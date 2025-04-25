@@ -1,2 +1,6 @@
 infra/gcp/keyfile.json
 infra/gcp/keyfile.b64
+# Firebase & Node junk
+infra/gcp/node_modules/
+infra/gcp/package-lock.json
+infra/gcp/firebase-debug.log

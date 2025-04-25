@@ -1,0 +1,7 @@
+flowchart TD
+  GitHubActions -->|OIDC Authentication| WorkloadIdentityProvider
+  WorkloadIdentityProvider --> WorkloadIdentityPool
+  WorkloadIdentityPool --> ServiceAccount["Terraform Service Account"]
+  ServiceAccount -->|IAM Permissions| GCP_APIs
+  Terraform -->|Uses backend| GCSBucket["GCS Bucket: claritas-tf-state"]
+  Terraform -->|Enables| APIsList["APIs: GKE, Firestore, Pub/Sub, Vertex AI"]
