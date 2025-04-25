@@ -1,0 +1,35 @@
+name: Terraform Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  terraform:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+
+    env:
+      GOOGLE_APPLICATION_CREDENTIALS: "./keyfile.json"
+      TF_VAR_google_credentials: ${{ secrets.GCP_CREDENTIALS }}
+
+    steps:
+      - name: 📦 Checkout Code
+        uses: actions/checkout@v3
+
+      - name: ⚙️ Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.6.0
+
+      - name: 📂 Terraform Init
+        working-directory: infra/gcp
+        run: terraform init
+
+      - name: 🔍 Terraform Plan
+        working-directory: infra/gcp
+        run: terraform plan -var-file="terraform.tfvars"
+
+      - name: 🚀 Terraform Apply
+        working-directory: infra/gcp
+        run: terraform apply -auto-approve -var-file="terraform.tfvars"
