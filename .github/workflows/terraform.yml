@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      GOOGLE_APPLICATION_CREDENTIALS: "./keyfile.json"
       TF_VAR_google_credentials: ${{ secrets.GCP_CREDENTIALS }}
 
     steps:
