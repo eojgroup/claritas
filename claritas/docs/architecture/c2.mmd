@@ -1,0 +1,27 @@
+graph TB
+    subgraph Frontend
+        A["Web App (React)"] --> B["API Gateway (Google Cloud Endpoints)"]
+        C["Mobile App (Kotlin/Swift)"] --> B
+    end
+
+    subgraph Backend Services
+        B --> D["Application Server (Node.js, GKE)"]
+        D --> E["Authentication Service (Firebase Auth)"]
+        D --> F["Insights & ML Service (Cloud Functions + Vertex AI)"]
+    end
+
+    subgraph Storage
+        D --> G["Document DB (Firestore)"]
+        D --> H["Cloud Data Lake (Cloud Storage)"]
+        D --> I["Cache (Memorystore - Redis)"]
+    end
+
+    subgraph Messaging & Events
+        D --> J["Event Bus (Pub/Sub)"]
+        J --> K["Alert Service (Cloud Functions)"]
+    end
+
+    subgraph External Data Sources
+        L["OECD API"] --> F
+        M["World Bank API"] --> F
+    end

@@ -1,0 +1,30 @@
+graph TB
+    subgraph Users
+        A[End User] -->|Uses| B["Claritas Web App (C05, C06, C09)"]
+        A2[Mobile User] -->|Uses| C["Claritas Mobile App (C08, C09)"]
+        Dev[Developer] -->|Consumes| D["Claritas APIs (C07)"]
+    end
+
+    subgraph Claritas Platform
+        B --> E[Application Server]
+        C --> E
+        D --> F[API Gateway]
+        F --> E
+
+        E --> G["Processing & Enrichment Layer (C02, C03)"]
+        G --> H["Machine Learning Services (C03)"]
+        G --> I["Metadata Enrichment (C02)"]
+
+        E --> J[Data Storage Layer]
+        J -->|Stores raw & enriched data| K["Cloud Data Lake (C01)"]
+        J --> L["MongoDB Document Store (C01)"]
+        J --> M["Redis Cache (C01)"]
+
+        E --> N["Event Bus / PubSub (C04)"]
+        N --> O["Real-time Alert Services (C04)"]
+    end
+
+    subgraph External Data Sources
+        X[OECD API] --> G
+        Y[World Bank API] --> G
+    end
