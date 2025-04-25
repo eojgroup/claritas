@@ -25,7 +25,7 @@ jobs:
       - name: 🔐 Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v1
         with:
-          workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-wif-pool/providers/claritas-github-provider"
+          workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
       - name: 🌍 Terraform Init
