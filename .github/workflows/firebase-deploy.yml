@@ -32,6 +32,7 @@ jobs:
           npm run build
 
       - name: 🔐 Authenticate to Google Cloud via OIDC
+        id: auth   # 👈👈👈 ADD THIS LINE !!
         uses: google-github-actions/auth@v1
         with:
           token_format: access_token
@@ -44,4 +45,4 @@ jobs:
           repoToken: "${{ secrets.GITHUB_TOKEN }}"
           channelId: live
           projectId: claritas-457808
-          firebaseServiceAccount: ${{ steps.auth.outputs.credentials_file_path }}
+          firebaseServiceAccount: "${{ steps.auth.outputs.credentials_file_path }}"  # 👈 Now it knows where to find the service account file
