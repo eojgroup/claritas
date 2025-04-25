@@ -18,8 +18,15 @@ jobs:
         with:
           terraform_version: 1.6.0
 
-      - name: 📝 Write GCP credentials to file
-        run: echo "${{ secrets.GCP_CREDENTIALS }}" > keyfile.json
+      - name: 📝 Write raw GCP credentials to keyfile.json
+        run: |
+          echo "${{ secrets.GCP_CREDENTIALS }}" > keyfile.json
+
+          echo "🔵 Showing first 5 lines of keyfile.json:"
+          head -n 5 keyfile.json || echo "❌ Cannot read keyfile.json"
+
+          echo "🔵 Validate if JSON is correct with jq:"
+          cat keyfile.json | jq . || echo "❌ Invalid JSON structure!"
 
       - name: ⚙️ Terraform Init
         working-directory: infra/gcp
@@ -41,5 +48,4 @@ jobs:
 
       - name: 🧹 Securely delete keyfile
         if: always()
-        run: |
-          shred -u keyfile.json || rm -f keyfile.json
+        run: shred -u keyfile.json || rm -f keyfile.json
