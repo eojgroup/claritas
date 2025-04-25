@@ -6,11 +6,8 @@ on:
 
 jobs:
   terraform:
-    name: Terraform Apply
+    name: Secure Terraform Apply
     runs-on: ubuntu-latest
-
-    env:
-      TF_VAR_google_credentials: ${{ secrets.GCP_CREDENTIALS }}
 
     steps:
       - name: 📦 Checkout Code
@@ -21,14 +18,28 @@ jobs:
         with:
           terraform_version: 1.6.0
 
-      - name: 📂 Terraform Init
+      - name: 📝 Write GCP credentials to file
+        run: echo "${{ secrets.GCP_CREDENTIALS }}" > keyfile.json
+
+      - name: ⚙️ Terraform Init
         working-directory: infra/gcp
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/keyfile.json
         run: terraform init
 
       - name: 🔍 Terraform Plan
         working-directory: infra/gcp
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/keyfile.json
         run: terraform plan -var-file="terraform.tfvars"
 
       - name: 🚀 Terraform Apply
         working-directory: infra/gcp
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/keyfile.json
         run: terraform apply -auto-approve -var-file="terraform.tfvars"
+
+      - name: 🧹 Securely delete keyfile
+        if: always()
+        run: |
+          shred -u keyfile.json || rm -f keyfile.json
