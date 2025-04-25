@@ -1,16 +1,20 @@
-name: Terraform Deploy
+name: Terraform OIDC Deploy
 
 on:
   push:
     branches: [main]
 
+permissions:
+  id-token: write  # Required for OIDC
+  contents: read   # Required to clone the repo
+
 jobs:
-  terraform:
-    name: Secure Terraform Apply
+  deploy:
+    name: Terraform Apply via OIDC
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📦 Checkout Code
+      - name: 📦 Checkout
         uses: actions/checkout@v3
 
       - name: ⚙️ Set up Terraform
@@ -18,47 +22,20 @@ jobs:
         with:
           terraform_version: 1.6.0
 
-      - name: 🐛 Write and Inspect GCP Credentials
-        run: |
-          echo "🔵 Writing keyfile.json from secret..."
-          echo "${{ secrets.GCP_CREDENTIALS }}" > keyfile.json
+      - name: 🔐 Authenticate to Google Cloud via OIDC
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-wif-pool/providers/claritas-github-provider"
+          service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
-          echo "🔵 File written. Checking line count:"
-          wc -l keyfile.json || echo "❌ Failed to count lines"
-
-          echo "🔵 File size in bytes:"
-          stat --format="%s bytes" keyfile.json || stat -f%z keyfile.json || echo "❌ Failed to get size"
-
-          echo "🔵 First 10 lines of keyfile.json:"
-          head -n 10 keyfile.json
-
-          echo "🔵 Last 10 lines of keyfile.json:"
-          tail -n 10 keyfile.json
-
-          echo "🔵 Checking for BEGIN/END PRIVATE KEY markers:"
-          grep "PRIVATE KEY" keyfile.json || echo "❌ No key markers found!"
-
-          echo "🔵 Checking if file is valid JSON:"
-          jq . keyfile.json || echo "❌ Invalid JSON structure!"
-
-      - name: ⚙️ Terraform Init
+      - name: 🌍 Terraform Init
         working-directory: infra/gcp
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/keyfile.json
         run: terraform init
 
       - name: 🔍 Terraform Plan
         working-directory: infra/gcp
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/keyfile.json
         run: terraform plan -var-file="terraform.tfvars"
 
       - name: 🚀 Terraform Apply
         working-directory: infra/gcp
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/keyfile.json
         run: terraform apply -auto-approve -var-file="terraform.tfvars"
-
-      - name: 🧹 Securely delete keyfile
-        if: always()
-        run: shred -u keyfile.json || rm -f keyfile.json
