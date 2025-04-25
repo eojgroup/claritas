@@ -1,4 +1,11 @@
-name: Terraform OIDC Deploy
+name: Terraform Infrastructure Deployment
+# This workflow deploys Terraform infrastructure to Google Cloud using OIDC authentication.
+# It is triggered on pushes to the main branch.
+# The workflow includes steps for checking out the code, setting up Terraform, authenticating to Google Cloud,
+# initializing Terraform, importing existing resources, planning changes, and applying the configuration.
+# The workflow uses a service account with Workload Identity Federation for authentication.
+# The service account is specified using the workload identity provider and service account name.
+# The workflow also includes permissions for OIDC and repository contents.
 
 on:
   push:

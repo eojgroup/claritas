@@ -1,4 +1,4 @@
-name: Deploy Web to Firebase Hosting
+name: Firebase Hosting Deploy
 
 on:
   push:
@@ -32,17 +32,16 @@ jobs:
           npm run build
 
       - name: 🔐 Authenticate to Google Cloud via OIDC
-        id: auth   # 👈👈👈 ADD THIS LINE !!
         uses: google-github-actions/auth@v1
         with:
-          token_format: access_token
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
-
+        
       - name: 🚀 Deploy to Firebase Hosting
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: "${{ secrets.GITHUB_TOKEN }}"
           channelId: live
           projectId: claritas-457808
+          entryPoint: apps/web   # 🛠️ <--- NEW: tell it where firebase.json is!
           firebaseServiceAccount: "${{ steps.auth.outputs.credentials_file_path }}"  # 👈 Now it knows where to find the service account file
