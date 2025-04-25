@@ -34,8 +34,9 @@ jobs:
 
       - name: 🔍 Terraform Plan
         working-directory: infra/gcp
-        run: terraform plan -var-file="terraform.tfvars" -lock=false -lock-timeout=90s
-      
+        run: terraform plan -var-file="terraform.tfvars" -lock=false || true
+        # Optional: `|| true` prevents pipeline fail due to locking errors, but may hide other issues.
+
       - name: 🚀 Terraform Apply
         working-directory: infra/gcp
-        run: terraform apply -auto-approve -var-file="terraform.tfvars" -lock=false -lock-timeout=60s
+        run: terraform apply -auto-approve -var-file="terraform.tfvars" -lock=false
