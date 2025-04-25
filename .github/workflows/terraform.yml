@@ -18,15 +18,28 @@ jobs:
         with:
           terraform_version: 1.6.0
 
-      - name: 📝 Write raw GCP credentials to keyfile.json
+      - name: 🐛 Write and Inspect GCP Credentials
         run: |
+          echo "🔵 Writing keyfile.json from secret..."
           echo "${{ secrets.GCP_CREDENTIALS }}" > keyfile.json
 
-          echo "🔵 Showing first 5 lines of keyfile.json:"
-          head -n 5 keyfile.json || echo "❌ Cannot read keyfile.json"
+          echo "🔵 File written. Checking line count:"
+          wc -l keyfile.json || echo "❌ Failed to count lines"
 
-          echo "🔵 Validate if JSON is correct with jq:"
-          cat keyfile.json | jq . || echo "❌ Invalid JSON structure!"
+          echo "🔵 File size in bytes:"
+          stat --format="%s bytes" keyfile.json || stat -f%z keyfile.json || echo "❌ Failed to get size"
+
+          echo "🔵 First 10 lines of keyfile.json:"
+          head -n 10 keyfile.json
+
+          echo "🔵 Last 10 lines of keyfile.json:"
+          tail -n 10 keyfile.json
+
+          echo "🔵 Checking for BEGIN/END PRIVATE KEY markers:"
+          grep "PRIVATE KEY" keyfile.json || echo "❌ No key markers found!"
+
+          echo "🔵 Checking if file is valid JSON:"
+          jq . keyfile.json || echo "❌ Invalid JSON structure!"
 
       - name: ⚙️ Terraform Init
         working-directory: infra/gcp
