@@ -1,4 +1,4 @@
-name: Firebase Hosting Deploy
+name: Deploy Web to Firebase Hosting
 
 on:
   push:
@@ -36,12 +36,11 @@ jobs:
         with:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
-        
+
       - name: 🚀 Deploy to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
+        uses: google-github-actions/deploy-hosting@v0
         with:
           repoToken: "${{ secrets.GITHUB_TOKEN }}"
           channelId: live
           projectId: claritas-457808
-          entryPoint: apps/web   # 🛠️ <--- NEW: tell it where firebase.json is!
-          firebaseServiceAccount: "${{ steps.auth.outputs.credentials_file_path }}"  # 👈 Now it knows where to find the service account file
+          entryPoint: apps/web   # Assuming Firebase setup is in the "apps/web" directory
