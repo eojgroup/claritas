@@ -32,6 +32,10 @@ jobs:
         working-directory: infra/gcp
         run: terraform init -migrate-state -force-copy
 
+      - name: 🛠️ Terraform Import (GCS Bucket)
+        working-directory: infra/gcp
+        run: terraform import google_storage_bucket.terraform_state claritas-tf-state || true
+
       - name: 🔍 Terraform Plan
         working-directory: infra/gcp
         run: terraform plan -var-file="terraform.tfvars" -lock=false || true
