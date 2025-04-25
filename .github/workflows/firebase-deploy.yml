@@ -34,12 +34,14 @@ jobs:
       - name: 🔐 Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v1
         with:
+          token_format: access_token
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
       - name: 🚀 Deploy to Firebase Hosting
-        uses: google-github-actions/deploy-firebase@v0
+        uses: FirebaseExtended/action-hosting-deploy@v0
         with:
-          project_id: claritas-457808
-          firebase_target: hosting
-          firebase_cli_predeploy: "npm run build"
+          repoToken: "${{ secrets.GITHUB_TOKEN }}"
+          channelId: live
+          projectId: claritas-457808
+          firebaseServiceAccount: ${{ steps.auth.outputs.credentials_file_path }}
