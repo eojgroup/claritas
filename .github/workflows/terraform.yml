@@ -30,7 +30,7 @@ jobs:
 
       - name: 🌍 Terraform Init
         working-directory: infra/gcp
-        run: terraform init -input=false
+        run: terraform init -migrate-state -force-copy
 
       - name: 🔍 Terraform Plan
         working-directory: infra/gcp
