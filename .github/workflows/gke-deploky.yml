@@ -1,46 +1,38 @@
-name: GKE Infrastructure Deployment
+name: GKE Deploy via OIDC
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+
+permissions:
+  id-token: write   # Required for OIDC
+  contents: read    # Required to clone the repo
 
 jobs:
   deploy:
+    name: Deploy to GKE via OIDC
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: 📦 Checkout
         uses: actions/checkout@v3
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v2
+      - name: ⚙️ Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v0
         with:
-          terraform_version: 1.6.0
+          project_id: claritas-457808
+          version: '352.0.0'  # Specify your required GCP version
 
-      - name: Authenticate to GCP
+      - name: 🔐 Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v1
         with:
-          credentials_json: ${{ secrets.GCP_CREDENTIALS }}  # Ensure you set this in secrets
+          workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
+          service_account: "gke-deploy-oidc@claritas-457808.iam.gserviceaccount.com"  # Replace with your service account
 
-      - name: Initialize Terraform
-        run: terraform init -migrate-state -force-copy
-        working-directory: infra/gcp
-
-      - name: Terraform Plan
-        run: terraform plan -var-file=terraform.tfvars
-        working-directory: infra/gcp
-
-      - name: Terraform Apply
-        run: terraform apply -auto-approve -var-file=terraform.tfvars
-        working-directory: infra/gcp
-
-      - name: Set up kubectl
+      - name: Set up kubectl for GKE
         run: |
           gcloud container clusters get-credentials claritas-cluster --region us-central1 --project claritas-457808
-        working-directory: infra/gke
 
-      - name: Deploy to GKE
+      - name: 🚀 Deploy to GKE
         run: |
-          kubectl apply -f infra/gke/deployment.yaml
-        working-directory: infra/gke
+          kubectl apply -f deployment.yaml  # Use your deployment YAML here
