@@ -29,31 +29,20 @@ jobs:
 
       - name: 🏗️ Build Docker image
         run: |
-          echo "Building Docker image with tag: europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
-          docker build -t europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }} -f ./infra/docker/Dockerfile .
-
-      - name: 🧐 Debug GitHub SHA
-        run: |
-          echo "GitHub SHA: ${{ github.sha }}"
-
-      - name: Debug Docker images
-        run: |
-          echo "List of Docker images:"
-          docker images
-
+          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
+          echo "Building Docker image with tag: $IMAGE_NAME"
+          docker build -t $IMAGE_NAME -f ./infra/docker/Dockerfile .
+  
       - name: Configure Docker for Google Cloud Artifact Registry
         run: |
           echo "Configuring Docker to use Google Cloud credentials for Artifact Registry"
-          gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet  # Update this line for Artifact Registry
-          echo "Authenticating with gcloud for Artifact Registry"
-          gcloud auth list
-
+          gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet
+  
       - name: 🖼️ Push Docker image to Artifact Registry
         run: |
-          echo "Pushing Docker image to Artifact Registry: europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
-          echo "Docker push command: docker push europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
-          echo "docker push europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
-          docker push europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}
+          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
+          echo "Pushing Docker image to Artifact Registry: $IMAGE_NAME"
+          docker push $IMAGE_NAME
 
   deploy:
     name: Deploy to GKE
