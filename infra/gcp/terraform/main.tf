@@ -12,7 +12,7 @@ resource "google_project_service" "enabled_services" {
 
 resource "google_storage_bucket" "terraform_state" {
   name                        = "claritas-tf-state"
-  location                    = var.region
+  location                    = var.region  # Ensure it's using the updated variable for region
   force_destroy               = true
   storage_class               = "STANDARD"
   uniform_bucket_level_access = true
@@ -29,7 +29,7 @@ resource "google_storage_bucket" "terraform_state" {
 
 resource "google_container_cluster" "primary" {
   name     = "claritas-cluster"
-  location = "us-central1-a"
+  location = var.region  # Dynamic region from variables (defaults to europe-west1)
 
   initial_node_count = 1
 

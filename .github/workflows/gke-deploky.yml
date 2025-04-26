@@ -57,10 +57,14 @@ jobs:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
+      - name: Install GKE gcloud auth plugin
+        run: |
+            gcloud components install gke-gcloud-auth-plugin
+
       - name: 💻 Configure kubectl
         run: |
           echo "Getting GKE credentials for cluster claritas-cluster"
-          gcloud container clusters get-credentials claritas-cluster --region us-central1-a --project claritas-457808
+          gcloud container clusters get-credentials claritas-cluster --region europe-west1 --project claritas-457808
 
       - name: 📤 Apply Kubernetes deployment
         run: |
