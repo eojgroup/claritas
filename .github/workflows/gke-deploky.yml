@@ -1,38 +1,60 @@
-name: GKE Deploy via OIDC
+name: Build and Deploy to GKE
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main # Trigger when pushing to the main branch
 
 permissions:
-  id-token: write   # Required for OIDC
-  contents: read    # Required to clone the repo
+  id-token: write  # Required for OIDC
+  contents: read   # Required to clone the repo
 
 jobs:
-  deploy:
-    name: Deploy to GKE via OIDC
+  build:
+    name: Build Docker Image and Push to GCR
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📦 Checkout
+      - name: 📦 Checkout code
         uses: actions/checkout@v3
 
-      - name: ⚙️ Setup Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v0
-        with:
-          project_id: claritas-457808
-          version: '352.0.0'  # Specify your required GCP version
+      - name: 🚀 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
       - name: 🔐 Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
-          service_account: "gke-deploy-oidc@claritas-457808.iam.gserviceaccount.com"  # Replace with your service account
+          service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
-      - name: Set up kubectl for GKE
+      - name: 🏗️ Build Docker image
+        run: |
+          docker build -t gcr.io/claritas-457808/claritas-app:${{ github.sha }} -f ./docker/Dockerfile .
+
+      - name: 🖼️ Push Docker image to GCR
+        run: |
+          docker push gcr.io/claritas-457808/claritas-app:${{ github.sha }}
+
+  deploy:
+    name: Deploy to GKE
+    runs-on: ubuntu-latest
+    needs: build # Ensure deployment only happens after image is pushed
+
+    steps:
+      - name: 📦 Checkout code
+        uses: actions/checkout@v3
+
+      - name: 🔐 Authenticate to GKE with OIDC
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
+          service_account: "gke-deploy-oidc@claritas-457808.iam.gserviceaccount.com"
+
+      - name: 💻 Configure kubectl
         run: |
           gcloud container clusters get-credentials claritas-cluster --region us-central1 --project claritas-457808
 
-      - name: 🚀 Deploy to GKE
+      - name: 📤 Apply Kubernetes deployment
         run: |
-          kubectl apply -f deployment.yaml  # Use your deployment YAML here
+          kubectl set image deployment/claritas-app claritas-app=gcr.io/claritas-457808/claritas-app:${{ github.sha }}
+          kubectl rollout status deployment/claritas-app
