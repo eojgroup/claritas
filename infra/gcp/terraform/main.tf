@@ -63,10 +63,6 @@ resource "google_container_node_pool" "primary_nodes" {
     prevent_destroy = true
   }
 
-  labels = {
-    environment = "dev"
-    purpose     = "node-pool"
-  }
 }
 
 output "kubernetes_cluster_name" {
