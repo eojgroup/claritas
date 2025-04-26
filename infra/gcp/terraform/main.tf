@@ -36,6 +36,7 @@ resource "google_container_cluster" "primary" {
   node_config {
     machine_type = "e2-small"  # Cheapest option (adjust based on your needs)
     preemptible  = true         # Preemptible nodes save costs
+    service_account = "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
   }
 
   lifecycle {
