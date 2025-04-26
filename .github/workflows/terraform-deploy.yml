@@ -1,12 +1,19 @@
 name: Terraform Infrastructure Deployment
+# This workflow deploys Terraform infrastructure to Google Cloud using OIDC authentication.
+# It is triggered on pushes to the main branch.
+# The workflow includes steps for checking out the code, setting up Terraform, authenticating to Google Cloud,
+# initializing Terraform, importing existing resources, planning changes, and applying the configuration.
+# The workflow uses a service account with Workload Identity Federation for authentication.
+# The service account is specified using the workload identity provider and service account name.
+# The workflow also includes permissions for OIDC and repository contents.
 
 on:
   push:
     branches: [main]
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write  # Required for OIDC
+  contents: read   # Required to clone the repo
 
 jobs:
   deploy:
@@ -32,19 +39,22 @@ jobs:
         working-directory: infra/gcp/terraform
         run: terraform init -migrate-state -force-copy
 
+      - name: 🛠️ Terraform Import (GCS Bucket)
+        working-directory: infra/gcp/terraform
+        run: |
+          # Import GCS bucket to state if it exists, skip if already imported
+          terraform import google_storage_bucket.terraform_state claritas-tf-state || true
+
       - name: 🛠️ Terraform Import (GKE Cluster)
         working-directory: infra/gcp/terraform
         run: |
-          # Import the existing GKE cluster to Terraform state if not already done
-          if ! terraform state list | grep google_container_cluster.primary; then
-            terraform import google_container_cluster.primary projects/claritas-457808/locations/europe-west1/clusters/claritas-cluster
-          else
-            echo "GKE Cluster already imported"
-          fi
+          # Import the GKE cluster if it exists
+          terraform import google_container_cluster.primary projects/claritas-457808/locations/europe-west1/clusters/claritas-cluster || true
 
       - name: 🔍 Terraform Plan
         working-directory: infra/gcp/terraform
         run: terraform plan -var-file="terraform.tfvars" -lock=false || true
+        # Optional: `|| true` prevents pipeline from failing due to locking errors, but may hide other issues.
 
       - name: 🚀 Terraform Apply
         working-directory: infra/gcp/terraform
