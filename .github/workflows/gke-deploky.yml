@@ -31,13 +31,11 @@ jobs:
         run: |
           echo "Building Docker image with tag: europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
           docker build -t europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }} -f ./infra/docker/Dockerfile .
-        
 
-      - name: Configure Docker for Google Cloud (GCR)
+      - name: Configure Docker for Google Cloud Artifact Registry
         run: |
-          echo "Configuring Docker to use Google Cloud credentials"
-          gcloud auth configure-docker gcr.io --quiet
-
+          echo "Configuring Docker to use Google Cloud credentials for Artifact Registry"
+          gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet  # Update this line for Artifact Registry
 
       - name: 🖼️ Push Docker image to Artifact Registry
         run: |
@@ -70,6 +68,6 @@ jobs:
 
       - name: 📤 Apply Kubernetes deployment
         run: |
-          echo "Setting image for deployment claritas-app to gcr.io/claritas-457808/claritas-app:${{ github.sha }}"
-          kubectl set image deployment/claritas-app claritas-app=gcr.io/claritas-457808/claritas-app:${{ github.sha }}
+          echo "Setting image for deployment claritas-app to europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
+          kubectl set image deployment/claritas-app claritas-app=europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}
           kubectl rollout status deployment/claritas-app
