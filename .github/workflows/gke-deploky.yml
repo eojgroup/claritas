@@ -65,9 +65,9 @@ jobs:
           exec -l $SHELL
           gcloud components update
 
-      - name: Install GKE gcloud auth plugin using gcloud
+      - name: Install GKE gcloud auth plugin via apt-get
         run: |
-          gcloud components install gke-gcloud-auth-plugin --quiet
+          sudo apt-get update && sudo apt-get install -y google-cloud-cli-gke-gcloud-auth-plugin
 
       - name: 💻 Configure kubectl
         run: |
