@@ -60,7 +60,7 @@ jobs:
       - name: 💻 Configure kubectl
         run: |
           echo "Getting GKE credentials for cluster claritas-cluster"
-          gcloud container clusters get-credentials claritas-cluster --region us-central1 --project claritas-457808
+          gcloud container clusters get-credentials claritas-cluster --region us-central1-a --project claritas-457808
 
       - name: 📤 Apply Kubernetes deployment
         run: |
