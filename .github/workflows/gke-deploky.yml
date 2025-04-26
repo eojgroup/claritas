@@ -29,14 +29,17 @@ jobs:
 
       - name: 🏗️ Build Docker image
         run: |
+          echo "Building Docker image with tag: gcr.io/claritas-457808/claritas-app:${{ github.sha }}"
           docker build -t gcr.io/claritas-457808/claritas-app:${{ github.sha }} -f ./infra/docker/Dockerfile .
 
       - name: Configure Docker for Google Cloud (GCR)
         run: |
+          echo "Configuring Docker to use Google Cloud credentials"
           gcloud auth configure-docker gcr.io --quiet
 
       - name: 🖼️ Push Docker image to GCR
         run: |
+          echo "Pushing Docker image to GCR: gcr.io/claritas-457808/claritas-app:${{ github.sha }}"
           docker push gcr.io/claritas-457808/claritas-app:${{ github.sha }}
 
   deploy:
@@ -56,9 +59,11 @@ jobs:
 
       - name: 💻 Configure kubectl
         run: |
+          echo "Getting GKE credentials for cluster claritas-cluster"
           gcloud container clusters get-credentials claritas-cluster --region us-central1 --project claritas-457808
 
       - name: 📤 Apply Kubernetes deployment
         run: |
+          echo "Setting image for deployment claritas-app to gcr.io/claritas-457808/claritas-app:${{ github.sha }}"
           kubectl set image deployment/claritas-app claritas-app=gcr.io/claritas-457808/claritas-app:${{ github.sha }}
           kubectl rollout status deployment/claritas-app
