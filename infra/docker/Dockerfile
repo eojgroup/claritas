@@ -1,5 +1,4 @@
-# Use an official Node.js runtime as the base image
-FROM node:18
+FROM node:18 AS builder
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -12,6 +11,21 @@ RUN npm install
 
 # Copy the rest of the application files
 COPY . .
+
+# Build the app
+RUN npm run build
+
+# Production Stage: Use Google Cloud SDK for GKE deployment
+FROM google/cloud-sdk:alpine
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Install the GKE gcloud auth plugin
+RUN gcloud components install gke-gcloud-auth-plugin
+
+# Copy built app from builder
+COPY --from=builder /app /app
 
 # Expose the port the app will run on
 EXPOSE 3000

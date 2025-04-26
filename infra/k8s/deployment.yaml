@@ -1,34 +1,56 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: web-app-deployment
+  name: claritas-app
   labels:
-    app: web-app
+    app: claritas
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: web-app
+      app: claritas
   template:
     metadata:
       labels:
-        app: web-app
+        app: claritas
     spec:
       containers:
-        - name: web-app
-          image: gcr.io/claritas-457808/your-image-name:latest  # Replace with your image name
-          ports:
-            - containerPort: 80
+      - name: claritas-app
+        image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${GITHUB_SHA}
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: web-app-service
+  name: claritas-app-service
 spec:
   selector:
-    app: web-app
+    app: claritas
   ports:
     - protocol: TCP
       port: 80
-      targetPort: 80
+      targetPort: 3000
   type: LoadBalancer
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: claritas-app-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: <your-app-domain>
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: claritas-app-service
+            port:
+              number: 80
