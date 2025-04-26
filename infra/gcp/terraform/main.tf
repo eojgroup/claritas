@@ -6,7 +6,7 @@ resource "google_project_service" "enabled_services" {
     "pubsub.googleapis.com",
     "aiplatform.googleapis.com"
   ])
-  service = each.value
+  service            = each.value
   disable_on_destroy = true
 }
 
@@ -21,7 +21,13 @@ resource "google_storage_bucket" "terraform_state" {
     enabled = true
   }
 
-  resource "google_container_cluster" "primary" {
+  labels = {
+    environment = "dev"
+    purpose     = "terraform-state"
+  }
+}
+
+resource "google_container_cluster" "primary" {
   name     = "claritas-cluster"
   location = "us-central1-a"
 
@@ -32,7 +38,17 @@ resource "google_storage_bucket" "terraform_state" {
     preemptible  = true         # Preemptible nodes save costs
   }
 
-  resource "google_container_node_pool" "primary_nodes" {
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  labels = {
+    environment = "dev"
+    purpose     = "kubernetes-cluster"
+  }
+}
+
+resource "google_container_node_pool" "primary_nodes" {
   name       = "primary-node-pool"
   location   = "us-central1-a"
   cluster    = google_container_cluster.primary.name
@@ -42,11 +58,6 @@ resource "google_storage_bucket" "terraform_state" {
     machine_type = "e2-small"
     preemptible  = true
   }
-}
-
-output "kubernetes_cluster_name" {
-  value = google_container_cluster.primary.name
-}
 
   lifecycle {
     prevent_destroy = true
@@ -54,6 +65,10 @@ output "kubernetes_cluster_name" {
 
   labels = {
     environment = "dev"
-    purpose     = "terraform-state"
+    purpose     = "node-pool"
   }
+}
+
+output "kubernetes_cluster_name" {
+  value = google_container_cluster.primary.name
 }

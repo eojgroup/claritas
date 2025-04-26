@@ -1,32 +1,32 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: claritas-web-deployment
+  name: web-app-deployment
+  labels:
+    app: web-app
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
-      app: claritas-web
+      app: web-app
   template:
     metadata:
       labels:
-        app: claritas-web
+        app: web-app
     spec:
       containers:
-        - name: claritas-web
-          image: gcr.io/claritas-457808/claritas-web:v1  # Change this to your image
+        - name: web-app
+          image: gcr.io/claritas-457808/your-image-name:latest  # Replace with your image name
           ports:
             - containerPort: 80
-
 ---
-
 apiVersion: v1
 kind: Service
 metadata:
-  name: claritas-web-service
+  name: web-app-service
 spec:
   selector:
-    app: claritas-web
+    app: web-app
   ports:
     - protocol: TCP
       port: 80
