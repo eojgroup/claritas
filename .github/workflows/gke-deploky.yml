@@ -39,8 +39,8 @@ jobs:
 
       - name: 🖼️ Push Docker image to GCR
         run: |
-          echo "Pushing Docker image to GCR: gcr.io/claritas-457808/claritas-app:latest"
-          docker push gcr.io/claritas-457808/claritas-app:latest
+          echo "Pushing Docker image to GCR: gcr.io/claritas-457808/claritas-app:v1.0"
+          docker push gcr.io/claritas-457808/claritas-app:v1.0
 
   deploy:
     name: Deploy to GKE
@@ -64,6 +64,6 @@ jobs:
 
       - name: 📤 Apply Kubernetes deployment
         run: |
-          echo "Setting image for deployment claritas-app to gcr.io/claritas-457808/claritas-app:latest"
-          kubectl set image deployment/claritas-app claritas-app=gcr.io/claritas-457808/claritas-app:latest
+          echo "Setting image for deployment claritas-app to gcr.io/claritas-457808/claritas-app:v1.0"
+          kubectl set image deployment/claritas-app claritas-app=gcr.io/claritas-457808/claritas-app:v1.0
           kubectl rollout status deployment/claritas-app
