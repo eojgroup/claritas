@@ -35,7 +35,7 @@ jobs:
       - name: 🛠️ Terraform Import (GKE Cluster)
         working-directory: infra/gcp/terraform
         run: |
-          # Import the existing GKE cluster to Terraform state
+          # Import the existing GKE cluster to Terraform state if not already done
           if ! terraform state list | grep google_container_cluster.primary; then
             terraform import google_container_cluster.primary projects/claritas-457808/zones/us-central1-a/clusters/claritas-cluster
           else
