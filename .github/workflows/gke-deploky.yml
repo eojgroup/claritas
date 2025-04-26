@@ -29,7 +29,7 @@ jobs:
 
       - name: 🏗️ Build Docker image
         run: |
-          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
+          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
           echo "Building Docker image with tag: $IMAGE_NAME"
           docker build -t $IMAGE_NAME -f ./infra/docker/Dockerfile .
   
@@ -40,7 +40,7 @@ jobs:
   
       - name: 🖼️ Push Docker image to Artifact Registry
         run: |
-          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
+          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
           echo "Pushing Docker image to Artifact Registry: $IMAGE_NAME"
           docker push $IMAGE_NAME
 
