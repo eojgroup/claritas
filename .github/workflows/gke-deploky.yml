@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Docker Image and Push to GCR
+    name: Build Docker Image and Push to Artifact Registry
     runs-on: ubuntu-latest
 
     steps:
@@ -32,12 +32,12 @@ jobs:
           IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
           echo "Building Docker image with tag: $IMAGE_NAME"
           docker build -t $IMAGE_NAME -f ./infra/docker/Dockerfile .
-  
+
       - name: Configure Docker for Google Cloud Artifact Registry
         run: |
           echo "Configuring Docker to use Google Cloud credentials for Artifact Registry"
           gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet
-  
+
       - name: 🖼️ Push Docker image to Artifact Registry
         run: |
           IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
@@ -48,11 +48,11 @@ jobs:
     name: Deploy to GKE
     runs-on: ubuntu-latest
     needs: build
-        
+
     steps:
       - name: 📦 Checkout code
         uses: actions/checkout@v3
-        
+
       - name: 🔐 Authenticate to GKE with OIDC
         uses: google-github-actions/auth@v1
         with:
@@ -68,26 +68,26 @@ jobs:
       - name: Install GKE gcloud auth plugin using gcloud
         run: |
           gcloud components install gke-gcloud-auth-plugin --quiet
-        
+
       - name: 💻 Configure kubectl
         run: |
           echo "Getting GKE credentials for cluster claritas-cluster"
           gcloud container clusters get-credentials claritas-cluster --region europe-west2 --project claritas-457808
-        
+
       - name: 📤 Apply Kubernetes deployment
         run: |
-          echo "Setting image for deployment claritas-app to europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
-          kubectl set image deployment/claritas-app claritas-app=europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}
+          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
+          echo "Setting image for deployment claritas-app to $IMAGE_NAME"
+          kubectl set image deployment/claritas-app claritas-app=$IMAGE_NAME
           kubectl rollout status deployment/claritas-app
-        
-      # Apply deployment, service, and ingress configurations
+
       - name: 🛠️ Apply Kubernetes resources
         run: |
           echo "Applying Kubernetes resources (deployment, service, ingress)"
           kubectl apply -f ./infra/k8s/deployment.yaml
           kubectl apply -f ./infra/k8s/service.yaml
-          kubectl apply -f ./infra/k8s/ingress.yaml  # Optional, if using ingress
-        
+          kubectl apply -f ./infra/k8s/ingress.yaml
+
       - name: 🚀 Verify deployment
         run: |
           kubectl get pods
