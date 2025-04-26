@@ -1,0 +1,46 @@
+name: GKE Infrastructure Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.6.0
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}  # Ensure you set this in secrets
+
+      - name: Initialize Terraform
+        run: terraform init -migrate-state -force-copy
+        working-directory: infra/gcp
+
+      - name: Terraform Plan
+        run: terraform plan -var-file=terraform.tfvars
+        working-directory: infra/gcp
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -var-file=terraform.tfvars
+        working-directory: infra/gcp
+
+      - name: Set up kubectl
+        run: |
+          gcloud container clusters get-credentials claritas-cluster --region us-central1 --project claritas-457808
+        working-directory: infra/gke
+
+      - name: Deploy to GKE
+        run: |
+          kubectl apply -f infra/gke/deployment.yaml
+        working-directory: infra/gke

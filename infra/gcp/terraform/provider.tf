@@ -4,6 +4,14 @@ provider "google" {
   zone        = var.zone
 }
 
+provider "kubernetes" {
+  host                   = google_container_cluster.primary.endpoint
+  cluster_ca_certificate = base64decode(google_container_cluster.primary.cluster_ca_certificate)
+  token                  = data.google_client_config.default.access_token
+}
+
+data "google_client_config" "default" {}
+
 terraform {
   required_providers {
     google = {

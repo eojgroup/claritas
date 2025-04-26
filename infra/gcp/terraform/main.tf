@@ -21,6 +21,33 @@ resource "google_storage_bucket" "terraform_state" {
     enabled = true
   }
 
+  resource "google_container_cluster" "primary" {
+  name     = "claritas-cluster"
+  location = "us-central1-a"
+
+  initial_node_count = 1
+
+  node_config {
+    machine_type = "e2-small"  # Cheapest option (adjust based on your needs)
+    preemptible  = true         # Preemptible nodes save costs
+  }
+
+  resource "google_container_node_pool" "primary_nodes" {
+  name       = "primary-node-pool"
+  location   = "us-central1-a"
+  cluster    = google_container_cluster.primary.name
+  node_count = 1
+
+  node_config {
+    machine_type = "e2-small"
+    preemptible  = true
+  }
+}
+
+output "kubernetes_cluster_name" {
+  value = google_container_cluster.primary.name
+}
+
   lifecycle {
     prevent_destroy = true
   }
