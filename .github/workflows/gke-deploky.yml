@@ -29,18 +29,20 @@ jobs:
 
       - name: 🏗️ Build Docker image
         run: |
-          echo "Building Docker image with tag: gcr.io/claritas-457808/claritas-app:${{ github.sha }}"
-          docker build -t gcr.io/claritas-457808/claritas-app:${{ github.sha }} -f ./infra/docker/Dockerfile .
+          echo "Building Docker image with tag: europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
+          docker build -t europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }} -f ./infra/docker/Dockerfile .
+        
 
       - name: Configure Docker for Google Cloud (GCR)
         run: |
           echo "Configuring Docker to use Google Cloud credentials"
           gcloud auth configure-docker gcr.io --quiet
 
-      - name: 🖼️ Push Docker image to GCR
+
+      - name: 🖼️ Push Docker image to Artifact Registry
         run: |
-          echo "Pushing Docker image to GCR: gcr.io/claritas-457808/claritas-app:${{ github.sha }}"
-          docker push gcr.io/claritas-457808/claritas-app:${{ github.sha }}
+          echo "Pushing Docker image to Artifact Registry: europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
+          docker push europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}
 
   deploy:
     name: Deploy to GKE
@@ -64,7 +66,7 @@ jobs:
       - name: 💻 Configure kubectl
         run: |
           echo "Getting GKE credentials for cluster claritas-cluster"
-          gcloud container clusters get-credentials claritas-cluster --region europe-west1 --project claritas-457808
+          gcloud container clusters get-credentials claritas-cluster --region europe-west2 --project claritas-457808
 
       - name: 📤 Apply Kubernetes deployment
         run: |
