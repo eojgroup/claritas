@@ -48,7 +48,7 @@ jobs:
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
-          service_account: "gke-deploy-oidc@claritas-457808.iam.gserviceaccount.com"
+          service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
       - name: 💻 Configure kubectl
         run: |
