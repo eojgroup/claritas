@@ -1,15 +1,18 @@
+# Enable necessary APIs
 resource "google_project_service" "enabled_services" {
   for_each = toset([
     "container.googleapis.com",
     "firebase.googleapis.com",
     "firestore.googleapis.com",
     "pubsub.googleapis.com",
-    "aiplatform.googleapis.com"
+    "aiplatform.googleapis.com",
+    "artifactregistry.googleapis.com"  # Ensure Artifact Registry API is enabled
   ])
   service            = each.value
   disable_on_destroy = true
 }
 
+# Storage bucket for Terraform state
 resource "google_storage_bucket" "terraform_state" {
   name                        = "claritas-tf-state"
   location                    = var.region  # Ensure it's using the updated variable for region
@@ -27,6 +30,15 @@ resource "google_storage_bucket" "terraform_state" {
   }
 }
 
+# Artifact Registry repository for Docker images
+resource "google_artifact_registry_repository" "claritas_app" {
+  name     = "claritas-app"
+  format   = "DOCKER"
+  location = "europe-west1"  # Ensure the region is set to europe-west1
+  project  = var.project_id
+}
+
+# GKE Cluster resource in europe-west1
 resource "google_container_cluster" "primary" {
   name     = "claritas-cluster"
   location = "europe-west1"  # Correct region
@@ -44,6 +56,11 @@ resource "google_container_cluster" "primary" {
   }
 }
 
+# Outputs for cluster name and Artifact Registry repository name
 output "kubernetes_cluster_name" {
   value = google_container_cluster.primary.name
+}
+
+output "artifact_registry_repo_name" {
+  value = google_artifact_registry_repository.claritas_app.name
 }
