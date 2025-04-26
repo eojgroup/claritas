@@ -42,10 +42,10 @@ resource "google_artifact_registry_repository" "claritas_app" {
   }
 }
 
-# GKE Cluster resource in europe-west1
+# GKE Cluster resource in europe-west2
 resource "google_container_cluster" "primary" {
   name     = "claritas-cluster"
-  location = "europe-west1"  # Correct region
+  location = "europe-west2"  # Correct region
 
   initial_node_count = 1
 
