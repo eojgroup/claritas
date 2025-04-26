@@ -4,8 +4,8 @@ FROM node:18
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy the package.json and package-lock.json (or yarn.lock)
-COPY package*.json ./
+# Copy package.json files to the working directory
+COPY ./apps/web/package*.json ./
 
 # Install the dependencies
 RUN npm install
