@@ -59,10 +59,15 @@ jobs:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
-      - name: Install GKE gcloud auth plugin
+      - name: Install Google Cloud SDK
         run: |
-          sudo apt-get update
-          sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
+          curl -sSL https://sdk.cloud.google.com | bash
+          exec -l $SHELL
+          gcloud components update
+
+      - name: Install GKE gcloud auth plugin using gcloud
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
         
       - name: 💻 Configure kubectl
         run: |
