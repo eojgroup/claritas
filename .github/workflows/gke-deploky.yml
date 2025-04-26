@@ -52,6 +52,7 @@ jobs:
         run: |
           echo "Pushing Docker image to Artifact Registry: europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
           echo "Docker push command: docker push europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
+          echo "docker push europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
           docker push europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}
 
   deploy:
