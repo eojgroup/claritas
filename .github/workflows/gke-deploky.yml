@@ -29,7 +29,7 @@ jobs:
 
       - name: 🏗️ Build Docker image
         run: |
-          docker build -t gcr.io/claritas-457808/claritas-app:${{ github.sha }} -f ./docker/Dockerfile .
+          docker build -t gcr.io/claritas-457808/claritas-app:${{ github.sha }} -f ./infra/docker/Dockerfile .
 
       - name: 🖼️ Push Docker image to GCR
         run: |
