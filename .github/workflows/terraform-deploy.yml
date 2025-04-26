@@ -5,8 +5,8 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write  # Required for OIDC
-  contents: read   # Required to clone the repo
+  id-token: write
+  contents: read
 
 jobs:
   deploy:
@@ -37,19 +37,9 @@ jobs:
         run: |
           # Import the existing GKE cluster to Terraform state if not already done
           if ! terraform state list | grep google_container_cluster.primary; then
-            terraform import google_container_cluster.primary projects/claritas-457808/locations/${{ secrets.TERRAFORM_REGION }}/clusters/claritas-cluster
+            terraform import google_container_cluster.primary projects/claritas-457808/locations/europe-west1/clusters/claritas-cluster
           else
             echo "GKE Cluster already imported"
-          fi
-
-      - name: 🛠️ Terraform Import (GCS Bucket)
-        working-directory: infra/gcp/terraform
-        run: |
-          # Import GCS bucket to state (if not already imported)
-          if ! terraform state list | grep google_storage_bucket.terraform_state; then
-            terraform import google_storage_bucket.terraform_state claritas-tf-state
-          else
-            echo "GCS Bucket already imported"
           fi
 
       - name: 🔍 Terraform Plan

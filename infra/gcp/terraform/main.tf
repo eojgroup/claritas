@@ -29,18 +29,18 @@ resource "google_storage_bucket" "terraform_state" {
 
 resource "google_container_cluster" "primary" {
   name     = "claritas-cluster"
-  location = var.region  # Dynamic region from variables (defaults to europe-west1)
+  location = "europe-west1"  # Correct region
 
   initial_node_count = 1
 
   node_config {
-    machine_type = "e2-small"  # Cheapest option (adjust based on your needs)
-    preemptible  = true         # Preemptible nodes save costs
+    machine_type    = "e2-small"
+    preemptible     = true
     service_account = "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
   }
 
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = true  # Prevent destruction of the cluster
   }
 }
 
