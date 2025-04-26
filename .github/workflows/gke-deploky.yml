@@ -48,11 +48,11 @@ jobs:
     name: Deploy to GKE
     runs-on: ubuntu-latest
     needs: build
-
+        
     steps:
       - name: 📦 Checkout code
         uses: actions/checkout@v3
-
+        
       - name: 🔐 Authenticate to GKE with OIDC
         uses: google-github-actions/auth@v1
         with:
@@ -61,15 +61,29 @@ jobs:
 
       - name: Install GKE gcloud auth plugin
         run: |
-            gcloud components install gke-gcloud-auth-plugin
-
+          sudo apt-get update
+          sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
+        
       - name: 💻 Configure kubectl
         run: |
           echo "Getting GKE credentials for cluster claritas-cluster"
           gcloud container clusters get-credentials claritas-cluster --region europe-west2 --project claritas-457808
-
+        
       - name: 📤 Apply Kubernetes deployment
         run: |
           echo "Setting image for deployment claritas-app to europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
           kubectl set image deployment/claritas-app claritas-app=europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}
           kubectl rollout status deployment/claritas-app
+        
+      # Apply deployment, service, and ingress configurations
+      - name: 🛠️ Apply Kubernetes resources
+        run: |
+          echo "Applying Kubernetes resources (deployment, service, ingress)"
+          kubectl apply -f ./infra/k8s/deployment.yaml
+          kubectl apply -f ./infra/k8s/service.yaml
+          kubectl apply -f ./infra/k8s/ingress.yaml  # Optional, if using ingress
+        
+      - name: 🚀 Verify deployment
+        run: |
+          kubectl get pods
+          kubectl get svc
