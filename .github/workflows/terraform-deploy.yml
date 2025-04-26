@@ -45,6 +45,12 @@ jobs:
           # Import GCS bucket to state if it exists, skip if already imported
           terraform import google_storage_bucket.terraform_state claritas-tf-state || true
 
+      - name: 🛠️ Terraform Import (Artifact Registry Repository)
+        working-directory: infra/gcp/terraform
+        run: |
+          # Import the Artifact Registry repository if it exists
+          terraform import google_artifact_registry_repository.claritas_app projects/claritas-457808/locations/europe-west1/repositories/claritas-app || true
+
       - name: 🛠️ Terraform Import (GKE Cluster)
         working-directory: infra/gcp/terraform
         run: |
