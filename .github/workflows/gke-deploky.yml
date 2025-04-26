@@ -32,6 +32,10 @@ jobs:
           echo "Building Docker image with tag: europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }}"
           docker build -t europe-west2-docker.pkg.dev/claritas-457808/claritas-app:${{ github.sha }} -f ./infra/docker/Dockerfile .
 
+      - name: 🧐 Debug GitHub SHA
+        run: |
+          echo "GitHub SHA: ${{ github.sha }}"
+
       - name: Configure Docker for Google Cloud Artifact Registry
         run: |
           echo "Configuring Docker to use Google Cloud credentials for Artifact Registry"
