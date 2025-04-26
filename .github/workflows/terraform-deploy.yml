@@ -36,18 +36,18 @@ jobs:
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
       - name: 🌍 Terraform Init
-        working-directory: infra/gcp
+        working-directory: infra/gcp/terraform
         run: terraform init -migrate-state -force-copy
 
       - name: 🛠️ Terraform Import (GCS Bucket)
-        working-directory: infra/gcp
+        working-directory: infra/gcp/terraform
         run: terraform import google_storage_bucket.terraform_state claritas-tf-state || true
 
       - name: 🔍 Terraform Plan
-        working-directory: infra/gcp
+        working-directory: infra/gcp/terraform
         run: terraform plan -var-file="terraform.tfvars" -lock=false || true
         # Optional: `|| true` prevents pipeline fail due to locking errors, but may hide other issues.
 
       - name: 🚀 Terraform Apply
-        working-directory: infra/gcp
+        working-directory: infra/gcp/terraform
         run: terraform apply -auto-approve -var-file="terraform.tfvars" -lock=false
