@@ -32,10 +32,14 @@ resource "google_storage_bucket" "terraform_state" {
 
 # Artifact Registry repository for Docker images
 resource "google_artifact_registry_repository" "claritas_app" {
-  name     = "claritas-app"
-  format   = "DOCKER"
-  location = "europe-west1"  # Ensure the region is set to europe-west1
-  project  = var.project_id
+  repository_id = "claritas-app"  # The name of the repository
+  location      = var.region      # The region where the repository will be created
+  format        = "DOCKER"        # The format of the repository, "DOCKER" in this case
+
+  labels = {
+    environment = "dev"
+    purpose     = "docker-images"
+  }
 }
 
 # GKE Cluster resource in europe-west1
