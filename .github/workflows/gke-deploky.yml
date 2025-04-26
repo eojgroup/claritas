@@ -67,7 +67,7 @@ jobs:
 
       - name: Install GKE gcloud auth plugin via official method
         run: |
-          # Add the Google Cloud public key
+          # Add the Google Cloud public key to trusted keys
           curl -sSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo tee /usr/share/keyrings/cloud.google.gpg > /dev/null
             
           # Add the Cloud SDK repository
