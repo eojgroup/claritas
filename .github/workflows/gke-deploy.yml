@@ -65,17 +65,11 @@ jobs:
           exec -l $SHELL
           gcloud components update
 
-      - name: Install GKE gcloud auth plugin via official method
-        run: |
-          # Add the Google Cloud public key to trusted keys
-          curl -sSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo tee /usr/share/keyrings/cloud.google.gpg > /dev/null
-            
-          # Add the Cloud SDK repository
-          echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-            
-          # Update apt and install the necessary plugin 
-          sudo apt-get update
-          sudo apt-get install google-cloud-sdk-gke-gcloud-auth-plugin
+      - name: 🔧 Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: claritas-457808
+          install_components: gke-gcloud-auth-plugin
 
       - name: 💻 Configure kubectl
         run: |
