@@ -77,6 +77,14 @@ jobs:
           gcloud container clusters get-credentials "${CLUSTER}" --region "${REGION}" --project "${PROJECT_ID}"
           kubectl version --client
 
+      - name: 🔎 Debug cluster & namespace
+        run: |
+          echo "Context:" && kubectl config current-context
+          echo "Namespaces:" && kubectl get ns -o wide
+          echo "All deployments (all namespaces):" && kubectl get deploy -A -o wide || true
+          echo "Resources in ${NAMESPACE}:" && kubectl -n "${NAMESPACE}" get all || true
+          echo "Manifests present:" && ls -la ./infra/k8s || true
+
       - name: 🧭 Ensure namespace exists
         run: |
           kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
