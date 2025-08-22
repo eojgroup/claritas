@@ -22,7 +22,7 @@ jobs:
         uses: docker/setup-buildx-action@v2
 
       - name: 🔐 Authenticate to Google Cloud via OIDC
-        uses: google-github-actions/auth@v1
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
@@ -48,49 +48,58 @@ jobs:
     name: Deploy to GKE
     runs-on: ubuntu-latest
     needs: build
+    env:
+      PROJECT_ID: claritas-457808
+      REGION: europe-west2
+      CLUSTER: claritas-cluster
+      NAMESPACE: claritas
+      IMAGE_URI: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app
 
     steps:
       - name: 📦 Checkout code
         uses: actions/checkout@v3
 
       - name: 🔐 Authenticate to GKE with OIDC
-        uses: google-github-actions/auth@v1
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
-      - name: Install Google Cloud SDK
-        run: |
-          curl -sSL https://sdk.cloud.google.com | bash
-          exec -l $SHELL
-          gcloud components update
-
       - name: 🔧 Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
+        uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: claritas-457808
+          project_id: ${{ env.PROJECT_ID }}
           install_components: gke-gcloud-auth-plugin
 
       - name: 💻 Configure kubectl
         run: |
-          echo "Getting GKE credentials for cluster claritas-cluster"
-          gcloud container clusters get-credentials claritas-cluster --region europe-west2 --project claritas-457808
+          echo "Getting GKE credentials for cluster ${CLUSTER}"
+          gcloud container clusters get-credentials "${CLUSTER}" --region "${REGION}" --project "${PROJECT_ID}"
+          kubectl version --client
 
-      - name: 📤 Apply Kubernetes deployment
+      - name: 🧭 Ensure namespace exists
         run: |
-          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
-          echo "Setting image for deployment claritas-app to $IMAGE_NAME"
-          kubectl set image deployment/claritas-app claritas-app=$IMAGE_NAME
-          kubectl rollout status deployment/claritas-app
+          kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
 
       - name: 🛠️ Apply Kubernetes resources
         run: |
-          echo "Applying Kubernetes resources (deployment, service, ingress)"
-          kubectl apply -f ./infra/k8s/deployment.yaml
-          kubectl apply -f ./infra/k8s/service.yaml
-          kubectl apply -f ./infra/k8s/ingress.yaml
+          echo "Applying Kubernetes resources (namespace, deployment, service, ingress)"
+          # Apply manifests idempotently; if you keep a namespace.yaml, include it here
+          if [ -f ./infra/k8s/namespace.yaml ]; then kubectl apply -f ./infra/k8s/namespace.yaml; fi
+          kubectl apply -f ./infra/k8s/deployment.yaml -n "${NAMESPACE}"
+          kubectl apply -f ./infra/k8s/service.yaml -n "${NAMESPACE}"
+          if [ -f ./infra/k8s/ingress.yaml ]; then kubectl apply -f ./infra/k8s/ingress.yaml -n "${NAMESPACE}"; fi
+
+      - name: 📤 Set image and rollout
+        run: |
+          IMAGE_NAME="${IMAGE_URI}:${{ github.sha }}"
+          echo "Setting image for deployment claritas-app in namespace ${NAMESPACE} to ${IMAGE_NAME}"
+          kubectl -n "${NAMESPACE}" set image deployment/claritas-app claritas-app="${IMAGE_NAME}"
+          kubectl -n "${NAMESPACE}" rollout status deployment/claritas-app --timeout=180s
 
       - name: 🚀 Verify deployment
         run: |
-          kubectl get pods
-          kubectl get svc
+          kubectl -n "${NAMESPACE}" get deploy
+          kubectl -n "${NAMESPACE}" get pods -o wide
+          kubectl -n "${NAMESPACE}" get svc
+          if kubectl -n "${NAMESPACE}" get ingress >/dev/null 2>&1; then kubectl -n "${NAMESPACE}" get ingress; fi
