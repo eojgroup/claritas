@@ -7,6 +7,13 @@ metadata:
     app: claritas-app
 spec:
   replicas: 3
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: claritas-app
@@ -14,10 +21,13 @@ spec:
     metadata:
       labels:
         app: claritas-app
+      annotations:
+        prometheus.io/scrape: "false"
     spec:
       containers:
         - name: claritas-app
           image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:PLACEHOLDER
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           readinessProbe:
@@ -26,12 +36,14 @@ spec:
               port: 80
             initialDelaySeconds: 3
             periodSeconds: 10
+            timeoutSeconds: 2
           livenessProbe:
             httpGet:
               path: /
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 20
+            timeoutSeconds: 2
           resources:
             requests:
               cpu: "50m"
@@ -39,3 +51,4 @@ spec:
             limits:
               cpu: "200m"
               memory: "256Mi"
+      terminationGracePeriodSeconds: 30

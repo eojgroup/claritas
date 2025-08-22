@@ -21,6 +21,7 @@ metadata:
   namespace: claritas
   annotations:
     kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.allow-http: "true"
 spec:
   rules:
     - http:

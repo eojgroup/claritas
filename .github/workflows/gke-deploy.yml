@@ -32,7 +32,16 @@ jobs:
           IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
           echo "Building Docker image with tag: $IMAGE_NAME"
           docker build -t $IMAGE_NAME -f ./infra/docker/Dockerfile .
+# inside build job
+      - name: 🏗️ Build Docker image (web)
+        run: |
+          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
+          docker build -t "$IMAGE_NAME" -f ./apps/web/Dockerfile .
 
+      - name: 🖼️ Push Docker image to Artifact Registry
+        run: |
+          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
+          docker push "$IMAGE_NAME"
       - name: Configure Docker for Google Cloud Artifact Registry
         run: |
           echo "Configuring Docker to use Google Cloud credentials for Artifact Registry"
