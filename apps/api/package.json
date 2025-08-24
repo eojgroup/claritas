@@ -1,10 +1,21 @@
 {
   "name": "claritas-api",
   "version": "0.1.0",
-  "main": "dist/index.js",
+  "private": true,
   "type": "commonjs",
+  "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^20.11.30",
+    "@types/express": "^4.17.21",
+    "tsx": "^4.19.1"
   }
 }
