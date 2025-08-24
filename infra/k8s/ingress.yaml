@@ -6,9 +6,11 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.allow-http: "true"
+    networking.gke.io/managed-certificates: "claritas-web-cert"
 spec:
   rules:
-    - http:
+    - host: app.claritas.info
+      http:
         paths:
           - path: /
             pathType: Prefix
