@@ -26,7 +26,7 @@ jobs:
           echo "PWD=$(pwd)"
           ls -la
           echo "---- apps/web ----" && ls -la ./apps/web || true
-          echo "---- infra/docker ----" && ls -la ./infra/docker || true
+          echo "---- apps/api ----" && ls -la ./apps/api || true
 
       - name: 🔐 Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v2
@@ -40,15 +40,30 @@ jobs:
           gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet
 
       - name: 🏗️ Build Docker image (web)
+        env:
+          IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
         run: |
-          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
           test -f ./apps/web/Dockerfile || { echo "ERROR: ./apps/web/Dockerfile not found"; exit 1; }
-          docker build -t "$IMAGE_NAME" -f ./apps/web/Dockerfile .
+          docker build -t "${IMAGE_URI_WEB}:${{ github.sha }}" -f ./apps/web/Dockerfile .
 
-      - name: 🖼️ Push Docker image to Artifact Registry
+      - name: 🖼️ Push Docker image (web)
+        env:
+          IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
         run: |
-          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
-          docker push "$IMAGE_NAME"
+          docker push "${IMAGE_URI_WEB}:${{ github.sha }}"
+
+      - name: 🏗️ Build Docker image (api)
+        env:
+          IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
+        run: |
+          test -f ./apps/api/Dockerfile || { echo "ERROR: ./apps/api/Dockerfile not found"; exit 1; }
+          docker build -t "${IMAGE_URI_API}:${{ github.sha }}" -f ./apps/api/Dockerfile .
+
+      - name: 🖼️ Push Docker image (api)
+        env:
+          IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
+        run: |
+          docker push "${IMAGE_URI_API}:${{ github.sha }}"
 
   deploy:
     name: Deploy to GKE
@@ -59,7 +74,8 @@ jobs:
       REGION: europe-west2
       CLUSTER: claritas-cluster
       NAMESPACE: claritas
-      IMAGE_URI: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app
+      IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
+      IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
 
     steps:
       - name: 📦 Checkout code
@@ -97,23 +113,24 @@ jobs:
 
       - name: 🛠️ Apply Kubernetes resources
         run: |
-          echo "Applying Kubernetes resources (namespace, deployment, service, ingress)"
-          # Apply manifests idempotently; if you keep a namespace.yaml, include it here
-          if [ -f ./infra/k8s/namespace.yaml ]; then kubectl apply -f ./infra/k8s/namespace.yaml; fi
-          kubectl apply -f ./infra/k8s/deployment.yaml -n "${NAMESPACE}"
-          kubectl apply -f ./infra/k8s/service.yaml -n "${NAMESPACE}"
-          if [ -f ./infra/k8s/ingress.yaml ]; then kubectl apply -f ./infra/k8s/ingress.yaml -n "${NAMESPACE}"; fi
+          echo "Applying Kubernetes resources (web, api, ingress)"
+          kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
+          kubectl apply -f ./infra/k8s/web-deployment.yaml
+          kubectl apply -f ./infra/k8s/web-service.yaml
+          kubectl apply -f ./infra/k8s/api-deployment.yaml
+          kubectl apply -f ./infra/k8s/api-service.yaml
+          kubectl apply -f ./infra/k8s/ingress.yaml
 
       - name: 📤 Set image and rollout
         run: |
-          IMAGE_NAME="${IMAGE_URI}:${{ github.sha }}"
-          echo "Setting image for deployment claritas-app in namespace ${NAMESPACE} to ${IMAGE_NAME}"
-          kubectl -n "${NAMESPACE}" set image deployment/claritas-app claritas-app="${IMAGE_NAME}"
-          kubectl -n "${NAMESPACE}" rollout status deployment/claritas-app --timeout=180s
+          echo "Updating images to current SHA and waiting for rollout"
+          kubectl -n "${NAMESPACE}" set image deployment/claritas-web claritas-web="${IMAGE_URI_WEB}:${{ github.sha }}"
+          kubectl -n "${NAMESPACE}" set image deployment/claritas-api claritas-api="${IMAGE_URI_API}:${{ github.sha }}"
+          kubectl -n "${NAMESPACE}" rollout status deployment/claritas-web --timeout=300s
+          kubectl -n "${NAMESPACE}" rollout status deployment/claritas-api --timeout=300s
 
       - name: 🚀 Verify deployment
         run: |
-          kubectl -n "${NAMESPACE}" get deploy
-          kubectl -n "${NAMESPACE}" get pods -o wide
-          kubectl -n "${NAMESPACE}" get svc
-          if kubectl -n "${NAMESPACE}" get ingress >/dev/null 2>&1; then kubectl -n "${NAMESPACE}" get ingress; fi
+          kubectl -n "${NAMESPACE}" get deploy,svc,ingress -o wide
+          echo "Describe Ingress for details:"
+          kubectl -n "${NAMESPACE}" describe ingress claritas | sed -n '1,160p' || true

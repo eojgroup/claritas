@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: claritas-api
+  namespace: claritas
+  labels: { app: claritas-api }
+spec:
+  selector: { app: claritas-api }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

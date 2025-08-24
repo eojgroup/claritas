@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claritas-web
+  namespace: claritas
+  labels: { app: claritas-web }
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector: { matchLabels: { app: claritas-web } }
+  template:
+    metadata: { labels: { app: claritas-web } }
+    spec:
+      containers:
+        - name: claritas-web
+          image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web:PLACEHOLDER
+          imagePullPolicy: Always
+          ports: [ { containerPort: 80 } ]
+          readinessProbe:
+            httpGet: { path: /readyz, port: 80 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: 80 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 2
+          resources:
+            requests: { cpu: "50m",  memory: "64Mi"  }
+            limits:   { cpu: "200m", memory: "256Mi" }
