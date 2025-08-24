@@ -21,37 +21,34 @@ jobs:
       - name: 🚀 Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
 
+      - name: 🧾 Debug repo layout
+        run: |
+          echo "PWD=$(pwd)"
+          ls -la
+          echo "---- apps/web ----" && ls -la ./apps/web || true
+          echo "---- infra/docker ----" && ls -la ./infra/docker || true
+
       - name: 🔐 Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
 
-      - name: 🏗️ Build Docker image
+      - name: Configure Docker for Google Cloud Artifact Registry
         run: |
-          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
-          echo "Building Docker image with tag: $IMAGE_NAME"
-          docker build -t $IMAGE_NAME -f ./infra/docker/Dockerfile .
-# inside build job
+          echo "Configuring Docker to use Google Cloud credentials for Artifact Registry"
+          gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet
+
       - name: 🏗️ Build Docker image (web)
         run: |
           IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
+          test -f ./apps/web/Dockerfile || { echo "ERROR: ./apps/web/Dockerfile not found"; exit 1; }
           docker build -t "$IMAGE_NAME" -f ./apps/web/Dockerfile .
 
       - name: 🖼️ Push Docker image to Artifact Registry
         run: |
           IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
           docker push "$IMAGE_NAME"
-      - name: Configure Docker for Google Cloud Artifact Registry
-        run: |
-          echo "Configuring Docker to use Google Cloud credentials for Artifact Registry"
-          gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet
-
-      - name: 🖼️ Push Docker image to Artifact Registry
-        run: |
-          IMAGE_NAME="europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-app:${{ github.sha }}"
-          echo "Pushing Docker image to Artifact Registry: $IMAGE_NAME"
-          docker push $IMAGE_NAME
 
   deploy:
     name: Deploy to GKE
