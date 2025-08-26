@@ -25,6 +25,17 @@ provider "google-beta" {
   region  = var.region
 }
 
+# Ensure required Google APIs are enabled
+resource "google_project_service" "required" {
+  for_each           = toset([
+    "servicenetworking.googleapis.com",
+    "sqladmin.googleapis.com",
+  ])
+  project            = var.project_id
+  service            = each.value
+  disable_on_destroy = false
+}
+
 # If you’re on the default VPC you can pass "default" as name; otherwise use the self_link.
 
 data "google_compute_network" "vpc" {
@@ -45,6 +56,10 @@ resource "google_service_networking_connection" "private_vpc_connection" {
   network                 = data.google_compute_network.vpc.self_link
   service                 = "services/servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.private_ip_alloc.name]
+
+  depends_on = [
+    google_project_service.required["servicenetworking.googleapis.com"],
+  ]
 }
 
 resource "random_password" "db_password" {
@@ -57,7 +72,10 @@ resource "google_sql_database_instance" "pg" {
   database_version = "POSTGRES_15"
   region           = var.region
 
-  depends_on = [google_service_networking_connection.private_vpc_connection]
+  depends_on = [
+    google_service_networking_connection.private_vpc_connection,
+    google_project_service.required["sqladmin.googleapis.com"],
+  ]
 
   settings {
     tier = var.db_tier
@@ -66,7 +84,7 @@ resource "google_sql_database_instance" "pg" {
     ip_configuration {
       ipv4_enabled    = false         # prefer Private IP from GKE
       private_network = data.google_compute_network.vpc.self_link
-      require_ssl     = true
+      ssl_mode        = "ENCRYPTED_ONLY"
     }
 
     backup_configuration {
@@ -97,9 +115,11 @@ resource "google_sql_user" "app" {
   password = random_password.db_password.result
 }
 
-# Helpful IAM so your CI/cluster can see the instance
+# Optional: grant Cloud SQL Client to a GKE Workload Identity principal.
+# Enable via -var=enable_runtime_iam=true once WI is configured.
 resource "google_project_iam_member" "artifact_reader" {
+  count   = var.enable_runtime_iam ? 1 : 0
   project = var.project_id
   role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${var.project_id}.svc.id.goog[claritas/default]" # adjust if you use another SA/namespace
+  member  = "serviceAccount:${var.project_id}.svc.id.goog[claritas/default]" # adjust when enabling WI
 }
