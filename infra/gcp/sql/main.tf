@@ -26,8 +26,25 @@ provider "google-beta" {
 }
 
 # If you’re on the default VPC you can pass "default" as name; otherwise use the self_link.
+
 data "google_compute_network" "vpc" {
   name = var.network
+}
+
+# Reserve an internal range for Private Service Access (required for Private IP Cloud SQL)
+resource "google_compute_global_address" "private_ip_alloc" {
+  name          = "claritas-sql-psa-range"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = 16
+  network       = data.google_compute_network.vpc.self_link
+}
+
+# Establish VPC peering for Service Networking (Cloud SQL Private IP)
+resource "google_service_networking_connection" "private_vpc_connection" {
+  network                 = data.google_compute_network.vpc.self_link
+  service                 = "services/servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.private_ip_alloc.name]
 }
 
 resource "random_password" "db_password" {
@@ -40,8 +57,11 @@ resource "google_sql_database_instance" "pg" {
   database_version = "POSTGRES_15"
   region           = var.region
 
+  depends_on = [google_service_networking_connection.private_vpc_connection]
+
   settings {
     tier = var.db_tier
+    availability_type = var.availability_type  # "ZONAL" or "REGIONAL"
 
     ip_configuration {
       ipv4_enabled    = false         # prefer Private IP from GKE
@@ -63,7 +83,6 @@ resource "google_sql_database_instance" "pg" {
   }
 
   deletion_protection = true
-  availability_type   = var.availability_type
 }
 
 resource "google_sql_database" "db" {
