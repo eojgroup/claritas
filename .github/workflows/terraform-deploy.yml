@@ -128,7 +128,7 @@ jobs:
       - name: 📜 Apply migration manifests
         run: |
           kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-configmap.yaml
-          kubectl -n "${{ env.KINAMESPACE }}" delete job flyway-migrate --ignore-not-found=true || true
+          kubectl -n "${{ env.K8S_NAMESPACE }}" delete job flyway-migrate --ignore-not-found=true || true
           kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-job.yaml
 
       - name: 🕒 Wait for migrations
