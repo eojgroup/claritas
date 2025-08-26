@@ -63,34 +63,20 @@ jobs:
         run: terraform apply -auto-approve -var-file="terraform.tfvars" -lock=false
 
       ############################################
-      # Cloud SQL Terraform module
+      # Cloud SQL Terraform outputs
       ############################################
-      - name: 🌍 Terraform Init (sql)
-        working-directory: infra/gcp/sql
-        run: terraform init
-
-      - name: 🔍 Terraform Plan (sql)
-        working-directory: infra/gcp/sql
-        run: terraform plan -var="project_id=${{ env.PROJECT_ID }}" -var="region=${{ env.REGION }}" -lock=false || true
-
-      - name: 🚀 Terraform Apply (sql)
-        id: tf_apply_sql
-        working-directory: infra/gcp/sql
-        run: terraform apply -auto-approve -var="project_id=${{ env.PROJECT_ID }}" -var="region=${{ env.REGION }}" -lock=false
-
-      - name: 📤 Capture Terraform outputs (sql)
-        id: tf_out_sql
-        working-directory: infra/gcp/sql
-        shell: bash
+      - name: 📤 Capture Terraform outputs (core)
+        id: tf_out
+        working-directory: infra/gcp/terraform
         run: |
           echo "ICN=$(terraform output -raw instance_connection_name)" >> $GITHUB_OUTPUT
           echo "DB_NAME=$(terraform output -raw db_name)" >> $GITHUB_OUTPUT
           echo "DB_USER=$(terraform output -raw db_user)" >> $GITHUB_OUTPUT
           echo "DB_PASS=$(terraform output -raw db_pass)" >> $GITHUB_OUTPUT
-        # Mask secrets in logs
+
       - name: 🕵️ Mask DB secret
         run: |
-          echo "::add-mask::${{ steps.tf_out_sql.outputs.DB_PASS }}"
+          echo "::add-mask::${{ steps.tf_out.outputs.DB_PASS }}"
 
       ############################################
       # Kube access + namespace
@@ -109,7 +95,7 @@ jobs:
       - name: 🧩 Upsert ConfigMap (claritas-config)
         run: |
           kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap claritas-config \
-            --from-literal=INSTANCE_CONNECTION_NAME="${{ steps.tf_out_sql.outputs.ICN }}" \
+            --from-literal=INSTANCE_CONNECTION_NAME="${{ steps.tf_out.outputs.ICN }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: 🔐 Upsert Secret (claritas-db)
@@ -117,9 +103,9 @@ jobs:
           kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-db \
             --from-literal=DB_HOST=127.0.0.1 \
             --from-literal=DB_PORT=5432 \
-            --from-literal=DB_NAME="${{ steps.tf_out_sql.outputs.DB_NAME }}" \
-            --from-literal=DB_USER="${{ steps.tf_out_sql.outputs.DB_USER }}" \
-            --from-literal=DB_PASSWORD="${{ steps.tf_out_sql.outputs.DB_PASS }}" \
+            --from-literal=DB_NAME="${{ steps.tf_out.outputs.DB_NAME }}" \
+            --from-literal=DB_USER="${{ steps.tf_out.outputs.DB_USER }}" \
+            --from-literal=DB_PASSWORD="${{ steps.tf_out.outputs.DB_PASS }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       ############################################
