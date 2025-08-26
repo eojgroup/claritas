@@ -60,6 +60,7 @@ resource "google_container_cluster" "primary" {
   lifecycle {
     prevent_destroy = true  # Prevent destruction of the cluster
   }
+}
 
 # ---- Cloud SQL (Postgres) with Private IP ----
 
