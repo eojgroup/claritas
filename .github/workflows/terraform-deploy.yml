@@ -23,10 +23,11 @@ jobs:
       - name: 📦 Checkout
         uses: actions/checkout@v3
 
-      - name: ⚙️ Set up Terraform
-        uses: hashicorp/setup-terraform@v2
+      - name: 🧰 Setup Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.6.0
+          terraform_version: 1.8.5
+          terraform_wrapper: false   # <- prevents ::debug:: noise on stdout
 
       - name: 🔐 Authenticate to Google Cloud via OIDC
         uses: google-github-actions/auth@v1
@@ -66,14 +67,17 @@ jobs:
       ############################################
       # Cloud SQL Terraform outputs
       ############################################
-      - name: 📤 Capture Terraform outputs (core)
+      - name: 🌉 Capture Terraform outputs
         id: tf_out
-        working-directory: infra/gcp/terraform
         run: |
-          echo "ICN=$(terraform output -raw instance_connection_name)" >> $GITHUB_OUTPUT
-          echo "DB_NAME=$(terraform output -raw db_name)" >> $GITHUB_OUTPUT
-          echo "DB_USER=$(terraform output -raw db_user)" >> $GITHUB_OUTPUT
-          echo "DB_PASS=$(terraform output -raw db_pass)" >> $GITHUB_OUTPUT
+          ICN=$(terraform output -raw instance_connection_name 2>/dev/null | tr -d '\n')
+          echo "ICN=${ICN}" >> "$GITHUB_OUTPUT"
+          DB_NAME=$(terraform output -raw db_name 2>/dev/null | tr -d '\n')
+          DB_USER=$(terraform output -raw db_user 2>/dev/null | tr -d '\n')
+
+          echo "instance_connection_name=${ICN}" >> "$GITHUB_OUTPUT"
+          echo "db_name=${DB_NAME}" >> "$GITHUB_OUTPUT"
+          echo "db_user=${DB_USER}" >> "$GITHUB_OUTPUT"
 
       - name: 🕵️ Mask DB secret
         run: |
