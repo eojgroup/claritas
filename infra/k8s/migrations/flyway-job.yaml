@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: flyway-migrate
+  namespace: claritas
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: flyway
+          image: flyway/flyway:10
+          args:
+            - -url=jdbc:postgresql://127.0.0.1:5432/$(DB_NAME)
+            - -user=$(DB_USER)
+            - -password=$(DB_PASSWORD)
+            - -connectRetries=30
+            - -locations=filesystem:/flyway/sql
+            - migrate
+          envFrom:
+            - secretRef: { name: claritas-db }
+          volumeMounts:
+            - name: sql
+              mountPath: /flyway/sql
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.4
+          args:
+            - "--structured-logs"
+            - "--port=5432"
+            - "$(INSTANCE_CONNECTION_NAME)"
+          env:
+            - name: INSTANCE_CONNECTION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: claritas-config
+                  key: INSTANCE_CONNECTION_NAME
+          securityContext:
+            runAsNonRoot: true
+      volumes:
+        - name: sql
+          configMap:
+            name: flyway-sql

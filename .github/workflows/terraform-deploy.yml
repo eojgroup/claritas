@@ -1,24 +1,23 @@
 name: Terraform Infrastructure Deployment
-# This workflow deploys Terraform infrastructure to Google Cloud using OIDC authentication.
-# It is triggered on pushes to the main branch.
-# The workflow includes steps for checking out the code, setting up Terraform, authenticating to Google Cloud,
-# initializing Terraform, importing existing resources, planning changes, and applying the configuration.
-# The workflow uses a service account with Workload Identity Federation for authentication.
-# The service account is specified using the workload identity provider and service account name.
-# The workflow also includes permissions for OIDC and repository contents.
 
 on:
   push:
     branches: [main]
 
 permissions:
-  id-token: write  # Required for OIDC
-  contents: read   # Required to clone the repo
+  id-token: write
+  contents: read
 
 jobs:
   deploy:
-    name: Terraform Apply via OIDC
+    name: Terraform + Cloud SQL + Migrations
     runs-on: ubuntu-latest
+
+    env:
+      PROJECT_ID: claritas-457808
+      REGION: europe-west2
+      GKE_CLUSTER: claritas-cluster
+      K8S_NAMESPACE: claritas
 
     steps:
       - name: 📦 Checkout
@@ -33,35 +32,113 @@ jobs:
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
-          service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
+          service_account: "terraform-github-oidc@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
 
-      - name: 🌍 Terraform Init
+      - name: ☁️ Install gcloud SDK + GKE auth plugin
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          install_components: gke-gcloud-auth-plugin
+
+      ############################################
+      # Core Terraform (networking, GKE, registry)
+      ############################################
+      - name: 🌍 Terraform Init (core)
         working-directory: infra/gcp/terraform
         run: terraform init -migrate-state -force-copy
 
-      - name: 🛠️ Terraform Import (GCS Bucket)
+      - name: 🛠️ Terraform Import (existing resources)
         working-directory: infra/gcp/terraform
         run: |
-          # Import GCS bucket to state if it exists, skip if already imported
           terraform import google_storage_bucket.terraform_state claritas-tf-state || true
+          terraform import google_artifact_registry_repository.claritas_app projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/repositories/claritas-app || true
+          terraform import google_container_cluster.primary projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/clusters/${{ env.GKE_CLUSTER }} || true
 
-      - name: 🛠️ Terraform Import (Artifact Registry Repository)
-        working-directory: infra/gcp/terraform
-        run: |
-          # Import the Artifact Registry repository if it exists
-          terraform import google_artifact_registry_repository.claritas_app projects/claritas-457808/locations/europe-west2/repositories/claritas-app || true
-
-      - name: 🛠️ Terraform Import (GKE Cluster)
-        working-directory: infra/gcp/terraform
-        run: |
-          # Import the GKE cluster if it exists
-          terraform import google_container_cluster.primary projects/claritas-457808/locations/europe-west2/clusters/claritas-cluster || true
-
-      - name: 🔍 Terraform Plan
+      - name: 🔍 Terraform Plan (core)
         working-directory: infra/gcp/terraform
         run: terraform plan -var-file="terraform.tfvars" -lock=false || true
-        # Optional: `|| true` prevents pipeline from failing due to locking errors, but may hide other issues.
 
-      - name: 🚀 Terraform Apply
+      - name: 🚀 Terraform Apply (core)
         working-directory: infra/gcp/terraform
         run: terraform apply -auto-approve -var-file="terraform.tfvars" -lock=false
+
+      ############################################
+      # Cloud SQL Terraform module
+      ############################################
+      - name: 🌍 Terraform Init (sql)
+        working-directory: infra/gcp/sql
+        run: terraform init
+
+      - name: 🔍 Terraform Plan (sql)
+        working-directory: infra/gcp/sql
+        run: terraform plan -var="project_id=${{ env.PROJECT_ID }}" -var="region=${{ env.REGION }}" -lock=false || true
+
+      - name: 🚀 Terraform Apply (sql)
+        id: tf_apply_sql
+        working-directory: infra/gcp/sql
+        run: terraform apply -auto-approve -var="project_id=${{ env.PROJECT_ID }}" -var="region=${{ env.REGION }}" -lock=false
+
+      - name: 📤 Capture Terraform outputs (sql)
+        id: tf_out_sql
+        working-directory: infra/gcp/sql
+        shell: bash
+        run: |
+          echo "ICN=$(terraform output -raw instance_connection_name)" >> $GITHUB_OUTPUT
+          echo "DB_NAME=$(terraform output -raw db_name)" >> $GITHUB_OUTPUT
+          echo "DB_USER=$(terraform output -raw db_user)" >> $GITHUB_OUTPUT
+          echo "DB_PASS=$(terraform output -raw db_pass)" >> $GITHUB_OUTPUT
+        # Mask secrets in logs
+      - name: 🕵️ Mask DB secret
+        run: |
+          echo "::add-mask::${{ steps.tf_out_sql.outputs.DB_PASS }}"
+
+      ############################################
+      # Kube access + namespace
+      ############################################
+      - name: 💻 Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials "${{ env.GKE_CLUSTER }}" --region "${{ env.REGION }}" --project "${{ env.PROJECT_ID }}"
+
+      - name: 🧰 Ensure namespace exists
+        run: |
+          kubectl get ns "${{ env.K8S_NAMESPACE }}" || kubectl create ns "${{ env.K8S_NAMESPACE }}"
+
+      ############################################
+      # ConfigMap + Secret (idempotent upsert)
+      ############################################
+      - name: 🧩 Upsert ConfigMap (claritas-config)
+        run: |
+          kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap claritas-config \
+            --from-literal=INSTANCE_CONNECTION_NAME="${{ steps.tf_out_sql.outputs.ICN }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: 🔐 Upsert Secret (claritas-db)
+        run: |
+          kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-db \
+            --from-literal=DB_HOST=127.0.0.1 \
+            --from-literal=DB_PORT=5432 \
+            --from-literal=DB_NAME="${{ steps.tf_out_sql.outputs.DB_NAME }}" \
+            --from-literal=DB_USER="${{ steps.tf_out_sql.outputs.DB_USER }}" \
+            --from-literal=DB_PASSWORD="${{ steps.tf_out_sql.outputs.DB_PASS }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      ############################################
+      # Run Flyway migrations (via K8s Job)
+      ############################################
+      - name: 📜 Apply migration manifests
+        run: |
+          kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-configmap.yaml
+          kubectl -n "${{ env.KINAMESPACE }}" delete job flyway-migrate --ignore-not-found=true || true
+          kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-job.yaml
+
+      - name: 🕒 Wait for migrations
+        run: |
+          kubectl -n "${{ env.K8S_NAMESPACE }}" wait --for=condition=complete job/flyway-migrate --timeout=300s
+          kubectl -n "${{ env.K8S_NAMESPACE }}" logs job/flyway-migrate
+
+      ############################################
+      # (Optional) Redeploy API if needed
+      ############################################
+      - name: 🔄 Show deployments
+        run: |
+          kubectl -n "${{ env.K8S_NAMESPACE }}" get deploy,svc,ingress

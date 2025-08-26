@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flyway-sql
+  namespace: claritas
+data:
+  V1__001_init.sql: |
+    {{ contents of 001_init.sql pasted here verbatim }}
