@@ -60,20 +60,6 @@ resource "google_container_cluster" "primary" {
   lifecycle {
     prevent_destroy = true  # Prevent destruction of the cluster
   }
-}
-
-# GitHub Actions Terraform SA needs to manage VPC peering & service networking
-resource "google_project_iam_member" "tf_sa_network_admin" {
-  project = var.project_id
-  role    = "roles/compute.networkAdmin"
-  member  = "serviceAccount:terraform-github-oidc@${var.project_id}.iam.gserviceaccount.com"
-}
-
-resource "google_project_iam_member" "tf_sa_servicenetworking_admin" {
-  project = var.project_id
-  role    = "roles/servicenetworking.admin"
-  member  = "serviceAccount:terraform-github-oidc@${var.project_id}.iam.gserviceaccount.com"
-}
 
 # ---- Cloud SQL (Postgres) with Private IP ----
 
