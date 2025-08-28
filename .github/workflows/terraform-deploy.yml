@@ -133,10 +133,27 @@ jobs:
           kubectl -n "${{ env.K8S_NAMESPACE }}" delete job flyway-migrate --ignore-not-found=true || true
           kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-job.yaml
 
-      - name: 🕒 Wait for migrations
+      - name: 🕒 Wait for migrations (with debug on failure)
         run: |
-          kubectl -n "${{ env.K8S_NAMESPACE }}" wait --for=condition=complete job/flyway-migrate --timeout=300s
-          kubectl -n "${{ env.K8S_NAMESPACE }}" logs job/flyway-migrate
+          set -euo pipefail
+          # Wait for Job to complete but capture failure details if it doesn't
+          if ! kubectl -n "${{ env.K8S_NAMESPACE }}" wait --for=condition=complete job/flyway-migrate --timeout=300s; then
+            echo "Flyway job did not reach Complete condition within timeout. Dumping diagnostics..." >&2
+            echo "\n=== Job status ===" >&2
+            kubectl -n "${{ env.K8S_NAMESPACE }}" get job flyway-migrate -o wide || true
+            kubectl -n "${{ env.K8S_NAMESPACE }}" describe job flyway-migrate | sed -n '1,200p' || true
+            echo "\n=== Pod status ===" >&2
+            kubectl -n "${{ env.K8S_NAMESPACE }}" get pods -l job-name=flyway-migrate -o wide || true
+            for p in $(kubectl -n "${{ env.K8S_NAMESPACE }}" get pods -l job-name=flyway-migrate -o name); do
+              echo "\n--- Describe $p ---" >&2
+              kubectl -n "${{ env.K8S_NAMESPACE }}" describe "$p" | sed -n '1,200p' || true
+            done
+            echo "\n=== Job logs (all containers) ===" >&2
+            kubectl -n "${{ env.K8S_NAMESPACE }}" logs job/flyway-migrate --all-containers=true --prefix=true || true
+            exit 1
+          fi
+          # If complete, show logs for traceability
+          kubectl -n "${{ env.K8S_NAMESPACE }}" logs job/flyway-migrate --all-containers=true --prefix=true || true
 
       ############################################
       # (Optional) Redeploy API if needed

@@ -62,6 +62,13 @@ resource "google_container_cluster" "primary" {
   }
 }
 
+# Allow GKE nodes to connect to Cloud SQL via Auth Proxy
+resource "google_project_iam_member" "gke_nodes_cloudsql_client" {
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
+}
+
 # ---- Cloud SQL (Postgres) with Private IP ----
 
 # Reference the default VPC
