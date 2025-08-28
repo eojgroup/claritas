@@ -56,6 +56,14 @@ jobs:
           terraform import google_container_cluster.primary projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/clusters/${{ env.GKE_CLUSTER }} || true
           terraform import google_compute_global_address.sql_psa_range projects/${{ env.PROJECT_ID }}/global/addresses/claritas-sql-psa-range || true
 
+          # Service Networking VPC connection (peering)
+          terraform import google_service_networking_connection.vpc_connection "https://www.googleapis.com/compute/v1/projects/${{ env.PROJECT_ID }}/global/networks/${{ env.NETWORK:-default }}:services/servicenetworking.googleapis.com" || true
+
+          # Cloud SQL (PostgreSQL) resources
+          terraform import google_sql_database_instance.pg projects/${{ env.PROJECT_ID }}/instances/claritas-sql || true
+          terraform import google_sql_database.db projects/${{ env.PROJECT_ID }}/instances/claritas-sql/databases/claritas || true
+          terraform import google_sql_user.app projects/${{ env.PROJECT_ID }}/instances/claritas-sql/users/claritas_app || true
+
       - name: 🔍 Terraform Plan (core)
         working-directory: infra/gcp/terraform
         run: terraform plan -var-file="terraform.tfvars" -lock=false || true
@@ -69,19 +77,21 @@ jobs:
       ############################################
       - name: 🌉 Capture Terraform outputs
         id: tf_out
+        working-directory: infra/gcp/terraform
         run: |
           ICN=$(terraform output -raw instance_connection_name 2>/dev/null | tr -d '\n')
-          echo "ICN=${ICN}" >> "$GITHUB_OUTPUT"
           DB_NAME=$(terraform output -raw db_name 2>/dev/null | tr -d '\n')
           DB_USER=$(terraform output -raw db_user 2>/dev/null | tr -d '\n')
+          DB_PASS=$(terraform output -raw db_pass 2>/dev/null | tr -d '\n')
 
-          echo "instance_connection_name=${ICN}" >> "$GITHUB_OUTPUT"
+          echo "icn=${ICN}" >> "$GITHUB_OUTPUT"
           echo "db_name=${DB_NAME}" >> "$GITHUB_OUTPUT"
           echo "db_user=${DB_USER}" >> "$GITHUB_OUTPUT"
+          echo "db_pass=${DB_PASS}" >> "$GITHUB_OUTPUT"
 
       - name: 🕵️ Mask DB secret
         run: |
-          echo "::add-mask::${{ steps.tf_out.outputs.DB_PASS }}"
+          echo "::add-mask::${{ steps.tf_out.outputs.db_pass }}"
 
       ############################################
       # Kube access + namespace
@@ -100,7 +110,7 @@ jobs:
       - name: 🧩 Upsert ConfigMap (claritas-config)
         run: |
           kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap claritas-config \
-            --from-literal=INSTANCE_CONNECTION_NAME="${{ steps.tf_out.outputs.ICN }}" \
+            --from-literal=INSTANCE_CONNECTION_NAME="${{ steps.tf_out.outputs.icn }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: 🔐 Upsert Secret (claritas-db)
@@ -108,9 +118,9 @@ jobs:
           kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-db \
             --from-literal=DB_HOST=127.0.0.1 \
             --from-literal=DB_PORT=5432 \
-            --from-literal=DB_NAME="${{ steps.tf_out.outputs.DB_NAME }}" \
-            --from-literal=DB_USER="${{ steps.tf_out.outputs.DB_USER }}" \
-            --from-literal=DB_PASSWORD="${{ steps.tf_out.outputs.DB_PASS }}" \
+            --from-literal=DB_NAME="${{ steps.tf_out.outputs.db_name }}" \
+            --from-literal=DB_USER="${{ steps.tf_out.outputs.db_user }}" \
+            --from-literal=DB_PASSWORD="${{ steps.tf_out.outputs.db_pass }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       ############################################
