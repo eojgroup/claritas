@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-sa
+  namespace: claritas
+  annotations:
+    iam.gke.io/gcp-service-account: claritas-sql-gsa@claritas-457808.iam.gserviceaccount.com
