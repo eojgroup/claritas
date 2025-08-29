@@ -105,6 +105,10 @@ jobs:
         run: |
           kubectl get ns "${{ env.K8S_NAMESPACE }}" || kubectl create ns "${{ env.K8S_NAMESPACE }}"
 
+      - name: 🪪 Apply KSA for Workload Identity
+        run: |
+          kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/config/serviceaccounts.yaml
+
       ############################################
       # ConfigMap + Secret (idempotent upsert)
       ############################################
