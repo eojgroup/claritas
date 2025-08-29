@@ -5,4 +5,4 @@ metadata:
   namespace: claritas
 data:
   V1__001_init.sql: |
-    {{ contents of 001_init.sql pasted here verbatim }}
+    {{ contents of infra/gcp/sql/001_init.sql }}

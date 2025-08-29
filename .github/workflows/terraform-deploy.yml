@@ -131,6 +131,12 @@ jobs:
       ############################################
       # Run Flyway migrations (via K8s Job)
       ############################################
+      - name: 🧩 Upsert Flyway scripts ConfigMap from repo
+        run: |
+          kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap flyway-scripts \
+            --from-file=infra/gcp/sql/ \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: 📜 Apply migration manifests
         run: |
           kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-configmap.yaml
