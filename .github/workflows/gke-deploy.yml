@@ -113,13 +113,14 @@ jobs:
         run: |
           kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
 
+      - name: 🛡️ Apply RBAC (ServiceAccounts for Workload Identity)
+        run: |
+          kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
+          kubectl -n "${NAMESPACE}" apply -f infra/k8s/rbac/api-sa.yaml
+          kubectl -n "${NAMESPACE}" apply -f infra/k8s/rbac/flyway-sa.yaml
+
       - name: 🛠️ Apply Kubernetes resources
         run: |
-          echo "Applying Kubernetes resources (web, api, managed cert, ingress, db config, sql proxy)"
-          kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
-          kubectl apply -f ./infra/k8s/config/claritas-config.yaml
-          kubectl apply -f ./infra/k8s/config/db-secret.yaml || true   # optional, pipeline already upserts secrets
-          kubectl apply -f ./infra/k8s/tools/cloud-sql-proxy.yaml
           kubectl apply -f ./infra/k8s/web-deployment.yaml
           kubectl apply -f ./infra/k8s/web-service.yaml
           kubectl apply -f ./infra/k8s/api-deployment.yaml
@@ -127,13 +128,43 @@ jobs:
           kubectl apply -f ./infra/k8s/managed-cert.yaml
           kubectl apply -f ./infra/k8s/ingress.yaml
 
-      - name: 📤 Set image and rollout
+      - name: 📤 Set image and rollout (with diagnostics)
         run: |
-          echo "Updating images to current SHA and waiting for rollout"
-          kubectl -n "${NAMESPACE}" set image deployment/claritas-web claritas-web="${IMAGE_URI_WEB}:${{ github.sha }}"
-          kubectl -n "${NAMESPACE}" set image deployment/claritas-api claritas-api="${IMAGE_URI_API}:${{ github.sha }}"
-          kubectl -n "${NAMESPACE}" rollout status deployment/claritas-web --timeout=300s
-          kubectl -n "${NAMESPACE}" rollout status deployment/claritas-api --timeout=300s
+          set -euo pipefail
+          ns="${NAMESPACE}"
+
+          # Update images to this commit
+          kubectl -n "$ns" set image deployment/claritas-web claritas-web="${IMAGE_URI_WEB}:${{ github.sha }}"
+          kubectl -n "$ns" set image deployment/claritas-api claritas-api="${IMAGE_URI_API}:${{ github.sha }}"
+
+          wait_rollout () {
+            local dep="$1"
+            echo "⏳ Waiting for rollout of $dep ..."
+            if ! kubectl -n "$ns" rollout status "deployment/${dep}" --timeout=600s; then
+              echo "::warning::Rollout for ${dep} timed out — dumping diagnostics"
+              echo "=== describe deployment ==="
+              kubectl -n "$ns" describe deployment "${dep}" | sed -n '1,200p' || true
+              echo "=== replica sets ==="
+              kubectl -n "$ns" get rs -l app=${dep#claritas-} -o wide || true
+              local rs
+              rs="$(kubectl -n "$ns" get rs -l app=${dep#claritas-} -o name | tail -n1 || true)"
+              if [ -n "${rs}" ]; then
+                echo "=== describe $rs ==="
+                kubectl -n "$ns" describe "${rs}" | sed -n '1,200p' || true
+              fi
+              echo "=== pods ==="
+              kubectl -n "$ns" get pods -l app=${dep#claritas-} -o wide || true
+              for p in $(kubectl -n "$ns" get pods -l app=${dep#claritas-} -o name); do
+                echo "--- logs $p (all containers, last 200) ---"
+                kubectl -n "$ns" logs "$p" --all-containers --tail=200 || true
+              done
+              exit 1
+            fi
+            echo "✅ ${dep} rolled out"
+          }
+
+          wait_rollout claritas-web
+          wait_rollout claritas-api
 
       - name: 🔒 Check ManagedCertificate (best-effort)
         continue-on-error: true
