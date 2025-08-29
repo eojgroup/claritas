@@ -116,8 +116,8 @@ jobs:
       - name: 🛡️ Apply RBAC (ServiceAccounts for Workload Identity)
         run: |
           kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
-          kubectl -n "${NAMESPACE}" apply -f infra/k8s/rbac/api-sa.yaml
-          kubectl -n "${NAMESPACE}" apply -f infra/k8s/rbac/flyway-sa.yaml
+          kubectl -n "${NAMESPACE}" apply -f infra/k8s/api-sa.yaml
+          kubectl -n "${NAMESPACE}" apply -f infra/k8s/flyway-sa.yaml
 
       - name: 🛠️ Apply Kubernetes resources
         run: |

@@ -51,32 +51,40 @@ resource "google_artifact_registry_repository" "claritas_app" {
   ]
 }
 
+
 ############################################
-# GKE Cluster (Workload Identity enabled)
+# GKE Cluster
 ############################################
 resource "google_container_cluster" "primary" {
   name     = "claritas-cluster"
   project  = var.project_id
   location = var.region
 
+  # keep the cluster you're already running; do NOT let TF recreate it
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      # ignore fields that tend to drift on imported clusters
+      node_config[0].oauth_scopes,
+      logging_config,
+      monitoring_config,
+      network,
+      subnetwork,
+      node_pool,                 # since default-pool is managed by GKE
+      release_channel,
+      enable_autopilot,
+      private_cluster_config,
+    ]
+  }
+
+  # minimal shape that matches your live cluster well enough
   initial_node_count = 1
 
   node_config {
     machine_type    = "e2-small"
     preemptible     = true
     service_account = "terraform-github-oidc@${var.project_id}.iam.gserviceaccount.com"
-    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
   }
-
-  workload_identity_config {
-    workload_pool = "${var.project_id}.svc.id.goog"
-  }
-
-  lifecycle { prevent_destroy = true }
-
-  depends_on = [
-    google_project_service.enabled_services["container.googleapis.com"]
-  ]
 }
 
 ############################################
