@@ -115,8 +115,11 @@ jobs:
 
       - name: 🛠️ Apply Kubernetes resources
         run: |
-          echo "Applying Kubernetes resources (web, api, managed cert, ingress)"
+          echo "Applying Kubernetes resources (web, api, managed cert, ingress, db config, sql proxy)"
           kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
+          kubectl apply -f ./infra/k8s/config/claritas-config.yaml
+          kubectl apply -f ./infra/k8s/config/db-secret.yaml || true   # optional, pipeline already upserts secrets
+          kubectl apply -f ./infra/k8s/tools/cloud-sql-proxy.yaml
           kubectl apply -f ./infra/k8s/web-deployment.yaml
           kubectl apply -f ./infra/k8s/web-service.yaml
           kubectl apply -f ./infra/k8s/api-deployment.yaml

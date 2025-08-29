@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: claritas-db-secret
-  namespace: claritas
-type: Opaque
-stringData:
-  DB_PASSWORD: "<paste the terraform output db_pass here>"
