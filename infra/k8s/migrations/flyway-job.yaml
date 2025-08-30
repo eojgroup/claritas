@@ -11,16 +11,18 @@ spec:
       containers:
         - name: flyway
           image: flyway/flyway:10.17-alpine
-          args: ["migrate"]
+          args:
+            - "-connectRetries=60"
+            - "migrate"
           env:
+            - name: DB_NAME
+              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_NAME } }
             - name: FLYWAY_URL
               value: "jdbc:postgresql://127.0.0.1:5432/$(DB_NAME)"
             - name: FLYWAY_USER
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_USER } }
             - name: FLYWAY_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
-            - name: DB_NAME
-              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_NAME } }
           volumeMounts:
             - name: flyway-sql
               mountPath: /flyway/sql

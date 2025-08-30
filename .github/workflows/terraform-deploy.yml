@@ -142,31 +142,64 @@ jobs:
 
       - name: 📜 Apply migration manifests
         run: |
-          kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-configmap.yaml
+          # Ensure fresh Job
           kubectl -n "${{ env.K8S_NAMESPACE }}" delete job flyway-migrate --ignore-not-found=true || true
           kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-job.yaml
 
-      - name: 🕒 Wait for migrations (with debug on failure)
+      - name: 🕒 Wait for migrations (watch flyway container, then clean up)
         run: |
           set -euo pipefail
-          # Wait for Job to complete but capture failure details if it doesn't
-          if ! kubectl -n "${{ env.K8S_NAMESPACE }}" wait --for=condition=complete job/flyway-migrate --timeout=300s; then
-            echo "Flyway job did not reach Complete condition within timeout. Dumping diagnostics..." >&2
-            echo "\n=== Job status ===" >&2
-            kubectl -n "${{ env.K8S_NAMESPACE }}" get job flyway-migrate -o wide || true
-            kubectl -n "${{ env.K8S_NAMESPACE }}" describe job flyway-migrate | sed -n '1,200p' || true
-            echo "\n=== Pod status ===" >&2
-            kubectl -n "${{ env.K8S_NAMESPACE }}" get pods -l job-name=flyway-migrate -o wide || true
-            for p in $(kubectl -n "${{ env.K8S_NAMESPACE }}" get pods -l job-name=flyway-migrate -o name); do
-              echo "\n--- Describe $p ---" >&2
-              kubectl -n "${{ env.K8S_NAMESPACE }}" describe "$p" | sed -n '1,200p' || true
-            done
-            echo "\n=== Job logs (all containers) ===" >&2
-            kubectl -n "${{ env.K8S_NAMESPACE }}" logs job/flyway-migrate --all-containers=true --prefix=true || true
+          ns="${{ env.K8S_NAMESPACE }}"
+          job="flyway-migrate"
+          echo "Waiting for pod of job/$job to start..."
+          # Wait for Pod creation
+          for i in $(seq 1 60); do
+            POD=$(kubectl -n "$ns" get pods -l job-name=$job -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "${POD:-}" ]; then break; fi
+            sleep 5
+          done
+          if [ -z "${POD:-}" ]; then
+            echo "::error::No pod created for job/$job within timeout" >&2
+            kubectl -n "$ns" get job "$job" -o wide || true
             exit 1
           fi
-          # If complete, show logs for traceability
-          kubectl -n "${{ env.K8S_NAMESPACE }}" logs job/flyway-migrate --all-containers=true --prefix=true || true
+          echo "Tracking container 'flyway' in pod $POD ..."
+          # Poll the flyway container termination status
+          for i in $(seq 1 120); do
+            CODE=$(kubectl -n "$ns" get pod "$POD" -o jsonpath='{.status.containerStatuses[?(@.name=="flyway")].state.terminated.exitCode}' 2>/dev/null || true)
+            if [ "${CODE:-}" = "0" ]; then
+              echo "Flyway finished successfully. Showing logs:"
+              kubectl -n "$ns" logs "$POD" -c flyway --tail=200 || true
+              echo "Cleaning up job/$job to stop sidecar..."
+              kubectl -n "$ns" delete job "$job" --wait=true || true
+              exit 0
+            elif [ -n "${CODE:-}" ]; then
+              echo "::error::Flyway container exited with code ${CODE}" >&2
+              echo "\n=== Job status ===" >&2
+              kubectl -n "$ns" get job "$job" -o wide || true
+              kubectl -n "$ns" describe job "$job" | sed -n '1,200p' || true
+              echo "\n=== Pod status ===" >&2
+              kubectl -n "$ns" describe pod "$POD" | sed -n '1,200p' || true
+              echo "\n=== Logs (flyway + proxy) ===" >&2
+              kubectl -n "$ns" logs "$POD" -c flyway --tail=200 || true
+              kubectl -n "$ns" logs "$POD" -c cloud-sql-proxy --tail=200 || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "::error::Flyway did not finish within timeout. Dumping diagnostics..." >&2
+          echo "\n=== Job status ===" >&2
+          kubectl -n "$ns" get job "$job" -o wide || true
+          kubectl -n "$ns" describe job "$job" | sed -n '1,200p' || true
+          echo "\n=== Pods ===" >&2
+          kubectl -n "$ns" get pods -l job-name=$job -o wide || true
+          for p in $(kubectl -n "$ns" get pods -l job-name=$job -o name); do
+            echo "\n--- Describe $p ---" >&2
+            kubectl -n "$ns" describe "$p" | sed -n '1,200p' || true
+            echo "\n--- Logs $p (all containers) ---" >&2
+            kubectl -n "$ns" logs "$p" --all-containers=true --prefix=true || true
+          done
+          exit 1
 
       ############################################
       # (Optional) Redeploy API if needed
