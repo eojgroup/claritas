@@ -4,6 +4,7 @@ metadata:
   name: flyway-migrate
   namespace: claritas
 spec:
+  backoffLimit: 2
   template:
     spec:
       restartPolicy: Never
@@ -25,9 +26,14 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_USER } }
             - name: FLYWAY_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Xms64m -Xmx256m -XX:MaxRAMPercentage=75"
           volumeMounts:
             - name: flyway-sql
               mountPath: /flyway/sql
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "256Mi" }
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
           args:
@@ -41,6 +47,9 @@ spec:
                 configMapKeyRef:
                   name: claritas-config
                   key: INSTANCE_CONNECTION_NAME
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "256Mi" }
       volumes:
         - name: flyway-sql
           configMap:
