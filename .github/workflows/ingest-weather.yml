@@ -1,0 +1,81 @@
+name: Ingest Weather (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      namespace:
+        description: Kubernetes namespace
+        required: false
+        default: claritas
+      country:
+        description: Optional ISO2 country code (limits to one)
+        required: false
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  run:
+    name: Run OpenWeather ingest once
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: claritas-457808
+      REGION: europe-west2
+      CLUSTER: claritas-cluster
+      NAMESPACE: ${{ github.event.inputs.namespace || 'claritas' }}
+      COUNTRY: ${{ github.event.inputs.country || '' }}
+
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v3
+
+      - name: 🔐 Authenticate to GCP (OIDC)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
+          service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
+
+      - name: ☁️ Setup gcloud + GKE auth plugin
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          install_components: gke-gcloud-auth-plugin
+
+      - name: 💻 Get cluster credentials
+        run: |
+          gcloud container clusters get-credentials "${CLUSTER}" --region "${REGION}" --project "${PROJECT_ID}"
+
+      - name: 🧭 Ensure namespace exists
+        run: |
+          kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
+
+      - name: ▶️ Run OpenWeather ingest inside cluster
+        run: |
+          set -euo pipefail
+          ns="${NAMESPACE}"
+          name="ingest-weather-$(date +%s)"
+          if [ -n "${COUNTRY}" ]; then
+            payload="{\"country\":\"${COUNTRY}\"}"
+          else
+            payload='{}'
+          fi
+          script='BASE="http://claritas-api.claritas.svc.cluster.local:8080";
+            echo "> openweather/country-current payload: ${payload}";
+            curl --fail --show-error --silent --retry 3 --max-time 180 -H "content-type: application/json" \
+              -d "'${payload}'" \
+              "$BASE/api/ingest/openweather/country-current"; echo;'
+
+          # Use a short pod so we can stream logs easily
+          kubectl -n "$ns" run "$name" --image=curlimages/curl:8.10.1 --restart=Never -- /bin/sh -ceu "$script"
+          echo "Waiting for pod..."; sleep 2
+          kubectl -n "$ns" wait --for=condition=Ready pod/"$name" --timeout=120s || true
+          echo "Streaming logs:"; kubectl -n "$ns" logs -f "$name" || true
+          kubectl -n "$ns" delete pod "$name" --wait=true || true
+
+      - name: ✅ Verify Weather latest (best effort)
+        continue-on-error: true
+        run: |
+          curl -sf https://app.claritas.info/api/weather/country-latest | jq . || true
+
