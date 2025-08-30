@@ -131,6 +131,18 @@ jobs:
             --from-literal=DB_PASSWORD="${{ steps.tf_out.outputs.db_pass }}" \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: 🔐 Upsert Secret (claritas-newsapi)
+        env:
+          NEWSAPI_API_KEY: ${{ secrets.NEWSAPI_API_KEY }}
+        run: |
+          if [ -z "${NEWSAPI_API_KEY:-}" ]; then
+            echo "::warning::NEWSAPI_API_KEY not set in GitHub Secrets; skipping secret upsert";
+          else
+            kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-newsapi \
+              --from-literal=NEWSAPI_API_KEY="$NEWSAPI_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          fi
+
       ############################################
       # Run Flyway migrations (via K8s Job)
       ############################################
