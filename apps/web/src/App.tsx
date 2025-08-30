@@ -58,7 +58,7 @@ export default function ClaritasDashboard() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="min-h-screen w-full bg-slate-50 text-slate-900">
       {/* Header */}
       <header className="bg-slate-200 border-b border-slate-300">
         <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
@@ -82,7 +82,7 @@ export default function ClaritasDashboard() {
       </header>
 
       {/* Content */}
-      <main className="mx-auto max-w-7xl px-4 py-6 grid grid-cols-12 gap-4">
+      <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-12 gap-4">
         {/* LEFT: Map + AI Search + News/Country Profile */}
         <section className="col-span-12 lg:col-span-7 flex flex-col gap-4">
           {/* Map Card */}

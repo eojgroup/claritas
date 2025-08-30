@@ -119,6 +119,11 @@ jobs:
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/api-sa.yaml
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/flyway-sa.yaml
 
+      - name: ⚙️ Apply ConfigMaps
+        run: |
+          # Ensure claritas-config (DB_NAME, DB_USER, INSTANCE_CONNECTION_NAME) exists
+          kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/db-config.yaml
+
       - name: 🛠️ Apply Kubernetes resources
         run: |
           kubectl apply -f ./infra/k8s/web-deployment.yaml
@@ -129,6 +134,26 @@ jobs:
           kubectl apply -f ./infra/k8s/ingest-cronjob.yaml
           kubectl apply -f ./infra/k8s/managed-cert.yaml
           kubectl apply -f ./infra/k8s/ingress.yaml
+
+      - name: 🔐 Ensure DB secret matches Terraform state
+        env:
+          NS: ${{ env.NAMESPACE }}
+        run: |
+          set -euo pipefail
+          # Read DB name/user from the ConfigMap we just applied
+          DB_NAME=$(kubectl -n "$NS" get configmap claritas-config -o jsonpath='{.data.DB_NAME}')
+          DB_USER=$(kubectl -n "$NS" get configmap claritas-config -o jsonpath='{.data.DB_USER}')
+          # Extract password from local terraform state (dev convenience). In prod, source from Secret Manager.
+          DB_PASS=$(jq -r '.resources[] | select(.type=="random_password" and .name=="db_password") | .instances[0].attributes.result' infra/gcp/terraform/terraform.tfstate)
+          if [ -z "$DB_PASS" ] || [ "$DB_PASS" = "null" ]; then
+            echo "::warning::Could not extract DB password from terraform.tfstate; skipping secret upsert"
+          else
+            kubectl -n "$NS" delete secret claritas-db --ignore-not-found
+            kubectl -n "$NS" create secret generic claritas-db \
+              --from-literal=DB_NAME="$DB_NAME" \
+              --from-literal=DB_USER="$DB_USER" \
+              --from-literal=DB_PASSWORD="$DB_PASS"
+          fi
 
       - name: 📤 Set image and rollout (with diagnostics)
         run: |
