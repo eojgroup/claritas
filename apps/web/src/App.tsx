@@ -29,7 +29,7 @@ const scatterData = [
 ];
 
 import WorldMapBubbles from "./components/WorldMapBubbles";
-import { fetchCountryStats, fetchNews, type CountryStat, type NewsItem } from "./lib/api";
+import { fetchCountryStats, fetchNews, imageProxy, type CountryStat, type NewsItem } from "./lib/api";
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
@@ -112,22 +112,40 @@ export default function ClaritasDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="p-4 border-b border-slate-100 font-semibold">News</div>
-              <ul className="p-4 space-y-2">
+              <ul className="p-4 space-y-3">
                 {news.length === 0 && (
                   <li className="text-sm text-slate-500">No news items yet.</li>
                 )}
-                {news.map((n) => (
-                  <li key={n.id} className="rounded-lg border border-slate-100 p-3 hover:bg-slate-50">
-                    <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900">
-                      {n.title || n.url || 'Untitled'}
-                    </a>
-                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                      {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 border text-slate-700">{n.country_iso2}</span>}
-                      {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
-                    </div>
-                    {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
-                  </li>
-                ))}
+                {news.map((n) => {
+                  const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
+                  return (
+                    <li key={n.id} className="rounded-lg border border-slate-100 p-3 hover:bg-slate-50">
+                      <div className="flex items-start gap-3">
+                        {img ? (
+                          <img
+                            src={img}
+                            alt={n.title ?? 'thumbnail'}
+                            loading="lazy"
+                            decoding="async"
+                            referrerPolicy="no-referrer"
+                            className="h-16 w-24 object-cover rounded-md border border-slate-200 flex-none"
+                            onError={(e) => ((e.currentTarget.style.display = 'none'))}
+                          />
+                        ) : null}
+                        <div className="min-w-0">
+                          <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900 hover:underline">
+                            {n.title || n.url || 'Untitled'}
+                          </a>
+                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
+                            {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 border text-slate-700">{n.country_iso2}</span>}
+                            {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
+                          </div>
+                          {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
 

@@ -34,3 +34,13 @@ export async function fetchCountryStats(params?: { days?: number }) {
   return (data.stats ?? []) as CountryStat[];
 }
 
+export function imageProxy(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  try {
+    // Encode once and attach to the API proxy path (same origin)
+    const u = new URL(url);
+    return `/api/proxy-image?url=${encodeURIComponent(u.toString())}`;
+  } catch {
+    return undefined;
+  }
+}

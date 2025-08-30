@@ -100,6 +100,28 @@ app.post("/api/ingest/newsapi/top-headlines", async (req, res) => {
   }
 });
 
+// Lightweight image proxy for remote thumbnails that block hotlinking
+app.get("/api/proxy-image", async (req, res) => {
+  try {
+    const url = String(req.query.url || "");
+    if (!url || !/^https?:\/\//i.test(url)) {
+      return res.status(400).send("invalid url");
+    }
+    const r = await fetch(url, { redirect: "follow" as any });
+    if (!r.ok) {
+      return res.status(r.status).send("upstream error");
+    }
+    const ct = r.headers.get("content-type") || "image/jpeg";
+    res.setHeader("content-type", ct);
+    res.setHeader("cache-control", "public, max-age=86400, s-maxage=86400, immutable");
+    res.setHeader("access-control-allow-origin", "*");
+    const buf = Buffer.from(await r.arrayBuffer());
+    res.status(200).send(buf);
+  } catch (e: any) {
+    res.status(500).send("proxy error");
+  }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API listening on http://0.0.0.0:${PORT}`);
 });
