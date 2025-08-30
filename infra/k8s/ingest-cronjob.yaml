@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: claritas-ingest-newsapi
+  namespace: claritas
+spec:
+  # Daily at 03:00 UTC. Change this cron string to adjust recurrence.
+  schedule: "0 3 * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: claritas-ingest-newsapi
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: curl
+              image: curlimages/curl:8.10.1
+              imagePullPolicy: IfNotPresent
+              args:
+                - /bin/sh
+                - -ceu
+                - |
+                  echo "Starting scheduled NewsAPI ingests..."
+                  BASE_URL="http://claritas-api.claritas.svc.cluster.local:8080"
+                  echo "> /api/ingest/newsapi/everything (q=OpenAI)"
+                  curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
+                    -H 'content-type: application/json' \
+                    -d '{"q":"OpenAI","pageSize":50,"maxPages":2}' \
+                    "$BASE_URL/api/ingest/newsapi/everything"
+                  echo
+                  echo "> /api/ingest/newsapi/top-headlines (country=us, category=technology)"
+                  curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
+                    -H 'content-type: application/json' \
+                    -d '{"country":"us","category":"technology","pageSize":50,"maxPages":2}' \
+                    "$BASE_URL/api/ingest/newsapi/top-headlines"
+                  echo
+                  echo "Ingest completed."

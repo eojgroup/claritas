@@ -125,6 +125,8 @@ jobs:
           kubectl apply -f ./infra/k8s/web-service.yaml
           kubectl apply -f ./infra/k8s/api-deployment.yaml
           kubectl apply -f ./infra/k8s/api-service.yaml
+          # Scheduled ingest CronJob
+          kubectl apply -f ./infra/k8s/ingest-cronjob.yaml
           kubectl apply -f ./infra/k8s/managed-cert.yaml
           kubectl apply -f ./infra/k8s/ingress.yaml
 
