@@ -17,7 +17,9 @@ export type WorldMapBubblesProps = {
 // TopoJSON -> GeoJSON features
 const countries: any = (feature(worldData as any, (worldData as any).objects.countries) as any).features;
 
-const projection = geoEqualEarth();
+// Fixed-size projection matching the component's viewBox (800x400)
+// This ensures bubbles and map align predictably across browsers.
+const projection = geoEqualEarth().fitSize([800, 400], { type: 'Sphere' } as any);
 
 export default memo(function WorldMapBubbles({ data, onSelect }: WorldMapBubblesProps) {
   const path = useMemo(() => geoPath(projection), []);

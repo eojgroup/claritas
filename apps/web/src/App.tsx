@@ -90,8 +90,28 @@ export default function ClaritasDashboard() {
             <div className="p-4 border-b border-slate-100 text-sm text-slate-500">#News per country</div>
             <div className="relative p-4">
               <div className="aspect-[16/9] rounded-xl overflow-hidden">
-                <WorldMapBubbles data={countryStats} onSelect={setSelectedCountry} />
+                {/* Fallback: derive bubbles from the currently loaded news if stats are empty */}
+                <WorldMapBubbles
+                  data={
+                    (countryStats && countryStats.length > 0)
+                      ? countryStats
+                      : Object.entries(
+                          (news || []).reduce<Record<string, number>>((acc, n) => {
+                            const iso = (n.country_iso2 || "").toUpperCase();
+                            if (!iso) return acc;
+                            acc[iso] = (acc[iso] || 0) + 1;
+                            return acc;
+                          }, {})
+                        ).map(([country, count]) => ({ country, count }))
+                  }
+                  onSelect={setSelectedCountry}
+                />
               </div>
+              {countryStats.length === 0 && (
+                <div className="absolute bottom-3 right-4 text-xs text-slate-500 bg-white/70 px-2 py-1 rounded shadow-sm border">
+                  No aggregated stats yet — showing live list fallback
+                </div>
+              )}
             </div>
             {/* AI Search */}
             <div className="border-t border-slate-100 p-3">
