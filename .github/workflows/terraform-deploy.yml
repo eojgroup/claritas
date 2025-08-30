@@ -143,6 +143,18 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           fi
 
+      - name: 🔐 Upsert Secret (claritas-openweather)
+        env:
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+        run: |
+          if [ -z "${OPENWEATHER_API_KEY:-}" ]; then
+            echo "::warning::OPENWEATHER_API_KEY not set in GitHub Secrets; skipping secret upsert";
+          else
+            kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-openweather \
+              --from-literal=OPENWEATHER_API_KEY="$OPENWEATHER_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          fi
+
       ############################################
       # Run Flyway migrations (via K8s Job)
       ############################################
