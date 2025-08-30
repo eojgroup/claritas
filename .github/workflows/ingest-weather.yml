@@ -56,19 +56,16 @@ jobs:
           set -euo pipefail
           ns="${NAMESPACE}"
           name="ingest-weather-$(date +%s)"
-          if [ -n "${COUNTRY}" ]; then
-            payload="{\"country\":\"${COUNTRY}\"}"
-          else
-            payload='{}'
-          fi
           script='BASE="http://claritas-api.claritas.svc.cluster.local:8080";
+            payload="{}";
+            if [ -n "${COUNTRY:-}" ]; then payload="{\"country\":\"${COUNTRY}\"}"; fi;
             echo "> openweather/country-current payload: ${payload}";
             curl --fail --show-error --silent --retry 3 --max-time 180 -H "content-type: application/json" \
-              -d "'${payload}'" \
+              -d "${payload}" \
               "$BASE/api/ingest/openweather/country-current"; echo;'
 
-          # Use a short pod so we can stream logs easily
-          kubectl -n "$ns" run "$name" --image=curlimages/curl:8.10.1 --restart=Never -- /bin/sh -ceu "$script"
+          # Use a short pod so we can stream logs easily. Pass COUNTRY env to the pod.
+          kubectl -n "$ns" run "$name" --image=curlimages/curl:8.10.1 --restart=Never --env=COUNTRY="${COUNTRY}" -- /bin/sh -ceu "$script"
           echo "Waiting for pod..."; sleep 2
           kubectl -n "$ns" wait --for=condition=Ready pod/"$name" --timeout=120s || true
           echo "Streaming logs:"; kubectl -n "$ns" logs -f "$name" || true
@@ -78,4 +75,3 @@ jobs:
         continue-on-error: true
         run: |
           curl -sf https://app.claritas.info/api/weather/country-latest | jq . || true
-
