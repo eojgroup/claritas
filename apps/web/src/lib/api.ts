@@ -10,6 +10,7 @@ export type NewsItem = {
 };
 
 export type CountryStat = { country: string; count: number };
+export type CountryWeather = { country: string; temp_c: number | null; humidity: number | null; observed_at: string; weather_main: string | null };
 
 const API_BASE = ''; // relative to same host; In dev, consider proxying /api to backend
 
@@ -32,6 +33,13 @@ export async function fetchCountryStats(params?: { days?: number }) {
   if (!resp.ok) throw new Error(`Failed to fetch country stats: ${resp.status}`);
   const data = await resp.json();
   return (data.stats ?? []) as CountryStat[];
+}
+
+export async function fetchCountryWeather() {
+  const resp = await fetch(`${API_BASE}/api/weather/country-latest`);
+  if (!resp.ok) throw new Error(`Failed to fetch country weather: ${resp.status}`);
+  const data = await resp.json();
+  return (data.stats ?? []) as CountryWeather[];
 }
 
 export function imageProxy(url?: string | null): string | undefined {

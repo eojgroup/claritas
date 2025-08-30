@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const newsapi_1 = require("./connectors/newsapi");
+const openweather_1 = require("./connectors/openweather");
 const db_1 = require("./db");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -92,6 +93,27 @@ app.post("/api/ingest/newsapi/top-headlines", async (req, res) => {
         const { country, category, q, pageSize, maxPages } = req.body || {};
         const result = await (0, newsapi_1.ingestNewsApiTopHeadlines)({ country, category, q, pageSize, maxPages });
         res.json(result);
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message || String(e) });
+    }
+});
+// Ingest OpenWeather current weather for countries (centroid-based)
+app.post("/api/ingest/openweather/country-current", async (req, res) => {
+    try {
+        const { country } = req.body || {};
+        const result = await (0, openweather_1.ingestOpenWeatherCountryCurrent)(typeof country === 'string' ? country : undefined);
+        res.json(result);
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message || String(e) });
+    }
+});
+// Latest weather per country for map overlay
+app.get("/api/weather/country-latest", async (_req, res) => {
+    try {
+        const rows = await (0, openweather_1.getCountryWeatherLatest)();
+        res.json({ stats: rows });
     }
     catch (e) {
         res.status(500).json({ error: e.message || String(e) });

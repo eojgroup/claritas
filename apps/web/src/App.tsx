@@ -29,17 +29,20 @@ const scatterData = [
 ];
 
 import WorldMapBubbles from "./components/WorldMapBubbles";
-import { fetchCountryStats, fetchNews, imageProxy, type CountryStat, type NewsItem } from "./lib/api";
+import { fetchCountryStats, fetchCountryWeather, fetchNews, imageProxy, type CountryStat, type CountryWeather, type NewsItem } from "./lib/api";
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
+  const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [mapMode, setMapMode] = useState<"news" | "weather">("news");
 
   useEffect(() => {
     // Load initial data
     fetchCountryStats({ days: 30 }).then(setCountryStats).catch(() => setCountryStats([]));
+    fetchCountryWeather().then(setWeatherStats).catch(() => setWeatherStats([]));
     fetchNews({ limit: 20 }).then(setNews).catch(() => setNews([]));
   }, []);
 
@@ -87,27 +90,56 @@ export default function ClaritasDashboard() {
         <section className="col-span-12 lg:col-span-7 flex flex-col gap-4">
           {/* Map Card */}
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="p-4 border-b border-slate-100 text-sm text-slate-500">#News per country</div>
+            <div className="p-4 border-b border-slate-100 text-sm text-slate-500 flex items-center justify-between">
+              <span>Map: {mapMode === 'news' ? '#News per country' : 'Weather (temperature) per country'}</span>
+              <div className="flex items-center gap-2 text-xs">
+                <button
+                  className={`px-2 py-1 rounded border ${mapMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                  onClick={() => setMapMode('news')}
+                >News</button>
+                <button
+                  className={`px-2 py-1 rounded border ${mapMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                  onClick={() => setMapMode('weather')}
+                >Weather</button>
+              </div>
+            </div>
             <div className="relative p-4">
               <div className="aspect-[16/9] rounded-xl overflow-hidden">
-                {/* Fallback: derive bubbles from the currently loaded news if stats are empty */}
-                <WorldMapBubbles
-                  data={
-                    (countryStats && countryStats.length > 0)
-                      ? countryStats
-                      : Object.entries(
-                          (news || []).reduce<Record<string, number>>((acc, n) => {
-                            const iso = (n.country_iso2 || "").toUpperCase();
-                            if (!iso) return acc;
-                            acc[iso] = (acc[iso] || 0) + 1;
-                            return acc;
-                          }, {})
-                        ).map(([country, count]) => ({ country, count }))
-                  }
-                  onSelect={setSelectedCountry}
-                />
+                {/* Render based on selected mode */}
+                {mapMode === 'news' ? (
+                  <WorldMapBubbles
+                    data={
+                      (countryStats && countryStats.length > 0)
+                        ? countryStats
+                        : Object.entries(
+                            (news || []).reduce<Record<string, number>>((acc, n) => {
+                              const iso = (n.country_iso2 || "").toUpperCase();
+                              if (!iso) return acc;
+                              acc[iso] = (acc[iso] || 0) + 1;
+                              return acc;
+                            }, {})
+                          ).map(([country, count]) => ({ country, count }))
+                    }
+                    onSelect={setSelectedCountry}
+                  />
+                ) : (
+                  <WorldMapBubbles
+                    data={(() => {
+                      const withTemp = (weatherStats || []).filter(w => typeof w.temp_c === 'number');
+                      if (withTemp.length === 0) return [];
+                      const temps = withTemp.map(w => Number(w.temp_c));
+                      const min = Math.min(...temps);
+                      return withTemp.map(w => ({
+                        country: (w.country || '').toUpperCase(),
+                        // Normalize so the smallest temp still has some radius
+                        count: (Number(w.temp_c) - min) + 1,
+                      }));
+                    })()}
+                    onSelect={setSelectedCountry}
+                  />
+                )}
               </div>
-              {countryStats.length === 0 && (
+              {mapMode === 'news' && countryStats.length === 0 && (
                 <div className="absolute bottom-3 right-4 text-xs text-slate-500 bg-white/70 px-2 py-1 rounded shadow-sm border">
                   No aggregated stats yet — showing live list fallback
                 </div>

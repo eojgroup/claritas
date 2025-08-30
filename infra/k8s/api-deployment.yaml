@@ -18,6 +18,8 @@ spec:
           env:
             - name: NEWSAPI_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-newsapi, key: NEWSAPI_API_KEY } }
+            - name: OPENWEATHER_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY } }
             - name: INSTANCE_CONNECTION_NAME
               valueFrom: { configMapKeyRef: { name: claritas-config, key: INSTANCE_CONNECTION_NAME } }
             - name: DB_NAME
