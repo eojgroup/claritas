@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Bell, Settings, Menu, User } from "lucide-react";
 import {
   PieChart,
@@ -28,10 +28,29 @@ const scatterData = [
   { x: 50, y: 18 },
 ];
 
-const newsItems = ["News 1", "News 2", "News 3", "News 4"]; 
+import WorldMapBubbles from "./components/WorldMapBubbles";
+import { fetchCountryStats, fetchNews, type CountryStat, type NewsItem } from "./lib/api";
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
+  const [news, setNews] = useState<NewsItem[]>([]);
+
+  useEffect(() => {
+    // Load initial data
+    fetchCountryStats({ days: 30 }).then(setCountryStats).catch(() => setCountryStats([]));
+    fetchNews({ limit: 20 }).then(setNews).catch(() => setNews([]));
+  }, []);
+
+  useEffect(() => {
+    // When a country is selected, refetch list filtered by country
+    if (selectedCountry) {
+      fetchNews({ limit: 20, country: selectedCountry }).then(setNews).catch(() => setNews([]));
+    } else {
+      fetchNews({ limit: 20 }).then(setNews).catch(() => setNews([]));
+    }
+  }, [selectedCountry]);
 
   const pieColors = useMemo(
     () => ["#0B1E2D", "#183447", "#254B66"],
@@ -70,14 +89,8 @@ export default function ClaritasDashboard() {
           <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="p-4 border-b border-slate-100 text-sm text-slate-500">#News per country</div>
             <div className="relative p-4">
-              {/* Placeholder world map */}
-              <div className="aspect-[16/9] rounded-xl bg-gradient-to-tr from-slate-100 to-slate-200 grid place-items-center">
-                <span className="text-slate-400">World map placeholder</span>
-                {/* Bubble markers (decorative) */}
-                <div className="absolute left-[18%] top-[35%] h-10 w-10 rounded-full bg-emerald-700/80" />
-                <div className="absolute left-[35%] top-[30%] h-16 w-16 rounded-full bg-emerald-700/70" />
-                <div className="absolute left-[45%] top-[50%] h-20 w-20 rounded-full bg-emerald-700/70" />
-                <div className="absolute right-[18%] top-[40%] h-20 w-20 rounded-full bg-emerald-700/70" />
+              <div className="aspect-[16/9] rounded-xl overflow-hidden">
+                <WorldMapBubbles data={countryStats} onSelect={setSelectedCountry} />
               </div>
             </div>
             {/* AI Search */}
@@ -100,9 +113,19 @@ export default function ClaritasDashboard() {
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="p-4 border-b border-slate-100 font-semibold">News</div>
               <ul className="p-4 space-y-2">
-                {newsItems.map((n) => (
-                  <li key={n} className="rounded-lg border border-slate-100 p-3 hover:bg-slate-50">
-                    {n}
+                {news.length === 0 && (
+                  <li className="text-sm text-slate-500">No news items yet.</li>
+                )}
+                {news.map((n) => (
+                  <li key={n.id} className="rounded-lg border border-slate-100 p-3 hover:bg-slate-50">
+                    <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900">
+                      {n.title || n.url || 'Untitled'}
+                    </a>
+                    <div className="text-xs text-slate-500 mt-1 flex items-center gap-2">
+                      {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 border text-slate-700">{n.country_iso2}</span>}
+                      {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
+                    </div>
+                    {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
                   </li>
                 ))}
               </ul>
@@ -110,8 +133,16 @@ export default function ClaritasDashboard() {
 
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="p-4 border-b border-slate-100 font-semibold">Country profile based on selection</div>
-              <div className="p-4 text-sm text-slate-600">
-                Select a country bubble on the map (placeholder) to load a brief profile here.
+              <div className="p-4 text-sm text-slate-600 space-y-2">
+                {!selectedCountry && (
+                  <div>Select a bubble on the map to see a brief profile.</div>
+                )}
+                {selectedCountry && (
+                  <>
+                    <div className="text-base font-semibold">Country: {selectedCountry}</div>
+                    <div>Recent items from this country in the list are highlighted by the country tag.</div>
+                  </>
+                )}
               </div>
             </div>
           </div>

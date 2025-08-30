@@ -6,7 +6,7 @@ metadata:
 spec:
   # Daily at 03:00 UTC. Change this cron string to adjust recurrence.
   schedule: "0 3 * * *"
-  suspend: true
+  suspend: false
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
