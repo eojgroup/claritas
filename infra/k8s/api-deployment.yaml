@@ -12,15 +12,6 @@ spec:
       labels: { app: claritas-api }
     spec:
       serviceAccountName: api-sa
-      initContainers:
-        - name: wait-for-proxy
-          image: busybox:1.36
-          command: ["sh","-c"]
-          args:
-            - >
-              i=0; until nc -z 127.0.0.1 5432 || [ $i -gt 60 ]; do
-                echo "waiting for cloud-sql-proxy..."; i=$((i+1)); sleep 5;
-              done
       containers:
         - name: claritas-api
           image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api:latest

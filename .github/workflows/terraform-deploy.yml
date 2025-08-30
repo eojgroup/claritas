@@ -65,6 +65,9 @@ jobs:
           terraform import google_sql_database.db projects/${{ env.PROJECT_ID }}/instances/claritas-sql/databases/claritas || true
           terraform import google_sql_user.app projects/${{ env.PROJECT_ID }}/instances/claritas-sql/users/claritas_app || true
 
+          # GCP Service Account used for Workload Identity (already exists)
+          terraform import google_service_account.claritas_sql_gsa "projects/${{ env.PROJECT_ID }}/serviceAccounts/claritas-sql-gsa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com" || true
+
       - name: 🔍 Terraform Plan (core)
         working-directory: infra/gcp/terraform
         run: terraform plan -var-file="terraform.tfvars" -lock=false || true
