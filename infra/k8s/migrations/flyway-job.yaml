@@ -14,8 +14,8 @@ spec:
           command: ["/bin/sh", "-lc"]
           args:
             - |
-              flyway -connectRetries=60 repair && \
-              flyway -connectRetries=60 migrate
+              /flyway/flyway -connectRetries=60 repair && \
+              /flyway/flyway -connectRetries=60 migrate
           env:
             - name: DB_NAME
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_NAME } }
