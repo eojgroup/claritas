@@ -42,6 +42,16 @@ export async function fetchCountryWeather() {
   return (data.stats ?? []) as CountryWeather[];
 }
 
+export async function ingestWeatherNow(country?: string) {
+  const resp = await fetch(`${API_BASE}/api/ingest/openweather/country-current`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(country ? { country } : {}),
+  });
+  if (!resp.ok) throw new Error(`Failed to ingest weather: ${resp.status}`);
+  return await resp.json();
+}
+
 export function imageProxy(url?: string | null): string | undefined {
   if (!url) return undefined;
   try {

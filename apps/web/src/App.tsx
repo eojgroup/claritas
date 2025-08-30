@@ -29,7 +29,7 @@ const scatterData = [
 ];
 
 import WorldMapBubbles from "./components/WorldMapBubbles";
-import { fetchCountryStats, fetchCountryWeather, fetchNews, imageProxy, type CountryStat, type CountryWeather, type NewsItem } from "./lib/api";
+import { fetchCountryStats, fetchCountryWeather, fetchNews, imageProxy, ingestWeatherNow, type CountryStat, type CountryWeather, type NewsItem } from "./lib/api";
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
@@ -38,6 +38,9 @@ export default function ClaritasDashboard() {
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [mapMode, setMapMode] = useState<"news" | "weather">("news");
+  const [listMode, setListMode] = useState<"news" | "weather">("news");
+  const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
+  const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
 
   useEffect(() => {
     // Load initial data
@@ -59,6 +62,31 @@ export default function ClaritasDashboard() {
     () => ["#0B1E2D", "#183447", "#254B66"],
     []
   );
+
+  const filteredWeather = useMemo(() => {
+    let w = weatherStats;
+    if (typeof minTemp === 'number') {
+      w = w.filter(x => (x.temp_c ?? -999) >= minTemp);
+    }
+    if (selectedCountry) {
+      const iso = selectedCountry.toUpperCase();
+      w = w.filter(x => (x.country || '').toUpperCase() === iso);
+    }
+    return w;
+  }, [weatherStats, minTemp, selectedCountry]);
+
+  async function handleRefreshWeather() {
+    try {
+      setIsRefreshingWeather(true);
+      await ingestWeatherNow(selectedCountry || undefined);
+      const next = await fetchCountryWeather();
+      setWeatherStats(next);
+    } catch {
+      // ignore for now
+    } finally {
+      setIsRefreshingWeather(false);
+    }
+  }
 
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900">
@@ -95,11 +123,11 @@ export default function ClaritasDashboard() {
               <div className="flex items-center gap-2 text-xs">
                 <button
                   className={`px-2 py-1 rounded border ${mapMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
-                  onClick={() => setMapMode('news')}
+                  onClick={() => { setMapMode('news'); setListMode('news'); }}
                 >News</button>
                 <button
                   className={`px-2 py-1 rounded border ${mapMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
-                  onClick={() => setMapMode('weather')}
+                  onClick={() => { setMapMode('weather'); setListMode('weather'); }}
                 >Weather</button>
               </div>
             </div>
@@ -144,6 +172,15 @@ export default function ClaritasDashboard() {
                   No aggregated stats yet — showing live list fallback
                 </div>
               )}
+              {mapMode === 'weather' && (weatherStats?.length ?? 0) === 0 && (
+                <div className="absolute bottom-3 right-4 text-xs text-slate-600 bg-white/80 px-2 py-1 rounded shadow-sm border flex items-center gap-2">
+                  <span>No weather stats yet.</span>
+                  <button onClick={handleRefreshWeather} disabled={isRefreshingWeather}
+                          className="px-2 py-0.5 rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50">
+                    {isRefreshingWeather ? 'Refreshing…' : 'Refresh now'}
+                  </button>
+                </div>
+              )}
             </div>
             {/* AI Search */}
             <div className="border-t border-slate-100 p-3">
@@ -163,42 +200,91 @@ export default function ClaritasDashboard() {
           {/* News + Country Profile grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="p-4 border-b border-slate-100 font-semibold">News</div>
-              <ul className="p-4 space-y-3">
-                {news.length === 0 && (
-                  <li className="text-sm text-slate-500">No news items yet.</li>
-                )}
-                {news.map((n) => {
-                  const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
-                  return (
-                    <li key={n.id} className="rounded-lg border border-slate-100 p-3 hover:bg-slate-50">
-                      <div className="flex items-start gap-3">
-                        {img ? (
-                          <img
-                            src={img}
-                            alt={n.title ?? 'thumbnail'}
-                            loading="lazy"
-                            decoding="async"
-                            referrerPolicy="no-referrer"
-                            className="h-16 w-24 object-cover rounded-md border border-slate-200 flex-none"
-                            onError={(e) => ((e.currentTarget.style.display = 'none'))}
-                          />
-                        ) : null}
-                        <div className="min-w-0">
-                          <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900 hover:underline">
-                            {n.title || n.url || 'Untitled'}
-                          </a>
-                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
-                            {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 border text-slate-700">{n.country_iso2}</span>}
-                            {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
+              <div className="p-4 border-b border-slate-100 font-semibold flex items-center gap-2">
+                <span>List</span>
+                <div className="ml-auto flex items-center gap-2 text-xs">
+                  <button
+                    className={`px-2 py-1 rounded border ${listMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                    onClick={() => setListMode('news')}
+                  >News</button>
+                  <button
+                    className={`px-2 py-1 rounded border ${listMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                    onClick={() => setListMode('weather')}
+                  >Weather</button>
+                </div>
+              </div>
+
+              {listMode === 'news' ? (
+                <ul className="list-none p-4 space-y-3">
+                  {news.length === 0 && (
+                    <li className="text-sm text-slate-500">No news items yet.</li>
+                  )}
+                  {news.map((n) => {
+                    const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
+                    return (
+                      <li key={n.id} className="rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
+                        <div className="flex items-start gap-3">
+                          <div className="relative w-32 h-20 rounded-md overflow-hidden border border-slate-200 bg-slate-100 flex-none">
+                            {img ? (
+                              <img
+                                src={img}
+                                alt={n.title ?? 'thumbnail'}
+                                loading="lazy"
+                                decoding="async"
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                                onError={(e) => ((e.currentTarget.style.display = 'none'))}
+                              />
+                            ) : null}
                           </div>
-                          {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
+                          <div className="min-w-0">
+                            <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900 hover:underline">
+                              {n.title || n.url || 'Untitled'}
+                            </a>
+                            <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
+                              {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 border text-slate-700">{n.country_iso2}</span>}
+                              {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
+                            </div>
+                            {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
+                          </div>
                         </div>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <div className="p-4 space-y-3">
+                  <div className="flex items-center gap-3 text-sm">
+                    <label className="text-slate-600">Min temp (°C)</label>
+                    <input type="number" className="w-24 rounded border border-slate-300 px-2 py-1"
+                      value={typeof minTemp === 'number' ? minTemp : ''}
+                      onChange={(e) => setMinTemp(e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value))}
+                      placeholder="Any" />
+                    <button onClick={handleRefreshWeather} disabled={isRefreshingWeather}
+                      className="ml-auto px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50">
+                      {isRefreshingWeather ? 'Refreshing…' : 'Refresh'}
+                    </button>
+                  </div>
+                  <ul className="list-none divide-y divide-slate-100">
+                    {filteredWeather.length === 0 && (
+                      <li className="text-sm text-slate-500 py-3">No weather rows.</li>
+                    )}
+                    {filteredWeather.map((w, i) => (
+                      <li key={`${w.country}-${i}`} className="py-2 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 border text-slate-700">{(w.country || '').toUpperCase()}</span>
+                          <span className="text-slate-700 text-sm">{new Date(w.observed_at).toLocaleString()}</span>
+                        </div>
+                        <div className="text-sm text-slate-800 flex items-center gap-4">
+                          <span title="Temperature">🌡️ {w.temp_c ?? '—'}°C</span>
+                          <span title="Humidity">💧 {w.humidity ?? '—'}%</span>
+                          {w.weather_main && <span className="text-slate-600">{w.weather_main}</span>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
