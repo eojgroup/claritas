@@ -180,6 +180,51 @@ jobs:
             echo "::warning::OPENWEATHER_API_KEY secret not provided; skipping claritas-openweather upsert"
           fi
 
+      - name: 🧩 Run DB migrations (Flyway)
+        env:
+          NS: ${{ env.NAMESPACE }}
+        run: |
+          set -euo pipefail
+          # Upsert Flyway scripts from repo SQL directory
+          kubectl -n "$NS" create configmap flyway-scripts \
+            --from-file=infra/gcp/sql/ \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Recreate and apply the Job
+          kubectl -n "$NS" delete job flyway-migrate --ignore-not-found=true || true
+          kubectl -n "$NS" apply -f infra/k8s/migrations/flyway-job.yaml
+
+          # Wait for completion and show logs on failure
+          echo "Waiting for pod of job/flyway-migrate to start..."
+          for i in $(seq 1 60); do
+            POD=$(kubectl -n "$NS" get pods -l job-name=flyway-migrate -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [ -n "${POD:-}" ]; then break; fi
+            sleep 5
+          done
+          if [ -z "${POD:-}" ]; then
+            echo "::error::No pod created for job/flyway-migrate within timeout" >&2
+            kubectl -n "$NS" get job flyway-migrate -o wide || true
+            exit 1
+          fi
+          echo "Tracking container 'flyway' in pod $POD ..."
+          for i in $(seq 1 120); do
+            CODE=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.containerStatuses[?(@.name=="flyway")].state.terminated.exitCode}' 2>/dev/null || true)
+            if [ "${CODE:-}" = "0" ]; then
+              echo "Flyway finished successfully. Showing logs:"
+              kubectl -n "$NS" logs "$POD" -c flyway --tail=200 || true
+              kubectl -n "$NS" delete job flyway-migrate --wait=true || true
+              break
+            elif [ -n "${CODE:-}" ]; then
+              echo "::error::Flyway container exited with code ${CODE}" >&2
+              echo "=== Logs (flyway) ===" >&2
+              kubectl -n "$NS" logs "$POD" -c flyway --tail=200 || true
+              echo "=== Logs (cloud-sql-proxy) ===" >&2
+              kubectl -n "$NS" logs "$POD" -c cloud-sql-proxy --tail=200 || true
+              exit 1
+            fi
+            sleep 5
+          done
+
       - name: 📤 Set image and rollout (with diagnostics)
         run: |
           set -euo pipefail
