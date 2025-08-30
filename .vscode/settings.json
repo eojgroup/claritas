@@ -1,0 +1,15 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "server": "127.0.0.1",
+            "port": 5432,
+            "askForPassword": true,
+            "driver": "PostgreSQL",
+            "name": "claritas-sql",
+            "group": "claritas",
+            "database": "claritas",
+            "username": "claritas_app"
+        }
+    ]
+}
