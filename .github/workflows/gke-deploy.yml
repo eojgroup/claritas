@@ -144,22 +144,22 @@ jobs:
               echo "::warning::Rollout for ${dep} timed out — dumping diagnostics"
               echo "=== describe deployment ==="
               kubectl -n "$ns" describe deployment "${dep}" | sed -n '1,200p' || true
-          echo "=== replica sets ==="
-          kubectl -n "$ns" get rs -l app=${dep} -o wide || true
-          local rs
-          rs="$(kubectl -n "$ns" get rs -l app=${dep} -o name | tail -n1 || true)"
-          if [ -n "${rs}" ]; then
-            echo "=== describe $rs ==="
-            kubectl -n "$ns" describe "${rs}" | sed -n '1,200p' || true
-          fi
-          echo "=== pods ==="
-          kubectl -n "$ns" get pods -l app=${dep} -o wide || true
-          for p in $(kubectl -n "$ns" get pods -l app=${dep} -o name); do
-            echo "--- logs $p (all containers, last 200) ---"
-            kubectl -n "$ns" logs "$p" --all-containers --tail=200 || true
-          done
-          exit 1
-        fi
+              echo "=== replica sets ==="
+              kubectl -n "$ns" get rs -l app=${dep} -o wide || true
+              local rs
+              rs="$(kubectl -n "$ns" get rs -l app=${dep} -o name | tail -n1 || true)"
+              if [ -n "${rs}" ]; then
+                echo "=== describe $rs ==="
+                kubectl -n "$ns" describe "${rs}" | sed -n '1,200p' || true
+              fi
+              echo "=== pods ==="
+              kubectl -n "$ns" get pods -l app=${dep} -o wide || true
+              for p in $(kubectl -n "$ns" get pods -l app=${dep} -o name); do
+                echo "--- logs $p (all containers, last 200) ---"
+                kubectl -n "$ns" logs "$p" --all-containers --tail=200 || true
+              done
+              exit 1
+            fi
             echo "✅ ${dep} rolled out"
           }
 
