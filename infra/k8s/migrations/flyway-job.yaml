@@ -11,9 +11,11 @@ spec:
       containers:
         - name: flyway
           image: flyway/flyway:10.17-alpine
+          command: ["/bin/sh", "-lc"]
           args:
-            - "-connectRetries=60"
-            - "migrate"
+            - |
+              flyway -connectRetries=60 repair && \
+              flyway -connectRetries=60 migrate
           env:
             - name: DB_NAME
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_NAME } }

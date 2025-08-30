@@ -155,6 +155,31 @@ jobs:
               --from-literal=DB_PASSWORD="$DB_PASS"
           fi
 
+      - name: 🔐 Ensure API provider secrets exist
+        env:
+          NS: ${{ env.NAMESPACE }}
+          NEWSAPI_API_KEY: ${{ secrets.NEWSAPI_API_KEY }}
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+        run: |
+          set -euo pipefail
+          # Upsert NewsAPI secret if provided
+          if [ -n "${NEWSAPI_API_KEY:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-newsapi \
+              --from-literal=NEWSAPI_API_KEY="$NEWSAPI_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::NEWSAPI_API_KEY secret not provided; skipping claritas-newsapi upsert"
+          fi
+
+          # Upsert OpenWeather secret if provided
+          if [ -n "${OPENWEATHER_API_KEY:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-openweather \
+              --from-literal=OPENWEATHER_API_KEY="$OPENWEATHER_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::OPENWEATHER_API_KEY secret not provided; skipping claritas-openweather upsert"
+          fi
+
       - name: 📤 Set image and rollout (with diagnostics)
         run: |
           set -euo pipefail
