@@ -29,6 +29,18 @@ async function ensureSource(name: string, apiBaseUrl: string) {
   return rows[0];
 }
 
+// Ensure a country row exists to satisfy FK on weather_snapshot
+async function ensureCountry(iso2: string) {
+  const code = (iso2 || "").toUpperCase();
+  if (!code || code.length !== 2) return;
+  await query(
+    `INSERT INTO country (iso2, name)
+     VALUES ($1, $1)
+     ON CONFLICT (iso2) DO NOTHING`,
+    [code]
+  );
+}
+
 function toISO(ts?: number): string {
   const d = ts ? new Date(ts * 1000) : new Date();
   return d.toISOString();
@@ -214,6 +226,8 @@ export async function ingestOpenWeatherCountryCurrent(countryIso2?: string) {
 
       const observedAtISO = toISO(data.dt);
       try {
+        // Defensive: make sure FK target exists even if migrations missed seeding
+        await ensureCountry(iso);
         await upsertWeatherSnapshot({
           sourceId: source.id,
           countryIso2: iso,
