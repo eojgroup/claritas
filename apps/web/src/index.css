@@ -12,7 +12,11 @@ body {
   display: block; /* ensure children aren't constrained as flex items */
   background: #f8fafc; /* slate-50 */
   color: #0f172a;      /* slate-900 */
+  font-family: "Times New Roman", Times, serif;
 }
+
+/* Ensure form controls inherit the brand font across browsers */
+button, input, select, textarea { font: inherit; }
 
 @tailwind base;
 @tailwind components;

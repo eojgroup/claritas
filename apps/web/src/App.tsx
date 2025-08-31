@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Bell, Settings, Menu, User } from "lucide-react";
+import { Search, Bell, Settings, Menu, User, Moon, Sun } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -33,6 +33,14 @@ import { fetchCountryStats, fetchCountryWeather, fetchNews, imageProxy, ingestWe
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
+  const [dark, setDark] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem('theme');
+      if (v === 'dark') return true;
+      if (v === 'light') return false;
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch { return false; }
+  });
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
@@ -41,6 +49,12 @@ export default function ClaritasDashboard() {
   const [listMode, setListMode] = useState<"news" | "weather">("news");
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
   const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
+
+  useEffect(() => {
+    const el = document.documentElement;
+    if (dark) el.classList.add('dark'); else el.classList.remove('dark');
+    try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch {}
+  }, [dark]);
 
   useEffect(() => {
     // Load initial data
@@ -89,9 +103,9 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 text-slate-900">
+    <div className="min-h-screen w-full bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
       {/* Header */}
-      <header className="bg-slate-200 border-b border-slate-300">
+      <header className="bg-slate-200 dark:bg-slate-800 border-b border-slate-300 dark:border-slate-700">
         <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-3">
@@ -104,7 +118,10 @@ export default function ClaritasDashboard() {
           </div>
 
           {/* Header actions */}
-          <div className="flex items-center gap-5 text-slate-800">
+          <div className="flex items-center gap-5 text-slate-800 dark:text-slate-200">
+            <button aria-label="Toggle dark mode" onClick={() => setDark(v => !v)} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10">
+              {dark ? <Sun className="h-6 w-6" /> : <Moon className="h-6 w-6" />}
+            </button>
             <Settings className="h-6 w-6" />
             <Menu className="h-6 w-6" />
             <User className="h-6 w-6" />
@@ -117,16 +134,16 @@ export default function ClaritasDashboard() {
         {/* LEFT: Map + AI Search + News/Country Profile */}
         <section className="col-span-12 lg:col-span-7 flex flex-col gap-4">
           {/* Map Card */}
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="p-4 border-b border-slate-100 text-sm text-slate-500 flex items-center justify-between">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 flex items-center justify-between">
               <span>Map: {mapMode === 'news' ? '#News per country' : 'Weather (temperature) per country'}</span>
               <div className="flex items-center gap-2 text-xs">
                 <button
-                  className={`px-2 py-1 rounded border ${mapMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                  className={`px-2 py-1 rounded border ${mapMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}`}
                   onClick={() => { setMapMode('news'); setListMode('news'); }}
                 >News</button>
                 <button
-                  className={`px-2 py-1 rounded border ${mapMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                  className={`px-2 py-1 rounded border ${mapMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}`}
                   onClick={() => { setMapMode('weather'); setListMode('weather'); }}
                 >Weather</button>
               </div>
@@ -149,6 +166,7 @@ export default function ClaritasDashboard() {
                           ).map(([country, count]) => ({ country, count }))
                     }
                     onSelect={setSelectedCountry}
+                    dark={dark}
                   />
                 ) : (
                   <WorldMapBubbles
@@ -164,30 +182,31 @@ export default function ClaritasDashboard() {
                       }));
                     })()}
                     onSelect={setSelectedCountry}
+                    dark={dark}
                   />
                 )}
               </div>
               {mapMode === 'news' && countryStats.length === 0 && (
-                <div className="absolute bottom-3 right-4 text-xs text-slate-500 bg-white/70 px-2 py-1 rounded shadow-sm border">
+                <div className="absolute bottom-3 right-4 text-xs text-slate-500 dark:text-slate-300 bg-white/70 dark:bg-slate-800/80 px-2 py-1 rounded shadow-sm border border-slate-200 dark:border-slate-700">
                   No aggregated stats yet — showing live list fallback
                 </div>
               )}
               {mapMode === 'weather' && (weatherStats?.length ?? 0) === 0 && (
-                <div className="absolute bottom-3 right-4 text-xs text-slate-600 bg-white/80 px-2 py-1 rounded shadow-sm border flex items-center gap-2">
+                <div className="absolute bottom-3 right-4 text-xs text-slate-600 dark:text-slate-300 bg-white/80 dark:bg-slate-800/80 px-2 py-1 rounded shadow-sm border border-slate-200 dark:border-slate-700 flex items-center gap-2">
                   <span>No weather stats yet.</span>
                   <button onClick={handleRefreshWeather} disabled={isRefreshingWeather}
-                          className="px-2 py-0.5 rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50">
+                          className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
                     {isRefreshingWeather ? 'Refreshing…' : 'Refresh now'}
                   </button>
                 </div>
               )}
             </div>
             {/* AI Search */}
-            <div className="border-t border-slate-100 p-3">
-              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-inner">
-                <Search className="h-5 w-5 text-slate-500" />
+            <div className="border-t border-slate-100 dark:border-slate-700 p-3">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 shadow-inner">
+                <Search className="h-5 w-5 text-slate-500 dark:text-slate-300" />
                 <input
-                  className="w-full bg-transparent outline-none placeholder:text-slate-400"
+                  className="w-full bg-transparent outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500 text-inherit"
                   placeholder="AI Search"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
@@ -199,16 +218,16 @@ export default function ClaritasDashboard() {
 
           {/* News + Country Profile grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="p-4 border-b border-slate-100 font-semibold flex items-center gap-2">
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+              <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold flex items-center gap-2">
                 <span>List</span>
                 <div className="ml-auto flex items-center gap-2 text-xs">
                   <button
-                    className={`px-2 py-1 rounded border ${listMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                    className={`px-2 py-1 rounded border ${listMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}`}
                     onClick={() => setListMode('news')}
                   >News</button>
                   <button
-                    className={`px-2 py-1 rounded border ${listMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                    className={`px-2 py-1 rounded border ${listMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}`}
                     onClick={() => setListMode('weather')}
                   >Weather</button>
                 </div>
@@ -217,14 +236,14 @@ export default function ClaritasDashboard() {
               {listMode === 'news' ? (
                 <ul className="list-none p-4 space-y-3">
                   {news.length === 0 && (
-                    <li className="text-sm text-slate-500">No news items yet.</li>
+                    <li className="text-sm text-slate-500 dark:text-slate-400">No news items yet.</li>
                   )}
                   {news.map((n) => {
                     const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
                     return (
-                      <li key={n.id} className="rounded-lg border border-slate-200 p-3 hover:bg-slate-50">
+                      <li key={n.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 hover:bg-slate-50 dark:hover:bg-slate-700/50">
                         <div className="flex items-start gap-3">
-                          <div className="relative w-32 h-20 rounded-md overflow-hidden border border-slate-200 bg-slate-100 flex-none">
+                          <div className="relative w-32 h-20 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-700/50 flex-none">
                             {img ? (
                               <img
                                 src={img}
@@ -238,11 +257,11 @@ export default function ClaritasDashboard() {
                             ) : null}
                           </div>
                           <div className="min-w-0">
-                            <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900 hover:underline">
+                            <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900 dark:text-slate-100 hover:underline">
                               {n.title || n.url || 'Untitled'}
                             </a>
-                            <div className="text-xs text-slate-500 mt-1 flex items-center gap-2 flex-wrap">
-                              {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 border text-slate-700">{n.country_iso2}</span>}
+                            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
+                              {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200">{n.country_iso2}</span>}
                               {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
                             </div>
                             {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
@@ -255,27 +274,27 @@ export default function ClaritasDashboard() {
               ) : (
                 <div className="p-4 space-y-3">
                   <div className="flex items-center gap-3 text-sm">
-                    <label className="text-slate-600">Min temp (°C)</label>
-                    <input type="number" className="w-24 rounded border border-slate-300 px-2 py-1"
+                    <label className="text-slate-600 dark:text-slate-300">Min temp (°C)</label>
+                    <input type="number" className="w-24 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1"
                       value={typeof minTemp === 'number' ? minTemp : ''}
                       onChange={(e) => setMinTemp(e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value))}
                       placeholder="Any" />
                     <button onClick={handleRefreshWeather} disabled={isRefreshingWeather}
-                      className="ml-auto px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-50">
+                      className="ml-auto px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
                       {isRefreshingWeather ? 'Refreshing…' : 'Refresh'}
                     </button>
                   </div>
-                  <ul className="list-none divide-y divide-slate-100">
+                  <ul className="list-none divide-y divide-slate-100 dark:divide-slate-700/60">
                     {filteredWeather.length === 0 && (
-                      <li className="text-sm text-slate-500 py-3">No weather rows.</li>
+                      <li className="text-sm text-slate-500 dark:text-slate-400 py-3">No weather rows.</li>
                     )}
                     {filteredWeather.map((w, i) => (
                       <li key={`${w.country}-${i}`} className="py-2 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <span className="px-1.5 py-0.5 rounded bg-slate-100 border text-slate-700">{(w.country || '').toUpperCase()}</span>
-                          <span className="text-slate-700 text-sm">{new Date(w.observed_at).toLocaleString()}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200">{(w.country || '').toUpperCase()}</span>
+                          <span className="text-slate-700 dark:text-slate-200 text-sm">{new Date(w.observed_at).toLocaleString()}</span>
                         </div>
-                        <div className="text-sm text-slate-800 flex items-center gap-4">
+                        <div className="text-sm text-slate-800 dark:text-slate-200 flex items-center gap-4">
                           <span title="Temperature">🌡️ {w.temp_c ?? '—'}°C</span>
                           <span title="Humidity">💧 {w.humidity ?? '—'}%</span>
                           {w.weather_main && <span className="text-slate-600">{w.weather_main}</span>}
@@ -287,9 +306,9 @@ export default function ClaritasDashboard() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="p-4 border-b border-slate-100 font-semibold">Country profile based on selection</div>
-              <div className="p-4 text-sm text-slate-600 space-y-2">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold">Country profile based on selection</div>
+            <div className="p-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
                 {!selectedCountry && (
                   <div>Select a bubble on the map to see a brief profile.</div>
                 )}
@@ -306,8 +325,8 @@ export default function ClaritasDashboard() {
 
         {/* RIGHT: Analytics + Notifications */}
         <section className="col-span-12 lg:col-span-5 flex flex-col gap-4">
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="p-4 border-b border-slate-100 font-semibold">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold">
               News/number of ships etc per category
             </div>
             <div className="p-4 space-y-6">
@@ -340,11 +359,11 @@ export default function ClaritasDashboard() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="p-4 border-b border-slate-100 font-semibold flex items-center gap-2">
+          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold flex items-center gap-2">
               <Bell className="h-5 w-5" /> Notifications
             </div>
-            <div className="p-4 text-sm text-slate-600">No notifications yet.</div>
+            <div className="p-4 text-sm text-slate-600 dark:text-slate-300">No notifications yet.</div>
           </div>
         </section>
       </main>
