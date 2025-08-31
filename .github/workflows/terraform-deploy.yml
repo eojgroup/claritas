@@ -166,9 +166,30 @@ jobs:
 
       - name: 📜 Apply migration manifests
         run: |
+          set -euo pipefail
+          ns="${{ env.K8S_NAMESPACE }}"
+          job="flyway-migrate"
+
           # Ensure fresh Job
-          kubectl -n "${{ env.K8S_NAMESPACE }}" delete job flyway-migrate --ignore-not-found=true || true
-          kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/migrations/flyway-job.yaml
+          kubectl -n "$ns" delete job "$job" --ignore-not-found=true || true
+
+          # Apply explicitly into the target namespace (even if YAML specifies it)
+          kubectl -n "$ns" apply -f infra/k8s/migrations/flyway-job.yaml
+
+          # Verify that the Job object exists (fast-fail if not created)
+          echo "Verifying job/$job exists in namespace $ns ..."
+          for i in $(seq 1 10); do
+            if kubectl -n "$ns" get job "$job" >/dev/null 2>&1; then
+              kubectl -n "$ns" get job "$job" -o wide || true
+              break
+            fi
+            sleep 2
+          done
+          if ! kubectl -n "$ns" get job "$job" >/dev/null 2>&1; then
+            echo "::error::Failed to create job/$job. Recent events:" >&2
+            kubectl -n "$ns" get events --sort-by=.lastTimestamp | tail -n 50 || true
+            exit 1
+          fi
 
       - name: 🕒 Wait for migrations (watch flyway container/logs, then clean up)
         run: |
@@ -191,7 +212,13 @@ jobs:
 
           echo "Waiting for a pod of job/$job to start..."
           for i in $(seq 1 60); do
-            POD=$(kubectl -n "$ns" get pods -l job-name=$job --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)
+            # Re-check that the job still exists
+            if ! kubectl -n "$ns" get job "$job" >/dev/null 2>&1; then
+              echo "::error::Job $job disappeared before a pod started. Recent events:" >&2
+              kubectl -n "$ns" get events --sort-by=.lastTimestamp | tail -n 50 || true
+              exit 1
+            fi
+            POD=$(kubectl -n "$ns" get pods -l job-name=$job --sort-by=.metadata.creationTimestamp -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | tail -n 1 || true)
             if [ -n "${POD:-}" ]; then break; fi
             sleep 5
           done
@@ -205,8 +232,15 @@ jobs:
           # Poll for completion; re-detect the latest pod and use job-scoped logs
           for i in $(seq 1 120); do
             # Always re-detect the newest pod for this job (pods can rotate on failure)
-            PNEW=$(kubectl -n "$ns" get pods -l job-name=$job --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)
+            PNEW=$(kubectl -n "$ns" get pods -l job-name=$job --sort-by=.metadata.creationTimestamp -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | tail -n 1 || true)
             [ -n "${PNEW:-}" ] && POD="$PNEW"
+
+            # If the job itself vanished unexpectedly, fail fast with diagnostics
+            if ! kubectl -n "$ns" get job "$job" >/dev/null 2>&1; then
+              echo "::error::Job $job no longer exists. Dumping recent events..." >&2
+              kubectl -n "$ns" get events --sort-by=.lastTimestamp | tail -n 50 || true
+              exit 1
+            fi
 
             CODE=$(kubectl -n "$ns" get pod "$POD" -o jsonpath='{.status.containerStatuses[?(@.name=="flyway")].state.terminated.exitCode}' 2>/dev/null || true)
             if [ "${CODE:-}" = "0" ]; then

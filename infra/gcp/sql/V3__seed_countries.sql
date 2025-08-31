@@ -37,3 +37,8 @@ VALUES
   ('SA', NULL, 'Saudi Arabia', 'Asia', NULL, '{}'::jsonb)
 ON CONFLICT (iso2) DO NOTHING;
 
+-- Extend with a few frequently seen ccTLDs
+INSERT INTO country (iso2, iso3, name, region, centroid, ext)
+VALUES
+  ('PT', NULL, 'Portugal', 'Europe', NULL, '{}'::jsonb)
+ON CONFLICT (iso2) DO NOTHING;
