@@ -182,6 +182,9 @@ export async function ingestOpenWeatherCountryCurrent(countryIso2?: string) {
   }
 
   let inserted = 0, updated = 0, skipped = 0;
+  let http_failures = 0, db_errors = 0;
+  let last_http_status: number | null = null;
+  let last_http_error: string | null = null;
 
   for (const t of targets) {
     const url = new URL(OW_BASE);
@@ -190,35 +193,52 @@ export async function ingestOpenWeatherCountryCurrent(countryIso2?: string) {
     url.searchParams.set("appid", apiKey);
     url.searchParams.set("units", "metric");
 
-    const resp = await fetch(url.toString());
-    if (!resp.ok) {
-      skipped++;
-      continue;
-    }
-    const data = (await resp.json()) as OWCurrent;
-    const iso = (data.sys?.country || t.iso2 || "").toUpperCase();
-    if (!iso) { skipped++; continue; }
-
-    const observedAtISO = toISO(data.dt);
     try {
-      await upsertWeatherSnapshot({
-        sourceId: source.id,
-        countryIso2: iso,
-        coord: { lat: data.coord?.lat ?? null, lon: data.coord?.lon ?? null },
-        main: data.main,
-        wind: data.wind,
-        weather: data.weather,
-        observedAtISO,
-        raw: data,
-      });
-      // Cannot easily tell insert vs update with ON CONFLICT without checking, so treat as inserted
-      inserted++;
-    } catch {
+      const resp = await fetch(url.toString());
+      if (!resp.ok) {
+        skipped++;
+        http_failures++;
+        last_http_status = resp.status;
+        try {
+          // Try to capture a short error message body without leaking secrets
+          const t = await resp.text();
+          last_http_error = (t || "").slice(0, 200);
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+      const data = (await resp.json()) as OWCurrent;
+      const iso = (data.sys?.country || t.iso2 || "").toUpperCase();
+      if (!iso) { skipped++; continue; }
+
+      const observedAtISO = toISO(data.dt);
+      try {
+        await upsertWeatherSnapshot({
+          sourceId: source.id,
+          countryIso2: iso,
+          coord: { lat: data.coord?.lat ?? null, lon: data.coord?.lon ?? null },
+          main: data.main,
+          wind: data.wind,
+          weather: data.weather,
+          observedAtISO,
+          raw: data,
+        });
+        // Cannot easily tell insert vs update with ON CONFLICT without checking, so treat as inserted
+        inserted++;
+      } catch {
+        skipped++;
+        db_errors++;
+      }
+    } catch (e) {
+      // Network or fetch error (no HTTP response)
       skipped++;
+      http_failures++;
+      last_http_error = String((e as any)?.message || e);
     }
   }
 
-  return { inserted, updated, skipped };
+  return { inserted, updated, skipped, http_failures, db_errors, last_http_status, last_http_error };
 }
 
 export async function getCountryWeatherLatest(): Promise<CountryWeather[]> {
