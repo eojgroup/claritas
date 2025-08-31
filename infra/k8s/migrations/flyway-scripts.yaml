@@ -154,3 +154,79 @@ data:
 
     CREATE INDEX IF NOT EXISTS weather_snapshot_country_idx ON weather_snapshot (country_iso2);
 
+
+  V3__seed_countries.sql: |
+    -- Seed a minimal set of countries needed for FK constraints
+    -- Safe to run multiple times thanks to ON CONFLICT DO NOTHING
+
+    INSERT INTO country (iso2, iso3, name, region, centroid, ext)
+    VALUES
+      ('US', NULL, 'United States', 'Americas', NULL, '{}'::jsonb),
+      ('GB', NULL, 'United Kingdom', 'Europe', NULL, '{}'::jsonb),
+      ('FR', NULL, 'France', 'Europe', NULL, '{}'::jsonb),
+      ('DE', NULL, 'Germany', 'Europe', NULL, '{}'::jsonb),
+      ('ES', NULL, 'Spain', 'Europe', NULL, '{}'::jsonb),
+      ('IT', NULL, 'Italy', 'Europe', NULL, '{}'::jsonb),
+      ('SE', NULL, 'Sweden', 'Europe', NULL, '{}'::jsonb),
+      ('NO', NULL, 'Norway', 'Europe', NULL, '{}'::jsonb),
+      ('NL', NULL, 'Netherlands', 'Europe', NULL, '{}'::jsonb),
+      ('BE', NULL, 'Belgium', 'Europe', NULL, '{}'::jsonb),
+      ('PL', NULL, 'Poland', 'Europe', NULL, '{}'::jsonb),
+      ('UA', NULL, 'Ukraine', 'Europe', NULL, '{}'::jsonb),
+      ('RU', NULL, 'Russia', 'Europe/Asia', NULL, '{}'::jsonb),
+      ('TR', NULL, 'Türkiye', 'Europe/Asia', NULL, '{}'::jsonb),
+      ('CN', NULL, 'China', 'Asia', NULL, '{}'::jsonb),
+      ('JP', NULL, 'Japan', 'Asia', NULL, '{}'::jsonb),
+      ('KR', NULL, 'South Korea', 'Asia', NULL, '{}'::jsonb),
+      ('IN', NULL, 'India', 'Asia', NULL, '{}'::jsonb),
+      ('ID', NULL, 'Indonesia', 'Asia', NULL, '{}'::jsonb),
+      ('AU', NULL, 'Australia', 'Oceania', NULL, '{}'::jsonb),
+      ('NZ', NULL, 'New Zealand', 'Oceania', NULL, '{}'::jsonb),
+      ('ZA', NULL, 'South Africa', 'Africa', NULL, '{}'::jsonb),
+      ('EG', NULL, 'Egypt', 'Africa', NULL, '{}'::jsonb),
+      ('NG', NULL, 'Nigeria', 'Africa', NULL, '{}'::jsonb),
+      ('KE', NULL, 'Kenya', 'Africa', NULL, '{}'::jsonb),
+      ('BR', NULL, 'Brazil', 'Americas', NULL, '{}'::jsonb),
+      ('AR', NULL, 'Argentina', 'Americas', NULL, '{}'::jsonb),
+      ('MX', NULL, 'Mexico', 'Americas', NULL, '{}'::jsonb),
+      ('CA', NULL, 'Canada', 'Americas', NULL, '{}'::jsonb),
+      ('SG', NULL, 'Singapore', 'Asia', NULL, '{}'::jsonb),
+      ('AE', NULL, 'United Arab Emirates', 'Asia', NULL, '{}'::jsonb),
+      ('SA', NULL, 'Saudi Arabia', 'Asia', NULL, '{}'::jsonb)
+    ON CONFLICT (iso2) DO NOTHING;
+
+    -- Extend with a few frequently seen ccTLDs
+    INSERT INTO country (iso2, iso3, name, region, centroid, ext)
+    VALUES
+      ('PT', NULL, 'Portugal', 'Europe', NULL, '{}'::jsonb)
+    ON CONFLICT (iso2) DO NOTHING;
+
+  V4__backfill_item_country_from_tld.sql: |
+    -- Backfill country_iso2 for existing news items using ccTLD heuristics
+    -- - Extract hostname from url, take final label as TLD
+    -- - Ignore generic TLDs; special-case 'uk' -> 'GB'
+    -- - Only set when resulting ISO2 exists in country table (FK safety)
+
+    WITH hosts AS (
+      SELECT i.id,
+             lower(regexp_replace(substring(i.url from '^[a-z]+://([^/]+)'), '.*\.([^.]+)$', '\\1')) AS tld
+      FROM item i
+      WHERE i.country_iso2 IS NULL
+        AND i.url IS NOT NULL
+    ), mapped AS (
+      SELECT id,
+             CASE
+               WHEN tld IN ('com','net','org','info','biz','edu','gov','mil','int','io','me','tv','news','xyz','online','shop','site','app','tech','cloud','ai','dev','pro','press') THEN NULL
+               WHEN tld = 'uk' THEN 'GB'
+               WHEN length(tld) = 2 THEN upper(tld)
+               ELSE NULL
+             END AS iso2
+      FROM hosts
+    )
+    UPDATE item i
+    SET country_iso2 = c.iso2
+    FROM mapped m
+    JOIN country c ON c.iso2 = m.iso2
+    WHERE i.id = m.id
+      AND m.iso2 IS NOT NULL
+      AND i.country_iso2 IS NULL;
