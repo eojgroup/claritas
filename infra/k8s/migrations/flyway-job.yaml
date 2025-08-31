@@ -26,6 +26,10 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_USER } }
             - name: FLYWAY_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
+            - name: FLYWAY_ENCODING
+              value: "UTF-8"
+            - name: FLYWAY_LOCATIONS
+              value: "filesystem:/flyway/sql"
             - name: JAVA_TOOL_OPTIONS
               value: "-Xms64m -Xmx256m -XX:MaxRAMPercentage=75"
           volumeMounts:
@@ -54,4 +58,4 @@ spec:
         - name: flyway-sql
           configMap:
             name: flyway-scripts
-            optional: true
+            optional: false

@@ -194,6 +194,23 @@ jobs:
           kubectl -n "$NS" delete job flyway-migrate --ignore-not-found=true || true
           kubectl -n "$NS" apply -f infra/k8s/migrations/flyway-job.yaml
 
+          # Ensure the Job object actually exists before proceeding
+          echo "Waiting for job/flyway-migrate to be created..."
+          for i in $(seq 1 30); do
+            if kubectl -n "$NS" get job flyway-migrate >/dev/null 2>&1; then
+              echo "Job flyway-migrate created."
+              break
+            fi
+            sleep 2
+          done
+          if ! kubectl -n "$NS" get job flyway-migrate >/dev/null 2>&1; then
+            echo "::error::Job flyway-migrate was not created. Dumping diagnostics..." >&2
+            echo "=== Events (tail) ===" && kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -n 50 || true
+            echo "=== Validate manifest (client-side) ===" && kubectl -n "$NS" apply --dry-run=client -f infra/k8s/migrations/flyway-job.yaml || true
+            echo "=== Show manifest ===" && sed -n '1,200p' infra/k8s/migrations/flyway-job.yaml || true
+            exit 1
+          fi
+
           # Wait for completion and show logs on failure
           echo "Waiting for pod of job/flyway-migrate to start..."
           for i in $(seq 1 60); do
