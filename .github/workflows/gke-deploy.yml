@@ -190,21 +190,23 @@ jobs:
             --from-file=infra/gcp/sql/ \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          # Recreate and apply the Job
-          kubectl -n "$NS" delete job flyway-migrate --ignore-not-found=true || true
-          kubectl -n "$NS" apply -f infra/k8s/migrations/flyway-job.yaml
+          # Use a unique Job name to avoid collisions across runs
+          job="flyway-migrate-${GITHUB_RUN_ID}"
+          kubectl -n "$NS" delete job "$job" --ignore-not-found=true || true
+          # Apply manifest with a run-scoped job name
+          sed -E "s/^\s*name: flyway-migrate$/  name: ${job}/" infra/k8s/migrations/flyway-job.yaml | kubectl -n "$NS" apply -f -
 
           # Ensure the Job object actually exists before proceeding
-          echo "Waiting for job/flyway-migrate to be created..."
+          echo "Waiting for job/$job to be created..."
           for i in $(seq 1 30); do
-            if kubectl -n "$NS" get job flyway-migrate >/dev/null 2>&1; then
-              echo "Job flyway-migrate created."
+            if kubectl -n "$NS" get job "$job" >/dev/null 2>&1; then
+              echo "Job $job created."
               break
             fi
             sleep 2
           done
-          if ! kubectl -n "$NS" get job flyway-migrate >/dev/null 2>&1; then
-            echo "::error::Job flyway-migrate was not created. Dumping diagnostics..." >&2
+          if ! kubectl -n "$NS" get job "$job" >/dev/null 2>&1; then
+            echo "::error::Job $job was not created. Dumping diagnostics..." >&2
             echo "=== Events (tail) ===" && kubectl -n "$NS" get events --sort-by=.lastTimestamp | tail -n 50 || true
             echo "=== Validate manifest (client-side) ===" && kubectl -n "$NS" apply --dry-run=client -f infra/k8s/migrations/flyway-job.yaml || true
             echo "=== Show manifest ===" && sed -n '1,200p' infra/k8s/migrations/flyway-job.yaml || true
@@ -212,60 +214,60 @@ jobs:
           fi
 
           # Wait for completion and show logs on failure
-          echo "Waiting for pod of job/flyway-migrate to start..."
+          echo "Waiting for pod of job/$job to start..."
           for i in $(seq 1 60); do
-            POD=$(kubectl -n "$NS" get pods -l job-name=flyway-migrate -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            POD=$(kubectl -n "$NS" get pods -l job-name="$job" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
             if [ -n "${POD:-}" ]; then break; fi
             sleep 5
           done
           if [ -z "${POD:-}" ]; then
-            echo "::error::No pod created for job/flyway-migrate within timeout" >&2
-            kubectl -n "$NS" get job flyway-migrate -o wide || true
+            echo "::error::No pod created for job/$job within timeout" >&2
+            kubectl -n "$NS" get job "$job" -o wide || true
             exit 1
           fi
           echo "Tracking container 'flyway' in pod $POD ..."
           for i in $(seq 1 120); do
             # Always re-detect the newest pod for this job (pods can rotate on failure)
-            PNEW=$(kubectl -n "$NS" get pods -l job-name=flyway-migrate --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)
+            PNEW=$(kubectl -n "$NS" get pods -l job-name="$job" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)
             [ -n "${PNEW:-}" ] && POD="$PNEW"
 
             CODE=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.containerStatuses[?(@.name=="flyway")].state.terminated.exitCode}' 2>/dev/null || true)
             if [ "${CODE:-}" = "0" ]; then
               echo "Flyway finished successfully (exitCode=0). Showing logs:"
-              kubectl -n "$NS" logs job/flyway-migrate -c flyway --tail=200 || true
-              kubectl -n "$NS" delete job flyway-migrate --wait=true || true
+              kubectl -n "$NS" logs "job/$job" -c flyway --tail=200 || true
+              kubectl -n "$NS" delete job "$job" --wait=true || true
               break
             elif [ -n "${CODE:-}" ]; then
               echo "Flyway container exited with code ${CODE} (will retry if job backoff allows)"
               # Print last logs from the job, which follows the latest pod
-              echo "=== Logs (flyway) ===" && kubectl -n "$NS" logs job/flyway-migrate -c flyway --tail=200 || true
-              echo "=== Logs (cloud-sql-proxy) ===" && kubectl -n "$NS" logs job/flyway-migrate -c cloud-sql-proxy --tail=200 || true
+              echo "=== Logs (flyway) ===" && kubectl -n "$NS" logs "job/$job" -c flyway --tail=200 || true
+              echo "=== Logs (cloud-sql-proxy) ===" && kubectl -n "$NS" logs "job/$job" -c cloud-sql-proxy --tail=200 || true
             fi
 
             # Fallback success detection by logs
-            LOGS=$(kubectl -n "$NS" logs job/flyway-migrate -c flyway --tail=200 2>/dev/null || true)
+            LOGS=$(kubectl -n "$NS" logs "job/$job" -c flyway --tail=200 2>/dev/null || true)
             if echo "$LOGS" | grep -qiE "Successfully (applied|repaired|validated)|Schema \"public\" is up to date|Current version of schema"; then
               echo "Flyway appears successful based on logs. Cleaning up job..."
               echo "$LOGS" | sed -n '1,200p' || true
-              kubectl -n "$NS" delete job flyway-migrate --wait=true || true
+              kubectl -n "$NS" delete job "$job" --wait=true || true
               break
             fi
 
             # If job signals failure and no active pods, bail out
-            SUC=$(kubectl -n "$NS" get job flyway-migrate -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
-            FLD=$(kubectl -n "$NS" get job flyway-migrate -o jsonpath='{.status.failed}' 2>/dev/null || true)
-            ACT=$(kubectl -n "$NS" get job flyway-migrate -o jsonpath='{.status.active}' 2>/dev/null || true)
+            SUC=$(kubectl -n "$NS" get job "$job" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)
+            FLD=$(kubectl -n "$NS" get job "$job" -o jsonpath='{.status.failed}' 2>/dev/null || true)
+            ACT=$(kubectl -n "$NS" get job "$job" -o jsonpath='{.status.active}' 2>/dev/null || true)
             if [ "${SUC:-0}" = "1" ]; then
               echo "Job succeeded. Cleaning up..."
-              kubectl -n "$NS" delete job flyway-migrate --wait=true || true
+              kubectl -n "$NS" delete job "$job" --wait=true || true
               break
             fi
             if [ "${ACT:-0}" = "0" ] && [ -n "${FLD:-}" ] && [ "${FLD:-0}" -ge 2 ]; then
               echo "::error::Job failed after retries. Dumping diagnostics..." >&2
-              kubectl -n "$NS" describe job flyway-migrate | sed -n '1,200p' || true
-              kubectl -n "$NS" get pods -l job-name=flyway-migrate -o wide || true
-              kubectl -n "$NS" logs job/flyway-migrate -c flyway --tail=200 || true
-              kubectl -n "$NS" logs job/flyway-migrate -c cloud-sql-proxy --tail=200 || true
+              kubectl -n "$NS" describe job "$job" | sed -n '1,200p' || true
+              kubectl -n "$NS" get pods -l job-name="$job" -o wide || true
+              kubectl -n "$NS" logs "job/$job" -c flyway --tail=200 || true
+              kubectl -n "$NS" logs "job/$job" -c cloud-sql-proxy --tail=200 || true
               exit 1
             fi
             sleep 5
