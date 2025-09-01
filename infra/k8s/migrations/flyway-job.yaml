@@ -16,6 +16,8 @@ spec:
           args:
             - |
               set -e
+              # Compose JDBC URL from DB_NAME provided via Secret
+              export FLYWAY_URL="jdbc:postgresql://127.0.0.1:5432/${DB_NAME}"
               # Run Flyway migrations (retry until DB is reachable)
               /flyway/flyway -connectRetries=60 repair && \
               /flyway/flyway -connectRetries=60 migrate
@@ -31,8 +33,6 @@ spec:
           env:
             - name: DB_NAME
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_NAME } }
-            - name: FLYWAY_URL
-              value: "jdbc:postgresql://127.0.0.1:5432/$(DB_NAME)"
             - name: FLYWAY_USER
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_USER } }
             - name: FLYWAY_PASSWORD

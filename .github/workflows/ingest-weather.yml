@@ -51,6 +51,27 @@ jobs:
         run: |
           kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
 
+      - name: 🔐 Ensure OpenWeather secret exists (best effort)
+        env:
+          NS: ${{ env.NAMESPACE }}
+          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${OPENWEATHER_API_KEY:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-openweather \
+              --from-literal=OPENWEATHER_API_KEY="$OPENWEATHER_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::OPENWEATHER_API_KEY not set in GitHub Secrets; skipping secret upsert"
+          fi
+
+      - name: ✅ Verify API deployment is ready
+        env:
+          NS: ${{ env.NAMESPACE }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" rollout status deploy/claritas-api --timeout=180s
+
 
       - name: ▶️ Run OpenWeather ingest inside cluster
         run: |
@@ -61,9 +82,10 @@ jobs:
             payload="{}";
             if [ -n "${COUNTRY:-}" ]; then payload="{\"country\":\"${COUNTRY}\"}"; fi;
             echo "> openweather/country-current payload: ${payload}";
-            curl --fail --show-error --silent --retry 3 --max-time 180 -H "content-type: application/json" \
+            curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 -H "content-type: application/json" \
               -d "${payload}" \
-              "$BASE/api/ingest/openweather/country-current"; echo;'
+              "$BASE/api/ingest/openweather/country-current" \
+              | jq -c . 2>/dev/null || true; echo;'
 
           # Use a short pod so we can stream logs easily. Pass COUNTRY env to the pod.
           kubectl -n "$ns" run "$name" --image=curlimages/curl:8.10.1 --restart=Never --env=COUNTRY="${COUNTRY}" -- /bin/sh -ceu "$script"
