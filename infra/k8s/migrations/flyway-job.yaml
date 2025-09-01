@@ -7,34 +7,27 @@ spec:
   backoffLimit: 2
   template:
     spec:
+      shareProcessNamespace: true
       restartPolicy: Never
       serviceAccountName: flyway-sa
-      initContainers:
-        - name: cloud-sql-proxy-prepare
-          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
-          command: ["/bin/sh", "-lc"]
-          args:
-            - |
-              cp /cloud-sql-proxy /workspace/cloud-sql-proxy && \
-              chmod +x /workspace/cloud-sql-proxy
-          volumeMounts:
-            - name: proxy-bin
-              mountPath: /workspace
       containers:
         - name: flyway
           image: flyway/flyway:10.17-alpine
           command: ["/bin/sh", "-lc"]
           args:
             - |
-              # Start Cloud SQL Proxy in background
-              /workspace/cloud-sql-proxy --structured-logs --private-ip --port=5432 "$(INSTANCE_CONNECTION_NAME)" &
-              PROXY_PID=$!
+              set -e
               # Run Flyway migrations (retry until DB is reachable)
               /flyway/flyway -connectRetries=60 repair && \
               /flyway/flyway -connectRetries=60 migrate
               STATUS=$?
-              # Stop proxy and exit with Flyway status
-              kill "$PROXY_PID" || true
+              # Signal the sidecar proxy to exit so the Job can complete
+              if command -v killall >/dev/null 2>&1; then
+                killall cloud-sql-proxy >/dev/null 2>&1 || true
+              else
+                PIDS=$(ps -eo pid,args | awk '/cloud-sql-proxy/{print $1}')
+                [ -n "$PIDS" ] && kill $PIDS || true
+              fi
               exit "$STATUS"
           env:
             - name: DB_NAME
@@ -51,16 +44,25 @@ spec:
               value: "filesystem:/flyway/sql"
             - name: JAVA_TOOL_OPTIONS
               value: "-Xms64m -Xmx256m -XX:MaxRAMPercentage=75"
+          volumeMounts:
+            - name: flyway-sql
+              mountPath: /flyway/sql
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "256Mi" }
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
+          args:
+            - "--structured-logs"
+            - "--private-ip"
+            - "--port=5432"
+            - "$(INSTANCE_CONNECTION_NAME)"
+          env:
             - name: INSTANCE_CONNECTION_NAME
               valueFrom:
                 configMapKeyRef:
                   name: claritas-config
                   key: INSTANCE_CONNECTION_NAME
-          volumeMounts:
-            - name: flyway-sql
-              mountPath: /flyway/sql
-            - name: proxy-bin
-              mountPath: /workspace
           resources:
             requests: { cpu: "50m", memory: "64Mi" }
             limits:   { cpu: "200m", memory: "256Mi" }
@@ -69,5 +71,3 @@ spec:
           configMap:
             name: flyway-scripts
             optional: false
-        - name: proxy-bin
-          emptyDir: {}
