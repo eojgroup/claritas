@@ -1,0 +1,132 @@
+import Foundation
+
+struct APIError: Error, LocalizedError {
+    let status: Int
+    let message: String
+    var errorDescription: String? { message }
+}
+
+final class APIClient {
+    private let session: URLSession
+    private let baseURL: URL
+
+    init(session: URLSession = .shared) {
+        self.session = session
+
+        // Resolve base URL precedence: UserDefaults override -> Config.plist -> default
+        if let override = UserDefaults.standard.string(forKey: "API_BASE_URL"),
+           let url = URL(string: override) {
+            self.baseURL = url
+        } else if let configURL = APIClient.loadConfigBaseURL() {
+            self.baseURL = configURL
+        } else {
+            self.baseURL = URL(string: "http://localhost:8080")! // dev default
+        }
+    }
+
+    private static func loadConfigBaseURL() -> URL? {
+        guard let url = Bundle.main.url(forResource: "Config", withExtension: "plist"),
+              let data = try? Data(contentsOf: url),
+              let dict = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let base = dict["API_BASE_URL"] as? String,
+              let out = URL(string: base) else {
+            return nil
+        }
+        return out
+    }
+
+    // MARK: - Endpoints
+
+    func fetchNews(limit: Int = 20, offset: Int = 0, q: String? = nil, country: String? = nil) async throws -> [NewsItem] {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/news"), resolvingAgainstBaseURL: false)!
+        var items: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit)),
+                                     URLQueryItem(name: "offset", value: String(offset))]
+        if let q { items.append(URLQueryItem(name: "q", value: q)) }
+        if let country { items.append(URLQueryItem(name: "country", value: country)) }
+        comps.queryItems = items
+        let req = URLRequest(url: comps.url!)
+        return try await request(req, as: [NewsItem].self, rootKey: "items")
+    }
+
+    func fetchCountryStats(days: Int = 30) async throws -> [CountryStat] {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/news/country-stats"), resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "days", value: String(days))]
+        let req = URLRequest(url: comps.url!)
+        return try await request(req, as: [CountryStat].self, rootKey: "stats")
+    }
+
+    func fetchCountryWeather() async throws -> [CountryWeather] {
+        let url = baseURL.appendingPathComponent("/api/weather/country-latest")
+        let req = URLRequest(url: url)
+        return try await request(req, as: [CountryWeather].self, rootKey: "stats")
+    }
+
+    func ingestWeatherNow(country: String?) async throws -> [String: Any] {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/ingest/openweather/country-current"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let country {
+            req.httpBody = try JSONSerialization.data(withJSONObject: ["country": country], options: [])
+        } else {
+            req.httpBody = Data("{}".utf8)
+        }
+        return try await request(req, as: [String: Any].self)
+    }
+
+    func imageProxyURL(for original: URL?) -> URL? {
+        guard let original else { return nil }
+        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/proxy-image"), resolvingAgainstBaseURL: false)!
+        comps.queryItems = [URLQueryItem(name: "url", value: original.absoluteString)]
+        return comps.url
+    }
+
+    // MARK: - Generic request
+
+    private func request<T>(_ req: URLRequest, as: T.Type) async throws -> T where T: Decodable {
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw APIError(status: -1, message: "No HTTP response") }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw APIError(status: http.statusCode, message: message)
+        }
+        if T.self == [String: Any].self {
+            let json = try JSONSerialization.jsonObject(with: data, options: [])
+            guard let dict = json as? T else { throw APIError(status: -1, message: "Invalid JSON") }
+            return dict
+        }
+        if let rootKey = _rootKey {
+            let container = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+            let value = container?[rootKey]
+            let valueData = try JSONSerialization.data(withJSONObject: value ?? NSNull(), options: [])
+            return try JSONDecoder.api.decode(T.self, from: valueData)
+        } else {
+            return try JSONDecoder.api.decode(T.self, from: data)
+        }
+    }
+
+    // Helper to decode when API wraps arrays into a rootKey
+    private var _rootKey: String? = nil
+    private func request<T>(_ req: URLRequest, as: T.Type, rootKey: String) async throws -> T where T: Decodable {
+        _rootKey = rootKey
+        defer { _rootKey = nil }
+        return try await request(req, as: T.self)
+    }
+}
+
+extension JSONDecoder {
+    static var api: JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .formatted(DateFormatter.apiDate)
+        return d
+    }
+}
+
+extension DateFormatter {
+    static let apiDate: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+}
+
