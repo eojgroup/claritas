@@ -3,13 +3,13 @@
           # ...
           env:
             - name: DB_HOST
-              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_HOST } }
+              value: "127.0.0.1"
             - name: DB_PORT
-              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PORT } }
+              value: "5432"
             - name: DB_NAME
-              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_NAME } }
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_NAME } }
             - name: DB_USER
-              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_USER } }
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_USER } }
             - name: DB_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
           ports:

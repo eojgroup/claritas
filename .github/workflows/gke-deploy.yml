@@ -121,8 +121,8 @@ jobs:
 
       - name: ⚙️ Apply ConfigMaps
         run: |
-          # Ensure claritas-config (DB_NAME, DB_USER, INSTANCE_CONNECTION_NAME) exists
-          kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/db-config.yaml
+          # Ensure claritas-config (DB + auth settings) exists
+          kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
 
       - name: 🛠️ Apply Kubernetes resources
         run: |

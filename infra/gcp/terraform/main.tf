@@ -57,6 +57,18 @@ resource "google_artifact_registry_repository" "claritas_app" {
 # Secret Manager (OAuth credentials)
 ############################################
 locals {
+  auth_secret_names = toset([
+    "claritas-auth-google-client-id",
+    "claritas-auth-google-client-secret",
+    "claritas-auth-microsoft-client-id",
+    "claritas-auth-microsoft-client-secret",
+    "claritas-auth-microsoft-tenant-id",
+    "claritas-auth-apple-client-id",
+    "claritas-auth-apple-team-id",
+    "claritas-auth-apple-key-id",
+    "claritas-auth-apple-private-key",
+  ])
+
   auth_secrets = {
     "claritas-auth-google-client-id"       = var.auth_google_client_id
     "claritas-auth-google-client-secret"   = var.auth_google_client_secret
@@ -71,9 +83,9 @@ locals {
 }
 
 resource "google_secret_manager_secret" "auth" {
-  for_each  = local.auth_secrets
+  for_each  = local.auth_secret_names
   project   = var.project_id
-  secret_id = each.key
+  secret_id = each.value
 
   replication {
     auto {}
@@ -85,9 +97,9 @@ resource "google_secret_manager_secret" "auth" {
 }
 
 resource "google_secret_manager_secret_version" "auth" {
-  for_each   = { for key, value in local.auth_secrets : key => value if value != "" }
-  secret     = google_secret_manager_secret.auth[each.key].id
-  secret_data = each.value
+  for_each    = local.auth_secret_names
+  secret      = google_secret_manager_secret.auth[each.value].id
+  secret_data = local.auth_secrets[each.value]
 }
 
 

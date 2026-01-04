@@ -17,15 +17,15 @@ spec:
           image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api:latest
           env:
             - name: NEWSAPI_API_KEY
-              valueFrom: { secretKeyRef: { name: claritas-newsapi, key: NEWSAPI_API_KEY } }
+              valueFrom: { secretKeyRef: { name: claritas-newsapi, key: NEWSAPI_API_KEY, optional: true } }
             - name: OPENWEATHER_API_KEY
-              valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY } }
+              valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
             - name: INSTANCE_CONNECTION_NAME
               valueFrom: { configMapKeyRef: { name: claritas-config, key: INSTANCE_CONNECTION_NAME } }
             - name: DB_NAME
-              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_NAME } }
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_NAME } }
             - name: DB_USER
-              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_USER } }
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_USER } }
             - name: DB_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
             - name: DB_HOST
@@ -47,23 +47,23 @@ spec:
             - name: AUTH_STATE_TTL_MINUTES
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_STATE_TTL_MINUTES } }
             - name: AUTH_GOOGLE_CLIENT_ID
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_GOOGLE_CLIENT_ID } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_GOOGLE_CLIENT_ID, optional: true } }
             - name: AUTH_GOOGLE_CLIENT_SECRET
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_GOOGLE_CLIENT_SECRET } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_GOOGLE_CLIENT_SECRET, optional: true } }
             - name: AUTH_MICROSOFT_CLIENT_ID
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_CLIENT_ID } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_CLIENT_ID, optional: true } }
             - name: AUTH_MICROSOFT_CLIENT_SECRET
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_CLIENT_SECRET } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_CLIENT_SECRET, optional: true } }
             - name: AUTH_MICROSOFT_TENANT_ID
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_TENANT_ID } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_TENANT_ID, optional: true } }
             - name: AUTH_APPLE_CLIENT_ID
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_CLIENT_ID } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_CLIENT_ID, optional: true } }
             - name: AUTH_APPLE_TEAM_ID
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_TEAM_ID } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_TEAM_ID, optional: true } }
             - name: AUTH_APPLE_KEY_ID
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_KEY_ID } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_KEY_ID, optional: true } }
             - name: AUTH_APPLE_PRIVATE_KEY
-              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_PRIVATE_KEY } }
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_PRIVATE_KEY, optional: true } }
           ports: [{ name: http, containerPort: 8080 }]
           readinessProbe:
             httpGet: { path: /healthz, port: http }
