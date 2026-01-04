@@ -47,7 +47,7 @@ jobs:
       ############################################
       - name: 🌍 Terraform Init (core)
         working-directory: infra/gcp/terraform
-        run: terraform init -migrate-state -force-copy
+        run: terraform init
 
       - name: 🛠️ Terraform Import (existing resources)
         working-directory: infra/gcp/terraform

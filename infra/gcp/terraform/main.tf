@@ -80,6 +80,18 @@ locals {
     "claritas-auth-apple-key-id"           = var.auth_apple_key_id
     "claritas-auth-apple-private-key"      = var.auth_apple_private_key
   }
+
+  terraform_runner_sa = var.terraform_runner_service_account != "" ? var.terraform_runner_service_account : "terraform-github-oidc@${var.project_id}.iam.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "terraform_runner_secretmanager" {
+  project = var.project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:${local.terraform_runner_sa}"
+
+  depends_on = [
+    google_project_service.enabled_services["secretmanager.googleapis.com"]
+  ]
 }
 
 resource "google_secret_manager_secret" "auth" {
@@ -92,7 +104,8 @@ resource "google_secret_manager_secret" "auth" {
   }
 
   depends_on = [
-    google_project_service.enabled_services["secretmanager.googleapis.com"]
+    google_project_service.enabled_services["secretmanager.googleapis.com"],
+    google_project_iam_member.terraform_runner_secretmanager
   ]
 }
 
