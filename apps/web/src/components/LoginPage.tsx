@@ -5,6 +5,7 @@ type LoginPageProps = {
   status: "checking" | "unauthed";
   error?: string | null;
   onSignIn: (provider: AuthProviderId) => void;
+  signUpUrl?: string | null;
 };
 
 type ProviderMeta = {
@@ -102,9 +103,11 @@ function ProviderButton({
   );
 }
 
-export default function LoginPage({ providers, status, error, onSignIn }: LoginPageProps) {
+export default function LoginPage({ providers, status, error, onSignIn, signUpUrl }: LoginPageProps) {
   const enabledMap = new Map(providers.map((p) => [p.id, p.enabled]));
   const isChecking = status === "checking";
+  const signUpHref = signUpUrl?.trim();
+  const canSignUp = Boolean(signUpHref);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#0b1218] text-slate-100">
@@ -195,8 +198,27 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               : "Select a provider to continue. You will be redirected to complete sign-in."}
           </div>
 
-          <div className="mt-6 text-xs text-slate-500">
-            Need access? Contact your Claritas admin to enable a provider for this environment.
+          <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">No account yet?</div>
+              <div className="text-xs text-slate-500">Request access to enable a provider for your team.</div>
+            </div>
+            {canSignUp ? (
+              <a
+                href={signUpHref}
+                className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#f5efe6] transition hover:bg-slate-800"
+              >
+                Request access
+              </a>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="rounded-full bg-slate-200 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500"
+              >
+                Request access
+              </button>
+            )}
           </div>
         </div>
       </div>

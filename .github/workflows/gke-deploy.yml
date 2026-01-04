@@ -131,6 +131,13 @@ jobs:
         run: |
           # Ensure claritas-config (DB + auth settings) exists
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
+          base="${DOMAIN}"
+          if [ -n "${base}" ] && [ "${base#http}" = "${base}" ]; then
+            base="https://${base}"
+          fi
+          if [ -n "${base}" ]; then
+            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${base}\"}}"
+          fi
 
       - name: 🛠️ Apply Kubernetes resources
         run: |
@@ -191,6 +198,63 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::OPENWEATHER_API_KEY secret not provided; skipping claritas-openweather upsert"
+          fi
+
+      - name: 🔐 Ensure auth provider secrets exist
+        env:
+          NS: ${{ env.NAMESPACE }}
+          AUTH_GOOGLE_CLIENT_ID: ${{ secrets.AUTH_GOOGLE_CLIENT_ID }}
+          AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.AUTH_GOOGLE_CLIENT_SECRET }}
+          AUTH_MICROSOFT_CLIENT_ID: ${{ secrets.AUTH_MICROSOFT_CLIENT_ID }}
+          AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.AUTH_MICROSOFT_CLIENT_SECRET }}
+          AUTH_MICROSOFT_TENANT_ID: ${{ secrets.AUTH_MICROSOFT_TENANT_ID }}
+          AUTH_APPLE_CLIENT_ID: ${{ secrets.AUTH_APPLE_CLIENT_ID }}
+          AUTH_APPLE_TEAM_ID: ${{ secrets.AUTH_APPLE_TEAM_ID }}
+          AUTH_APPLE_KEY_ID: ${{ secrets.AUTH_APPLE_KEY_ID }}
+          AUTH_APPLE_PRIVATE_KEY: ${{ secrets.AUTH_APPLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          args=()
+          tmpfile=""
+
+          if [ -n "${AUTH_GOOGLE_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=AUTH_GOOGLE_CLIENT_ID="$AUTH_GOOGLE_CLIENT_ID")
+          fi
+          if [ -n "${AUTH_GOOGLE_CLIENT_SECRET:-}" ]; then
+            args+=(--from-literal=AUTH_GOOGLE_CLIENT_SECRET="$AUTH_GOOGLE_CLIENT_SECRET")
+          fi
+          if [ -n "${AUTH_MICROSOFT_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=AUTH_MICROSOFT_CLIENT_ID="$AUTH_MICROSOFT_CLIENT_ID")
+          fi
+          if [ -n "${AUTH_MICROSOFT_CLIENT_SECRET:-}" ]; then
+            args+=(--from-literal=AUTH_MICROSOFT_CLIENT_SECRET="$AUTH_MICROSOFT_CLIENT_SECRET")
+          fi
+          if [ -n "${AUTH_MICROSOFT_TENANT_ID:-}" ]; then
+            args+=(--from-literal=AUTH_MICROSOFT_TENANT_ID="$AUTH_MICROSOFT_TENANT_ID")
+          fi
+          if [ -n "${AUTH_APPLE_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=AUTH_APPLE_CLIENT_ID="$AUTH_APPLE_CLIENT_ID")
+          fi
+          if [ -n "${AUTH_APPLE_TEAM_ID:-}" ]; then
+            args+=(--from-literal=AUTH_APPLE_TEAM_ID="$AUTH_APPLE_TEAM_ID")
+          fi
+          if [ -n "${AUTH_APPLE_KEY_ID:-}" ]; then
+            args+=(--from-literal=AUTH_APPLE_KEY_ID="$AUTH_APPLE_KEY_ID")
+          fi
+          if [ -n "${AUTH_APPLE_PRIVATE_KEY:-}" ]; then
+            tmpfile="$(mktemp)"
+            printf "%s" "$AUTH_APPLE_PRIVATE_KEY" > "$tmpfile"
+            args+=(--from-file=AUTH_APPLE_PRIVATE_KEY="$tmpfile")
+          fi
+
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "::warning::No auth provider secrets configured; sign-in providers will stay disabled."
+          else
+            kubectl -n "$NS" create secret generic claritas-auth "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
+          fi
+
+          if [ -n "${tmpfile}" ]; then
+            rm -f "$tmpfile"
           fi
 
       - name: 🧩 Run DB migrations (Flyway)
