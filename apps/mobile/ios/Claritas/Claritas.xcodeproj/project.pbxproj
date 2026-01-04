@@ -7,113 +7,113 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		284793446748305E724060D8 /* NewsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59CCBC8D9AD737423C575FD7 /* NewsListView.swift */; };
-		292F478B5DA2EA287962C002 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8F1A261BE189BE6A509F82C8 /* Info.plist */; };
-		46137BA460127B51846AEE3A /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23EC98B8C1B7665260B426D6 /* DashboardView.swift */; };
-		49421E81E0FF700E62FABE0A /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B4D5E868A7ADA8BC7394BE /* App.swift */; };
-		5CF9414D852CDED418D76990 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4AC0C92C391A05331E457659 /* Assets.xcassets */; };
-		7790A94560A77B617E6AC830 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2D46392CDEAECF5976C8E0B /* RootView.swift */; };
-		965E649BA49D0A56E8355B52 /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 212CC1113087F4196DB5E1F1 /* WeatherListView.swift */; };
-		D849D32D126C6B1924C99932 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8197243C33B4F58FBF1C67A9 /* Models.swift */; };
-		E2DB199CEF40E2CCD62F221B /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C52B1169A41296E100F242B5 /* Foundation.framework */; };
-		E694FD4A97593319DD8F2D9A /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B14EA10653047CBE3D15ECB /* Config.plist */; };
-		F59F19916C89F14C45B01493 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37D393464384802D4354ABB2 /* AppModel.swift */; };
-		FAF64EB53F9D50547D6448F6 /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 235887E5F5063C59BB8C2EED /* CountryProfileView.swift */; };
-		FBE40FEA95DE435EB4FFAB47 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A672461FCD309034C7A8FAB2 /* APIClient.swift */; };
+		13393B99E5B483A2DCA9C719 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D51FFE1A39E761E7FFC24E8 /* AppModel.swift */; };
+		16EC8F5A035FF612E3FEB43B /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1696DB27E934EAC83CB45C8A /* CountryProfileView.swift */; };
+		22088399238459C288498D24 /* NewsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 192B8603EDE370DA77625265 /* NewsListView.swift */; };
+		2289D8A9DD4FAFAEDDE6C51F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68EA77B2981AF6BAA0AB95DB /* Models.swift */; };
+		59A9F6FA0DBB9622E0406EB1 /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 799D058A34FC37C883892B08 /* WeatherListView.swift */; };
+		663162EF6417CCA5E56766D1 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 707C710775B7563E5D790FEB /* Foundation.framework */; };
+		77A27470B7E5D27855F83381 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A3C0BCDF64916E6F0C6721A /* DashboardView.swift */; };
+		86BF606AEB58AF39F9121EFC /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 054DF5F1F71BBD2D26969B06 /* Config.plist */; };
+		95BEF938B2E0EB3FD4D5E41B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5BE5D9C09529297E1451F12 /* APIClient.swift */; };
+		A621E9AC3EC7A577AC533FB7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E82B3BB5CE96F92B515B6761 /* Assets.xcassets */; };
+		ADA2989FE34B746DECF5AA91 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EDE751F583EFD9AF910EFBF /* RootView.swift */; };
+		EFDB0B685B766B21737D8F74 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = CDCBB7D8BC8E2962625E9970 /* Info.plist */; };
+		F9DDE33C37F8B313D099461F /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 096E885ACDAE32201E2C8B01 /* App.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		212CC1113087F4196DB5E1F1 /* WeatherListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WeatherListView.swift; path = Claritas/Views/WeatherListView.swift; sourceTree = "<group>"; };
-		235887E5F5063C59BB8C2EED /* CountryProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CountryProfileView.swift; path = Claritas/Views/CountryProfileView.swift; sourceTree = "<group>"; };
-		23EC98B8C1B7665260B426D6 /* DashboardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DashboardView.swift; path = Claritas/Views/DashboardView.swift; sourceTree = "<group>"; };
-		37D393464384802D4354ABB2 /* AppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppModel.swift; path = Claritas/AppModel.swift; sourceTree = "<group>"; };
-		3B14EA10653047CBE3D15ECB /* Config.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Config.plist; path = Claritas/Config.plist; sourceTree = "<group>"; };
-		4AC0C92C391A05331E457659 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Claritas/Assets.xcassets; sourceTree = "<group>"; };
-		59CCBC8D9AD737423C575FD7 /* NewsListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NewsListView.swift; path = Claritas/Views/NewsListView.swift; sourceTree = "<group>"; };
-		8197243C33B4F58FBF1C67A9 /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Models.swift; path = Claritas/Models/Models.swift; sourceTree = "<group>"; };
-		8F1A261BE189BE6A509F82C8 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = Claritas/Info.plist; sourceTree = "<group>"; };
-		A4B4D5E868A7ADA8BC7394BE /* App.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = App.swift; path = Claritas/App.swift; sourceTree = "<group>"; };
-		A672461FCD309034C7A8FAB2 /* APIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIClient.swift; path = Claritas/Services/APIClient.swift; sourceTree = "<group>"; };
-		C52B1169A41296E100F242B5 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		E2D46392CDEAECF5976C8E0B /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootView.swift; path = Claritas/Views/RootView.swift; sourceTree = "<group>"; };
-		FB5B9D7A1F102492E3DF615E /* Claritas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Claritas.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		054DF5F1F71BBD2D26969B06 /* Config.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Config.plist; path = Claritas/Config.plist; sourceTree = "<group>"; };
+		096E885ACDAE32201E2C8B01 /* App.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = App.swift; path = Claritas/App.swift; sourceTree = "<group>"; };
+		1696DB27E934EAC83CB45C8A /* CountryProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CountryProfileView.swift; path = Claritas/Views/CountryProfileView.swift; sourceTree = "<group>"; };
+		192B8603EDE370DA77625265 /* NewsListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NewsListView.swift; path = Claritas/Views/NewsListView.swift; sourceTree = "<group>"; };
+		1A3C0BCDF64916E6F0C6721A /* DashboardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DashboardView.swift; path = Claritas/Views/DashboardView.swift; sourceTree = "<group>"; };
+		68EA77B2981AF6BAA0AB95DB /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Models.swift; path = Claritas/Models/Models.swift; sourceTree = "<group>"; };
+		6EDE751F583EFD9AF910EFBF /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootView.swift; path = Claritas/Views/RootView.swift; sourceTree = "<group>"; };
+		707C710775B7563E5D790FEB /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		799D058A34FC37C883892B08 /* WeatherListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WeatherListView.swift; path = Claritas/Views/WeatherListView.swift; sourceTree = "<group>"; };
+		7D51FFE1A39E761E7FFC24E8 /* AppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppModel.swift; path = Claritas/AppModel.swift; sourceTree = "<group>"; };
+		8DA85295964BB7D0F6BDA601 /* Claritas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Claritas.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A5BE5D9C09529297E1451F12 /* APIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIClient.swift; path = Claritas/Services/APIClient.swift; sourceTree = "<group>"; };
+		CDCBB7D8BC8E2962625E9970 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = Claritas/Info.plist; sourceTree = "<group>"; };
+		E82B3BB5CE96F92B515B6761 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Claritas/Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		D7220847CD4F3204C111AC27 /* Frameworks */ = {
+		871EE564F2D1F7650C3969F7 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E2DB199CEF40E2CCD62F221B /* Foundation.framework in Frameworks */,
+				663162EF6417CCA5E56766D1 /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		6DB8378959879D7C1660DE43 /* Frameworks */ = {
+		5CF5CBAB3E5C7804AC7E73AD /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				EADA30B4D263EE727BAB8CA5 /* iOS */,
+				BA082C6C44374352AB2C05C0 /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		8AF6C3F6CD4249D485374650 = {
+		7D8428A9A77E303827F5A42F /* Claritas */ = {
 			isa = PBXGroup;
 			children = (
-				92F48192EF925BD7A26C279D /* Products */,
-				6DB8378959879D7C1660DE43 /* Frameworks */,
-				A5EF8D8631AA1F427D4C1362 /* Claritas */,
-			);
-			sourceTree = "<group>";
-		};
-		92F48192EF925BD7A26C279D /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				FB5B9D7A1F102492E3DF615E /* Claritas.app */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		A5EF8D8631AA1F427D4C1362 /* Claritas */ = {
-			isa = PBXGroup;
-			children = (
-				A4B4D5E868A7ADA8BC7394BE /* App.swift */,
-				37D393464384802D4354ABB2 /* AppModel.swift */,
-				8197243C33B4F58FBF1C67A9 /* Models.swift */,
-				A672461FCD309034C7A8FAB2 /* APIClient.swift */,
-				E2D46392CDEAECF5976C8E0B /* RootView.swift */,
-				23EC98B8C1B7665260B426D6 /* DashboardView.swift */,
-				59CCBC8D9AD737423C575FD7 /* NewsListView.swift */,
-				212CC1113087F4196DB5E1F1 /* WeatherListView.swift */,
-				235887E5F5063C59BB8C2EED /* CountryProfileView.swift */,
-				8F1A261BE189BE6A509F82C8 /* Info.plist */,
-				3B14EA10653047CBE3D15ECB /* Config.plist */,
-				4AC0C92C391A05331E457659 /* Assets.xcassets */,
+				096E885ACDAE32201E2C8B01 /* App.swift */,
+				7D51FFE1A39E761E7FFC24E8 /* AppModel.swift */,
+				68EA77B2981AF6BAA0AB95DB /* Models.swift */,
+				A5BE5D9C09529297E1451F12 /* APIClient.swift */,
+				6EDE751F583EFD9AF910EFBF /* RootView.swift */,
+				1A3C0BCDF64916E6F0C6721A /* DashboardView.swift */,
+				192B8603EDE370DA77625265 /* NewsListView.swift */,
+				799D058A34FC37C883892B08 /* WeatherListView.swift */,
+				1696DB27E934EAC83CB45C8A /* CountryProfileView.swift */,
+				CDCBB7D8BC8E2962625E9970 /* Info.plist */,
+				054DF5F1F71BBD2D26969B06 /* Config.plist */,
+				E82B3BB5CE96F92B515B6761 /* Assets.xcassets */,
 			);
 			name = Claritas;
 			path = Claritas;
 			sourceTree = "<group>";
 		};
-		EADA30B4D263EE727BAB8CA5 /* iOS */ = {
+		B34935CE9B1CADB9BAC92983 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				C52B1169A41296E100F242B5 /* Foundation.framework */,
+				8DA85295964BB7D0F6BDA601 /* Claritas.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		BA082C6C44374352AB2C05C0 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				707C710775B7563E5D790FEB /* Foundation.framework */,
 			);
 			name = iOS;
+			sourceTree = "<group>";
+		};
+		DB5AF7479CA4130015E9E367 = {
+			isa = PBXGroup;
+			children = (
+				B34935CE9B1CADB9BAC92983 /* Products */,
+				5CF5CBAB3E5C7804AC7E73AD /* Frameworks */,
+				7D8428A9A77E303827F5A42F /* Claritas */,
+			);
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		3AF3EE81B7F66869F47072B5 /* Claritas */ = {
+		8F4B7EC74BFED1DBD1DCBD8D /* Claritas */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 0E50F53793A34039DD54788A /* Build configuration list for PBXNativeTarget "Claritas" */;
+			buildConfigurationList = E4F6384319326AD2E91D9212 /* Build configuration list for PBXNativeTarget "Claritas" */;
 			buildPhases = (
-				6562F3BB3C8570060F27A378 /* Sources */,
-				D7220847CD4F3204C111AC27 /* Frameworks */,
-				209D9B996CD0074C9399350B /* Resources */,
+				66A4BEC0C3A149A53E67AFED /* Sources */,
+				871EE564F2D1F7650C3969F7 /* Frameworks */,
+				8145F4AF6363D716AC9A2F8E /* Resources */,
 			);
 			buildRules = (
 			);
@@ -121,19 +121,19 @@
 			);
 			name = Claritas;
 			productName = Claritas;
-			productReference = FB5B9D7A1F102492E3DF615E /* Claritas.app */;
+			productReference = 8DA85295964BB7D0F6BDA601 /* Claritas.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		7474AA525F6B4C80E7C8EDA9 /* Project object */ = {
+		1CF1DFAEE7956204861D0BCD /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 			};
-			buildConfigurationList = 72C78D81D981BEC68E30103E /* Build configuration list for PBXProject "Claritas" */;
+			buildConfigurationList = 884BF9C0CA454B60F21B9E87 /* Build configuration list for PBXProject "Claritas" */;
 			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -141,149 +141,52 @@
 				en,
 				Base,
 			);
-			mainGroup = 8AF6C3F6CD4249D485374650;
+			mainGroup = DB5AF7479CA4130015E9E367;
 			minimizedProjectReferenceProxies = 0;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 92F48192EF925BD7A26C279D /* Products */;
+			productRefGroup = B34935CE9B1CADB9BAC92983 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				3AF3EE81B7F66869F47072B5 /* Claritas */,
+				8F4B7EC74BFED1DBD1DCBD8D /* Claritas */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		209D9B996CD0074C9399350B /* Resources */ = {
+		8145F4AF6363D716AC9A2F8E /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				292F478B5DA2EA287962C002 /* Info.plist in Resources */,
-				E694FD4A97593319DD8F2D9A /* Config.plist in Resources */,
-				5CF9414D852CDED418D76990 /* Assets.xcassets in Resources */,
+				EFDB0B685B766B21737D8F74 /* Info.plist in Resources */,
+				86BF606AEB58AF39F9121EFC /* Config.plist in Resources */,
+				A621E9AC3EC7A577AC533FB7 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		6562F3BB3C8570060F27A378 /* Sources */ = {
+		66A4BEC0C3A149A53E67AFED /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				49421E81E0FF700E62FABE0A /* App.swift in Sources */,
-				F59F19916C89F14C45B01493 /* AppModel.swift in Sources */,
-				D849D32D126C6B1924C99932 /* Models.swift in Sources */,
-				FBE40FEA95DE435EB4FFAB47 /* APIClient.swift in Sources */,
-				7790A94560A77B617E6AC830 /* RootView.swift in Sources */,
-				46137BA460127B51846AEE3A /* DashboardView.swift in Sources */,
-				284793446748305E724060D8 /* NewsListView.swift in Sources */,
-				965E649BA49D0A56E8355B52 /* WeatherListView.swift in Sources */,
-				FAF64EB53F9D50547D6448F6 /* CountryProfileView.swift in Sources */,
+				F9DDE33C37F8B313D099461F /* App.swift in Sources */,
+				13393B99E5B483A2DCA9C719 /* AppModel.swift in Sources */,
+				2289D8A9DD4FAFAEDDE6C51F /* Models.swift in Sources */,
+				95BEF938B2E0EB3FD4D5E41B /* APIClient.swift in Sources */,
+				ADA2989FE34B746DECF5AA91 /* RootView.swift in Sources */,
+				77A27470B7E5D27855F83381 /* DashboardView.swift in Sources */,
+				22088399238459C288498D24 /* NewsListView.swift in Sources */,
+				59A9F6FA0DBB9622E0406EB1 /* WeatherListView.swift in Sources */,
+				16EC8F5A035FF612E3FEB43B /* CountryProfileView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		3C40CDBBD2CADF06BEB39112 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				INFOPLIST_FILE = Claritas/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojc.claritas;
-				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				UIApplicationSceneManifest = "";
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		6BF7850F753E8C6A0DB02136 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				INFOPLIST_FILE = Claritas/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojc.claritas;
-				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				UIApplicationSceneManifest = "";
-			};
-			name = Debug;
-		};
-		E317FA8EB7097BB835DD3F3F /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ANALYZER_NONNULL = YES;
-				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
-				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
-				CLANG_CXX_LIBRARY = "libc++";
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
-				CLANG_WARN_BOOL_CONVERSION = YES;
-				CLANG_WARN_COMMA = YES;
-				CLANG_WARN_CONSTANT_CONVERSION = YES;
-				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
-				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
-				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
-				CLANG_WARN_EMPTY_BODY = YES;
-				CLANG_WARN_ENUM_CONVERSION = YES;
-				CLANG_WARN_INFINITE_RECURSION = YES;
-				CLANG_WARN_INT_CONVERSION = YES;
-				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
-				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
-				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
-				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
-				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
-				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
-				CLANG_WARN_STRICT_PROTOTYPES = YES;
-				CLANG_WARN_SUSPICIOUS_MOVE = YES;
-				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
-				CLANG_WARN_UNREACHABLE_CODE = YES;
-				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu11;
-				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
-				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
-				GCC_WARN_UNDECLARED_SELECTOR = YES;
-				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
-				GCC_WARN_UNUSED_FUNCTION = YES;
-				GCC_WARN_UNUSED_VARIABLE = YES;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				MTL_FAST_MATH = YES;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
-		FB74B9B542603163CAEA86DC /* Debug */ = {
+		35DFFD156FFAC98B85C9FBEF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -344,28 +247,125 @@
 			};
 			name = Debug;
 		};
+		6E1259A10FA996BAFF67188E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		7EA21A1E84D4B93CD71B637E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = Claritas/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				UIApplicationSceneManifest = "";
+			};
+			name = Debug;
+		};
+		8CEEC5C00CAE06C341BF7758 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = Claritas/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				UIApplicationSceneManifest = "";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		0E50F53793A34039DD54788A /* Build configuration list for PBXNativeTarget "Claritas" */ = {
+		884BF9C0CA454B60F21B9E87 /* Build configuration list for PBXProject "Claritas" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				3C40CDBBD2CADF06BEB39112 /* Release */,
-				6BF7850F753E8C6A0DB02136 /* Debug */,
+				35DFFD156FFAC98B85C9FBEF /* Debug */,
+				6E1259A10FA996BAFF67188E /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		72C78D81D981BEC68E30103E /* Build configuration list for PBXProject "Claritas" */ = {
+		E4F6384319326AD2E91D9212 /* Build configuration list for PBXNativeTarget "Claritas" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				FB74B9B542603163CAEA86DC /* Debug */,
-				E317FA8EB7097BB835DD3F3F /* Release */,
+				8CEEC5C00CAE06C341BF7758 /* Release */,
+				7EA21A1E84D4B93CD71B637E /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = 7474AA525F6B4C80E7C8EDA9 /* Project object */;
+	rootObject = 1CF1DFAEE7956204861D0BCD /* Project object */;
 }
