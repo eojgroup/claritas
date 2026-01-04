@@ -117,9 +117,9 @@ jobs:
       ############################################
       - name: 🧩 Upsert ConfigMap (claritas-config)
         run: |
-          kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap claritas-config \
-            --from-literal=INSTANCE_CONNECTION_NAME="${{ steps.tf_out.outputs.icn }}" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          ns="${{ env.K8S_NAMESPACE }}"
+          kubectl -n "$ns" apply -f infra/k8s/config/claritas-config.yaml
+          kubectl -n "$ns" patch configmap claritas-config --type merge -p "{\"data\":{\"INSTANCE_CONNECTION_NAME\":\"${{ steps.tf_out.outputs.icn }}\",\"DB_NAME\":\"${{ steps.tf_out.outputs.db_name }}\",\"DB_USER\":\"${{ steps.tf_out.outputs.db_user }}\"}}"
 
       - name: 🔐 Upsert Secret (claritas-db)
         run: |

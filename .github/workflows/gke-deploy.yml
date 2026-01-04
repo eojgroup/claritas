@@ -44,26 +44,28 @@ jobs:
           IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
         run: |
           test -f ./apps/web/Dockerfile || { echo "ERROR: ./apps/web/Dockerfile not found"; exit 1; }
-          docker build -t "${IMAGE_URI_WEB}:${{ github.sha }}" -f ./apps/web/Dockerfile .
+          docker build -t "${IMAGE_URI_WEB}:${{ github.sha }}" -t "${IMAGE_URI_WEB}:latest" -f ./apps/web/Dockerfile .
 
       - name: 🖼️ Push Docker image (web)
         env:
           IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
         run: |
           docker push "${IMAGE_URI_WEB}:${{ github.sha }}"
+          docker push "${IMAGE_URI_WEB}:latest"
 
       - name: 🏗️ Build Docker image (api)
         env:
           IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
         run: |
           test -f ./apps/api/Dockerfile || { echo "ERROR: ./apps/api/Dockerfile not found"; exit 1; }
-          docker build -t "${IMAGE_URI_API}:${{ github.sha }}" -f ./apps/api/Dockerfile .
+          docker build -t "${IMAGE_URI_API}:${{ github.sha }}" -t "${IMAGE_URI_API}:latest" -f ./apps/api/Dockerfile .
 
       - name: 🖼️ Push Docker image (api)
         env:
           IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
         run: |
           docker push "${IMAGE_URI_API}:${{ github.sha }}"
+          docker push "${IMAGE_URI_API}:latest"
 
   deploy:
     name: Deploy to GKE
