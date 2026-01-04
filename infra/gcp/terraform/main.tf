@@ -76,7 +76,7 @@ resource "google_secret_manager_secret" "auth" {
   secret_id = each.key
 
   replication {
-    automatic {}
+    auto {}
   }
 
   depends_on = [
