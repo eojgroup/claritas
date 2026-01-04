@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import express from "express";
 import cookie from "cookie";
 import jwt from "jsonwebtoken";
-import { Issuer, generators, type Client } from "openid-client";
+import { Issuer, generators, type Client, type ClientAuthMethod } from "openid-client";
 import type { Request } from "express";
 import { query, withTransaction } from "./db";
 
@@ -15,7 +15,7 @@ type ProviderConfig = {
   clientIdEnv: string;
   clientSecretEnv?: string;
   authParams?: Record<string, string>;
-  tokenEndpointAuthMethod?: string;
+  tokenEndpointAuthMethod?: ClientAuthMethod;
 };
 
 const providerConfigs: Record<ProviderName, ProviderConfig> = {

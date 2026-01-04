@@ -5,7 +5,7 @@ require 'xcodeproj'
 
 ROOT = File.expand_path(File.join(__dir__, 'Claritas'))
 APP_NAME = 'Claritas'
-BUNDLE_ID = ENV['BUNDLE_ID'] || 'com.eojc.claritas'
+BUNDLE_ID = ENV['BUNDLE_ID'] || 'com.eojgroup.claritas'
 IOS_DEPLOYMENT = ENV['IOS_DEPLOYMENT_TARGET'] || '16.0'
 
 def abort_with(msg)
