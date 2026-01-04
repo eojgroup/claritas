@@ -2,13 +2,17 @@ import express from "express";
 import { ingestNewsApiEverything, ingestNewsApiTopHeadlines } from "./connectors/newsapi";
 import { getCountryWeatherLatest, ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
 import { pool } from "./db";
+import authRouter from "./auth";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 
+app.set("trust proxy", 1);
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 app.get("/api/hello", (_req, res) => res.json({ hello: "world" }));
+app.use("/api/auth", authRouter);
 
 // Simple endpoint to test DB connectivity
 app.get("/api/db/ping", async (_req, res) => {

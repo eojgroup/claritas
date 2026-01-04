@@ -32,6 +32,38 @@ spec:
               value: "127.0.0.1"
             - name: DB_PORT
               value: "5432"
+            - name: AUTH_BASE_URL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_BASE_URL } }
+            - name: AUTH_SUCCESS_REDIRECT_URL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_SUCCESS_REDIRECT_URL } }
+            - name: AUTH_FAILURE_REDIRECT_URL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_FAILURE_REDIRECT_URL } }
+            - name: AUTH_ALLOWED_REDIRECTS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_ALLOWED_REDIRECTS } }
+            - name: AUTH_COOKIE_SECURE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_COOKIE_SECURE } }
+            - name: AUTH_SESSION_TTL_DAYS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_SESSION_TTL_DAYS } }
+            - name: AUTH_STATE_TTL_MINUTES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_STATE_TTL_MINUTES } }
+            - name: AUTH_GOOGLE_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_GOOGLE_CLIENT_ID } }
+            - name: AUTH_GOOGLE_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_GOOGLE_CLIENT_SECRET } }
+            - name: AUTH_MICROSOFT_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_CLIENT_ID } }
+            - name: AUTH_MICROSOFT_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_CLIENT_SECRET } }
+            - name: AUTH_MICROSOFT_TENANT_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_MICROSOFT_TENANT_ID } }
+            - name: AUTH_APPLE_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_CLIENT_ID } }
+            - name: AUTH_APPLE_TEAM_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_TEAM_ID } }
+            - name: AUTH_APPLE_KEY_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_KEY_ID } }
+            - name: AUTH_APPLE_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_APPLE_PRIVATE_KEY } }
           ports: [{ name: http, containerPort: 8080 }]
           readinessProbe:
             httpGet: { path: /healthz, port: http }

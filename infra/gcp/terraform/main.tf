@@ -8,6 +8,7 @@ resource "google_project_service" "enabled_services" {
     "servicenetworking.googleapis.com",
     "sqladmin.googleapis.com",
     "pubsub.googleapis.com",        
+    "secretmanager.googleapis.com",
   ])
   project            = var.project_id
   service            = each.value
@@ -50,6 +51,43 @@ resource "google_artifact_registry_repository" "claritas_app" {
   depends_on = [
     google_project_service.enabled_services["artifactregistry.googleapis.com"]
   ]
+}
+
+############################################
+# Secret Manager (OAuth credentials)
+############################################
+locals {
+  auth_secrets = {
+    "claritas-auth-google-client-id"       = var.auth_google_client_id
+    "claritas-auth-google-client-secret"   = var.auth_google_client_secret
+    "claritas-auth-microsoft-client-id"    = var.auth_microsoft_client_id
+    "claritas-auth-microsoft-client-secret" = var.auth_microsoft_client_secret
+    "claritas-auth-microsoft-tenant-id"    = var.auth_microsoft_tenant_id
+    "claritas-auth-apple-client-id"        = var.auth_apple_client_id
+    "claritas-auth-apple-team-id"          = var.auth_apple_team_id
+    "claritas-auth-apple-key-id"           = var.auth_apple_key_id
+    "claritas-auth-apple-private-key"      = var.auth_apple_private_key
+  }
+}
+
+resource "google_secret_manager_secret" "auth" {
+  for_each  = local.auth_secrets
+  project   = var.project_id
+  secret_id = each.key
+
+  replication {
+    automatic = true
+  }
+
+  depends_on = [
+    google_project_service.enabled_services["secretmanager.googleapis.com"]
+  ]
+}
+
+resource "google_secret_manager_secret_version" "auth" {
+  for_each   = { for key, value in local.auth_secrets : key => value if value != "" }
+  secret     = google_secret_manager_secret.auth[each.key].id
+  secret_data = each.value
 }
 
 

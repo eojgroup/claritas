@@ -34,3 +34,7 @@ output "artifact_registry_repo_name" {
 output "claritas_sql_gsa_email" {
   value = google_service_account.claritas_sql_gsa.email
 }
+
+output "auth_secret_ids" {
+  value = { for key, secret in google_secret_manager_secret.auth : key => secret.id }
+}
