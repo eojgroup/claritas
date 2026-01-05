@@ -7,6 +7,13 @@
   text-rendering: optimizeLegibility;
   --font-display: "Fraunces", "Times New Roman", serif;
   --font-body: "Work Sans", "Gill Sans", "Trebuchet MS", sans-serif;
+  --login-ink: #0b1f2a;
+  --login-ink-soft: #2b3b45;
+  --login-cream: #fbf8f3;
+  --login-sand: #f4efe6;
+  --login-mist: #dbe3e1;
+  --login-teal: #1f6b68;
+  --login-amber: #d3a06b;
 }
 
 body {
