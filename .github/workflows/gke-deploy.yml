@@ -44,26 +44,28 @@ jobs:
           IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
         run: |
           test -f ./apps/web/Dockerfile || { echo "ERROR: ./apps/web/Dockerfile not found"; exit 1; }
-          docker build -t "${IMAGE_URI_WEB}:${{ github.sha }}" -f ./apps/web/Dockerfile .
+          docker build -t "${IMAGE_URI_WEB}:${{ github.sha }}" -t "${IMAGE_URI_WEB}:latest" -f ./apps/web/Dockerfile .
 
       - name: 🖼️ Push Docker image (web)
         env:
           IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
         run: |
           docker push "${IMAGE_URI_WEB}:${{ github.sha }}"
+          docker push "${IMAGE_URI_WEB}:latest"
 
       - name: 🏗️ Build Docker image (api)
         env:
           IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
         run: |
           test -f ./apps/api/Dockerfile || { echo "ERROR: ./apps/api/Dockerfile not found"; exit 1; }
-          docker build -t "${IMAGE_URI_API}:${{ github.sha }}" -f ./apps/api/Dockerfile .
+          docker build -t "${IMAGE_URI_API}:${{ github.sha }}" -t "${IMAGE_URI_API}:latest" -f ./apps/api/Dockerfile .
 
       - name: 🖼️ Push Docker image (api)
         env:
           IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
         run: |
           docker push "${IMAGE_URI_API}:${{ github.sha }}"
+          docker push "${IMAGE_URI_API}:latest"
 
   deploy:
     name: Deploy to GKE
@@ -95,6 +97,12 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
           install_components: gke-gcloud-auth-plugin
 
+      - name: 🧰 Setup Terraform (outputs)
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+          terraform_wrapper: false
+
       - name: 💻 Configure kubectl
         run: |
           echo "Getting GKE credentials for cluster ${CLUSTER}"
@@ -123,6 +131,13 @@ jobs:
         run: |
           # Ensure claritas-config (DB + auth settings) exists
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
+          base="${DOMAIN}"
+          if [ -n "${base}" ] && [ "${base#http}" = "${base}" ]; then
+            base="https://${base}"
+          fi
+          if [ -n "${base}" ]; then
+            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${base}\"}}"
+          fi
 
       - name: 🛠️ Apply Kubernetes resources
         run: |
@@ -143,10 +158,15 @@ jobs:
           # Read DB name/user from the ConfigMap we just applied
           DB_NAME=$(kubectl -n "$NS" get configmap claritas-config -o jsonpath='{.data.DB_NAME}')
           DB_USER=$(kubectl -n "$NS" get configmap claritas-config -o jsonpath='{.data.DB_USER}')
-          # Extract password from local terraform state (dev convenience). In prod, source from Secret Manager.
-          DB_PASS=$(jq -r '.resources[] | select(.type=="random_password" and .name=="db_password") | .instances[0].attributes.result' infra/gcp/terraform/terraform.tfstate)
+          # Extract password from Terraform output (remote state via GCS backend).
+          DB_PASS=""
+          if terraform -chdir=infra/gcp/terraform init -input=false -backend=true; then
+            DB_PASS=$(terraform -chdir=infra/gcp/terraform output -raw db_pass 2>/dev/null || true)
+          else
+            echo "::warning::Terraform init failed; skipping secret upsert"
+          fi
           if [ -z "$DB_PASS" ] || [ "$DB_PASS" = "null" ]; then
-            echo "::warning::Could not extract DB password from terraform.tfstate; skipping secret upsert"
+            echo "::warning::Could not extract DB password from Terraform output; skipping secret upsert"
           else
             kubectl -n "$NS" delete secret claritas-db --ignore-not-found
             kubectl -n "$NS" create secret generic claritas-db \
@@ -178,6 +198,63 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::OPENWEATHER_API_KEY secret not provided; skipping claritas-openweather upsert"
+          fi
+
+      - name: 🔐 Ensure auth provider secrets exist
+        env:
+          NS: ${{ env.NAMESPACE }}
+          AUTH_GOOGLE_CLIENT_ID: ${{ secrets.AUTH_GOOGLE_CLIENT_ID }}
+          AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.AUTH_GOOGLE_CLIENT_SECRET }}
+          AUTH_MICROSOFT_CLIENT_ID: ${{ secrets.AUTH_MICROSOFT_CLIENT_ID }}
+          AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.AUTH_MICROSOFT_CLIENT_SECRET }}
+          AUTH_MICROSOFT_TENANT_ID: ${{ secrets.AUTH_MICROSOFT_TENANT_ID }}
+          AUTH_APPLE_CLIENT_ID: ${{ secrets.AUTH_APPLE_CLIENT_ID }}
+          AUTH_APPLE_TEAM_ID: ${{ secrets.AUTH_APPLE_TEAM_ID }}
+          AUTH_APPLE_KEY_ID: ${{ secrets.AUTH_APPLE_KEY_ID }}
+          AUTH_APPLE_PRIVATE_KEY: ${{ secrets.AUTH_APPLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          args=()
+          tmpfile=""
+
+          if [ -n "${AUTH_GOOGLE_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=AUTH_GOOGLE_CLIENT_ID="$AUTH_GOOGLE_CLIENT_ID")
+          fi
+          if [ -n "${AUTH_GOOGLE_CLIENT_SECRET:-}" ]; then
+            args+=(--from-literal=AUTH_GOOGLE_CLIENT_SECRET="$AUTH_GOOGLE_CLIENT_SECRET")
+          fi
+          if [ -n "${AUTH_MICROSOFT_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=AUTH_MICROSOFT_CLIENT_ID="$AUTH_MICROSOFT_CLIENT_ID")
+          fi
+          if [ -n "${AUTH_MICROSOFT_CLIENT_SECRET:-}" ]; then
+            args+=(--from-literal=AUTH_MICROSOFT_CLIENT_SECRET="$AUTH_MICROSOFT_CLIENT_SECRET")
+          fi
+          if [ -n "${AUTH_MICROSOFT_TENANT_ID:-}" ]; then
+            args+=(--from-literal=AUTH_MICROSOFT_TENANT_ID="$AUTH_MICROSOFT_TENANT_ID")
+          fi
+          if [ -n "${AUTH_APPLE_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=AUTH_APPLE_CLIENT_ID="$AUTH_APPLE_CLIENT_ID")
+          fi
+          if [ -n "${AUTH_APPLE_TEAM_ID:-}" ]; then
+            args+=(--from-literal=AUTH_APPLE_TEAM_ID="$AUTH_APPLE_TEAM_ID")
+          fi
+          if [ -n "${AUTH_APPLE_KEY_ID:-}" ]; then
+            args+=(--from-literal=AUTH_APPLE_KEY_ID="$AUTH_APPLE_KEY_ID")
+          fi
+          if [ -n "${AUTH_APPLE_PRIVATE_KEY:-}" ]; then
+            tmpfile="$(mktemp)"
+            printf "%s" "$AUTH_APPLE_PRIVATE_KEY" > "$tmpfile"
+            args+=(--from-file=AUTH_APPLE_PRIVATE_KEY="$tmpfile")
+          fi
+
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "::warning::No auth provider secrets configured; sign-in providers will stay disabled."
+          else
+            kubectl -n "$NS" create secret generic claritas-auth "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
+          fi
+
+          if [ -n "${tmpfile}" ]; then
+            rm -f "$tmpfile"
           fi
 
       - name: 🧩 Run DB migrations (Flyway)

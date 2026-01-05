@@ -75,3 +75,9 @@ variable "auth_apple_private_key" {
   default     = ""
   sensitive   = true
 }
+
+variable "terraform_runner_service_account" {
+  description = "Service account email used by Terraform (for IAM grants). Leave empty to use terraform-github-oidc@<project_id>."
+  type        = string
+  default     = ""
+}

@@ -1,8 +1,12 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Work+Sans:wght@400;500;600;700&display=swap");
+
 /* Reset some Vite defaults so the app stretches full width/height */
 :root {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  --font-display: "Fraunces", "Times New Roman", serif;
+  --font-body: "Work Sans", "Gill Sans", "Trebuchet MS", sans-serif;
 }
 
 body {
@@ -12,11 +16,32 @@ body {
   display: block; /* ensure children aren't constrained as flex items */
   background: #f8fafc; /* slate-50 */
   color: #0f172a;      /* slate-900 */
-  font-family: "Times New Roman", Times, serif;
+  font-family: var(--font-body);
 }
 
 /* Ensure form controls inherit the brand font across browsers */
 button, input, select, textarea { font: inherit; }
+
+@keyframes login-fade {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes login-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-14px);
+  }
+}
 
 @tailwind base;
 @tailwind components;

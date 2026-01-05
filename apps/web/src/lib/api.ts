@@ -11,8 +11,41 @@ export type NewsItem = {
 
 export type CountryStat = { country: string; count: number };
 export type CountryWeather = { country: string; temp_c: number | null; humidity: number | null; observed_at: string; weather_main: string | null };
+export type AuthProviderId = "google" | "microsoft" | "apple";
+export type AuthProvider = { id: AuthProviderId; enabled: boolean };
+export type AuthUser = { id: number; email: string | null; display_name: string | null; avatar_url: string | null; roles: string[] };
 
 const API_BASE = ''; // relative to same host; In dev, consider proxying /api to backend
+
+export async function fetchAuthProviders(): Promise<AuthProvider[]> {
+  const resp = await fetch(`${API_BASE}/api/auth/providers`, { credentials: "include" });
+  if (!resp.ok) throw new Error(`Failed to fetch auth providers: ${resp.status}`);
+  const data = await resp.json();
+  return (data.providers ?? []) as AuthProvider[];
+}
+
+export async function fetchAuthMe(): Promise<AuthUser | null> {
+  const resp = await fetch(`${API_BASE}/api/auth/me`, { credentials: "include" });
+  if (resp.status === 401) return null;
+  if (!resp.ok) throw new Error(`Failed to fetch auth session: ${resp.status}`);
+  const data = await resp.json();
+  return (data.user ?? null) as AuthUser | null;
+}
+
+export async function logoutAuth(): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(`Failed to logout: ${resp.status}`);
+}
+
+export function getAuthStartUrl(provider: AuthProviderId, redirectUrl?: string): string {
+  const sp = new URLSearchParams();
+  if (redirectUrl) sp.set("redirect", redirectUrl);
+  const qs = sp.toString();
+  return `${API_BASE}/api/auth/${provider}/start${qs ? `?${qs}` : ""}`;
+}
 
 export async function fetchNews(params?: { limit?: number; offset?: number; q?: string; country?: string }) {
   const sp = new URLSearchParams();

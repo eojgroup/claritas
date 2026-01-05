@@ -57,18 +57,6 @@ resource "google_artifact_registry_repository" "claritas_app" {
 # Secret Manager (OAuth credentials)
 ############################################
 locals {
-  auth_secret_names = toset([
-    "claritas-auth-google-client-id",
-    "claritas-auth-google-client-secret",
-    "claritas-auth-microsoft-client-id",
-    "claritas-auth-microsoft-client-secret",
-    "claritas-auth-microsoft-tenant-id",
-    "claritas-auth-apple-client-id",
-    "claritas-auth-apple-team-id",
-    "claritas-auth-apple-key-id",
-    "claritas-auth-apple-private-key",
-  ])
-
   auth_secrets = {
     "claritas-auth-google-client-id"       = var.auth_google_client_id
     "claritas-auth-google-client-secret"   = var.auth_google_client_secret
@@ -80,6 +68,24 @@ locals {
     "claritas-auth-apple-key-id"           = var.auth_apple_key_id
     "claritas-auth-apple-private-key"      = var.auth_apple_private_key
   }
+
+  auth_secret_names = toset(keys(local.auth_secrets))
+  auth_secret_version_names = toset(nonsensitive([
+    for name, value in local.auth_secrets : name
+    if try(trimspace(value), "") != ""
+  ]))
+
+  terraform_runner_sa = var.terraform_runner_service_account != "" ? var.terraform_runner_service_account : "terraform-github-oidc@${var.project_id}.iam.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "terraform_runner_secretmanager" {
+  project = var.project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:${local.terraform_runner_sa}"
+
+  depends_on = [
+    google_project_service.enabled_services["secretmanager.googleapis.com"]
+  ]
 }
 
 resource "google_secret_manager_secret" "auth" {
@@ -92,12 +98,13 @@ resource "google_secret_manager_secret" "auth" {
   }
 
   depends_on = [
-    google_project_service.enabled_services["secretmanager.googleapis.com"]
+    google_project_service.enabled_services["secretmanager.googleapis.com"],
+    google_project_iam_member.terraform_runner_secretmanager
   ]
 }
 
 resource "google_secret_manager_secret_version" "auth" {
-  for_each    = local.auth_secret_names
+  for_each    = local.auth_secret_version_names
   secret      = google_secret_manager_secret.auth[each.value].id
   secret_data = local.auth_secrets[each.value]
 }

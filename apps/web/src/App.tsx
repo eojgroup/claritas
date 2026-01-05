@@ -29,10 +29,32 @@ const scatterData = [
 ];
 
 import WorldMapBubbles from "./components/WorldMapBubbles";
-import { fetchCountryStats, fetchCountryWeather, fetchNews, imageProxy, ingestWeatherNow, type CountryStat, type CountryWeather, type NewsItem } from "./lib/api";
+import LoginPage from "./components/LoginPage";
+import {
+  fetchAuthMe,
+  fetchAuthProviders,
+  fetchCountryStats,
+  fetchCountryWeather,
+  fetchNews,
+  getAuthStartUrl,
+  imageProxy,
+  ingestWeatherNow,
+  type AuthProvider,
+  type AuthProviderId,
+  type AuthUser,
+  type CountryStat,
+  type CountryWeather,
+  type NewsItem,
+} from "./lib/api";
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
+  const [authStatus, setAuthStatus] = useState<"checking" | "authed" | "unauthed">("checking");
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const signUpUrl =
+    import.meta.env.VITE_SIGNUP_URL || "mailto:access@claritas.info?subject=Claritas%20Access%20Request";
   const [dark, setDark] = useState<boolean>(() => {
     try {
       const v = localStorage.getItem('theme');
@@ -57,20 +79,52 @@ export default function ClaritasDashboard() {
   }, [dark]);
 
   useEffect(() => {
-    // Load initial data
-    fetchCountryStats({ days: 30 }).then(setCountryStats).catch(() => setCountryStats([]));
-    fetchCountryWeather().then(setWeatherStats).catch(() => setWeatherStats([]));
-    fetchNews({ limit: 20 }).then(setNews).catch(() => setNews([]));
+    let active = true;
+    setAuthStatus("checking");
+    setAuthError(null);
+
+    Promise.allSettled([fetchAuthMe(), fetchAuthProviders()]).then(([userRes, providersRes]) => {
+      if (!active) return;
+
+      const user = userRes.status === "fulfilled" ? userRes.value : null;
+      const providers = providersRes.status === "fulfilled" ? providersRes.value : [];
+      const errors: string[] = [];
+
+      if (userRes.status === "rejected") {
+        errors.push(userRes.reason instanceof Error ? userRes.reason.message : String(userRes.reason));
+      }
+      if (providersRes.status === "rejected") {
+        errors.push(providersRes.reason instanceof Error ? providersRes.reason.message : String(providersRes.reason));
+      }
+
+      setAuthUser(user);
+      setAuthProviders(providers);
+      setAuthError(errors.length > 0 ? errors.join(" | ") : null);
+      setAuthStatus(user ? "authed" : "unauthed");
+    });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
+    // Load initial data
+    if (authStatus !== "authed") return;
+    fetchCountryStats({ days: 30 }).then(setCountryStats).catch(() => setCountryStats([]));
+    fetchCountryWeather().then(setWeatherStats).catch(() => setWeatherStats([]));
+    fetchNews({ limit: 20 }).then(setNews).catch(() => setNews([]));
+  }, [authStatus]);
+
+  useEffect(() => {
     // When a country is selected, refetch list filtered by country
+    if (authStatus !== "authed") return;
     if (selectedCountry) {
       fetchNews({ limit: 20, country: selectedCountry }).then(setNews).catch(() => setNews([]));
     } else {
       fetchNews({ limit: 20 }).then(setNews).catch(() => setNews([]));
     }
-  }, [selectedCountry]);
+  }, [selectedCountry, authStatus]);
 
   const pieColors = useMemo(
     () => ["#0B1E2D", "#183447", "#254B66"],
@@ -102,6 +156,25 @@ export default function ClaritasDashboard() {
     }
   }
 
+  const userLabel = authUser?.display_name || authUser?.email || "Signed in";
+
+  const handleSignIn = (provider: AuthProviderId) => {
+    const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.location.assign(getAuthStartUrl(provider, redirect));
+  };
+
+  if (authStatus !== "authed") {
+    return (
+      <LoginPage
+        providers={authProviders}
+        status={authStatus}
+        error={authError}
+        onSignIn={handleSignIn}
+        signUpUrl={signUpUrl}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen w-full bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
       {/* Header */}
@@ -119,6 +192,12 @@ export default function ClaritasDashboard() {
 
           {/* Header actions */}
           <div className="flex items-center gap-5 text-slate-800 dark:text-slate-200">
+            {authUser && (
+              <div className="hidden md:flex items-center gap-2 rounded-full border border-slate-300 dark:border-slate-600 px-3 py-1 text-xs text-slate-600 dark:text-slate-300">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                <span className="max-w-[180px] truncate">{userLabel}</span>
+              </div>
+            )}
             <button aria-label="Toggle dark mode" onClick={() => setDark(v => !v)} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10">
               {dark ? <Sun className="h-6 w-6" /> : <Moon className="h-6 w-6" />}
             </button>
