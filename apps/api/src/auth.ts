@@ -520,7 +520,20 @@ async function handleAuthCallback(req: express.Request, res: express.Response) {
 
     const successRedirect = authState.redirect_url || optionalEnv("AUTH_SUCCESS_REDIRECT_URL");
     if (successRedirect) {
-      return res.redirect(303, successRedirect);
+      let redirectTarget = successRedirect;
+      // If redirecting to a custom scheme (mobile deep link), append session token details.
+      if (!/^https?:\/\//i.test(successRedirect)) {
+        try {
+          const url = new URL(successRedirect);
+          url.searchParams.set("token", session.token);
+          url.searchParams.set("expires_at", session.expiresAt);
+          redirectTarget = url.toString();
+        } catch {
+          // fall back to original redirect
+          redirectTarget = successRedirect;
+        }
+      }
+      return res.redirect(303, redirectTarget);
     }
 
     return res.json({ ok: true, session: { expires_at: session.expiresAt } });

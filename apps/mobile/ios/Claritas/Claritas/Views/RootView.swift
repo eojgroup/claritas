@@ -6,25 +6,31 @@ struct RootView: View {
     @AppStorage("THEME_DARK") private var dark: Bool = false
 
     var body: some View {
-        TabView(selection: $tab) {
-            NavigationStack {
-                DashboardView()
-                    .navigationTitle("Claritas")
-                    .toolbar { ToolbarItem(placement: .navigationBarTrailing) { ThemeToggle() } }
-            }
-            .tabItem { Label("Dashboard", systemImage: "globe") }
-            .tag(0)
+        Group {
+            if model.authStatus == .authed {
+                TabView(selection: $tab) {
+                    NavigationStack {
+                        DashboardView()
+                            .navigationTitle("Claritas")
+                            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { ThemeToggle() } }
+                    }
+                    .tabItem { Label("Dashboard", systemImage: "globe") }
+                    .tag(0)
 
-            NavigationStack {
-                AnalyticsView()
-                    .navigationTitle("Analytics")
+                    NavigationStack {
+                        AnalyticsView()
+                            .navigationTitle("Analytics")
+                    }
+                    .tabItem { Label("Analytics", systemImage: "chart.pie") }
+                    .tag(1)
+                }
+            } else {
+                LoginView()
             }
-            .tabItem { Label("Analytics", systemImage: "chart.pie") }
-            .tag(1)
         }
         .preferredColorScheme(dark ? .dark : .light)
         .task {
-            await model.loadInitial()
+            await model.bootstrap()
         }
     }
 }

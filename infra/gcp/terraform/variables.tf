@@ -81,3 +81,9 @@ variable "terraform_runner_service_account" {
   type        = string
   default     = ""
 }
+
+variable "k8s_namespace" {
+  description = "Kubernetes namespace where Claritas workloads run."
+  type        = string
+  default     = "claritas"
+}

@@ -4,7 +4,6 @@
 <dict>
     <!-- Default base URL for API. Override at runtime via UserDefaults key `API_BASE_URL`. -->
     <key>API_BASE_URL</key>
-    <string>http://localhost:8080</string>
+    <string>https://app.claritas.info</string>
 </dict>
 </plist>
-

@@ -9,6 +9,7 @@ struct APIError: Error, LocalizedError {
 final class APIClient {
     private let session: URLSession
     private let baseURL: URL
+    private var authToken: String?
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -35,7 +36,47 @@ final class APIClient {
         return out
     }
 
+    func setAuthToken(_ token: String?) {
+        self.authToken = token
+    }
+
     // MARK: - Endpoints
+
+    func fetchAuthProviders() async throws -> [AuthProvider] {
+        let url = baseURL.appendingPathComponent("/api/auth/providers")
+        let req = URLRequest(url: url)
+        return try await request(req, as: [AuthProvider].self, rootKey: "providers")
+    }
+
+    func fetchAuthMe() async throws -> AuthUser? {
+        let url = baseURL.appendingPathComponent("/api/auth/me")
+        var req = URLRequest(url: url)
+        let (data, resp) = try await session.data(for: authedRequest(req))
+        guard let http = resp as? HTTPURLResponse else { throw APIError(status: -1, message: "No HTTP response") }
+        if http.statusCode == 401 {
+            return nil
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw APIError(status: http.statusCode, message: message)
+        }
+        let container = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+        let value = container?["user"]
+        let valueData = try JSONSerialization.data(withJSONObject: value ?? NSNull(), options: [])
+        return try JSONDecoder.api.decode(AuthUser?.self, from: valueData)
+    }
+
+    func logout() async throws {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/auth/logout"))
+        req.httpMethod = "POST"
+        _ = try await request(req, as: EmptyResponse.self)
+    }
+
+    func authStartURL(provider: AuthProviderId, redirect: URL) -> URL? {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/auth/\(provider.rawValue)/start"), resolvingAgainstBaseURL: false)
+        comps?.queryItems = [URLQueryItem(name: "redirect", value: redirect.absoluteString)]
+        return comps?.url
+    }
 
     func fetchNews(limit: Int = 20, offset: Int = 0, q: String? = nil, country: String? = nil) async throws -> [NewsItem] {
         var comps = URLComponents(url: baseURL.appendingPathComponent("/api/news"), resolvingAgainstBaseURL: false)!
@@ -83,7 +124,7 @@ final class APIClient {
     // MARK: - Generic request
 
     private func request<T>(_ req: URLRequest, as: T.Type, rootKey: String? = nil) async throws -> T where T: Decodable {
-        let (data, resp) = try await session.data(for: req)
+        let (data, resp) = try await session.data(for: authedRequest(req))
         guard let http = resp as? HTTPURLResponse else { throw APIError(status: -1, message: "No HTTP response") }
         guard (200..<300).contains(http.statusCode) else {
             let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
@@ -97,7 +138,16 @@ final class APIClient {
         }
         return try JSONDecoder.api.decode(T.self, from: data)
     }
+
+    private func authedRequest(_ req: URLRequest) -> URLRequest {
+        guard let token = authToken, !token.isEmpty else { return req }
+        var next = req
+        next.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return next
+    }
 }
+
+private struct EmptyResponse: Decodable {}
 
 extension JSONDecoder {
     static var api: JSONDecoder {

@@ -1,5 +1,26 @@
 import Foundation
 
+enum AuthProviderId: String, Codable, CaseIterable, Identifiable {
+    case google
+    case microsoft
+    case apple
+
+    var id: String { rawValue }
+}
+
+struct AuthProvider: Codable, Identifiable {
+    let id: AuthProviderId
+    let enabled: Bool
+}
+
+struct AuthUser: Codable {
+    let id: Int
+    let email: String?
+    let display_name: String?
+    let avatar_url: String?
+    let roles: [String]?
+}
+
 struct NewsItem: Codable, Identifiable {
     let id: Int
     let kind: String?

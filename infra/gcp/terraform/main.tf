@@ -9,6 +9,8 @@ resource "google_project_service" "enabled_services" {
     "sqladmin.googleapis.com",
     "pubsub.googleapis.com",        
     "secretmanager.googleapis.com",
+    "iam.googleapis.com",
+    "iamcredentials.googleapis.com",
   ])
   project            = var.project_id
   service            = each.value
@@ -138,10 +140,18 @@ resource "google_container_cluster" "primary" {
   # minimal shape that matches your live cluster well enough
   initial_node_count = 1
 
+  workload_identity_config {
+    workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
   node_config {
     machine_type    = "e2-small"
     preemptible     = true
     service_account = "terraform-github-oidc@${var.project_id}.iam.gserviceaccount.com"
+
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
   }
 }
 
