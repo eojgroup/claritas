@@ -61,7 +61,7 @@ final class APIClient {
         return try await request(req, as: [CountryWeather].self, rootKey: "stats")
     }
 
-    func ingestWeatherNow(country: String?) async throws -> [String: Any] {
+    func ingestWeatherNow(country: String?) async throws -> WeatherIngestResponse {
         var req = URLRequest(url: baseURL.appendingPathComponent("/api/ingest/openweather/country-current"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -70,7 +70,7 @@ final class APIClient {
         } else {
             req.httpBody = Data("{}".utf8)
         }
-        return try await request(req, as: [String: Any].self)
+        return try await request(req, as: WeatherIngestResponse.self)
     }
 
     func imageProxyURL(for original: URL?) -> URL? {
@@ -82,51 +82,50 @@ final class APIClient {
 
     // MARK: - Generic request
 
-    private func request<T>(_ req: URLRequest, as: T.Type) async throws -> T where T: Decodable {
+    private func request<T>(_ req: URLRequest, as: T.Type, rootKey: String? = nil) async throws -> T where T: Decodable {
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw APIError(status: -1, message: "No HTTP response") }
         guard (200..<300).contains(http.statusCode) else {
             let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
             throw APIError(status: http.statusCode, message: message)
         }
-        if T.self == [String: Any].self {
-            let json = try JSONSerialization.jsonObject(with: data, options: [])
-            guard let dict = json as? T else { throw APIError(status: -1, message: "Invalid JSON") }
-            return dict
-        }
-        if let rootKey = _rootKey {
+        if let rootKey {
             let container = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
             let value = container?[rootKey]
             let valueData = try JSONSerialization.data(withJSONObject: value ?? NSNull(), options: [])
             return try JSONDecoder.api.decode(T.self, from: valueData)
-        } else {
-            return try JSONDecoder.api.decode(T.self, from: data)
         }
-    }
-
-    // Helper to decode when API wraps arrays into a rootKey
-    private var _rootKey: String? = nil
-    private func request<T>(_ req: URLRequest, as: T.Type, rootKey: String) async throws -> T where T: Decodable {
-        _rootKey = rootKey
-        defer { _rootKey = nil }
-        return try await request(req, as: T.self)
+        return try JSONDecoder.api.decode(T.self, from: data)
     }
 }
 
 extension JSONDecoder {
     static var api: JSONDecoder {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .formatted(DateFormatter.apiDate)
+        d.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            if let str = try? container.decode(String.self), let date = APIDateParser.parse(str) {
+                return date
+            }
+            if let seconds = try? container.decode(Double.self) {
+                return Date(timeIntervalSince1970: seconds)
+            }
+            if let seconds = try? container.decode(Int.self) {
+                return Date(timeIntervalSince1970: TimeInterval(seconds))
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date")
+        }
         return d
     }
 }
 
-extension DateFormatter {
-    static let apiDate: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
+struct WeatherIngestResponse: Decodable {
+    let inserted: Int?
+    let updated: Int?
+    let skipped: Int?
+    let http_failures: Int?
+    let db_errors: Int?
+    let last_http_status: Int?
+    let last_http_error: String?
+    let last_db_error: String?
 }
-

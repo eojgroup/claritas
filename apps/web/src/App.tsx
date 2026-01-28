@@ -53,8 +53,6 @@ export default function ClaritasDashboard() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
-  const signUpUrl =
-    import.meta.env.VITE_SIGNUP_URL || "mailto:access@claritas.info?subject=Claritas%20Access%20Request";
   const [dark, setDark] = useState<boolean>(() => {
     try {
       const v = localStorage.getItem('theme');
@@ -170,7 +168,6 @@ export default function ClaritasDashboard() {
         status={authStatus}
         error={authError}
         onSignIn={handleSignIn}
-        signUpUrl={signUpUrl}
       />
     );
   }

@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
 import type { AuthProvider, AuthProviderId } from "../lib/api";
 
 type LoginPageProps = {
@@ -7,26 +6,34 @@ type LoginPageProps = {
   status: "checking" | "unauthed";
   error?: string | null;
   onSignIn: (provider: AuthProviderId) => void;
-  signUpUrl?: string | null;
 };
 
 type ProviderMeta = {
   id: AuthProviderId;
   label: string;
+  signupLabel: string;
   helper: string;
 };
 
-type SignUpForm = {
-  name: string;
-  email: string;
-  company: string;
-  role: string;
-};
-
 const providerMeta: ProviderMeta[] = [
-  { id: "google", label: "Continue with Google", helper: "Personal or Workspace accounts" },
-  { id: "microsoft", label: "Continue with Microsoft", helper: "Azure AD or Microsoft 365" },
-  { id: "apple", label: "Continue with Apple", helper: "Apple ID for iOS and macOS" },
+  {
+    id: "google",
+    label: "Continue with Google",
+    signupLabel: "Sign up with Google",
+    helper: "Personal or Workspace accounts",
+  },
+  {
+    id: "microsoft",
+    label: "Continue with Microsoft",
+    signupLabel: "Sign up with Microsoft",
+    helper: "Azure AD or Microsoft 365",
+  },
+  {
+    id: "apple",
+    label: "Continue with Apple",
+    signupLabel: "Sign up with Apple",
+    helper: "Apple ID for iOS and macOS",
+  },
 ];
 
 const highlightCards = [
@@ -48,42 +55,6 @@ const highlightCards = [
   },
 ];
 
-const defaultSignUp: SignUpForm = {
-  name: "",
-  email: "",
-  company: "",
-  role: "",
-};
-
-function buildSignUpUrl(baseUrl: string, form: SignUpForm) {
-  if (baseUrl.startsWith("mailto:")) {
-    const [address, query = ""] = baseUrl.split("?");
-    const params = new URLSearchParams(query);
-    const lines = [
-      form.name ? `Name: ${form.name}` : "",
-      form.email ? `Email: ${form.email}` : "",
-      form.company ? `Company: ${form.company}` : "",
-      form.role ? `Role: ${form.role}` : "",
-    ].filter(Boolean);
-    const existingBody = params.get("body");
-    const body = existingBody ? `${existingBody}\n\n${lines.join("\n")}` : lines.join("\n");
-    if (body) params.set("body", body);
-    if (!params.has("subject")) params.set("subject", "Claritas access request");
-    return `${address}?${params.toString()}`;
-  }
-
-  try {
-    const origin = typeof window === "undefined" ? "https://claritas.invalid" : window.location.origin;
-    const url = new URL(baseUrl, origin);
-    if (form.name) url.searchParams.set("name", form.name);
-    if (form.email) url.searchParams.set("email", form.email);
-    if (form.company) url.searchParams.set("company", form.company);
-    if (form.role) url.searchParams.set("role", form.role);
-    return url.toString();
-  } catch {
-    return baseUrl;
-  }
-}
 
 function ProviderIcon({ id }: { id: AuthProviderId }) {
   if (id === "google") {
@@ -121,12 +92,16 @@ function ProviderIcon({ id }: { id: AuthProviderId }) {
 }
 
 function ProviderButton({
-  meta,
+  id,
+  label,
+  helper,
   enabled,
   busy,
   onClick,
 }: {
-  meta: ProviderMeta;
+  id: AuthProviderId;
+  label: string;
+  helper: string;
   enabled: boolean;
   busy: boolean;
   onClick: () => void;
@@ -152,11 +127,11 @@ function ProviderButton({
     >
       <div className="flex items-center gap-3">
         <div className={canUse ? "" : "opacity-60"}>
-          <ProviderIcon id={meta.id} />
+          <ProviderIcon id={id} />
         </div>
         <div>
-          <div className={`text-sm font-semibold ${canUse ? "text-slate-900" : "text-slate-400"}`}>{meta.label}</div>
-          <div className={`text-xs ${canUse ? "text-slate-500" : "text-slate-400"}`}>{meta.helper}</div>
+          <div className={`text-sm font-semibold ${canUse ? "text-slate-900" : "text-slate-400"}`}>{label}</div>
+          <div className={`text-xs ${canUse ? "text-slate-500" : "text-slate-400"}`}>{helper}</div>
         </div>
       </div>
       <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${badgeClass}`}>{badgeLabel}</span>
@@ -164,43 +139,18 @@ function ProviderButton({
   );
 }
 
-export default function LoginPage({ providers, status, error, onSignIn, signUpUrl }: LoginPageProps) {
+export default function LoginPage({ providers, status, error, onSignIn }: LoginPageProps) {
   const enabledMap = useMemo(() => new Map(providers.map((p) => [p.id, p.enabled])), [providers]);
   const isChecking = status === "checking";
-  const signUpHref = signUpUrl?.trim() ?? "";
-  const canSignUp = Boolean(signUpHref);
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [signUpForm, setSignUpForm] = useState<SignUpForm>(defaultSignUp);
-  const [signUpState, setSignUpState] = useState<"idle" | "sent" | "error">("idle");
 
   const handleModeChange = (nextMode: "signin" | "signup") => {
     setMode(nextMode);
-    setSignUpState("idle");
-  };
-
-  const handleInputChange = (field: keyof SignUpForm) => (event: ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.value;
-    setSignUpForm((prev) => ({ ...prev, [field]: value }));
-    if (signUpState !== "idle") setSignUpState("idle");
-  };
-
-  const canSubmit = canSignUp && signUpForm.name.trim() !== "" && signUpForm.email.trim() !== "";
-
-  const handleSignUpSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!canSignUp) {
-      setSignUpState("error");
-      return;
-    }
-    const targetUrl = buildSignUpUrl(signUpHref, signUpForm);
-    const opened = window.open(targetUrl, "_blank", "noopener,noreferrer");
-    if (!opened) window.location.assign(targetUrl);
-    setSignUpState("sent");
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[color:var(--login-cream)] text-[color:var(--login-ink)]">
+    <div className="relative min-h-screen overflow-x-hidden bg-[color:var(--login-cream)] text-[color:var(--login-ink)]">
       <div className="absolute inset-0 bg-[radial-gradient(800px_circle_at_12%_20%,rgba(31,107,104,0.18),transparent_65%)]" />
       <div className="absolute inset-0 bg-[radial-gradient(700px_circle_at_90%_10%,rgba(211,160,107,0.18),transparent_60%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,41,51,0.08)_0%,rgba(255,255,255,0)_45%)]" />
@@ -210,8 +160,8 @@ export default function LoginPage({ providers, status, error, onSignIn, signUpUr
         style={{ animationDelay: "1.5s" }}
       />
 
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col justify-center gap-12 px-6 py-16 lg:grid lg:grid-cols-[1.1fr_0.9fr] lg:py-20">
-        <div className="space-y-10">
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-6 py-12 lg:grid lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:py-20">
+        <div className="order-2 space-y-10 lg:order-1">
           <div className="flex items-center gap-3">
             <div className="relative h-12 w-12">
               <div className="absolute -left-3 top-0 h-12 w-12 rounded-full bg-[#102739]" />
@@ -267,12 +217,12 @@ export default function LoginPage({ providers, status, error, onSignIn, signUpUr
           </div>
         </div>
 
-        <div className="rounded-3xl border border-white/80 bg-white/90 p-8 text-slate-900 shadow-[0_30px_80px_rgba(14,30,37,0.18)] motion-safe:animate-[login-fade_800ms_ease-out_both]">
+        <div className="order-1 rounded-3xl border border-white/80 bg-white/90 p-8 text-slate-900 shadow-[0_30px_80px_rgba(14,30,37,0.18)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="text-xs uppercase tracking-[0.25em] text-slate-500">Secure access</div>
               <h2 className="mt-2 text-2xl font-semibold text-[color:var(--login-ink)]" style={{ fontFamily: "var(--font-display)" }}>
-                {mode === "signin" ? "Sign in to Claritas" : "Request a Claritas account"}
+                {mode === "signin" ? "Sign in to Claritas" : "Create a Claritas account"}
               </h2>
             </div>
             <div className="rounded-full bg-[color:var(--login-ink)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--login-cream)]">
@@ -280,11 +230,11 @@ export default function LoginPage({ providers, status, error, onSignIn, signUpUr
             </div>
           </div>
 
-          <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 p-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+          <div className="mt-6 flex w-full items-center gap-2 rounded-full border border-slate-200 bg-slate-100 p-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
             <button
               type="button"
               onClick={() => handleModeChange("signin")}
-              className={`rounded-full px-4 py-2 transition ${
+              className={`flex-1 rounded-full px-4 py-2 text-center transition ${
                 mode === "signin" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
               }`}
             >
@@ -293,7 +243,7 @@ export default function LoginPage({ providers, status, error, onSignIn, signUpUr
             <button
               type="button"
               onClick={() => handleModeChange("signup")}
-              className={`rounded-full px-4 py-2 transition ${
+              className={`flex-1 rounded-full px-4 py-2 text-center transition ${
                 mode === "signup" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
               }`}
             >
@@ -312,7 +262,9 @@ export default function LoginPage({ providers, status, error, onSignIn, signUpUr
               {providerMeta.map((meta) => (
                 <ProviderButton
                   key={meta.id}
-                  meta={meta}
+                  id={meta.id}
+                  label={meta.label}
+                  helper={meta.helper}
                   enabled={enabledMap.get(meta.id) ?? false}
                   busy={isChecking}
                   onClick={() => onSignIn(meta.id)}
@@ -325,97 +277,46 @@ export default function LoginPage({ providers, status, error, onSignIn, signUpUr
                   : "Select a provider to continue. You will be redirected to complete sign-in."}
               </div>
 
-              <button
-                type="button"
-                onClick={() => handleModeChange("signup")}
-                className="text-sm font-semibold text-[color:var(--login-teal)]"
-              >
-                New here? Create a Claritas account.
-              </button>
+              <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3">
+                <div className="text-sm font-semibold text-slate-900">No account yet?</div>
+                <div className="text-xs text-slate-500">Create your account in seconds with a provider.</div>
+                <button
+                  type="button"
+                  onClick={() => handleModeChange("signup")}
+                  className="mt-3 w-full rounded-full border border-slate-200 bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-slate-800"
+                >
+                  Create account
+                </button>
+              </div>
             </div>
           ) : (
-            <form className="mt-6 space-y-4" onSubmit={handleSignUpSubmit}>
-              <label className="block text-sm font-semibold text-slate-700">
-                Full name
-                <input
-                  type="text"
-                  name="name"
-                  autoComplete="name"
-                  value={signUpForm.name}
-                  onChange={handleInputChange("name")}
-                  placeholder="Alex Morgan"
-                  required
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 shadow-sm focus:border-[color:var(--login-teal)] focus:outline-none focus:ring-4 focus:ring-[color:var(--login-teal)]/10"
-                />
-              </label>
-
-              <label className="block text-sm font-semibold text-slate-700">
-                Work email
-                <input
-                  type="email"
-                  name="email"
-                  autoComplete="email"
-                  value={signUpForm.email}
-                  onChange={handleInputChange("email")}
-                  placeholder="alex@company.com"
-                  required
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 shadow-sm focus:border-[color:var(--login-teal)] focus:outline-none focus:ring-4 focus:ring-[color:var(--login-teal)]/10"
-                />
-              </label>
-
-              <label className="block text-sm font-semibold text-slate-700">
-                Company
-                <input
-                  type="text"
-                  name="company"
-                  autoComplete="organization"
-                  value={signUpForm.company}
-                  onChange={handleInputChange("company")}
-                  placeholder="Claritas Labs"
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 shadow-sm focus:border-[color:var(--login-teal)] focus:outline-none focus:ring-4 focus:ring-[color:var(--login-teal)]/10"
-                />
-              </label>
-
-              <label className="block text-sm font-semibold text-slate-700">
-                Role (optional)
-                <input
-                  type="text"
-                  name="role"
-                  autoComplete="organization-title"
-                  value={signUpForm.role}
-                  onChange={handleInputChange("role")}
-                  placeholder="Security lead"
-                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm text-slate-900 shadow-sm focus:border-[color:var(--login-teal)] focus:outline-none focus:ring-4 focus:ring-[color:var(--login-teal)]/10"
-                />
-              </label>
-
-              {signUpState === "error" ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                  Sign-up is not configured yet. Ask your admin to enable access requests.
+            <div className="mt-6 space-y-4">
+              {error ? (
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {error}
                 </div>
               ) : null}
 
-              {signUpState === "sent" ? (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-                  We opened the access request link with your details.
-                </div>
-              ) : null}
+              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                Create your Claritas account using the provider you already trust. We create your profile
+                after provider verification.
+              </div>
 
-              <button
-                type="submit"
-                disabled={!canSubmit}
-                className={`w-full rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] transition ${
-                  canSubmit
-                    ? "bg-[color:var(--login-ink)] text-[color:var(--login-cream)] hover:bg-[#132b36]"
-                    : "cursor-not-allowed bg-slate-200 text-slate-500"
-                }`}
-              >
-                Request access
-              </button>
+              {providerMeta.map((meta) => (
+                <ProviderButton
+                  key={meta.id}
+                  id={meta.id}
+                  label={meta.signupLabel}
+                  helper={meta.helper}
+                  enabled={enabledMap.get(meta.id) ?? false}
+                  busy={isChecking}
+                  onClick={() => onSignIn(meta.id)}
+                />
+              ))}
 
-              <p className="text-xs text-slate-500">
-                We will review your request and connect your provider for your team.
-              </p>
+              <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-xs text-slate-500">
+                No passwords stored. Your identity stays with your provider.
+              </div>
 
               <button
                 type="button"
@@ -424,7 +325,7 @@ export default function LoginPage({ providers, status, error, onSignIn, signUpUr
               >
                 Already have access? Sign in.
               </button>
-            </form>
+            </div>
           )}
         </div>
       </div>

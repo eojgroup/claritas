@@ -12,7 +12,7 @@ struct NewsItem: Codable, Identifiable {
 
     var eventDate: Date? {
         guard let s = event_time else { return nil }
-        return DateFormatter.apiDate.date(from: s)
+        return APIDateParser.parse(s)
     }
 }
 
@@ -29,7 +29,7 @@ struct CountryWeather: Codable, Identifiable {
     let observed_at: String
     let weather_main: String?
     var id: String { country + observed_at }
-    var observedDate: Date? { DateFormatter.apiDate.date(from: observed_at) }
+    var observedDate: Date? { APIDateParser.parse(observed_at) }
 }
 
 // JSON dynamic value to capture `payload` flexibly
@@ -66,4 +66,23 @@ enum JSONValue: Codable {
 
     var string: String? { if case .string(let s) = self { return s } else { return nil } }
     var object: [String: JSONValue]? { if case .object(let o) = self { return o } else { return nil } }
+}
+
+enum APIDateParser {
+    private static let withFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let withoutFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static func parse(_ value: String) -> Date? {
+        if let d = withFractional.date(from: value) { return d }
+        return withoutFractional.date(from: value)
+    }
 }

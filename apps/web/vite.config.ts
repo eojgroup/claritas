@@ -9,8 +9,10 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
-        changeOrigin: true,
+        // Preserve the original host so OAuth redirect URIs stay on the Vite origin.
+        changeOrigin: false,
         secure: false,
+        xfwd: true,
       },
     },
   },
