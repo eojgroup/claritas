@@ -123,18 +123,8 @@ resource "google_container_cluster" "primary" {
   # keep the cluster you're already running; do NOT let TF recreate it
   lifecycle {
     prevent_destroy = true
-    ignore_changes = [
-      # ignore fields that tend to drift on imported clusters
-      node_config[0].oauth_scopes,
-      logging_config,
-      monitoring_config,
-      network,
-      subnetwork,
-      node_pool,                 # since default-pool is managed by GKE
-      release_channel,
-      enable_autopilot,
-      private_cluster_config,
-    ]
+    # Do not attempt to reconcile imported clusters; avoid replacements.
+    ignore_changes = all
   }
 
   # minimal shape that matches your live cluster well enough
