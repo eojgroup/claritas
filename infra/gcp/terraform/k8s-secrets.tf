@@ -1,5 +1,5 @@
 ############################################
-# Kubernetes secrets for API auth + DB
+# Kubernetes secrets for API auth (optional)
 ############################################
 locals {
   k8s_auth_plain = {
@@ -22,23 +22,12 @@ locals {
 }
 
 resource "kubernetes_secret" "claritas_auth" {
+  count = length(local.k8s_auth_data) == 0 ? 0 : 1
   metadata {
     name      = "claritas-auth"
     namespace = var.k8s_namespace
   }
   data = local.k8s_auth_data
-  type = "Opaque"
-  depends_on = [google_container_cluster.primary]
-}
-
-resource "kubernetes_secret" "claritas_db" {
-  metadata {
-    name      = "claritas-db"
-    namespace = var.k8s_namespace
-  }
-  data = {
-    DB_PASSWORD = random_password.db_password.result
-  }
   type = "Opaque"
   depends_on = [google_container_cluster.primary]
 }
