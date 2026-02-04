@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -7,11 +40,26 @@ const express_1 = __importDefault(require("express"));
 const newsapi_1 = require("./connectors/newsapi");
 const openweather_1 = require("./connectors/openweather");
 const db_1 = require("./db");
+const auth_1 = __importStar(require("./auth"));
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
+app.set("trust proxy", 1);
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 app.use(express_1.default.json());
+app.use(express_1.default.urlencoded({ extended: false }));
 app.get("/api/hello", (_req, res) => res.json({ hello: "world" }));
+app.use("/api/auth", auth_1.default);
+const requireAdminRole = (0, auth_1.requireRole)("admin");
+const requireAuthenticated = (0, auth_1.requireAuth)();
+function requireIngestionAccess(req, res, next) {
+    const sharedToken = process.env.INGEST_API_TOKEN;
+    if (sharedToken) {
+        const supplied = req.get("x-ingest-token");
+        if (supplied && supplied === sharedToken)
+            return next();
+    }
+    return requireAdminRole(req, res, next);
+}
 // Simple endpoint to test DB connectivity
 app.get("/api/db/ping", async (_req, res) => {
     try {
@@ -23,7 +71,7 @@ app.get("/api/db/ping", async (_req, res) => {
     }
 });
 // List recent news items with optional filters
-app.get("/api/news", async (req, res) => {
+app.get("/api/news", requireAuthenticated, async (req, res) => {
     try {
         const limit = Math.min(Math.max(parseInt(String(req.query.limit || "20"), 10) || 20, 1), 200);
         const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
@@ -57,7 +105,7 @@ app.get("/api/news", async (req, res) => {
     }
 });
 // Aggregate counts by country (for map bubbles)
-app.get("/api/news/country-stats", async (req, res) => {
+app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
     try {
         const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 365);
         const params = [days];
@@ -74,7 +122,7 @@ app.get("/api/news/country-stats", async (req, res) => {
     }
 });
 // Ingest NewsAPI 'everything'
-app.post("/api/ingest/newsapi/everything", async (req, res) => {
+app.post("/api/ingest/newsapi/everything", requireIngestionAccess, async (req, res) => {
     try {
         const { q, language, pageSize, maxPages } = req.body || {};
         if (!q || typeof q !== "string") {
@@ -88,7 +136,7 @@ app.post("/api/ingest/newsapi/everything", async (req, res) => {
     }
 });
 // Ingest NewsAPI 'top-headlines'
-app.post("/api/ingest/newsapi/top-headlines", async (req, res) => {
+app.post("/api/ingest/newsapi/top-headlines", requireIngestionAccess, async (req, res) => {
     try {
         const { country, category, q, pageSize, maxPages } = req.body || {};
         const result = await (0, newsapi_1.ingestNewsApiTopHeadlines)({ country, category, q, pageSize, maxPages });
@@ -99,7 +147,7 @@ app.post("/api/ingest/newsapi/top-headlines", async (req, res) => {
     }
 });
 // Ingest OpenWeather current weather for countries (centroid-based)
-app.post("/api/ingest/openweather/country-current", async (req, res) => {
+app.post("/api/ingest/openweather/country-current", requireIngestionAccess, async (req, res) => {
     try {
         const { country } = req.body || {};
         const result = await (0, openweather_1.ingestOpenWeatherCountryCurrent)(typeof country === 'string' ? country : undefined);
@@ -110,7 +158,7 @@ app.post("/api/ingest/openweather/country-current", async (req, res) => {
     }
 });
 // Latest weather per country for map overlay
-app.get("/api/weather/country-latest", async (_req, res) => {
+app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) => {
     try {
         const rows = await (0, openweather_1.getCountryWeatherLatest)();
         res.json({ stats: rows });
@@ -120,7 +168,7 @@ app.get("/api/weather/country-latest", async (_req, res) => {
     }
 });
 // Lightweight image proxy for remote thumbnails that block hotlinking
-app.get("/api/proxy-image", async (req, res) => {
+app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
     try {
         const url = String(req.query.url || "");
         if (!url || !/^https?:\/\//i.test(url)) {

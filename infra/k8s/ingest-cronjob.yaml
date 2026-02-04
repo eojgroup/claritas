@@ -23,6 +23,13 @@ spec:
             - name: curl
               image: curlimages/curl:8.10.1
               imagePullPolicy: IfNotPresent
+              env:
+                - name: INGEST_API_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: claritas-auth
+                      key: INGEST_API_TOKEN
+                      optional: true
               args:
                 - /bin/sh
                 - -ceu
@@ -32,18 +39,21 @@ spec:
                   echo "> /api/ingest/newsapi/everything (q=OpenAI)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
                     -H 'content-type: application/json' \
+                    -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
                     -d '{"q":"OpenAI","pageSize":50,"maxPages":2}' \
                     "$BASE_URL/api/ingest/newsapi/everything"
                   echo
                   echo "> /api/ingest/newsapi/top-headlines (country=us, category=technology)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
                     -H 'content-type: application/json' \
+                    -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
                     -d '{"country":"us","category":"technology","pageSize":50,"maxPages":2}' \
                     "$BASE_URL/api/ingest/newsapi/top-headlines"
                   echo
                   echo "> /api/ingest/openweather/country-current (global sample set)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
                     -H 'content-type: application/json' \
+                    -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
                     -d '{}' \
                     "$BASE_URL/api/ingest/openweather/country-current"
                   echo

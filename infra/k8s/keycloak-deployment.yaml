@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: claritas
+  labels: { app: keycloak }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: keycloak }
+  template:
+    metadata:
+      labels: { app: keycloak }
+    spec:
+      serviceAccountName: keycloak-sa
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: keycloak
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.0.7
+          args:
+            - start
+            - --http-enabled=true
+            - --health-enabled=true
+            - --metrics-enabled=true
+            - --proxy-headers=xforwarded
+            - --hostname=auth.claritas.info
+            - --hostname-strict=true
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL_HOST
+              value: "127.0.0.1"
+            - name: KC_DB_URL_PORT
+              value: "5432"
+            - name: KC_DB_URL_DATABASE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_DB_NAME } }
+            - name: KC_DB_USERNAME
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_DB_USER } }
+            - name: KC_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_DB_PASSWORD } }
+            - name: KEYCLOAK_ADMIN
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_ADMIN } }
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_ADMIN_PASSWORD } }
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet: { path: /health/ready, port: http }
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            initialDelaySeconds: 45
+            periodSeconds: 15
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: "500m", memory: "1Gi" }
+            limits: { cpu: "1500m", memory: "2Gi" }
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
+          args:
+            - "--structured-logs"
+            - "--private-ip"
+            - "--port=5432"
+            - "$(INSTANCE_CONNECTION_NAME)"
+          env:
+            - name: INSTANCE_CONNECTION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: claritas-config
+                  key: INSTANCE_CONNECTION_NAME
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

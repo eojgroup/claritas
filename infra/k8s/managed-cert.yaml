@@ -6,3 +6,4 @@ metadata:
 spec:
   domains:
     - app.claritas.info
+    - auth.claritas.info

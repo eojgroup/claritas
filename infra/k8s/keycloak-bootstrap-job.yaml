@@ -1,0 +1,71 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-bootstrap
+  namespace: claritas
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: keycloak-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: keycloak-sa
+      containers:
+        - name: bootstrap
+          image: quay.io/keycloak/keycloak:26.0.7
+          command: ["/bin/bash", "/bootstrap/bootstrap.sh"]
+          env:
+            - name: KEYCLOAK_URL
+              value: "http://keycloak:8080"
+            - name: KEYCLOAK_REALM
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_REALM } }
+            - name: KEYCLOAK_WEB_CLIENT_ID
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_WEB_CLIENT_ID } }
+            - name: KEYCLOAK_MOBILE_CLIENT_ID
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_MOBILE_CLIENT_ID } }
+            - name: KEYCLOAK_API_CLIENT_ID
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_KEYCLOAK_CLIENT_ID } }
+            - name: KEYCLOAK_WEB_REDIRECT_URIS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_WEB_REDIRECT_URIS } }
+            - name: KEYCLOAK_WEB_ORIGINS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_WEB_ORIGINS } }
+            - name: KEYCLOAK_MOBILE_REDIRECT_URIS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_MOBILE_REDIRECT_URIS } }
+            - name: KEYCLOAK_API_REDIRECT_URIS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_API_REDIRECT_URIS } }
+            - name: AUTH_KEYCLOAK_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_KEYCLOAK_CLIENT_SECRET, optional: true } }
+            - name: KEYCLOAK_ADMIN
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_ADMIN } }
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_ADMIN_PASSWORD } }
+            - name: KC_IDP_GOOGLE_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_GOOGLE_CLIENT_ID, optional: true } }
+            - name: KC_IDP_GOOGLE_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_GOOGLE_CLIENT_SECRET, optional: true } }
+            - name: KC_IDP_MICROSOFT_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_MICROSOFT_CLIENT_ID, optional: true } }
+            - name: KC_IDP_MICROSOFT_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_MICROSOFT_CLIENT_SECRET, optional: true } }
+            - name: KC_IDP_MICROSOFT_TENANT
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_MICROSOFT_TENANT, optional: true } }
+            - name: KC_IDP_APPLE_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_APPLE_CLIENT_ID, optional: true } }
+            - name: KC_IDP_APPLE_TEAM_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_APPLE_TEAM_ID, optional: true } }
+            - name: KC_IDP_APPLE_KEY_ID
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_APPLE_KEY_ID, optional: true } }
+            - name: KC_IDP_APPLE_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: KC_IDP_APPLE_PRIVATE_KEY, optional: true } }
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: keycloak-bootstrap-scripts
+            defaultMode: 0555

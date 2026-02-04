@@ -1,0 +1,260 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-bootstrap-scripts
+  namespace: claritas
+data:
+  bootstrap.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    KCADM="/opt/keycloak/bin/kcadm.sh"
+    KEYCLOAK_URL="${KEYCLOAK_URL:-http://keycloak:8080}"
+    KEYCLOAK_ADMIN_REALM="${KEYCLOAK_ADMIN_REALM:-master}"
+    KEYCLOAK_REALM="${KEYCLOAK_REALM:-claritas}"
+
+    KEYCLOAK_WEB_CLIENT_ID="${KEYCLOAK_WEB_CLIENT_ID:-claritas-web}"
+    KEYCLOAK_MOBILE_CLIENT_ID="${KEYCLOAK_MOBILE_CLIENT_ID:-claritas-mobile}"
+    KEYCLOAK_API_CLIENT_ID="${KEYCLOAK_API_CLIENT_ID:-claritas-api}"
+
+    KEYCLOAK_WEB_REDIRECT_URIS="${KEYCLOAK_WEB_REDIRECT_URIS:-https://app.claritas.info/*,http://localhost:5173/*}"
+    KEYCLOAK_WEB_ORIGINS="${KEYCLOAK_WEB_ORIGINS:-https://app.claritas.info,http://localhost:5173}"
+    KEYCLOAK_MOBILE_REDIRECT_URIS="${KEYCLOAK_MOBILE_REDIRECT_URIS:-claritas://auth/*}"
+    KEYCLOAK_API_REDIRECT_URIS="${KEYCLOAK_API_REDIRECT_URIS:-https://app.claritas.info/api/auth/*/callback,http://localhost:8080/api/auth/*/callback}"
+
+    log() { echo "[keycloak-bootstrap] $*"; }
+
+    trim() {
+      local v="$1"
+      v="${v#"${v%%[![:space:]]*}"}"
+      v="${v%"${v##*[![:space:]]}"}"
+      printf "%s" "$v"
+    }
+
+    json_escape() {
+      printf "%s" "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; :a;N;$!ba;s/\n/\\n/g'
+    }
+
+    csv_to_json_array() {
+      local csv="${1:-}"
+      local first=1
+      local part=""
+      printf "["
+      IFS=',' read -r -a items <<< "$csv"
+      for part in "${items[@]}"; do
+        part="$(trim "$part")"
+        [ -z "$part" ] && continue
+        if [ "$first" -eq 0 ]; then
+          printf ","
+        fi
+        printf "\"%s\"" "$(json_escape "$part")"
+        first=0
+      done
+      printf "]"
+    }
+
+    client_internal_id() {
+      local client_id="$1"
+      "$KCADM" get clients -r "$KEYCLOAK_REALM" -q clientId="$client_id" --fields id \
+        | sed -n 's/.*"id" : "\([^"]*\)".*/\1/p' \
+        | head -n 1
+    }
+
+    upsert_client() {
+      local client_id="$1"
+      local public_client="$2"
+      local redirect_csv="$3"
+      local origins_csv="$4"
+      local client_secret="${5:-}"
+      local redirect_uris
+      local web_origins
+      local payload
+      local id
+
+      redirect_uris="$(csv_to_json_array "$redirect_csv")"
+      web_origins="$(csv_to_json_array "$origins_csv")"
+
+      payload="$(mktemp)"
+      {
+        echo "{"
+        echo "  \"clientId\": \"$(json_escape "$client_id")\","
+        echo "  \"enabled\": true,"
+        echo "  \"protocol\": \"openid-connect\","
+        echo "  \"standardFlowEnabled\": true,"
+        echo "  \"implicitFlowEnabled\": false,"
+        echo "  \"directAccessGrantsEnabled\": false,"
+        echo "  \"serviceAccountsEnabled\": false,"
+        echo "  \"publicClient\": ${public_client},"
+        if [ "$public_client" = "false" ] && [ -n "$client_secret" ]; then
+          echo "  \"secret\": \"$(json_escape "$client_secret")\","
+        fi
+        echo "  \"redirectUris\": ${redirect_uris},"
+        echo "  \"webOrigins\": ${web_origins},"
+        echo "  \"attributes\": {"
+        echo "    \"pkce.code.challenge.method\": \"S256\","
+        echo "    \"post.logout.redirect.uris\": \"+\""
+        echo "  }"
+        echo "}"
+      } > "$payload"
+
+      id="$(client_internal_id "$client_id" || true)"
+      if [ -n "${id:-}" ]; then
+        log "Updating client ${client_id}"
+        "$KCADM" update "clients/${id}" -r "$KEYCLOAK_REALM" -f "$payload"
+      else
+        log "Creating client ${client_id}"
+        "$KCADM" create clients -r "$KEYCLOAK_REALM" -f "$payload"
+      fi
+      rm -f "$payload"
+    }
+
+    upsert_idp() {
+      local alias="$1"
+      local payload="$2"
+      if "$KCADM" get "identity-provider/instances/${alias}" -r "$KEYCLOAK_REALM" >/dev/null 2>&1; then
+        log "Updating identity provider ${alias}"
+        "$KCADM" update "identity-provider/instances/${alias}" -r "$KEYCLOAK_REALM" -f "$payload"
+      else
+        log "Creating identity provider ${alias}"
+        "$KCADM" create "identity-provider/instances" -r "$KEYCLOAK_REALM" -f "$payload"
+      fi
+    }
+
+    configure_google_idp() {
+      [ -z "${KC_IDP_GOOGLE_CLIENT_ID:-}" ] && return 0
+      [ -z "${KC_IDP_GOOGLE_CLIENT_SECRET:-}" ] && return 0
+      local payload
+      payload="$(mktemp)"
+      cat > "$payload" <<EOF
+    {
+      "alias": "google",
+      "providerId": "google",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "syncMode": "FORCE",
+      "config": {
+        "clientId": "$(json_escape "${KC_IDP_GOOGLE_CLIENT_ID}")",
+        "clientSecret": "$(json_escape "${KC_IDP_GOOGLE_CLIENT_SECRET}")",
+        "defaultScope": "openid profile email"
+      }
+    }
+    EOF
+      upsert_idp "google" "$payload"
+      rm -f "$payload"
+    }
+
+    configure_microsoft_idp() {
+      [ -z "${KC_IDP_MICROSOFT_CLIENT_ID:-}" ] && return 0
+      [ -z "${KC_IDP_MICROSOFT_CLIENT_SECRET:-}" ] && return 0
+      local tenant
+      local payload
+      tenant="${KC_IDP_MICROSOFT_TENANT:-common}"
+      payload="$(mktemp)"
+      cat > "$payload" <<EOF
+    {
+      "alias": "microsoft",
+      "providerId": "microsoft",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "syncMode": "FORCE",
+      "config": {
+        "clientId": "$(json_escape "${KC_IDP_MICROSOFT_CLIENT_ID}")",
+        "clientSecret": "$(json_escape "${KC_IDP_MICROSOFT_CLIENT_SECRET}")",
+        "tenant": "$(json_escape "${tenant}")"
+      }
+    }
+    EOF
+      upsert_idp "microsoft" "$payload"
+      rm -f "$payload"
+    }
+
+    configure_apple_idp() {
+      [ -z "${KC_IDP_APPLE_CLIENT_ID:-}" ] && return 0
+      [ -z "${KC_IDP_APPLE_TEAM_ID:-}" ] && return 0
+      [ -z "${KC_IDP_APPLE_KEY_ID:-}" ] && return 0
+      [ -z "${KC_IDP_APPLE_PRIVATE_KEY:-}" ] && return 0
+      local payload
+      payload="$(mktemp)"
+      cat > "$payload" <<EOF
+    {
+      "alias": "apple",
+      "providerId": "apple",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "authenticateByDefault": false,
+      "firstBrokerLoginFlowAlias": "first broker login",
+      "syncMode": "FORCE",
+      "config": {
+        "clientId": "$(json_escape "${KC_IDP_APPLE_CLIENT_ID}")",
+        "teamId": "$(json_escape "${KC_IDP_APPLE_TEAM_ID}")",
+        "keyId": "$(json_escape "${KC_IDP_APPLE_KEY_ID}")",
+        "privateKey": "$(json_escape "${KC_IDP_APPLE_PRIVATE_KEY}")"
+      }
+    }
+    EOF
+      upsert_idp "apple" "$payload"
+      rm -f "$payload"
+    }
+
+    authed=0
+    for _ in $(seq 1 60); do
+      if "$KCADM" config credentials \
+        --server "${KEYCLOAK_URL}" \
+        --realm "${KEYCLOAK_ADMIN_REALM}" \
+        --user "${KEYCLOAK_ADMIN}" \
+        --password "${KEYCLOAK_ADMIN_PASSWORD}" >/dev/null 2>&1; then
+        authed=1
+        break
+      fi
+      log "Waiting for Keycloak admin API at ${KEYCLOAK_URL}..."
+      sleep 5
+    done
+    if [ "$authed" -ne 1 ]; then
+      log "ERROR: Unable to authenticate against Keycloak admin API"
+      exit 1
+    fi
+
+    if "$KCADM" get "realms/${KEYCLOAK_REALM}" >/dev/null 2>&1; then
+      log "Realm ${KEYCLOAK_REALM} exists; updating baseline settings"
+      "$KCADM" update "realms/${KEYCLOAK_REALM}" -s enabled=true -s loginWithEmailAllowed=true -s registrationAllowed=true >/dev/null
+    else
+      log "Creating realm ${KEYCLOAK_REALM}"
+      "$KCADM" create realms \
+        -s realm="${KEYCLOAK_REALM}" \
+        -s enabled=true \
+        -s displayName="Claritas" \
+        -s loginWithEmailAllowed=true \
+        -s registrationAllowed=true >/dev/null
+    fi
+
+    upsert_client "${KEYCLOAK_WEB_CLIENT_ID}" "true" "${KEYCLOAK_WEB_REDIRECT_URIS}" "${KEYCLOAK_WEB_ORIGINS}"
+    upsert_client "${KEYCLOAK_MOBILE_CLIENT_ID}" "true" "${KEYCLOAK_MOBILE_REDIRECT_URIS}" ""
+
+    if [ -n "${AUTH_KEYCLOAK_CLIENT_SECRET:-}" ]; then
+      upsert_client "${KEYCLOAK_API_CLIENT_ID}" "false" "${KEYCLOAK_API_REDIRECT_URIS}" "" "${AUTH_KEYCLOAK_CLIENT_SECRET}"
+    else
+      upsert_client "${KEYCLOAK_API_CLIENT_ID}" "true" "${KEYCLOAK_API_REDIRECT_URIS}" ""
+      log "AUTH_KEYCLOAK_CLIENT_SECRET not set; created ${KEYCLOAK_API_CLIENT_ID} as public PKCE client"
+    fi
+
+    if ! configure_google_idp; then
+      log "WARN: Google IdP bootstrap failed; configure manually in Keycloak admin."
+    fi
+    if ! configure_microsoft_idp; then
+      log "WARN: Microsoft IdP bootstrap failed; configure manually in Keycloak admin."
+    fi
+    if ! configure_apple_idp; then
+      log "WARN: Apple IdP bootstrap failed; configure manually in Keycloak admin."
+    fi
+
+    log "Bootstrap completed"

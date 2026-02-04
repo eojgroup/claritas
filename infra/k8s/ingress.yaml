@@ -24,3 +24,12 @@ spec:
               service:
                 name: claritas-api
                 port: { number: 8080 }
+    - host: auth.claritas.info
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port: { number: 8080 }

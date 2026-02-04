@@ -11,6 +11,9 @@ enum AuthProviderId: String, Codable, CaseIterable, Identifiable {
 struct AuthProvider: Codable, Identifiable {
     let id: AuthProviderId
     let enabled: Bool
+    let display_name: String?
+    let icon: String?
+    let start_path: String?
 }
 
 struct AuthUser: Codable {

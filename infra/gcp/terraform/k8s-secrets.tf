@@ -3,15 +3,20 @@
 ############################################
 locals {
   k8s_auth_plain = {
-    AUTH_GOOGLE_CLIENT_ID       = var.auth_google_client_id
-    AUTH_GOOGLE_CLIENT_SECRET   = var.auth_google_client_secret
-    AUTH_MICROSOFT_CLIENT_ID    = var.auth_microsoft_client_id
-    AUTH_MICROSOFT_CLIENT_SECRET = var.auth_microsoft_client_secret
-    AUTH_MICROSOFT_TENANT_ID    = var.auth_microsoft_tenant_id
-    AUTH_APPLE_CLIENT_ID        = var.auth_apple_client_id
-    AUTH_APPLE_TEAM_ID          = var.auth_apple_team_id
-    AUTH_APPLE_KEY_ID           = var.auth_apple_key_id
-    AUTH_APPLE_PRIVATE_KEY      = var.auth_apple_private_key
+    AUTH_KEYCLOAK_CLIENT_SECRET = var.auth_keycloak_client_secret
+    INGEST_API_TOKEN            = var.ingest_api_token
+    KEYCLOAK_DB_PASSWORD        = random_password.keycloak_db_password.result
+    KEYCLOAK_ADMIN              = var.keycloak_admin
+    KEYCLOAK_ADMIN_PASSWORD     = var.keycloak_admin_password
+    KC_IDP_GOOGLE_CLIENT_ID     = var.auth_google_client_id
+    KC_IDP_GOOGLE_CLIENT_SECRET = var.auth_google_client_secret
+    KC_IDP_MICROSOFT_CLIENT_ID  = var.auth_microsoft_client_id
+    KC_IDP_MICROSOFT_CLIENT_SECRET = var.auth_microsoft_client_secret
+    KC_IDP_MICROSOFT_TENANT     = var.auth_microsoft_tenant_id
+    KC_IDP_APPLE_CLIENT_ID      = var.auth_apple_client_id
+    KC_IDP_APPLE_TEAM_ID        = var.auth_apple_team_id
+    KC_IDP_APPLE_KEY_ID         = var.auth_apple_key_id
+    KC_IDP_APPLE_PRIVATE_KEY    = var.auth_apple_private_key
   }
 
   k8s_auth_data = {

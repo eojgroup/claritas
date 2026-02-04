@@ -69,6 +69,7 @@ export default function ClaritasDashboard() {
   const [listMode, setListMode] = useState<"news" | "weather">("news");
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
   const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
+  const authProviderMap = useMemo(() => new Map(authProviders.map((p) => [p.id, p])), [authProviders]);
 
   useEffect(() => {
     const el = document.documentElement;
@@ -158,6 +159,13 @@ export default function ClaritasDashboard() {
 
   const handleSignIn = (provider: AuthProviderId) => {
     const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const providerMeta = authProviderMap.get(provider);
+    if (providerMeta?.start_path) {
+      const url = new URL(providerMeta.start_path, window.location.origin);
+      url.searchParams.set("redirect", redirect);
+      window.location.assign(url.toString());
+      return;
+    }
     window.location.assign(getAuthStartUrl(provider, redirect));
   };
 

@@ -87,3 +87,30 @@ variable "k8s_namespace" {
   type        = string
   default     = "claritas"
 }
+
+variable "auth_keycloak_client_secret" {
+  description = "Client secret for the API's Keycloak confidential client."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "ingest_api_token" {
+  description = "Shared token used by internal ingestion jobs when calling ingest endpoints."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "keycloak_admin" {
+  description = "Keycloak initial admin username."
+  type        = string
+  default     = "admin"
+}
+
+variable "keycloak_admin_password" {
+  description = "Keycloak initial admin password."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

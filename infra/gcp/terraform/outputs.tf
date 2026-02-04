@@ -23,6 +23,19 @@ output "db_pass" {
   sensitive = true
 }
 
+output "keycloak_db_name" {
+  value = google_sql_database.keycloak_db.name
+}
+
+output "keycloak_db_user" {
+  value = google_sql_user.keycloak.name
+}
+
+output "keycloak_db_pass" {
+  value     = random_password.keycloak_db_password.result
+  sensitive = true
+}
+
 output "kubernetes_cluster_name" {
   value = google_container_cluster.primary.name
 }

@@ -12,6 +12,18 @@
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_USER } }
             - name: DB_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
+            - name: AUTH_PROVIDERS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_PROVIDERS } }
+            - name: AUTH_ISSUER_URL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_ISSUER_URL } }
+            - name: AUTH_KEYCLOAK_CLIENT_ID
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_KEYCLOAK_CLIENT_ID } }
+            - name: AUTH_KEYCLOAK_SCOPE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_KEYCLOAK_SCOPE } }
+            - name: AUTH_KEYCLOAK_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_KEYCLOAK_CLIENT_SECRET, optional: true } }
+            - name: INGEST_API_TOKEN
+              valueFrom: { secretKeyRef: { name: claritas-auth, key: INGEST_API_TOKEN, optional: true } }
           ports:
             - containerPort: 8080
 

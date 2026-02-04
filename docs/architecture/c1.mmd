@@ -1,30 +1,59 @@
 graph TB
-    subgraph Users
-        A[End User] -->|Uses| B["Claritas Web App (C05, C06, C09)"]
-        A2[Mobile User] -->|Uses| C["Claritas Mobile App (C08, C09)"]
-        Dev[Developer] -->|Consumes| D["Claritas APIs (C07)"]
+    subgraph Actors
+        U1[Web User]
+        U2[Mobile User]
+        U3[Operations Team]
     end
 
-    subgraph Claritas Platform
-        B --> E[Application Server]
-        C --> E
-        D --> F[API Gateway]
-        F --> E
-
-        E --> G["Processing & Enrichment Layer (C02, C03)"]
-        G --> H["Machine Learning Services (C03)"]
-        G --> I["Metadata Enrichment (C02)"]
-
-        E --> J[Data Storage Layer]
-        J -->|Stores raw & enriched data| K["Cloud Data Lake (C01)"]
-        J --> L["MongoDB Document Store (C01)"]
-        J --> M["Redis Cache (C01)"]
-
-        E --> N["Event Bus / PubSub (C04)"]
-        N --> O["Real-time Alert Services (C04)"]
+    subgraph Identity Platform
+        KC[Keycloak (Open Source IAM)]
+        IDP1[Google]
+        IDP2[Microsoft]
+        IDP3[Apple]
     end
 
-    subgraph External Data Sources
-        X[OECD API] --> G
-        Y[World Bank API] --> G
+    subgraph Claritas Platform (GCP)
+        WEB[Claritas Web App]
+        MOB[Claritas Mobile App]
+        ING[Ingress / HTTPS]
+        API[Claritas API Platform (GKE)]
+        JOBS[Ingestion Jobs / CronJobs]
+        KBOOT[Keycloak Bootstrap Job]
+        DB[(Cloud SQL PostgreSQL)]
+        OBS[Logging / Monitoring / Audit]
+        SEC[Secret + IAM Controls]
     end
+
+    subgraph External Data Providers
+        EXT1[News Data Provider APIs]
+        EXT2[Weather Data Provider APIs]
+        EXT3[Additional Domain Sources]
+    end
+
+    U1 --> WEB
+    U2 --> MOB
+    WEB --> ING
+    MOB --> ING
+    ING --> API
+
+    WEB -. OIDC PKCE .-> KC
+    MOB -. OIDC PKCE .-> KC
+    KC -. Identity Brokering .-> IDP1
+    KC -. Identity Brokering .-> IDP2
+    KC -. Identity Brokering .-> IDP3
+
+    API --> DB
+    JOBS --> API
+    KBOOT --> KC
+    KBOOT --> SEC
+    API --> OBS
+    JOBS --> OBS
+    API --> SEC
+    JOBS --> SEC
+
+    EXT1 --> JOBS
+    EXT2 --> JOBS
+    EXT3 --> JOBS
+
+    U3 --> OBS
+    U3 --> SEC

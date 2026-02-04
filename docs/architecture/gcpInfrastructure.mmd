@@ -1,7 +1,38 @@
 flowchart TD
-  GitHubActions -->|OIDC Authentication| WorkloadIdentityProvider
-  WorkloadIdentityProvider --> WorkloadIdentityPool
-  WorkloadIdentityPool --> ServiceAccount["Terraform Service Account"]
-  ServiceAccount -->|IAM Permissions| GCP_APIs
-  Terraform -->|Uses backend| GCSBucket["GCS Bucket: claritas-tf-state"]
-  Terraform -->|Enables| APIsList["APIs: GKE, Firestore, Pub/Sub, Vertex AI"]
+  GA[GitHub Actions] -->|OIDC| WIP[Workload Identity Provider]
+  WIP --> WPool[Workload Identity Pool]
+  WPool --> TSA[Terraform Service Account]
+  TSA -->|Terraform Apply| TF[Terraform]
+
+  TF --> ST[GCS Terraform State Bucket]
+  TF --> GKE[GKE Cluster]
+  TF --> SQL[Cloud SQL PostgreSQL]
+  TF --> AR[Artifact Registry]
+  TF --> IAM[IAM + Workload Identity Bindings]
+  TF --> INFR[Ingress + Managed Certificate]
+
+  subgraph Runtime on GKE
+    WEB[Web Deployment]
+    API[API Deployment]
+    JOB[Ingestion CronJobs/Jobs]
+    KC[Keycloak Deployment (Open Source IAM)]
+    KBOOT[Keycloak Bootstrap Job]
+    KCS[Keycloak Service]
+    SEC[ConfigMaps + Secrets]
+  end
+
+  AR --> WEB
+  AR --> API
+  INFR --> WEB
+  INFR --> API
+  API --> SQL
+  JOB --> API
+  API --> SEC
+  JOB --> SEC
+
+  KC --> KCS
+  INFR --> KCS
+  KCS --> SQL
+  KC --> SEC
+  SEC --> KBOOT
+  KBOOT --> KC

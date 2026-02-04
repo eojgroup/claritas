@@ -1,27 +1,72 @@
 graph TB
-    subgraph Frontend
-        A["Web App (React)"] --> B["API Gateway (Google Cloud Endpoints)"]
-        C["Mobile App (Kotlin/Swift)"] --> B
+    subgraph Client Layer
+        W1[React Web App]
+        M1[iOS Mobile App]
     end
 
-    subgraph Backend Services
-        B --> D["Application Server (Node.js, GKE)"]
-        D --> E["Authentication Service (Firebase Auth)"]
-        D --> F["Insights & ML Service (Cloud Functions + Vertex AI)"]
+    subgraph Identity
+        K1[Keycloak (Realm + Clients)]
+        P1[Google Provider]
+        P2[Microsoft Provider]
+        P3[Apple Provider]
+        K2[Bootstrap Job (kcadm)]
     end
 
-    subgraph Storage
-        D --> G["Document DB (Firestore)"]
-        D --> H["Cloud Data Lake (Cloud Storage)"]
-        D --> I["Cache (Memorystore - Redis)"]
+    subgraph Edge
+        E1[GKE Ingress + TLS]
     end
 
-    subgraph Messaging & Events
-        D --> J["Event Bus (Pub/Sub)"]
-        J --> K["Alert Service (Cloud Functions)"]
+    subgraph API Layer (GKE)
+        A1[Express API]
+        A2[Auth Middleware\nissuer-aware JWT verification + auth context]
+        A3[Domain Endpoints\nnews / weather / country stats]
+        A4[Ingestion Endpoints\nadmin role or x-ingest-token]
     end
 
-    subgraph External Data Sources
-        L["OECD API"] --> F
-        M["World Bank API"] --> F
+    subgraph Data Pipeline
+        J1[CronJob / Backfill Jobs]
+        C1[Connector: News Sources]
+        C2[Connector: Weather Sources]
+        N1[Normalizer + Dedupe + Upsert]
     end
+
+    subgraph Data Layer (Cloud SQL Postgres)
+        D1[(app_user, auth_identity, auth_session)]
+        D2[(auth_role, auth_user_role)]
+        D3[(source, source_feed, ingestion_run)]
+        D4[(item, weather_snapshot, country)]
+    end
+
+    subgraph Platform Controls
+        S1[Secrets + Workload Identity]
+        O1[Logs / Metrics / Audit]
+    end
+
+    W1 --> E1 --> A1
+    M1 --> E1 --> A1
+
+    W1 --> K1
+    M1 --> K1
+    K1 --> P1
+    K1 --> P2
+    K1 --> P3
+    K2 --> K1
+
+    A1 --> A2
+    A1 --> A3
+    J1 --> A4
+    A4 --> C1
+    A4 --> C2
+    C1 --> N1
+    C2 --> N1
+
+    A2 --> D1
+    A2 --> D2
+    N1 --> D3
+    N1 --> D4
+    A3 --> D4
+
+    A1 --> S1
+    J1 --> S1
+    A1 --> O1
+    J1 --> O1

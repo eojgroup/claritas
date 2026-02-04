@@ -69,6 +69,9 @@ locals {
     "claritas-auth-apple-team-id"          = var.auth_apple_team_id
     "claritas-auth-apple-key-id"           = var.auth_apple_key_id
     "claritas-auth-apple-private-key"      = var.auth_apple_private_key
+    "claritas-auth-keycloak-client-secret" = var.auth_keycloak_client_secret
+    "claritas-ingest-api-token"            = var.ingest_api_token
+    "claritas-keycloak-admin-password"     = var.keycloak_admin_password
   }
 
   auth_secret_names = toset(keys(local.auth_secrets))
@@ -164,6 +167,7 @@ locals {
   wi_bindings = [
     "serviceAccount:${var.project_id}.svc.id.goog[claritas/api-sa]",
     "serviceAccount:${var.project_id}.svc.id.goog[claritas/flyway-sa]",
+    "serviceAccount:${var.project_id}.svc.id.goog[claritas/keycloak-sa]",
   ]
 }
 
@@ -201,6 +205,11 @@ resource "google_service_networking_connection" "vpc_connection" {
 }
 
 resource "random_password" "db_password" {
+  length  = 32
+  special = false
+}
+
+resource "random_password" "keycloak_db_password" {
   length  = 32
   special = false
 }
@@ -251,9 +260,22 @@ resource "google_sql_database" "db" {
   instance = google_sql_database_instance.pg.name
 }
 
+resource "google_sql_database" "keycloak_db" {
+  name     = "keycloak"
+  project  = var.project_id
+  instance = google_sql_database_instance.pg.name
+}
+
 resource "google_sql_user" "app" {
   name     = "claritas_app"
   project  = var.project_id
   instance = google_sql_database_instance.pg.name
   password = random_password.db_password.result
+}
+
+resource "google_sql_user" "keycloak" {
+  name     = "keycloak_app"
+  project  = var.project_id
+  instance = google_sql_database_instance.pg.name
+  password = random_password.keycloak_db_password.result
 }

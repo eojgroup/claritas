@@ -72,8 +72,14 @@ final class APIClient {
         _ = try await request(req, as: EmptyResponse.self)
     }
 
-    func authStartURL(provider: AuthProviderId, redirect: URL) -> URL? {
-        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/auth/\(provider.rawValue)/start"), resolvingAgainstBaseURL: false)
+    func authStartURL(provider: AuthProviderId, redirect: URL, startPathOverride: String? = nil) -> URL? {
+        let startPath: String
+        if let startPathOverride, !startPathOverride.isEmpty {
+            startPath = startPathOverride
+        } else {
+            startPath = "/api/auth/\(provider.rawValue)/start"
+        }
+        var comps = URLComponents(url: baseURL.appendingPathComponent(startPath), resolvingAgainstBaseURL: false)
         comps?.queryItems = [URLQueryItem(name: "redirect", value: redirect.absoluteString)]
         return comps?.url
     }

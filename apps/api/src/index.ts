@@ -2,7 +2,7 @@ import express from "express";
 import { ingestNewsApiEverything, ingestNewsApiTopHeadlines } from "./connectors/newsapi";
 import { getCountryWeatherLatest, ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
 import { pool } from "./db";
-import authRouter from "./auth";
+import authRouter, { requireAuth, requireRole } from "./auth";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -13,6 +13,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.get("/api/hello", (_req, res) => res.json({ hello: "world" }));
 app.use("/api/auth", authRouter);
+
+const requireAdminRole = requireRole("admin");
+const requireAuthenticated = requireAuth();
+
+function requireIngestionAccess(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const sharedToken = process.env.INGEST_API_TOKEN;
+  if (sharedToken) {
+    const supplied = req.get("x-ingest-token");
+    if (supplied && supplied === sharedToken) return next();
+  }
+  return requireAdminRole(req, res, next);
+}
 
 // Simple endpoint to test DB connectivity
 app.get("/api/db/ping", async (_req, res) => {
@@ -25,7 +37,7 @@ app.get("/api/db/ping", async (_req, res) => {
 });
 
 // List recent news items with optional filters
-app.get("/api/news", async (req, res) => {
+app.get("/api/news", requireAuthenticated, async (req, res) => {
   try {
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "20"), 10) || 20, 1), 200);
     const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
@@ -61,7 +73,7 @@ app.get("/api/news", async (req, res) => {
 });
 
 // Aggregate counts by country (for map bubbles)
-app.get("/api/news/country-stats", async (req, res) => {
+app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
   try {
     const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 365);
     const params: any[] = [days];
@@ -81,7 +93,7 @@ app.get("/api/news/country-stats", async (req, res) => {
 });
 
 // Ingest NewsAPI 'everything'
-app.post("/api/ingest/newsapi/everything", async (req, res) => {
+app.post("/api/ingest/newsapi/everything", requireIngestionAccess, async (req, res) => {
   try {
     const { q, language, pageSize, maxPages } = req.body || {};
     if (!q || typeof q !== "string") {
@@ -95,7 +107,7 @@ app.post("/api/ingest/newsapi/everything", async (req, res) => {
 });
 
 // Ingest NewsAPI 'top-headlines'
-app.post("/api/ingest/newsapi/top-headlines", async (req, res) => {
+app.post("/api/ingest/newsapi/top-headlines", requireIngestionAccess, async (req, res) => {
   try {
     const { country, category, q, pageSize, maxPages } = req.body || {};
     const result = await ingestNewsApiTopHeadlines({ country, category, q, pageSize, maxPages });
@@ -106,7 +118,7 @@ app.post("/api/ingest/newsapi/top-headlines", async (req, res) => {
 });
 
 // Ingest OpenWeather current weather for countries (centroid-based)
-app.post("/api/ingest/openweather/country-current", async (req, res) => {
+app.post("/api/ingest/openweather/country-current", requireIngestionAccess, async (req, res) => {
   try {
     const { country } = req.body || {};
     const result = await ingestOpenWeatherCountryCurrent(typeof country === 'string' ? country : undefined);
@@ -117,7 +129,7 @@ app.post("/api/ingest/openweather/country-current", async (req, res) => {
 });
 
 // Latest weather per country for map overlay
-app.get("/api/weather/country-latest", async (_req, res) => {
+app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) => {
   try {
     const rows = await getCountryWeatherLatest();
     res.json({ stats: rows });
@@ -127,7 +139,7 @@ app.get("/api/weather/country-latest", async (_req, res) => {
 });
 
 // Lightweight image proxy for remote thumbnails that block hotlinking
-app.get("/api/proxy-image", async (req, res) => {
+app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
   try {
     const url = String(req.query.url || "");
     if (!url || !/^https?:\/\//i.test(url)) {

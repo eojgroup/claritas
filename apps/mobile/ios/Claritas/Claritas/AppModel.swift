@@ -61,7 +61,8 @@ final class AppModel: ObservableObject {
     }
 
     func startSignIn(provider: AuthProviderId) {
-        guard let authURL = api.authStartURL(provider: provider, redirect: authCallbackURL) else {
+        let startPath = authProviders.first(where: { $0.id == provider })?.start_path
+        guard let authURL = api.authStartURL(provider: provider, redirect: authCallbackURL, startPathOverride: startPath) else {
             authError = "Unable to start sign-in."
             return
         }

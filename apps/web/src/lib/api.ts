@@ -12,7 +12,13 @@ export type NewsItem = {
 export type CountryStat = { country: string; count: number };
 export type CountryWeather = { country: string; temp_c: number | null; humidity: number | null; observed_at: string; weather_main: string | null };
 export type AuthProviderId = "google" | "microsoft" | "apple";
-export type AuthProvider = { id: AuthProviderId; enabled: boolean };
+export type AuthProvider = {
+  id: AuthProviderId;
+  enabled: boolean;
+  display_name?: string;
+  icon?: AuthProviderId;
+  start_path?: string;
+};
 export type AuthUser = { id: number; email: string | null; display_name: string | null; avatar_url: string | null; roles: string[] };
 
 const API_BASE = ''; // relative to same host; In dev, consider proxying /api to backend

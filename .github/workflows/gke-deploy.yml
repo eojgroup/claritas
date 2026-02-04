@@ -126,6 +126,7 @@ jobs:
           kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/api-sa.yaml
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/flyway-sa.yaml
+          kubectl -n "${NAMESPACE}" apply -f infra/k8s/keycloak-sa.yaml
 
       - name: ⚙️ Apply ConfigMaps
         run: |
@@ -136,7 +137,8 @@ jobs:
             base="https://${base}"
           fi
           if [ -n "${base}" ]; then
-            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${base}\"}}"
+            allowed_redirects="${base},claritas://,http://localhost:5173,http://localhost:8080"
+            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${allowed_redirects}\"}}"
           fi
 
       - name: 🛠️ Apply Kubernetes resources
@@ -145,6 +147,10 @@ jobs:
           kubectl apply -f ./infra/k8s/web-service.yaml
           kubectl apply -f ./infra/k8s/api-deployment.yaml
           kubectl apply -f ./infra/k8s/api-service.yaml
+          kubectl apply -f ./infra/k8s/keycloak-pdb.yaml
+          kubectl apply -f ./infra/k8s/keycloak-deployment.yaml
+          kubectl apply -f ./infra/k8s/keycloak-service.yaml
+          kubectl apply -f ./infra/k8s/keycloak-bootstrap-configmap.yaml
           # Scheduled ingest CronJob
           kubectl apply -f ./infra/k8s/ingest-cronjob.yaml
           kubectl apply -f ./infra/k8s/managed-cert.yaml
@@ -200,62 +206,99 @@ jobs:
             echo "::warning::OPENWEATHER_API_KEY secret not provided; skipping claritas-openweather upsert"
           fi
 
-      - name: 🔐 Ensure auth provider secrets exist
+      - name: 🔐 Ensure Keycloak/API auth secrets exist
         env:
           NS: ${{ env.NAMESPACE }}
-          AUTH_GOOGLE_CLIENT_ID: ${{ secrets.AUTH_GOOGLE_CLIENT_ID }}
-          AUTH_GOOGLE_CLIENT_SECRET: ${{ secrets.AUTH_GOOGLE_CLIENT_SECRET }}
-          AUTH_MICROSOFT_CLIENT_ID: ${{ secrets.AUTH_MICROSOFT_CLIENT_ID }}
-          AUTH_MICROSOFT_CLIENT_SECRET: ${{ secrets.AUTH_MICROSOFT_CLIENT_SECRET }}
-          AUTH_MICROSOFT_TENANT_ID: ${{ secrets.AUTH_MICROSOFT_TENANT_ID }}
-          AUTH_APPLE_CLIENT_ID: ${{ secrets.AUTH_APPLE_CLIENT_ID }}
-          AUTH_APPLE_TEAM_ID: ${{ secrets.AUTH_APPLE_TEAM_ID }}
-          AUTH_APPLE_KEY_ID: ${{ secrets.AUTH_APPLE_KEY_ID }}
-          AUTH_APPLE_PRIVATE_KEY: ${{ secrets.AUTH_APPLE_PRIVATE_KEY }}
+          AUTH_KEYCLOAK_CLIENT_SECRET: ${{ secrets.AUTH_KEYCLOAK_CLIENT_SECRET }}
+          INGEST_API_TOKEN: ${{ secrets.INGEST_API_TOKEN }}
+          KEYCLOAK_DB_PASSWORD: ${{ secrets.KEYCLOAK_DB_PASSWORD }}
+          KEYCLOAK_ADMIN: ${{ secrets.KEYCLOAK_ADMIN }}
+          KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+          KC_IDP_GOOGLE_CLIENT_ID: ${{ secrets.KC_IDP_GOOGLE_CLIENT_ID }}
+          KC_IDP_GOOGLE_CLIENT_SECRET: ${{ secrets.KC_IDP_GOOGLE_CLIENT_SECRET }}
+          KC_IDP_MICROSOFT_CLIENT_ID: ${{ secrets.KC_IDP_MICROSOFT_CLIENT_ID }}
+          KC_IDP_MICROSOFT_CLIENT_SECRET: ${{ secrets.KC_IDP_MICROSOFT_CLIENT_SECRET }}
+          KC_IDP_MICROSOFT_TENANT: ${{ secrets.KC_IDP_MICROSOFT_TENANT }}
+          KC_IDP_APPLE_CLIENT_ID: ${{ secrets.KC_IDP_APPLE_CLIENT_ID }}
+          KC_IDP_APPLE_TEAM_ID: ${{ secrets.KC_IDP_APPLE_TEAM_ID }}
+          KC_IDP_APPLE_KEY_ID: ${{ secrets.KC_IDP_APPLE_KEY_ID }}
+          KC_IDP_APPLE_PRIVATE_KEY: ${{ secrets.KC_IDP_APPLE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          args=()
-          tmpfile=""
 
-          if [ -n "${AUTH_GOOGLE_CLIENT_ID:-}" ]; then
-            args+=(--from-literal=AUTH_GOOGLE_CLIENT_ID="$AUTH_GOOGLE_CLIENT_ID")
+          if [ -z "${KEYCLOAK_DB_PASSWORD:-}" ] || [ "${KEYCLOAK_DB_PASSWORD}" = "null" ]; then
+            if terraform -chdir=infra/gcp/terraform init -input=false -backend=true; then
+              KEYCLOAK_DB_PASSWORD="$(terraform -chdir=infra/gcp/terraform output -raw keycloak_db_pass 2>/dev/null || true)"
+            fi
           fi
-          if [ -n "${AUTH_GOOGLE_CLIENT_SECRET:-}" ]; then
-            args+=(--from-literal=AUTH_GOOGLE_CLIENT_SECRET="$AUTH_GOOGLE_CLIENT_SECRET")
+
+          args=()
+          if [ -n "${AUTH_KEYCLOAK_CLIENT_SECRET:-}" ]; then
+            args+=(--from-literal=AUTH_KEYCLOAK_CLIENT_SECRET="$AUTH_KEYCLOAK_CLIENT_SECRET")
           fi
-          if [ -n "${AUTH_MICROSOFT_CLIENT_ID:-}" ]; then
-            args+=(--from-literal=AUTH_MICROSOFT_CLIENT_ID="$AUTH_MICROSOFT_CLIENT_ID")
+          if [ -n "${INGEST_API_TOKEN:-}" ]; then
+            args+=(--from-literal=INGEST_API_TOKEN="$INGEST_API_TOKEN")
           fi
-          if [ -n "${AUTH_MICROSOFT_CLIENT_SECRET:-}" ]; then
-            args+=(--from-literal=AUTH_MICROSOFT_CLIENT_SECRET="$AUTH_MICROSOFT_CLIENT_SECRET")
+          if [ -n "${KEYCLOAK_DB_PASSWORD:-}" ]; then
+            args+=(--from-literal=KEYCLOAK_DB_PASSWORD="$KEYCLOAK_DB_PASSWORD")
           fi
-          if [ -n "${AUTH_MICROSOFT_TENANT_ID:-}" ]; then
-            args+=(--from-literal=AUTH_MICROSOFT_TENANT_ID="$AUTH_MICROSOFT_TENANT_ID")
+          if [ -n "${KEYCLOAK_ADMIN:-}" ]; then
+            args+=(--from-literal=KEYCLOAK_ADMIN="$KEYCLOAK_ADMIN")
           fi
-          if [ -n "${AUTH_APPLE_CLIENT_ID:-}" ]; then
-            args+=(--from-literal=AUTH_APPLE_CLIENT_ID="$AUTH_APPLE_CLIENT_ID")
+          if [ -n "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
+            args+=(--from-literal=KEYCLOAK_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD")
           fi
-          if [ -n "${AUTH_APPLE_TEAM_ID:-}" ]; then
-            args+=(--from-literal=AUTH_APPLE_TEAM_ID="$AUTH_APPLE_TEAM_ID")
+          if [ -n "${KC_IDP_GOOGLE_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=KC_IDP_GOOGLE_CLIENT_ID="$KC_IDP_GOOGLE_CLIENT_ID")
           fi
-          if [ -n "${AUTH_APPLE_KEY_ID:-}" ]; then
-            args+=(--from-literal=AUTH_APPLE_KEY_ID="$AUTH_APPLE_KEY_ID")
+          if [ -n "${KC_IDP_GOOGLE_CLIENT_SECRET:-}" ]; then
+            args+=(--from-literal=KC_IDP_GOOGLE_CLIENT_SECRET="$KC_IDP_GOOGLE_CLIENT_SECRET")
           fi
-          if [ -n "${AUTH_APPLE_PRIVATE_KEY:-}" ]; then
-            tmpfile="$(mktemp)"
-            printf "%s" "$AUTH_APPLE_PRIVATE_KEY" > "$tmpfile"
-            args+=(--from-file=AUTH_APPLE_PRIVATE_KEY="$tmpfile")
+          if [ -n "${KC_IDP_MICROSOFT_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=KC_IDP_MICROSOFT_CLIENT_ID="$KC_IDP_MICROSOFT_CLIENT_ID")
+          fi
+          if [ -n "${KC_IDP_MICROSOFT_CLIENT_SECRET:-}" ]; then
+            args+=(--from-literal=KC_IDP_MICROSOFT_CLIENT_SECRET="$KC_IDP_MICROSOFT_CLIENT_SECRET")
+          fi
+          if [ -n "${KC_IDP_MICROSOFT_TENANT:-}" ]; then
+            args+=(--from-literal=KC_IDP_MICROSOFT_TENANT="$KC_IDP_MICROSOFT_TENANT")
+          fi
+          if [ -n "${KC_IDP_APPLE_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=KC_IDP_APPLE_CLIENT_ID="$KC_IDP_APPLE_CLIENT_ID")
+          fi
+          if [ -n "${KC_IDP_APPLE_TEAM_ID:-}" ]; then
+            args+=(--from-literal=KC_IDP_APPLE_TEAM_ID="$KC_IDP_APPLE_TEAM_ID")
+          fi
+          if [ -n "${KC_IDP_APPLE_KEY_ID:-}" ]; then
+            args+=(--from-literal=KC_IDP_APPLE_KEY_ID="$KC_IDP_APPLE_KEY_ID")
+          fi
+          if [ -n "${KC_IDP_APPLE_PRIVATE_KEY:-}" ]; then
+            args+=(--from-literal=KC_IDP_APPLE_PRIVATE_KEY="$KC_IDP_APPLE_PRIVATE_KEY")
           fi
 
           if [ "${#args[@]}" -eq 0 ]; then
-            echo "::warning::No auth provider secrets configured; sign-in providers will stay disabled."
+            echo "::warning::No Keycloak secrets configured; auth components will not start correctly."
           else
             kubectl -n "$NS" create secret generic claritas-auth "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
           fi
 
-          if [ -n "${tmpfile}" ]; then
-            rm -f "$tmpfile"
+      - name: 🔑 Bootstrap Keycloak realm and IdPs
+        env:
+          NS: ${{ env.NAMESPACE }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" rollout status deployment/keycloak --timeout=600s
+          job="keycloak-bootstrap-${GITHUB_RUN_ID}"
+          kubectl -n "$NS" delete job "$job" --ignore-not-found=true || true
+          sed -E "s/^\s*name: keycloak-bootstrap$/  name: ${job}/" infra/k8s/keycloak-bootstrap-job.yaml | kubectl -n "$NS" apply -f -
+          if ! kubectl -n "$NS" wait --for=condition=complete "job/${job}" --timeout=600s; then
+            echo "::error::Keycloak bootstrap job failed" >&2
+            kubectl -n "$NS" describe "job/${job}" || true
+            kubectl -n "$NS" logs "job/${job}" --tail=200 || true
+            exit 1
           fi
+          kubectl -n "$NS" logs "job/${job}" --tail=200 || true
+          kubectl -n "$NS" delete "job/${job}" --wait=true || true
 
       - name: 🧩 Run DB migrations (Flyway)
         env:
@@ -387,6 +430,7 @@ jobs:
 
           wait_rollout claritas-web
           wait_rollout claritas-api
+          wait_rollout keycloak
 
       - name: 🔒 Check ManagedCertificate (best-effort)
         continue-on-error: true
@@ -401,6 +445,7 @@ jobs:
           INGRESS_IP=$(kubectl -n "${NAMESPACE}" get ingress claritas -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           echo "Ingress IP: ${INGRESS_IP}"
           echo "Add/ensure A record: ${DOMAIN} -> ${INGRESS_IP}"
+          echo "Add/ensure A record: auth.claritas.info -> ${INGRESS_IP}"
 
       - name: 🌐 Ensure A record in Cloud DNS (optional)
         if: env.DNS_ZONE != ''
