@@ -141,18 +141,13 @@ jobs:
             kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${allowed_redirects}\"}}"
           fi
 
-      - name: 🛠️ Apply Kubernetes resources
+      - name: 🛠️ Apply Kubernetes resources (non-workload)
         run: |
-          kubectl apply -f ./infra/k8s/web-deployment.yaml
           kubectl apply -f ./infra/k8s/web-service.yaml
-          kubectl apply -f ./infra/k8s/api-deployment.yaml
           kubectl apply -f ./infra/k8s/api-service.yaml
           kubectl apply -f ./infra/k8s/keycloak-pdb.yaml
-          kubectl apply -f ./infra/k8s/keycloak-deployment.yaml
           kubectl apply -f ./infra/k8s/keycloak-service.yaml
           kubectl apply -f ./infra/k8s/keycloak-bootstrap-configmap.yaml
-          # Scheduled ingest CronJob
-          kubectl apply -f ./infra/k8s/ingest-cronjob.yaml
           kubectl apply -f ./infra/k8s/managed-cert.yaml
           kubectl apply -f ./infra/k8s/ingress.yaml
 
@@ -232,21 +227,28 @@ jobs:
             fi
           fi
 
-          args=()
+          if [ -z "${KEYCLOAK_DB_PASSWORD:-}" ] || [ "${KEYCLOAK_DB_PASSWORD}" = "null" ]; then
+            echo "::error::KEYCLOAK_DB_PASSWORD is required. Provide GitHub secret KEYCLOAK_DB_PASSWORD or ensure Terraform output keycloak_db_pass is available." >&2
+            exit 1
+          fi
+          if [ -z "${KEYCLOAK_ADMIN:-}" ]; then
+            KEYCLOAK_ADMIN="admin"
+          fi
+          if [ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
+            echo "::error::KEYCLOAK_ADMIN_PASSWORD is required." >&2
+            exit 1
+          fi
+
+          args=(
+            --from-literal=KEYCLOAK_DB_PASSWORD="$KEYCLOAK_DB_PASSWORD"
+            --from-literal=KEYCLOAK_ADMIN="$KEYCLOAK_ADMIN"
+            --from-literal=KEYCLOAK_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD"
+          )
           if [ -n "${AUTH_KEYCLOAK_CLIENT_SECRET:-}" ]; then
             args+=(--from-literal=AUTH_KEYCLOAK_CLIENT_SECRET="$AUTH_KEYCLOAK_CLIENT_SECRET")
           fi
           if [ -n "${INGEST_API_TOKEN:-}" ]; then
             args+=(--from-literal=INGEST_API_TOKEN="$INGEST_API_TOKEN")
-          fi
-          if [ -n "${KEYCLOAK_DB_PASSWORD:-}" ]; then
-            args+=(--from-literal=KEYCLOAK_DB_PASSWORD="$KEYCLOAK_DB_PASSWORD")
-          fi
-          if [ -n "${KEYCLOAK_ADMIN:-}" ]; then
-            args+=(--from-literal=KEYCLOAK_ADMIN="$KEYCLOAK_ADMIN")
-          fi
-          if [ -n "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
-            args+=(--from-literal=KEYCLOAK_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD")
           fi
           if [ -n "${KC_IDP_GOOGLE_CLIENT_ID:-}" ]; then
             args+=(--from-literal=KC_IDP_GOOGLE_CLIENT_ID="$KC_IDP_GOOGLE_CLIENT_ID")
@@ -276,18 +278,35 @@ jobs:
             args+=(--from-literal=KC_IDP_APPLE_PRIVATE_KEY="$KC_IDP_APPLE_PRIVATE_KEY")
           fi
 
-          if [ "${#args[@]}" -eq 0 ]; then
-            echo "::warning::No Keycloak secrets configured; auth components will not start correctly."
-          else
-            kubectl -n "$NS" create secret generic claritas-auth "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
-          fi
+          kubectl -n "$NS" create secret generic claritas-auth "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: 🛠️ Apply workload deployments
+        run: |
+          kubectl apply -f ./infra/k8s/web-deployment.yaml
+          kubectl apply -f ./infra/k8s/api-deployment.yaml
+          kubectl apply -f ./infra/k8s/keycloak-deployment.yaml
+          kubectl apply -f ./infra/k8s/ingest-cronjob.yaml
 
       - name: 🔑 Bootstrap Keycloak realm and IdPs
         env:
           NS: ${{ env.NAMESPACE }}
         run: |
           set -euo pipefail
-          kubectl -n "$NS" rollout status deployment/keycloak --timeout=600s
+          if ! kubectl -n "$NS" rollout status deployment/keycloak --timeout=600s; then
+            echo "::error::Keycloak deployment rollout failed. Dumping diagnostics..." >&2
+            kubectl -n "$NS" get deploy keycloak -o wide || true
+            kubectl -n "$NS" describe deploy keycloak || true
+            kubectl -n "$NS" get pods -l app=keycloak -o wide || true
+            for p in $(kubectl -n "$NS" get pods -l app=keycloak -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true); do
+              echo "=== describe pod/${p} ==="
+              kubectl -n "$NS" describe pod "$p" || true
+              echo "=== logs pod/${p} container=keycloak ==="
+              kubectl -n "$NS" logs "$p" -c keycloak --tail=200 || true
+              echo "=== logs pod/${p} container=cloud-sql-proxy ==="
+              kubectl -n "$NS" logs "$p" -c cloud-sql-proxy --tail=200 || true
+            done
+            exit 1
+          fi
           job="keycloak-bootstrap-${GITHUB_RUN_ID}"
           kubectl -n "$NS" delete job "$job" --ignore-not-found=true || true
           sed -E "s/^\s*name: keycloak-bootstrap$/  name: ${job}/" infra/k8s/keycloak-bootstrap-job.yaml | kubectl -n "$NS" apply -f -

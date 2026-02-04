@@ -153,7 +153,7 @@ Claritas targets an enterprise architecture on Google Cloud Platform with a shar
 ## 🔐 Hardening Baseline (Implemented)
 
 - Keycloak on GKE now runs as a hardened deployment (`infra/k8s/keycloak-deployment.yaml`):
-  - 2 replicas
+  - 1 replica by default on the current small dev cluster (scale to 2+ for production)
   - startup/readiness/liveness probes
   - anti-affinity + pod disruption budget
   - dedicated service account (`keycloak-sa`) with Workload Identity
