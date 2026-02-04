@@ -1,9 +1,17 @@
 apiVersion: networking.gke.io/v1
 kind: ManagedCertificate
 metadata:
-  name: claritas-web-cert
+  name: claritas-app-cert
   namespace: claritas
 spec:
   domains:
     - app.claritas.info
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: claritas-auth-cert
+  namespace: claritas
+spec:
+  domains:
     - auth.claritas.info

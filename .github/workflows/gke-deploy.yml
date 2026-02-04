@@ -79,6 +79,7 @@ jobs:
       IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
       IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
       DOMAIN: app.claritas.info
+      AUTH_DOMAIN: auth.claritas.info
       DNS_ZONE: ""  # set to your Cloud DNS managed zone name to auto-manage A record (optional)
 
     steps:
@@ -156,6 +157,7 @@ jobs:
           kubectl apply -f ./infra/k8s/keycloak-pdb.yaml
           kubectl apply -f ./infra/k8s/keycloak-service.yaml
           kubectl apply -f ./infra/k8s/keycloak-bootstrap-configmap.yaml
+          kubectl -n "${NAMESPACE}" delete managedcertificate claritas-web-cert --ignore-not-found=true
           kubectl apply -f ./infra/k8s/managed-cert.yaml
           kubectl apply -f ./infra/k8s/ingress.yaml
 
@@ -496,34 +498,37 @@ jobs:
       - name: 🔒 Check ManagedCertificate (best-effort)
         continue-on-error: true
         run: |
-          echo "ManagedCertificate status:" || true
-          kubectl -n "${NAMESPACE}" get managedcertificate claritas-web-cert -o yaml || true
-          echo "Describe certificate:" || true
-          kubectl -n "${NAMESPACE}" describe managedcertificate claritas-web-cert | sed -n '1,200p' || true
+          for cert in claritas-app-cert claritas-auth-cert; do
+            echo "ManagedCertificate status: ${cert}" || true
+            kubectl -n "${NAMESPACE}" get managedcertificate "${cert}" -o yaml || true
+            echo "Describe certificate: ${cert}" || true
+            kubectl -n "${NAMESPACE}" describe managedcertificate "${cert}" | sed -n '1,200p' || true
+          done
 
       - name: 🌐 Show Ingress IP and suggested DNS
         run: |
           INGRESS_IP=$(kubectl -n "${NAMESPACE}" get ingress claritas -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           echo "Ingress IP: ${INGRESS_IP}"
           echo "Add/ensure A record: ${DOMAIN} -> ${INGRESS_IP}"
-          echo "Add/ensure A record: auth.claritas.info -> ${INGRESS_IP}"
+          echo "Add/ensure A record: ${AUTH_DOMAIN} -> ${INGRESS_IP}"
 
       - name: 🌐 Ensure A record in Cloud DNS (optional)
         if: env.DNS_ZONE != ''
         run: |
           set -euo pipefail
           INGRESS_IP=$(kubectl -n "${NAMESPACE}" get ingress claritas -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-          echo "Ensuring A record for ${DOMAIN} in zone ${DNS_ZONE} -> ${INGRESS_IP}"
+          echo "Ensuring A records in zone ${DNS_ZONE} -> ${INGRESS_IP}"
           gcloud dns managed-zones describe "${DNS_ZONE}" >/dev/null
 
           gcloud dns record-sets transaction start --zone="${DNS_ZONE}" || true
 
-          EXISTING=$(gcloud dns record-sets list --zone="${DNS_ZONE}" --name="${DOMAIN}." --type=A --format='value(rrdatas[])') || true
-          if [ -n "${EXISTING:-}" ]; then
-            gcloud dns record-sets transaction remove --zone="${DNS_ZONE}" --name="${DOMAIN}." --type=A --ttl=300 ${EXISTING} || true
-          fi
-
-          gcloud dns record-sets transaction add --zone="${DNS_ZONE}" --name="${DOMAIN}." --type=A --ttl=300 "${INGRESS_IP}"
+          for host in "${DOMAIN}" "${AUTH_DOMAIN}"; do
+            EXISTING=$(gcloud dns record-sets list --zone="${DNS_ZONE}" --name="${host}." --type=A --format='value(rrdatas[])') || true
+            if [ -n "${EXISTING:-}" ]; then
+              gcloud dns record-sets transaction remove --zone="${DNS_ZONE}" --name="${host}." --type=A --ttl=300 ${EXISTING} || true
+            fi
+            gcloud dns record-sets transaction add --zone="${DNS_ZONE}" --name="${host}." --type=A --ttl=300 "${INGRESS_IP}"
+          done
 
           gcloud dns record-sets transaction execute --zone="${DNS_ZONE}"
-          echo "A ${DOMAIN} -> ${INGRESS_IP} ensured."
+          echo "A ${DOMAIN} and ${AUTH_DOMAIN} -> ${INGRESS_IP} ensured."

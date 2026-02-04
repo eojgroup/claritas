@@ -1,41 +1,48 @@
-# DNS Configuration for Claritas Web App
+# DNS Configuration for Claritas Ingress
 
-This document describes the manual DNS configuration required to expose the **Claritas web application** (`app.claritas.info`) through Google Kubernetes Engine (GKE) Ingress.
+This document describes the DNS records required for the Claritas GKE Ingress.
 
----
+## Domains
 
-## 📌 Domain
+- Root: `claritas.info`
+- Web/API host: `app.claritas.info`
+- Auth host (Keycloak): `auth.claritas.info`
 
-- **Domain Registrar / DNS Host:** Microsoft 365 Admin Center  
-- **Root Domain:** `claritas.info`  
-- **Subdomain for Web Application:** `app.claritas.info`  
+## Required DNS Records
 
----
+Both hosts must resolve to the same external IP of the `claritas` Ingress.
 
-## 🔹 DNS Record Created
+| Record Type | Hostname | Value (Target) | Purpose |
+|-------------|----------|----------------|---------|
+| `A` | `app` | `<INGRESS_IP>` | Serves web app + API traffic |
+| `A` | `auth` | `<INGRESS_IP>` | Serves Keycloak auth traffic |
 
-| Record Type | Hostname / Alias | Value (Target) | TTL    | Purpose                           |
-|-------------|------------------|----------------|--------|-----------------------------------|
-| `A`         | `app`            | `35.190.65.41` | 1 Hour | Points `app.claritas.info` to the external IP of the GKE Ingress |
-
----
-
-## 🔹 How It Works
-
-1. The GKE Ingress (`claritas`) provisions a **Google Cloud Load Balancer** with an external IP address (`35.190.65.41`).
-2. A DNS `A` record was created in Microsoft 365 Admin Center:
-   - **Hostname:** `app`  
-   - **Type:** `A` (Address)  
-   - **Points to:** `35.190.65.41`  
-3. As a result, requests to **`app.claritas.info`** resolve to the load balancer IP and are routed to the Claritas web app (frontend) and API services via Kubernetes Ingress.
-
----
-
-## 🔹 Certificate
-
-- A **ManagedCertificate** (`claritas-web-cert`) is configured in GKE for `app.claritas.info`.
-- Once DNS is propagated and points correctly, Google will issue and attach a TLS certificate automatically.
-- You can check the status with:
+Use the current Ingress IP:
 
 ```bash
-kubectl -n claritas describe managedcertificate claritas-web-cert
+kubectl -n claritas get ingress claritas -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+```
+
+## TLS Certificates
+
+Claritas uses two Google ManagedCertificates:
+
+- `claritas-app-cert` for `app.claritas.info`
+- `claritas-auth-cert` for `auth.claritas.info`
+
+The split avoids an auth-domain DNS issue blocking TLS on the web domain.
+
+Check certificate status:
+
+```bash
+kubectl -n claritas describe managedcertificate claritas-app-cert
+kubectl -n claritas describe managedcertificate claritas-auth-cert
+```
+
+## Common Failure Mode
+
+If `https://app.claritas.info` does not load but `http://app.claritas.info` does, check:
+
+1. `app.claritas.info` and `auth.claritas.info` both resolve to the Ingress IP.
+2. `claritas-app-cert` status is `Active`.
+3. `claritas-auth-cert` is not required for app page load, but it must be `Active` for auth flows.

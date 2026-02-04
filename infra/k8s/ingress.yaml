@@ -6,7 +6,8 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.allow-http: "true"
-    networking.gke.io/managed-certificates: "claritas-web-cert"
+    # Keep app/auth certificates independent so auth DNS issues do not block app TLS.
+    networking.gke.io/managed-certificates: "claritas-app-cert,claritas-auth-cert"
 spec:
   rules:
     - host: app.claritas.info
