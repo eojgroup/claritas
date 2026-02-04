@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
 import type { AuthProvider, AuthProviderId } from "../lib/api";
+import googleIcon from "../assets/provider-icons/google.svg";
+import microsoftIcon from "../assets/provider-icons/microsoft.svg";
+import appleIcon from "../assets/provider-icons/apple.svg";
 
 type LoginPageProps = {
   providers: AuthProvider[];
@@ -36,6 +39,12 @@ const providerMeta: ProviderMeta[] = [
   },
 ];
 
+const providerIcons: Record<AuthProviderId, string> = {
+  google: googleIcon,
+  microsoft: microsoftIcon,
+  apple: appleIcon,
+};
+
 const highlightCards = [
   {
     title: "Signal desk access",
@@ -57,36 +66,20 @@ const highlightCards = [
 
 
 function ProviderIcon({ id }: { id: AuthProviderId }) {
-  if (id === "google") {
-    return (
-      <span className="grid h-11 w-11 place-items-center rounded-xl bg-white shadow-sm ring-1 ring-black/5">
-        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6">
-          <path
-            fill="#4285F4"
-            d="M21.35 11.1H12v2.9h5.34c-.48 2.4-2.44 3.5-5.34 3.5-3.24 0-5.87-2.63-5.87-5.87S8.76 5.76 12 5.76c1.78 0 3.26.73 4.3 1.7l1.96-1.96C16.97 3.98 14.67 2.85 12 2.85 7.82 2.85 4.3 6.37 4.3 10.55S7.82 18.25 12 18.25c4.77 0 7.6-3.35 7.6-8.05 0-.54-.06-1.07-.17-1.59z"
-          />
-        </svg>
-      </span>
-    );
-  }
-  if (id === "microsoft") {
-    return (
-      <span className="grid h-11 w-11 place-items-center rounded-xl bg-white shadow-sm ring-1 ring-black/5">
-        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6">
-          <rect x="3" y="3" width="8" height="8" fill="#F25022" />
-          <rect x="13" y="3" width="8" height="8" fill="#7FBA00" />
-          <rect x="3" y="13" width="8" height="8" fill="#00A4EF" />
-          <rect x="13" y="13" width="8" height="8" fill="#FFB900" />
-        </svg>
-      </span>
-    );
-  }
-
   return (
-    <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#0f1113] text-white shadow-sm ring-1 ring-black/10">
-      <svg aria-hidden="true" viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
-        <path d="M16.365 1.43c0 1.14-.403 2.076-1.222 2.818-.986.897-2.161 1.42-3.466 1.308-.153-1.106.45-2.22 1.322-2.93.96-.783 2.39-1.36 3.366-1.196zm4.073 14.215c-.753 1.726-1.64 3.439-3.048 3.47-1.32.03-1.742-.87-3.247-.87-1.503 0-1.978.84-3.228.9-1.38.06-2.446-1.41-3.206-3.12-1.66-3.74-2.9-10.56.52-13.32 1.06-.86 2.36-1.39 3.77-1.42 1.32-.03 2.57.93 3.246.93.68 0 2.2-1.14 3.71-.97.63.03 2.41.26 3.55 1.97-.09.06-2.12 1.23-2.1 3.68.03 2.93 2.56 3.9 2.6 3.92z" />
-      </svg>
+    <span
+      className="grid h-11 w-11 place-items-center rounded-xl bg-white shadow-sm ring-1 ring-black/5"
+      style={{ width: 44, height: 44 }}
+    >
+      <img
+        src={providerIcons[id]}
+        alt=""
+        width={20}
+        height={20}
+        className="h-5 w-5"
+        loading="lazy"
+        decoding="async"
+      />
     </span>
   );
 }
