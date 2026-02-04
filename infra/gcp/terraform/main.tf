@@ -214,6 +214,11 @@ resource "random_password" "keycloak_db_password" {
   special = false
 }
 
+resource "random_password" "keycloak_admin_password" {
+  length  = 32
+  special = false
+}
+
 resource "google_sql_database_instance" "pg" {
   name                = "claritas-sql"
   project             = var.project_id

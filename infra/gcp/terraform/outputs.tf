@@ -36,6 +36,15 @@ output "keycloak_db_pass" {
   sensitive = true
 }
 
+output "keycloak_admin" {
+  value = var.keycloak_admin
+}
+
+output "keycloak_admin_password" {
+  value     = try(trimspace(var.keycloak_admin_password), "") != "" ? var.keycloak_admin_password : random_password.keycloak_admin_password.result
+  sensitive = true
+}
+
 output "kubernetes_cluster_name" {
   value = google_container_cluster.primary.name
 }

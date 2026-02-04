@@ -2,12 +2,13 @@
 # Kubernetes secrets for API auth (optional)
 ############################################
 locals {
+  keycloak_admin_password_effective = try(trimspace(var.keycloak_admin_password), "") != "" ? var.keycloak_admin_password : random_password.keycloak_admin_password.result
+
   # Keep optional values plan-time deterministic by deriving them from input vars only.
   k8s_auth_optional_plain = {
     AUTH_KEYCLOAK_CLIENT_SECRET    = var.auth_keycloak_client_secret
     INGEST_API_TOKEN               = var.ingest_api_token
     KEYCLOAK_ADMIN                 = var.keycloak_admin
-    KEYCLOAK_ADMIN_PASSWORD        = var.keycloak_admin_password
     KC_IDP_GOOGLE_CLIENT_ID        = var.auth_google_client_id
     KC_IDP_GOOGLE_CLIENT_SECRET    = var.auth_google_client_secret
     KC_IDP_MICROSOFT_CLIENT_ID     = var.auth_microsoft_client_id
@@ -29,7 +30,8 @@ locals {
   k8s_auth_data = merge(
     local.k8s_auth_optional_data,
     {
-      KEYCLOAK_DB_PASSWORD = random_password.keycloak_db_password.result
+      KEYCLOAK_DB_PASSWORD     = random_password.keycloak_db_password.result
+      KEYCLOAK_ADMIN_PASSWORD  = local.keycloak_admin_password_effective
     }
   )
 }

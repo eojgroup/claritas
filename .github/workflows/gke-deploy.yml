@@ -221,9 +221,43 @@ jobs:
         run: |
           set -euo pipefail
 
+          tf_ready=0
+          if terraform -chdir=infra/gcp/terraform init -input=false -backend=true; then
+            tf_ready=1
+          else
+            echo "::warning::Terraform init failed in deploy job; will rely on existing cluster/GitHub secrets."
+          fi
+
+          # First fallback: existing Kubernetes secret (keeps previously working credentials stable).
           if [ -z "${KEYCLOAK_DB_PASSWORD:-}" ] || [ "${KEYCLOAK_DB_PASSWORD}" = "null" ]; then
-            if terraform -chdir=infra/gcp/terraform init -input=false -backend=true; then
+            b64="$(kubectl -n "$NS" get secret claritas-auth -o jsonpath='{.data.KEYCLOAK_DB_PASSWORD}' 2>/dev/null || true)"
+            if [ -n "${b64:-}" ]; then
+              KEYCLOAK_DB_PASSWORD="$(printf '%s' "$b64" | base64 --decode 2>/dev/null || true)"
+            fi
+          fi
+          if [ -z "${KEYCLOAK_ADMIN:-}" ]; then
+            b64="$(kubectl -n "$NS" get secret claritas-auth -o jsonpath='{.data.KEYCLOAK_ADMIN}' 2>/dev/null || true)"
+            if [ -n "${b64:-}" ]; then
+              KEYCLOAK_ADMIN="$(printf '%s' "$b64" | base64 --decode 2>/dev/null || true)"
+            fi
+          fi
+          if [ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
+            b64="$(kubectl -n "$NS" get secret claritas-auth -o jsonpath='{.data.KEYCLOAK_ADMIN_PASSWORD}' 2>/dev/null || true)"
+            if [ -n "${b64:-}" ]; then
+              KEYCLOAK_ADMIN_PASSWORD="$(printf '%s' "$b64" | base64 --decode 2>/dev/null || true)"
+            fi
+          fi
+
+          # Second fallback: Terraform outputs from remote state.
+          if [ "${tf_ready}" -eq 1 ]; then
+            if [ -z "${KEYCLOAK_DB_PASSWORD:-}" ] || [ "${KEYCLOAK_DB_PASSWORD}" = "null" ]; then
               KEYCLOAK_DB_PASSWORD="$(terraform -chdir=infra/gcp/terraform output -raw keycloak_db_pass 2>/dev/null || true)"
+            fi
+            if [ -z "${KEYCLOAK_ADMIN:-}" ]; then
+              KEYCLOAK_ADMIN="$(terraform -chdir=infra/gcp/terraform output -raw keycloak_admin 2>/dev/null || true)"
+            fi
+            if [ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
+              KEYCLOAK_ADMIN_PASSWORD="$(terraform -chdir=infra/gcp/terraform output -raw keycloak_admin_password 2>/dev/null || true)"
             fi
           fi
 
@@ -235,7 +269,7 @@ jobs:
             KEYCLOAK_ADMIN="admin"
           fi
           if [ -z "${KEYCLOAK_ADMIN_PASSWORD:-}" ]; then
-            echo "::error::KEYCLOAK_ADMIN_PASSWORD is required." >&2
+            echo "::error::KEYCLOAK_ADMIN_PASSWORD is required. Provide GitHub secret KEYCLOAK_ADMIN_PASSWORD, or set Terraform var keycloak_admin_password and rerun terraform-deploy." >&2
             exit 1
           fi
 
