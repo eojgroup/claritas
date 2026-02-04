@@ -7,6 +7,11 @@ metadata:
 spec:
   replicas: 1
   progressDeadlineSeconds: 900
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels: { app: keycloak }
   template:
@@ -58,16 +63,18 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: management
+              containerPort: 9000
           startupProbe:
-            httpGet: { path: /health/ready, port: http }
+            httpGet: { path: /health/ready, port: management }
             failureThreshold: 30
             periodSeconds: 10
           readinessProbe:
-            httpGet: { path: /health/ready, port: http }
+            httpGet: { path: /health/ready, port: management }
             initialDelaySeconds: 30
             periodSeconds: 10
           livenessProbe:
-            httpGet: { path: /health/live, port: http }
+            httpGet: { path: /health/live, port: management }
             initialDelaySeconds: 45
             periodSeconds: 15
           securityContext:

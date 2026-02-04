@@ -117,6 +117,14 @@ jobs:
           echo "Resources in ${NAMESPACE}:" && kubectl -n "${NAMESPACE}" get all || true
           echo "Manifests present:" && ls -la ./infra/k8s || true
 
+      - name: ✅ Validate manifests have no placeholder images
+        run: |
+          set -euo pipefail
+          if grep -RIn "PLACEHOLDER" infra/k8s; then
+            echo "::error::Found placeholder values in Kubernetes manifests. Replace before deploy." >&2
+            exit 1
+          fi
+
       - name: 🧭 Ensure namespace exists
         run: |
           kubectl get ns "${NAMESPACE}" || kubectl create ns "${NAMESPACE}"

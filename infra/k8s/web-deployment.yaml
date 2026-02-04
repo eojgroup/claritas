@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: claritas-web
-          image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web:PLACEHOLDER
+          image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web:latest
           imagePullPolicy: Always
           ports: [ { containerPort: 80 } ]
           readinessProbe:
