@@ -18,6 +18,18 @@ spec:
               set -euo pipefail
               export PGPASSWORD="${DB_PASSWORD}"
 
+              # Wait for cloud-sql-proxy sidecar to be ready on localhost.
+              for i in $(seq 1 30); do
+                if pg_isready -h 127.0.0.1 -p 5432 -U "${DB_USER}" -d "${DB_NAME}" >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 2
+              done
+              if ! pg_isready -h 127.0.0.1 -p 5432 -U "${DB_USER}" -d "${DB_NAME}" >/dev/null 2>&1; then
+                echo "ERROR: cloud-sql-proxy/database not ready after wait window" >&2
+                exit 1
+              fi
+
               psql "host=127.0.0.1 port=5432 dbname=${DB_NAME} user=${DB_USER} sslmode=disable" -v ON_ERROR_STOP=1 <<'SQL'
               -- Ensure core tables exist
               DO $$
