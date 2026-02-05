@@ -20,6 +20,19 @@ jobs:
       K8S_NAMESPACE: claritas
       NETWORK: default
       DOMAIN: app.claritas.info
+      TF_VAR_auth_keycloak_client_secret: ${{ secrets.AUTH_KEYCLOAK_CLIENT_SECRET }}
+      TF_VAR_ingest_api_token: ${{ secrets.INGEST_API_TOKEN }}
+      TF_VAR_keycloak_admin: ${{ secrets.KEYCLOAK_ADMIN }}
+      TF_VAR_keycloak_admin_password: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+      TF_VAR_auth_google_client_id: ${{ secrets.KC_IDP_GOOGLE_CLIENT_ID }}
+      TF_VAR_auth_google_client_secret: ${{ secrets.KC_IDP_GOOGLE_CLIENT_SECRET }}
+      TF_VAR_auth_microsoft_client_id: ${{ secrets.KC_IDP_MICROSOFT_CLIENT_ID }}
+      TF_VAR_auth_microsoft_client_secret: ${{ secrets.KC_IDP_MICROSOFT_CLIENT_SECRET }}
+      TF_VAR_auth_microsoft_tenant_id: ${{ secrets.KC_IDP_MICROSOFT_TENANT }}
+      TF_VAR_auth_apple_client_id: ${{ secrets.KC_IDP_APPLE_CLIENT_ID }}
+      TF_VAR_auth_apple_team_id: ${{ secrets.KC_IDP_APPLE_TEAM_ID }}
+      TF_VAR_auth_apple_key_id: ${{ secrets.KC_IDP_APPLE_KEY_ID }}
+      TF_VAR_auth_apple_private_key: ${{ secrets.KC_IDP_APPLE_PRIVATE_KEY }}
 
     steps:
       - name: 📦 Checkout
