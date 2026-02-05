@@ -163,6 +163,28 @@ jobs:
           kubectl apply -f ./infra/k8s/managed-cert.yaml
           kubectl apply -f ./infra/k8s/ingress.yaml
 
+      - name: 🔁 Reconcile Cloud SQL user passwords from Terraform state
+        run: |
+          set -euo pipefail
+          terraform -chdir=infra/gcp/terraform init -input=false -backend=true
+          DB_PASS="$(terraform -chdir=infra/gcp/terraform output -raw db_pass 2>/dev/null || true)"
+          KC_DB_PASS="$(terraform -chdir=infra/gcp/terraform output -raw keycloak_db_pass 2>/dev/null || true)"
+          ICN="$(terraform -chdir=infra/gcp/terraform output -raw instance_connection_name 2>/dev/null || true)"
+          DB_INSTANCE="${ICN##*:}"
+          if [ -z "${DB_INSTANCE:-}" ] || [ "$DB_INSTANCE" = "$ICN" ]; then
+            DB_INSTANCE="claritas-sql"
+          fi
+          if [ -z "${DB_PASS:-}" ] || [ "$DB_PASS" = "null" ]; then
+            echo "::error::Could not extract db_pass from Terraform output." >&2
+            exit 1
+          fi
+          if [ -z "${KC_DB_PASS:-}" ] || [ "$KC_DB_PASS" = "null" ]; then
+            echo "::error::Could not extract keycloak_db_pass from Terraform output." >&2
+            exit 1
+          fi
+          gcloud sql users set-password claritas_app --instance="$DB_INSTANCE" --project "${PROJECT_ID}" --password="$DB_PASS"
+          gcloud sql users set-password keycloak_app --instance="$DB_INSTANCE" --project "${PROJECT_ID}" --password="$KC_DB_PASS"
+
       - name: 🔐 Ensure DB secret matches Terraform state
         env:
           NS: ${{ env.NAMESPACE }}
