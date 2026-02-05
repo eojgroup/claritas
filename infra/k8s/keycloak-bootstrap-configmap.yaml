@@ -53,6 +53,52 @@ data:
       printf "]"
     }
 
+    # Keycloak does not accept wildcard-in-the-middle patterns like
+    # /api/auth/*/callback for redirect URIs. Expand those into explicit
+    # provider callbacks so bootstrap remains compatible with older config.
+    expand_provider_callbacks() {
+      local csv="${1:-}"
+      local part=""
+      local item=""
+      local joined=""
+      declare -A seen=()
+
+      IFS=',' read -r -a items <<< "$csv"
+      for part in "${items[@]}"; do
+        part="$(trim "$part")"
+        [ -z "$part" ] && continue
+        if [[ "$part" == *"/api/auth/*/callback" ]]; then
+          for provider in google microsoft apple; do
+            item="${part/\*\/callback/${provider}/callback}"
+            if [ -n "${seen[$item]+x}" ]; then
+              continue
+            fi
+            seen["$item"]=1
+            if [ -n "$joined" ]; then
+              joined="${joined},${item}"
+            else
+              joined="${item}"
+            fi
+          done
+        else
+          item="$part"
+          if [ -n "${seen[$item]+x}" ]; then
+            continue
+          fi
+          seen["$item"]=1
+          if [ -n "$joined" ]; then
+            joined="${joined},${item}"
+          else
+            joined="${item}"
+          fi
+        fi
+      done
+
+      printf "%s" "$joined"
+    }
+
+    KEYCLOAK_API_REDIRECT_URIS="$(expand_provider_callbacks "$KEYCLOAK_API_REDIRECT_URIS")"
+
     client_internal_id() {
       local client_id="$1"
       "$KCADM" get clients -r "$KEYCLOAK_REALM" -q clientId="$client_id" --fields id \

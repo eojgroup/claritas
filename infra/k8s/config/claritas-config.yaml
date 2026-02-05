@@ -28,6 +28,6 @@ data:
   KEYCLOAK_WEB_REDIRECT_URIS: "https://app.claritas.info/*,http://localhost:5173/*"
   KEYCLOAK_WEB_ORIGINS: "https://app.claritas.info,http://localhost:5173"
   KEYCLOAK_MOBILE_REDIRECT_URIS: "claritas://auth/*"
-  KEYCLOAK_API_REDIRECT_URIS: "https://app.claritas.info/api/auth/*/callback,http://localhost:8080/api/auth/*/callback"
+  KEYCLOAK_API_REDIRECT_URIS: "https://app.claritas.info/api/auth/google/callback,https://app.claritas.info/api/auth/microsoft/callback,https://app.claritas.info/api/auth/apple/callback,http://localhost:8080/api/auth/google/callback,http://localhost:8080/api/auth/microsoft/callback,http://localhost:8080/api/auth/apple/callback"
   KEYCLOAK_DB_NAME: "keycloak"
   KEYCLOAK_DB_USER: "keycloak_app"
