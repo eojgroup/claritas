@@ -31,12 +31,29 @@ spec:
               fi
 
               psql "host=127.0.0.1 port=5432 dbname=${DB_NAME} user=${DB_USER} sslmode=disable" -v ON_ERROR_STOP=1 <<'SQL'
+              \set ON_ERROR_STOP on
               -- Ensure core tables exist
-              DO $$
-              DECLARE
-                missing text[];
-              BEGIN
-                SELECT array_agg(t.name) INTO missing
+              SELECT count(*) AS missing_tables
+              FROM (VALUES
+                ('flyway_schema_history'),
+                ('source'),
+                ('source_feed'),
+                ('ingestion_run'),
+                ('country'),
+                ('item'),
+                ('weather_snapshot'),
+                ('app_user'),
+                ('auth_identity'),
+                ('auth_session'),
+                ('auth_role'),
+                ('auth_user_role'),
+                ('auth_state')
+              ) AS t(name)
+              WHERE to_regclass('public.' || t.name) IS NULL;
+              \gset
+              \if :missing_tables != 0
+                \echo 'Missing required tables:'
+                SELECT array_agg(t.name)
                 FROM (VALUES
                   ('flyway_schema_history'),
                   ('source'),
@@ -53,18 +70,22 @@ spec:
                   ('auth_state')
                 ) AS t(name)
                 WHERE to_regclass('public.' || t.name) IS NULL;
-
-                IF missing IS NOT NULL THEN
-                  RAISE EXCEPTION 'Missing required tables: %', array_to_string(missing, ', ');
-                END IF;
-              END $$;
+                \quit 1
+              \endif
 
               -- Ensure all expected migrations are marked successful
-              DO $$
-              DECLARE
-                missing_versions text[];
-              BEGIN
-                SELECT array_agg(v.version) INTO missing_versions
+              SELECT count(*) AS missing_versions
+              FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7')) AS v(version)
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM flyway_schema_history f
+                WHERE f.version = v.version
+                  AND f.success = true
+              );
+              \gset
+              \if :missing_versions != 0
+                \echo 'Missing successful Flyway versions:'
+                SELECT array_agg(v.version)
                 FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7')) AS v(version)
                 WHERE NOT EXISTS (
                   SELECT 1
@@ -72,11 +93,8 @@ spec:
                   WHERE f.version = v.version
                     AND f.success = true
                 );
-
-                IF missing_versions IS NOT NULL THEN
-                  RAISE EXCEPTION 'Missing successful Flyway versions: %', array_to_string(missing_versions, ', ');
-                END IF;
-              END $$;
+                \quit 1
+              \endif
               SQL
 
               # Stop sidecar so Job can complete.
