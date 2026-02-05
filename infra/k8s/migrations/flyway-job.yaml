@@ -18,11 +18,14 @@ spec:
               set -e
               # Compose JDBC URL from DB_NAME provided via ConfigMap
               export FLYWAY_URL="jdbc:postgresql://127.0.0.1:5432/${DB_NAME}"
+              # Fail fast on bad credentials/config. Long retry loops hide real errors.
+              export FLYWAY_CONNECT_RETRIES=8
+              export FLYWAY_CONNECT_RETRIES_INTERVAL=3
               # Validate and apply migrations (retry until DB is reachable).
               # Do not auto-repair here; if validation fails we want deploy to fail loudly.
-              /flyway/flyway -connectRetries=60 info
-              /flyway/flyway -connectRetries=60 validate
-              /flyway/flyway -connectRetries=60 migrate
+              /flyway/flyway info
+              /flyway/flyway validate
+              /flyway/flyway migrate
               STATUS=$?
               # Signal the sidecar proxy to exit so the Job can complete
               if command -v killall >/dev/null 2>&1; then
