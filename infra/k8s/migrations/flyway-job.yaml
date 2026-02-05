@@ -21,11 +21,12 @@ spec:
               # Fail fast on bad credentials/config. Long retry loops hide real errors.
               export FLYWAY_CONNECT_RETRIES=8
               export FLYWAY_CONNECT_RETRIES_INTERVAL=3
-              # Validate and apply migrations (retry until DB is reachable).
-              # Do not auto-repair here; if validation fails we want deploy to fail loudly.
+              # Apply then validate:
+              # - migrate handles expected pending scripts
+              # - validate still catches drift/checksum issues afterward
               /flyway/flyway info
-              /flyway/flyway validate
               /flyway/flyway migrate
+              /flyway/flyway validate
               STATUS=$?
               # Signal the sidecar proxy to exit so the Job can complete
               if command -v killall >/dev/null 2>&1; then
