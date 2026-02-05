@@ -4,6 +4,8 @@ metadata:
   name: keycloak
   namespace: claritas
   labels: { app: keycloak }
+  annotations:
+    cloud.google.com/backend-config: '{"default":"keycloak-backendconfig"}'
 spec:
   selector: { app: keycloak }
   ports:

@@ -42,7 +42,9 @@ spec:
             - --metrics-enabled=true
             - --proxy-headers=xforwarded
             - --hostname=auth.claritas.info
-            - --hostname-strict=true
+            # GCLB health checks do not use the auth host header; strict host validation
+            # can mark the backend unhealthy and surface 502 at auth.claritas.info.
+            - --hostname-strict=false
           env:
             - name: KC_DB
               value: postgres

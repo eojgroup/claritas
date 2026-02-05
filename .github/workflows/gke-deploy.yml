@@ -155,6 +155,7 @@ jobs:
           kubectl apply -f ./infra/k8s/web-service.yaml
           kubectl apply -f ./infra/k8s/api-service.yaml
           kubectl apply -f ./infra/k8s/keycloak-pdb.yaml
+          kubectl apply -f ./infra/k8s/keycloak-backendconfig.yaml
           kubectl apply -f ./infra/k8s/keycloak-service.yaml
           kubectl apply -f ./infra/k8s/keycloak-bootstrap-configmap.yaml
           kubectl -n "${NAMESPACE}" delete managedcertificate claritas-web-cert --ignore-not-found=true
