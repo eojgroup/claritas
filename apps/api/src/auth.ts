@@ -31,6 +31,7 @@ const authRouter = express.Router();
 
 const issuerCache = new Map<string, Promise<Issuer>>();
 const clientCache = new Map<string, Promise<Client>>();
+let ensureAuthStateTablePromise: Promise<void> | null = null;
 
 function optionalEnv(name: string): string | undefined {
   const value = process.env[name];
@@ -179,6 +180,7 @@ async function insertAuthState(
   codeVerifier: string,
   redirectUrl: string | undefined
 ) {
+  await ensureAuthStateTable();
   const expiresAt = new Date(Date.now() + getStateTtlMs()).toISOString();
   await query(
     `INSERT INTO auth_state (provider, state, nonce, code_verifier, redirect_url, expires_at)
@@ -188,6 +190,7 @@ async function insertAuthState(
 }
 
 async function consumeAuthState(state: string): Promise<AuthStateRow | null> {
+  await ensureAuthStateTable();
   return withTransaction(async (client) => {
     await client.query(`DELETE FROM auth_state WHERE expires_at < now()`);
     const { rows } = await client.query<AuthStateRow>(
@@ -199,6 +202,30 @@ async function consumeAuthState(state: string): Promise<AuthStateRow | null> {
     );
     return rows[0] || null;
   });
+}
+
+async function ensureAuthStateTable(): Promise<void> {
+  if (!ensureAuthStateTablePromise) {
+    ensureAuthStateTablePromise = (async () => {
+      await query(`
+        CREATE TABLE IF NOT EXISTS auth_state (
+          id BIGSERIAL PRIMARY KEY,
+          provider TEXT NOT NULL,
+          state TEXT NOT NULL UNIQUE,
+          nonce TEXT NOT NULL,
+          code_verifier TEXT NOT NULL,
+          redirect_url TEXT,
+          created_at TIMESTAMPTZ DEFAULT now(),
+          expires_at TIMESTAMPTZ NOT NULL
+        )
+      `);
+      await query(`CREATE INDEX IF NOT EXISTS auth_state_expires_idx ON auth_state (expires_at)`);
+    })().catch((err) => {
+      ensureAuthStateTablePromise = null;
+      throw err;
+    });
+  }
+  await ensureAuthStateTablePromise;
 }
 
 async function ensureUserFromClaims(provider: ProviderName, claims: Record<string, any>): Promise<{ userId: number }> {

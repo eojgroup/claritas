@@ -13,6 +13,7 @@ const db_1 = require("./db");
 const authRouter = express_1.default.Router();
 const issuerCache = new Map();
 const clientCache = new Map();
+let ensureAuthStateTablePromise = null;
 function optionalEnv(name) {
     const value = process.env[name];
     return value ? value : undefined;
@@ -142,11 +143,13 @@ function hashToken(token) {
     return node_crypto_1.default.createHash("sha256").update(token).digest("hex");
 }
 async function insertAuthState(provider, state, nonce, codeVerifier, redirectUrl) {
+    await ensureAuthStateTable();
     const expiresAt = new Date(Date.now() + getStateTtlMs()).toISOString();
     await (0, db_1.query)(`INSERT INTO auth_state (provider, state, nonce, code_verifier, redirect_url, expires_at)
      VALUES ($1, $2, $3, $4, $5, $6)`, [provider, state, nonce, codeVerifier, redirectUrl || null, expiresAt]);
 }
 async function consumeAuthState(state) {
+    await ensureAuthStateTable();
     return (0, db_1.withTransaction)(async (client) => {
         await client.query(`DELETE FROM auth_state WHERE expires_at < now()`);
         const { rows } = await client.query(`DELETE FROM auth_state
@@ -155,6 +158,29 @@ async function consumeAuthState(state) {
        RETURNING provider, state, nonce, code_verifier, redirect_url, expires_at`, [state]);
         return rows[0] || null;
     });
+}
+async function ensureAuthStateTable() {
+    if (!ensureAuthStateTablePromise) {
+        ensureAuthStateTablePromise = (async () => {
+            await (0, db_1.query)(`
+        CREATE TABLE IF NOT EXISTS auth_state (
+          id BIGSERIAL PRIMARY KEY,
+          provider TEXT NOT NULL,
+          state TEXT NOT NULL UNIQUE,
+          nonce TEXT NOT NULL,
+          code_verifier TEXT NOT NULL,
+          redirect_url TEXT,
+          created_at TIMESTAMPTZ DEFAULT now(),
+          expires_at TIMESTAMPTZ NOT NULL
+        )
+      `);
+            await (0, db_1.query)(`CREATE INDEX IF NOT EXISTS auth_state_expires_idx ON auth_state (expires_at)`);
+        })().catch((err) => {
+            ensureAuthStateTablePromise = null;
+            throw err;
+        });
+    }
+    await ensureAuthStateTablePromise;
 }
 async function ensureUserFromClaims(provider, claims) {
     const providerSubject = typeof claims.sub === "string" ? claims.sub : "";
