@@ -1,0 +1,102 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-verify
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      shareProcessNamespace: true
+      restartPolicy: Never
+      serviceAccountName: flyway-sa
+      containers:
+        - name: db-verify
+          image: postgres:16-alpine
+          command: ["/bin/sh", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+              export PGPASSWORD="${DB_PASSWORD}"
+
+              psql "host=127.0.0.1 port=5432 dbname=${DB_NAME} user=${DB_USER} sslmode=disable" -v ON_ERROR_STOP=1 <<'SQL'
+              -- Ensure core tables exist
+              DO $$
+              DECLARE
+                missing text[];
+              BEGIN
+                SELECT array_agg(t.name) INTO missing
+                FROM (VALUES
+                  ('flyway_schema_history'),
+                  ('source'),
+                  ('source_feed'),
+                  ('ingestion_run'),
+                  ('country'),
+                  ('item'),
+                  ('weather_snapshot'),
+                  ('app_user'),
+                  ('auth_identity'),
+                  ('auth_session'),
+                  ('auth_role'),
+                  ('auth_user_role'),
+                  ('auth_state')
+                ) AS t(name)
+                WHERE to_regclass('public.' || t.name) IS NULL;
+
+                IF missing IS NOT NULL THEN
+                  RAISE EXCEPTION 'Missing required tables: %', array_to_string(missing, ', ');
+                END IF;
+              END $$;
+
+              -- Ensure all expected migrations are marked successful
+              DO $$
+              DECLARE
+                missing_versions text[];
+              BEGIN
+                SELECT array_agg(v.version) INTO missing_versions
+                FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7')) AS v(version)
+                WHERE NOT EXISTS (
+                  SELECT 1
+                  FROM flyway_schema_history f
+                  WHERE f.version = v.version
+                    AND f.success = true
+                );
+
+                IF missing_versions IS NOT NULL THEN
+                  RAISE EXCEPTION 'Missing successful Flyway versions: %', array_to_string(missing_versions, ', ');
+                END IF;
+              END $$;
+              SQL
+
+              # Stop sidecar so Job can complete.
+              if command -v killall >/dev/null 2>&1; then
+                killall cloud-sql-proxy >/dev/null 2>&1 || true
+              else
+                PIDS=$(ps -eo pid,args | awk '/cloud-sql-proxy/{print $1}')
+                [ -n "$PIDS" ] && kill $PIDS || true
+              fi
+          env:
+            - name: DB_NAME
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_NAME } }
+            - name: DB_USER
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_USER } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
+          args:
+            - "--structured-logs"
+            - "--private-ip"
+            - "--port=5432"
+            - "$(INSTANCE_CONNECTION_NAME)"
+          env:
+            - name: INSTANCE_CONNECTION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: claritas-config
+                  key: INSTANCE_CONNECTION_NAME
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }

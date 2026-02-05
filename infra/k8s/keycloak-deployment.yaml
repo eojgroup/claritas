@@ -37,6 +37,10 @@ spec:
           image: quay.io/keycloak/keycloak:26.0.7
           args:
             - start
+            - --db=postgres
+            - --db-url-host=127.0.0.1
+            - --db-url-port=5432
+            - --db-url-database=$(KEYCLOAK_DB_NAME)
             - --http-enabled=true
             - --health-enabled=true
             - --metrics-enabled=true
@@ -48,11 +52,7 @@ spec:
           env:
             - name: KC_DB
               value: postgres
-            - name: KC_DB_URL_HOST
-              value: "127.0.0.1"
-            - name: KC_DB_URL_PORT
-              value: "5432"
-            - name: KC_DB_URL_DATABASE
+            - name: KEYCLOAK_DB_NAME
               valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_DB_NAME } }
             - name: KC_DB_USERNAME
               valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_DB_USER } }

@@ -173,20 +173,17 @@ jobs:
           DB_USER=$(kubectl -n "$NS" get configmap claritas-config -o jsonpath='{.data.DB_USER}')
           # Extract password from Terraform output (remote state via GCS backend).
           DB_PASS=""
-          if terraform -chdir=infra/gcp/terraform init -input=false -backend=true; then
-            DB_PASS=$(terraform -chdir=infra/gcp/terraform output -raw db_pass 2>/dev/null || true)
-          else
-            echo "::warning::Terraform init failed; skipping secret upsert"
-          fi
+          terraform -chdir=infra/gcp/terraform init -input=false -backend=true
+          DB_PASS=$(terraform -chdir=infra/gcp/terraform output -raw db_pass 2>/dev/null || true)
           if [ -z "$DB_PASS" ] || [ "$DB_PASS" = "null" ]; then
-            echo "::warning::Could not extract DB password from Terraform output; skipping secret upsert"
-          else
-            kubectl -n "$NS" delete secret claritas-db --ignore-not-found
-            kubectl -n "$NS" create secret generic claritas-db \
-              --from-literal=DB_NAME="$DB_NAME" \
-              --from-literal=DB_USER="$DB_USER" \
-              --from-literal=DB_PASSWORD="$DB_PASS"
+            echo "::error::Could not extract DB password from Terraform output (db_pass). Refusing deploy to avoid broken API DB auth." >&2
+            exit 1
           fi
+          kubectl -n "$NS" create secret generic claritas-db \
+            --from-literal=DB_NAME="$DB_NAME" \
+            --from-literal=DB_USER="$DB_USER" \
+            --from-literal=DB_PASSWORD="$DB_PASS" \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: 🔐 Ensure API provider secrets exist
         env:
@@ -457,6 +454,24 @@ jobs:
             fi
             sleep 5
           done
+
+      - name: ✅ Verify DB schema and migration history
+        env:
+          NS: ${{ env.NAMESPACE }}
+        run: |
+          set -euo pipefail
+          job="db-verify-${GITHUB_RUN_ID}"
+          kubectl -n "$NS" delete job "$job" --ignore-not-found=true || true
+          sed -E "s/^\s*name: db-verify$/  name: ${job}/" infra/k8s/migrations/db-verify-job.yaml | kubectl -n "$NS" apply -f -
+          if ! kubectl -n "$NS" wait --for=condition=complete "job/${job}" --timeout=600s; then
+            echo "::error::DB verification failed" >&2
+            kubectl -n "$NS" describe "job/${job}" || true
+            kubectl -n "$NS" logs "job/${job}" -c db-verify --tail=200 || true
+            kubectl -n "$NS" logs "job/${job}" -c cloud-sql-proxy --tail=200 || true
+            exit 1
+          fi
+          kubectl -n "$NS" logs "job/${job}" -c db-verify --tail=200 || true
+          kubectl -n "$NS" delete "job/${job}" --wait=true || true
 
       - name: 📤 Set image and rollout (with diagnostics)
         run: |
