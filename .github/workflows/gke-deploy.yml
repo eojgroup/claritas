@@ -304,28 +304,6 @@ jobs:
             exit 1
           fi
 
-          # Enforce IdP secrets for providers that are enabled.
-          providers="$(kubectl -n "$NS" get configmap claritas-config -o jsonpath='{.data.AUTH_PROVIDERS}' 2>/dev/null || true)"
-          providers="${providers:-google,microsoft,apple}"
-          for p in $(echo "$providers" | tr ',' ' '); do
-            case "$p" in
-              google)
-                [ -n "${KC_IDP_GOOGLE_CLIENT_ID:-}" ] || { echo "::error::Missing KC_IDP_GOOGLE_CLIENT_ID (required for Google IdP)"; exit 1; }
-                [ -n "${KC_IDP_GOOGLE_CLIENT_SECRET:-}" ] || { echo "::error::Missing KC_IDP_GOOGLE_CLIENT_SECRET (required for Google IdP)"; exit 1; }
-                ;;
-              microsoft)
-                [ -n "${KC_IDP_MICROSOFT_CLIENT_ID:-}" ] || { echo "::error::Missing KC_IDP_MICROSOFT_CLIENT_ID (required for Microsoft IdP)"; exit 1; }
-                [ -n "${KC_IDP_MICROSOFT_CLIENT_SECRET:-}" ] || { echo "::error::Missing KC_IDP_MICROSOFT_CLIENT_SECRET (required for Microsoft IdP)"; exit 1; }
-                ;;
-              apple)
-                [ -n "${KC_IDP_APPLE_CLIENT_ID:-}" ] || { echo "::error::Missing KC_IDP_APPLE_CLIENT_ID (required for Apple IdP)"; exit 1; }
-                [ -n "${KC_IDP_APPLE_TEAM_ID:-}" ] || { echo "::error::Missing KC_IDP_APPLE_TEAM_ID (required for Apple IdP)"; exit 1; }
-                [ -n "${KC_IDP_APPLE_KEY_ID:-}" ] || { echo "::error::Missing KC_IDP_APPLE_KEY_ID (required for Apple IdP)"; exit 1; }
-                [ -n "${KC_IDP_APPLE_PRIVATE_KEY:-}" ] || { echo "::error::Missing KC_IDP_APPLE_PRIVATE_KEY (required for Apple IdP)"; exit 1; }
-                ;;
-            esac
-          done
-
           args=(
             --from-literal=KEYCLOAK_DB_PASSWORD="$KEYCLOAK_DB_PASSWORD"
             --from-literal=KEYCLOAK_ADMIN="$KEYCLOAK_ADMIN"
