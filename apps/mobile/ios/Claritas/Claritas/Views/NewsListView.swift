@@ -12,12 +12,10 @@ struct NewsListView: View {
                 .frame(maxWidth: .infinity)
                 .padding()
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal)
         } else {
             VStack(spacing: 12) {
                 ForEach(items) { n in
                     NewsRow(item: n, onSelectCountry: onSelectCountry)
-                        .padding(.horizontal)
                 }
             }
         }

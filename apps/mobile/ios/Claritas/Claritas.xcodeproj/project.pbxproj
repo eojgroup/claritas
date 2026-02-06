@@ -19,6 +19,7 @@
 		A621E9AC3EC7A577AC533FB7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E82B3BB5CE96F92B515B6761 /* Assets.xcassets */; };
 		ADA2989FE34B746DECF5AA91 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EDE751F583EFD9AF910EFBF /* RootView.swift */; };
 		C8A9E2F5B0C84D9EA2B3D4E5 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7F4D1E5A0B74C8D91A1C2F3 /* ProfileView.swift */; };
+		D8F2A1B7C9E34D77B2A0E901 /* BrandComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A1E2B3D4F54A6B8192C3D4 /* BrandComponents.swift */; };
 		EFDB0B685B766B21737D8F74 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = CDCBB7D8BC8E2962625E9970 /* Info.plist */; };
 		F9DDE33C37F8B313D099461F /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 096E885ACDAE32201E2C8B01 /* App.swift */; };
 /* End PBXBuildFile section */
@@ -35,6 +36,7 @@
 		799D058A34FC37C883892B08 /* WeatherListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WeatherListView.swift; path = Claritas/Views/WeatherListView.swift; sourceTree = "<group>"; };
 		7D51FFE1A39E761E7FFC24E8 /* AppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppModel.swift; path = Claritas/AppModel.swift; sourceTree = "<group>"; };
 		B7F4D1E5A0B74C8D91A1C2F3 /* ProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileView.swift; path = Claritas/Views/ProfileView.swift; sourceTree = "<group>"; };
+		C7A1E2B3D4F54A6B8192C3D4 /* BrandComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BrandComponents.swift; path = Claritas/Views/BrandComponents.swift; sourceTree = "<group>"; };
 		8DA85295964BB7D0F6BDA601 /* Claritas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Claritas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A5BE5D9C09529297E1451F12 /* APIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIClient.swift; path = Claritas/Services/APIClient.swift; sourceTree = "<group>"; };
 		CDCBB7D8BC8E2962625E9970 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = Claritas/Info.plist; sourceTree = "<group>"; };
@@ -70,6 +72,7 @@
 				A5BE5D9C09529297E1451F12 /* APIClient.swift */,
 				6EDE751F583EFD9AF910EFBF /* RootView.swift */,
 				1A3C0BCDF64916E6F0C6721A /* DashboardView.swift */,
+				C7A1E2B3D4F54A6B8192C3D4 /* BrandComponents.swift */,
 				B7F4D1E5A0B74C8D91A1C2F3 /* ProfileView.swift */,
 				192B8603EDE370DA77625265 /* NewsListView.swift */,
 				799D058A34FC37C883892B08 /* WeatherListView.swift */,
@@ -180,6 +183,7 @@
 				95BEF938B2E0EB3FD4D5E41B /* APIClient.swift in Sources */,
 				ADA2989FE34B746DECF5AA91 /* RootView.swift in Sources */,
 				77A27470B7E5D27855F83381 /* DashboardView.swift in Sources */,
+				D8F2A1B7C9E34D77B2A0E901 /* BrandComponents.swift in Sources */,
 				C8A9E2F5B0C84D9EA2B3D4E5 /* ProfileView.swift in Sources */,
 				22088399238459C288498D24 /* NewsListView.swift in Sources */,
 				59A9F6FA0DBB9622E0406EB1 /* WeatherListView.swift in Sources */,

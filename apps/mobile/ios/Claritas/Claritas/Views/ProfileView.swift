@@ -25,17 +25,19 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 18) {
-                headerCard
-                accountDetailsCard
-                providerCard
-                preferencesCard
-                sessionCard
+        BrandBackground {
+            ScrollView {
+                VStack(spacing: 18) {
+                    headerCard
+                    accountDetailsCard
+                    providerCard
+                    preferencesCard
+                    sessionCard
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
             }
-            .padding()
         }
-        .background(Color(.systemGroupedBackground))
     }
 
     private var headerCard: some View {
@@ -99,7 +101,7 @@ struct ProfileView: View {
     }
 
     private var accountDetailsCard: some View {
-        CardContainer(title: "Account details", icon: "person.crop.circle") {
+        BrandCard(title: "Account details", icon: "person.crop.circle") {
             ProfileRow(label: "User ID", value: model.authUser.map { String($0.id) } ?? "—")
             ProfileRow(label: "Display name", value: model.authUser?.display_name ?? "Not set")
             ProfileRow(label: "Email", value: model.authUser?.email ?? "Not provided")
@@ -108,7 +110,7 @@ struct ProfileView: View {
     }
 
     private var providerCard: some View {
-        CardContainer(title: "Identity providers", icon: "lock.shield") {
+        BrandCard(title: "Identity providers", icon: "lock.shield") {
             if model.authProviders.isEmpty {
                 Text("No providers reported yet.")
                     .font(.footnote)
@@ -139,7 +141,7 @@ struct ProfileView: View {
     }
 
     private var preferencesCard: some View {
-        CardContainer(title: "Preferences", icon: "slider.horizontal.3") {
+        BrandCard(title: "Preferences", icon: "slider.horizontal.3") {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Theme")
@@ -159,7 +161,7 @@ struct ProfileView: View {
     }
 
     private var sessionCard: some View {
-        CardContainer(title: "Session", icon: "checkmark.seal") {
+        BrandCard(title: "Session", icon: "checkmark.seal") {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Active session")
@@ -196,29 +198,6 @@ struct ProfileView: View {
         case .microsoft: return "Microsoft"
         case .apple: return "Apple"
         }
-    }
-}
-
-private struct CardContainer<Content: View>: View {
-    let title: String
-    let icon: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .foregroundStyle(.secondary)
-                Text(title.uppercased())
-                    .font(.caption2.weight(.semibold))
-                    .tracking(3)
-                    .foregroundStyle(.secondary)
-            }
-            content
-        }
-        .padding(16)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.secondary.opacity(0.12)))
     }
 }
 

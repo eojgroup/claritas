@@ -11,26 +11,7 @@ struct LoginView: View {
     @State private var mode: Mode = .signin
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.98, green: 0.96, blue: 0.93), Color(red: 0.93, green: 0.92, blue: 0.88)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            Circle()
-                .fill(Color(red: 0.12, green: 0.42, blue: 0.4).opacity(0.18))
-                .frame(width: 320, height: 320)
-                .blur(radius: 20)
-                .offset(x: -140, y: -220)
-
-            Circle()
-                .fill(Color(red: 0.83, green: 0.63, blue: 0.42).opacity(0.22))
-                .frame(width: 260, height: 260)
-                .blur(radius: 18)
-                .offset(x: 150, y: -260)
-
+        BrandBackground {
             ScrollView {
                 VStack(spacing: 24) {
                     header
@@ -185,7 +166,7 @@ struct LoginView: View {
             }
         }
         .padding(20)
-        .background(.white.opacity(0.92))
+        .background(Color(.systemBackground).opacity(0.95))
         .clipShape(RoundedRectangle(cornerRadius: 24))
         .shadow(color: Color.black.opacity(0.12), radius: 20, x: 0, y: 12)
     }

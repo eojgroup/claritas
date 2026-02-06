@@ -153,7 +153,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
         style={{ animationDelay: "1.5s" }}
       />
 
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-6 py-12 lg:grid lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:py-20">
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col gap-10 px-4 py-12 sm:px-6 lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-8 lg:py-20">
         <div className="order-2 space-y-10 lg:order-1">
           <div className="flex items-center gap-3">
             <div className="relative h-12 w-12">
@@ -210,7 +210,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
           </div>
         </div>
 
-        <div className="order-1 rounded-3xl border border-white/80 bg-white/90 p-8 text-slate-900 shadow-[0_30px_80px_rgba(14,30,37,0.18)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
+        <div className="order-1 rounded-3xl border border-white/80 bg-white/95 p-8 text-slate-900 shadow-[0_24px_60px_rgba(14,30,37,0.16)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="text-xs uppercase tracking-[0.25em] text-slate-500">Secure access</div>

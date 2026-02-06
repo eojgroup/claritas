@@ -133,6 +133,8 @@ export default function ClaritasDashboard() {
     () => ["#0B1E2D", "#183447", "#254B66"],
     []
   );
+  const cardBase =
+    "rounded-3xl border border-slate-200/70 bg-white/90 shadow-sm dark:border-slate-700/70 dark:bg-slate-800/80";
 
   const filteredWeather = useMemo(() => {
     let w = weatherStats;
@@ -209,9 +211,9 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+    <div className="min-h-screen w-full bg-[color:var(--login-cream)] text-slate-900 dark:bg-slate-900 dark:text-slate-100">
       {/* Header */}
-      <header className="bg-slate-200 dark:bg-slate-800 border-b border-slate-300 dark:border-slate-700">
+      <header className="border-b border-white/60 bg-white/70 backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/70">
         <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-3">
@@ -275,7 +277,7 @@ export default function ClaritasDashboard() {
           </div>
         </div>
       )}
-      <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-12 gap-4">
+      <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-12 gap-6">
         {activeView === "profile" ? (
           <section className="col-span-12">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -343,7 +345,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6 shadow-sm">
+                <div className={cardBase + " p-6"}>
                   <div className="flex items-center justify-between">
                     <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Account details</div>
                     <Settings className="h-4 w-4 text-slate-400" />
@@ -365,7 +367,7 @@ export default function ClaritasDashboard() {
               </div>
 
               <div className="space-y-6">
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6 shadow-sm">
+                <div className={cardBase + " p-6"}>
                   <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Identity providers</div>
                   <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                     Available sign-in methods connected to this environment.
@@ -399,7 +401,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-6 shadow-sm">
+                <div className={cardBase + " p-6"}>
                   <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Preferences</div>
                   <div className="mt-4 space-y-4 text-sm text-slate-600 dark:text-slate-300">
                     <div className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
@@ -447,9 +449,9 @@ export default function ClaritasDashboard() {
         ) : (
         <>
         {/* LEFT: Map + AI Search + News/Country Profile */}
-        <section className="col-span-12 lg:col-span-7 flex flex-col gap-4">
+        <section className="col-span-12 lg:col-span-7 flex flex-col gap-6">
           {/* Map Card */}
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+          <div className={cardBase}>
             <div className="p-4 border-b border-slate-100 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 flex items-center justify-between">
               <span>Map: {mapMode === 'news' ? '#News per country' : 'Weather (temperature) per country'}</span>
               <div className="flex items-center gap-2 text-xs">
@@ -532,8 +534,8 @@ export default function ClaritasDashboard() {
           </div>
 
           {/* News + Country Profile grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className={cardBase}>
               <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold flex items-center gap-2">
                 <span>List</span>
                 <div className="ml-auto flex items-center gap-2 text-xs">
@@ -621,7 +623,7 @@ export default function ClaritasDashboard() {
               )}
             </div>
 
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+          <div className={cardBase}>
             <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold">Country profile based on selection</div>
             <div className="p-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
                 {!selectedCountry && (
@@ -639,8 +641,8 @@ export default function ClaritasDashboard() {
         </section>
 
         {/* RIGHT: Analytics + Notifications */}
-        <section className="col-span-12 lg:col-span-5 flex flex-col gap-4">
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+        <section className="col-span-12 lg:col-span-5 flex flex-col gap-6">
+          <div className={cardBase}>
             <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold">
               News/number of ships etc per category
             </div>
@@ -674,7 +676,7 @@ export default function ClaritasDashboard() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm">
+          <div className={cardBase}>
             <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold flex items-center gap-2">
               <Bell className="h-5 w-5" /> Notifications
             </div>
@@ -685,7 +687,7 @@ export default function ClaritasDashboard() {
         )}
       </main>
 
-      <footer className="bg-slate-900 text-slate-100">
+      <footer className="border-t border-white/60 bg-white/70 text-slate-600 dark:border-slate-700/60 dark:bg-slate-900/70 dark:text-slate-300">
         <div className="mx-auto max-w-7xl px-4 py-3 text-sm">EOJC</div>
       </footer>
     </div>

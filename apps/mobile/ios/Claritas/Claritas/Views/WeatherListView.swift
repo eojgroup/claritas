@@ -21,7 +21,6 @@ struct WeatherListView: View {
                     .buttonStyle(.bordered)
                     .disabled(isRefreshing)
             }
-            .padding(.horizontal)
 
             if items.isEmpty {
                 Text("No weather rows.")
@@ -30,7 +29,6 @@ struct WeatherListView: View {
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal)
             } else {
                 VStack(spacing: 0) {
                     ForEach(items) { w in
@@ -40,7 +38,6 @@ struct WeatherListView: View {
                 }
                 .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.2)))
-                .padding(.horizontal)
             }
         }
     }
@@ -75,8 +72,6 @@ private struct WeatherRow: View {
                 if let w = item.weather_main { Text(w).foregroundStyle(.secondary) }
             }
         }
-        .padding(.horizontal)
         .padding(.vertical, 10)
     }
 }
-

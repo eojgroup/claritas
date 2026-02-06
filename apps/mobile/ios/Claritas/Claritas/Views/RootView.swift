@@ -31,6 +31,7 @@ struct RootView: View {
                     .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                     .tag(2)
                 }
+                .tint(Color(red: 0.12, green: 0.42, blue: 0.4))
             } else {
                 LoginView()
             }
