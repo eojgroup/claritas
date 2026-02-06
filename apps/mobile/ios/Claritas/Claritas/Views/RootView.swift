@@ -23,6 +23,13 @@ struct RootView: View {
                     }
                     .tabItem { Label("Analytics", systemImage: "chart.pie") }
                     .tag(1)
+
+                    NavigationStack {
+                        ProfileView()
+                            .navigationTitle("Profile")
+                    }
+                    .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                    .tag(2)
                 }
             } else {
                 LoginView()
