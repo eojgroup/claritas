@@ -272,7 +272,7 @@ data:
 
     if "$KCADM" get "realms/${KEYCLOAK_REALM}" >/dev/null 2>&1; then
       log "Realm ${KEYCLOAK_REALM} exists; updating baseline settings"
-      "$KCADM" update "realms/${KEYCLOAK_REALM}" -s enabled=true -s loginWithEmailAllowed=true -s registrationAllowed=true >/dev/null
+      "$KCADM" update "realms/${KEYCLOAK_REALM}" -s enabled=true -s loginWithEmailAllowed=true -s registrationAllowed=true -s loginTheme="claritas" >/dev/null
     else
       log "Creating realm ${KEYCLOAK_REALM}"
       "$KCADM" create realms \
@@ -280,7 +280,8 @@ data:
         -s enabled=true \
         -s displayName="Claritas" \
         -s loginWithEmailAllowed=true \
-        -s registrationAllowed=true >/dev/null
+        -s registrationAllowed=true \
+        -s loginTheme="claritas" >/dev/null
     fi
 
     upsert_client "${KEYCLOAK_WEB_CLIENT_ID}" "true" "${KEYCLOAK_WEB_REDIRECT_URIS}" "${KEYCLOAK_WEB_ORIGINS}"

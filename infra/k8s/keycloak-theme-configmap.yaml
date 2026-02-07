@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-theme
+  namespace: claritas
+data:
+  login-theme.properties: |
+    parent=keycloak
+    import=common/keycloak
+    styles=css/claritas.css
+  login-claritas.css: |
+    :root {
+      --claritas-navy: #0b1f2a;
+      --claritas-steel: #445666;
+      --claritas-ash: #e3e8ec;
+      --claritas-border: #b9c3cc;
+      --claritas-ink: #0b1f2a;
+      --claritas-muted: #516170;
+    }
+
+    body,
+    .login-pf body {
+      background: var(--claritas-ash);
+      font-family: "Work Sans", "Helvetica Neue", Arial, sans-serif;
+      color: var(--claritas-ink);
+    }
+
+    #kc-header {
+      padding: 28px 0 8px;
+    }
+
+    #kc-header-wrapper {
+      position: relative;
+      padding-left: 120px;
+      font-family: "Georgia", "Times New Roman", serif;
+      font-size: 28px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--claritas-ink);
+      display: inline-block;
+    }
+
+    #kc-header-wrapper::before,
+    #kc-header-wrapper::after {
+      content: "";
+      position: absolute;
+      top: -14px;
+      width: 74px;
+      height: 74px;
+      border-radius: 50%;
+    }
+
+    #kc-header-wrapper::before {
+      left: 0;
+      background: var(--claritas-navy);
+    }
+
+    #kc-header-wrapper::after {
+      left: 38px;
+      background: var(--claritas-steel);
+    }
+
+    #kc-content-wrapper {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px 32px;
+    }
+
+    .card-pf,
+    .kc-card,
+    .pf-c-card {
+      background: #ffffff;
+      border: 1px solid var(--claritas-border);
+      border-radius: 14px;
+      box-shadow: none;
+    }
+
+    .login-pf-page .login-pf-brand {
+      display: none;
+    }
+
+    .pf-c-form-control,
+    input[type="text"],
+    input[type="password"],
+    input[type="email"],
+    input[type="tel"] {
+      border: 1px solid var(--claritas-border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      box-shadow: none;
+    }
+
+    .pf-c-form-control:focus,
+    input:focus {
+      outline: none;
+      border-color: var(--claritas-navy);
+      box-shadow: 0 0 0 2px rgba(11, 31, 42, 0.15);
+    }
+
+    #kc-page-title,
+    .kc-page-title,
+    .login-pf-page-header {
+      color: var(--claritas-ink);
+      font-family: "Georgia", "Times New Roman", serif;
+    }
+
+    a,
+    .kc-link {
+      color: var(--claritas-navy);
+    }
+
+    #kc-form-buttons .btn-primary,
+    .pf-c-button.pf-m-primary,
+    .btn-primary {
+      background: var(--claritas-navy);
+      border-color: var(--claritas-navy);
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    #kc-form-buttons .btn-primary:hover,
+    .pf-c-button.pf-m-primary:hover,
+    .btn-primary:hover {
+      background: #0f2a3d;
+      border-color: #0f2a3d;
+    }
+
+    .pf-c-alert__title,
+    .kc-feedback-text,
+    .instruction {
+      color: var(--claritas-muted);
+    }
+
+    .kc-social-item,
+    .login-pf-social {
+      border-radius: 10px;
+      border: 1px solid var(--claritas-border);
+    }

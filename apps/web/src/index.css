@@ -14,6 +14,12 @@
   --login-mist: #dbe3e1;
   --login-teal: #1f6b68;
   --login-amber: #d3a06b;
+  --home-bg: #e4e8ec;
+  --home-header: #dde3e8;
+  --home-surface: #ffffff;
+  --home-border: #b9c3cc;
+  --home-ink: #0b1f2a;
+  --home-muted: #516170;
 }
 
 body {

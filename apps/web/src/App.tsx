@@ -28,6 +28,65 @@ const scatterData = [
   { x: 50, y: 18 },
 ];
 
+const legalPolicies = [
+  {
+    id: "cookie-policy",
+    title: "Cookie Policy",
+    intro:
+      "We use cookies and similar technologies to keep Claritas secure, remember your preferences, and understand how the service is used.",
+    items: [
+      "Strictly necessary cookies keep sessions active and protect against unauthorized access.",
+      "Preference cookies remember choices like language and theme so the interface stays consistent.",
+      "Analytics cookies help us measure performance and improve the clarity of dashboards.",
+      "Marketing cookies are only used when enabled to surface relevant updates.",
+    ],
+    note:
+      "You can manage cookie settings in your browser and clear stored data at any time. Disabling some cookies may impact sign-in or personalization.",
+  },
+  {
+    id: "privacy-statement",
+    title: "Privacy Statement",
+    intro:
+      "Claritas collects only the data needed to provide the service, including account identifiers, security logs, and usage signals.",
+    items: [
+      "We process authentication data to verify identity and manage access across providers.",
+      "Operational metrics are used to keep the platform reliable and to monitor anomalies.",
+      "We do not sell personal information; data is shared only with trusted service providers.",
+      "Retention is limited to what is required for security, compliance, and support.",
+    ],
+    note:
+      "You can request access, correction, or deletion of your data through your account administrator or support contact.",
+  },
+  {
+    id: "terms-of-use",
+    title: "Terms of Use",
+    intro:
+      "By using Claritas you agree to use the platform responsibly and only for authorized business purposes.",
+    items: [
+      "Do not attempt to bypass security controls or access data you are not permitted to see.",
+      "Respect rate limits and avoid actions that could degrade service for other users.",
+      "All content, dashboards, and reports remain the property of Claritas and its licensors.",
+      "We may update these terms to reflect product or regulatory changes.",
+    ],
+    note:
+      "Violations may result in suspended access or termination of accounts. Continued use indicates acceptance of updated terms.",
+  },
+  {
+    id: "copyright",
+    title: "Copyright",
+    intro:
+      "Claritas content, visualizations, and branding are protected by copyright and other intellectual property laws.",
+    items: [
+      "You may use Claritas outputs for internal analysis and reporting within your organization.",
+      "Do not reproduce, distribute, or publish Claritas materials without written permission.",
+      "Third-party data sources remain subject to their own licensing terms.",
+      "Trademarks and logos must not be altered or used in a misleading way.",
+    ],
+    note:
+      "For licensing questions or permissions, contact your Claritas representative.",
+  },
+];
+
 import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
 import {
@@ -130,11 +189,11 @@ export default function ClaritasDashboard() {
   }, [selectedCountry, authStatus]);
 
   const pieColors = useMemo(
-    () => ["#0B1E2D", "#183447", "#254B66"],
+    () => ["#0B1E2D", "#2F4455", "#4E6473"],
     []
   );
   const cardBase =
-    "rounded-3xl border border-slate-200/70 bg-white/90 shadow-sm dark:border-slate-700/70 dark:bg-slate-800/80";
+    "rounded-2xl border border-[color:var(--home-border)] bg-[color:var(--home-surface)] shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-slate-700/70 dark:bg-slate-900/70";
 
   const filteredWeather = useMemo(() => {
     let w = weatherStats;
@@ -211,48 +270,60 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-[color:var(--login-cream)] text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+    <div className="min-h-screen w-full bg-[color:var(--home-bg)] text-[color:var(--home-ink)] dark:bg-slate-950 dark:text-slate-100">
       {/* Header */}
-      <header className="border-b border-white/60 bg-white/70 backdrop-blur dark:border-slate-700/60 dark:bg-slate-900/70">
-        <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
+      <header className="border-b border-[color:var(--home-border)] bg-[color:var(--home-header)]">
+        <div className="mx-auto max-w-7xl px-4 py-5 flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-3">
-            <div className="relative h-12 w-12">
-              <div className="absolute -left-3 top-0 h-12 w-12 rounded-full bg-[#102739]" />
-              <div className="absolute left-1 top-0 h-12 w-12 rounded-full bg-[#1F3C52] opacity-90" />
-              <div className="absolute left-5 top-0 h-12 w-12 rounded-full bg-[#2D556F] opacity-80" />
+            <div className="relative h-14 w-14">
+              <div className="absolute -left-4 top-0 h-14 w-14 rounded-full bg-[#0B1E2D]" />
+              <div className="absolute left-1 top-0 h-14 w-14 rounded-full bg-[#3E4F5F] opacity-90" />
             </div>
-            <span className="font-extrabold tracking-wide text-2xl text-[#0B1E2D]">CLARITAS</span>
+            <span
+              className="text-2xl font-semibold tracking-[0.12em] text-[#0B1E2D]"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              CLARITAS
+            </span>
           </div>
 
           {/* Header actions */}
-          <div className="flex items-center gap-3 text-slate-800 dark:text-slate-200">
+          <div className="flex items-center gap-3 text-[color:var(--home-muted)]">
             {authUser && (
-              <div className="hidden md:flex items-center gap-2 rounded-full border border-slate-300 dark:border-slate-600 px-3 py-1 text-xs text-slate-600 dark:text-slate-300">
+              <div className="hidden md:flex items-center gap-2 rounded-full border border-[color:var(--home-border)] bg-[color:var(--home-surface)] px-3 py-1 text-xs text-[color:var(--home-muted)]">
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
                 <span className="max-w-[180px] truncate">{userLabel}</span>
               </div>
             )}
-            <button aria-label="Toggle dark mode" onClick={() => setDark(v => !v)} className="p-1 rounded hover:bg-black/5 dark:hover:bg-white/10">
-              {dark ? <Sun className="h-6 w-6" /> : <Moon className="h-6 w-6" />}
+            <button
+              aria-label="Toggle dark mode"
+              onClick={() => setDark(v => !v)}
+              className="h-9 w-9 rounded-lg border border-[color:var(--home-border)] bg-[color:var(--home-surface)] text-[color:var(--home-ink)] shadow-sm hover:bg-slate-50 dark:border-slate-700/70 dark:bg-slate-900/70 dark:text-slate-100"
+            >
+              <span className="grid h-full w-full place-items-center">
+                {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+              </span>
             </button>
             <button
               type="button"
               onClick={() => setActiveView("profile")}
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition ${
+              className={`h-9 w-9 rounded-lg border text-[color:var(--home-ink)] shadow-sm transition ${
                 activeView === "profile"
                   ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
+                  : "border-[color:var(--home-border)] bg-[color:var(--home-surface)] hover:bg-slate-50"
               }`}
+              aria-label="Profile"
             >
-              <User className="h-4 w-4" />
-              <span className="hidden sm:inline">Profile</span>
+              <span className="grid h-full w-full place-items-center">
+                <User className="h-5 w-5" />
+              </span>
             </button>
             <button
               type="button"
               onClick={handleSignOut}
               disabled={isSigningOut}
-              className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-700 hover:border-rose-300 disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-700 shadow-sm hover:border-rose-300 disabled:opacity-60"
             >
               <LogOut className="h-4 w-4" />
               <span className="hidden sm:inline">{isSigningOut ? "Signing out…" : "Sign out"}</span>
@@ -452,15 +523,15 @@ export default function ClaritasDashboard() {
         <section className="col-span-12 lg:col-span-7 flex flex-col gap-6">
           {/* Map Card */}
           <div className={cardBase}>
-            <div className="p-4 border-b border-slate-100 dark:border-slate-700 text-sm text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <div className="p-4 border-b border-[color:var(--home-border)] text-sm text-[color:var(--home-muted)] flex items-center justify-between">
               <span>Map: {mapMode === 'news' ? '#News per country' : 'Weather (temperature) per country'}</span>
               <div className="flex items-center gap-2 text-xs">
                 <button
-                  className={`px-2 py-1 rounded border ${mapMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}`}
+                  className={`px-2 py-1 rounded border ${mapMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-[color:var(--home-muted)] border-[color:var(--home-border)]'}`}
                   onClick={() => { setMapMode('news'); setListMode('news'); }}
                 >News</button>
                 <button
-                  className={`px-2 py-1 rounded border ${mapMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}`}
+                  className={`px-2 py-1 rounded border ${mapMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-[color:var(--home-muted)] border-[color:var(--home-border)]'}`}
                   onClick={() => { setMapMode('weather'); setListMode('weather'); }}
                 >Weather</button>
               </div>
@@ -504,26 +575,26 @@ export default function ClaritasDashboard() {
                 )}
               </div>
               {mapMode === 'news' && countryStats.length === 0 && (
-                <div className="absolute bottom-3 right-4 text-xs text-slate-500 dark:text-slate-300 bg-white/70 dark:bg-slate-800/80 px-2 py-1 rounded shadow-sm border border-slate-200 dark:border-slate-700">
+                <div className="absolute bottom-3 right-4 text-xs text-[color:var(--home-muted)] bg-white/70 px-2 py-1 rounded shadow-sm border border-[color:var(--home-border)]">
                   No aggregated stats yet — showing live list fallback
                 </div>
               )}
               {mapMode === 'weather' && (weatherStats?.length ?? 0) === 0 && (
-                <div className="absolute bottom-3 right-4 text-xs text-slate-600 dark:text-slate-300 bg-white/80 dark:bg-slate-800/80 px-2 py-1 rounded shadow-sm border border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                <div className="absolute bottom-3 right-4 text-xs text-[color:var(--home-muted)] bg-white/80 px-2 py-1 rounded shadow-sm border border-[color:var(--home-border)] flex items-center gap-2">
                   <span>No weather stats yet.</span>
                   <button onClick={handleRefreshWeather} disabled={isRefreshingWeather}
-                          className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+                          className="px-2 py-0.5 rounded border border-[color:var(--home-border)] bg-white hover:bg-slate-50 disabled:opacity-50">
                     {isRefreshingWeather ? 'Refreshing…' : 'Refresh now'}
                   </button>
                 </div>
               )}
             </div>
             {/* AI Search */}
-            <div className="border-t border-slate-100 dark:border-slate-700 p-3">
-              <div className="flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 shadow-inner">
-                <Search className="h-5 w-5 text-slate-500 dark:text-slate-300" />
+            <div className="border-t border-[color:var(--home-border)] p-3">
+              <div className="flex items-center gap-2 rounded-xl border border-[color:var(--home-border)] bg-white px-3 py-2 shadow-inner">
+                <Search className="h-5 w-5 text-[color:var(--home-muted)]" />
                 <input
-                  className="w-full bg-transparent outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500 text-inherit"
+                  className="w-full bg-transparent outline-none placeholder:text-[color:var(--home-muted)] text-inherit"
                   placeholder="AI Search"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
@@ -536,15 +607,15 @@ export default function ClaritasDashboard() {
           {/* News + Country Profile grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className={cardBase}>
-              <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold flex items-center gap-2">
+              <div className="p-4 border-b border-[color:var(--home-border)] font-semibold flex items-center gap-2">
                 <span>List</span>
                 <div className="ml-auto flex items-center gap-2 text-xs">
                   <button
-                    className={`px-2 py-1 rounded border ${listMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}`}
+                    className={`px-2 py-1 rounded border ${listMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-[color:var(--home-muted)] border-[color:var(--home-border)]'}`}
                     onClick={() => setListMode('news')}
                   >News</button>
                   <button
-                    className={`px-2 py-1 rounded border ${listMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'}`}
+                    className={`px-2 py-1 rounded border ${listMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-[color:var(--home-muted)] border-[color:var(--home-border)]'}`}
                     onClick={() => setListMode('weather')}
                   >Weather</button>
                 </div>
@@ -558,9 +629,9 @@ export default function ClaritasDashboard() {
                   {news.map((n) => {
                     const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
                     return (
-                      <li key={n.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                      <li key={n.id} className="rounded-lg border border-[color:var(--home-border)] p-3 hover:bg-slate-50">
                         <div className="flex items-start gap-3">
-                          <div className="relative w-32 h-20 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-700/50 flex-none">
+                          <div className="relative w-32 h-20 rounded-md overflow-hidden border border-[color:var(--home-border)] bg-slate-100 flex-none">
                             {img ? (
                               <img
                                 src={img}
@@ -574,11 +645,11 @@ export default function ClaritasDashboard() {
                             ) : null}
                           </div>
                           <div className="min-w-0">
-                            <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900 dark:text-slate-100 hover:underline">
+                            <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900 hover:underline">
                               {n.title || n.url || 'Untitled'}
                             </a>
-                            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-                              {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200">{n.country_iso2}</span>}
+                            <div className="text-xs text-[color:var(--home-muted)] mt-1 flex items-center gap-2 flex-wrap">
+                              {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-[color:var(--home-border)] text-slate-700">{n.country_iso2}</span>}
                               {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
                             </div>
                             {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
@@ -591,27 +662,27 @@ export default function ClaritasDashboard() {
               ) : (
                 <div className="p-4 space-y-3">
                   <div className="flex items-center gap-3 text-sm">
-                    <label className="text-slate-600 dark:text-slate-300">Min temp (°C)</label>
-                    <input type="number" className="w-24 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1"
+                    <label className="text-[color:var(--home-muted)]">Min temp (°C)</label>
+                    <input type="number" className="w-24 rounded border border-[color:var(--home-border)] bg-white px-2 py-1"
                       value={typeof minTemp === 'number' ? minTemp : ''}
                       onChange={(e) => setMinTemp(e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value))}
                       placeholder="Any" />
                     <button onClick={handleRefreshWeather} disabled={isRefreshingWeather}
-                      className="ml-auto px-2 py-1 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50">
+                      className="ml-auto px-2 py-1 rounded border border-[color:var(--home-border)] bg-white hover:bg-slate-50 disabled:opacity-50">
                       {isRefreshingWeather ? 'Refreshing…' : 'Refresh'}
                     </button>
                   </div>
-                  <ul className="list-none divide-y divide-slate-100 dark:divide-slate-700/60">
+                  <ul className="list-none divide-y divide-[color:var(--home-border)]">
                     {filteredWeather.length === 0 && (
-                      <li className="text-sm text-slate-500 dark:text-slate-400 py-3">No weather rows.</li>
+                      <li className="text-sm text-[color:var(--home-muted)] py-3">No weather rows.</li>
                     )}
                     {filteredWeather.map((w, i) => (
                       <li key={`${w.country}-${i}`} className="py-2 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200">{(w.country || '').toUpperCase()}</span>
-                          <span className="text-slate-700 dark:text-slate-200 text-sm">{new Date(w.observed_at).toLocaleString()}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-[color:var(--home-border)] text-slate-700">{(w.country || '').toUpperCase()}</span>
+                          <span className="text-slate-700 text-sm">{new Date(w.observed_at).toLocaleString()}</span>
                         </div>
-                        <div className="text-sm text-slate-800 dark:text-slate-200 flex items-center gap-4">
+                        <div className="text-sm text-slate-800 flex items-center gap-4">
                           <span title="Temperature">🌡️ {w.temp_c ?? '—'}°C</span>
                           <span title="Humidity">💧 {w.humidity ?? '—'}%</span>
                           {w.weather_main && <span className="text-slate-600">{w.weather_main}</span>}
@@ -687,8 +758,66 @@ export default function ClaritasDashboard() {
         )}
       </main>
 
-      <footer className="border-t border-white/60 bg-white/70 text-slate-600 dark:border-slate-700/60 dark:bg-slate-900/70 dark:text-slate-300">
-        <div className="mx-auto max-w-7xl px-4 py-3 text-sm">EOJC</div>
+      <section id="legal" className="border-t border-[color:var(--home-border)] bg-[color:var(--home-header)]">
+        <div className="mx-auto max-w-7xl px-4 py-10">
+          <div className="flex flex-col gap-2">
+            <div className="text-xs uppercase tracking-[0.4em] text-slate-500">Legal</div>
+            <h2
+              className="text-2xl font-semibold text-slate-900"
+              style={{ fontFamily: "var(--font-display)" }}
+            >
+              Policies and usage guidelines
+            </h2>
+            <p className="text-sm text-slate-600 max-w-2xl">
+              Review the policy summaries below. Each section describes how Claritas protects data,
+              governs platform use, and supports compliance.
+            </p>
+          </div>
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            {legalPolicies.map((policy) => (
+              <article
+                key={policy.id}
+                id={policy.id}
+              className="scroll-mt-24 rounded-2xl border border-[color:var(--home-border)] bg-white p-6 shadow-sm"
+            >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-slate-900">{policy.title}</h3>
+                  <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Claritas</span>
+                </div>
+                <p className="mt-3 text-sm text-slate-600">{policy.intro}</p>
+                <ul className="mt-4 space-y-2 text-sm text-slate-600">
+                  {policy.items.map((item) => (
+                    <li key={item} className="flex gap-2">
+                      <span className="mt-1 h-1.5 w-1.5 flex-none rounded-full bg-slate-500" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-4 text-sm text-slate-600">{policy.note}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <footer className="border-t border-[color:var(--home-border)] bg-slate-700 text-slate-100">
+        <div className="mx-auto max-w-7xl px-4 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm font-semibold tracking-[0.35em] uppercase">Claritas</div>
+          <nav aria-label="Legal links" className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <a href="#cookie-policy" className="transition hover:text-white/90">
+              Cookie Policy
+            </a>
+            <a href="#privacy-statement" className="transition hover:text-white/90">
+              Privacy Statement
+            </a>
+            <a href="#terms-of-use" className="transition hover:text-white/90">
+              Terms of Use
+            </a>
+            <a href="#copyright" className="transition hover:text-white/90">
+              Copyright
+            </a>
+          </nav>
+        </div>
       </footer>
     </div>
   );

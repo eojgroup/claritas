@@ -67,6 +67,10 @@ spec:
               containerPort: 8080
             - name: management
               containerPort: 9000
+          volumeMounts:
+            - name: keycloak-theme
+              mountPath: /opt/keycloak/themes
+              readOnly: true
           startupProbe:
             httpGet: { path: /health/ready, port: management }
             failureThreshold: 30
@@ -108,3 +112,12 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: keycloak-theme
+          configMap:
+            name: keycloak-theme
+            items:
+              - key: login-theme.properties
+                path: claritas/login/theme.properties
+              - key: login-claritas.css
+                path: claritas/login/resources/css/claritas.css
