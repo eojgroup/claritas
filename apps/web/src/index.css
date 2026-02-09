@@ -14,12 +14,19 @@
   --login-mist: #dbe3e1;
   --login-teal: #1f6b68;
   --login-amber: #d3a06b;
-  --home-bg: #e4e8ec;
-  --home-header: #dde3e8;
-  --home-surface: #ffffff;
-  --home-border: #b9c3cc;
-  --home-ink: #0b1f2a;
-  --home-muted: #516170;
+  --shell-bg: #eef1f4;
+  --shell-sidebar: #0b1f2a;
+  --shell-surface: #ffffff;
+  --shell-border: #c7d0d9;
+  --shell-ink: #0b1f2a;
+  --shell-muted: #5a6a78;
+  --shell-accent: #1f6b68;
+  --home-bg: var(--shell-bg);
+  --home-header: #e6ecf1;
+  --home-surface: var(--shell-surface);
+  --home-border: var(--shell-border);
+  --home-ink: var(--shell-ink);
+  --home-muted: var(--shell-muted);
 }
 
 body {
@@ -27,8 +34,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   display: block; /* ensure children aren't constrained as flex items */
-  background: var(--login-cream);
-  color: var(--login-ink);
+  background: var(--shell-bg);
+  color: var(--shell-ink);
   font-family: var(--font-body);
 }
 

@@ -137,9 +137,26 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
   const isChecking = status === "checking";
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [showMethods, setShowMethods] = useState(false);
 
   const handleModeChange = (nextMode: "signin" | "signup") => {
     setMode(nextMode);
+    if (nextMode === "signup") {
+      setShowMethods(true);
+    }
+  };
+
+  const enabledProviders = providerMeta.filter((meta) => enabledMap.get(meta.id));
+  const primaryProvider = !isChecking && enabledProviders.length === 1 ? enabledProviders[0] : null;
+  const primaryDisabled = isChecking || enabledProviders.length === 0;
+  const primaryLabel = mode === "signin" ? "Continue to Claritas" : "Create Claritas account";
+
+  const handlePrimaryAction = () => {
+    if (primaryProvider) {
+      onSignIn(primaryProvider.id);
+      return;
+    }
+    setShowMethods(true);
   };
 
   return (
@@ -153,8 +170,8 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
         style={{ animationDelay: "1.5s" }}
       />
 
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-7xl flex-col gap-10 px-4 py-12 sm:px-6 lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-8 lg:py-20">
-        <div className="order-2 space-y-10 lg:order-1">
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-4 py-12 sm:px-6 lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-8 lg:py-20">
+        <section className="order-2 space-y-10 lg:order-1">
           <div className="flex items-center gap-3">
             <div className="relative h-12 w-12">
               <div className="absolute -left-3 top-0 h-12 w-12 rounded-full bg-[#102739]" />
@@ -175,8 +192,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               Global clarity starts with trusted identity.
             </h1>
             <p className="max-w-xl text-lg text-slate-600">
-              Sign in with your provider to unlock the Claritas signal desk. No passwords stored, no extra
-              identity sprawl.
+              Sign in with your provider to unlock the Claritas signal desk. No passwords stored, no extra identity sprawl.
             </p>
           </div>
 
@@ -194,12 +210,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
           </div>
 
           <div className="flex flex-wrap gap-3">
-            {[
-              "SOC 2 controls",
-              "Encrypted sessions",
-              "Geo-aware policies",
-              "24/7 monitoring",
-            ].map((item) => (
+            {["SOC 2 controls", "Encrypted sessions", "Geo-aware policies", "24/7 monitoring"].map((item) => (
               <div
                 key={item}
                 className="rounded-full border border-white/80 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600"
@@ -208,10 +219,10 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div className="order-1 rounded-3xl border border-white/80 bg-white/95 p-8 text-slate-900 shadow-[0_24px_60px_rgba(14,30,37,0.16)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
-          <div className="flex items-center justify-between gap-4">
+        <section className="order-1 rounded-3xl border border-white/80 bg-white/95 p-8 text-slate-900 shadow-[0_24px_60px_rgba(14,30,37,0.16)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
+          <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-xs uppercase tracking-[0.25em] text-slate-500">Secure access</div>
               <h2 className="mt-2 text-2xl font-semibold text-[color:var(--login-ink)]" style={{ fontFamily: "var(--font-display)" }}>
@@ -219,7 +230,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               </h2>
             </div>
             <div className="rounded-full bg-[color:var(--login-ink)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--login-cream)]">
-              {isChecking ? "Checking" : "Ready"}
+              {isChecking ? "Checking" : primaryDisabled ? "Unavailable" : "Ready"}
             </div>
           </div>
 
@@ -244,32 +255,65 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             </button>
           </div>
 
-          {mode === "signin" ? (
-            <div className="mt-6 space-y-4">
-              {error ? (
-                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  {error}
-                </div>
-              ) : null}
-
-              {providerMeta.map((meta) => (
-                <ProviderButton
-                  key={meta.id}
-                  id={meta.id}
-                  label={meta.label}
-                  helper={meta.helper}
-                  enabled={enabledMap.get(meta.id) ?? false}
-                  busy={isChecking}
-                  onClick={() => onSignIn(meta.id)}
-                />
-              ))}
-
-              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                {isChecking
-                  ? "Checking for active sessions and configured providers."
-                  : "Select a provider to continue. You will be redirected to complete sign-in."}
+          <div className="mt-6 space-y-4">
+            {error ? (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {error}
               </div>
+            ) : null}
 
+            <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              {mode === "signin"
+                ? "Use your trusted identity provider to access the Claritas signal desk."
+                : "Create your Claritas account using the provider you already trust."}
+            </div>
+
+            <button
+              type="button"
+              onClick={handlePrimaryAction}
+              disabled={primaryDisabled}
+              className={`w-full rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] transition ${
+                primaryDisabled
+                  ? "cursor-not-allowed bg-slate-200 text-slate-500"
+                  : "bg-slate-900 text-white hover:bg-slate-800"
+              }`}
+            >
+              {primaryLabel}
+            </button>
+
+            {enabledProviders.length === 0 && !isChecking && (
+              <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-xs text-slate-500">
+                No providers are enabled yet. Configure an identity provider to continue.
+              </div>
+            )}
+
+            {enabledProviders.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setShowMethods((v) => !v)}
+                className="text-sm font-semibold text-[color:var(--login-teal)]"
+              >
+                {showMethods ? "Hide other methods" : "Other methods"}
+              </button>
+            )}
+
+            {showMethods && (
+              <div className="space-y-3">
+                {providerMeta.map((meta) => (
+                  <ProviderButton
+                    key={meta.id}
+                    id={meta.id}
+                    label={mode === "signin" ? meta.label : meta.signupLabel}
+                    helper={meta.helper}
+                    enabled={enabledMap.get(meta.id) ?? false}
+                    busy={isChecking}
+                    onClick={() => onSignIn(meta.id)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {mode === "signin" ? (
               <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3">
                 <div className="text-sm font-semibold text-slate-900">No account yet?</div>
                 <div className="text-xs text-slate-500">Create your account in seconds with a provider.</div>
@@ -281,46 +325,22 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
                   Create account
                 </button>
               </div>
-            </div>
-          ) : (
-            <div className="mt-6 space-y-4">
-              {error ? (
-                <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  {error}
+            ) : (
+              <>
+                <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-xs text-slate-500">
+                  No passwords stored. Your identity stays with your provider.
                 </div>
-              ) : null}
-
-              <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                Create your Claritas account using the provider you already trust. We create your profile
-                after provider verification.
-              </div>
-
-              {providerMeta.map((meta) => (
-                <ProviderButton
-                  key={meta.id}
-                  id={meta.id}
-                  label={meta.signupLabel}
-                  helper={meta.helper}
-                  enabled={enabledMap.get(meta.id) ?? false}
-                  busy={isChecking}
-                  onClick={() => onSignIn(meta.id)}
-                />
-              ))}
-
-              <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-xs text-slate-500">
-                No passwords stored. Your identity stays with your provider.
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleModeChange("signin")}
-                className="text-sm font-semibold text-[color:var(--login-teal)]"
-              >
-                Already have access? Sign in.
-              </button>
-            </div>
-          )}
-        </div>
+                <button
+                  type="button"
+                  onClick={() => handleModeChange("signin")}
+                  className="text-sm font-semibold text-[color:var(--login-teal)]"
+                >
+                  Already have access? Sign in.
+                </button>
+              </>
+            )}
+          </div>
+        </section>
       </div>
     </div>
   );

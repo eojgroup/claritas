@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Bell, Settings, User, Moon, Sun, LogOut, ChevronLeft } from "lucide-react";
+import { Search, Bell, Settings, User, Moon, Sun, LogOut, ChevronLeft, Menu, LayoutGrid, FileText } from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -113,7 +113,8 @@ export default function ClaritasDashboard() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<"dashboard" | "profile">("dashboard");
+  const [activeView, setActiveView] = useState<"dashboard" | "profile" | "legal">("dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<{ tone: "error" | "success" | "info"; message: string } | null>(null);
   const [dark, setDark] = useState<boolean>(() => {
@@ -132,6 +133,7 @@ export default function ClaritasDashboard() {
   const [listMode, setListMode] = useState<"news" | "weather">("news");
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
   const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
+  const [profileSection, setProfileSection] = useState<"overview" | "identity" | "preferences" | "security" | "policies">("overview");
   const authProviderMap = useMemo(() => new Map(authProviders.map((p) => [p.id, p])), [authProviders]);
 
   useEffect(() => {
@@ -139,6 +141,12 @@ export default function ClaritasDashboard() {
     if (dark) el.classList.add('dark'); else el.classList.remove('dark');
     try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch {}
   }, [dark]);
+
+  useEffect(() => {
+    if (activeView === "profile") {
+      setProfileSection("overview");
+    }
+  }, [activeView]);
 
   useEffect(() => {
     let active = true;
@@ -188,12 +196,9 @@ export default function ClaritasDashboard() {
     }
   }, [selectedCountry, authStatus]);
 
-  const pieColors = useMemo(
-    () => ["#0B1E2D", "#2F4455", "#4E6473"],
-    []
-  );
+  const pieColors = useMemo(() => ["#0B1E2D", "#2F4455", "#4E6473"], []);
   const cardBase =
-    "rounded-2xl border border-[color:var(--home-border)] bg-[color:var(--home-surface)] shadow-[0_1px_0_rgba(15,23,42,0.04)] dark:border-slate-700/70 dark:bg-slate-900/70";
+    "rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-[0_12px_30px_rgba(15,23,42,0.06)] dark:border-slate-800/60 dark:bg-slate-900/70";
 
   const filteredWeather = useMemo(() => {
     let w = weatherStats;
@@ -228,6 +233,26 @@ export default function ClaritasDashboard() {
     apple: "Apple",
   };
 
+  const navItems = [
+    { id: "dashboard", label: "Dashboard", view: "dashboard" as const, icon: LayoutGrid },
+    { id: "profile", label: "Profile", view: "profile" as const, icon: User },
+    { id: "legal", label: "Policies", view: "legal" as const, icon: FileText },
+  ];
+
+  const viewMeta = {
+    dashboard: { kicker: "Dashboard", title: "Signal desk overview" },
+    profile: { kicker: "Account", title: "Profile & access" },
+    legal: { kicker: "Legal", title: "Policies & usage" },
+  } as const;
+
+  const profileSections = [
+    { id: "overview", label: "Overview", description: "Identity snapshot" },
+    { id: "identity", label: "Identity", description: "Account and providers" },
+    { id: "preferences", label: "Preferences", description: "Workspace defaults" },
+    { id: "security", label: "Security", description: "Session posture" },
+    { id: "policies", label: "Policies", description: "Compliance links" },
+  ] as const;
+
   const handleSignIn = (provider: AuthProviderId) => {
     const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     const providerMeta = authProviderMap.get(provider);
@@ -258,6 +283,16 @@ export default function ClaritasDashboard() {
     }
   };
 
+  const handleProfileNav = (sectionId: typeof profileSections[number]["id"]) => {
+    setProfileSection(sectionId);
+    const el = document.getElementById(`profile-${sectionId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const currentViewMeta = viewMeta[activeView];
+
   if (authStatus !== "authed") {
     return (
       <LoginPage
@@ -270,555 +305,806 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-[color:var(--home-bg)] text-[color:var(--home-ink)] dark:bg-slate-950 dark:text-slate-100">
-      {/* Header */}
-      <header className="border-b border-[color:var(--home-border)] bg-[color:var(--home-header)]">
-        <div className="mx-auto max-w-7xl px-4 py-5 flex items-center justify-between">
-          {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="relative h-14 w-14">
-              <div className="absolute -left-4 top-0 h-14 w-14 rounded-full bg-[#0B1E2D]" />
-              <div className="absolute left-1 top-0 h-14 w-14 rounded-full bg-[#3E4F5F] opacity-90" />
-            </div>
-            <span
-              className="text-2xl font-semibold tracking-[0.12em] text-[#0B1E2D]"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              CLARITAS
-            </span>
-          </div>
-
-          {/* Header actions */}
-          <div className="flex items-center gap-3 text-[color:var(--home-muted)]">
-            {authUser && (
-              <div className="hidden md:flex items-center gap-2 rounded-full border border-[color:var(--home-border)] bg-[color:var(--home-surface)] px-3 py-1 text-xs text-[color:var(--home-muted)]">
-                <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                <span className="max-w-[180px] truncate">{userLabel}</span>
-              </div>
-            )}
-            <button
-              aria-label="Toggle dark mode"
-              onClick={() => setDark(v => !v)}
-              className="h-9 w-9 rounded-lg border border-[color:var(--home-border)] bg-[color:var(--home-surface)] text-[color:var(--home-ink)] shadow-sm hover:bg-slate-50 dark:border-slate-700/70 dark:bg-slate-900/70 dark:text-slate-100"
-            >
-              <span className="grid h-full w-full place-items-center">
-                {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveView("profile")}
-              className={`h-9 w-9 rounded-lg border text-[color:var(--home-ink)] shadow-sm transition ${
-                activeView === "profile"
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-[color:var(--home-border)] bg-[color:var(--home-surface)] hover:bg-slate-50"
-              }`}
-              aria-label="Profile"
-            >
-              <span className="grid h-full w-full place-items-center">
-                <User className="h-5 w-5" />
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              disabled={isSigningOut}
-              className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm text-rose-700 shadow-sm hover:border-rose-300 disabled:opacity-60"
-            >
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">{isSigningOut ? "Signing out…" : "Sign out"}</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Content */}
-      {sessionNotice && (
-        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 pt-6">
+    <div className="min-h-screen w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)] dark:bg-slate-950 dark:text-slate-100">
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
           <div
-            className={`rounded-2xl border px-4 py-3 text-sm ${
-              sessionNotice.tone === "error"
-                ? "border-rose-200 bg-rose-50 text-rose-700"
-                : sessionNotice.tone === "success"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : "border-slate-200 bg-white text-slate-700"
-            }`}
-          >
-            {sessionNotice.message}
-          </div>
-        </div>
-      )}
-      <main className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8 py-8 grid grid-cols-12 gap-6">
-        {activeView === "profile" ? (
-          <section className="col-span-12">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="text-xs uppercase tracking-[0.35em] text-slate-500">Account</div>
-                <h1 className="mt-2 text-3xl font-semibold text-slate-900 dark:text-slate-100" style={{ fontFamily: "var(--font-display)" }}>
-                  Profile & access
-                </h1>
-                <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-300">
-                  Review identity details, provider status, and session preferences across devices.
-                </p>
+            className="absolute inset-0 bg-slate-900/60"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <aside className="absolute left-0 top-0 h-full w-72 bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
+            <div className="flex h-full flex-col">
+              <div className="px-6 pt-6 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="relative h-10 w-10">
+                    <div className="absolute -left-2 top-0 h-10 w-10 rounded-full bg-[#102739]" />
+                    <div className="absolute left-1 top-0 h-10 w-10 rounded-full bg-[#1F3C52] opacity-90" />
+                    <div className="absolute left-4 top-0 h-10 w-10 rounded-full bg-[#2D556F] opacity-80" />
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.32em] text-white/60">Claritas</div>
+                    <div className="text-base font-semibold">Signal Desk</div>
+                  </div>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setActiveView("dashboard")}
-                  className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:border-slate-400"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Back to dashboard
-                </button>
+              <nav className="flex-1 px-3 py-2 space-y-1">
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = activeView === item.view;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveView(item.view);
+                        setMobileNavOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                        active ? "bg-white/10 text-white" : "text-white/70 hover:bg-white/10 hover:text-white"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </nav>
+              <div className="border-t border-white/10 px-6 py-4 space-y-3">
+                {authUser && (
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-full bg-white/15 text-sm font-semibold uppercase grid place-items-center">
+                      {userInitial}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white truncate">{userLabel}</div>
+                      <div className="text-xs text-white/60 truncate">{authUser.email ?? "Signed in"}</div>
+                    </div>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={handleSignOut}
                   disabled={isSigningOut}
-                  className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 hover:border-rose-300 disabled:opacity-60"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white/90 hover:bg-white/15 disabled:opacity-60"
                 >
                   <LogOut className="h-4 w-4" />
                   {isSigningOut ? "Signing out…" : "Sign out"}
                 </button>
               </div>
             </div>
+          </aside>
+        </div>
+      )}
 
-            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="space-y-6">
-                <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-6 text-white shadow-sm">
-                  <div className="absolute -top-16 right-0 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
-                  <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="h-16 w-16 overflow-hidden rounded-2xl bg-white/15 text-2xl font-semibold uppercase text-white ring-1 ring-white/25">
-                        {authUser?.avatar_url ? (
-                          <img src={authUser.avatar_url} alt="User avatar" className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="grid h-full w-full place-items-center">{userInitial}</div>
-                        )}
-                      </div>
-                      <div>
-                        <div className="text-sm uppercase tracking-[0.2em] text-slate-300">Signed in as</div>
-                        <div className="text-2xl font-semibold">{userLabel}</div>
-                        <div className="text-sm text-slate-300">{authUser?.email ?? "Email not provided"}</div>
-                      </div>
-                    </div>
-                    <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm">
-                      <div className="text-xs uppercase tracking-[0.3em] text-slate-300">Session</div>
-                      <div className="mt-1 text-base font-semibold">Active</div>
-                      <div className="text-xs text-slate-300">Managed by identity provider</div>
-                    </div>
-                  </div>
-                  <div className="mt-6 flex flex-wrap gap-2 text-xs">
-                    {(authUser?.roles?.length ? authUser.roles : ["Standard access"]).map((role) => (
-                      <span key={role} className="rounded-full border border-white/20 bg-white/10 px-3 py-1 uppercase tracking-[0.2em]">
-                        {role}
-                      </span>
-                    ))}
-                  </div>
+      <div className="flex min-h-screen">
+        <aside className="hidden lg:flex lg:w-72 lg:flex-col bg-[color:var(--shell-sidebar)] text-white">
+          <div className="px-6 pt-7 pb-5">
+            <div className="flex items-center gap-3">
+              <div className="relative h-11 w-11">
+                <div className="absolute -left-2 top-0 h-11 w-11 rounded-full bg-[#102739]" />
+                <div className="absolute left-1 top-0 h-11 w-11 rounded-full bg-[#1F3C52] opacity-90" />
+                <div className="absolute left-4 top-0 h-11 w-11 rounded-full bg-[#2D556F] opacity-80" />
+              </div>
+              <div>
+                <div className="text-xs uppercase tracking-[0.32em] text-white/60">Claritas</div>
+                <div className="text-base font-semibold">Signal Desk</div>
+              </div>
+            </div>
+          </div>
+          <nav className="flex-1 px-3 py-2 space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = activeView === item.view;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveView(item.view)}
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
+                    active ? "bg-white/10 text-white" : "text-white/70 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+          <div className="border-t border-white/10 px-6 py-5 space-y-3">
+            {authUser && (
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-white/15 text-sm font-semibold uppercase grid place-items-center">
+                  {userInitial}
                 </div>
-
-                <div className={cardBase + " p-6"}>
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Account details</div>
-                    <Settings className="h-4 w-4 text-slate-400" />
-                  </div>
-                  <dl className="mt-4 divide-y divide-slate-100 dark:divide-slate-700/60 text-sm">
-                    {[
-                      { label: "User ID", value: authUser?.id ? String(authUser.id) : "—" },
-                      { label: "Display name", value: authUser?.display_name ?? "Not set" },
-                      { label: "Email", value: authUser?.email ?? "Not provided" },
-                      { label: "Roles", value: authUser?.roles?.length ? authUser.roles.join(", ") : "Standard access" },
-                    ].map((row) => (
-                      <div key={row.label} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
-                        <dt className="text-slate-500">{row.label}</dt>
-                        <dd className="font-medium text-slate-900 dark:text-slate-100">{row.value}</dd>
-                      </div>
-                    ))}
-                  </dl>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-white truncate">{userLabel}</div>
+                  <div className="text-xs text-white/60 truncate">{authUser.email ?? "Signed in"}</div>
                 </div>
               </div>
+            )}
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={isSigningOut}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white/90 hover:bg-white/15 disabled:opacity-60"
+            >
+              <LogOut className="h-4 w-4" />
+              {isSigningOut ? "Signing out…" : "Sign out"}
+            </button>
+          </div>
+        </aside>
 
-              <div className="space-y-6">
-                <div className={cardBase + " p-6"}>
-                  <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Identity providers</div>
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                    Available sign-in methods connected to this environment.
-                  </p>
-                  <div className="mt-4 space-y-3">
-                    {authProviders.length === 0 && (
-                      <div className="text-sm text-slate-500">No providers reported yet.</div>
-                    )}
-                    {authProviders.map((provider) => (
-                      <div
-                        key={provider.id}
-                        className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3"
-                      >
-                        <div>
-                          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                            {providerLabels[provider.id]}
-                          </div>
-                          <div className="text-xs text-slate-500">
-                            {provider.enabled ? "Enabled and ready" : "Disabled"}
-                          </div>
-                        </div>
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            provider.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                          }`}
-                        >
-                          {provider.enabled ? "Active" : "Inactive"}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/90 backdrop-blur">
+            <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-4 sm:px-6 lg:px-8">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                className="lg:hidden inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] shadow-sm"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+
+              <div>
+                <div className="text-xs uppercase tracking-[0.32em] text-[color:var(--shell-muted)]">
+                  {currentViewMeta.kicker}
                 </div>
+                <div className="text-lg font-semibold text-[color:var(--shell-ink)]">{currentViewMeta.title}</div>
+              </div>
 
-                <div className={cardBase + " p-6"}>
-                  <div className="text-sm uppercase tracking-[0.2em] text-slate-500">Preferences</div>
-                  <div className="mt-4 space-y-4 text-sm text-slate-600 dark:text-slate-300">
-                    <div className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
+              <div className="ml-auto flex items-center gap-3">
+                <div className="hidden md:flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-sm text-[color:var(--shell-muted)] shadow-sm">
+                  <Search className="h-4 w-4" />
+                  <input
+                    className="w-40 bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
+                    placeholder="Search signals"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                </div>
+                <button
+                  aria-label="Toggle dark mode"
+                  onClick={() => setDark(v => !v)}
+                  className="h-10 w-10 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] shadow-sm hover:bg-slate-50 dark:border-slate-700/70 dark:bg-slate-900/70 dark:text-slate-100"
+                >
+                  <span className="grid h-full w-full place-items-center">
+                    {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                  </span>
+                </button>
+                <div className="hidden sm:flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-muted)] shadow-sm">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="max-w-[160px] truncate">{userLabel}</span>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 lg:px-8 py-8">
+            {sessionNotice && (
+              <div className="mb-6">
+                <div
+                  className={`rounded-2xl border px-4 py-3 text-sm ${
+                    sessionNotice.tone === "error"
+                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                      : sessionNotice.tone === "success"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-white text-slate-700"
+                  }`}
+                >
+                  {sessionNotice.message}
+                </div>
+              </div>
+            )}
+
+            {activeView === "dashboard" && (
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)]">
+                <div className="flex flex-col gap-6">
+                  <div className={cardBase}>
+                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div>
-                        <div className="font-semibold text-slate-900 dark:text-slate-100">Theme</div>
-                        <div className="text-xs text-slate-500">Match your current workspace.</div>
+                        <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Geospatial</div>
+                        <div className="text-sm font-semibold">
+                          Map: {mapMode === "news" ? "#News per country" : "Weather (temperature) per country"}
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setDark(v => !v)}
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700"
-                      >
-                        {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                        {dark ? "Light" : "Dark"}
-                      </button>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
-                      <div className="font-semibold text-slate-900 dark:text-slate-100">Default map view</div>
-                      <div className="mt-2 flex items-center gap-2 text-xs">
+                      <div className="flex items-center gap-2 text-xs">
                         <button
-                          type="button"
-                          onClick={() => { setMapMode("news"); setListMode("news"); }}
-                          className={`rounded-full border px-3 py-1 ${
-                            mapMode === "news" ? "bg-slate-900 text-white border-slate-900" : "border-slate-200 text-slate-600"
+                          className={`px-2 py-1 rounded-full border ${
+                            mapMode === "news"
+                              ? "bg-slate-900 text-white border-slate-900"
+                              : "bg-white text-[color:var(--shell-muted)] border-[color:var(--shell-border)]"
                           }`}
+                          onClick={() => { setMapMode("news"); setListMode("news"); }}
                         >
                           News
                         </button>
                         <button
-                          type="button"
-                          onClick={() => { setMapMode("weather"); setListMode("weather"); }}
-                          className={`rounded-full border px-3 py-1 ${
-                            mapMode === "weather" ? "bg-slate-900 text-white border-slate-900" : "border-slate-200 text-slate-600"
+                          className={`px-2 py-1 rounded-full border ${
+                            mapMode === "weather"
+                              ? "bg-slate-900 text-white border-slate-900"
+                              : "bg-white text-[color:var(--shell-muted)] border-[color:var(--shell-border)]"
                           }`}
+                          onClick={() => { setMapMode("weather"); setListMode("weather"); }}
                         >
                           Weather
                         </button>
                       </div>
                     </div>
+                    <div className="relative p-4">
+                      <div className="relative h-72 md:h-80 rounded-xl overflow-hidden bg-[color:var(--shell-bg)]">
+                        {mapMode === "news" ? (
+                          <WorldMapBubbles
+                            variant="compact"
+                            data={
+                              (countryStats && countryStats.length > 0)
+                                ? countryStats
+                                : Object.entries(
+                                    (news || []).reduce<Record<string, number>>((acc, n) => {
+                                      const iso = (n.country_iso2 || "").toUpperCase();
+                                      if (!iso) return acc;
+                                      acc[iso] = (acc[iso] || 0) + 1;
+                                      return acc;
+                                    }, {})
+                                  ).map(([country, count]) => ({ country, count }))
+                            }
+                            onSelect={setSelectedCountry}
+                            dark={dark}
+                          />
+                        ) : (
+                          <WorldMapBubbles
+                            variant="compact"
+                            data={(() => {
+                              const withTemp = (weatherStats || []).filter(w => typeof w.temp_c === "number");
+                              if (withTemp.length === 0) return [];
+                              const temps = withTemp.map(w => Number(w.temp_c));
+                              const min = Math.min(...temps);
+                              return withTemp.map(w => ({
+                                country: (w.country || "").toUpperCase(),
+                                count: (Number(w.temp_c) - min) + 1,
+                              }));
+                            })()}
+                            onSelect={setSelectedCountry}
+                            dark={dark}
+                          />
+                        )}
+                      </div>
+                      {mapMode === "news" && countryStats.length === 0 && (
+                        <div className="absolute bottom-3 right-4 text-xs text-[color:var(--shell-muted)] bg-white/80 px-2 py-1 rounded shadow-sm border border-[color:var(--shell-border)]">
+                          No aggregated stats yet — showing live list fallback
+                        </div>
+                      )}
+                      {mapMode === "weather" && (weatherStats?.length ?? 0) === 0 && (
+                        <div className="absolute bottom-3 right-4 text-xs text-[color:var(--shell-muted)] bg-white/80 px-2 py-1 rounded shadow-sm border border-[color:var(--shell-border)] flex items-center gap-2">
+                          <span>No weather stats yet.</span>
+                          <button
+                            onClick={handleRefreshWeather}
+                            disabled={isRefreshingWeather}
+                            className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {isRefreshingWeather ? "Refreshing…" : "Refresh now"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={cardBase}>
+                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country profile</div>
+                        <div className="text-sm font-semibold">Selected location overview</div>
+                      </div>
+                      <span className="text-xs text-[color:var(--shell-muted)]">Auto-updated</span>
+                    </div>
+                    <div className="p-4 text-sm text-[color:var(--shell-muted)] space-y-2">
+                      {!selectedCountry && (
+                        <div>Select a bubble on the map to see a brief profile.</div>
+                      )}
+                      {selectedCountry && (
+                        <>
+                          <div className="text-base font-semibold text-[color:var(--shell-ink)]">Country: {selectedCountry}</div>
+                          <div>Recent items from this country in the list are highlighted by the country tag.</div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={cardBase}>
+                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">AI search</div>
+                        <div className="text-sm font-semibold">Ask Claritas for signal context</div>
+                      </div>
+                      <span className="text-xs text-[color:var(--shell-muted)]">Beta</span>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2 shadow-inner">
+                        <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
+                        <input
+                          className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
+                          placeholder="Search events, alerts, and location activity"
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                        />
+                        <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-white text-sm">Search</button>
+                      </div>
+                      <p className="text-xs text-[color:var(--shell-muted)]">
+                        Queries return live signal matches from the last 30 days.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-6">
+                  <div className={cardBase}>
+                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div>
+                        <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Live feed</div>
+                        <div className="text-sm font-semibold">Latest intelligence drops</div>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <button
+                          className={`px-2 py-1 rounded-full border ${
+                            listMode === "news"
+                              ? "bg-slate-900 text-white border-slate-900"
+                              : "bg-white text-[color:var(--shell-muted)] border-[color:var(--shell-border)]"
+                          }`}
+                          onClick={() => setListMode("news")}
+                        >
+                          News
+                        </button>
+                        <button
+                          className={`px-2 py-1 rounded-full border ${
+                            listMode === "weather"
+                              ? "bg-slate-900 text-white border-slate-900"
+                              : "bg-white text-[color:var(--shell-muted)] border-[color:var(--shell-border)]"
+                          }`}
+                          onClick={() => setListMode("weather")}
+                        >
+                          Weather
+                        </button>
+                      </div>
+                    </div>
+
+                    {listMode === "news" ? (
+                      <ul className="list-none p-4 space-y-3">
+                        {news.length === 0 && (
+                          <li className="text-sm text-[color:var(--shell-muted)]">No news items yet.</li>
+                        )}
+                        {news.map((n) => {
+                          const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
+                          return (
+                            <li key={n.id} className="rounded-lg border border-[color:var(--shell-border)] p-3 hover:bg-slate-50">
+                              <div className="flex items-start gap-3">
+                                <div className="relative w-32 h-20 rounded-md overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none">
+                                  {img ? (
+                                    <img
+                                      src={img}
+                                      alt={n.title ?? "thumbnail"}
+                                      loading="lazy"
+                                      decoding="async"
+                                      referrerPolicy="no-referrer"
+                                      className="w-full h-full object-cover"
+                                      onError={(e) => ((e.currentTarget.style.display = "none"))}
+                                    />
+                                  ) : null}
+                                </div>
+                                <div className="min-w-0">
+                                  <a href={n.url ?? "#"} target="_blank" rel="noopener noreferrer" className="font-medium text-[color:var(--shell-ink)] hover:underline">
+                                    {n.title || n.url || "Untitled"}
+                                  </a>
+                                  <div className="text-xs text-[color:var(--shell-muted)] mt-1 flex items-center gap-2 flex-wrap">
+                                    {n.country_iso2 && (
+                                      <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
+                                        {n.country_iso2}
+                                      </span>
+                                    )}
+                                    {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
+                                  </div>
+                                  {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
+                                </div>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-center gap-3 text-sm">
+                          <label className="text-[color:var(--shell-muted)]">Min temp (°C)</label>
+                          <input
+                            type="number"
+                            className="w-24 rounded border border-[color:var(--shell-border)] bg-white px-2 py-1"
+                            value={typeof minTemp === "number" ? minTemp : ""}
+                            onChange={(e) => setMinTemp(e.currentTarget.value === "" ? undefined : Number(e.currentTarget.value))}
+                            placeholder="Any"
+                          />
+                          <button
+                            onClick={handleRefreshWeather}
+                            disabled={isRefreshingWeather}
+                            className="ml-auto px-2 py-1 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {isRefreshingWeather ? "Refreshing…" : "Refresh"}
+                          </button>
+                        </div>
+                        <ul className="list-none divide-y divide-[color:var(--shell-border)]">
+                          {filteredWeather.length === 0 && (
+                            <li className="text-sm text-[color:var(--shell-muted)] py-3">No weather rows.</li>
+                          )}
+                          {filteredWeather.map((w, i) => (
+                            <li key={`${w.country}-${i}`} className="py-2 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
+                                  {(w.country || "").toUpperCase()}
+                                </span>
+                                <span className="text-slate-700 text-sm">{new Date(w.observed_at).toLocaleString()}</span>
+                              </div>
+                              <div className="text-sm text-slate-800 flex items-center gap-4">
+                                <span title="Temperature">🌡️ {w.temp_c ?? "—"}°C</span>
+                                <span title="Humidity">💧 {w.humidity ?? "—"}%</span>
+                                {w.weather_main && <span className="text-slate-600">{w.weather_main}</span>}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className={cardBase}>
+                    <div className="p-4 border-b border-[color:var(--shell-border)] font-semibold">
+                      Analytics snapshot
+                    </div>
+                    <div className="p-4 space-y-6">
+                      <div className="h-44">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                            <XAxis dataKey="x" tick={{ fontSize: 12 }} />
+                            <YAxis dataKey="y" tick={{ fontSize: 12 }} />
+                            <ZAxis range={[60, 60]} />
+                            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+                            <Scatter data={scatterData} fill="#94a3b8" />
+                          </ScatterChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90}>
+                              {pieData.map((_, i) => (
+                                <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={cardBase}>
+                    <div className="p-4 border-b border-[color:var(--shell-border)] font-semibold flex items-center gap-2">
+                      <Bell className="h-5 w-5" /> Notifications
+                    </div>
+                    <div className="p-4 text-sm text-[color:var(--shell-muted)]">No notifications yet.</div>
                   </div>
                 </div>
               </div>
-            </div>
-          </section>
-        ) : (
-        <>
-        {/* LEFT: Map + AI Search + News/Country Profile */}
-        <section className="col-span-12 lg:col-span-7 flex flex-col gap-6">
-          {/* Map Card */}
-          <div className={cardBase}>
-            <div className="p-4 border-b border-[color:var(--home-border)] text-sm text-[color:var(--home-muted)] flex items-center justify-between">
-              <span>Map: {mapMode === 'news' ? '#News per country' : 'Weather (temperature) per country'}</span>
-              <div className="flex items-center gap-2 text-xs">
-                <button
-                  className={`px-2 py-1 rounded border ${mapMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-[color:var(--home-muted)] border-[color:var(--home-border)]'}`}
-                  onClick={() => { setMapMode('news'); setListMode('news'); }}
-                >News</button>
-                <button
-                  className={`px-2 py-1 rounded border ${mapMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-[color:var(--home-muted)] border-[color:var(--home-border)]'}`}
-                  onClick={() => { setMapMode('weather'); setListMode('weather'); }}
-                >Weather</button>
-              </div>
-            </div>
-            <div className="relative p-4">
-              <div className="aspect-[16/9] rounded-xl overflow-hidden">
-                {/* Render based on selected mode */}
-                {mapMode === 'news' ? (
-                  <WorldMapBubbles
-                    data={
-                      (countryStats && countryStats.length > 0)
-                        ? countryStats
-                        : Object.entries(
-                            (news || []).reduce<Record<string, number>>((acc, n) => {
-                              const iso = (n.country_iso2 || "").toUpperCase();
-                              if (!iso) return acc;
-                              acc[iso] = (acc[iso] || 0) + 1;
-                              return acc;
-                            }, {})
-                          ).map(([country, count]) => ({ country, count }))
-                    }
-                    onSelect={setSelectedCountry}
-                    dark={dark}
-                  />
-                ) : (
-                  <WorldMapBubbles
-                    data={(() => {
-                      const withTemp = (weatherStats || []).filter(w => typeof w.temp_c === 'number');
-                      if (withTemp.length === 0) return [];
-                      const temps = withTemp.map(w => Number(w.temp_c));
-                      const min = Math.min(...temps);
-                      return withTemp.map(w => ({
-                        country: (w.country || '').toUpperCase(),
-                        // Normalize so the smallest temp still has some radius
-                        count: (Number(w.temp_c) - min) + 1,
-                      }));
-                    })()}
-                    onSelect={setSelectedCountry}
-                    dark={dark}
-                  />
-                )}
-              </div>
-              {mapMode === 'news' && countryStats.length === 0 && (
-                <div className="absolute bottom-3 right-4 text-xs text-[color:var(--home-muted)] bg-white/70 px-2 py-1 rounded shadow-sm border border-[color:var(--home-border)]">
-                  No aggregated stats yet — showing live list fallback
-                </div>
-              )}
-              {mapMode === 'weather' && (weatherStats?.length ?? 0) === 0 && (
-                <div className="absolute bottom-3 right-4 text-xs text-[color:var(--home-muted)] bg-white/80 px-2 py-1 rounded shadow-sm border border-[color:var(--home-border)] flex items-center gap-2">
-                  <span>No weather stats yet.</span>
-                  <button onClick={handleRefreshWeather} disabled={isRefreshingWeather}
-                          className="px-2 py-0.5 rounded border border-[color:var(--home-border)] bg-white hover:bg-slate-50 disabled:opacity-50">
-                    {isRefreshingWeather ? 'Refreshing…' : 'Refresh now'}
-                  </button>
-                </div>
-              )}
-            </div>
-            {/* AI Search */}
-            <div className="border-t border-[color:var(--home-border)] p-3">
-              <div className="flex items-center gap-2 rounded-xl border border-[color:var(--home-border)] bg-white px-3 py-2 shadow-inner">
-                <Search className="h-5 w-5 text-[color:var(--home-muted)]" />
-                <input
-                  className="w-full bg-transparent outline-none placeholder:text-[color:var(--home-muted)] text-inherit"
-                  placeholder="AI Search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-                <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-white text-sm">Search</button>
-              </div>
-            </div>
-          </div>
+            )}
 
-          {/* News + Country Profile grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className={cardBase}>
-              <div className="p-4 border-b border-[color:var(--home-border)] font-semibold flex items-center gap-2">
-                <span>List</span>
-                <div className="ml-auto flex items-center gap-2 text-xs">
-                  <button
-                    className={`px-2 py-1 rounded border ${listMode === 'news' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-[color:var(--home-muted)] border-[color:var(--home-border)]'}`}
-                    onClick={() => setListMode('news')}
-                  >News</button>
-                  <button
-                    className={`px-2 py-1 rounded border ${listMode === 'weather' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-[color:var(--home-muted)] border-[color:var(--home-border)]'}`}
-                    onClick={() => setListMode('weather')}
-                  >Weather</button>
-                </div>
-              </div>
-
-              {listMode === 'news' ? (
-                <ul className="list-none p-4 space-y-3">
-                  {news.length === 0 && (
-                    <li className="text-sm text-slate-500 dark:text-slate-400">No news items yet.</li>
-                  )}
-                  {news.map((n) => {
-                    const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
-                    return (
-                      <li key={n.id} className="rounded-lg border border-[color:var(--home-border)] p-3 hover:bg-slate-50">
-                        <div className="flex items-start gap-3">
-                          <div className="relative w-32 h-20 rounded-md overflow-hidden border border-[color:var(--home-border)] bg-slate-100 flex-none">
-                            {img ? (
-                              <img
-                                src={img}
-                                alt={n.title ?? 'thumbnail'}
-                                loading="lazy"
-                                decoding="async"
-                                referrerPolicy="no-referrer"
-                                className="w-full h-full object-cover"
-                                onError={(e) => ((e.currentTarget.style.display = 'none'))}
-                              />
-                            ) : null}
-                          </div>
-                          <div className="min-w-0">
-                            <a href={n.url ?? '#'} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-900 hover:underline">
-                              {n.title || n.url || 'Untitled'}
-                            </a>
-                            <div className="text-xs text-[color:var(--home-muted)] mt-1 flex items-center gap-2 flex-wrap">
-                              {n.country_iso2 && <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-[color:var(--home-border)] text-slate-700">{n.country_iso2}</span>}
-                              {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
-                            </div>
-                            {n.summary && <p className="text-sm text-slate-600 mt-1 line-clamp-3">{n.summary}</p>}
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <div className="p-4 space-y-3">
-                  <div className="flex items-center gap-3 text-sm">
-                    <label className="text-[color:var(--home-muted)]">Min temp (°C)</label>
-                    <input type="number" className="w-24 rounded border border-[color:var(--home-border)] bg-white px-2 py-1"
-                      value={typeof minTemp === 'number' ? minTemp : ''}
-                      onChange={(e) => setMinTemp(e.currentTarget.value === '' ? undefined : Number(e.currentTarget.value))}
-                      placeholder="Any" />
-                    <button onClick={handleRefreshWeather} disabled={isRefreshingWeather}
-                      className="ml-auto px-2 py-1 rounded border border-[color:var(--home-border)] bg-white hover:bg-slate-50 disabled:opacity-50">
-                      {isRefreshingWeather ? 'Refreshing…' : 'Refresh'}
+            {activeView === "profile" && (
+              <div className="space-y-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.35em] text-[color:var(--shell-muted)]">Account</div>
+                    <h1 className="mt-2 text-3xl font-semibold text-[color:var(--shell-ink)]" style={{ fontFamily: "var(--font-display)" }}>
+                      Profile & access
+                    </h1>
+                    <p className="mt-2 max-w-2xl text-sm text-[color:var(--shell-muted)]">
+                      Review identity details, provider status, and session preferences across devices.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setActiveView("dashboard")}
+                      className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-2 text-sm text-[color:var(--shell-ink)] hover:border-slate-400"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Back to dashboard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSignOut}
+                      disabled={isSigningOut}
+                      className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 hover:border-rose-300 disabled:opacity-60"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      {isSigningOut ? "Signing out…" : "Sign out"}
                     </button>
                   </div>
-                  <ul className="list-none divide-y divide-[color:var(--home-border)]">
-                    {filteredWeather.length === 0 && (
-                      <li className="text-sm text-[color:var(--home-muted)] py-3">No weather rows.</li>
-                    )}
-                    {filteredWeather.map((w, i) => (
-                      <li key={`${w.country}-${i}`} className="py-2 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className="px-1.5 py-0.5 rounded bg-slate-100 border border-[color:var(--home-border)] text-slate-700">{(w.country || '').toUpperCase()}</span>
-                          <span className="text-slate-700 text-sm">{new Date(w.observed_at).toLocaleString()}</span>
-                        </div>
-                        <div className="text-sm text-slate-800 flex items-center gap-4">
-                          <span title="Temperature">🌡️ {w.temp_c ?? '—'}°C</span>
-                          <span title="Humidity">💧 {w.humidity ?? '—'}%</span>
-                          {w.weather_main && <span className="text-slate-600">{w.weather_main}</span>}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
                 </div>
-              )}
-            </div>
 
-          <div className={cardBase}>
-            <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold">Country profile based on selection</div>
-            <div className="p-4 text-sm text-slate-600 dark:text-slate-300 space-y-2">
-                {!selectedCountry && (
-                  <div>Select a bubble on the map to see a brief profile.</div>
-                )}
-                {selectedCountry && (
-                  <>
-                    <div className="text-base font-semibold">Country: {selectedCountry}</div>
-                    <div>Recent items from this country in the list are highlighted by the country tag.</div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* RIGHT: Analytics + Notifications */}
-        <section className="col-span-12 lg:col-span-5 flex flex-col gap-6">
-          <div className={cardBase}>
-            <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold">
-              News/number of ships etc per category
-            </div>
-            <div className="p-4 space-y-6">
-              {/* Scatter */}
-              <div className="h-44">
-                <ResponsiveContainer width="100%" height="100%">
-                  <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
-                    <XAxis dataKey="x" tick={{ fontSize: 12 }} />
-                    <YAxis dataKey="y" tick={{ fontSize: 12 }} />
-                    <ZAxis range={[60, 60]} />
-                    <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                    <Scatter data={scatterData} fill="#94a3b8" />
-                  </ScatterChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Pie */}
-              <div className="h-56">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90}>
-                      {pieData.map((_, i) => (
-                        <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+                  <aside className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+                    <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Sections</div>
+                    <div className="mt-3 space-y-2">
+                      {profileSections.map((section) => (
+                        <button
+                          key={section.id}
+                          type="button"
+                          onClick={() => handleProfileNav(section.id)}
+                          className={`w-full rounded-xl px-3 py-2 text-left transition ${
+                            profileSection === section.id
+                              ? "bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)] shadow-sm"
+                              : "text-[color:var(--shell-muted)] hover:bg-slate-100"
+                          }`}
+                        >
+                          <div className="text-sm font-semibold">{section.label}</div>
+                          <div className="text-xs">{section.description}</div>
+                        </button>
                       ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
+                    </div>
+                  </aside>
 
-          <div className={cardBase}>
-            <div className="p-4 border-b border-slate-100 dark:border-slate-700 font-semibold flex items-center gap-2">
-              <Bell className="h-5 w-5" /> Notifications
-            </div>
-            <div className="p-4 text-sm text-slate-600 dark:text-slate-300">No notifications yet.</div>
-          </div>
-        </section>
-        </>
-        )}
-      </main>
+                  <div className="space-y-6">
+                    <section id="profile-overview" className="space-y-4 scroll-mt-24">
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Overview</div>
+                      <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
+                        <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-6 text-white shadow-sm">
+                          <div className="absolute -top-16 right-0 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+                          <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="h-16 w-16 overflow-hidden rounded-2xl bg-white/15 text-2xl font-semibold uppercase text-white ring-1 ring-white/25">
+                                {authUser?.avatar_url ? (
+                                  <img src={authUser.avatar_url} alt="User avatar" className="h-full w-full object-cover" />
+                                ) : (
+                                  <div className="grid h-full w-full place-items-center">{userInitial}</div>
+                                )}
+                              </div>
+                              <div>
+                                <div className="text-sm uppercase tracking-[0.2em] text-slate-300">Signed in as</div>
+                                <div className="text-2xl font-semibold">{userLabel}</div>
+                                <div className="text-sm text-slate-300">{authUser?.email ?? "Email not provided"}</div>
+                              </div>
+                            </div>
+                            <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm">
+                              <div className="text-xs uppercase tracking-[0.3em] text-slate-300">Session</div>
+                              <div className="mt-1 text-base font-semibold">Active</div>
+                              <div className="text-xs text-slate-300">Managed by identity provider</div>
+                            </div>
+                          </div>
+                          <div className="mt-6 flex flex-wrap gap-2 text-xs">
+                            {(authUser?.roles?.length ? authUser.roles : ["Standard access"]).map((role) => (
+                              <span key={role} className="rounded-full border border-white/20 bg-white/10 px-3 py-1 uppercase tracking-[0.2em]">
+                                {role}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
 
-      <section id="legal" className="border-t border-[color:var(--home-border)] bg-[color:var(--home-header)]">
-        <div className="mx-auto max-w-7xl px-4 py-10">
-          <div className="flex flex-col gap-2">
-            <div className="text-xs uppercase tracking-[0.4em] text-slate-500">Legal</div>
-            <h2
-              className="text-2xl font-semibold text-slate-900"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              Policies and usage guidelines
-            </h2>
-            <p className="text-sm text-slate-600 max-w-2xl">
-              Review the policy summaries below. Each section describes how Claritas protects data,
-              governs platform use, and supports compliance.
-            </p>
-          </div>
-          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-            {legalPolicies.map((policy) => (
-              <article
-                key={policy.id}
-                id={policy.id}
-              className="scroll-mt-24 rounded-2xl border border-[color:var(--home-border)] bg-white p-6 shadow-sm"
-            >
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-slate-900">{policy.title}</h3>
-                  <span className="text-xs uppercase tracking-[0.3em] text-slate-400">Claritas</span>
+                        <div className={cardBase + " p-6"}>
+                          <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Session health</div>
+                          <div className="mt-4 space-y-3 text-sm text-[color:var(--shell-muted)]">
+                            <div className="flex items-center justify-between">
+                              <span>Session status</span>
+                              <span className="font-semibold text-emerald-600">Active</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span>Provider</span>
+                              <span className="font-semibold text-[color:var(--shell-ink)]">Managed</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span>Role count</span>
+                              <span className="font-semibold text-[color:var(--shell-ink)]">
+                                {authUser?.roles?.length ?? 1}
+                              </span>
+                            </div>
+                            <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-2 text-xs">
+                              All access events are recorded for audit readiness.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section id="profile-identity" className="space-y-4 scroll-mt-24">
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Identity</div>
+                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                        <div className={cardBase + " p-6"}>
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Account details</div>
+                            <Settings className="h-4 w-4 text-slate-400" />
+                          </div>
+                          <dl className="mt-4 divide-y divide-[color:var(--shell-border)] text-sm">
+                            {[
+                              { label: "User ID", value: authUser?.id ? String(authUser.id) : "—" },
+                              { label: "Display name", value: authUser?.display_name ?? "Not set" },
+                              { label: "Email", value: authUser?.email ?? "Not provided" },
+                              { label: "Roles", value: authUser?.roles?.length ? authUser.roles.join(", ") : "Standard access" },
+                            ].map((row) => (
+                              <div key={row.label} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
+                                <dt className="text-[color:var(--shell-muted)]">{row.label}</dt>
+                                <dd className="font-medium text-[color:var(--shell-ink)]">{row.value}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        </div>
+
+                        <div className={cardBase + " p-6"}>
+                          <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Identity providers</div>
+                          <p className="mt-2 text-sm text-[color:var(--shell-muted)]">
+                            Available sign-in methods connected to this environment.
+                          </p>
+                          <div className="mt-4 space-y-3">
+                            {authProviders.length === 0 && (
+                              <div className="text-sm text-[color:var(--shell-muted)]">No providers reported yet.</div>
+                            )}
+                            {authProviders.map((provider) => (
+                              <div
+                                key={provider.id}
+                                className="flex items-center justify-between rounded-xl border border-[color:var(--shell-border)] px-4 py-3"
+                              >
+                                <div>
+                                  <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                                    {providerLabels[provider.id]}
+                                  </div>
+                                  <div className="text-xs text-[color:var(--shell-muted)]">
+                                    {provider.enabled ? "Enabled and ready" : "Disabled"}
+                                  </div>
+                                </div>
+                                <span
+                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                                    provider.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                                  }`}
+                                >
+                                  {provider.enabled ? "Active" : "Inactive"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section id="profile-preferences" className="space-y-4 scroll-mt-24">
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Preferences</div>
+                      <div className={cardBase + " p-6"}>
+                        <div className="flex flex-col gap-4 text-sm text-[color:var(--shell-muted)]">
+                          <div className="flex items-center justify-between rounded-xl border border-[color:var(--shell-border)] px-4 py-3">
+                            <div>
+                              <div className="font-semibold text-[color:var(--shell-ink)]">Theme</div>
+                              <div className="text-xs text-[color:var(--shell-muted)]">Match your current workspace.</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setDark(v => !v)}
+                              className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs text-[color:var(--shell-ink)]"
+                            >
+                              {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                              {dark ? "Light" : "Dark"}
+                            </button>
+                          </div>
+                          <div className="rounded-xl border border-[color:var(--shell-border)] px-4 py-3">
+                            <div className="font-semibold text-[color:var(--shell-ink)]">Default map view</div>
+                            <div className="mt-2 flex items-center gap-2 text-xs">
+                              <button
+                                type="button"
+                                onClick={() => { setMapMode("news"); setListMode("news"); }}
+                                className={`rounded-full border px-3 py-1 ${
+                                  mapMode === "news" ? "bg-slate-900 text-white border-slate-900" : "border-slate-200 text-slate-600"
+                                }`}
+                              >
+                                News
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setMapMode("weather"); setListMode("weather"); }}
+                                className={`rounded-full border px-3 py-1 ${
+                                  mapMode === "weather" ? "bg-slate-900 text-white border-slate-900" : "border-slate-200 text-slate-600"
+                                }`}
+                              >
+                                Weather
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section id="profile-security" className="space-y-4 scroll-mt-24">
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Security</div>
+                      <div className={cardBase + " p-6"}>
+                        <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Access roles</div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {(authUser?.roles?.length ? authUser.roles : ["Standard access"]).map((role) => (
+                            <span key={role} className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]">
+                              {role}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="mt-4 text-sm text-[color:var(--shell-muted)]">
+                          Session tokens are short-lived and scoped to your approved providers.
+                        </div>
+                      </div>
+                    </section>
+
+                    <section id="profile-policies" className="space-y-4 scroll-mt-24">
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Policies</div>
+                      <div className={cardBase + " p-6"}>
+                        <div className="flex flex-col gap-3 text-sm text-[color:var(--shell-muted)]">
+                          <div>Claritas policies define how we protect data and govern platform use.</div>
+                          <div className="flex flex-wrap gap-2">
+                            {legalPolicies.map((policy) => (
+                              <span key={policy.id} className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-xs text-[color:var(--shell-ink)]">
+                                {policy.title}
+                              </span>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setActiveView("legal")}
+                            className="inline-flex w-fit items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]"
+                          >
+                            View full policies
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+                  </div>
                 </div>
-                <p className="mt-3 text-sm text-slate-600">{policy.intro}</p>
-                <ul className="mt-4 space-y-2 text-sm text-slate-600">
-                  {policy.items.map((item) => (
-                    <li key={item} className="flex gap-2">
-                      <span className="mt-1 h-1.5 w-1.5 flex-none rounded-full bg-slate-500" />
-                      <span>{item}</span>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-4 text-sm text-slate-600">{policy.note}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
+              </div>
+            )}
 
-      <footer className="border-t border-[color:var(--home-border)] bg-slate-700 text-slate-100">
-        <div className="mx-auto max-w-7xl px-4 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm font-semibold tracking-[0.35em] uppercase">Claritas</div>
-          <nav aria-label="Legal links" className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <a href="#cookie-policy" className="transition hover:text-white/90">
-              Cookie Policy
-            </a>
-            <a href="#privacy-statement" className="transition hover:text-white/90">
-              Privacy Statement
-            </a>
-            <a href="#terms-of-use" className="transition hover:text-white/90">
-              Terms of Use
-            </a>
-            <a href="#copyright" className="transition hover:text-white/90">
-              Copyright
-            </a>
-          </nav>
+            {activeView === "legal" && (
+              <div className="space-y-6">
+                <div>
+                  <div className="text-xs uppercase tracking-[0.4em] text-[color:var(--shell-muted)]">Legal</div>
+                  <h1 className="mt-2 text-3xl font-semibold text-[color:var(--shell-ink)]" style={{ fontFamily: "var(--font-display)" }}>
+                    Policies and usage guidelines
+                  </h1>
+                  <p className="mt-2 max-w-2xl text-sm text-[color:var(--shell-muted)]">
+                    Review the policy summaries below. Each section describes how Claritas protects data, governs platform use, and supports compliance.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                  {legalPolicies.map((policy) => (
+                    <article
+                      key={policy.id}
+                      id={policy.id}
+                      className="scroll-mt-24 rounded-2xl border border-[color:var(--shell-border)] bg-white p-6 shadow-sm"
+                    >
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-semibold text-[color:var(--shell-ink)]">{policy.title}</h3>
+                        <span className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Claritas</span>
+                      </div>
+                      <p className="mt-3 text-sm text-[color:var(--shell-muted)]">{policy.intro}</p>
+                      <ul className="mt-4 space-y-2 text-sm text-[color:var(--shell-muted)]">
+                        {policy.items.map((item) => (
+                          <li key={item} className="flex gap-2">
+                            <span className="mt-1 h-1.5 w-1.5 flex-none rounded-full bg-slate-500" />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-4 text-sm text-[color:var(--shell-muted)]">{policy.note}</p>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 text-xs text-[color:var(--shell-muted)] flex flex-wrap items-center gap-x-6 gap-y-2">
+                  <span className="font-semibold uppercase tracking-[0.3em] text-[color:var(--shell-ink)]">Claritas</span>
+                  <a href="#cookie-policy" className="transition hover:text-[color:var(--shell-ink)]">Cookie Policy</a>
+                  <a href="#privacy-statement" className="transition hover:text-[color:var(--shell-ink)]">Privacy Statement</a>
+                  <a href="#terms-of-use" className="transition hover:text-[color:var(--shell-ink)]">Terms of Use</a>
+                  <a href="#copyright" className="transition hover:text-[color:var(--shell-ink)]">Copyright</a>
+                </div>
+              </div>
+            )}
+          </main>
         </div>
-      </footer>
+      </div>
     </div>
   );
 }

@@ -14,6 +14,7 @@ export type WorldMapBubblesProps = {
   onSelect?: (countryIso2: string) => void;
   dark?: boolean;
   legend?: boolean;
+  variant?: "default" | "compact";
 };
 
 // TopoJSON -> GeoJSON features
@@ -23,7 +24,13 @@ const countries: any = (feature(worldData as any, (worldData as any).objects.cou
 // This ensures bubbles and map align predictably across browsers.
 const projection = geoEqualEarth().fitSize([800, 400], { type: 'Sphere' } as any);
 
-export default memo(function WorldMapBubbles({ data, onSelect, dark, legend = true }: WorldMapBubblesProps) {
+export default memo(function WorldMapBubbles({
+  data,
+  onSelect,
+  dark,
+  legend = true,
+  variant = "default",
+}: WorldMapBubblesProps) {
   const path = useMemo(() => geoPath(projection), []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<{ show: boolean; x: number; y: number; country: string; value: number } | null>(null);
@@ -49,13 +56,17 @@ export default memo(function WorldMapBubbles({ data, onSelect, dark, legend = tr
   const max = useMemo(() => data.reduce((m, d) => Math.max(m, d.count), 0) || 1, [data]);
 
   const isDark = !!dark;
+  const isCompact = variant === "compact";
   const landFill = isDark ? '#334155' : '#E5E7EB';
   const landStroke = isDark ? '#1f2937' : '#CBD5E1';
   const bubbleFill = isDark ? 'rgba(34,197,94,0.75)' : 'rgba(16,115,74,0.75)';
   const bubbleStroke = isDark ? '#16a34a' : '#0f5132';
   const labelColor = isDark ? '#e2e8f0' : '#0f172a';
 
-  const rScale = (v: number) => 6 + 22 * Math.sqrt(v / max);
+  const rScale = (v: number) =>
+    (isCompact ? 4 : 6) + (isCompact ? 16 : 22) * Math.sqrt(v / max);
+  const labelSize = isCompact ? 9 : 10;
+  const labelOffset = isCompact ? 1 : 2;
 
   return (
     <div ref={containerRef} className="relative w-full h-full">
@@ -92,7 +103,7 @@ export default memo(function WorldMapBubbles({ data, onSelect, dark, legend = tr
               >
                 <circle r={r} fill={bubbleFill} stroke={bubbleStroke} strokeWidth={1} />
                 <title>{`${key}: ${d.count}`}</title>
-                <text textAnchor="middle" y={-r - 2} style={{ fontSize: 10, fill: labelColor }}>
+                <text textAnchor="middle" y={-r - labelOffset} style={{ fontSize: labelSize, fill: labelColor }}>
                   {key}
                 </text>
               </g>
@@ -109,10 +120,11 @@ export default memo(function WorldMapBubbles({ data, onSelect, dark, legend = tr
                borderColor: isDark ? '#334155' : '#cbd5e1'
              }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <svg width="80" height="28">
+            <svg width={isCompact ? 64 : 80} height={isCompact ? 24 : 28}>
               {([0.2, 0.5, 1] as number[]).map((f, i) => {
                 const r = rScale(Math.max(1, max * f));
-                const cx = 12 + i * 24; const cy = 16;
+                const cx = (isCompact ? 10 : 12) + i * (isCompact ? 20 : 24);
+                const cy = isCompact ? 14 : 16;
                 return <circle key={i} cx={cx} cy={cy} r={r} fill={bubbleFill} stroke={bubbleStroke} strokeWidth={1} />;
               })}
             </svg>
