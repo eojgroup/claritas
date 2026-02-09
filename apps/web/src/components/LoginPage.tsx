@@ -185,15 +185,16 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
           </div>
 
           <div className="space-y-4">
-            <h1
-              className="text-4xl font-semibold tracking-tight text-[color:var(--login-ink)] md:text-5xl"
-              style={{ fontFamily: "var(--font-display)" }}
-            >
-              Global clarity starts with trusted identity.
-            </h1>
-            <p className="max-w-xl text-lg text-slate-600">
-              Sign in with your provider to unlock the Claritas signal desk. No passwords stored, no extra identity sprawl.
-            </p>
+            <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/80 shadow-sm">
+              <div
+                className="h-56 sm:h-64 bg-[color:var(--login-sand)] bg-cover bg-center"
+                style={{ backgroundImage: "url(/claritas-hero.png)" }}
+                aria-label="Claritas environment preview"
+              />
+              <div className="px-4 py-3 text-sm text-slate-600">
+                A unified workspace for global signals, alerts, and monitoring.
+              </div>
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

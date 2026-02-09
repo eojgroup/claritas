@@ -312,7 +312,7 @@ export default function ClaritasDashboard() {
             className="absolute inset-0 bg-slate-900/60"
             onClick={() => setMobileNavOpen(false)}
           />
-          <aside className="absolute left-0 top-0 h-full w-72 bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
+          <aside className="absolute left-0 top-0 h-full w-72 bg-[#0B1E2D] text-white shadow-2xl">
             <div className="flex h-full flex-col">
               <div className="px-6 pt-6 pb-4">
                 <div className="flex items-center gap-3">
@@ -322,8 +322,8 @@ export default function ClaritasDashboard() {
                     <div className="absolute left-4 top-0 h-10 w-10 rounded-full bg-[#2D556F] opacity-80" />
                   </div>
                   <div>
-                    <div className="text-xs uppercase tracking-[0.32em] text-white/60">Claritas</div>
-                    <div className="text-base font-semibold">Signal Desk</div>
+                    <div className="text-lg font-semibold tracking-[0.28em]" style={{ fontFamily: "var(--font-display)" }}>CLARITAS</div>
+                    <div className="text-xs uppercase tracking-[0.32em] text-white/60">Signal Desk</div>
                   </div>
                 </div>
               </div>
@@ -377,7 +377,7 @@ export default function ClaritasDashboard() {
       )}
 
       <div className="flex min-h-screen">
-        <aside className="hidden lg:flex lg:w-72 lg:flex-col bg-[color:var(--shell-sidebar)] text-white">
+        <aside className="hidden lg:flex lg:w-72 lg:flex-col bg-[#0B1E2D] text-white shadow-2xl">
           <div className="px-6 pt-7 pb-5">
             <div className="flex items-center gap-3">
               <div className="relative h-11 w-11">
@@ -386,8 +386,8 @@ export default function ClaritasDashboard() {
                 <div className="absolute left-4 top-0 h-11 w-11 rounded-full bg-[#2D556F] opacity-80" />
               </div>
               <div>
-                <div className="text-xs uppercase tracking-[0.32em] text-white/60">Claritas</div>
-                <div className="text-base font-semibold">Signal Desk</div>
+                <div className="text-lg font-semibold tracking-[0.28em]" style={{ fontFamily: "var(--font-display)" }}>CLARITAS</div>
+                <div className="text-xs uppercase tracking-[0.32em] text-white/60">Signal Desk</div>
               </div>
             </div>
           </div>
@@ -436,7 +436,7 @@ export default function ClaritasDashboard() {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/90 backdrop-blur">
-            <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-4 sm:px-6 lg:px-8">
+            <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 lg:px-8">
               <button
                 type="button"
                 onClick={() => setMobileNavOpen(true)}
@@ -444,8 +444,18 @@ export default function ClaritasDashboard() {
               >
                 <Menu className="h-5 w-5" />
               </button>
+              <div className="flex items-center gap-2 lg:hidden">
+                <div className="relative h-7 w-7">
+                  <div className="absolute -left-1 top-0 h-7 w-7 rounded-full bg-[#102739]" />
+                  <div className="absolute left-1 top-0 h-7 w-7 rounded-full bg-[#1F3C52] opacity-90" />
+                  <div className="absolute left-3.5 top-0 h-7 w-7 rounded-full bg-[#2D556F] opacity-80" />
+                </div>
+                <span className="text-xs font-semibold tracking-[0.32em]" style={{ fontFamily: "var(--font-display)" }}>
+                  CLARITAS
+                </span>
+              </div>
 
-              <div>
+              <div className="min-w-0">
                 <div className="text-xs uppercase tracking-[0.32em] text-[color:var(--shell-muted)]">
                   {currentViewMeta.kicker}
                 </div>
@@ -497,8 +507,8 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)]">
-                <div className="flex flex-col gap-6">
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                   <div className={cardBase}>
                     <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div>
@@ -531,7 +541,7 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
                     <div className="relative p-4">
-                      <div className="relative h-72 md:h-80 rounded-xl overflow-hidden bg-[color:var(--shell-bg)]">
+                      <div className="relative h-60 md:h-64 rounded-xl overflow-hidden bg-[color:var(--shell-bg)]">
                         {mapMode === "news" ? (
                           <WorldMapBubbles
                             variant="compact"
@@ -588,54 +598,6 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
 
-                  <div className={cardBase}>
-                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country profile</div>
-                        <div className="text-sm font-semibold">Selected location overview</div>
-                      </div>
-                      <span className="text-xs text-[color:var(--shell-muted)]">Auto-updated</span>
-                    </div>
-                    <div className="p-4 text-sm text-[color:var(--shell-muted)] space-y-2">
-                      {!selectedCountry && (
-                        <div>Select a bubble on the map to see a brief profile.</div>
-                      )}
-                      {selectedCountry && (
-                        <>
-                          <div className="text-base font-semibold text-[color:var(--shell-ink)]">Country: {selectedCountry}</div>
-                          <div>Recent items from this country in the list are highlighted by the country tag.</div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className={cardBase}>
-                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div>
-                        <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">AI search</div>
-                        <div className="text-sm font-semibold">Ask Claritas for signal context</div>
-                      </div>
-                      <span className="text-xs text-[color:var(--shell-muted)]">Beta</span>
-                    </div>
-                    <div className="p-4 space-y-3">
-                      <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2 shadow-inner">
-                        <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
-                        <input
-                          className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
-                          placeholder="Search events, alerts, and location activity"
-                          value={query}
-                          onChange={(e) => setQuery(e.target.value)}
-                        />
-                        <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-white text-sm">Search</button>
-                      </div>
-                      <p className="text-xs text-[color:var(--shell-muted)]">
-                        Queries return live signal matches from the last 30 days.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-6">
                   <div className={cardBase}>
                     <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div>
@@ -750,43 +712,95 @@ export default function ClaritasDashboard() {
                       </div>
                     )}
                   </div>
+                </div>
 
-                  <div className={cardBase}>
-                    <div className="p-4 border-b border-[color:var(--shell-border)] font-semibold">
-                      Analytics snapshot
-                    </div>
-                    <div className="p-4 space-y-6">
-                      <div className="h-44">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
-                            <XAxis dataKey="x" tick={{ fontSize: 12 }} />
-                            <YAxis dataKey="y" tick={{ fontSize: 12 }} />
-                            <ZAxis range={[60, 60]} />
-                            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                            <Scatter data={scatterData} fill="#94a3b8" />
-                          </ScatterChart>
-                        </ResponsiveContainer>
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                  <div className="flex flex-col gap-6">
+                    <div className={cardBase}>
+                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country profile</div>
+                          <div className="text-sm font-semibold">Selected location overview</div>
+                        </div>
+                        <span className="text-xs text-[color:var(--shell-muted)]">Auto-updated</span>
                       </div>
-                      <div className="h-56">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90}>
-                              {pieData.map((_, i) => (
-                                <Cell key={i} fill={pieColors[i % pieColors.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                          </PieChart>
-                        </ResponsiveContainer>
+                      <div className="p-4 text-sm text-[color:var(--shell-muted)] space-y-2">
+                        {!selectedCountry && (
+                          <div>Select a bubble on the map to see a brief profile.</div>
+                        )}
+                        {selectedCountry && (
+                          <>
+                            <div className="text-base font-semibold text-[color:var(--shell-ink)]">Country: {selectedCountry}</div>
+                            <div>Recent items from this country in the list are highlighted by the country tag.</div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className={cardBase}>
+                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">AI search</div>
+                          <div className="text-sm font-semibold">Ask Claritas for signal context</div>
+                        </div>
+                        <span className="text-xs text-[color:var(--shell-muted)]">Beta</span>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2 shadow-inner">
+                          <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
+                          <input
+                            className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
+                            placeholder="Search events, alerts, and location activity"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                          />
+                          <button className="rounded-lg bg-slate-900 px-3 py-1.5 text-white text-sm">Search</button>
+                        </div>
+                        <p className="text-xs text-[color:var(--shell-muted)]">
+                          Queries return live signal matches from the last 30 days.
+                        </p>
                       </div>
                     </div>
                   </div>
 
-                  <div className={cardBase}>
-                    <div className="p-4 border-b border-[color:var(--shell-border)] font-semibold flex items-center gap-2">
-                      <Bell className="h-5 w-5" /> Notifications
+                  <div className="flex flex-col gap-6">
+                    <div className={cardBase}>
+                      <div className="p-4 border-b border-[color:var(--shell-border)] font-semibold">
+                        Analytics snapshot
+                      </div>
+                      <div className="p-4 space-y-6">
+                        <div className="h-44">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                              <XAxis dataKey="x" tick={{ fontSize: 12 }} />
+                              <YAxis dataKey="y" tick={{ fontSize: 12 }} />
+                              <ZAxis range={[60, 60]} />
+                              <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+                              <Scatter data={scatterData} fill="#94a3b8" />
+                            </ScatterChart>
+                          </ResponsiveContainer>
+                        </div>
+                        <div className="h-56">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90}>
+                                {pieData.map((_, i) => (
+                                  <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                                ))}
+                              </Pie>
+                              <Tooltip />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
                     </div>
-                    <div className="p-4 text-sm text-[color:var(--shell-muted)]">No notifications yet.</div>
+
+                    <div className={cardBase}>
+                      <div className="p-4 border-b border-[color:var(--shell-border)] font-semibold flex items-center gap-2">
+                        <Bell className="h-5 w-5" /> Notifications
+                      </div>
+                      <div className="p-4 text-sm text-[color:var(--shell-muted)]">No notifications yet.</div>
+                    </div>
                   </div>
                 </div>
               </div>
