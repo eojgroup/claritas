@@ -176,16 +176,9 @@ data:
       "alias": "google",
       "providerId": "google",
       "enabled": true,
-      "trustEmail": true,
-      "storeToken": false,
-      "addReadTokenRoleOnCreate": false,
-      "authenticateByDefault": false,
-      "firstBrokerLoginFlowAlias": "first broker login",
-      "syncMode": "FORCE",
       "config": {
         "clientId": "$(json_escape "${KC_IDP_GOOGLE_CLIENT_ID}")",
-        "clientSecret": "$(json_escape "${KC_IDP_GOOGLE_CLIENT_SECRET}")",
-        "defaultScope": "openid profile email"
+        "clientSecret": "$(json_escape "${KC_IDP_GOOGLE_CLIENT_SECRET}")"
       }
     }
     EOF
