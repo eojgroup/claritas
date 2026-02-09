@@ -143,6 +143,35 @@ export default function ClaritasDashboard() {
   }, [dark]);
 
   useEffect(() => {
+    const legalIds = new Set(legalPolicies.map((policy) => policy.id));
+    const profileIds = new Set(profileSections.map((section) => section.id));
+    const handleHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (!hash) return;
+      if (legalIds.has(hash)) {
+        setActiveView("legal");
+        setTimeout(() => {
+          document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 50);
+        return;
+      }
+      if (hash.startsWith("profile-")) {
+        const sectionId = hash.replace("profile-", "");
+        if (profileIds.has(sectionId as typeof profileSections[number]["id"])) {
+          setActiveView("profile");
+          setProfileSection(sectionId as typeof profileSections[number]["id"]);
+          setTimeout(() => {
+            document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 50);
+        }
+      }
+    };
+    handleHash();
+    window.addEventListener("hashchange", handleHash);
+    return () => window.removeEventListener("hashchange", handleHash);
+  }, []);
+
+  useEffect(() => {
     if (activeView === "profile") {
       setProfileSection("overview");
     }
