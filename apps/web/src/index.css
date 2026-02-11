@@ -7,25 +7,20 @@
   text-rendering: optimizeLegibility;
   --font-display: "Fraunces", "Times New Roman", serif;
   --font-body: "Work Sans", "Gill Sans", "Trebuchet MS", sans-serif;
-  --login-ink: #0b1f2a;
-  --login-ink-soft: #2b3b45;
-  --login-cream: #fbf8f3;
-  --login-sand: #f4efe6;
-  --login-mist: #dbe3e1;
-  --login-teal: #1f6b68;
-  --login-amber: #d3a06b;
-  --shell-bg: #edf1f6;
-  --shell-sidebar: #0b1f2a;
+  --login-ink: #111827;
+  --login-ink-soft: #6b7280;
+  --login-cream: #f6f7f9;
+  --login-sand: #eef2f7;
+  --login-mist: #e5e7eb;
+  --login-teal: #111827;
+  --login-amber: #9ca3af;
+  --shell-bg: #f6f7f9;
+  --shell-sidebar: #111827;
   --shell-surface: #ffffff;
-  --shell-border: #d2dbe4;
-  --shell-ink: #0b1f2a;
-  --shell-muted: #5a6a78;
-  --shell-accent: #1f6b68;
-  --shell-hero-start: #0b1f2a;
-  --shell-hero-mid: #123446;
-  --shell-hero-end: #1d4e5f;
-  --shell-hero-glow: #7dd3c7;
-  --shell-hero-warm: #f2c089;
+  --shell-border: #e5e7eb;
+  --shell-ink: #111827;
+  --shell-muted: #6b7280;
+  --shell-accent: #111827;
   --home-bg: var(--shell-bg);
   --home-header: #e6ecf1;
   --home-surface: var(--shell-surface);
@@ -68,40 +63,6 @@ button, input, select, textarea { font: inherit; }
   }
 }
 
-@keyframes dash-fade {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes dash-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-12px);
-  }
-}
-
-@keyframes dash-sheen {
-  0% {
-    transform: translateX(-20%);
-    opacity: 0;
-  }
-  40% {
-    opacity: 0.45;
-  }
-  100% {
-    transform: translateX(120%);
-    opacity: 0;
-  }
-}
 
 @tailwind base;
 @tailwind components;

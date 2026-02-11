@@ -135,7 +135,6 @@ export default function ClaritasDashboard() {
   const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
   const [profileSection, setProfileSection] = useState<"overview" | "identity" | "preferences" | "security" | "policies">("overview");
   const authProviderMap = useMemo(() => new Map(authProviders.map((p) => [p.id, p])), [authProviders]);
-  const heroImageUrl = `${import.meta.env.BASE_URL}claritas-hero.png`;
 
   useEffect(() => {
     const el = document.documentElement;
@@ -228,7 +227,7 @@ export default function ClaritasDashboard() {
 
   const pieColors = useMemo(() => ["#0B1E2D", "#2F4455", "#4E6473"], []);
   const cardBase =
-    "rounded-3xl border border-[color:var(--shell-border)]/80 bg-white/80 shadow-[0_20px_45px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-slate-800/70 dark:bg-slate-900/70";
+    "rounded-2xl border border-[color:var(--shell-border)] bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70";
 
   const todayLabel = useMemo(
     () => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(new Date()),
@@ -358,13 +357,6 @@ export default function ClaritasDashboard() {
     }
   };
 
-  const jumpToSection = (id: string) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  };
-
   const currentViewMeta = viewMeta[activeView];
 
   if (authStatus !== "authed") {
@@ -379,20 +371,14 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <div className="relative min-h-screen w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)] dark:bg-slate-950 dark:text-slate-100">
-      <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(1200px_circle_at_12%_12%,rgba(30,107,104,0.18),transparent_60%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(900px_circle_at_90%_8%,rgba(242,192,137,0.2),transparent_55%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,41,51,0.18)_0%,rgba(255,255,255,0)_45%)]" />
-      </div>
-      <div className="relative z-10">
-        {mobileNavOpen && (
-          <div className="fixed inset-0 z-40 lg:hidden">
-            <div
-              className="absolute inset-0 bg-slate-900/60"
-              onClick={() => setMobileNavOpen(false)}
-            />
-          <aside className="absolute left-0 top-0 h-full w-72 bg-[#0B1E2D] text-white shadow-2xl">
+    <div className="min-h-screen w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)] dark:bg-slate-950 dark:text-slate-100">
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div
+            className="absolute inset-0 bg-slate-900/60"
+            onClick={() => setMobileNavOpen(false)}
+          />
+          <aside className="absolute left-0 top-0 h-full w-72 bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
             <div className="flex h-full flex-col">
               <div className="px-6 pt-6 pb-4">
                 <div className="flex items-center gap-3">
@@ -454,10 +440,10 @@ export default function ClaritasDashboard() {
             </div>
           </aside>
         </div>
-        )}
+      )}
 
-        <div className="flex min-h-screen">
-        <aside className="hidden lg:flex lg:w-72 lg:flex-col bg-[#0B1E2D] text-white shadow-2xl">
+      <div className="flex min-h-screen">
+        <aside className="hidden lg:flex lg:w-72 lg:flex-col bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
           <div className="px-6 pt-7 pb-5">
             <div className="flex items-center gap-3">
               <div className="relative h-11 w-11">
@@ -515,7 +501,7 @@ export default function ClaritasDashboard() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-white/60 bg-white/75 backdrop-blur dark:border-slate-800/70 dark:bg-slate-950/75">
+          <header className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-white dark:border-slate-800 dark:bg-slate-950">
             <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 lg:px-8">
               <button
                 type="button"
@@ -543,12 +529,12 @@ export default function ClaritasDashboard() {
               </div>
 
               <div className="ml-auto flex items-center gap-3">
-                <div className="hidden lg:flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white/80 px-3 py-1 text-xs text-[color:var(--shell-muted)] shadow-sm">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500 motion-safe:animate-pulse" />
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-[color:var(--shell-ink)]">Live</span>
+                <div className="hidden lg:flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]">Live</span>
                   <span>{todayLabel}</span>
                 </div>
-                <div className="hidden md:flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white/80 px-3 py-1 text-sm text-[color:var(--shell-muted)] shadow-sm">
+                <div className="hidden md:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2 text-sm text-[color:var(--shell-muted)]">
                   <Search className="h-4 w-4" />
                   <input
                     className="w-40 bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
@@ -560,13 +546,13 @@ export default function ClaritasDashboard() {
                 <button
                   aria-label="Toggle dark mode"
                   onClick={() => setDark(v => !v)}
-                  className="h-10 w-10 rounded-2xl border border-[color:var(--shell-border)] bg-white/80 text-[color:var(--shell-ink)] shadow-sm hover:bg-white dark:border-slate-700/70 dark:bg-slate-900/70 dark:text-slate-100"
+                  className="h-10 w-10 rounded-xl border border-[color:var(--shell-border)] bg-white text-[color:var(--shell-ink)] hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 >
                   <span className="grid h-full w-full place-items-center">
                     {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
                   </span>
                 </button>
-                <div className="hidden sm:flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white/80 px-3 py-1 text-xs text-[color:var(--shell-muted)] shadow-sm">
+                <div className="hidden sm:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs text-[color:var(--shell-muted)]">
                   <span className="h-2 w-2 rounded-full bg-emerald-500" />
                   <span className="max-w-[160px] truncate">{userLabel}</span>
                 </div>
@@ -574,7 +560,7 @@ export default function ClaritasDashboard() {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 lg:px-8 py-8">
+          <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 lg:px-8 py-6">
             {sessionNotice && (
               <div className="mb-6">
                 <div
@@ -592,123 +578,48 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div className="space-y-8">
-                <section className="relative overflow-hidden rounded-[32px] border border-white/30 bg-[radial-gradient(1400px_circle_at_10%_15%,rgba(13,148,136,0.55),transparent_55%),linear-gradient(135deg,var(--shell-hero-start)_0%,var(--shell-hero-mid)_40%,var(--shell-hero-end)_100%)] text-white shadow-[0_30px_80px_rgba(15,23,42,0.35)] motion-safe:animate-[dash-fade_0.8s_ease-out]">
-                  <div className="absolute inset-0">
-                    <div className="absolute -left-12 top-10 h-40 w-40 rounded-full bg-[color:var(--shell-hero-glow)] opacity-40 blur-3xl motion-safe:animate-[dash-float_18s_ease-in-out_infinite]" />
-                    <div className="absolute right-10 top-20 h-24 w-24 rounded-full bg-[color:var(--shell-hero-warm)] opacity-40 blur-3xl motion-safe:animate-[dash-float_16s_ease-in-out_infinite]" />
-                    <div className="absolute inset-0 bg-[linear-gradient(120deg,transparent_20%,rgba(255,255,255,0.2)_45%,transparent_70%)] opacity-60 motion-safe:animate-[dash-sheen_10s_linear_infinite]" />
+              <div className="space-y-4">
+                <section className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+                  <div className={`${cardBase} p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Live signals</div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{news.length}</div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">Stories & alerts</div>
                   </div>
-                  <div className="relative grid gap-8 p-6 sm:p-8 lg:grid-cols-[1.1fr_0.9fr]">
-                    <div className="space-y-6">
-                      <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.35em] text-white/80">
-                        <span className="h-2 w-2 rounded-full bg-emerald-400 motion-safe:animate-pulse" />
-                        Signal desk
-                      </div>
-                      <div className="space-y-3">
-                        <h1 className="text-3xl sm:text-4xl font-semibold" style={{ fontFamily: "var(--font-display)" }}>
-                          Global signals, orchestrated in one command surface
-                        </h1>
-                        <p className="max-w-xl text-sm text-white/75">
-                          Track regional activity, pivot across weather and news streams, and stay ahead of operational risk
-                          without leaving the desk.
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-3">
-                        <button
-                          type="button"
-                          onClick={() => jumpToSection("signal-feed")}
-                          className="rounded-full border border-white/20 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] shadow-sm transition hover:-translate-y-0.5"
-                        >
-                          Explore live feed
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => jumpToSection("signal-map")}
-                          className="rounded-full border border-white/30 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/80 transition hover:-translate-y-0.5 hover:bg-white/20"
-                        >
-                          Jump to map
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setActiveView("profile")}
-                          className="rounded-full border border-white/30 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/80 transition hover:-translate-y-0.5 hover:bg-white/20"
-                        >
-                          Account overview
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                        <div className="rounded-2xl border border-white/15 bg-white/10 p-3">
-                          <div className="text-[10px] uppercase tracking-[0.3em] text-white/60">Live signals</div>
-                          <div className="mt-1 text-2xl font-semibold">{news.length}</div>
-                          <div className="text-xs text-white/60">Stories & alerts</div>
-                        </div>
-                        <div className="rounded-2xl border border-white/15 bg-white/10 p-3">
-                          <div className="text-[10px] uppercase tracking-[0.3em] text-white/60">Active regions</div>
-                          <div className="mt-1 text-2xl font-semibold">{activeRegions}</div>
-                          <div className="text-xs text-white/60">Countries tracked</div>
-                        </div>
-                        <div className="rounded-2xl border border-white/15 bg-white/10 p-3">
-                          <div className="text-[10px] uppercase tracking-[0.3em] text-white/60">Weather rows</div>
-                          <div className="mt-1 text-2xl font-semibold">{weatherStats.length}</div>
-                          <div className="text-xs text-white/60">Latest observations</div>
-                        </div>
-                        <div className="rounded-2xl border border-white/15 bg-white/10 p-3">
-                          <div className="text-[10px] uppercase tracking-[0.3em] text-white/60">Focus</div>
-                          <div className="mt-1 text-2xl font-semibold">{focusLabel}</div>
-                          <div className="text-xs text-white/60">Current lens</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="relative">
-                      <div className="absolute -top-10 right-4 h-40 w-40 rounded-full bg-[color:var(--shell-hero-glow)] opacity-30 blur-3xl motion-safe:animate-[dash-float_20s_ease-in-out_infinite]" />
-                      <div className="relative overflow-hidden rounded-3xl border border-white/20 bg-white/10 p-4 shadow-[0_25px_55px_rgba(15,23,42,0.35)]">
-                        <div className="relative h-56 sm:h-64 overflow-hidden rounded-2xl border border-white/15 bg-white/10">
-                          <img
-                            src={heroImageUrl}
-                            alt="Claritas command overview"
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                            decoding="async"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-[#0b1f2a]/70 via-transparent to-transparent" />
-                          <div className="absolute bottom-3 left-3 text-xs font-semibold uppercase tracking-[0.2em] text-white/80">
-                            Live command snapshot
-                          </div>
-                        </div>
-                        <div className="mt-4 grid grid-cols-2 gap-3">
-                          <div className="rounded-2xl border border-white/15 bg-white/10 p-3 text-xs">
-                            <div className="text-[10px] uppercase tracking-[0.3em] text-white/60">Last sync</div>
-                            <div className="mt-1 text-sm font-semibold text-white">{latestEventLabel}</div>
-                          </div>
-                          <div className="rounded-2xl border border-white/15 bg-white/10 p-3 text-xs">
-                            <div className="text-[10px] uppercase tracking-[0.3em] text-white/60">Map mode</div>
-                            <div className="mt-1 text-sm font-semibold text-white">
-                              {mapMode === "news" ? "News pulse" : "Weather pulse"}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                  <div className={`${cardBase} p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Active regions</div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{activeRegions}</div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">Countries tracked</div>
+                  </div>
+                  <div className={`${cardBase} p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Weather rows</div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{weatherStats.length}</div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">Latest observations</div>
+                  </div>
+                  <div className={`${cardBase} p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Last sync</div>
+                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">{latestEventLabel}</div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">Combined feeds</div>
+                  </div>
+                  <div className={`${cardBase} p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Focus</div>
+                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">{focusLabel}</div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">Current lens</div>
                   </div>
                 </section>
 
-                <section id="signal-grid" className="grid grid-cols-1 gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-                  <div id="signal-map" className={`${cardBase} overflow-hidden`}>
-                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)]/60 bg-white/70 px-5 py-4 dark:bg-slate-900/60">
+                <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+                  <div id="signal-map" className={`${cardBase} lg:col-span-7`}>
+                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div>
                         <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Geospatial pulse</div>
-                        <div className="text-base font-semibold">
-                          Map: {mapMode === "news" ? "#News per country" : "Weather (temperature) per country"}
-                        </div>
+                        <div className="text-sm font-semibold">Map: {mapMode === "news" ? "#News per country" : "Weather (temperature) per country"}</div>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
                         <button
                           className={`rounded-full border px-3 py-1 transition ${
                             mapMode === "news"
-                              ? "border-[color:var(--shell-accent)] bg-[color:var(--shell-accent)] text-white shadow-sm"
-                              : "border-[color:var(--shell-border)] bg-white/70 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-accent)]"
+                              ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                              : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                           }`}
                           onClick={() => { setMapMode("news"); setListMode("news"); }}
                         >
@@ -717,8 +628,8 @@ export default function ClaritasDashboard() {
                         <button
                           className={`rounded-full border px-3 py-1 transition ${
                             mapMode === "weather"
-                              ? "border-[color:var(--shell-accent)] bg-[color:var(--shell-accent)] text-white shadow-sm"
-                              : "border-[color:var(--shell-border)] bg-white/70 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-accent)]"
+                              ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                              : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                           }`}
                           onClick={() => { setMapMode("weather"); setListMode("weather"); }}
                         >
@@ -726,8 +637,8 @@ export default function ClaritasDashboard() {
                         </button>
                       </div>
                     </div>
-                    <div className="relative p-5">
-                      <div className="relative h-64 rounded-2xl overflow-hidden bg-[color:var(--shell-bg)]">
+                    <div className="relative p-4">
+                      <div className="relative h-64 rounded-xl overflow-hidden bg-[color:var(--shell-bg)]">
                         {mapMode === "news" ? (
                           <WorldMapBubbles
                             variant="compact"
@@ -765,12 +676,12 @@ export default function ClaritasDashboard() {
                         )}
                       </div>
                       {mapMode === "news" && countryStats.length === 0 && (
-                        <div className="absolute bottom-4 right-5 text-xs text-[color:var(--shell-muted)] bg-white/80 px-2 py-1 rounded-full shadow-sm border border-[color:var(--shell-border)]">
+                        <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)]">
                           No aggregated stats yet — showing live list fallback
                         </div>
                       )}
                       {mapMode === "weather" && (weatherStats?.length ?? 0) === 0 && (
-                        <div className="absolute bottom-4 right-5 text-xs text-[color:var(--shell-muted)] bg-white/80 px-2 py-1 rounded-full shadow-sm border border-[color:var(--shell-border)] flex items-center gap-2">
+                        <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
                           <span>No weather stats yet.</span>
                           <button
                             onClick={handleRefreshWeather}
@@ -784,18 +695,18 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
 
-                  <div id="signal-feed" className={`${cardBase} overflow-hidden`}>
-                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)]/60 bg-white/70 px-5 py-4 dark:bg-slate-900/60">
+                  <div id="signal-feed" className={`${cardBase} lg:col-span-5`}>
+                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div>
                         <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Live feed</div>
-                        <div className="text-base font-semibold">Latest intelligence drops</div>
+                        <div className="text-sm font-semibold">Latest intelligence drops</div>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
                         <button
                           className={`rounded-full border px-3 py-1 transition ${
                             listMode === "news"
-                              ? "border-[color:var(--shell-accent)] bg-[color:var(--shell-accent)] text-white shadow-sm"
-                              : "border-[color:var(--shell-border)] bg-white/70 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-accent)]"
+                              ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                              : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                           }`}
                           onClick={() => setListMode("news")}
                         >
@@ -804,8 +715,8 @@ export default function ClaritasDashboard() {
                         <button
                           className={`rounded-full border px-3 py-1 transition ${
                             listMode === "weather"
-                              ? "border-[color:var(--shell-accent)] bg-[color:var(--shell-accent)] text-white shadow-sm"
-                              : "border-[color:var(--shell-border)] bg-white/70 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-accent)]"
+                              ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                              : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                           }`}
                           onClick={() => setListMode("weather")}
                         >
@@ -815,16 +726,16 @@ export default function ClaritasDashboard() {
                     </div>
 
                     {listMode === "news" ? (
-                      <ul className="list-none p-5 space-y-4">
+                      <div className="max-h-[420px] overflow-y-auto p-4 space-y-3">
                         {news.length === 0 && (
-                          <li className="text-sm text-[color:var(--shell-muted)]">No news items yet.</li>
+                          <div className="text-sm text-[color:var(--shell-muted)]">No news items yet.</div>
                         )}
                         {news.map((n) => {
                           const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
                           return (
-                            <li key={n.id} className="rounded-2xl border border-[color:var(--shell-border)] bg-white/70 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+                            <div key={n.id} className="rounded-xl border border-[color:var(--shell-border)] bg-white p-3">
                               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                                <div className="relative h-24 w-full sm:w-32 rounded-xl overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none">
+                                <div className="relative h-20 w-full sm:w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none">
                                   {img ? (
                                     <img
                                       src={img}
@@ -849,20 +760,20 @@ export default function ClaritasDashboard() {
                                     )}
                                     {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
                                   </div>
-                                  {n.summary && <p className="text-sm text-slate-600 mt-2 line-clamp-3">{n.summary}</p>}
+                                  {n.summary && <p className="text-sm text-slate-600 mt-2 line-clamp-2">{n.summary}</p>}
                                 </div>
                               </div>
-                            </li>
+                            </div>
                           );
                         })}
-                      </ul>
+                      </div>
                     ) : (
-                      <div className="p-5 space-y-4">
+                      <div className="max-h-[420px] overflow-y-auto p-4 space-y-4">
                         <div className="flex flex-wrap items-center gap-3 text-sm">
                           <label className="text-[color:var(--shell-muted)]">Min temp (°C)</label>
                           <input
                             type="number"
-                            className="w-24 rounded-xl border border-[color:var(--shell-border)] bg-white px-2 py-1"
+                            className="w-24 rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1"
                             value={typeof minTemp === "number" ? minTemp : ""}
                             onChange={(e) => setMinTemp(e.currentTarget.value === "" ? undefined : Number(e.currentTarget.value))}
                             placeholder="Any"
@@ -898,96 +809,84 @@ export default function ClaritasDashboard() {
                       </div>
                     )}
                   </div>
-                </section>
 
-                <section id="insights" className="grid grid-cols-1 gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-                  <div className="flex flex-col gap-6">
-                    <div className={cardBase}>
-                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)]/60 bg-white/70 px-5 py-4 dark:bg-slate-900/60">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country profile</div>
-                          <div className="text-base font-semibold">Selected location overview</div>
-                        </div>
-                        <span className="text-xs text-[color:var(--shell-muted)]">Auto-updated</span>
-                      </div>
-                      <div className="p-5 text-sm text-[color:var(--shell-muted)] space-y-2">
-                        {!selectedCountry && (
-                          <div>Select a bubble on the map to see a brief profile.</div>
-                        )}
-                        {selectedCountry && (
-                          <>
-                            <div className="text-base font-semibold text-[color:var(--shell-ink)]">Country: {selectedCountry}</div>
-                            <div>Recent items from this country in the list are highlighted by the country tag.</div>
-                          </>
-                        )}
-                      </div>
+                  <div className={`${cardBase} lg:col-span-4`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country profile</div>
+                      <div className="text-sm font-semibold">Selected location overview</div>
                     </div>
+                    <div className="p-4 text-sm text-[color:var(--shell-muted)] space-y-2">
+                      {!selectedCountry && (
+                        <div>Select a bubble on the map to see a brief profile.</div>
+                      )}
+                      {selectedCountry && (
+                        <>
+                          <div className="text-base font-semibold text-[color:var(--shell-ink)]">Country: {selectedCountry}</div>
+                          <div>Recent items from this country in the list are highlighted by the country tag.</div>
+                        </>
+                      )}
+                    </div>
+                  </div>
 
-                    <div className={cardBase}>
-                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)]/60 bg-white/70 px-5 py-4 dark:bg-slate-900/60">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">AI search</div>
-                          <div className="text-base font-semibold">Ask Claritas for signal context</div>
-                        </div>
-                        <span className="text-xs text-[color:var(--shell-muted)]">Beta</span>
+                  <div className={`${cardBase} lg:col-span-4`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">AI search</div>
+                      <div className="text-sm font-semibold">Ask Claritas for signal context</div>
+                    </div>
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2">
+                        <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
+                        <input
+                          className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
+                          placeholder="Search events, alerts, and location activity"
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                        />
+                        <button className="rounded-lg bg-[color:var(--shell-ink)] px-3 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]">Search</button>
                       </div>
-                      <div className="p-5 space-y-3">
-                        <div className="flex items-center gap-2 rounded-2xl border border-[color:var(--shell-border)] bg-white px-3 py-2 shadow-inner">
-                          <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
-                          <input
-                            className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
-                            placeholder="Search events, alerts, and location activity"
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                          />
-                          <button className="rounded-full bg-[color:var(--shell-ink)] px-4 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]">Search</button>
-                        </div>
-                        <p className="text-xs text-[color:var(--shell-muted)]">
-                          Queries return live signal matches from the last 30 days.
-                        </p>
+                      <p className="text-xs text-[color:var(--shell-muted)]">
+                        Queries return live signal matches from the last 30 days.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className={`${cardBase} lg:col-span-4`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-sm font-semibold">Analytics snapshot</div>
+                    </div>
+                    <div className="p-4 space-y-6">
+                      <div className="h-40">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                            <XAxis dataKey="x" tick={{ fontSize: 12 }} />
+                            <YAxis dataKey="y" tick={{ fontSize: 12 }} />
+                            <ZAxis range={[60, 60]} />
+                            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+                            <Scatter data={scatterData} fill="#94a3b8" />
+                          </ScatterChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="h-44">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={70}>
+                              {pieData.map((_, i) => (
+                                <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                          </PieChart>
+                        </ResponsiveContainer>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-6">
-                    <div className={cardBase}>
-                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)]/60 bg-white/70 px-5 py-4 dark:bg-slate-900/60">
-                        <div className="text-base font-semibold">Analytics snapshot</div>
-                        <span className="text-xs text-[color:var(--shell-muted)]">Last 30 days</span>
-                      </div>
-                      <div className="p-5 space-y-6">
-                        <div className="h-44">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
-                              <XAxis dataKey="x" tick={{ fontSize: 12 }} />
-                              <YAxis dataKey="y" tick={{ fontSize: 12 }} />
-                              <ZAxis range={[60, 60]} />
-                              <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                              <Scatter data={scatterData} fill="#94a3b8" />
-                            </ScatterChart>
-                          </ResponsiveContainer>
-                        </div>
-                        <div className="h-56">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <PieChart>
-                              <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90}>
-                                {pieData.map((_, i) => (
-                                  <Cell key={i} fill={pieColors[i % pieColors.length]} />
-                                ))}
-                              </Pie>
-                              <Tooltip />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
+                  <div className={`${cardBase} lg:col-span-12`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3 flex items-center gap-2">
+                      <Bell className="h-4 w-4" />
+                      <div className="text-sm font-semibold">Notifications</div>
                     </div>
-
-                    <div className={cardBase}>
-                      <div className="flex items-center gap-2 border-b border-[color:var(--shell-border)]/60 bg-white/70 px-5 py-4 dark:bg-slate-900/60">
-                        <Bell className="h-5 w-5" /> <span className="text-base font-semibold">Notifications</span>
-                      </div>
-                      <div className="p-5 text-sm text-[color:var(--shell-muted)]">No notifications yet.</div>
-                    </div>
+                    <div className="p-4 text-sm text-[color:var(--shell-muted)]">No notifications yet.</div>
                   </div>
                 </section>
               </div>
@@ -1305,7 +1204,6 @@ export default function ClaritasDashboard() {
           </main>
         </div>
       </div>
-    </div>
     </div>
   );
 }

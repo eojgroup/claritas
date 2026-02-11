@@ -162,15 +162,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
   };
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[color:var(--login-cream)] text-[color:var(--login-ink)]">
-      <div className="absolute inset-0 bg-[radial-gradient(800px_circle_at_12%_20%,rgba(31,107,104,0.18),transparent_65%)]" />
-      <div className="absolute inset-0 bg-[radial-gradient(700px_circle_at_90%_10%,rgba(211,160,107,0.18),transparent_60%)]" />
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,41,51,0.08)_0%,rgba(255,255,255,0)_45%)]" />
-      <div className="absolute -top-24 right-8 h-64 w-64 rounded-full bg-[color:var(--login-mist)] opacity-70 blur-3xl motion-safe:animate-[login-float_18s_ease-in-out_infinite]" />
-      <div
-        className="absolute -bottom-40 left-6 h-80 w-80 rounded-full bg-[color:var(--login-sand)] opacity-80 blur-3xl motion-safe:animate-[login-float_22s_ease-in-out_infinite]"
-        style={{ animationDelay: "1.5s" }}
-      />
+    <div className="relative min-h-screen bg-[color:var(--login-cream)] text-[color:var(--login-ink)]">
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-4 py-12 sm:px-6 lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-8 lg:py-20">
         <section className="order-2 space-y-10 lg:order-1">
