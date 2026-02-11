@@ -45,6 +45,8 @@ const providerIcons: Record<AuthProviderId, string> = {
   apple: appleIcon,
 };
 
+const heroImageUrl = `${import.meta.env.BASE_URL}claritas-hero.png`;
+
 const highlightCards = [
   {
     title: "Signal desk access",
@@ -188,7 +190,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/80 shadow-sm">
               <div
                 className="h-56 sm:h-64 bg-[color:var(--login-sand)] bg-cover bg-center"
-                style={{ backgroundImage: "url(/claritas-hero.png)" }}
+                style={{ backgroundImage: `url(${heroImageUrl})` }}
                 aria-label="Claritas environment preview"
               />
               <div className="px-4 py-3 text-sm text-slate-600">
