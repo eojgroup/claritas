@@ -763,8 +763,8 @@ export default function ClaritasDashboard() {
                     id="signal-map-feed"
                     className={`${cardBase} lg:col-span-12`}
                   >
-                    <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr]">
-                      <div className="border-b border-[color:var(--shell-border)] lg:border-b-0 lg:border-r">
+                    <div className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr]">
+                      <div className="border-b border-[color:var(--shell-border)] md:border-b-0 md:border-r">
                         <div className="flex items-center justify-between px-4 py-3">
                           <div>
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
