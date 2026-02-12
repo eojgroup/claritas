@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Bell, Settings, User, Moon, Sun, LogOut, ChevronLeft, Menu, LayoutGrid, FileText } from "lucide-react";
+import {
+  Search,
+  Bell,
+  Settings,
+  User,
+  Moon,
+  Sun,
+  LogOut,
+  ChevronLeft,
+  Menu,
+  LayoutGrid,
+  FileText,
+} from "lucide-react";
 import {
   PieChart,
   Pie,
@@ -40,8 +52,7 @@ const legalPolicies = [
       "Analytics cookies help us measure performance and improve the clarity of dashboards.",
       "Marketing cookies are only used when enabled to surface relevant updates.",
     ],
-    note:
-      "You can manage cookie settings in your browser and clear stored data at any time. Disabling some cookies may impact sign-in or personalization.",
+    note: "You can manage cookie settings in your browser and clear stored data at any time. Disabling some cookies may impact sign-in or personalization.",
   },
   {
     id: "privacy-statement",
@@ -54,8 +65,7 @@ const legalPolicies = [
       "We do not sell personal information; data is shared only with trusted service providers.",
       "Retention is limited to what is required for security, compliance, and support.",
     ],
-    note:
-      "You can request access, correction, or deletion of your data through your account administrator or support contact.",
+    note: "You can request access, correction, or deletion of your data through your account administrator or support contact.",
   },
   {
     id: "terms-of-use",
@@ -68,8 +78,7 @@ const legalPolicies = [
       "All content, dashboards, and reports remain the property of Claritas and its licensors.",
       "We may update these terms to reflect product or regulatory changes.",
     ],
-    note:
-      "Violations may result in suspended access or termination of accounts. Continued use indicates acceptance of updated terms.",
+    note: "Violations may result in suspended access or termination of accounts. Continued use indicates acceptance of updated terms.",
   },
   {
     id: "copyright",
@@ -82,8 +91,7 @@ const legalPolicies = [
       "Third-party data sources remain subject to their own licensing terms.",
       "Trademarks and logos must not be altered or used in a misleading way.",
     ],
-    note:
-      "For licensing questions or permissions, contact your Claritas representative.",
+    note: "For licensing questions or permissions, contact your Claritas representative.",
   },
 ];
 
@@ -109,21 +117,33 @@ import {
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
-  const [authStatus, setAuthStatus] = useState<"checking" | "authed" | "unauthed">("checking");
+  const [authStatus, setAuthStatus] = useState<
+    "checking" | "authed" | "unauthed"
+  >("checking");
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<"dashboard" | "profile" | "legal">("dashboard");
+  const [activeView, setActiveView] = useState<
+    "dashboard" | "profile" | "legal"
+  >("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
-  const [sessionNotice, setSessionNotice] = useState<{ tone: "error" | "success" | "info"; message: string } | null>(null);
+  const [sessionNotice, setSessionNotice] = useState<{
+    tone: "error" | "success" | "info";
+    message: string;
+  } | null>(null);
   const [dark, setDark] = useState<boolean>(() => {
     try {
-      const v = localStorage.getItem('theme');
-      if (v === 'dark') return true;
-      if (v === 'light') return false;
-      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    } catch { return false; }
+      const v = localStorage.getItem("theme");
+      if (v === "dark") return true;
+      if (v === "light") return false;
+      return (
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches
+      );
+    } catch {
+      return false;
+    }
   });
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
@@ -133,35 +153,51 @@ export default function ClaritasDashboard() {
   const [listMode, setListMode] = useState<"news" | "weather">("news");
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
   const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
-  const [profileSection, setProfileSection] = useState<"overview" | "identity" | "preferences" | "security" | "policies">("overview");
-  const authProviderMap = useMemo(() => new Map(authProviders.map((p) => [p.id, p])), [authProviders]);
+  const [profileSection, setProfileSection] = useState<
+    "overview" | "identity" | "preferences" | "security" | "policies"
+  >("overview");
+  const authProviderMap = useMemo(
+    () => new Map(authProviders.map((p) => [p.id, p])),
+    [authProviders],
+  );
 
   useEffect(() => {
     const el = document.documentElement;
-    if (dark) el.classList.add('dark'); else el.classList.remove('dark');
-    try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch {}
+    if (dark) el.classList.add("dark");
+    else el.classList.remove("dark");
+    try {
+      localStorage.setItem("theme", dark ? "dark" : "light");
+    } catch {}
   }, [dark]);
 
   useEffect(() => {
     const legalIds = new Set(legalPolicies.map((policy) => policy.id));
     const profileIds = new Set(profileSections.map((section) => section.id));
     const handleHash = () => {
-      const hash = window.location.hash.replace('#', '');
+      const hash = window.location.hash.replace("#", "");
       if (!hash) return;
       if (legalIds.has(hash)) {
         setActiveView("legal");
         setTimeout(() => {
-          document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+          document
+            .getElementById(hash)
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
         }, 50);
         return;
       }
       if (hash.startsWith("profile-")) {
         const sectionId = hash.replace("profile-", "");
-        if (profileIds.has(sectionId as typeof profileSections[number]["id"])) {
+        if (
+          profileIds.has(sectionId as (typeof profileSections)[number]["id"])
+        ) {
           setActiveView("profile");
-          setProfileSection(sectionId as typeof profileSections[number]["id"]);
+          setProfileSection(
+            sectionId as (typeof profileSections)[number]["id"],
+          );
           setTimeout(() => {
-            document.getElementById(hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            document
+              .getElementById(hash)
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
           }, 50);
         }
       }
@@ -182,25 +218,36 @@ export default function ClaritasDashboard() {
     setAuthStatus("checking");
     setAuthError(null);
 
-    Promise.allSettled([fetchAuthMe(), fetchAuthProviders()]).then(([userRes, providersRes]) => {
-      if (!active) return;
+    Promise.allSettled([fetchAuthMe(), fetchAuthProviders()]).then(
+      ([userRes, providersRes]) => {
+        if (!active) return;
 
-      const user = userRes.status === "fulfilled" ? userRes.value : null;
-      const providers = providersRes.status === "fulfilled" ? providersRes.value : [];
-      const errors: string[] = [];
+        const user = userRes.status === "fulfilled" ? userRes.value : null;
+        const providers =
+          providersRes.status === "fulfilled" ? providersRes.value : [];
+        const errors: string[] = [];
 
-      if (userRes.status === "rejected") {
-        errors.push(userRes.reason instanceof Error ? userRes.reason.message : String(userRes.reason));
-      }
-      if (providersRes.status === "rejected") {
-        errors.push(providersRes.reason instanceof Error ? providersRes.reason.message : String(providersRes.reason));
-      }
+        if (userRes.status === "rejected") {
+          errors.push(
+            userRes.reason instanceof Error
+              ? userRes.reason.message
+              : String(userRes.reason),
+          );
+        }
+        if (providersRes.status === "rejected") {
+          errors.push(
+            providersRes.reason instanceof Error
+              ? providersRes.reason.message
+              : String(providersRes.reason),
+          );
+        }
 
-      setAuthUser(user);
-      setAuthProviders(providers);
-      setAuthError(errors.length > 0 ? errors.join(" | ") : null);
-      setAuthStatus(user ? "authed" : "unauthed");
-    });
+        setAuthUser(user);
+        setAuthProviders(providers);
+        setAuthError(errors.length > 0 ? errors.join(" | ") : null);
+        setAuthStatus(user ? "authed" : "unauthed");
+      },
+    );
 
     return () => {
       active = false;
@@ -210,18 +257,28 @@ export default function ClaritasDashboard() {
   useEffect(() => {
     // Load initial data
     if (authStatus !== "authed") return;
-    fetchCountryStats({ days: 30 }).then(setCountryStats).catch(() => setCountryStats([]));
-    fetchCountryWeather().then(setWeatherStats).catch(() => setWeatherStats([]));
-    fetchNews({ limit: 20 }).then(setNews).catch(() => setNews([]));
+    fetchCountryStats({ days: 30 })
+      .then(setCountryStats)
+      .catch(() => setCountryStats([]));
+    fetchCountryWeather()
+      .then(setWeatherStats)
+      .catch(() => setWeatherStats([]));
+    fetchNews({ limit: 20 })
+      .then(setNews)
+      .catch(() => setNews([]));
   }, [authStatus]);
 
   useEffect(() => {
     // When a country is selected, refetch list filtered by country
     if (authStatus !== "authed") return;
     if (selectedCountry) {
-      fetchNews({ limit: 20, country: selectedCountry }).then(setNews).catch(() => setNews([]));
+      fetchNews({ limit: 20, country: selectedCountry })
+        .then(setNews)
+        .catch(() => setNews([]));
     } else {
-      fetchNews({ limit: 20 }).then(setNews).catch(() => setNews([]));
+      fetchNews({ limit: 20 })
+        .then(setNews)
+        .catch(() => setNews([]));
     }
   }, [selectedCountry, authStatus]);
 
@@ -230,15 +287,27 @@ export default function ClaritasDashboard() {
     "rounded-2xl border border-[color:var(--shell-border)] bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70";
 
   const todayLabel = useMemo(
-    () => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric" }).format(new Date()),
-    []
+    () =>
+      new Intl.DateTimeFormat("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      }).format(new Date()),
+    [],
   );
 
   const activeRegions = useMemo(() => {
     const regions = new Set<string>();
-    countryStats.forEach((stat) => stat.country && regions.add(stat.country.toUpperCase()));
-    news.forEach((item) => item.country_iso2 && regions.add(item.country_iso2.toUpperCase()));
-    weatherStats.forEach((item) => item.country && regions.add(item.country.toUpperCase()));
+    countryStats.forEach(
+      (stat) => stat.country && regions.add(stat.country.toUpperCase()),
+    );
+    news.forEach(
+      (item) =>
+        item.country_iso2 && regions.add(item.country_iso2.toUpperCase()),
+    );
+    weatherStats.forEach(
+      (item) => item.country && regions.add(item.country.toUpperCase()),
+    );
     return regions.size;
   }, [countryStats, news, weatherStats]);
 
@@ -268,12 +337,12 @@ export default function ClaritasDashboard() {
 
   const filteredWeather = useMemo(() => {
     let w = weatherStats;
-    if (typeof minTemp === 'number') {
-      w = w.filter(x => (x.temp_c ?? -999) >= minTemp);
+    if (typeof minTemp === "number") {
+      w = w.filter((x) => (x.temp_c ?? -999) >= minTemp);
     }
     if (selectedCountry) {
       const iso = selectedCountry.toUpperCase();
-      w = w.filter(x => (x.country || '').toUpperCase() === iso);
+      w = w.filter((x) => (x.country || "").toUpperCase() === iso);
     }
     return w;
   }, [weatherStats, minTemp, selectedCountry]);
@@ -292,7 +361,8 @@ export default function ClaritasDashboard() {
   }
 
   const userLabel = authUser?.display_name || authUser?.email || "Signed in";
-  const userInitial = (authUser?.display_name || authUser?.email || "C")[0]?.toUpperCase() ?? "C";
+  const userInitial =
+    (authUser?.display_name || authUser?.email || "C")[0]?.toUpperCase() ?? "C";
   const providerLabels: Record<AuthProviderId, string> = {
     google: "Google",
     microsoft: "Microsoft",
@@ -300,7 +370,12 @@ export default function ClaritasDashboard() {
   };
 
   const navItems = [
-    { id: "dashboard", label: "Dashboard", view: "dashboard" as const, icon: LayoutGrid },
+    {
+      id: "dashboard",
+      label: "Dashboard",
+      view: "dashboard" as const,
+      icon: LayoutGrid,
+    },
     { id: "profile", label: "Profile", view: "profile" as const, icon: User },
     { id: "legal", label: "Policies", view: "legal" as const, icon: FileText },
   ];
@@ -314,7 +389,11 @@ export default function ClaritasDashboard() {
   const profileSections = [
     { id: "overview", label: "Overview", description: "Identity snapshot" },
     { id: "identity", label: "Identity", description: "Account and providers" },
-    { id: "preferences", label: "Preferences", description: "Workspace defaults" },
+    {
+      id: "preferences",
+      label: "Preferences",
+      description: "Workspace defaults",
+    },
     { id: "security", label: "Security", description: "Session posture" },
     { id: "policies", label: "Policies", description: "Compliance links" },
   ] as const;
@@ -343,13 +422,18 @@ export default function ClaritasDashboard() {
       setAuthError(null);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setSessionNotice({ tone: "error", message: `Sign out failed: ${message}` });
+      setSessionNotice({
+        tone: "error",
+        message: `Sign out failed: ${message}`,
+      });
     } finally {
       setIsSigningOut(false);
     }
   };
 
-  const handleProfileNav = (sectionId: typeof profileSections[number]["id"]) => {
+  const handleProfileNav = (
+    sectionId: (typeof profileSections)[number]["id"],
+  ) => {
     setProfileSection(sectionId);
     const el = document.getElementById(`profile-${sectionId}`);
     if (el) {
@@ -388,8 +472,15 @@ export default function ClaritasDashboard() {
                     <div className="absolute left-4 top-0 h-10 w-10 rounded-full bg-[#2D556F] opacity-80" />
                   </div>
                   <div>
-                    <div className="text-lg font-semibold tracking-[0.28em]" style={{ fontFamily: "var(--font-display)" }}>CLARITAS</div>
-                    <div className="text-xs uppercase tracking-[0.32em] text-white/60">Signal Desk</div>
+                    <div
+                      className="text-lg font-semibold tracking-[0.28em]"
+                      style={{ fontFamily: "var(--font-display)" }}
+                    >
+                      CLARITAS
+                    </div>
+                    <div className="text-xs uppercase tracking-[0.32em] text-white/60">
+                      Signal Desk
+                    </div>
                   </div>
                 </div>
               </div>
@@ -406,7 +497,9 @@ export default function ClaritasDashboard() {
                         setMobileNavOpen(false);
                       }}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                        active ? "bg-white/10 text-white" : "text-white/70 hover:bg-white/10 hover:text-white"
+                        active
+                          ? "bg-white/10 text-white"
+                          : "text-white/70 hover:bg-white/10 hover:text-white"
                       }`}
                     >
                       <Icon className="h-4 w-4" />
@@ -422,8 +515,12 @@ export default function ClaritasDashboard() {
                       {userInitial}
                     </div>
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-white truncate">{userLabel}</div>
-                      <div className="text-xs text-white/60 truncate">{authUser.email ?? "Signed in"}</div>
+                      <div className="text-sm font-semibold text-white truncate">
+                        {userLabel}
+                      </div>
+                      <div className="text-xs text-white/60 truncate">
+                        {authUser.email ?? "Signed in"}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -452,8 +549,15 @@ export default function ClaritasDashboard() {
                 <div className="absolute left-4 top-0 h-11 w-11 rounded-full bg-[#2D556F] opacity-80" />
               </div>
               <div>
-                <div className="text-lg font-semibold tracking-[0.28em]" style={{ fontFamily: "var(--font-display)" }}>CLARITAS</div>
-                <div className="text-xs uppercase tracking-[0.32em] text-white/60">Signal Desk</div>
+                <div
+                  className="text-lg font-semibold tracking-[0.28em]"
+                  style={{ fontFamily: "var(--font-display)" }}
+                >
+                  CLARITAS
+                </div>
+                <div className="text-xs uppercase tracking-[0.32em] text-white/60">
+                  Signal Desk
+                </div>
               </div>
             </div>
           </div>
@@ -467,7 +571,9 @@ export default function ClaritasDashboard() {
                   type="button"
                   onClick={() => setActiveView(item.view)}
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                    active ? "bg-white/10 text-white" : "text-white/70 hover:bg-white/10 hover:text-white"
+                    active
+                      ? "bg-white/10 text-white"
+                      : "text-white/70 hover:bg-white/10 hover:text-white"
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -483,8 +589,12 @@ export default function ClaritasDashboard() {
                   {userInitial}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white truncate">{userLabel}</div>
-                  <div className="text-xs text-white/60 truncate">{authUser.email ?? "Signed in"}</div>
+                  <div className="text-sm font-semibold text-white truncate">
+                    {userLabel}
+                  </div>
+                  <div className="text-xs text-white/60 truncate">
+                    {authUser.email ?? "Signed in"}
+                  </div>
                 </div>
               </div>
             )}
@@ -516,7 +626,10 @@ export default function ClaritasDashboard() {
                   <div className="absolute left-1 top-0 h-7 w-7 rounded-full bg-[#1F3C52] opacity-90" />
                   <div className="absolute left-3.5 top-0 h-7 w-7 rounded-full bg-[#2D556F] opacity-80" />
                 </div>
-                <span className="text-xs font-semibold tracking-[0.32em]" style={{ fontFamily: "var(--font-display)" }}>
+                <span
+                  className="text-xs font-semibold tracking-[0.32em]"
+                  style={{ fontFamily: "var(--font-display)" }}
+                >
                   CLARITAS
                 </span>
               </div>
@@ -525,13 +638,17 @@ export default function ClaritasDashboard() {
                 <div className="text-xs uppercase tracking-[0.32em] text-[color:var(--shell-muted)]">
                   {currentViewMeta.kicker}
                 </div>
-                <div className="text-lg font-semibold text-[color:var(--shell-ink)]">{currentViewMeta.title}</div>
+                <div className="text-lg font-semibold text-[color:var(--shell-ink)]">
+                  {currentViewMeta.title}
+                </div>
               </div>
 
               <div className="ml-auto flex items-center gap-3">
                 <div className="hidden lg:flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
                   <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                  <span className="font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]">Live</span>
+                  <span className="font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]">
+                    Live
+                  </span>
                   <span>{todayLabel}</span>
                 </div>
                 <div className="hidden md:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2 text-sm text-[color:var(--shell-muted)]">
@@ -545,11 +662,15 @@ export default function ClaritasDashboard() {
                 </div>
                 <button
                   aria-label="Toggle dark mode"
-                  onClick={() => setDark(v => !v)}
+                  onClick={() => setDark((v) => !v)}
                   className="h-10 w-10 rounded-xl border border-[color:var(--shell-border)] bg-white text-[color:var(--shell-ink)] hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 >
                   <span className="grid h-full w-full place-items-center">
-                    {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+                    {dark ? (
+                      <Sun className="h-5 w-5" />
+                    ) : (
+                      <Moon className="h-5 w-5" />
+                    )}
                   </span>
                 </button>
                 <div className="hidden sm:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs text-[color:var(--shell-muted)]">
@@ -581,248 +702,381 @@ export default function ClaritasDashboard() {
               <div className="space-y-4">
                 <section className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
                   <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Live signals</div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{news.length}</div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">Stories & alerts</div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Live signals
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {news.length}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Stories & alerts
+                    </div>
                   </div>
                   <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Active regions</div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{activeRegions}</div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">Countries tracked</div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Active regions
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {activeRegions}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Countries tracked
+                    </div>
                   </div>
                   <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Weather rows</div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{weatherStats.length}</div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">Latest observations</div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Weather rows
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {weatherStats.length}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Latest observations
+                    </div>
                   </div>
                   <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Last sync</div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">{latestEventLabel}</div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">Combined feeds</div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Last sync
+                    </div>
+                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
+                      {latestEventLabel}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Combined feeds
+                    </div>
                   </div>
                   <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Focus</div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">{focusLabel}</div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">Current lens</div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Focus
+                    </div>
+                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
+                      {focusLabel}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Current lens
+                    </div>
                   </div>
                 </section>
 
                 <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-                  <div id="signal-map" className={`${cardBase} lg:col-span-7`}>
-                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Geospatial pulse</div>
-                        <div className="text-sm font-semibold">Map: {mapMode === "news" ? "#News per country" : "Weather (temperature) per country"}</div>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs">
-                        <button
-                          className={`rounded-full border px-3 py-1 transition ${
-                            mapMode === "news"
-                              ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                              : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                          }`}
-                          onClick={() => { setMapMode("news"); setListMode("news"); }}
-                        >
-                          News
-                        </button>
-                        <button
-                          className={`rounded-full border px-3 py-1 transition ${
-                            mapMode === "weather"
-                              ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                              : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                          }`}
-                          onClick={() => { setMapMode("weather"); setListMode("weather"); }}
-                        >
-                          Weather
-                        </button>
-                      </div>
-                    </div>
-                    <div className="relative p-4">
-                      <div className="relative h-64 rounded-xl overflow-hidden bg-[color:var(--shell-bg)]">
-                        {mapMode === "news" ? (
-                          <WorldMapBubbles
-                            variant="compact"
-                            data={
-                              (countryStats && countryStats.length > 0)
-                                ? countryStats
-                                : Object.entries(
-                                    (news || []).reduce<Record<string, number>>((acc, n) => {
-                                      const iso = (n.country_iso2 || "").toUpperCase();
-                                      if (!iso) return acc;
-                                      acc[iso] = (acc[iso] || 0) + 1;
-                                      return acc;
-                                    }, {})
-                                  ).map(([country, count]) => ({ country, count }))
-                            }
-                            onSelect={setSelectedCountry}
-                            dark={dark}
-                          />
-                        ) : (
-                          <WorldMapBubbles
-                            variant="compact"
-                            data={(() => {
-                              const withTemp = (weatherStats || []).filter(w => typeof w.temp_c === "number");
-                              if (withTemp.length === 0) return [];
-                              const temps = withTemp.map(w => Number(w.temp_c));
-                              const min = Math.min(...temps);
-                              return withTemp.map(w => ({
-                                country: (w.country || "").toUpperCase(),
-                                count: (Number(w.temp_c) - min) + 1,
-                              }));
-                            })()}
-                            onSelect={setSelectedCountry}
-                            dark={dark}
-                          />
-                        )}
-                      </div>
-                      {mapMode === "news" && countryStats.length === 0 && (
-                        <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)]">
-                          No aggregated stats yet — showing live list fallback
+                  <div
+                    id="signal-map-feed"
+                    className={`${cardBase} lg:col-span-12`}
+                  >
+                    <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr]">
+                      <div className="border-b border-[color:var(--shell-border)] lg:border-b-0 lg:border-r">
+                        <div className="flex items-center justify-between px-4 py-3">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Geospatial pulse
+                            </div>
+                            <div className="text-sm font-semibold">
+                              Map:{" "}
+                              {mapMode === "news"
+                                ? "#News per country"
+                                : "Weather (temperature) per country"}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            <button
+                              className={`rounded-full border px-3 py-1 transition ${
+                                mapMode === "news"
+                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                              }`}
+                              onClick={() => {
+                                setMapMode("news");
+                                setListMode("news");
+                              }}
+                            >
+                              News
+                            </button>
+                            <button
+                              className={`rounded-full border px-3 py-1 transition ${
+                                mapMode === "weather"
+                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                              }`}
+                              onClick={() => {
+                                setMapMode("weather");
+                                setListMode("weather");
+                              }}
+                            >
+                              Weather
+                            </button>
+                          </div>
                         </div>
-                      )}
-                      {mapMode === "weather" && (weatherStats?.length ?? 0) === 0 && (
-                        <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
-                          <span>No weather stats yet.</span>
-                          <button
-                            onClick={handleRefreshWeather}
-                            disabled={isRefreshingWeather}
-                            className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50 disabled:opacity-50"
-                          >
-                            {isRefreshingWeather ? "Refreshing…" : "Refresh now"}
-                          </button>
+                        <div className="relative p-4">
+                          <div className="relative h-[420px] rounded-xl overflow-hidden bg-[color:var(--shell-bg)]">
+                            {mapMode === "news" ? (
+                              <WorldMapBubbles
+                                variant="compact"
+                                data={
+                                  countryStats && countryStats.length > 0
+                                    ? countryStats
+                                    : Object.entries(
+                                        (news || []).reduce<
+                                          Record<string, number>
+                                        >((acc, n) => {
+                                          const iso = (
+                                            n.country_iso2 || ""
+                                          ).toUpperCase();
+                                          if (!iso) return acc;
+                                          acc[iso] = (acc[iso] || 0) + 1;
+                                          return acc;
+                                        }, {}),
+                                      ).map(([country, count]) => ({
+                                        country,
+                                        count,
+                                      }))
+                                }
+                                onSelect={setSelectedCountry}
+                                dark={dark}
+                              />
+                            ) : (
+                              <WorldMapBubbles
+                                variant="compact"
+                                data={(() => {
+                                  const withTemp = (weatherStats || []).filter(
+                                    (w) => typeof w.temp_c === "number",
+                                  );
+                                  if (withTemp.length === 0) return [];
+                                  const temps = withTemp.map((w) =>
+                                    Number(w.temp_c),
+                                  );
+                                  const min = Math.min(...temps);
+                                  return withTemp.map((w) => ({
+                                    country: (w.country || "").toUpperCase(),
+                                    count: Number(w.temp_c) - min + 1,
+                                  }));
+                                })()}
+                                onSelect={setSelectedCountry}
+                                dark={dark}
+                              />
+                            )}
+                          </div>
+                          {mapMode === "news" && countryStats.length === 0 && (
+                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)]">
+                              No aggregated stats yet — showing live list
+                              fallback
+                            </div>
+                          )}
+                          {mapMode === "weather" &&
+                            (weatherStats?.length ?? 0) === 0 && (
+                              <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
+                                <span>No weather stats yet.</span>
+                                <button
+                                  onClick={handleRefreshWeather}
+                                  disabled={isRefreshingWeather}
+                                  className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50 disabled:opacity-50"
+                                >
+                                  {isRefreshingWeather
+                                    ? "Refreshing…"
+                                    : "Refresh now"}
+                                </button>
+                              </div>
+                            )}
                         </div>
-                      )}
-                    </div>
-                  </div>
+                      </div>
 
-                  <div id="signal-feed" className={`${cardBase} lg:col-span-5`}>
-                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div>
-                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Live feed</div>
-                        <div className="text-sm font-semibold">Latest intelligence drops</div>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs">
-                        <button
-                          className={`rounded-full border px-3 py-1 transition ${
-                            listMode === "news"
-                              ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                              : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                          }`}
-                          onClick={() => setListMode("news")}
-                        >
-                          News
-                        </button>
-                        <button
-                          className={`rounded-full border px-3 py-1 transition ${
-                            listMode === "weather"
-                              ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                              : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                          }`}
-                          onClick={() => setListMode("weather")}
-                        >
-                          Weather
-                        </button>
-                      </div>
-                    </div>
+                        <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Live feed
+                            </div>
+                            <div className="text-sm font-semibold">
+                              Latest intelligence drops
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            <button
+                              className={`rounded-full border px-3 py-1 transition ${
+                                listMode === "news"
+                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                              }`}
+                              onClick={() => setListMode("news")}
+                            >
+                              News
+                            </button>
+                            <button
+                              className={`rounded-full border px-3 py-1 transition ${
+                                listMode === "weather"
+                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                              }`}
+                              onClick={() => setListMode("weather")}
+                            >
+                              Weather
+                            </button>
+                          </div>
+                        </div>
 
-                    {listMode === "news" ? (
-                      <div className="max-h-[420px] overflow-y-auto p-4 space-y-3">
-                        {news.length === 0 && (
-                          <div className="text-sm text-[color:var(--shell-muted)]">No news items yet.</div>
-                        )}
-                        {news.map((n) => {
-                          const img = imageProxy((n as any)?.payload?.urlToImage ?? (n as any)?.payload?.raw?.urlToImage);
-                          return (
-                            <div key={n.id} className="rounded-xl border border-[color:var(--shell-border)] bg-white p-3">
-                              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                                <div className="relative h-20 w-full sm:w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none">
-                                  {img ? (
-                                    <img
-                                      src={img}
-                                      alt={n.title ?? "thumbnail"}
-                                      loading="lazy"
-                                      decoding="async"
-                                      referrerPolicy="no-referrer"
-                                      className="w-full h-full object-cover"
-                                      onError={(e) => ((e.currentTarget.style.display = "none"))}
-                                    />
-                                  ) : null}
+                        {listMode === "news" ? (
+                          <div className="max-h-[420px] overflow-y-auto p-4 space-y-3">
+                            {news.length === 0 && (
+                              <div className="text-sm text-[color:var(--shell-muted)]">
+                                No news items yet.
+                              </div>
+                            )}
+                            {news.map((n) => {
+                              const img = imageProxy(
+                                (n as any)?.payload?.urlToImage ??
+                                  (n as any)?.payload?.raw?.urlToImage,
+                              );
+                              return (
+                                <div
+                                  key={n.id}
+                                  className="rounded-xl border border-[color:var(--shell-border)] bg-white p-3"
+                                >
+                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                                  <div className="relative h-20 w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none shrink-0">
+                                      {img ? (
+                                        <img
+                                          src={img}
+                                          alt={n.title ?? "thumbnail"}
+                                          loading="lazy"
+                                          decoding="async"
+                                          referrerPolicy="no-referrer"
+                                          className="w-full h-full object-cover"
+                                          onError={(e) =>
+                                            (e.currentTarget.style.display =
+                                              "none")
+                                          }
+                                        />
+                                      ) : null}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <a
+                                        href={n.url ?? "#"}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="font-semibold text-[color:var(--shell-ink)] hover:underline"
+                                      >
+                                        {n.title || n.url || "Untitled"}
+                                      </a>
+                                      <div className="text-xs text-[color:var(--shell-muted)] mt-2 flex items-center gap-2 flex-wrap">
+                                        {n.country_iso2 && (
+                                          <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
+                                            {n.country_iso2}
+                                          </span>
+                                        )}
+                                        {n.event_time && (
+                                          <span>
+                                            {new Date(
+                                              n.event_time,
+                                            ).toLocaleString()}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {n.summary && (
+                                        <p className="text-sm text-slate-600 mt-2 line-clamp-2">
+                                          {n.summary}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="min-w-0">
-                                  <a href={n.url ?? "#"} target="_blank" rel="noopener noreferrer" className="font-semibold text-[color:var(--shell-ink)] hover:underline">
-                                    {n.title || n.url || "Untitled"}
-                                  </a>
-                                  <div className="text-xs text-[color:var(--shell-muted)] mt-2 flex items-center gap-2 flex-wrap">
-                                    {n.country_iso2 && (
-                                      <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
-                                        {n.country_iso2}
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="max-h-[420px] overflow-y-auto p-4 space-y-4">
+                            <div className="flex flex-wrap items-center gap-3 text-sm">
+                              <label className="text-[color:var(--shell-muted)]">
+                                Min temp (°C)
+                              </label>
+                              <input
+                                type="number"
+                                className="w-24 rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1"
+                                value={
+                                  typeof minTemp === "number" ? minTemp : ""
+                                }
+                                onChange={(e) =>
+                                  setMinTemp(
+                                    e.currentTarget.value === ""
+                                      ? undefined
+                                      : Number(e.currentTarget.value),
+                                  )
+                                }
+                                placeholder="Any"
+                              />
+                              <button
+                                onClick={handleRefreshWeather}
+                                disabled={isRefreshingWeather}
+                                className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                {isRefreshingWeather
+                                  ? "Refreshing…"
+                                  : "Refresh"}
+                              </button>
+                            </div>
+                            <ul className="list-none divide-y divide-[color:var(--shell-border)]">
+                              {filteredWeather.length === 0 && (
+                                <li className="text-sm text-[color:var(--shell-muted)] py-3">
+                                  No weather rows.
+                                </li>
+                              )}
+                              {filteredWeather.map((w, i) => (
+                                <li
+                                  key={`${w.country}-${i}`}
+                                  className="py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
+                                      {(w.country || "").toUpperCase()}
+                                    </span>
+                                    <span className="text-slate-700 text-sm">
+                                      {new Date(w.observed_at).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <div className="text-sm text-slate-800 flex flex-wrap items-center gap-4">
+                                    <span title="Temperature">
+                                      🌡️ {w.temp_c ?? "—"}°C
+                                    </span>
+                                    <span title="Humidity">
+                                      💧 {w.humidity ?? "—"}%
+                                    </span>
+                                    {w.weather_main && (
+                                      <span className="text-slate-600">
+                                        {w.weather_main}
                                       </span>
                                     )}
-                                    {n.event_time && <span>{new Date(n.event_time).toLocaleString()}</span>}
                                   </div>
-                                  {n.summary && <p className="text-sm text-slate-600 mt-2 line-clamp-2">{n.summary}</p>}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="max-h-[420px] overflow-y-auto p-4 space-y-4">
-                        <div className="flex flex-wrap items-center gap-3 text-sm">
-                          <label className="text-[color:var(--shell-muted)]">Min temp (°C)</label>
-                          <input
-                            type="number"
-                            className="w-24 rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1"
-                            value={typeof minTemp === "number" ? minTemp : ""}
-                            onChange={(e) => setMinTemp(e.currentTarget.value === "" ? undefined : Number(e.currentTarget.value))}
-                            placeholder="Any"
-                          />
-                          <button
-                            onClick={handleRefreshWeather}
-                            disabled={isRefreshingWeather}
-                            className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-slate-50 disabled:opacity-50"
-                          >
-                            {isRefreshingWeather ? "Refreshing…" : "Refresh"}
-                          </button>
-                        </div>
-                        <ul className="list-none divide-y divide-[color:var(--shell-border)]">
-                          {filteredWeather.length === 0 && (
-                            <li className="text-sm text-[color:var(--shell-muted)] py-3">No weather rows.</li>
-                          )}
-                          {filteredWeather.map((w, i) => (
-                            <li key={`${w.country}-${i}`} className="py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                              <div className="flex items-center gap-3">
-                                <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
-                                  {(w.country || "").toUpperCase()}
-                                </span>
-                                <span className="text-slate-700 text-sm">{new Date(w.observed_at).toLocaleString()}</span>
-                              </div>
-                              <div className="text-sm text-slate-800 flex flex-wrap items-center gap-4">
-                                <span title="Temperature">🌡️ {w.temp_c ?? "—"}°C</span>
-                                <span title="Humidity">💧 {w.humidity ?? "—"}%</span>
-                                {w.weather_main && <span className="text-slate-600">{w.weather_main}</span>}
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
+                    </div>
                   </div>
 
                   <div className={`${cardBase} lg:col-span-4`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country profile</div>
-                      <div className="text-sm font-semibold">Selected location overview</div>
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Country profile
+                      </div>
+                      <div className="text-sm font-semibold">
+                        Selected location overview
+                      </div>
                     </div>
                     <div className="p-4 text-sm text-[color:var(--shell-muted)] space-y-2">
                       {!selectedCountry && (
-                        <div>Select a bubble on the map to see a brief profile.</div>
+                        <div>
+                          Select a bubble on the map to see a brief profile.
+                        </div>
                       )}
                       {selectedCountry && (
                         <>
-                          <div className="text-base font-semibold text-[color:var(--shell-ink)]">Country: {selectedCountry}</div>
-                          <div>Recent items from this country in the list are highlighted by the country tag.</div>
+                          <div className="text-base font-semibold text-[color:var(--shell-ink)]">
+                            Country: {selectedCountry}
+                          </div>
+                          <div>
+                            Recent items from this country in the list are
+                            highlighted by the country tag.
+                          </div>
                         </>
                       )}
                     </div>
@@ -830,8 +1084,12 @@ export default function ClaritasDashboard() {
 
                   <div className={`${cardBase} lg:col-span-4`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">AI search</div>
-                      <div className="text-sm font-semibold">Ask Claritas for signal context</div>
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        AI search
+                      </div>
+                      <div className="text-sm font-semibold">
+                        Ask Claritas for signal context
+                      </div>
                     </div>
                     <div className="p-4 space-y-3">
                       <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2">
@@ -842,22 +1100,29 @@ export default function ClaritasDashboard() {
                           value={query}
                           onChange={(e) => setQuery(e.target.value)}
                         />
-                        <button className="rounded-lg bg-[color:var(--shell-ink)] px-3 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]">Search</button>
+                        <button className="rounded-lg bg-[color:var(--shell-ink)] px-3 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]">
+                          Search
+                        </button>
                       </div>
                       <p className="text-xs text-[color:var(--shell-muted)]">
-                        Queries return live signal matches from the last 30 days.
+                        Queries return live signal matches from the last 30
+                        days.
                       </p>
                     </div>
                   </div>
 
                   <div className={`${cardBase} lg:col-span-4`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div className="text-sm font-semibold">Analytics snapshot</div>
+                      <div className="text-sm font-semibold">
+                        Analytics snapshot
+                      </div>
                     </div>
                     <div className="p-4 space-y-6">
                       <div className="h-40">
                         <ResponsiveContainer width="100%" height="100%">
-                          <ScatterChart margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                          <ScatterChart
+                            margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
+                          >
                             <XAxis dataKey="x" tick={{ fontSize: 12 }} />
                             <YAxis dataKey="y" tick={{ fontSize: 12 }} />
                             <ZAxis range={[60, 60]} />
@@ -869,9 +1134,18 @@ export default function ClaritasDashboard() {
                       <div className="h-44">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
-                            <Pie data={pieData} dataKey="value" nameKey="name" innerRadius={50} outerRadius={70}>
+                            <Pie
+                              data={pieData}
+                              dataKey="value"
+                              nameKey="name"
+                              innerRadius={50}
+                              outerRadius={70}
+                            >
                               {pieData.map((_, i) => (
-                                <Cell key={i} fill={pieColors[i % pieColors.length]} />
+                                <Cell
+                                  key={i}
+                                  fill={pieColors[i % pieColors.length]}
+                                />
                               ))}
                             </Pie>
                             <Tooltip />
@@ -886,7 +1160,9 @@ export default function ClaritasDashboard() {
                       <Bell className="h-4 w-4" />
                       <div className="text-sm font-semibold">Notifications</div>
                     </div>
-                    <div className="p-4 text-sm text-[color:var(--shell-muted)]">No notifications yet.</div>
+                    <div className="p-4 text-sm text-[color:var(--shell-muted)]">
+                      No notifications yet.
+                    </div>
                   </div>
                 </section>
               </div>
@@ -895,12 +1171,18 @@ export default function ClaritasDashboard() {
               <div className="space-y-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.35em] text-[color:var(--shell-muted)]">Account</div>
-                    <h1 className="mt-2 text-3xl font-semibold text-[color:var(--shell-ink)]" style={{ fontFamily: "var(--font-display)" }}>
+                    <div className="text-xs uppercase tracking-[0.35em] text-[color:var(--shell-muted)]">
+                      Account
+                    </div>
+                    <h1
+                      className="mt-2 text-3xl font-semibold text-[color:var(--shell-ink)]"
+                      style={{ fontFamily: "var(--font-display)" }}
+                    >
                       Profile & access
                     </h1>
                     <p className="mt-2 max-w-2xl text-sm text-[color:var(--shell-muted)]">
-                      Review identity details, provider status, and session preferences across devices.
+                      Review identity details, provider status, and session
+                      preferences across devices.
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
@@ -926,7 +1208,9 @@ export default function ClaritasDashboard() {
 
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
                   <aside className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
-                    <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Sections</div>
+                    <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Sections
+                    </div>
                     <div className="mt-3 space-y-2">
                       {profileSections.map((section) => (
                         <button
@@ -939,7 +1223,9 @@ export default function ClaritasDashboard() {
                               : "text-[color:var(--shell-muted)] hover:bg-slate-100"
                           }`}
                         >
-                          <div className="text-sm font-semibold">{section.label}</div>
+                          <div className="text-sm font-semibold">
+                            {section.label}
+                          </div>
                           <div className="text-xs">{section.description}</div>
                         </button>
                       ))}
@@ -947,8 +1233,13 @@ export default function ClaritasDashboard() {
                   </aside>
 
                   <div className="space-y-6">
-                    <section id="profile-overview" className="space-y-4 scroll-mt-24">
-                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Overview</div>
+                    <section
+                      id="profile-overview"
+                      className="space-y-4 scroll-mt-24"
+                    >
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Overview
+                      </div>
                       <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
                         <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-6 text-white shadow-sm">
                           <div className="absolute -top-16 right-0 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
@@ -956,26 +1247,50 @@ export default function ClaritasDashboard() {
                             <div className="flex items-center gap-4">
                               <div className="h-16 w-16 overflow-hidden rounded-2xl bg-white/15 text-2xl font-semibold uppercase text-white ring-1 ring-white/25">
                                 {authUser?.avatar_url ? (
-                                  <img src={authUser.avatar_url} alt="User avatar" className="h-full w-full object-cover" />
+                                  <img
+                                    src={authUser.avatar_url}
+                                    alt="User avatar"
+                                    className="h-full w-full object-cover"
+                                  />
                                 ) : (
-                                  <div className="grid h-full w-full place-items-center">{userInitial}</div>
+                                  <div className="grid h-full w-full place-items-center">
+                                    {userInitial}
+                                  </div>
                                 )}
                               </div>
                               <div>
-                                <div className="text-sm uppercase tracking-[0.2em] text-slate-300">Signed in as</div>
-                                <div className="text-2xl font-semibold">{userLabel}</div>
-                                <div className="text-sm text-slate-300">{authUser?.email ?? "Email not provided"}</div>
+                                <div className="text-sm uppercase tracking-[0.2em] text-slate-300">
+                                  Signed in as
+                                </div>
+                                <div className="text-2xl font-semibold">
+                                  {userLabel}
+                                </div>
+                                <div className="text-sm text-slate-300">
+                                  {authUser?.email ?? "Email not provided"}
+                                </div>
                               </div>
                             </div>
                             <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm">
-                              <div className="text-xs uppercase tracking-[0.3em] text-slate-300">Session</div>
-                              <div className="mt-1 text-base font-semibold">Active</div>
-                              <div className="text-xs text-slate-300">Managed by identity provider</div>
+                              <div className="text-xs uppercase tracking-[0.3em] text-slate-300">
+                                Session
+                              </div>
+                              <div className="mt-1 text-base font-semibold">
+                                Active
+                              </div>
+                              <div className="text-xs text-slate-300">
+                                Managed by identity provider
+                              </div>
                             </div>
                           </div>
                           <div className="mt-6 flex flex-wrap gap-2 text-xs">
-                            {(authUser?.roles?.length ? authUser.roles : ["Standard access"]).map((role) => (
-                              <span key={role} className="rounded-full border border-white/20 bg-white/10 px-3 py-1 uppercase tracking-[0.2em]">
+                            {(authUser?.roles?.length
+                              ? authUser.roles
+                              : ["Standard access"]
+                            ).map((role) => (
+                              <span
+                                key={role}
+                                className="rounded-full border border-white/20 bg-white/10 px-3 py-1 uppercase tracking-[0.2em]"
+                              >
                                 {role}
                               </span>
                             ))}
@@ -983,15 +1298,21 @@ export default function ClaritasDashboard() {
                         </div>
 
                         <div className={cardBase + " p-6"}>
-                          <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Session health</div>
+                          <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                            Session health
+                          </div>
                           <div className="mt-4 space-y-3 text-sm text-[color:var(--shell-muted)]">
                             <div className="flex items-center justify-between">
                               <span>Session status</span>
-                              <span className="font-semibold text-emerald-600">Active</span>
+                              <span className="font-semibold text-emerald-600">
+                                Active
+                              </span>
                             </div>
                             <div className="flex items-center justify-between">
                               <span>Provider</span>
-                              <span className="font-semibold text-[color:var(--shell-ink)]">Managed</span>
+                              <span className="font-semibold text-[color:var(--shell-ink)]">
+                                Managed
+                              </span>
                             </div>
                             <div className="flex items-center justify-between">
                               <span>Role count</span>
@@ -1000,44 +1321,78 @@ export default function ClaritasDashboard() {
                               </span>
                             </div>
                             <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-2 text-xs">
-                              All access events are recorded for audit readiness.
+                              All access events are recorded for audit
+                              readiness.
                             </div>
                           </div>
                         </div>
                       </div>
                     </section>
 
-                    <section id="profile-identity" className="space-y-4 scroll-mt-24">
-                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Identity</div>
+                    <section
+                      id="profile-identity"
+                      className="space-y-4 scroll-mt-24"
+                    >
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Identity
+                      </div>
                       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                         <div className={cardBase + " p-6"}>
                           <div className="flex items-center justify-between">
-                            <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Account details</div>
+                            <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                              Account details
+                            </div>
                             <Settings className="h-4 w-4 text-slate-400" />
                           </div>
                           <dl className="mt-4 divide-y divide-[color:var(--shell-border)] text-sm">
                             {[
-                              { label: "User ID", value: authUser?.id ? String(authUser.id) : "—" },
-                              { label: "Display name", value: authUser?.display_name ?? "Not set" },
-                              { label: "Email", value: authUser?.email ?? "Not provided" },
-                              { label: "Roles", value: authUser?.roles?.length ? authUser.roles.join(", ") : "Standard access" },
+                              {
+                                label: "User ID",
+                                value: authUser?.id ? String(authUser.id) : "—",
+                              },
+                              {
+                                label: "Display name",
+                                value: authUser?.display_name ?? "Not set",
+                              },
+                              {
+                                label: "Email",
+                                value: authUser?.email ?? "Not provided",
+                              },
+                              {
+                                label: "Roles",
+                                value: authUser?.roles?.length
+                                  ? authUser.roles.join(", ")
+                                  : "Standard access",
+                              },
                             ].map((row) => (
-                              <div key={row.label} className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between">
-                                <dt className="text-[color:var(--shell-muted)]">{row.label}</dt>
-                                <dd className="font-medium text-[color:var(--shell-ink)]">{row.value}</dd>
+                              <div
+                                key={row.label}
+                                className="flex flex-col gap-1 py-3 sm:flex-row sm:items-center sm:justify-between"
+                              >
+                                <dt className="text-[color:var(--shell-muted)]">
+                                  {row.label}
+                                </dt>
+                                <dd className="font-medium text-[color:var(--shell-ink)]">
+                                  {row.value}
+                                </dd>
                               </div>
                             ))}
                           </dl>
                         </div>
 
                         <div className={cardBase + " p-6"}>
-                          <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Identity providers</div>
+                          <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                            Identity providers
+                          </div>
                           <p className="mt-2 text-sm text-[color:var(--shell-muted)]">
-                            Available sign-in methods connected to this environment.
+                            Available sign-in methods connected to this
+                            environment.
                           </p>
                           <div className="mt-4 space-y-3">
                             {authProviders.length === 0 && (
-                              <div className="text-sm text-[color:var(--shell-muted)]">No providers reported yet.</div>
+                              <div className="text-sm text-[color:var(--shell-muted)]">
+                                No providers reported yet.
+                              </div>
                             )}
                             {authProviders.map((provider) => (
                               <div
@@ -1049,12 +1404,16 @@ export default function ClaritasDashboard() {
                                     {providerLabels[provider.id]}
                                   </div>
                                   <div className="text-xs text-[color:var(--shell-muted)]">
-                                    {provider.enabled ? "Enabled and ready" : "Disabled"}
+                                    {provider.enabled
+                                      ? "Enabled and ready"
+                                      : "Disabled"}
                                   </div>
                                 </div>
                                 <span
                                   className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                                    provider.enabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                                    provider.enabled
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : "bg-slate-100 text-slate-500"
                                   }`}
                                 >
                                   {provider.enabled ? "Active" : "Inactive"}
@@ -1066,41 +1425,66 @@ export default function ClaritasDashboard() {
                       </div>
                     </section>
 
-                    <section id="profile-preferences" className="space-y-4 scroll-mt-24">
-                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Preferences</div>
+                    <section
+                      id="profile-preferences"
+                      className="space-y-4 scroll-mt-24"
+                    >
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Preferences
+                      </div>
                       <div className={cardBase + " p-6"}>
                         <div className="flex flex-col gap-4 text-sm text-[color:var(--shell-muted)]">
                           <div className="flex items-center justify-between rounded-xl border border-[color:var(--shell-border)] px-4 py-3">
                             <div>
-                              <div className="font-semibold text-[color:var(--shell-ink)]">Theme</div>
-                              <div className="text-xs text-[color:var(--shell-muted)]">Match your current workspace.</div>
+                              <div className="font-semibold text-[color:var(--shell-ink)]">
+                                Theme
+                              </div>
+                              <div className="text-xs text-[color:var(--shell-muted)]">
+                                Match your current workspace.
+                              </div>
                             </div>
                             <button
                               type="button"
-                              onClick={() => setDark(v => !v)}
+                              onClick={() => setDark((v) => !v)}
                               className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs text-[color:var(--shell-ink)]"
                             >
-                              {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                              {dark ? (
+                                <Sun className="h-4 w-4" />
+                              ) : (
+                                <Moon className="h-4 w-4" />
+                              )}
                               {dark ? "Light" : "Dark"}
                             </button>
                           </div>
                           <div className="rounded-xl border border-[color:var(--shell-border)] px-4 py-3">
-                            <div className="font-semibold text-[color:var(--shell-ink)]">Default map view</div>
+                            <div className="font-semibold text-[color:var(--shell-ink)]">
+                              Default map view
+                            </div>
                             <div className="mt-2 flex items-center gap-2 text-xs">
                               <button
                                 type="button"
-                                onClick={() => { setMapMode("news"); setListMode("news"); }}
+                                onClick={() => {
+                                  setMapMode("news");
+                                  setListMode("news");
+                                }}
                                 className={`rounded-full border px-3 py-1 ${
-                                  mapMode === "news" ? "bg-slate-900 text-white border-slate-900" : "border-slate-200 text-slate-600"
+                                  mapMode === "news"
+                                    ? "bg-slate-900 text-white border-slate-900"
+                                    : "border-slate-200 text-slate-600"
                                 }`}
                               >
                                 News
                               </button>
                               <button
                                 type="button"
-                                onClick={() => { setMapMode("weather"); setListMode("weather"); }}
+                                onClick={() => {
+                                  setMapMode("weather");
+                                  setListMode("weather");
+                                }}
                                 className={`rounded-full border px-3 py-1 ${
-                                  mapMode === "weather" ? "bg-slate-900 text-white border-slate-900" : "border-slate-200 text-slate-600"
+                                  mapMode === "weather"
+                                    ? "bg-slate-900 text-white border-slate-900"
+                                    : "border-slate-200 text-slate-600"
                                 }`}
                               >
                                 Weather
@@ -1111,31 +1495,56 @@ export default function ClaritasDashboard() {
                       </div>
                     </section>
 
-                    <section id="profile-security" className="space-y-4 scroll-mt-24">
-                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Security</div>
+                    <section
+                      id="profile-security"
+                      className="space-y-4 scroll-mt-24"
+                    >
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Security
+                      </div>
                       <div className={cardBase + " p-6"}>
-                        <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Access roles</div>
+                        <div className="text-sm uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                          Access roles
+                        </div>
                         <div className="mt-4 flex flex-wrap gap-2">
-                          {(authUser?.roles?.length ? authUser.roles : ["Standard access"]).map((role) => (
-                            <span key={role} className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]">
+                          {(authUser?.roles?.length
+                            ? authUser.roles
+                            : ["Standard access"]
+                          ).map((role) => (
+                            <span
+                              key={role}
+                              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]"
+                            >
                               {role}
                             </span>
                           ))}
                         </div>
                         <div className="mt-4 text-sm text-[color:var(--shell-muted)]">
-                          Session tokens are short-lived and scoped to your approved providers.
+                          Session tokens are short-lived and scoped to your
+                          approved providers.
                         </div>
                       </div>
                     </section>
 
-                    <section id="profile-policies" className="space-y-4 scroll-mt-24">
-                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Policies</div>
+                    <section
+                      id="profile-policies"
+                      className="space-y-4 scroll-mt-24"
+                    >
+                      <div className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Policies
+                      </div>
                       <div className={cardBase + " p-6"}>
                         <div className="flex flex-col gap-3 text-sm text-[color:var(--shell-muted)]">
-                          <div>Claritas policies define how we protect data and govern platform use.</div>
+                          <div>
+                            Claritas policies define how we protect data and
+                            govern platform use.
+                          </div>
                           <div className="flex flex-wrap gap-2">
                             {legalPolicies.map((policy) => (
-                              <span key={policy.id} className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-xs text-[color:var(--shell-ink)]">
+                              <span
+                                key={policy.id}
+                                className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-xs text-[color:var(--shell-ink)]"
+                              >
                                 {policy.title}
                               </span>
                             ))}
@@ -1158,12 +1567,19 @@ export default function ClaritasDashboard() {
             {activeView === "legal" && (
               <div className="space-y-6">
                 <div>
-                  <div className="text-xs uppercase tracking-[0.4em] text-[color:var(--shell-muted)]">Legal</div>
-                  <h1 className="mt-2 text-3xl font-semibold text-[color:var(--shell-ink)]" style={{ fontFamily: "var(--font-display)" }}>
+                  <div className="text-xs uppercase tracking-[0.4em] text-[color:var(--shell-muted)]">
+                    Legal
+                  </div>
+                  <h1
+                    className="mt-2 text-3xl font-semibold text-[color:var(--shell-ink)]"
+                    style={{ fontFamily: "var(--font-display)" }}
+                  >
                     Policies and usage guidelines
                   </h1>
                   <p className="mt-2 max-w-2xl text-sm text-[color:var(--shell-muted)]">
-                    Review the policy summaries below. Each section describes how Claritas protects data, governs platform use, and supports compliance.
+                    Review the policy summaries below. Each section describes
+                    how Claritas protects data, governs platform use, and
+                    supports compliance.
                   </p>
                 </div>
 
@@ -1175,10 +1591,16 @@ export default function ClaritasDashboard() {
                       className="scroll-mt-24 rounded-2xl border border-[color:var(--shell-border)] bg-white p-6 shadow-sm"
                     >
                       <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-[color:var(--shell-ink)]">{policy.title}</h3>
-                        <span className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Claritas</span>
+                        <h3 className="text-lg font-semibold text-[color:var(--shell-ink)]">
+                          {policy.title}
+                        </h3>
+                        <span className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Claritas
+                        </span>
                       </div>
-                      <p className="mt-3 text-sm text-[color:var(--shell-muted)]">{policy.intro}</p>
+                      <p className="mt-3 text-sm text-[color:var(--shell-muted)]">
+                        {policy.intro}
+                      </p>
                       <ul className="mt-4 space-y-2 text-sm text-[color:var(--shell-muted)]">
                         {policy.items.map((item) => (
                           <li key={item} className="flex gap-2">
@@ -1187,17 +1609,41 @@ export default function ClaritasDashboard() {
                           </li>
                         ))}
                       </ul>
-                      <p className="mt-4 text-sm text-[color:var(--shell-muted)]">{policy.note}</p>
+                      <p className="mt-4 text-sm text-[color:var(--shell-muted)]">
+                        {policy.note}
+                      </p>
                     </article>
                   ))}
                 </div>
 
                 <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 text-xs text-[color:var(--shell-muted)] flex flex-wrap items-center gap-x-6 gap-y-2">
-                  <span className="font-semibold uppercase tracking-[0.3em] text-[color:var(--shell-ink)]">Claritas</span>
-                  <a href="#cookie-policy" className="transition hover:text-[color:var(--shell-ink)]">Cookie Policy</a>
-                  <a href="#privacy-statement" className="transition hover:text-[color:var(--shell-ink)]">Privacy Statement</a>
-                  <a href="#terms-of-use" className="transition hover:text-[color:var(--shell-ink)]">Terms of Use</a>
-                  <a href="#copyright" className="transition hover:text-[color:var(--shell-ink)]">Copyright</a>
+                  <span className="font-semibold uppercase tracking-[0.3em] text-[color:var(--shell-ink)]">
+                    Claritas
+                  </span>
+                  <a
+                    href="#cookie-policy"
+                    className="transition hover:text-[color:var(--shell-ink)]"
+                  >
+                    Cookie Policy
+                  </a>
+                  <a
+                    href="#privacy-statement"
+                    className="transition hover:text-[color:var(--shell-ink)]"
+                  >
+                    Privacy Statement
+                  </a>
+                  <a
+                    href="#terms-of-use"
+                    className="transition hover:text-[color:var(--shell-ink)]"
+                  >
+                    Terms of Use
+                  </a>
+                  <a
+                    href="#copyright"
+                    className="transition hover:text-[color:var(--shell-ink)]"
+                  >
+                    Copyright
+                  </a>
                 </div>
               </div>
             )}
