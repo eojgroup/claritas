@@ -2188,7 +2188,6 @@ export default function ClaritasDashboard() {
                                   r={5}
                                   fill="#ef4444"
                                   stroke="#b91c1c"
-                                  isFront
                                   onClick={() => handleAnomalyClick(point.dateKey)}
                                 />
                               ))}
