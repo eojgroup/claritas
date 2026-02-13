@@ -7,6 +7,10 @@ import worldCountries from 'world-countries';
 export type BubbleDatum = {
   country: string; // ISO2 code (not strictly needed for centroids)
   count: number;
+  meta?: {
+    subtitle?: string;
+    lines?: string[];
+  };
 };
 
 export type WorldMapBubblesProps = {
@@ -15,6 +19,11 @@ export type WorldMapBubblesProps = {
   dark?: boolean;
   legend?: boolean;
   variant?: "default" | "compact";
+  primaryCountry?: string | null;
+  secondaryCountry?: string | null;
+  pinnedCountry?: string | null;
+  scale?: "linear" | "log";
+  showLabels?: boolean;
 };
 
 // TopoJSON -> GeoJSON features
@@ -30,10 +39,22 @@ export default memo(function WorldMapBubbles({
   dark,
   legend = true,
   variant = "default",
+  primaryCountry,
+  secondaryCountry,
+  pinnedCountry,
+  scale = "linear",
+  showLabels = true,
 }: WorldMapBubblesProps) {
   const path = useMemo(() => geoPath(projection), []);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [tip, setTip] = useState<{ show: boolean; x: number; y: number; country: string; value: number } | null>(null);
+  const [tip, setTip] = useState<{
+    show: boolean;
+    x: number;
+    y: number;
+    country: string;
+    value: number;
+    meta?: BubbleDatum["meta"];
+  } | null>(null);
 
   // Build coarse centroids keyed by ISO2 using world-countries lat/lng metadata.
   // world-countries provides `latlng: [lat, lng]` — flip to [lng, lat] for d3 projections.
@@ -53,7 +74,14 @@ export default memo(function WorldMapBubbles({
     return map;
   }, []);
 
-  const max = useMemo(() => data.reduce((m, d) => Math.max(m, d.count), 0) || 1, [data]);
+  const max = useMemo(
+    () => data.reduce((m, d) => Math.max(m, d.count), 0) || 1,
+    [data],
+  );
+  const min = useMemo(() => {
+    const value = data.reduce((m, d) => Math.min(m, d.count), Infinity);
+    return Number.isFinite(value) ? value : 0;
+  }, [data]);
 
   const isDark = !!dark;
   const isCompact = variant === "compact";
@@ -63,10 +91,18 @@ export default memo(function WorldMapBubbles({
   const bubbleStroke = isDark ? '#16a34a' : '#0f5132';
   const labelColor = isDark ? '#e2e8f0' : '#0f172a';
 
-  const rScale = (v: number) =>
-    (isCompact ? 4 : 6) + (isCompact ? 16 : 22) * Math.sqrt(v / max);
+  const rScale = (v: number) => {
+    const ratio =
+      scale === "log"
+        ? Math.log10(v + 1) / Math.log10(max + 1)
+        : v / max;
+    return (isCompact ? 4 : 6) + (isCompact ? 16 : 22) * Math.sqrt(ratio);
+  };
   const labelSize = isCompact ? 9 : 10;
   const labelOffset = isCompact ? 1 : 2;
+  const primaryIso = primaryCountry?.toUpperCase();
+  const secondaryIso = secondaryCountry?.toUpperCase();
+  const pinnedIso = pinnedCountry?.toUpperCase();
 
   return (
     <div ref={containerRef} className="relative w-full h-full">
@@ -89,8 +125,28 @@ export default memo(function WorldMapBubbles({
               if (!rect) return;
               const px = e.clientX - rect.left + 8; // small offset
               const py = e.clientY - rect.top + 8;
-              setTip({ show: true, x: px, y: py, country: key, value: d.count });
+              setTip({
+                show: true,
+                x: px,
+                y: py,
+                country: key,
+                value: d.count,
+                meta: d.meta,
+              });
             };
+            const isPrimary = primaryIso === key;
+            const isSecondary = secondaryIso === key;
+            const isPinned = pinnedIso === key;
+            const fill = isPrimary
+              ? 'rgba(14,165,233,0.75)'
+              : isSecondary
+                ? 'rgba(250,204,21,0.75)'
+                : bubbleFill;
+            const stroke = isPrimary
+              ? '#0284c7'
+              : isSecondary
+                ? '#d97706'
+                : bubbleStroke;
             return (
               <g
                 key={key}
@@ -101,11 +157,25 @@ export default memo(function WorldMapBubbles({
                 onMouseLeave={() => setTip(null)}
                 style={{ cursor: 'pointer' }}
               >
-                <circle r={r} fill={bubbleFill} stroke={bubbleStroke} strokeWidth={1} />
+                <circle r={r} fill={fill} stroke={stroke} strokeWidth={1} />
+                {isPinned && (
+                  <circle
+                    r={r + 4}
+                    fill="none"
+                    stroke={isDark ? '#fde047' : '#f59e0b'}
+                    strokeWidth={1.5}
+                  />
+                )}
                 <title>{`${key}: ${d.count}`}</title>
-                <text textAnchor="middle" y={-r - labelOffset} style={{ fontSize: labelSize, fill: labelColor }}>
-                  {key}
-                </text>
+                {showLabels && (
+                  <text
+                    textAnchor="middle"
+                    y={-r - labelOffset}
+                    style={{ fontSize: labelSize, fill: labelColor }}
+                  >
+                    {key}
+                  </text>
+                )}
               </g>
             );
           })}
@@ -128,7 +198,11 @@ export default memo(function WorldMapBubbles({
                 return <circle key={i} cx={cx} cy={cy} r={r} fill={bubbleFill} stroke={bubbleStroke} strokeWidth={1} />;
               })}
             </svg>
-            <span>Relative size</span>
+            <span>Relative size · {scale === "log" ? "Log" : "Linear"}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginTop: 2 }}>
+            <span>Min {min}</span>
+            <span>Max {max}</span>
           </div>
         </div>
       )}
@@ -137,7 +211,10 @@ export default memo(function WorldMapBubbles({
         <div className="pointer-events-none absolute rounded border px-2 py-1 text-xs shadow"
              style={{ left: tip.x, top: tip.y, background: isDark ? '#0f172a' : '#ffffff', color: labelColor, borderColor: isDark ? '#334155' : '#cbd5e1' }}>
           <div style={{ fontWeight: 600 }}>{tip.country}</div>
-          <div>{tip.value} {tip.value === 1 ? 'item' : 'items'}</div>
+          <div>{tip.meta?.subtitle ?? `${tip.value} ${tip.value === 1 ? 'item' : 'items'}`}</div>
+          {tip.meta?.lines?.map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Bell,
@@ -20,7 +20,11 @@ import {
   AreaChart,
   Area,
   CartesianGrid,
+  Brush,
+  ReferenceDot,
+  Line,
 } from "recharts";
+import worldCountries from "world-countries";
 
 const legalPolicies = [
   {
@@ -77,6 +81,39 @@ const legalPolicies = [
   },
 ];
 
+const NEWS_FETCH_LIMIT = 250;
+const NEWS_TREND_WINDOW_DAYS = 30;
+const MAP_WINDOW_MIN = 7;
+const MAP_WINDOW_MAX = 45;
+
+const REGION_OPTIONS = [
+  { id: "global", label: "Global" },
+  { id: "americas", label: "Americas" },
+  { id: "europe", label: "Europe" },
+  { id: "africa", label: "Africa" },
+  { id: "asia", label: "Asia" },
+  { id: "apac", label: "APAC" },
+  { id: "oceania", label: "Oceania" },
+] as const;
+
+const getDateKey = (value: Date | string) => {
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+};
+
+const safeDownload = (filename: string, data: Blob | string) => {
+  const blob = typeof data === "string" ? new Blob([data]) : data;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+};
+
 import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
 import {
@@ -128,16 +165,35 @@ export default function ClaritasDashboard() {
     }
   });
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [comparisonCountry, setComparisonCountry] = useState<string | null>(
+    null,
+  );
+  const [compareMode, setCompareMode] = useState(false);
+  const [pinnedCountry, setPinnedCountry] = useState<string | null>(null);
+  const [regionFilter, setRegionFilter] =
+    useState<(typeof REGION_OPTIONS)[number]["id"]>("global");
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [mapMode, setMapMode] = useState<"news" | "weather">("news");
   const [listMode, setListMode] = useState<"news" | "weather">("news");
+  const [mapScale, setMapScale] = useState<"linear" | "log">("linear");
+  const [mapDayMode, setMapDayMode] = useState(false);
+  const [mapWindowDays, setMapWindowDays] = useState(NEWS_TREND_WINDOW_DAYS);
+  const [mapDayIndex, setMapDayIndex] = useState(0);
+  const [mapPlaying, setMapPlaying] = useState(false);
+  const [chartView, setChartView] = useState<"daily" | "rolling">("daily");
+  const [chartRange, setChartRange] = useState<{
+    startIndex?: number;
+    endIndex?: number;
+  }>({});
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
   const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
   const [profileSection, setProfileSection] = useState<
     "overview" | "identity" | "preferences" | "security" | "policies"
   >("overview");
+  const feedRef = useRef<HTMLDivElement | null>(null);
+  const chartRef = useRef<HTMLDivElement | null>(null);
   const authProviderMap = useMemo(
     () => new Map(authProviders.map((p) => [p.id, p])),
     [authProviders],
@@ -245,24 +301,10 @@ export default function ClaritasDashboard() {
     fetchCountryWeather()
       .then(setWeatherStats)
       .catch(() => setWeatherStats([]));
-    fetchNews({ limit: 20 })
+    fetchNews({ limit: NEWS_FETCH_LIMIT })
       .then(setNews)
       .catch(() => setNews([]));
   }, [authStatus]);
-
-  useEffect(() => {
-    // When a country is selected, refetch list filtered by country
-    if (authStatus !== "authed") return;
-    if (selectedCountry) {
-      fetchNews({ limit: 20, country: selectedCountry })
-        .then(setNews)
-        .catch(() => setNews([]));
-    } else {
-      fetchNews({ limit: 20 })
-        .then(setNews)
-        .catch(() => setNews([]));
-    }
-  }, [selectedCountry, authStatus]);
 
   const cardBase =
     "rounded-2xl border border-[color:var(--shell-border)] bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70";
@@ -278,30 +320,538 @@ export default function ClaritasDashboard() {
     [],
   );
 
+  const countryMeta = useMemo(() => {
+    const map = new Map<
+      string,
+      { name?: string; region?: string; subregion?: string }
+    >();
+    for (const c of worldCountries as any[]) {
+      const iso = (c.cca2 || c.properties?.cca2 || "").toUpperCase();
+      if (!iso) continue;
+      map.set(iso, {
+        name: c.name?.common ?? c.name?.official,
+        region: c.region,
+        subregion: c.subregion,
+      });
+    }
+    if (map.has("GB")) {
+      map.set("UK", map.get("GB")!);
+    }
+    return map;
+  }, []);
+
+  const regionSets = useMemo(() => {
+    const sets: Record<string, Set<string>> = {
+      americas: new Set(),
+      europe: new Set(),
+      africa: new Set(),
+      asia: new Set(),
+      apac: new Set(),
+      oceania: new Set(),
+    };
+    countryMeta.forEach((meta, iso) => {
+      const region = (meta.region || "").toLowerCase();
+      if (region === "americas") sets.americas.add(iso);
+      if (region === "europe") sets.europe.add(iso);
+      if (region === "africa") sets.africa.add(iso);
+      if (region === "asia") sets.asia.add(iso);
+      if (region === "oceania") sets.oceania.add(iso);
+      if (region === "asia" || region === "oceania") sets.apac.add(iso);
+    });
+    return sets;
+  }, [countryMeta]);
+
+  const regionLabel =
+    REGION_OPTIONS.find((opt) => opt.id === regionFilter)?.label ?? "Global";
+  const regionCountries =
+    regionFilter === "global" ? null : regionSets[regionFilter];
+
+  const selectedCountries = useMemo(() => {
+    const set = new Set<string>();
+    if (selectedCountry) set.add(selectedCountry.toUpperCase());
+    if (comparisonCountry) set.add(comparisonCountry.toUpperCase());
+    return set;
+  }, [selectedCountry, comparisonCountry]);
+
+  const newsScope = useMemo(() => {
+    if (!regionCountries) return news;
+    return news.filter(
+      (item) =>
+        item.country_iso2 &&
+        regionCountries.has(item.country_iso2.toUpperCase()),
+    );
+  }, [news, regionCountries]);
+
+  const getSourceLabel = (item: NewsItem) => {
+    const payload = (item as any)?.payload ?? {};
+    const raw = payload?.raw ?? payload;
+    const source =
+      raw?.source?.name ??
+      raw?.source?.id ??
+      raw?.source ??
+      payload?.source ??
+      payload?.provider ??
+      payload?.publisher ??
+      payload?.site;
+    if (!source) return undefined;
+    return typeof source === "string" ? source : source?.name;
+  };
+
+  const newsTrend = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+    const today = new Date();
+    const buckets = new Map<
+      string,
+      {
+        dateKey: string;
+        label: string;
+        count: number;
+        selectedCount: number;
+        comparisonCount: number;
+        rollingAvg: number;
+        selectedRollingAvg: number;
+        comparisonRollingAvg: number;
+        topCountries: string[];
+      }
+    >();
+    const perDayCountries = new Map<string, Map<string, number>>();
+    for (let i = NEWS_TREND_WINDOW_DAYS - 1; i >= 0; i -= 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      buckets.set(key, {
+        dateKey: key,
+        label: formatter.format(d),
+        count: 0,
+        selectedCount: 0,
+        comparisonCount: 0,
+        rollingAvg: 0,
+        selectedRollingAvg: 0,
+        comparisonRollingAvg: 0,
+        topCountries: [],
+      });
+    }
+
+    const selectedIso = selectedCountry?.toUpperCase() ?? null;
+    const comparisonIso = comparisonCountry?.toUpperCase() ?? null;
+
+    newsScope.forEach((item) => {
+      if (!item.event_time) return;
+      const key = getDateKey(item.event_time);
+      if (!key) return;
+      const bucket = buckets.get(key);
+      if (!bucket) return;
+      bucket.count += 1;
+      const iso = item.country_iso2?.toUpperCase();
+      if (iso) {
+        const countryMap = perDayCountries.get(key) ?? new Map<string, number>();
+        countryMap.set(iso, (countryMap.get(iso) ?? 0) + 1);
+        perDayCountries.set(key, countryMap);
+        if (selectedIso && iso === selectedIso) bucket.selectedCount += 1;
+        if (comparisonIso && iso === comparisonIso) bucket.comparisonCount += 1;
+      }
+    });
+
+    const points = Array.from(buckets.values());
+    points.forEach((bucket, idx) => {
+      const start = Math.max(0, idx - 6);
+      const window = points.slice(start, idx + 1);
+      const avg =
+        window.reduce((sum, item) => sum + item.count, 0) / window.length;
+      bucket.rollingAvg = Number(avg.toFixed(2));
+      const selectedAvg =
+        window.reduce((sum, item) => sum + item.selectedCount, 0) /
+        window.length;
+      const comparisonAvg =
+        window.reduce((sum, item) => sum + item.comparisonCount, 0) /
+        window.length;
+      bucket.selectedRollingAvg = Number(selectedAvg.toFixed(2));
+      bucket.comparisonRollingAvg = Number(comparisonAvg.toFixed(2));
+      const countryMap = perDayCountries.get(bucket.dateKey);
+      if (!countryMap) return;
+      bucket.topCountries = Array.from(countryMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([iso, count]) => `${iso} (${count})`);
+    });
+
+    return points;
+  }, [newsScope, selectedCountry, comparisonCountry]);
+
+  const newsTrendTotal = useMemo(
+    () => newsTrend.reduce((sum, item) => sum + item.count, 0),
+    [newsTrend],
+  );
+
+  const trendAnomalies = useMemo(() => {
+    if (newsTrend.length === 0) return [];
+    const mean = newsTrend.reduce((sum, d) => sum + d.count, 0) / newsTrend.length;
+    const variance =
+      newsTrend.reduce((sum, d) => sum + (d.count - mean) ** 2, 0) /
+      newsTrend.length;
+    const std = Math.sqrt(variance);
+    const threshold = mean + 2 * std;
+    return newsTrend.filter((d) => d.count > threshold);
+  }, [newsTrend]);
+
+  const activeRange = useMemo(() => {
+    if (chartRange.startIndex == null || chartRange.endIndex == null) return null;
+    const start = newsTrend[chartRange.startIndex]?.dateKey;
+    const end = newsTrend[chartRange.endIndex]?.dateKey;
+    if (!start || !end) return null;
+    return start <= end ? { start, end } : { start: end, end: start };
+  }, [chartRange, newsTrend]);
+
+  const activeRangeLabel = useMemo(() => {
+    if (!activeRange) return `Last ${NEWS_TREND_WINDOW_DAYS} days`;
+    const startLabel =
+      newsTrend.find((d) => d.dateKey === activeRange.start)?.label ??
+      activeRange.start;
+    const endLabel =
+      newsTrend.find((d) => d.dateKey === activeRange.end)?.label ??
+      activeRange.end;
+    return `${startLabel} – ${endLabel}`;
+  }, [activeRange, newsTrend]);
+
+  const defaultRange = useMemo(() => {
+    const today = new Date();
+    const end = getDateKey(today);
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - NEWS_TREND_WINDOW_DAYS + 1);
+    const start = getDateKey(startDate);
+    if (!start || !end) return null;
+    return { start, end };
+  }, []);
+
+  const effectiveRange = activeRange ?? defaultRange;
+
+  const newsRangeTotal = useMemo(() => {
+    if (!activeRange) return newsTrendTotal;
+    return newsTrend.reduce((sum, item) => {
+      if (item.dateKey < activeRange.start || item.dateKey > activeRange.end) {
+        return sum;
+      }
+      return sum + item.count;
+    }, 0);
+  }, [activeRange, newsTrend, newsTrendTotal]);
+
+  const filteredNews = useMemo(() => {
+    let items = newsScope;
+    if (effectiveRange) {
+      items = items.filter((item) => {
+        const key = item.event_time ? getDateKey(item.event_time) : null;
+        if (!key) return false;
+        return key >= effectiveRange.start && key <= effectiveRange.end;
+      });
+    }
+    if (selectedCountries.size > 0) {
+      items = items.filter(
+        (item) =>
+          item.country_iso2 &&
+          selectedCountries.has(item.country_iso2.toUpperCase()),
+      );
+    }
+    return items;
+  }, [newsScope, effectiveRange, selectedCountries]);
+
+  const filteredCountryStats = useMemo(() => {
+    const stats = new Map<string, { count: number; sources: Map<string, number> }>();
+    filteredNews.forEach((item) => {
+      if (!item.country_iso2) return;
+      const iso = item.country_iso2.toUpperCase();
+      const entry = stats.get(iso) ?? {
+        count: 0,
+        sources: new Map<string, number>(),
+      };
+      entry.count += 1;
+      const source = getSourceLabel(item);
+      if (source) {
+        entry.sources.set(source, (entry.sources.get(source) ?? 0) + 1);
+      }
+      stats.set(iso, entry);
+    });
+    return stats;
+  }, [filteredNews]);
+
+  const mapRange = useMemo(() => {
+    if (activeRange) return activeRange;
+    const today = new Date();
+    const end = getDateKey(today);
+    const windowSize = Math.min(
+      MAP_WINDOW_MAX,
+      Math.max(MAP_WINDOW_MIN, mapWindowDays),
+    );
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - windowSize + 1);
+    const start = getDateKey(startDate);
+    if (!start || !end) return null;
+    return { start, end };
+  }, [activeRange, mapWindowDays]);
+
+  const mapDates = useMemo(() => {
+    if (!mapRange) return [] as string[];
+    const dates: string[] = [];
+    const start = new Date(mapRange.start);
+    const end = new Date(mapRange.end);
+    const current = new Date(start);
+    while (current <= end) {
+      const key = getDateKey(current);
+      if (key) dates.push(key);
+      current.setDate(current.getDate() + 1);
+    }
+    return dates;
+  }, [mapRange]);
+
+  const mapRangeLabel = useMemo(() => {
+    if (!mapRange) return "No range";
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+    const startLabel = formatter.format(new Date(mapRange.start));
+    const endLabel = formatter.format(new Date(mapRange.end));
+    return `${startLabel} – ${endLabel}`;
+  }, [mapRange]);
+
+  const mapDayLabel = useMemo(() => {
+    if (mapDates.length === 0) return "—";
+    const key = mapDates[Math.min(mapDayIndex, mapDates.length - 1)];
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+    }).format(new Date(key));
+  }, [mapDates, mapDayIndex]);
+
+  const mapNews = useMemo(() => {
+    let items = newsScope;
+    if (mapRange) {
+      items = items.filter((item) => {
+        const key = item.event_time ? getDateKey(item.event_time) : null;
+        if (!key) return false;
+        return key >= mapRange.start && key <= mapRange.end;
+      });
+    }
+    if (mapDayMode && mapDates.length > 0) {
+      const dayKey = mapDates[Math.min(mapDayIndex, mapDates.length - 1)];
+      items = items.filter((item) => getDateKey(item.event_time ?? "") === dayKey);
+    }
+    return items;
+  }, [newsScope, mapRange, mapDayMode, mapDayIndex, mapDates]);
+
+  const mapCountryStats = useMemo(() => {
+    const stats = new Map<
+      string,
+      { count: number; lastEvent?: string; sources: Map<string, number> }
+    >();
+    mapNews.forEach((item) => {
+      if (!item.country_iso2) return;
+      const iso = item.country_iso2.toUpperCase();
+      const entry = stats.get(iso) ?? {
+        count: 0,
+        lastEvent: undefined,
+        sources: new Map<string, number>(),
+      };
+      entry.count += 1;
+      if (item.event_time) {
+        if (!entry.lastEvent || item.event_time > entry.lastEvent) {
+          entry.lastEvent = item.event_time;
+        }
+      }
+      const source = getSourceLabel(item);
+      if (source) {
+        entry.sources.set(source, (entry.sources.get(source) ?? 0) + 1);
+      }
+      stats.set(iso, entry);
+    });
+    return stats;
+  }, [mapNews]);
+
+  const mapBubbleData = useMemo(() => {
+    if (
+      mapCountryStats.size === 0 &&
+      !activeRange &&
+      !regionCountries &&
+      !mapDayMode &&
+      countryStats.length > 0
+    ) {
+      return countryStats.map((stat) => ({
+        country: stat.country.toUpperCase(),
+        count: stat.count,
+        meta: {
+          subtitle: `${stat.count} ${stat.count === 1 ? "story" : "stories"}`,
+          lines: ["Aggregated over last 30 days"],
+        },
+      }));
+    }
+    const entries = Array.from(mapCountryStats.entries());
+    return entries.map(([country, stat]) => {
+      let topSource: string | undefined;
+      if (stat.sources.size > 0) {
+        topSource = Array.from(stat.sources.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([name]) => name)[0];
+      }
+      const lastEvent = stat.lastEvent
+        ? new Date(stat.lastEvent).toLocaleString()
+        : undefined;
+      return {
+        country,
+        count: stat.count,
+        meta: {
+          subtitle: `${stat.count} ${stat.count === 1 ? "story" : "stories"}`,
+          lines: [
+            lastEvent ? `Last event: ${lastEvent}` : "Last event: —",
+            topSource ? `Top source: ${topSource}` : "Top source: —",
+          ],
+        },
+      };
+    });
+  }, [
+    mapCountryStats,
+    activeRange,
+    regionCountries,
+    mapDayMode,
+    countryStats,
+  ]);
+
+  const mapWeatherScope = useMemo(() => {
+    let w = weatherStats;
+    if (typeof minTemp === "number") {
+      w = w.filter((x) => (x.temp_c ?? -999) >= minTemp);
+    }
+    if (regionCountries) {
+      w = w.filter(
+        (x) => x.country && regionCountries.has(x.country.toUpperCase()),
+      );
+    }
+    return w;
+  }, [weatherStats, minTemp, regionCountries]);
+
+  const mapWeatherData = useMemo(() => {
+    const withTemp = (mapWeatherScope || []).filter(
+      (w) => typeof w.temp_c === "number",
+    );
+    if (withTemp.length === 0) return [];
+    const temps = withTemp.map((w) => Number(w.temp_c));
+    const min = Math.min(...temps);
+    return withTemp.map((w) => ({
+      country: (w.country || "").toUpperCase(),
+      count: Number(w.temp_c) - min + 1,
+      meta: {
+        subtitle: `Temp: ${w.temp_c ?? "—"}°C`,
+        lines: ([
+          `Humidity: ${w.humidity ?? "—"}%`,
+          w.weather_main ? `Condition: ${w.weather_main}` : undefined,
+          `Observed: ${new Date(w.observed_at).toLocaleString()}`,
+        ].filter(Boolean) as string[]),
+      },
+    }));
+  }, [mapWeatherScope]);
+
+  const pinnedNewsSummary = useMemo(() => {
+    if (!pinnedCountry) return null;
+    return mapCountryStats.get(pinnedCountry.toUpperCase()) ?? null;
+  }, [pinnedCountry, mapCountryStats]);
+
+  const pinnedTopSource = useMemo(() => {
+    if (!pinnedNewsSummary || pinnedNewsSummary.sources.size === 0) return null;
+    return Array.from(pinnedNewsSummary.sources.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name]) => name)[0];
+  }, [pinnedNewsSummary]);
+
+  const selectedCountryStats = useMemo(() => {
+    if (!selectedCountry) return null;
+    return filteredCountryStats.get(selectedCountry.toUpperCase()) ?? null;
+  }, [selectedCountry, filteredCountryStats]);
+
+  const selectedTopSource = useMemo(() => {
+    if (!selectedCountryStats || selectedCountryStats.sources.size === 0)
+      return null;
+    return Array.from(selectedCountryStats.sources.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name]) => name)[0];
+  }, [selectedCountryStats]);
+
+  const comparisonCountryStats = useMemo(() => {
+    if (!comparisonCountry) return null;
+    return filteredCountryStats.get(comparisonCountry.toUpperCase()) ?? null;
+  }, [comparisonCountry, filteredCountryStats]);
+
+  const comparisonTopSource = useMemo(() => {
+    if (!comparisonCountryStats || comparisonCountryStats.sources.size === 0)
+      return null;
+    return Array.from(comparisonCountryStats.sources.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name]) => name)[0];
+  }, [comparisonCountryStats]);
+
+  const pinnedWeatherSummary = useMemo(() => {
+    if (!pinnedCountry) return null;
+    return (
+      mapWeatherScope.find(
+        (w) => (w.country || "").toUpperCase() === pinnedCountry.toUpperCase(),
+      ) ?? null
+    );
+  }, [pinnedCountry, mapWeatherScope]);
+
+  const pinnedMeta = useMemo(() => {
+    if (!pinnedCountry) return null;
+    return countryMeta.get(pinnedCountry.toUpperCase()) ?? null;
+  }, [pinnedCountry, countryMeta]);
+
+  const selectedMeta = useMemo(() => {
+    if (!selectedCountry) return null;
+    return countryMeta.get(selectedCountry.toUpperCase()) ?? null;
+  }, [selectedCountry, countryMeta]);
+
+  const comparisonMeta = useMemo(() => {
+    if (!comparisonCountry) return null;
+    return countryMeta.get(comparisonCountry.toUpperCase()) ?? null;
+  }, [comparisonCountry, countryMeta]);
+
+  const filteredWeather = useMemo(() => {
+    let w = weatherStats;
+    if (typeof minTemp === "number") {
+      w = w.filter((x) => (x.temp_c ?? -999) >= minTemp);
+    }
+    if (regionCountries) {
+      w = w.filter(
+        (x) => x.country && regionCountries.has(x.country.toUpperCase()),
+      );
+    }
+    if (selectedCountries.size > 0) {
+      w = w.filter(
+        (x) => x.country && selectedCountries.has(x.country.toUpperCase()),
+      );
+    }
+    return w;
+  }, [weatherStats, minTemp, regionCountries, selectedCountries]);
+
   const activeRegions = useMemo(() => {
     const regions = new Set<string>();
-    countryStats.forEach(
-      (stat) => stat.country && regions.add(stat.country.toUpperCase()),
-    );
-    news.forEach(
+    filteredNews.forEach(
       (item) =>
         item.country_iso2 && regions.add(item.country_iso2.toUpperCase()),
     );
-    weatherStats.forEach(
+    filteredWeather.forEach(
       (item) => item.country && regions.add(item.country.toUpperCase()),
     );
     return regions.size;
-  }, [countryStats, news, weatherStats]);
+  }, [filteredNews, filteredWeather]);
 
   const latestEventLabel = useMemo(() => {
     const times: number[] = [];
-    news.forEach((item) => {
+    filteredNews.forEach((item) => {
       if (item.event_time) {
         const time = Date.parse(item.event_time);
         if (!Number.isNaN(time)) times.push(time);
       }
     });
-    weatherStats.forEach((item) => {
+    filteredWeather.forEach((item) => {
       const time = Date.parse(item.observed_at);
       if (!Number.isNaN(time)) times.push(time);
     });
@@ -313,58 +863,65 @@ export default function ClaritasDashboard() {
       hour: "numeric",
       minute: "2-digit",
     }).format(latest);
-  }, [news, weatherStats]);
+  }, [filteredNews, filteredWeather]);
 
-  const newsTrendWindow = 14;
-  const newsTrend = useMemo(() => {
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-    });
-    const today = new Date();
-    const buckets = new Map<
-      string,
-      { dateKey: string; label: string; count: number }
-    >();
-    for (let i = newsTrendWindow - 1; i >= 0; i -= 1) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      buckets.set(key, {
-        dateKey: key,
-        label: formatter.format(d),
-        count: 0,
-      });
+  const focusLabel = useMemo(() => {
+    if (selectedCountry && comparisonCountry) {
+      return `${selectedCountry.toUpperCase()} + ${comparisonCountry.toUpperCase()}`;
     }
-    news.forEach((item) => {
-      if (!item.event_time) return;
-      const d = new Date(item.event_time);
-      if (Number.isNaN(d.getTime())) return;
-      const key = d.toISOString().slice(0, 10);
-      const bucket = buckets.get(key);
-      if (bucket) bucket.count += 1;
-    });
-    return Array.from(buckets.values());
-  }, [news, newsTrendWindow]);
+    if (selectedCountry) return selectedCountry.toUpperCase();
+    if (comparisonCountry) return comparisonCountry.toUpperCase();
+    return regionFilter === "global" ? "Global" : regionLabel;
+  }, [selectedCountry, comparisonCountry, regionFilter, regionLabel]);
 
-  const newsTrendTotal = useMemo(
-    () => newsTrend.reduce((sum, item) => sum + item.count, 0),
-    [newsTrend],
-  );
-
-  const focusLabel = selectedCountry ? selectedCountry.toUpperCase() : "Global";
-
-  const filteredWeather = useMemo(() => {
-    let w = weatherStats;
-    if (typeof minTemp === "number") {
-      w = w.filter((x) => (x.temp_c ?? -999) >= minTemp);
+  useEffect(() => {
+    if (!selectedCountry) {
+      setComparisonCountry(null);
+      setCompareMode(false);
     }
-    if (selectedCountry) {
-      const iso = selectedCountry.toUpperCase();
-      w = w.filter((x) => (x.country || "").toUpperCase() === iso);
+  }, [selectedCountry]);
+
+  useEffect(() => {
+    if (mapDates.length > 0) {
+      setMapDayIndex(mapDates.length - 1);
     }
-    return w;
-  }, [weatherStats, minTemp, selectedCountry]);
+  }, [mapDates]);
+
+  useEffect(() => {
+    if (!mapDayMode) {
+      setMapPlaying(false);
+    }
+  }, [mapDayMode]);
+
+  useEffect(() => {
+    if (mapMode === "weather") {
+      setMapDayMode(false);
+      setMapPlaying(false);
+    }
+  }, [mapMode]);
+
+  useEffect(() => {
+    if (!mapPlaying || mapDates.length === 0) return;
+    const id = window.setInterval(() => {
+      setMapDayIndex((idx) => (idx + 1) % mapDates.length);
+    }, 1200);
+    return () => window.clearInterval(id);
+  }, [mapPlaying, mapDates.length]);
+
+  useEffect(() => {
+    if (
+      chartRange.startIndex != null &&
+      chartRange.startIndex >= newsTrend.length
+    ) {
+      setChartRange({});
+    }
+    if (
+      chartRange.endIndex != null &&
+      chartRange.endIndex >= newsTrend.length
+    ) {
+      setChartRange({});
+    }
+  }, [chartRange.endIndex, chartRange.startIndex, newsTrend.length]);
 
   async function handleRefreshWeather() {
     try {
@@ -378,6 +935,146 @@ export default function ClaritasDashboard() {
       setIsRefreshingWeather(false);
     }
   }
+
+  const handleMapSelect = (iso: string) => {
+    const key = iso.toUpperCase();
+    if (compareMode && selectedCountry) {
+      if (selectedCountry.toUpperCase() !== key) {
+        setComparisonCountry(key);
+        setCompareMode(false);
+      }
+      return;
+    }
+    if (selectedCountry && selectedCountry.toUpperCase() === key) {
+      setSelectedCountry(null);
+      return;
+    }
+    setSelectedCountry(key);
+  };
+
+  const handleClearSelection = () => {
+    setSelectedCountry(null);
+    setComparisonCountry(null);
+    setCompareMode(false);
+  };
+
+  const handleAnomalyClick = (dateKey: string) => {
+    const index = newsTrend.findIndex((d) => d.dateKey === dateKey);
+    if (index >= 0) {
+      setChartRange({ startIndex: index, endIndex: index });
+      setListMode("news");
+      requestAnimationFrame(() => {
+        feedRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
+  };
+
+  const handleExportCsv = () => {
+    const range = activeRange;
+    const series = range
+      ? newsTrend.filter(
+          (d) => d.dateKey >= range.start && d.dateKey <= range.end,
+        )
+      : newsTrend;
+    const header = [
+      "date",
+      "label",
+      "total",
+      "selected",
+      "comparison",
+      "rolling_avg",
+    ];
+    const rows = series.map((d) =>
+      [
+        d.dateKey,
+        d.label,
+        d.count,
+        d.selectedCount,
+        d.comparisonCount,
+        d.rollingAvg,
+      ].join(","),
+    );
+    safeDownload(
+      `news-volume-${new Date().toISOString().slice(0, 10)}.csv`,
+      [header.join(","), ...rows].join("\n"),
+    );
+  };
+
+  const handleExportPng = () => {
+    const container = chartRef.current;
+    const svg = container?.querySelector("svg");
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svg);
+    const svgBlob = new Blob([svgString], {
+      type: "image/svg+xml;charset=utf-8",
+    });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const canvas = document.createElement("canvas");
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = dark ? "#0f172a" : "#ffffff";
+      ctx.fillRect(0, 0, rect.width, rect.height);
+      ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        safeDownload(
+          `news-volume-${new Date().toISOString().slice(0, 10)}.png`,
+          blob,
+        );
+      });
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
+  const ChartTooltip = ({
+    active,
+    payload,
+    label,
+  }: {
+    active?: boolean;
+    payload?: Array<{ payload: (typeof newsTrend)[number] }>;
+    label?: string;
+  }) => {
+    if (!active || !payload || payload.length === 0) return null;
+    const point = payload[0].payload;
+    return (
+      <div className="rounded-lg border border-[color:var(--shell-border)] bg-white px-3 py-2 text-xs text-[color:var(--shell-ink)] shadow dark:bg-slate-900 dark:text-slate-100">
+        <div className="font-semibold">{label}</div>
+        <div>Total: {point.count}</div>
+        {selectedCountry && (
+          <div>
+            {selectedCountry.toUpperCase()}:{" "}
+            {chartView === "rolling"
+              ? point.selectedRollingAvg
+              : point.selectedCount}
+          </div>
+        )}
+        {comparisonCountry && (
+          <div>
+            {comparisonCountry.toUpperCase()}:{" "}
+            {chartView === "rolling"
+              ? point.comparisonRollingAvg
+              : point.comparisonCount}
+          </div>
+        )}
+        <div>7d avg: {point.rollingAvg}</div>
+        {point.topCountries.length > 0 && (
+          <div className="mt-1 text-[color:var(--shell-muted)]">
+            Top: {point.topCountries.join(", ")}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const userLabel = authUser?.display_name || authUser?.email || "Signed in";
   const userInitial =
@@ -700,7 +1397,7 @@ export default function ClaritasDashboard() {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-7xl flex-1 px-4 sm:px-6 lg:px-8 py-6">
+          <main className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6">
             {sessionNotice && (
               <div className="mb-6">
                 <div
@@ -718,15 +1415,15 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div className="space-y-6">
-                <div className="relative">
+              <div className="relative flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+                <div className="relative flex flex-col gap-4 lg:flex-1 lg:min-h-0">
                   <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-3xl dark:bg-emerald-900/40 dark:opacity-40" />
                   <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-[color:var(--signal-sky-soft)] opacity-80 blur-3xl dark:bg-sky-900/40 dark:opacity-40" />
 
-                  <section className="relative grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <section className="relative grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-2">
                     <div
                       id="signal-map-feed"
-                      className={`${cardBase} dashboard-panel flex min-h-[420px] flex-col`}
+                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`}
                       style={{ animationDelay: "0ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -770,62 +1467,156 @@ export default function ClaritasDashboard() {
                           </button>
                         </div>
                       </div>
-                      <div className="relative flex-1 p-4">
-                        <div className="relative h-full min-h-[320px] rounded-2xl overflow-hidden bg-[color:var(--shell-bg)]">
-                          {mapMode === "news" ? (
-                            <WorldMapBubbles
-                              variant="compact"
-                              data={
-                                countryStats && countryStats.length > 0
-                                  ? countryStats
-                                  : Object.entries(
-                                      (news || []).reduce<
-                                        Record<string, number>
-                                      >((acc, n) => {
-                                        const iso = (
-                                          n.country_iso2 || ""
-                                        ).toUpperCase();
-                                        if (!iso) return acc;
-                                        acc[iso] = (acc[iso] || 0) + 1;
-                                        return acc;
-                                      }, {}),
-                                    ).map(([country, count]) => ({
-                                      country,
-                                      count,
-                                    }))
-                              }
-                              onSelect={setSelectedCountry}
-                              dark={dark}
-                            />
-                          ) : (
-                            <WorldMapBubbles
-                              variant="compact"
-                              data={(() => {
-                                const withTemp = (weatherStats || []).filter(
-                                  (w) => typeof w.temp_c === "number",
-                                );
-                                if (withTemp.length === 0) return [];
-                                const temps = withTemp.map((w) =>
-                                  Number(w.temp_c),
-                                );
-                                const min = Math.min(...temps);
-                                return withTemp.map((w) => ({
-                                  country: (w.country || "").toUpperCase(),
-                                  count: Number(w.temp_c) - min + 1,
-                                }));
-                              })()}
-                              onSelect={setSelectedCountry}
-                              dark={dark}
-                            />
+                      <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-4 py-2 text-xs">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {REGION_OPTIONS.map((region) => {
+                            const active = regionFilter === region.id;
+                            return (
+                              <button
+                                key={region.id}
+                                onClick={() => setRegionFilter(region.id)}
+                                className={`rounded-full border px-3 py-1 transition ${
+                                  active
+                                    ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                    : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                }`}
+                              >
+                                {region.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="ml-auto flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() =>
+                              setMapScale((mode) =>
+                                mode === "linear" ? "log" : "linear",
+                              )
+                            }
+                            className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                          >
+                            Scale: {mapScale === "linear" ? "Linear" : "Log"}
+                          </button>
+                          <button
+                            onClick={() => setCompareMode((v) => !v)}
+                            className={`rounded-full border px-3 py-1 transition ${
+                              compareMode
+                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                          >
+                            {compareMode ? "Compare: On" : "Compare"}
+                          </button>
+                          <button
+                            onClick={() =>
+                              setPinnedCountry(
+                                selectedCountry
+                                  ? selectedCountry.toUpperCase()
+                                  : pinnedCountry,
+                              )
+                            }
+                            className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-50"
+                            disabled={!selectedCountry}
+                          >
+                            Pin selection
+                          </button>
+                          {pinnedCountry && (
+                            <button
+                              onClick={() => setPinnedCountry(null)}
+                              className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            >
+                              Unpin
+                            </button>
+                          )}
+                          {(selectedCountry || comparisonCountry) && (
+                            <button
+                              onClick={handleClearSelection}
+                              className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            >
+                              Clear
+                            </button>
                           )}
                         </div>
-                        {mapMode === "news" && countryStats.length === 0 && (
-                          <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)]">
-                            No aggregated stats yet — showing live list fallback
+                      </div>
+                      {compareMode && (
+                        <div className="px-4 py-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Compare mode: click a second country
+                        </div>
+                      )}
+                      <div className="relative flex-1 min-h-0 p-4">
+                        <div className="relative h-full min-h-0 rounded-2xl overflow-hidden bg-[color:var(--shell-bg)]">
+                          <WorldMapBubbles
+                            variant="compact"
+                            data={
+                              mapMode === "news" ? mapBubbleData : mapWeatherData
+                            }
+                            onSelect={handleMapSelect}
+                            dark={dark}
+                            primaryCountry={selectedCountry}
+                            secondaryCountry={comparisonCountry}
+                            pinnedCountry={pinnedCountry}
+                            scale={mapScale}
+                          />
+                        </div>
+                        {pinnedCountry && (
+                          <div className="absolute left-4 top-4 w-56 rounded-xl border border-[color:var(--shell-border)] bg-white/95 p-3 text-xs shadow-sm dark:bg-slate-900/90 dark:text-slate-100">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Pinned
+                            </div>
+                            <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                              {pinnedMeta?.name
+                                ? `${pinnedMeta.name} (${pinnedCountry.toUpperCase()})`
+                                : pinnedCountry.toUpperCase()}
+                            </div>
+                            {mapMode === "news" ? (
+                              <>
+                                <div className="mt-2 text-[color:var(--shell-muted)]">
+                                  {pinnedNewsSummary
+                                    ? `${pinnedNewsSummary.count} stories`
+                                    : "No stories in range"}
+                                </div>
+                                <div className="text-[color:var(--shell-muted)]">
+                                  Last:{" "}
+                                  {pinnedNewsSummary?.lastEvent
+                                    ? new Date(
+                                        pinnedNewsSummary.lastEvent,
+                                      ).toLocaleString()
+                                    : "—"}
+                                </div>
+                                <div className="text-[color:var(--shell-muted)]">
+                                  Top source: {pinnedTopSource ?? "—"}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="mt-2 text-[color:var(--shell-muted)]">
+                                  Temp: {pinnedWeatherSummary?.temp_c ?? "—"}°C
+                                </div>
+                                <div className="text-[color:var(--shell-muted)]">
+                                  Humidity:{" "}
+                                  {pinnedWeatherSummary?.humidity ?? "—"}%
+                                </div>
+                                <div className="text-[color:var(--shell-muted)]">
+                                  Observed:{" "}
+                                  {pinnedWeatherSummary?.observed_at
+                                    ? new Date(
+                                        pinnedWeatherSummary.observed_at,
+                                      ).toLocaleString()
+                                    : "—"}
+                                </div>
+                              </>
+                            )}
                           </div>
                         )}
+                        {mapMode === "news" &&
+                          mapBubbleData.length === 0 &&
+                          countryStats.length === 0 && (
+                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)]">
+                              No news data in the selected window.
+                            </div>
+                          )}
                         {mapMode === "weather" &&
-                          (weatherStats?.length ?? 0) === 0 && (
+                          mapWeatherScope.length === 0 && (
                             <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
                               <span>No weather stats yet.</span>
                               <button
@@ -840,10 +1631,101 @@ export default function ClaritasDashboard() {
                             </div>
                           )}
                       </div>
+                      <div className="border-t border-[color:var(--shell-border)] px-4 py-3 text-xs">
+                        {mapMode === "news" ? (
+                          <>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                                Time
+                              </span>
+                              <button
+                                onClick={() => setMapDayMode(false)}
+                                className={`rounded-full border px-3 py-1 ${
+                                  !mapDayMode
+                                    ? "bg-[color:var(--shell-ink)] text-white border-[color:var(--shell-ink)]"
+                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
+                                }`}
+                              >
+                                Aggregate
+                              </button>
+                              <button
+                                onClick={() => setMapDayMode(true)}
+                                className={`rounded-full border px-3 py-1 ${
+                                  mapDayMode
+                                    ? "bg-[color:var(--shell-ink)] text-white border-[color:var(--shell-ink)]"
+                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
+                                }`}
+                              >
+                                Day
+                              </button>
+                              {!activeRange && (
+                                <>
+                                  <span className="text-[color:var(--shell-muted)]">
+                                    Window: {mapWindowDays}d
+                                  </span>
+                                  <input
+                                    type="range"
+                                    min={MAP_WINDOW_MIN}
+                                    max={MAP_WINDOW_MAX}
+                                    value={mapWindowDays}
+                                    onChange={(e) =>
+                                      setMapWindowDays(
+                                        Number(e.currentTarget.value),
+                                      )
+                                    }
+                                    className="w-32"
+                                  />
+                                </>
+                              )}
+                              {activeRange && (
+                                <span className="text-[color:var(--shell-muted)]">
+                                  Using graph range ({activeRangeLabel})
+                                </span>
+                              )}
+                              <span className="ml-auto text-[color:var(--shell-muted)]">
+                                {mapRangeLabel}
+                              </span>
+                            </div>
+                            {mapDayMode && mapDates.length > 0 && (
+                              <div className="mt-2 flex flex-wrap items-center gap-3">
+                                <button
+                                  onClick={() => setMapPlaying((v) => !v)}
+                                  className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                >
+                                  {mapPlaying ? "Pause" : "Play"}
+                                </button>
+                                <input
+                                  type="range"
+                                  min={0}
+                                  max={Math.max(0, mapDates.length - 1)}
+                                  value={Math.min(
+                                    mapDayIndex,
+                                    mapDates.length - 1,
+                                  )}
+                                  onChange={(e) =>
+                                    setMapDayIndex(
+                                      Number(e.currentTarget.value),
+                                    )
+                                  }
+                                  className="flex-1 min-w-[120px]"
+                                />
+                                <span className="text-[color:var(--shell-muted)]">
+                                  {mapDayLabel}
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-[color:var(--shell-muted)]">
+                            Time controls apply to news view. Switch to News to
+                            animate.
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-[420px] flex-col`}
+                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`}
                       style={{ animationDelay: "80ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -853,6 +1735,9 @@ export default function ClaritasDashboard() {
                           </div>
                           <div className="text-sm font-semibold">
                             Latest intelligence drops
+                          </div>
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            {regionLabel} · {activeRangeLabel}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 text-xs">
@@ -879,23 +1764,39 @@ export default function ClaritasDashboard() {
                         </div>
                       </div>
 
-                      <div className="flex-1 overflow-hidden">
+                      <div className="flex-1 min-h-0 overflow-hidden">
                         {listMode === "news" ? (
-                          <div className="h-full overflow-y-auto p-4 space-y-3">
-                            {news.length === 0 && (
+                          <div
+                            ref={feedRef}
+                            className="h-full overflow-y-auto p-4 space-y-3"
+                          >
+                            {filteredNews.length === 0 && (
                               <div className="text-sm text-[color:var(--shell-muted)]">
-                                No news items yet.
+                                No news items for the current filters.
                               </div>
                             )}
-                            {news.map((n) => {
+                            {filteredNews.map((n) => {
                               const img = imageProxy(
                                 (n as any)?.payload?.urlToImage ??
                                   (n as any)?.payload?.raw?.urlToImage,
                               );
+                              const iso = n.country_iso2?.toUpperCase();
+                              const isPrimary =
+                                !!selectedCountry &&
+                                iso === selectedCountry.toUpperCase();
+                              const isSecondary =
+                                !!comparisonCountry &&
+                                iso === comparisonCountry.toUpperCase();
                               return (
                                 <div
                                   key={n.id}
-                                  className="rounded-xl border border-[color:var(--shell-border)] bg-white p-3"
+                                  className={`rounded-xl border p-3 ${
+                                    isPrimary
+                                      ? "border-emerald-200 bg-emerald-50/60"
+                                      : isSecondary
+                                        ? "border-amber-200 bg-amber-50/60"
+                                        : "border-[color:var(--shell-border)] bg-white"
+                                  }`}
                                 >
                                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
                                     <div className="relative h-20 w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none shrink-0">
@@ -927,6 +1828,16 @@ export default function ClaritasDashboard() {
                                         {n.country_iso2 && (
                                           <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
                                             {n.country_iso2}
+                                          </span>
+                                        )}
+                                        {isPrimary && (
+                                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                            Primary
+                                          </span>
+                                        )}
+                                        {isSecondary && (
+                                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                                            Compare
                                           </span>
                                         )}
                                         {n.event_time && (
@@ -1020,7 +1931,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-[420px] flex-col`}
+                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`}
                       style={{ animationDelay: "160ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -1036,7 +1947,7 @@ export default function ClaritasDashboard() {
                           {todayLabel}
                         </div>
                       </div>
-                      <div className="relative flex-1 p-4">
+                      <div className="relative flex-1 min-h-0 p-4">
                         <div className="pointer-events-none absolute -right-10 top-6 h-24 w-24 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-2xl" />
                         <div className="relative grid grid-cols-2 gap-3">
                           <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
@@ -1044,7 +1955,7 @@ export default function ClaritasDashboard() {
                               Live signals
                             </div>
                             <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                              {news.length}
+                              {filteredNews.length}
                             </div>
                             <div className="text-xs text-[color:var(--shell-muted)]">
                               Stories & alerts
@@ -1066,7 +1977,7 @@ export default function ClaritasDashboard() {
                               Weather rows
                             </div>
                             <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                              {weatherStats.length}
+                              {filteredWeather.length}
                             </div>
                             <div className="text-xs text-[color:var(--shell-muted)]">
                               Latest observations
@@ -1093,7 +2004,11 @@ export default function ClaritasDashboard() {
                               </div>
                             </div>
                             <span className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
-                              {selectedCountry ? "Filtered" : "Global"}
+                              {selectedCountry || comparisonCountry
+                                ? "Filtered"
+                                : regionFilter === "global"
+                                  ? "Global"
+                                  : "Region"}
                             </span>
                           </div>
                         </div>
@@ -1101,7 +2016,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-[420px] flex-col`}
+                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`}
                       style={{ animationDelay: "240ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -1110,24 +2025,86 @@ export default function ClaritasDashboard() {
                             News volume
                           </div>
                           <div className="text-sm font-semibold">
-                            Articles over the last {newsTrendWindow} days
+                            Articles over the last {NEWS_TREND_WINDOW_DAYS} days
+                          </div>
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            {activeRangeLabel}
                           </div>
                         </div>
                         <div className="text-xs text-[color:var(--shell-muted)]">
-                          {newsTrendTotal} stories
+                          {newsRangeTotal} stories
                         </div>
                       </div>
-                      <div className="flex-1 p-4">
+                      <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-4 py-2 text-xs">
+                        <button
+                          onClick={() => setChartView("daily")}
+                          className={`rounded-full border px-3 py-1 ${
+                            chartView === "daily"
+                              ? "bg-[color:var(--shell-ink)] text-white border-[color:var(--shell-ink)]"
+                              : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
+                          }`}
+                        >
+                          Daily
+                        </button>
+                        <button
+                          onClick={() => setChartView("rolling")}
+                          className={`rounded-full border px-3 py-1 ${
+                            chartView === "rolling"
+                              ? "bg-[color:var(--shell-ink)] text-white border-[color:var(--shell-ink)]"
+                              : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
+                          }`}
+                        >
+                          7d Avg
+                        </button>
+                        <button
+                          onClick={() => setChartRange({})}
+                          className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                        >
+                          Reset range
+                        </button>
+                        <button
+                          onClick={handleExportCsv}
+                          className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                        >
+                          Export CSV
+                        </button>
+                        <button
+                          onClick={handleExportPng}
+                          className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                        >
+                          Export PNG
+                        </button>
+                      </div>
+                      <div ref={chartRef} className="flex-1 min-h-0 p-4">
                         {newsTrendTotal === 0 ? (
                           <div className="h-full grid place-items-center text-sm text-[color:var(--shell-muted)]">
                             No timestamped articles yet.
                           </div>
                         ) : (
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart
-                              data={newsTrend}
-                              margin={{ top: 10, right: 16, left: -8, bottom: 0 }}
-                            >
+                          <>
+                            <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
+                              <span className="inline-flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                {regionLabel}
+                              </span>
+                              {selectedCountry && (
+                                <span className="inline-flex items-center gap-2">
+                                  <span className="h-2 w-2 rounded-full bg-sky-500" />
+                                  {selectedCountry.toUpperCase()}
+                                </span>
+                              )}
+                              {comparisonCountry && (
+                                <span className="inline-flex items-center gap-2">
+                                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                                  {comparisonCountry.toUpperCase()}
+                                </span>
+                              )}
+                            </div>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <AreaChart
+                                data={newsTrend}
+                                margin={{ top: 10, right: 16, left: -8, bottom: 0 }}
+                              >
                               <defs>
                                 <linearGradient
                                   id="newsVolumeGradient"
@@ -1158,100 +2135,215 @@ export default function ClaritasDashboard() {
                                 domain={[0, (max: number) => Math.max(2, max + 1)]}
                                 tick={{ fontSize: 12 }}
                               />
-                              <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                              <Area
-                                type="monotone"
-                                dataKey="count"
-                                stroke="var(--signal-emerald)"
-                                strokeWidth={2}
-                                fill="url(#newsVolumeGradient)"
+                              <Tooltip content={<ChartTooltip />} cursor={{ strokeDasharray: "3 3" }} />
+                              {chartView === "daily" && (
+                                <Area
+                                  type="monotone"
+                                  dataKey="count"
+                                  stroke="var(--signal-emerald)"
+                                  strokeWidth={2}
+                                  fill="url(#newsVolumeGradient)"
+                                />
+                              )}
+                              {chartView === "rolling" && (
+                                <Line
+                                  type="monotone"
+                                  dataKey="rollingAvg"
+                                  stroke="var(--signal-emerald)"
+                                  strokeWidth={2}
+                                  dot={false}
+                                />
+                              )}
+                              {selectedCountry && (
+                                <Line
+                                  type="monotone"
+                                  dataKey={
+                                    chartView === "rolling"
+                                      ? "selectedRollingAvg"
+                                      : "selectedCount"
+                                  }
+                                  stroke="#0ea5e9"
+                                  strokeWidth={2}
+                                  dot={false}
+                                />
+                              )}
+                              {comparisonCountry && (
+                                <Line
+                                  type="monotone"
+                                  dataKey={
+                                    chartView === "rolling"
+                                      ? "comparisonRollingAvg"
+                                      : "comparisonCount"
+                                  }
+                                  stroke="#f59e0b"
+                                  strokeWidth={2}
+                                  dot={false}
+                                />
+                              )}
+                              {trendAnomalies.map((point) => (
+                                <ReferenceDot
+                                  key={point.dateKey}
+                                  x={point.label}
+                                  y={point.count}
+                                  r={5}
+                                  fill="#ef4444"
+                                  stroke="#b91c1c"
+                                  isFront
+                                  onClick={() => handleAnomalyClick(point.dateKey)}
+                                />
+                              ))}
+                              <Brush
+                                dataKey="label"
+                                height={24}
+                                stroke="#94a3b8"
+                                startIndex={chartRange.startIndex}
+                                endIndex={chartRange.endIndex}
+                                onChange={(range) =>
+                                  setChartRange({
+                                    startIndex: range?.startIndex,
+                                    endIndex: range?.endIndex,
+                                  })
+                                }
                               />
-                            </AreaChart>
-                          </ResponsiveContainer>
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </>
                         )}
                       </div>
                     </div>
                   </section>
                 </div>
 
-                <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                  <div
-                    className={`${cardBase} dashboard-panel`}
-                    style={{ animationDelay: "320ms" }}
-                  >
-                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                        Country profile
-                      </div>
-                      <div className="text-sm font-semibold">
-                        Selected location overview
-                      </div>
-                    </div>
-                    <div className="p-4 text-sm text-[color:var(--shell-muted)] space-y-2">
-                      {!selectedCountry && (
-                        <div>
-                          Select a bubble on the map to see a brief profile.
+                <details className="rounded-2xl border border-[color:var(--shell-border)] bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+                  <summary className="cursor-pointer text-sm font-semibold text-[color:var(--shell-ink)]">
+                    More panels
+                  </summary>
+                  <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+                    <div
+                      className={`${cardBase} dashboard-panel`}
+                      style={{ animationDelay: "320ms" }}
+                    >
+                      <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Country profile
                         </div>
-                      )}
-                      {selectedCountry && (
-                        <>
-                          <div className="text-base font-semibold text-[color:var(--shell-ink)]">
-                            Country: {selectedCountry}
-                          </div>
+                        <div className="text-sm font-semibold">
+                          Selected location overview
+                        </div>
+                      </div>
+                      <div className="p-4 text-sm text-[color:var(--shell-muted)] space-y-2">
+                        {!selectedCountry && !comparisonCountry && (
                           <div>
-                            Recent items from this country in the list are
-                            highlighted by the country tag.
+                            Select a bubble on the map to see a brief profile.
                           </div>
-                        </>
-                      )}
+                        )}
+                        {selectedCountry && (
+                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-emerald-700">
+                              Primary
+                            </div>
+                            <div className="text-base font-semibold text-emerald-900">
+                              {selectedMeta?.name
+                                ? `${selectedMeta.name} (${selectedCountry.toUpperCase()})`
+                                : selectedCountry.toUpperCase()}
+                            </div>
+                            <div className="text-xs text-emerald-700">
+                              Region: {selectedMeta?.region ?? "—"}
+                            </div>
+                            <div className="text-xs text-emerald-700">
+                              Subregion: {selectedMeta?.subregion ?? "—"}
+                            </div>
+                            <div className="text-xs text-emerald-700">
+                              Stories in range:{" "}
+                              {selectedCountryStats?.count ?? 0}
+                            </div>
+                            <div className="text-xs text-emerald-700">
+                              Top source: {selectedTopSource ?? "—"}
+                            </div>
+                          </div>
+                        )}
+                        {comparisonCountry && (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-amber-700">
+                              Compare
+                            </div>
+                            <div className="text-base font-semibold text-amber-900">
+                              {comparisonMeta?.name
+                                ? `${comparisonMeta.name} (${comparisonCountry.toUpperCase()})`
+                                : comparisonCountry.toUpperCase()}
+                            </div>
+                            <div className="text-xs text-amber-700">
+                              Region: {comparisonMeta?.region ?? "—"}
+                            </div>
+                            <div className="text-xs text-amber-700">
+                              Subregion: {comparisonMeta?.subregion ?? "—"}
+                            </div>
+                            <div className="text-xs text-amber-700">
+                              Stories in range:{" "}
+                              {comparisonCountryStats?.count ?? 0}
+                            </div>
+                            <div className="text-xs text-amber-700">
+                              Top source: {comparisonTopSource ?? "—"}
+                            </div>
+                          </div>
+                        )}
+                        {(selectedCountry || comparisonCountry) && (
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            Drill down by clicking a country bubble. Compare
+                            mode lets you add a second focus.
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  <div
-                    className={`${cardBase} dashboard-panel`}
-                    style={{ animationDelay: "360ms" }}
-                  >
-                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                        AI search
+                    <div
+                      className={`${cardBase} dashboard-panel`}
+                      style={{ animationDelay: "360ms" }}
+                    >
+                      <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          AI search
+                        </div>
+                        <div className="text-sm font-semibold">
+                          Ask Claritas for signal context
+                        </div>
                       </div>
-                      <div className="text-sm font-semibold">
-                        Ask Claritas for signal context
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2">
+                          <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
+                          <input
+                            className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
+                            placeholder="Search events, alerts, and location activity"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                          />
+                          <button className="rounded-lg bg-[color:var(--shell-ink)] px-3 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]">
+                            Search
+                          </button>
+                        </div>
+                        <p className="text-xs text-[color:var(--shell-muted)]">
+                          Queries return live signal matches from the last 30
+                          days.
+                        </p>
                       </div>
                     </div>
-                    <div className="p-4 space-y-3">
-                      <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2">
-                        <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
-                        <input
-                          className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
-                          placeholder="Search events, alerts, and location activity"
-                          value={query}
-                          onChange={(e) => setQuery(e.target.value)}
-                        />
-                        <button className="rounded-lg bg-[color:var(--shell-ink)] px-3 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]">
-                          Search
-                        </button>
-                      </div>
-                      <p className="text-xs text-[color:var(--shell-muted)]">
-                        Queries return live signal matches from the last 30
-                        days.
-                      </p>
-                    </div>
-                  </div>
 
-                  <div
-                    className={`${cardBase} dashboard-panel`}
-                    style={{ animationDelay: "400ms" }}
-                  >
-                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3 flex items-center gap-2">
-                      <Bell className="h-4 w-4" />
-                      <div className="text-sm font-semibold">Notifications</div>
-                    </div>
-                    <div className="p-4 text-sm text-[color:var(--shell-muted)]">
-                      No notifications yet.
+                    <div
+                      className={`${cardBase} dashboard-panel`}
+                      style={{ animationDelay: "400ms" }}
+                    >
+                      <div className="border-b border-[color:var(--shell-border)] px-4 py-3 flex items-center gap-2">
+                        <Bell className="h-4 w-4" />
+                        <div className="text-sm font-semibold">
+                          Notifications
+                        </div>
+                      </div>
+                      <div className="p-4 text-sm text-[color:var(--shell-muted)]">
+                        No notifications yet.
+                      </div>
                     </div>
                   </div>
-                </section>
+                </details>
               </div>
             )}
             {activeView === "profile" && (
