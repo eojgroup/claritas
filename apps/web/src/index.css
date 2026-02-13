@@ -21,6 +21,10 @@
   --shell-ink: #111827;
   --shell-muted: #6b7280;
   --shell-accent: #111827;
+  --signal-emerald: #0f766e;
+  --signal-emerald-soft: #ccfbf1;
+  --signal-sky: #0ea5e9;
+  --signal-sky-soft: #e0f2fe;
   --home-bg: var(--shell-bg);
   --home-header: #e6ecf1;
   --home-surface: var(--shell-surface);
@@ -63,6 +67,26 @@ button, input, select, textarea { font: inherit; }
   }
 }
 
+.dashboard-panel {
+  animation: dashboard-rise 0.7s ease both;
+}
+
+@keyframes dashboard-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-panel {
+    animation: none;
+  }
+}
 
 @tailwind base;
 @tailwind components;

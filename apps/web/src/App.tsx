@@ -13,32 +13,14 @@ import {
   FileText,
 } from "lucide-react";
 import {
-  PieChart,
-  Pie,
-  Cell,
   ResponsiveContainer,
-  ScatterChart,
-  Scatter,
   XAxis,
   YAxis,
   Tooltip,
-  ZAxis,
+  AreaChart,
+  Area,
+  CartesianGrid,
 } from "recharts";
-
-// --- Utility mock data ---
-const pieData = [
-  { name: "Cat A", value: 45 },
-  { name: "Cat B", value: 25 },
-  { name: "Cat C", value: 30 },
-];
-
-const scatterData = [
-  { x: 10, y: 30 },
-  { x: 20, y: 20 },
-  { x: 30, y: 27 },
-  { x: 40, y: 35 },
-  { x: 50, y: 18 },
-];
 
 const legalPolicies = [
   {
@@ -282,9 +264,9 @@ export default function ClaritasDashboard() {
     }
   }, [selectedCountry, authStatus]);
 
-  const pieColors = useMemo(() => ["#0B1E2D", "#2F4455", "#4E6473"], []);
   const cardBase =
     "rounded-2xl border border-[color:var(--shell-border)] bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70";
+  const chartGridColor = dark ? "#1f2937" : "#e2e8f0";
 
   const todayLabel = useMemo(
     () =>
@@ -332,6 +314,43 @@ export default function ClaritasDashboard() {
       minute: "2-digit",
     }).format(latest);
   }, [news, weatherStats]);
+
+  const newsTrendWindow = 14;
+  const newsTrend = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+    });
+    const today = new Date();
+    const buckets = new Map<
+      string,
+      { dateKey: string; label: string; count: number }
+    >();
+    for (let i = newsTrendWindow - 1; i >= 0; i -= 1) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      buckets.set(key, {
+        dateKey: key,
+        label: formatter.format(d),
+        count: 0,
+      });
+    }
+    news.forEach((item) => {
+      if (!item.event_time) return;
+      const d = new Date(item.event_time);
+      if (Number.isNaN(d.getTime())) return;
+      const key = d.toISOString().slice(0, 10);
+      const bucket = buckets.get(key);
+      if (bucket) bucket.count += 1;
+    });
+    return Array.from(buckets.values());
+  }, [news, newsTrendWindow]);
+
+  const newsTrendTotal = useMemo(
+    () => newsTrend.reduce((sum, item) => sum + item.count, 0),
+    [newsTrend],
+  );
 
   const focusLabel = selectedCountry ? selectedCountry.toUpperCase() : "Global";
 
@@ -699,222 +718,170 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div className="space-y-4">
-                <section className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-                  <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Live signals
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {news.length}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Stories & alerts
-                    </div>
-                  </div>
-                  <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Active regions
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {activeRegions}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Countries tracked
-                    </div>
-                  </div>
-                  <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Weather rows
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {weatherStats.length}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Latest observations
-                    </div>
-                  </div>
-                  <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Last sync
-                    </div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
-                      {latestEventLabel}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Combined feeds
-                    </div>
-                  </div>
-                  <div className={`${cardBase} p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Focus
-                    </div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
-                      {focusLabel}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Current lens
-                    </div>
-                  </div>
-                </section>
+              <div className="space-y-6">
+                <div className="relative">
+                  <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-3xl dark:bg-emerald-900/40 dark:opacity-40" />
+                  <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-[color:var(--signal-sky-soft)] opacity-80 blur-3xl dark:bg-sky-900/40 dark:opacity-40" />
 
-                <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-                  <div
-                    id="signal-map-feed"
-                    className={`${cardBase} lg:col-span-12`}
-                  >
-                    <div className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr]">
-                      <div className="border-b border-[color:var(--shell-border)] md:border-b-0 md:border-r">
-                        <div className="flex items-center justify-between px-4 py-3">
-                          <div>
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Geospatial pulse
-                            </div>
-                            <div className="text-sm font-semibold">
-                              Map:{" "}
-                              {mapMode === "news"
-                                ? "#News per country"
-                                : "Weather (temperature) per country"}
-                            </div>
+                  <section className="relative grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div
+                      id="signal-map-feed"
+                      className={`${cardBase} dashboard-panel flex min-h-[420px] flex-col`}
+                      style={{ animationDelay: "0ms" }}
+                    >
+                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Geospatial pulse
                           </div>
-                          <div className="flex items-center gap-2 text-xs">
-                            <button
-                              className={`rounded-full border px-3 py-1 transition ${
-                                mapMode === "news"
-                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                              }`}
-                              onClick={() => {
-                                setMapMode("news");
-                                setListMode("news");
-                              }}
-                            >
-                              News
-                            </button>
-                            <button
-                              className={`rounded-full border px-3 py-1 transition ${
-                                mapMode === "weather"
-                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                              }`}
-                              onClick={() => {
-                                setMapMode("weather");
-                                setListMode("weather");
-                              }}
-                            >
-                              Weather
-                            </button>
+                          <div className="text-sm font-semibold">
+                            Map:{" "}
+                            {mapMode === "news"
+                              ? "#News per country"
+                              : "Weather (temperature) per country"}
                           </div>
                         </div>
-                        <div className="relative p-4">
-                          <div className="relative h-[420px] rounded-xl overflow-hidden bg-[color:var(--shell-bg)]">
-                            {mapMode === "news" ? (
-                              <WorldMapBubbles
-                                variant="compact"
-                                data={
-                                  countryStats && countryStats.length > 0
-                                    ? countryStats
-                                    : Object.entries(
-                                        (news || []).reduce<
-                                          Record<string, number>
-                                        >((acc, n) => {
-                                          const iso = (
-                                            n.country_iso2 || ""
-                                          ).toUpperCase();
-                                          if (!iso) return acc;
-                                          acc[iso] = (acc[iso] || 0) + 1;
-                                          return acc;
-                                        }, {}),
-                                      ).map(([country, count]) => ({
-                                        country,
-                                        count,
-                                      }))
-                                }
-                                onSelect={setSelectedCountry}
-                                dark={dark}
-                              />
-                            ) : (
-                              <WorldMapBubbles
-                                variant="compact"
-                                data={(() => {
-                                  const withTemp = (weatherStats || []).filter(
-                                    (w) => typeof w.temp_c === "number",
-                                  );
-                                  if (withTemp.length === 0) return [];
-                                  const temps = withTemp.map((w) =>
-                                    Number(w.temp_c),
-                                  );
-                                  const min = Math.min(...temps);
-                                  return withTemp.map((w) => ({
-                                    country: (w.country || "").toUpperCase(),
-                                    count: Number(w.temp_c) - min + 1,
-                                  }));
-                                })()}
-                                onSelect={setSelectedCountry}
-                                dark={dark}
-                              />
-                            )}
+                        <div className="flex items-center gap-2 text-xs">
+                          <button
+                            className={`rounded-full border px-3 py-1 transition ${
+                              mapMode === "news"
+                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                            onClick={() => {
+                              setMapMode("news");
+                              setListMode("news");
+                            }}
+                          >
+                            News
+                          </button>
+                          <button
+                            className={`rounded-full border px-3 py-1 transition ${
+                              mapMode === "weather"
+                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                            onClick={() => {
+                              setMapMode("weather");
+                              setListMode("weather");
+                            }}
+                          >
+                            Weather
+                          </button>
+                        </div>
+                      </div>
+                      <div className="relative flex-1 p-4">
+                        <div className="relative h-full min-h-[320px] rounded-2xl overflow-hidden bg-[color:var(--shell-bg)]">
+                          {mapMode === "news" ? (
+                            <WorldMapBubbles
+                              variant="compact"
+                              data={
+                                countryStats && countryStats.length > 0
+                                  ? countryStats
+                                  : Object.entries(
+                                      (news || []).reduce<
+                                        Record<string, number>
+                                      >((acc, n) => {
+                                        const iso = (
+                                          n.country_iso2 || ""
+                                        ).toUpperCase();
+                                        if (!iso) return acc;
+                                        acc[iso] = (acc[iso] || 0) + 1;
+                                        return acc;
+                                      }, {}),
+                                    ).map(([country, count]) => ({
+                                      country,
+                                      count,
+                                    }))
+                              }
+                              onSelect={setSelectedCountry}
+                              dark={dark}
+                            />
+                          ) : (
+                            <WorldMapBubbles
+                              variant="compact"
+                              data={(() => {
+                                const withTemp = (weatherStats || []).filter(
+                                  (w) => typeof w.temp_c === "number",
+                                );
+                                if (withTemp.length === 0) return [];
+                                const temps = withTemp.map((w) =>
+                                  Number(w.temp_c),
+                                );
+                                const min = Math.min(...temps);
+                                return withTemp.map((w) => ({
+                                  country: (w.country || "").toUpperCase(),
+                                  count: Number(w.temp_c) - min + 1,
+                                }));
+                              })()}
+                              onSelect={setSelectedCountry}
+                              dark={dark}
+                            />
+                          )}
+                        </div>
+                        {mapMode === "news" && countryStats.length === 0 && (
+                          <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)]">
+                            No aggregated stats yet — showing live list fallback
                           </div>
-                          {mapMode === "news" && countryStats.length === 0 && (
-                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)]">
-                              No aggregated stats yet — showing live list
-                              fallback
+                        )}
+                        {mapMode === "weather" &&
+                          (weatherStats?.length ?? 0) === 0 && (
+                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
+                              <span>No weather stats yet.</span>
+                              <button
+                                onClick={handleRefreshWeather}
+                                disabled={isRefreshingWeather}
+                                className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                {isRefreshingWeather
+                                  ? "Refreshing…"
+                                  : "Refresh now"}
+                              </button>
                             </div>
                           )}
-                          {mapMode === "weather" &&
-                            (weatherStats?.length ?? 0) === 0 && (
-                              <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
-                                <span>No weather stats yet.</span>
-                                <button
-                                  onClick={handleRefreshWeather}
-                                  disabled={isRefreshingWeather}
-                                  className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50 disabled:opacity-50"
-                                >
-                                  {isRefreshingWeather
-                                    ? "Refreshing…"
-                                    : "Refresh now"}
-                                </button>
-                              </div>
-                            )}
+                      </div>
+                    </div>
+
+                    <div
+                      className={`${cardBase} dashboard-panel flex min-h-[420px] flex-col`}
+                      style={{ animationDelay: "80ms" }}
+                    >
+                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Live feed
+                          </div>
+                          <div className="text-sm font-semibold">
+                            Latest intelligence drops
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs">
+                          <button
+                            className={`rounded-full border px-3 py-1 transition ${
+                              listMode === "news"
+                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                            onClick={() => setListMode("news")}
+                          >
+                            News
+                          </button>
+                          <button
+                            className={`rounded-full border px-3 py-1 transition ${
+                              listMode === "weather"
+                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                            onClick={() => setListMode("weather")}
+                          >
+                            Weather
+                          </button>
                         </div>
                       </div>
 
-                      <div>
-                        <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
-                          <div>
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Live feed
-                            </div>
-                            <div className="text-sm font-semibold">
-                              Latest intelligence drops
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs">
-                            <button
-                              className={`rounded-full border px-3 py-1 transition ${
-                                listMode === "news"
-                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                              }`}
-                              onClick={() => setListMode("news")}
-                            >
-                              News
-                            </button>
-                            <button
-                              className={`rounded-full border px-3 py-1 transition ${
-                                listMode === "weather"
-                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                              }`}
-                              onClick={() => setListMode("weather")}
-                            >
-                              Weather
-                            </button>
-                          </div>
-                        </div>
-
+                      <div className="flex-1 overflow-hidden">
                         {listMode === "news" ? (
-                          <div className="max-h-[420px] overflow-y-auto p-4 space-y-3">
+                          <div className="h-full overflow-y-auto p-4 space-y-3">
                             {news.length === 0 && (
                               <div className="text-sm text-[color:var(--shell-muted)]">
                                 No news items yet.
@@ -931,7 +898,7 @@ export default function ClaritasDashboard() {
                                   className="rounded-xl border border-[color:var(--shell-border)] bg-white p-3"
                                 >
                                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                                  <div className="relative h-20 w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none shrink-0">
+                                    <div className="relative h-20 w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none shrink-0">
                                       {img ? (
                                         <img
                                           src={img}
@@ -982,7 +949,7 @@ export default function ClaritasDashboard() {
                             })}
                           </div>
                         ) : (
-                          <div className="max-h-[420px] overflow-y-auto p-4 space-y-4">
+                          <div className="h-full overflow-y-auto p-4 space-y-4">
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <label className="text-[color:var(--shell-muted)]">
                                 Min temp (°C)
@@ -1051,9 +1018,167 @@ export default function ClaritasDashboard() {
                         )}
                       </div>
                     </div>
-                  </div>
 
-                  <div className={`${cardBase} lg:col-span-4`}>
+                    <div
+                      className={`${cardBase} dashboard-panel flex min-h-[420px] flex-col`}
+                      style={{ animationDelay: "160ms" }}
+                    >
+                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Metrics
+                          </div>
+                          <div className="text-sm font-semibold">
+                            Operational snapshot
+                          </div>
+                        </div>
+                        <div className="text-xs text-[color:var(--shell-muted)]">
+                          {todayLabel}
+                        </div>
+                      </div>
+                      <div className="relative flex-1 p-4">
+                        <div className="pointer-events-none absolute -right-10 top-6 h-24 w-24 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-2xl" />
+                        <div className="relative grid grid-cols-2 gap-3">
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Live signals
+                            </div>
+                            <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                              {news.length}
+                            </div>
+                            <div className="text-xs text-[color:var(--shell-muted)]">
+                              Stories & alerts
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Active regions
+                            </div>
+                            <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                              {activeRegions}
+                            </div>
+                            <div className="text-xs text-[color:var(--shell-muted)]">
+                              Countries tracked
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Weather rows
+                            </div>
+                            <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                              {weatherStats.length}
+                            </div>
+                            <div className="text-xs text-[color:var(--shell-muted)]">
+                              Latest observations
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Last sync
+                            </div>
+                            <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
+                              {latestEventLabel}
+                            </div>
+                            <div className="text-xs text-[color:var(--shell-muted)]">
+                              Combined feeds
+                            </div>
+                          </div>
+                          <div className="col-span-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-3 flex items-center justify-between">
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                                Focus
+                              </div>
+                              <div className="text-base font-semibold text-[color:var(--shell-ink)]">
+                                {focusLabel}
+                              </div>
+                            </div>
+                            <span className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                              {selectedCountry ? "Filtered" : "Global"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      className={`${cardBase} dashboard-panel flex min-h-[420px] flex-col`}
+                      style={{ animationDelay: "240ms" }}
+                    >
+                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            News volume
+                          </div>
+                          <div className="text-sm font-semibold">
+                            Articles over the last {newsTrendWindow} days
+                          </div>
+                        </div>
+                        <div className="text-xs text-[color:var(--shell-muted)]">
+                          {newsTrendTotal} stories
+                        </div>
+                      </div>
+                      <div className="flex-1 p-4">
+                        {newsTrendTotal === 0 ? (
+                          <div className="h-full grid place-items-center text-sm text-[color:var(--shell-muted)]">
+                            No timestamped articles yet.
+                          </div>
+                        ) : (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart
+                              data={newsTrend}
+                              margin={{ top: 10, right: 16, left: -8, bottom: 0 }}
+                            >
+                              <defs>
+                                <linearGradient
+                                  id="newsVolumeGradient"
+                                  x1="0"
+                                  y1="0"
+                                  x2="0"
+                                  y2="1"
+                                >
+                                  <stop
+                                    offset="5%"
+                                    stopColor="var(--signal-emerald)"
+                                    stopOpacity={0.4}
+                                  />
+                                  <stop
+                                    offset="95%"
+                                    stopColor="var(--signal-emerald)"
+                                    stopOpacity={0.05}
+                                  />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid
+                                stroke={chartGridColor}
+                                strokeDasharray="3 3"
+                              />
+                              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                              <YAxis
+                                allowDecimals={false}
+                                domain={[0, (max: number) => Math.max(2, max + 1)]}
+                                tick={{ fontSize: 12 }}
+                              />
+                              <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+                              <Area
+                                type="monotone"
+                                dataKey="count"
+                                stroke="var(--signal-emerald)"
+                                strokeWidth={2}
+                                fill="url(#newsVolumeGradient)"
+                              />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+                </div>
+
+                <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                  <div
+                    className={`${cardBase} dashboard-panel`}
+                    style={{ animationDelay: "320ms" }}
+                  >
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                         Country profile
@@ -1082,7 +1207,10 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
 
-                  <div className={`${cardBase} lg:col-span-4`}>
+                  <div
+                    className={`${cardBase} dashboard-panel`}
+                    style={{ animationDelay: "360ms" }}
+                  >
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                         AI search
@@ -1111,51 +1239,10 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
 
-                  <div className={`${cardBase} lg:col-span-4`}>
-                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div className="text-sm font-semibold">
-                        Analytics snapshot
-                      </div>
-                    </div>
-                    <div className="p-4 space-y-6">
-                      <div className="h-40">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <ScatterChart
-                            margin={{ top: 10, right: 10, left: 0, bottom: 10 }}
-                          >
-                            <XAxis dataKey="x" tick={{ fontSize: 12 }} />
-                            <YAxis dataKey="y" tick={{ fontSize: 12 }} />
-                            <ZAxis range={[60, 60]} />
-                            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
-                            <Scatter data={scatterData} fill="#94a3b8" />
-                          </ScatterChart>
-                        </ResponsiveContainer>
-                      </div>
-                      <div className="h-44">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={pieData}
-                              dataKey="value"
-                              nameKey="name"
-                              innerRadius={50}
-                              outerRadius={70}
-                            >
-                              {pieData.map((_, i) => (
-                                <Cell
-                                  key={i}
-                                  fill={pieColors[i % pieColors.length]}
-                                />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className={`${cardBase} lg:col-span-12`}>
+                  <div
+                    className={`${cardBase} dashboard-panel`}
+                    style={{ animationDelay: "400ms" }}
+                  >
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3 flex items-center gap-2">
                       <Bell className="h-4 w-4" />
                       <div className="text-sm font-semibold">Notifications</div>
