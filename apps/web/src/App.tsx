@@ -543,7 +543,7 @@ export default function ClaritasDashboard() {
     if (effectiveRange) {
       items = items.filter((item) => {
         const key = item.event_time ? getDateKey(item.event_time) : null;
-        if (!key) return false;
+        if (!key) return true;
         return key >= effectiveRange.start && key <= effectiveRange.end;
       });
     }
@@ -1326,7 +1326,7 @@ export default function ClaritasDashboard() {
           </div>
         </aside>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col min-h-0">
           <header className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-white dark:border-slate-800 dark:bg-slate-950">
             <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 lg:px-8">
               <button
@@ -1397,7 +1397,7 @@ export default function ClaritasDashboard() {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6">
+          <main className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6 lg:overflow-hidden">
             {sessionNotice && (
               <div className="mb-6">
                 <div
@@ -1415,15 +1415,15 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div className="relative flex flex-col gap-4 lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-                <div className="relative flex flex-col gap-4 lg:flex-1 lg:min-h-0">
+              <div className="relative flex flex-col gap-4 md:flex-1 md:min-h-0 md:overflow-hidden md:h-[calc(100vh-128px)]">
+                <div className="relative flex flex-col gap-4 md:flex-1 md:min-h-0">
                   <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-3xl dark:bg-emerald-900/40 dark:opacity-40" />
                   <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-[color:var(--signal-sky-soft)] opacity-80 blur-3xl dark:bg-sky-900/40 dark:opacity-40" />
 
-                  <section className="relative grid flex-1 min-h-0 grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-2">
+                  <section className="relative grid flex-1 min-h-0 grid-cols-1 gap-4 md:grid-cols-2 md:grid-rows-2 md:h-full md:overflow-hidden">
                     <div
                       id="signal-map-feed"
-                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`}
+                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden md:h-full`}
                       style={{ animationDelay: "0ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -1725,7 +1725,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`}
+                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden md:h-full`}
                       style={{ animationDelay: "80ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -1931,7 +1931,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`}
+                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden md:h-full`}
                       style={{ animationDelay: "160ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -2016,7 +2016,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`}
+                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden md:h-full`}
                       style={{ animationDelay: "240ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
