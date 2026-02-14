@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Search,
   Bell,
@@ -82,9 +90,26 @@ const legalPolicies = [
 ];
 
 const NEWS_FETCH_LIMIT = 250;
+const NEWS_ARCHIVE_PAGE_SIZE = 200;
+const NEWS_ARCHIVE_MAX_PAGES = 150;
 const NEWS_TREND_WINDOW_DAYS = 30;
 const MAP_WINDOW_MIN = 7;
 const MAP_WINDOW_MAX = 45;
+const SPLIT_VIEW_MIN_WIDTH = 700;
+const SPLIT_VIEW_MIN_HEIGHT = 620;
+
+type DataWindowPreset = "30d" | "90d" | "180d" | "all";
+
+const DATA_WINDOW_OPTIONS: Array<{
+  id: DataWindowPreset;
+  label: string;
+  days: number | null;
+}> = [
+  { id: "30d", label: "30d", days: 30 },
+  { id: "90d", label: "90d", days: 90 },
+  { id: "180d", label: "180d", days: 180 },
+  { id: "all", label: "All", days: null },
+];
 
 const REGION_OPTIONS = [
   { id: "global", label: "Global" },
@@ -175,6 +200,13 @@ export default function ClaritasDashboard() {
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [newsLoadMode, setNewsLoadMode] = useState<"recent" | "archive">(
+    "recent",
+  );
+  const [isLoadingNews, setIsLoadingNews] = useState(false);
+  const [newsLoadError, setNewsLoadError] = useState<string | null>(null);
+  const [dataWindowPreset, setDataWindowPreset] =
+    useState<DataWindowPreset>("30d");
   const [mapMode, setMapMode] = useState<"news" | "weather">("news");
   const [listMode, setListMode] = useState<"news" | "weather">("news");
   const [mapScale, setMapScale] = useState<"linear" | "log">("linear");
@@ -195,7 +227,12 @@ export default function ClaritasDashboard() {
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
+  const newsRequestIdRef = useRef(0);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [viewportSize, setViewportSize] = useState(() => ({
+    width: typeof window !== "undefined" ? window.innerWidth : 1280,
+    height: typeof window !== "undefined" ? window.innerHeight : 800,
+  }));
   const authProviderMap = useMemo(
     () => new Map(authProviders.map((p) => [p.id, p])),
     [authProviders],
@@ -294,6 +331,50 @@ export default function ClaritasDashboard() {
     };
   }, []);
 
+  const loadNewsData = useCallback(async (mode: "recent" | "archive") => {
+    const requestId = newsRequestIdRef.current + 1;
+    newsRequestIdRef.current = requestId;
+    setIsLoadingNews(true);
+    setNewsLoadError(null);
+    try {
+      if (mode === "recent") {
+        const items = await fetchNews({ limit: NEWS_FETCH_LIMIT });
+        if (newsRequestIdRef.current !== requestId) return;
+        setNews(items);
+        setNewsLoadMode("recent");
+        return;
+      }
+
+      const items: NewsItem[] = [];
+      const seenIds = new Set<number>();
+      let offset = 0;
+      for (let page = 0; page < NEWS_ARCHIVE_MAX_PAGES; page += 1) {
+        const batch = await fetchNews({
+          limit: NEWS_ARCHIVE_PAGE_SIZE,
+          offset,
+        });
+        if (newsRequestIdRef.current !== requestId) return;
+        if (batch.length === 0) break;
+        batch.forEach((item) => {
+          if (seenIds.has(item.id)) return;
+          seenIds.add(item.id);
+          items.push(item);
+        });
+        offset += batch.length;
+        if (batch.length < NEWS_ARCHIVE_PAGE_SIZE) break;
+      }
+      setNews(items);
+      setNewsLoadMode("archive");
+    } catch (err) {
+      if (newsRequestIdRef.current !== requestId) return;
+      setNewsLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (newsRequestIdRef.current === requestId) {
+        setIsLoadingNews(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     // Load initial data
     if (authStatus !== "authed") return;
@@ -303,10 +384,8 @@ export default function ClaritasDashboard() {
     fetchCountryWeather()
       .then(setWeatherStats)
       .catch(() => setWeatherStats([]));
-    fetchNews({ limit: NEWS_FETCH_LIMIT })
-      .then(setNews)
-      .catch(() => setNews([]));
-  }, [authStatus]);
+    void loadNewsData("recent");
+  }, [authStatus, loadNewsData]);
 
   const cardBase =
     "rounded-2xl border border-[color:var(--shell-border)] bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70";
@@ -399,12 +478,60 @@ export default function ClaritasDashboard() {
     return typeof source === "string" ? source : source?.name;
   };
 
+  const selectedWindowOption = useMemo(
+    () =>
+      DATA_WINDOW_OPTIONS.find((option) => option.id === dataWindowPreset) ??
+      DATA_WINDOW_OPTIONS[0],
+    [dataWindowPreset],
+  );
+
+  const selectedWindowDays = selectedWindowOption.days;
+  const selectedWindowLabel = selectedWindowOption.label;
+
+  const newsDateBounds = useMemo(() => {
+    const keys = newsScope
+      .map((item) => (item.event_time ? getDateKey(item.event_time) : null))
+      .filter((value): value is string => Boolean(value))
+      .sort();
+    if (keys.length === 0) return null;
+    return { start: keys[0], end: keys[keys.length - 1] };
+  }, [newsScope]);
+
+  const newsCoverageLabel = useMemo(() => {
+    if (!newsDateBounds) return "No dated articles loaded";
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    return `${formatter.format(new Date(newsDateBounds.start))} – ${formatter.format(new Date(newsDateBounds.end))}`;
+  }, [newsDateBounds]);
+
+  const defaultRange = useMemo(() => {
+    if (!newsDateBounds) return null;
+    if (selectedWindowDays == null) return newsDateBounds;
+    const endDate = new Date(newsDateBounds.end);
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - selectedWindowDays + 1);
+    const start = getDateKey(startDate);
+    if (!start) return newsDateBounds;
+    return {
+      start: start < newsDateBounds.start ? newsDateBounds.start : start,
+      end: newsDateBounds.end,
+    };
+  }, [newsDateBounds, selectedWindowDays]);
+
+  const trendWindowLabel = useMemo(() => {
+    if (selectedWindowDays == null) return "all available dates";
+    return `the last ${selectedWindowDays} days`;
+  }, [selectedWindowDays]);
+
   const newsTrend = useMemo(() => {
+    if (!defaultRange) return [];
     const formatter = new Intl.DateTimeFormat("en-US", {
       month: "short",
       day: "numeric",
     });
-    const today = new Date();
     const buckets = new Map<
       string,
       {
@@ -419,26 +546,30 @@ export default function ClaritasDashboard() {
         topCountries: string[];
       }
     >();
-    const perDayCountries = new Map<string, Map<string, number>>();
-    for (let i = NEWS_TREND_WINDOW_DAYS - 1; i >= 0; i -= 1) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      buckets.set(key, {
-        dateKey: key,
-        label: formatter.format(d),
-        count: 0,
-        selectedCount: 0,
-        comparisonCount: 0,
-        rollingAvg: 0,
-        selectedRollingAvg: 0,
-        comparisonRollingAvg: 0,
-        topCountries: [],
-      });
+    const start = new Date(defaultRange.start);
+    const end = new Date(defaultRange.end);
+    const cursor = new Date(start);
+    while (cursor <= end) {
+      const key = getDateKey(cursor);
+      if (key) {
+        buckets.set(key, {
+          dateKey: key,
+          label: formatter.format(cursor),
+          count: 0,
+          selectedCount: 0,
+          comparisonCount: 0,
+          rollingAvg: 0,
+          selectedRollingAvg: 0,
+          comparisonRollingAvg: 0,
+          topCountries: [],
+        });
+      }
+      cursor.setDate(cursor.getDate() + 1);
     }
 
     const selectedIso = selectedCountry?.toUpperCase() ?? null;
     const comparisonIso = comparisonCountry?.toUpperCase() ?? null;
+    const perDayCountries = new Map<string, Map<string, number>>();
 
     newsScope.forEach((item) => {
       if (!item.event_time) return;
@@ -459,8 +590,8 @@ export default function ClaritasDashboard() {
 
     const points = Array.from(buckets.values());
     points.forEach((bucket, idx) => {
-      const start = Math.max(0, idx - 6);
-      const window = points.slice(start, idx + 1);
+      const startIdx = Math.max(0, idx - 6);
+      const window = points.slice(startIdx, idx + 1);
       const avg =
         window.reduce((sum, item) => sum + item.count, 0) / window.length;
       bucket.rollingAvg = Number(avg.toFixed(2));
@@ -481,7 +612,7 @@ export default function ClaritasDashboard() {
     });
 
     return points;
-  }, [newsScope, selectedCountry, comparisonCountry]);
+  }, [newsScope, selectedCountry, comparisonCountry, defaultRange]);
 
   const newsTrendTotal = useMemo(
     () => newsTrend.reduce((sum, item) => sum + item.count, 0),
@@ -508,25 +639,23 @@ export default function ClaritasDashboard() {
   }, [chartRange, newsTrend]);
 
   const activeRangeLabel = useMemo(() => {
-    if (!activeRange) return `Last ${NEWS_TREND_WINDOW_DAYS} days`;
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+    if (!activeRange) {
+      if (!defaultRange) return selectedWindowLabel;
+      return `${formatter.format(new Date(defaultRange.start))} – ${formatter.format(new Date(defaultRange.end))}`;
+    }
     const startLabel =
       newsTrend.find((d) => d.dateKey === activeRange.start)?.label ??
-      activeRange.start;
+      formatter.format(new Date(activeRange.start));
     const endLabel =
       newsTrend.find((d) => d.dateKey === activeRange.end)?.label ??
-      activeRange.end;
+      formatter.format(new Date(activeRange.end));
     return `${startLabel} – ${endLabel}`;
-  }, [activeRange, newsTrend]);
-
-  const defaultRange = useMemo(() => {
-    const today = new Date();
-    const end = getDateKey(today);
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - NEWS_TREND_WINDOW_DAYS + 1);
-    const start = getDateKey(startDate);
-    if (!start || !end) return null;
-    return { start, end };
-  }, []);
+  }, [activeRange, defaultRange, newsTrend, selectedWindowLabel]);
 
   const effectiveRange = activeRange ?? defaultRange;
 
@@ -580,18 +709,20 @@ export default function ClaritasDashboard() {
 
   const mapRange = useMemo(() => {
     if (activeRange) return activeRange;
-    const today = new Date();
-    const end = getDateKey(today);
+    const anchorDate = newsDateBounds?.end
+      ? new Date(newsDateBounds.end)
+      : new Date();
+    const end = getDateKey(anchorDate);
     const windowSize = Math.min(
       MAP_WINDOW_MAX,
       Math.max(MAP_WINDOW_MIN, mapWindowDays),
     );
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - windowSize + 1);
+    const startDate = new Date(anchorDate);
+    startDate.setDate(anchorDate.getDate() - windowSize + 1);
     const start = getDateKey(startDate);
     if (!start || !end) return null;
     return { start, end };
-  }, [activeRange, mapWindowDays]);
+  }, [activeRange, mapWindowDays, newsDateBounds?.end]);
 
   const mapDates = useMemo(() => {
     if (!mapRange) return [] as string[];
@@ -876,10 +1007,21 @@ export default function ClaritasDashboard() {
     return regionFilter === "global" ? "Global" : regionLabel;
   }, [selectedCountry, comparisonCountry, regionFilter, regionLabel]);
 
+  const splitViewEnabled = useMemo(
+    () =>
+      viewportSize.width >= SPLIT_VIEW_MIN_WIDTH &&
+      viewportSize.height >= SPLIT_VIEW_MIN_HEIGHT,
+    [viewportSize.height, viewportSize.width],
+  );
+
+  const dashboardPanelClass = `${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden${
+    splitViewEnabled ? " h-full" : ""
+  }`;
+
   const dashboardHeight = useMemo(() => {
     const padding = 48; // py-6 on main (top + bottom)
-    if (!headerHeight) return `calc(100vh - ${padding}px)`;
-    return `calc(100vh - ${headerHeight}px - ${padding}px)`;
+    if (!headerHeight) return `calc(100dvh - ${padding}px)`;
+    return `calc(100dvh - ${headerHeight}px - ${padding}px)`;
   }, [headerHeight]);
 
   useEffect(() => {
@@ -888,6 +1030,19 @@ export default function ClaritasDashboard() {
       setCompareMode(false);
     }
   }, [selectedCountry]);
+
+  useEffect(() => {
+    if (dataWindowPreset === "all" || !newsDateBounds) return;
+    const latest = new Date(newsDateBounds.end);
+    const now = new Date();
+    const staleDays = Math.floor(
+      (now.getTime() - latest.getTime()) / (1000 * 60 * 60 * 24),
+    );
+    if (staleDays > 180) {
+      setDataWindowPreset("all");
+      setChartRange({});
+    }
+  }, [dataWindowPreset, newsDateBounds]);
 
   useEffect(() => {
     if (mapDates.length > 0) {
@@ -918,6 +1073,14 @@ export default function ClaritasDashboard() {
     const observer = new ResizeObserver(update);
     observer.observe(el);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const update = () =>
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
   }, []);
 
   useEffect(() => {
@@ -1439,17 +1602,89 @@ export default function ClaritasDashboard() {
 
             {activeView === "dashboard" && (
               <div
-                className="relative flex flex-col gap-4 md:flex-1 md:min-h-0 md:overflow-hidden md:h-[var(--dashboard-h)]"
-                style={{ "--dashboard-h": dashboardHeight } as React.CSSProperties}
+                className={`relative flex flex-col gap-4 ${
+                  splitViewEnabled
+                    ? "flex-1 min-h-0 overflow-hidden h-[var(--dashboard-h)]"
+                    : ""
+                }`}
+                style={{ "--dashboard-h": dashboardHeight } as CSSProperties}
               >
-                <div className="relative flex flex-col gap-4 md:flex-1 md:min-h-0">
+                <div
+                  className={`relative flex flex-col gap-4 ${
+                    splitViewEnabled ? "flex-1 min-h-0 overflow-hidden" : ""
+                  }`}
+                >
                   <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-3xl dark:bg-emerald-900/40 dark:opacity-40" />
                   <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-[color:var(--signal-sky-soft)] opacity-80 blur-3xl dark:bg-sky-900/40 dark:opacity-40" />
 
-                  <section className="relative grid flex-1 min-h-0 grid-cols-1 gap-4 md:grid-cols-2 md:grid-rows-2 md:h-full md:overflow-hidden">
+                  <div
+                    className={`${cardBase} dashboard-panel flex flex-wrap items-center gap-3 px-4 py-3`}
+                    style={{ animationDelay: "0ms" }}
+                  >
+                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                      <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Window
+                      </span>
+                      {DATA_WINDOW_OPTIONS.map((option) => {
+                        const active = dataWindowPreset === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            onClick={() => {
+                              setDataWindowPreset(option.id);
+                              setChartRange({});
+                            }}
+                            className={`rounded-full border px-3 py-1 transition ${
+                              active
+                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                      <span>Coverage: {newsCoverageLabel}</span>
+                      <span className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-ink)]">
+                        {newsLoadMode === "archive"
+                          ? `Archive (${news.length})`
+                          : `Recent (${news.length})`}
+                      </span>
+                      <button
+                        onClick={() =>
+                          void loadNewsData(
+                            newsLoadMode === "archive" ? "recent" : "archive",
+                          )
+                        }
+                        disabled={isLoadingNews}
+                        className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
+                      >
+                        {isLoadingNews
+                          ? "Loading…"
+                          : newsLoadMode === "archive"
+                            ? "Use recent"
+                            : "Load all data"}
+                      </button>
+                    </div>
+                    {newsLoadError && (
+                      <div className="w-full text-xs text-rose-600">
+                        Failed to refresh news data: {newsLoadError}
+                      </div>
+                    )}
+                  </div>
+
+                  <section
+                    className={`relative grid flex-1 min-h-0 gap-4 ${
+                      splitViewEnabled
+                        ? "grid-cols-2 grid-rows-2 h-full overflow-hidden"
+                        : "grid-cols-1"
+                    }`}
+                  >
                     <div
                       id="signal-map-feed"
-                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden md:h-full`}
+                      className={dashboardPanelClass}
                       style={{ animationDelay: "0ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -1570,7 +1805,13 @@ export default function ClaritasDashboard() {
                         </div>
                       )}
                       <div className="relative flex-1 min-h-0 p-4">
-                        <div className="relative h-full min-h-0 rounded-2xl overflow-hidden bg-[color:var(--shell-bg)]">
+                        <div
+                          className={`relative min-h-0 rounded-2xl overflow-hidden bg-[color:var(--shell-bg)] ${
+                            splitViewEnabled
+                              ? "h-full"
+                              : "h-[52vh] max-h-[520px]"
+                          }`}
+                        >
                           <WorldMapBubbles
                             variant="compact"
                             data={
@@ -1751,7 +1992,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden md:h-full`}
+                      className={dashboardPanelClass}
                       style={{ animationDelay: "80ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -1797,8 +2038,32 @@ export default function ClaritasDashboard() {
                             className="h-full overflow-y-auto p-4 space-y-3"
                           >
                             {filteredNews.length === 0 && (
-                              <div className="text-sm text-[color:var(--shell-muted)]">
-                                No news items for the current filters.
+                              <div className="rounded-xl border border-[color:var(--shell-border)] bg-white p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
+                                <div>No news items for the current filters.</div>
+                                <div className="flex flex-wrap items-center gap-2 text-xs">
+                                  {dataWindowPreset !== "all" && (
+                                    <button
+                                      onClick={() => {
+                                        setDataWindowPreset("all");
+                                        setChartRange({});
+                                      }}
+                                      className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                    >
+                                      Show all dates
+                                    </button>
+                                  )}
+                                  {newsLoadMode !== "archive" && (
+                                    <button
+                                      onClick={() => void loadNewsData("archive")}
+                                      disabled={isLoadingNews}
+                                      className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
+                                    >
+                                      {isLoadingNews
+                                        ? "Loading…"
+                                        : "Load all data"}
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             )}
                             {filteredNews.map((n) => {
@@ -1957,7 +2222,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden md:h-full`}
+                      className={dashboardPanelClass}
                       style={{ animationDelay: "160ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -2042,7 +2307,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden md:h-full`}
+                      className={dashboardPanelClass}
                       style={{ animationDelay: "240ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -2051,7 +2316,7 @@ export default function ClaritasDashboard() {
                             News volume
                           </div>
                           <div className="text-sm font-semibold">
-                            Articles over the last {NEWS_TREND_WINDOW_DAYS} days
+                            Articles over {trendWindowLabel}
                           </div>
                           <div className="text-xs text-[color:var(--shell-muted)]">
                             {activeRangeLabel}
