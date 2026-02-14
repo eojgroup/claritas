@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   Bell,
@@ -194,6 +194,8 @@ export default function ClaritasDashboard() {
   >("overview");
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
   const authProviderMap = useMemo(
     () => new Map(authProviders.map((p) => [p.id, p])),
     [authProviders],
@@ -874,6 +876,12 @@ export default function ClaritasDashboard() {
     return regionFilter === "global" ? "Global" : regionLabel;
   }, [selectedCountry, comparisonCountry, regionFilter, regionLabel]);
 
+  const dashboardHeight = useMemo(() => {
+    const padding = 48; // py-6 on main (top + bottom)
+    if (!headerHeight) return `calc(100vh - ${padding}px)`;
+    return `calc(100vh - ${headerHeight}px - ${padding}px)`;
+  }, [headerHeight]);
+
   useEffect(() => {
     if (!selectedCountry) {
       setComparisonCountry(null);
@@ -899,6 +907,18 @@ export default function ClaritasDashboard() {
       setMapPlaying(false);
     }
   }, [mapMode]);
+
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const update = () => {
+      setHeaderHeight(el.getBoundingClientRect().height);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!mapPlaying || mapDates.length === 0) return;
@@ -1327,7 +1347,10 @@ export default function ClaritasDashboard() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col min-h-0">
-          <header className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-white dark:border-slate-800 dark:bg-slate-950">
+          <header
+            ref={headerRef}
+            className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-white dark:border-slate-800 dark:bg-slate-950"
+          >
             <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 lg:px-8">
               <button
                 type="button"
@@ -1397,7 +1420,7 @@ export default function ClaritasDashboard() {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6 lg:overflow-hidden">
+          <main className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6">
             {sessionNotice && (
               <div className="mb-6">
                 <div
@@ -1415,7 +1438,10 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div className="relative flex flex-col gap-4 md:flex-1 md:min-h-0 md:overflow-hidden md:h-[calc(100vh-128px)]">
+              <div
+                className="relative flex flex-col gap-4 md:flex-1 md:min-h-0 md:overflow-hidden md:h-[var(--dashboard-h)]"
+                style={{ "--dashboard-h": dashboardHeight } as React.CSSProperties}
+              >
                 <div className="relative flex flex-col gap-4 md:flex-1 md:min-h-0">
                   <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-3xl dark:bg-emerald-900/40 dark:opacity-40" />
                   <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-[color:var(--signal-sky-soft)] opacity-80 blur-3xl dark:bg-sky-900/40 dark:opacity-40" />
