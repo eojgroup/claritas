@@ -141,6 +141,7 @@ const safeDownload = (filename: string, data: Blob | string) => {
 
 import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
+import AdminIngestionPanel from "./components/AdminIngestionPanel";
 import {
   fetchAuthMe,
   fetchAuthProviders,
@@ -150,7 +151,6 @@ import {
   getAuthStartUrl,
   logoutAuth,
   imageProxy,
-  ingestWeatherNow,
   type AuthProvider,
   type AuthProviderId,
   type AuthUser,
@@ -168,7 +168,7 @@ export default function ClaritasDashboard() {
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<
-    "dashboard" | "profile" | "legal"
+    "dashboard" | "admin" | "profile" | "legal"
   >("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -220,7 +220,6 @@ export default function ClaritasDashboard() {
     endIndex?: number;
   }>({});
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
-  const [isRefreshingWeather, setIsRefreshingWeather] = useState(false);
   const [profileSection, setProfileSection] = useState<
     "overview" | "identity" | "preferences" | "security" | "policies"
   >("overview");
@@ -289,6 +288,14 @@ export default function ClaritasDashboard() {
       setProfileSection("overview");
     }
   }, [activeView]);
+
+  const isAdmin = (authUser?.roles ?? []).includes("admin");
+
+  useEffect(() => {
+    if (!isAdmin && activeView === "admin") {
+      setActiveView("dashboard");
+    }
+  }, [activeView, isAdmin]);
 
   useEffect(() => {
     let active = true;
@@ -1106,19 +1113,6 @@ export default function ClaritasDashboard() {
     }
   }, [chartRange.endIndex, chartRange.startIndex, newsTrend.length]);
 
-  async function handleRefreshWeather() {
-    try {
-      setIsRefreshingWeather(true);
-      await ingestWeatherNow(selectedCountry || undefined);
-      const next = await fetchCountryWeather();
-      setWeatherStats(next);
-    } catch {
-      // ignore for now
-    } finally {
-      setIsRefreshingWeather(false);
-    }
-  }
-
   const handleMapSelect = (iso: string) => {
     const key = iso.toUpperCase();
     if (compareMode && selectedCountry) {
@@ -1275,12 +1269,16 @@ export default function ClaritasDashboard() {
       view: "dashboard" as const,
       icon: LayoutGrid,
     },
+    ...(isAdmin
+      ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings }]
+      : []),
     { id: "profile", label: "Profile", view: "profile" as const, icon: User },
     { id: "legal", label: "Policies", view: "legal" as const, icon: FileText },
   ];
 
   const viewMeta = {
     dashboard: { kicker: "Dashboard", title: "Signal desk overview" },
+    admin: { kicker: "Admin", title: "Data ingestion control" },
     profile: { kicker: "Account", title: "Profile & access" },
     legal: { kicker: "Legal", title: "Policies & usage" },
   } as const;
@@ -1886,15 +1884,16 @@ export default function ClaritasDashboard() {
                           mapWeatherScope.length === 0 && (
                             <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
                               <span>No weather stats yet.</span>
-                              <button
-                                onClick={handleRefreshWeather}
-                                disabled={isRefreshingWeather}
-                                className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50 disabled:opacity-50"
-                              >
-                                {isRefreshingWeather
-                                  ? "Refreshing…"
-                                  : "Refresh now"}
-                              </button>
+                              {isAdmin ? (
+                                <button
+                                  onClick={() => setActiveView("admin")}
+                                  className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50"
+                                >
+                                  Open admin ingest
+                                </button>
+                              ) : (
+                                <span>Admin ingestion required.</span>
+                              )}
                             </div>
                           )}
                       </div>
@@ -2171,15 +2170,18 @@ export default function ClaritasDashboard() {
                                 }
                                 placeholder="Any"
                               />
-                              <button
-                                onClick={handleRefreshWeather}
-                                disabled={isRefreshingWeather}
-                                className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-slate-50 disabled:opacity-50"
-                              >
-                                {isRefreshingWeather
-                                  ? "Refreshing…"
-                                  : "Refresh"}
-                              </button>
+                              {isAdmin ? (
+                                <button
+                                  onClick={() => setActiveView("admin")}
+                                  className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-slate-50"
+                                >
+                                  Open admin ingest
+                                </button>
+                              ) : (
+                                <div className="ml-auto text-xs text-[color:var(--shell-muted)]">
+                                  Ingestion is admin-only
+                                </div>
+                              )}
                             </div>
                             <ul className="list-none divide-y divide-[color:var(--shell-border)]">
                               {filteredWeather.length === 0 && (
@@ -2635,6 +2637,9 @@ export default function ClaritasDashboard() {
                   </div>
                 </details>
               </div>
+            )}
+            {activeView === "admin" && isAdmin && (
+              <AdminIngestionPanel dark={dark} />
             )}
             {activeView === "profile" && (
               <div className="space-y-6">

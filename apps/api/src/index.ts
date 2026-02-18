@@ -3,6 +3,18 @@ import { ingestNewsApiEverything, ingestNewsApiTopHeadlines } from "./connectors
 import { getCountryWeatherLatest, ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
 import { pool } from "./db";
 import authRouter, { requireAuth, requireRole } from "./auth";
+import {
+  IngestionValidationError,
+  buildNewsRunPlan,
+  buildWeatherRunPlan,
+  getMetrics,
+  getRunDetail,
+  getRunLogs,
+  listRuns,
+  triggerNewsRun,
+  triggerWeatherRun,
+  type IngestionPipeline,
+} from "./ingestion-admin";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -16,6 +28,27 @@ app.use("/api/auth", authRouter);
 
 const requireAdminRole = requireRole("admin");
 const requireAuthenticated = requireAuth();
+
+function parsePipeline(value: unknown): IngestionPipeline | undefined {
+  if (value === "news" || value === "weather") return value;
+  return undefined;
+}
+
+function getRequestActor(res: express.Response): { userId: number | null; email: string | null; triggerMode: string } {
+  const locals = res.locals as {
+    auth?: {
+      user?: {
+        id?: number;
+        email?: string | null;
+      };
+    };
+  };
+  return {
+    userId: typeof locals.auth?.user?.id === "number" ? locals.auth.user.id : null,
+    email: typeof locals.auth?.user?.email === "string" ? locals.auth.user.email : null,
+    triggerMode: "admin_ui",
+  };
+}
 
 function requireIngestionAccess(req: express.Request, res: express.Response, next: express.NextFunction) {
   const sharedToken = process.env.INGEST_API_TOKEN;
@@ -89,6 +122,104 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
     res.json({ stats: rows });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+// Admin ingestion orchestration (run + logs + metrics)
+app.post("/api/admin/ingestion/news/run", requireAdminRole, async (req, res) => {
+  try {
+    const plan = buildNewsRunPlan(req.body || {});
+    const run = await triggerNewsRun({
+      actor: getRequestActor(res),
+      plan,
+    });
+    const detail = await getRunDetail(run.runId, 150);
+    if (!detail) return res.status(500).json({ error: "Failed to load created run." });
+    return res.status(202).json(detail);
+  } catch (e: any) {
+    if (e instanceof IngestionValidationError) {
+      return res.status(400).json({ error: e.message || String(e) });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.post("/api/admin/ingestion/weather/run", requireAdminRole, async (req, res) => {
+  try {
+    const plan = buildWeatherRunPlan(req.body || {});
+    const run = await triggerWeatherRun({
+      actor: getRequestActor(res),
+      plan,
+    });
+    const detail = await getRunDetail(run.runId, 150);
+    if (!detail) return res.status(500).json({ error: "Failed to load created run." });
+    return res.status(202).json(detail);
+  } catch (e: any) {
+    if (e instanceof IngestionValidationError) {
+      return res.status(400).json({ error: e.message || String(e) });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/admin/ingestion/runs", requireAdminRole, async (req, res) => {
+  try {
+    const pipelineRaw = typeof req.query.pipeline === "string" ? req.query.pipeline.trim().toLowerCase() : undefined;
+    const pipeline = parsePipeline(pipelineRaw);
+    if (pipelineRaw && !pipeline) {
+      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather." });
+    }
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
+    const runs = await listRuns({ pipeline, limit, offset });
+    return res.json({ runs });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/admin/ingestion/runs/:runId", requireAdminRole, async (req, res) => {
+  try {
+    const runId = parseInt(req.params.runId, 10);
+    if (!Number.isFinite(runId) || runId <= 0) {
+      return res.status(400).json({ error: "Invalid run id." });
+    }
+    const logLimit = Math.min(Math.max(parseInt(String(req.query.logLimit || "200"), 10) || 200, 1), 1000);
+    const detail = await getRunDetail(runId, logLimit);
+    if (!detail) return res.status(404).json({ error: "Run not found." });
+    return res.json(detail);
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/admin/ingestion/runs/:runId/logs", requireAdminRole, async (req, res) => {
+  try {
+    const runId = parseInt(req.params.runId, 10);
+    if (!Number.isFinite(runId) || runId <= 0) {
+      return res.status(400).json({ error: "Invalid run id." });
+    }
+    const afterId = Math.max(parseInt(String(req.query.afterId || "0"), 10) || 0, 0);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "200"), 10) || 200, 1), 1000);
+    const logs = await getRunLogs(runId, { afterId, limit });
+    return res.json({ logs });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/admin/ingestion/metrics", requireAdminRole, async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 180);
+    const pipelineRaw = typeof req.query.pipeline === "string" ? req.query.pipeline.trim().toLowerCase() : undefined;
+    const pipeline = parsePipeline(pipelineRaw);
+    if (pipelineRaw && !pipeline) {
+      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather." });
+    }
+    const metrics = await getMetrics({ days, pipeline });
+    return res.json(metrics);
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
   }
 });
 
