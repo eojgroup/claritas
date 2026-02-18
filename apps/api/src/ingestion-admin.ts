@@ -737,9 +737,9 @@ export async function listRuns(options: {
      WHERE s.name IN ('newsapi', 'openweather')
        AND (
        $3::text IS NULL
-       OR r.pipeline = $3
-       OR ($3 = 'news' AND s.name = 'newsapi')
-       OR ($3 = 'weather' AND s.name = 'openweather')
+       OR r.pipeline = $3::text
+       OR ($3::text = 'news' AND s.name = 'newsapi')
+       OR ($3::text = 'weather' AND s.name = 'openweather')
      )
      ORDER BY r.started_at DESC, r.id DESC
      LIMIT $1 OFFSET $2`,
@@ -822,9 +822,9 @@ export async function getMetrics(options?: {
        AND s.name IN ('newsapi', 'openweather')
        AND (
          $2::text IS NULL
-         OR r.pipeline = $2
-         OR ($2 = 'news' AND s.name = 'newsapi')
-         OR ($2 = 'weather' AND s.name = 'openweather')
+         OR r.pipeline = $2::text
+         OR ($2::text = 'news' AND s.name = 'newsapi')
+         OR ($2::text = 'weather' AND s.name = 'openweather')
        )
      ORDER BY r.started_at ASC, r.id ASC`,
     [String(days), pipeline]

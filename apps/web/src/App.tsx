@@ -395,7 +395,7 @@ export default function ClaritasDashboard() {
   }, [authStatus, loadNewsData]);
 
   const cardBase =
-    "rounded-2xl border border-[color:var(--shell-border)] bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900/70";
+    "rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm";
   const chartGridColor = dark ? "#1f2937" : "#e2e8f0";
 
   const todayLabel = useMemo(
@@ -1224,7 +1224,7 @@ export default function ClaritasDashboard() {
     if (!active || !payload || payload.length === 0) return null;
     const point = payload[0].payload;
     return (
-      <div className="rounded-lg border border-[color:var(--shell-border)] bg-white px-3 py-2 text-xs text-[color:var(--shell-ink)] shadow dark:bg-slate-900 dark:text-slate-100">
+      <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-xs text-[color:var(--shell-ink)] shadow dark:bg-slate-900 dark:text-slate-100">
         <div className="font-semibold">{label}</div>
         <div>Total: {point.count}</div>
         {selectedCountry && (
@@ -1352,7 +1352,7 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)] dark:bg-slate-950 dark:text-slate-100">
+    <div className="min-h-screen w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)]">
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div
@@ -1395,8 +1395,8 @@ export default function ClaritasDashboard() {
                       }}
                       className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
                         active
-                          ? "bg-white/10 text-white"
-                          : "text-white/70 hover:bg-white/10 hover:text-white"
+                          ? "bg-[color:var(--shell-surface)]/10 text-white"
+                          : "text-white/70 hover:bg-[color:var(--shell-surface)]/10 hover:text-white"
                       }`}
                     >
                       <Icon className="h-4 w-4" />
@@ -1408,7 +1408,7 @@ export default function ClaritasDashboard() {
               <div className="border-t border-white/10 px-6 py-4 space-y-3">
                 {authUser && (
                   <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-white/15 text-sm font-semibold uppercase grid place-items-center">
+                    <div className="h-9 w-9 rounded-full bg-[color:var(--shell-surface)]/15 text-sm font-semibold uppercase grid place-items-center">
                       {userInitial}
                     </div>
                     <div className="min-w-0">
@@ -1425,7 +1425,7 @@ export default function ClaritasDashboard() {
                   type="button"
                   onClick={handleSignOut}
                   disabled={isSigningOut}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white/90 hover:bg-white/15 disabled:opacity-60"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-[color:var(--shell-surface)]/10 px-3 py-2 text-sm text-white/90 hover:bg-[color:var(--shell-surface)]/15 disabled:opacity-60"
                 >
                   <LogOut className="h-4 w-4" />
                   {isSigningOut ? "Signing out…" : "Sign out"}
@@ -1469,8 +1469,8 @@ export default function ClaritasDashboard() {
                   onClick={() => setActiveView(item.view)}
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
                     active
-                      ? "bg-white/10 text-white"
-                      : "text-white/70 hover:bg-white/10 hover:text-white"
+                      ? "bg-[color:var(--shell-surface)]/10 text-white"
+                      : "text-white/70 hover:bg-[color:var(--shell-surface)]/10 hover:text-white"
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -1482,7 +1482,7 @@ export default function ClaritasDashboard() {
           <div className="border-t border-white/10 px-6 py-5 space-y-3">
             {authUser && (
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-white/15 text-sm font-semibold uppercase grid place-items-center">
+                <div className="h-10 w-10 rounded-full bg-[color:var(--shell-surface)]/15 text-sm font-semibold uppercase grid place-items-center">
                   {userInitial}
                 </div>
                 <div className="min-w-0">
@@ -1499,7 +1499,7 @@ export default function ClaritasDashboard() {
               type="button"
               onClick={handleSignOut}
               disabled={isSigningOut}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-sm text-white/90 hover:bg-white/15 disabled:opacity-60"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-[color:var(--shell-surface)]/10 px-3 py-2 text-sm text-white/90 hover:bg-[color:var(--shell-surface)]/15 disabled:opacity-60"
             >
               <LogOut className="h-4 w-4" />
               {isSigningOut ? "Signing out…" : "Sign out"}
@@ -1510,7 +1510,7 @@ export default function ClaritasDashboard() {
         <div className="flex min-w-0 flex-1 flex-col min-h-0">
           <header
             ref={headerRef}
-            className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-white dark:border-slate-800 dark:bg-slate-950"
+            className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
           >
             <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 lg:px-8">
               <button
@@ -1551,7 +1551,7 @@ export default function ClaritasDashboard() {
                   </span>
                   <span>{todayLabel}</span>
                 </div>
-                <div className="hidden md:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2 text-sm text-[color:var(--shell-muted)]">
+                <div className="hidden md:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-muted)]">
                   <Search className="h-4 w-4" />
                   <input
                     className="w-40 bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
@@ -1563,7 +1563,7 @@ export default function ClaritasDashboard() {
                 <button
                   aria-label="Toggle dark mode"
                   onClick={() => setDark((v) => !v)}
-                  className="h-10 w-10 rounded-xl border border-[color:var(--shell-border)] bg-white text-[color:var(--shell-ink)] hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  className="h-10 w-10 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] hover:bg-slate-800/40"
                 >
                   <span className="grid h-full w-full place-items-center">
                     {dark ? (
@@ -1573,7 +1573,7 @@ export default function ClaritasDashboard() {
                     )}
                   </span>
                 </button>
-                <div className="hidden sm:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs text-[color:var(--shell-muted)]">
+                <div className="hidden sm:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-muted)]">
                   <span className="h-2 w-2 rounded-full bg-emerald-500" />
                   <span className="max-w-[160px] truncate">{userLabel}</span>
                 </div>
@@ -1590,7 +1590,7 @@ export default function ClaritasDashboard() {
                       ? "border-rose-200 bg-rose-50 text-rose-700"
                       : sessionNotice.tone === "success"
                         ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                        : "border-slate-200 bg-white text-slate-700"
+                        : "border-slate-200 bg-[color:var(--shell-surface)] text-slate-700"
                   }`}
                 >
                   {sessionNotice.message}
@@ -1635,7 +1635,7 @@ export default function ClaritasDashboard() {
                             className={`rounded-full border px-3 py-1 transition ${
                               active
                                 ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
                             {option.label}
@@ -1645,7 +1645,7 @@ export default function ClaritasDashboard() {
                     </div>
                     <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
                       <span>Coverage: {newsCoverageLabel}</span>
-                      <span className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-ink)]">
+                      <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-ink)]">
                         {newsLoadMode === "archive"
                           ? `Archive (${news.length})`
                           : `Recent (${news.length})`}
@@ -1657,7 +1657,7 @@ export default function ClaritasDashboard() {
                           )
                         }
                         disabled={isLoadingNews}
-                        className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
+                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
                       >
                         {isLoadingNews
                           ? "Loading…"
@@ -1702,7 +1702,7 @@ export default function ClaritasDashboard() {
                             className={`rounded-full border px-3 py-1 transition ${
                               mapMode === "news"
                                 ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => {
                               setMapMode("news");
@@ -1715,7 +1715,7 @@ export default function ClaritasDashboard() {
                             className={`rounded-full border px-3 py-1 transition ${
                               mapMode === "weather"
                                 ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => {
                               setMapMode("weather");
@@ -1737,7 +1737,7 @@ export default function ClaritasDashboard() {
                                 className={`rounded-full border px-3 py-1 transition ${
                                   active
                                     ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                    : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                    : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                                 }`}
                               >
                                 {region.label}
@@ -1752,7 +1752,7 @@ export default function ClaritasDashboard() {
                                 mode === "linear" ? "log" : "linear",
                               )
                             }
-                            className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                           >
                             Scale: {mapScale === "linear" ? "Linear" : "Log"}
                           </button>
@@ -1761,7 +1761,7 @@ export default function ClaritasDashboard() {
                             className={`rounded-full border px-3 py-1 transition ${
                               compareMode
                                 ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
                             {compareMode ? "Compare: On" : "Compare"}
@@ -1774,7 +1774,7 @@ export default function ClaritasDashboard() {
                                   : pinnedCountry,
                               )
                             }
-                            className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-50"
+                            className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-50"
                             disabled={!selectedCountry}
                           >
                             Pin selection
@@ -1782,7 +1782,7 @@ export default function ClaritasDashboard() {
                           {pinnedCountry && (
                             <button
                               onClick={() => setPinnedCountry(null)}
-                              className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             >
                               Unpin
                             </button>
@@ -1790,7 +1790,7 @@ export default function ClaritasDashboard() {
                           {(selectedCountry || comparisonCountry) && (
                             <button
                               onClick={handleClearSelection}
-                              className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             >
                               Clear
                             </button>
@@ -1824,7 +1824,7 @@ export default function ClaritasDashboard() {
                           />
                         </div>
                         {pinnedCountry && (
-                          <div className="absolute left-4 top-4 w-56 rounded-xl border border-[color:var(--shell-border)] bg-white/95 p-3 text-xs shadow-sm dark:bg-slate-900/90 dark:text-slate-100">
+                          <div className="absolute left-4 top-4 w-56 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/95 p-3 text-xs shadow-sm dark:bg-slate-900/90 dark:text-slate-100">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Pinned
                             </div>
@@ -1876,18 +1876,18 @@ export default function ClaritasDashboard() {
                         {mapMode === "news" &&
                           mapBubbleData.length === 0 &&
                           countryStats.length === 0 && (
-                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)]">
+                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-[color:var(--shell-surface)] px-2 py-1 rounded border border-[color:var(--shell-border)]">
                               No news data in the selected window.
                             </div>
                           )}
                         {mapMode === "weather" &&
                           mapWeatherScope.length === 0 && (
-                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-white px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
+                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-[color:var(--shell-surface)] px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
                               <span>No weather stats yet.</span>
                               {isAdmin ? (
                                 <button
                                   onClick={() => setActiveView("admin")}
-                                  className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-white hover:bg-slate-50"
+                                  className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:bg-slate-800/40"
                                 >
                                   Open admin ingest
                                 </button>
@@ -1956,7 +1956,7 @@ export default function ClaritasDashboard() {
                               <div className="mt-2 flex flex-wrap items-center gap-3">
                                 <button
                                   onClick={() => setMapPlaying((v) => !v)}
-                                  className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                  className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                                 >
                                   {mapPlaying ? "Pause" : "Play"}
                                 </button>
@@ -2011,7 +2011,7 @@ export default function ClaritasDashboard() {
                             className={`rounded-full border px-3 py-1 transition ${
                               listMode === "news"
                                 ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => setListMode("news")}
                           >
@@ -2021,7 +2021,7 @@ export default function ClaritasDashboard() {
                             className={`rounded-full border px-3 py-1 transition ${
                               listMode === "weather"
                                 ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => setListMode("weather")}
                           >
@@ -2037,7 +2037,7 @@ export default function ClaritasDashboard() {
                             className="h-full overflow-y-auto p-4 space-y-3"
                           >
                             {filteredNews.length === 0 && (
-                              <div className="rounded-xl border border-[color:var(--shell-border)] bg-white p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
+                              <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
                                 <div>No news items for the current filters.</div>
                                 <div className="flex flex-wrap items-center gap-2 text-xs">
                                   {dataWindowPreset !== "all" && (
@@ -2046,7 +2046,7 @@ export default function ClaritasDashboard() {
                                         setDataWindowPreset("all");
                                         setChartRange({});
                                       }}
-                                      className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                                     >
                                       Show all dates
                                     </button>
@@ -2055,7 +2055,7 @@ export default function ClaritasDashboard() {
                                     <button
                                       onClick={() => void loadNewsData("archive")}
                                       disabled={isLoadingNews}
-                                      className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
+                                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
                                     >
                                       {isLoadingNews
                                         ? "Loading…"
@@ -2085,7 +2085,7 @@ export default function ClaritasDashboard() {
                                       ? "border-emerald-200 bg-emerald-50/60"
                                       : isSecondary
                                         ? "border-amber-200 bg-amber-50/60"
-                                        : "border-[color:var(--shell-border)] bg-white"
+                                        : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
                                   }`}
                                 >
                                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
@@ -2157,7 +2157,7 @@ export default function ClaritasDashboard() {
                               </label>
                               <input
                                 type="number"
-                                className="w-24 rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1"
+                                className="w-24 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1"
                                 value={
                                   typeof minTemp === "number" ? minTemp : ""
                                 }
@@ -2173,7 +2173,7 @@ export default function ClaritasDashboard() {
                               {isAdmin ? (
                                 <button
                                   onClick={() => setActiveView("admin")}
-                                  className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-slate-50"
+                                  className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-slate-800/40"
                                 >
                                   Open admin ingest
                                 </button>
@@ -2243,7 +2243,7 @@ export default function ClaritasDashboard() {
                       <div className="relative flex-1 min-h-0 p-4">
                         <div className="pointer-events-none absolute -right-10 top-6 h-24 w-24 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-2xl" />
                         <div className="relative grid grid-cols-2 gap-3">
-                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Live signals
                             </div>
@@ -2254,7 +2254,7 @@ export default function ClaritasDashboard() {
                               Stories & alerts
                             </div>
                           </div>
-                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Active regions
                             </div>
@@ -2265,7 +2265,7 @@ export default function ClaritasDashboard() {
                               Countries tracked
                             </div>
                           </div>
-                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Weather rows
                             </div>
@@ -2276,7 +2276,7 @@ export default function ClaritasDashboard() {
                               Latest observations
                             </div>
                           </div>
-                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-white/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Last sync
                             </div>
@@ -2296,7 +2296,7 @@ export default function ClaritasDashboard() {
                                 {focusLabel}
                               </div>
                             </div>
-                            <span className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                            <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
                               {selectedCountry || comparisonCountry
                                 ? "Filtered"
                                 : regionFilter === "global"
@@ -2351,19 +2351,19 @@ export default function ClaritasDashboard() {
                         </button>
                         <button
                           onClick={() => setChartRange({})}
-                          className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                         >
                           Reset range
                         </button>
                         <button
                           onClick={handleExportCsv}
-                          className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                         >
                           Export CSV
                         </button>
                         <button
                           onClick={handleExportPng}
-                          className="rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                         >
                           Export PNG
                         </button>
@@ -2506,7 +2506,7 @@ export default function ClaritasDashboard() {
                   </section>
                 </div>
 
-                <details className="rounded-2xl border border-[color:var(--shell-border)] bg-white/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+                <details className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
                   <summary className="cursor-pointer text-sm font-semibold text-[color:var(--shell-ink)]">
                     More panels
                   </summary>
@@ -2601,7 +2601,7 @@ export default function ClaritasDashboard() {
                         </div>
                       </div>
                       <div className="p-4 space-y-3">
-                        <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-white px-3 py-2">
+                        <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2">
                           <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
                           <input
                             className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
@@ -2663,7 +2663,7 @@ export default function ClaritasDashboard() {
                     <button
                       type="button"
                       onClick={() => setActiveView("dashboard")}
-                      className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-2 text-sm text-[color:var(--shell-ink)] hover:border-slate-400"
+                      className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-ink)] hover:border-slate-400"
                     >
                       <ChevronLeft className="h-4 w-4" />
                       Back to dashboard
@@ -2716,10 +2716,10 @@ export default function ClaritasDashboard() {
                       </div>
                       <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-4">
                         <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-6 text-white shadow-sm">
-                          <div className="absolute -top-16 right-0 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+                          <div className="absolute -top-16 right-0 h-40 w-40 rounded-full bg-[color:var(--shell-surface)]/10 blur-2xl" />
                           <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                             <div className="flex items-center gap-4">
-                              <div className="h-16 w-16 overflow-hidden rounded-2xl bg-white/15 text-2xl font-semibold uppercase text-white ring-1 ring-white/25">
+                              <div className="h-16 w-16 overflow-hidden rounded-2xl bg-[color:var(--shell-surface)]/15 text-2xl font-semibold uppercase text-white ring-1 ring-white/25">
                                 {authUser?.avatar_url ? (
                                   <img
                                     src={authUser.avatar_url}
@@ -2744,7 +2744,7 @@ export default function ClaritasDashboard() {
                                 </div>
                               </div>
                             </div>
-                            <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 text-sm">
+                            <div className="rounded-2xl border border-white/20 bg-[color:var(--shell-surface)]/10 px-4 py-3 text-sm">
                               <div className="text-xs uppercase tracking-[0.3em] text-slate-300">
                                 Session
                               </div>
@@ -2763,7 +2763,7 @@ export default function ClaritasDashboard() {
                             ).map((role) => (
                               <span
                                 key={role}
-                                className="rounded-full border border-white/20 bg-white/10 px-3 py-1 uppercase tracking-[0.2em]"
+                                className="rounded-full border border-white/20 bg-[color:var(--shell-surface)]/10 px-3 py-1 uppercase tracking-[0.2em]"
                               >
                                 {role}
                               </span>
@@ -2920,7 +2920,7 @@ export default function ClaritasDashboard() {
                             <button
                               type="button"
                               onClick={() => setDark((v) => !v)}
-                              className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-xs text-[color:var(--shell-ink)]"
+                              className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-ink)]"
                             >
                               {dark ? (
                                 <Sun className="h-4 w-4" />
@@ -3026,7 +3026,7 @@ export default function ClaritasDashboard() {
                           <button
                             type="button"
                             onClick={() => setActiveView("legal")}
-                            className="inline-flex w-fit items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]"
+                            className="inline-flex w-fit items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]"
                           >
                             View full policies
                           </button>
@@ -3062,7 +3062,7 @@ export default function ClaritasDashboard() {
                     <article
                       key={policy.id}
                       id={policy.id}
-                      className="scroll-mt-24 rounded-2xl border border-[color:var(--shell-border)] bg-white p-6 shadow-sm"
+                      className="scroll-mt-24 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-6 shadow-sm"
                     >
                       <div className="flex items-center justify-between">
                         <h3 className="text-lg font-semibold text-[color:var(--shell-ink)]">

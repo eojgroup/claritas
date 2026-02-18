@@ -84,6 +84,41 @@ function pipelineLabel(pipeline: IngestionPipeline): string {
   return pipeline === "news" ? "News" : "Weather";
 }
 
+function buildZeroChartData(days: number): Array<{
+  date: string;
+  news_inserted: number;
+  weather_inserted: number;
+  news_runs: number;
+  weather_runs: number;
+  news_failed: number;
+  weather_failed: number;
+}> {
+  const out: Array<{
+    date: string;
+    news_inserted: number;
+    weather_inserted: number;
+    news_runs: number;
+    weather_runs: number;
+    news_failed: number;
+    weather_failed: number;
+  }> = [];
+  const now = new Date();
+  for (let idx = days - 1; idx >= 0; idx -= 1) {
+    const d = new Date(now);
+    d.setDate(now.getDate() - idx);
+    out.push({
+      date: d.toISOString().slice(0, 10),
+      news_inserted: 0,
+      weather_inserted: 0,
+      news_runs: 0,
+      weather_runs: 0,
+      news_failed: 0,
+      weather_failed: 0,
+    });
+  }
+  return out;
+}
+
 export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) {
   const [runs, setRuns] = useState<AdminIngestionRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
@@ -113,24 +148,33 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     async (silent = false) => {
       if (!silent) setIsLoadingOverview(true);
       if (!silent) setOverviewError(null);
-      try {
-        const selectedPipeline = pipelineFilter === "all" ? undefined : pipelineFilter;
-        const [nextRuns, metricResp] = await Promise.all([
-          fetchAdminIngestionRuns({ pipeline: selectedPipeline, limit: 100 }),
-          fetchAdminIngestionMetrics({ pipeline: selectedPipeline, days: metricsDays }),
-        ]);
+      const selectedPipeline = pipelineFilter === "all" ? undefined : pipelineFilter;
+      const [runsRes, metricsRes] = await Promise.allSettled([
+        fetchAdminIngestionRuns({ pipeline: selectedPipeline, limit: 100 }),
+        fetchAdminIngestionMetrics({ pipeline: selectedPipeline, days: metricsDays }),
+      ]);
+
+      const errors: string[] = [];
+      if (runsRes.status === "fulfilled") {
+        const nextRuns = runsRes.value;
         setRuns(nextRuns);
-        setPoints(metricResp.points);
-        setTotals(metricResp.totals);
         setSelectedRunId((current) => {
           if (current && nextRuns.some((run) => run.id === current)) return current;
           return nextRuns[0]?.id ?? null;
         });
-      } catch (error) {
-        setOverviewError(toErrorMessage(error));
-      } finally {
-        if (!silent) setIsLoadingOverview(false);
+      } else {
+        errors.push(`Runs: ${toErrorMessage(runsRes.reason)}`);
       }
+
+      if (metricsRes.status === "fulfilled") {
+        setPoints(metricsRes.value.points);
+        setTotals(metricsRes.value.totals);
+      } else {
+        errors.push(`Metrics: ${toErrorMessage(metricsRes.reason)}`);
+      }
+
+      setOverviewError(errors.length > 0 ? errors.join(" | ") : null);
+      if (!silent) setIsLoadingOverview(false);
     },
     [metricsDays, pipelineFilter],
   );
@@ -286,8 +330,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         row.weather_failed = point.failed_count;
       }
     });
-    return Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [points]);
+    const resolved = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
+    if (resolved.length > 0) return resolved;
+    return buildZeroChartData(metricsDays);
+  }, [metricsDays, points]);
 
   const summaryByPipeline = useMemo(() => {
     const summary = new Map<IngestionPipeline, AdminIngestionMetricsTotal>();
@@ -299,7 +345,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
 
   return (
     <div className="grid gap-4">
-      <section className="rounded-2xl border border-[color:var(--shell-border)] bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+      <section className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
@@ -316,7 +362,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               className={`rounded-full border px-3 py-1 transition ${
                 pipelineFilter === "all"
                   ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)]"
+                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
               }`}
             >
               All
@@ -327,7 +373,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               className={`rounded-full border px-3 py-1 transition ${
                 pipelineFilter === "news"
                   ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)]"
+                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
               }`}
             >
               News
@@ -338,7 +384,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               className={`rounded-full border px-3 py-1 transition ${
                 pipelineFilter === "weather"
                   ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                  : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)]"
+                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
               }`}
             >
               Weather
@@ -346,7 +392,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <button
               type="button"
               onClick={() => void refreshOverview(false)}
-              className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-white px-3 py-1 text-[color:var(--shell-muted)]"
+              className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Refresh
@@ -381,7 +427,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 <input
                   value={newsQuery}
                   onChange={(event) => setNewsQuery(event.currentTarget.value)}
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
                 />
               </label>
               <label className="text-xs text-[color:var(--shell-muted)]">
@@ -389,7 +435,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 <input
                   value={newsLanguage}
                   onChange={(event) => setNewsLanguage(event.currentTarget.value)}
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
                 />
               </label>
               <label className="text-xs text-[color:var(--shell-muted)]">
@@ -397,7 +443,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 <input
                   value={newsCountry}
                   onChange={(event) => setNewsCountry(event.currentTarget.value)}
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
                 />
               </label>
               <label className="text-xs text-[color:var(--shell-muted)]">
@@ -405,7 +451,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 <input
                   value={newsCategory}
                   onChange={(event) => setNewsCategory(event.currentTarget.value)}
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
                 />
               </label>
             </div>
@@ -450,7 +496,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 value={weatherCountry}
                 onChange={(event) => setWeatherCountry(event.currentTarget.value)}
                 placeholder="e.g. us"
-                className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-white px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
               />
             </label>
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
@@ -470,7 +516,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       </section>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             News totals ({metricsDays}d)
           </div>
@@ -481,7 +527,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             rows inserted · {summaryByPipeline.get("news")?.run_count ?? 0} runs
           </div>
         </div>
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             Weather totals ({metricsDays}d)
           </div>
@@ -492,7 +538,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             rows inserted · {summaryByPipeline.get("weather")?.run_count ?? 0} runs
           </div>
         </div>
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             Window
           </div>
@@ -505,7 +551,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 className={`rounded-full border px-3 py-1 ${
                   metricsDays === days
                     ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                    : "border-[color:var(--shell-border)] bg-white text-[color:var(--shell-muted)]"
+                    : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
                 }`}
               >
                 {days}d
@@ -519,7 +565,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-2 text-sm font-semibold text-[color:var(--shell-ink)]">
             Ingested rows by day
           </div>
@@ -552,7 +598,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-2 text-sm font-semibold text-[color:var(--shell-ink)]">
             Run volume and failures
           </div>
@@ -605,7 +651,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
           <div className="mb-3 flex items-center gap-2">
             <Activity className="h-4 w-4 text-[color:var(--shell-muted)]" />
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
@@ -629,8 +675,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   onClick={() => setSelectedRunId(run.id)}
                   className={`w-full rounded-xl border p-3 text-left transition ${
                     isActive
-                      ? "border-[color:var(--shell-ink)] bg-slate-50"
-                      : "border-[color:var(--shell-border)] bg-white hover:border-slate-400"
+                      ? "border-[color:var(--shell-ink)] bg-slate-800/40"
+                      : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-slate-400"
                   }`}
                 >
                   <div className="flex flex-wrap items-center gap-2">
@@ -663,7 +709,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
               Run logs

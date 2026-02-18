@@ -70,7 +70,7 @@ const highlightCards = [
 function ProviderIcon({ id }: { id: AuthProviderId }) {
   return (
     <span
-      className="grid h-11 w-11 place-items-center rounded-xl bg-white shadow-sm ring-1 ring-black/5"
+      className="grid h-11 w-11 place-items-center rounded-xl bg-[color:var(--shell-surface)] shadow-sm ring-1 ring-[color:var(--shell-border)]"
       style={{ width: 44, height: 44 }}
     >
       <img
@@ -104,10 +104,10 @@ function ProviderButton({
   const canUse = enabled && !busy;
   const badgeLabel = busy ? "Checking" : enabled ? "Ready" : "Disabled";
   const badgeClass = busy
-    ? "bg-slate-200 text-slate-600"
+    ? "bg-slate-700/60 text-slate-200"
     : enabled
-      ? "bg-emerald-100 text-emerald-700"
-      : "bg-slate-200 text-slate-500";
+      ? "bg-emerald-900/60 text-emerald-200"
+      : "bg-slate-700/60 text-slate-300";
 
   return (
     <button
@@ -116,8 +116,8 @@ function ProviderButton({
       disabled={!canUse}
       className={`group flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${
         canUse
-          ? "border-slate-200/70 bg-white shadow-sm hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md"
-          : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+          ? "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm hover:-translate-y-0.5 hover:border-emerald-800 hover:shadow-md"
+          : "cursor-not-allowed border-slate-700 bg-slate-800/70 text-slate-400"
       }`}
     >
       <div className="flex items-center gap-3">
@@ -125,8 +125,8 @@ function ProviderButton({
           <ProviderIcon id={id} />
         </div>
         <div>
-          <div className={`text-sm font-semibold ${canUse ? "text-slate-900" : "text-slate-400"}`}>{label}</div>
-          <div className={`text-xs ${canUse ? "text-slate-500" : "text-slate-400"}`}>{helper}</div>
+          <div className={`text-sm font-semibold ${canUse ? "text-[color:var(--shell-ink)]" : "text-slate-400"}`}>{label}</div>
+          <div className={`text-xs ${canUse ? "text-[color:var(--shell-muted)]" : "text-slate-400"}`}>{helper}</div>
         </div>
       </div>
       <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${badgeClass}`}>{badgeLabel}</span>
@@ -174,18 +174,18 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             </div>
             <div>
               <div className="text-xs uppercase tracking-[0.35em] text-[color:var(--login-ink-soft)]">Claritas</div>
-              <div className="text-sm text-slate-600">Secure access gateway</div>
+              <div className="text-sm text-[color:var(--shell-muted)]">Secure access gateway</div>
             </div>
           </div>
 
           <div className="space-y-4">
-            <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/80 shadow-sm">
+            <div className="overflow-hidden rounded-3xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm">
               <div
                 className="h-56 sm:h-64 bg-[color:var(--login-sand)] bg-cover bg-center"
                 style={{ backgroundImage: `url(${heroImageUrl})` }}
                 aria-label="Claritas environment preview"
               />
-              <div className="px-4 py-3 text-sm text-slate-600">
+              <div className="px-4 py-3 text-sm text-[color:var(--shell-muted)]">
                 A unified workspace for global signals, alerts, and monitoring.
               </div>
             </div>
@@ -195,11 +195,11 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             {highlightCards.map((feature, index) => (
               <div
                 key={feature.title}
-                className="rounded-2xl border border-white/70 bg-white/70 p-4 text-slate-700 shadow-sm backdrop-blur motion-safe:animate-[login-fade_900ms_ease-out_both]"
+                className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 text-[color:var(--shell-ink)] shadow-sm backdrop-blur motion-safe:animate-[login-fade_900ms_ease-out_both]"
                 style={{ animationDelay: `${index * 120}ms` }}
               >
                 <div className="text-sm font-semibold text-[color:var(--login-ink)]">{feature.title}</div>
-                <p className="mt-2 text-sm text-slate-600">{feature.description}</p>
+                <p className="mt-2 text-sm text-[color:var(--shell-muted)]">{feature.description}</p>
               </div>
             ))}
           </div>
@@ -208,7 +208,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             {["SOC 2 controls", "Encrypted sessions", "Geo-aware policies", "24/7 monitoring"].map((item) => (
               <div
                 key={item}
-                className="rounded-full border border-white/80 bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600"
+                className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"
               >
                 {item}
               </div>
@@ -216,7 +216,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
           </div>
         </section>
 
-        <section className="order-1 rounded-3xl border border-white/80 bg-white/95 p-8 text-slate-900 shadow-[0_24px_60px_rgba(14,30,37,0.16)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
+        <section className="order-1 rounded-3xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-8 text-[color:var(--shell-ink)] shadow-[0_24px_60px_rgba(6,13,20,0.5)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-xs uppercase tracking-[0.25em] text-slate-500">Secure access</div>
@@ -229,12 +229,12 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             </div>
           </div>
 
-          <div className="mt-6 flex w-full items-center gap-2 rounded-full border border-slate-200 bg-slate-100 p-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+          <div className="mt-6 flex w-full items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
             <button
               type="button"
               onClick={() => handleModeChange("signin")}
               className={`flex-1 rounded-full px-4 py-2 text-center transition ${
-                mode === "signin" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                mode === "signin" ? "bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] shadow-sm" : "text-[color:var(--shell-muted)]"
               }`}
             >
               Sign in
@@ -243,7 +243,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               type="button"
               onClick={() => handleModeChange("signup")}
               className={`flex-1 rounded-full px-4 py-2 text-center transition ${
-                mode === "signup" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                mode === "signup" ? "bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] shadow-sm" : "text-[color:var(--shell-muted)]"
               }`}
             >
               Create account
@@ -257,7 +257,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               </div>
             ) : null}
 
-            <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-4 py-3 text-sm text-[color:var(--shell-muted)]">
               {mode === "signin"
                 ? "Use your trusted identity provider to access the Claritas signal desk."
                 : "Create your Claritas account using the provider you already trust."}
@@ -277,7 +277,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             </button>
 
             {enabledProviders.length === 0 && !isChecking && (
-              <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-xs text-slate-500">
+              <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
                 No providers are enabled yet. Configure an identity provider to continue.
               </div>
             )}
@@ -309,9 +309,9 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             )}
 
             {mode === "signin" ? (
-              <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3">
-                <div className="text-sm font-semibold text-slate-900">No account yet?</div>
-                <div className="text-xs text-slate-500">Create your account in seconds with a provider.</div>
+              <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-3">
+                <div className="text-sm font-semibold text-[color:var(--shell-ink)]">No account yet?</div>
+                <div className="text-xs text-[color:var(--shell-muted)]">Create your account in seconds with a provider.</div>
                 <button
                   type="button"
                   onClick={() => handleModeChange("signup")}
@@ -322,7 +322,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               </div>
             ) : (
               <>
-                <div className="rounded-2xl border border-slate-200/80 bg-white px-4 py-3 text-xs text-slate-500">
+                <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
                   No passwords stored. Your identity stays with your provider.
                 </div>
                 <button
