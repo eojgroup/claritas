@@ -14,6 +14,24 @@ export type CountryWeather = { country: string; temp_c: number | null; humidity:
 export type AuthProviderId = "google" | "microsoft" | "apple";
 export type IngestionPipeline = "news" | "weather";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
+export type AdminRole = {
+  id: number;
+  key: string;
+  description: string | null;
+  user_count: number;
+};
+export type AdminUser = {
+  id: number;
+  email: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  roles: string[];
+  providers: string[];
+  last_seen_at: string | null;
+};
 export type AuthProvider = {
   id: AuthProviderId;
   enabled: boolean;
@@ -257,6 +275,80 @@ export async function fetchAdminIngestionMetrics(params?: {
     points: AdminIngestionMetricsPoint[];
     totals: AdminIngestionMetricsTotal[];
   };
+}
+
+export async function fetchAdminRoles(): Promise<AdminRole[]> {
+  const resp = await fetch(`${API_BASE}/api/admin/roles`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch roles"));
+  const data = await resp.json();
+  return (data.roles ?? []) as AdminRole[];
+}
+
+export async function createAdminRole(payload: {
+  key: string;
+  description?: string;
+}): Promise<AdminRole> {
+  const resp = await fetch(`${API_BASE}/api/admin/roles`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to create role"));
+  const data = await resp.json();
+  return data.role as AdminRole;
+}
+
+export async function fetchAdminUsers(params?: {
+  limit?: number;
+  offset?: number;
+  q?: string;
+  role?: string;
+  includeInactive?: boolean;
+}): Promise<{ users: AdminUser[]; total: number; limit: number; offset: number }> {
+  const sp = new URLSearchParams();
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.offset) sp.set("offset", String(params.offset));
+  if (params?.q) sp.set("q", params.q);
+  if (params?.role) sp.set("role", params.role);
+  if (typeof params?.includeInactive === "boolean") {
+    sp.set("includeInactive", String(params.includeInactive));
+  }
+  const resp = await fetch(`${API_BASE}/api/admin/users?${sp.toString()}`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch users"));
+  return (await resp.json()) as { users: AdminUser[]; total: number; limit: number; offset: number };
+}
+
+export async function updateAdminUserRoles(
+  userId: number,
+  roles: string[],
+): Promise<AdminUser | null> {
+  const resp = await fetch(`${API_BASE}/api/admin/users/${userId}/roles`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ roles }),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to update user roles"));
+  const data = await resp.json();
+  return (data.user ?? null) as AdminUser | null;
+}
+
+export async function updateAdminUserStatus(
+  userId: number,
+  is_active: boolean,
+): Promise<AdminUser | null> {
+  const resp = await fetch(`${API_BASE}/api/admin/users/${userId}/status`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ is_active }),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to update user status"));
+  const data = await resp.json();
+  return (data.user ?? null) as AdminUser | null;
 }
 
 export function imageProxy(url?: string | null): string | undefined {

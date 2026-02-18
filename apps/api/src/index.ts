@@ -1,7 +1,7 @@
 import express from "express";
 import { ingestNewsApiEverything, ingestNewsApiTopHeadlines } from "./connectors/newsapi";
 import { getCountryWeatherLatest, ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
-import { pool } from "./db";
+import { pool, query, withTransaction } from "./db";
 import authRouter, { requireAuth, requireRole } from "./auth";
 import {
   IngestionValidationError,
@@ -28,6 +28,107 @@ app.use("/api/auth", authRouter);
 
 const requireAdminRole = requireRole("admin");
 const requireAuthenticated = requireAuth();
+
+type AdminRoleRow = {
+  id: number;
+  key: string;
+  description: string | null;
+  user_count: number;
+};
+
+type AdminUserRow = {
+  id: number;
+  email: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  roles: string[] | null;
+  providers: string[] | null;
+  last_seen_at: string | null;
+};
+
+class AdminApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+const ADMIN_USER_BASE_SELECT = `
+  SELECT
+    u.id,
+    u.email,
+    u.display_name,
+    u.avatar_url,
+    u.is_active,
+    u.created_at,
+    u.updated_at,
+    COALESCE(ARRAY_REMOVE(ARRAY_AGG(DISTINCT r.key), NULL), '{}') AS roles,
+    COALESCE(ARRAY_REMOVE(ARRAY_AGG(DISTINCT ai.provider), NULL), '{}') AS providers,
+    MAX(s.last_seen_at) AS last_seen_at
+  FROM app_user u
+  LEFT JOIN auth_user_role ur ON ur.user_id = u.id
+  LEFT JOIN auth_role r ON r.id = ur.role_id
+  LEFT JOIN auth_identity ai ON ai.user_id = u.id
+  LEFT JOIN auth_session s ON s.user_id = u.id
+`;
+
+function isValidRoleKey(key: string): boolean {
+  return /^[a-z][a-z0-9_-]{1,31}$/.test(key);
+}
+
+function normalizeRoleKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) throw new AdminApiError(400, "body.roles must be an array of role keys.");
+  const keys = raw
+    .map((value) => (typeof value === "string" ? value.trim().toLowerCase() : ""))
+    .filter(Boolean);
+  for (const key of keys) {
+    if (!isValidRoleKey(key)) throw new AdminApiError(400, `Invalid role key: ${key}`);
+  }
+  return Array.from(new Set(keys)).sort();
+}
+
+function toAdminUser(row: AdminUserRow) {
+  return {
+    id: row.id,
+    email: row.email,
+    display_name: row.display_name,
+    avatar_url: row.avatar_url,
+    is_active: row.is_active,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    roles: row.roles || [],
+    providers: row.providers || [],
+    last_seen_at: row.last_seen_at,
+  };
+}
+
+async function getAdminUserById(userId: number): Promise<ReturnType<typeof toAdminUser> | null> {
+  const { rows } = await query<AdminUserRow>(
+    `${ADMIN_USER_BASE_SELECT}
+     WHERE u.id = $1
+     GROUP BY u.id
+     LIMIT 1`,
+    [userId]
+  );
+  return rows[0] ? toAdminUser(rows[0]) : null;
+}
+
+async function getActiveAdminCountTx(client: import("pg").PoolClient): Promise<number> {
+  const { rows } = await client.query<{ count: number }>(
+    `SELECT COUNT(DISTINCT ur.user_id)::int AS count
+     FROM auth_user_role ur
+     JOIN auth_role r ON r.id = ur.role_id
+     JOIN app_user u ON u.id = ur.user_id
+     WHERE r.key = 'admin'
+       AND u.is_active = true`
+  );
+  return Number(rows[0]?.count || 0);
+}
 
 function parsePipeline(value: unknown): IngestionPipeline | undefined {
   if (value === "news" || value === "weather") return value;
@@ -122,6 +223,241 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
     res.json({ stats: rows });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+// Admin user/role management
+app.get("/api/admin/roles", requireAdminRole, async (_req, res) => {
+  try {
+    const { rows } = await query<AdminRoleRow>(
+      `SELECT
+         r.id,
+         r.key,
+         r.description,
+         COUNT(ur.user_id)::int AS user_count
+       FROM auth_role r
+       LEFT JOIN auth_user_role ur ON ur.role_id = r.id
+       GROUP BY r.id
+       ORDER BY r.key ASC`
+    );
+    return res.json({ roles: rows });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.post("/api/admin/roles", requireAdminRole, async (req, res) => {
+  try {
+    const keyRaw = typeof req.body?.key === "string" ? req.body.key.trim().toLowerCase() : "";
+    const descriptionRaw = typeof req.body?.description === "string" ? req.body.description.trim() : "";
+    if (!keyRaw) return res.status(400).json({ error: "body.key is required." });
+    if (!isValidRoleKey(keyRaw)) {
+      return res.status(400).json({ error: "Invalid role key format. Use lowercase letters, numbers, '-' or '_'." });
+    }
+    const { rows } = await query<{ id: number; key: string; description: string | null }>(
+      `INSERT INTO auth_role (key, description)
+       VALUES ($1, $2)
+       RETURNING id, key, description`,
+      [keyRaw, descriptionRaw || null]
+    );
+    return res.status(201).json({ role: rows[0] });
+  } catch (e: any) {
+    if (e?.code === "23505") {
+      return res.status(409).json({ error: "Role already exists." });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/admin/users", requireAdminRole, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || "100"), 10) || 100, 1), 250);
+    const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const role = typeof req.query.role === "string" ? req.query.role.trim().toLowerCase() : "";
+    const includeInactive = String(req.query.includeInactive || "false").toLowerCase() === "true";
+    if (role && !isValidRoleKey(role)) {
+      return res.status(400).json({ error: "Invalid role filter." });
+    }
+
+    const params: any[] = [];
+    const where: string[] = [];
+    if (!includeInactive) {
+      where.push("u.is_active = true");
+    }
+    if (q) {
+      const qi = params.push(`%${q}%`);
+      where.push(`(u.email ILIKE $${qi} OR u.display_name ILIKE $${qi})`);
+    }
+    if (role) {
+      const ri = params.push(role);
+      where.push(
+        `EXISTS (
+          SELECT 1
+          FROM auth_user_role ur2
+          JOIN auth_role r2 ON r2.id = ur2.role_id
+          WHERE ur2.user_id = u.id
+            AND r2.key = $${ri}
+        )`
+      );
+    }
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+    const limitIdx = params.push(limit);
+    const offsetIdx = params.push(offset);
+
+    const { rows } = await query<AdminUserRow>(
+      `${ADMIN_USER_BASE_SELECT}
+       ${whereClause}
+       GROUP BY u.id
+       ORDER BY COALESCE(MAX(s.last_seen_at), u.created_at) DESC
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`
+      ,
+      params
+    );
+
+    const { rows: countRows } = await query<{ total: number }>(
+      `SELECT COUNT(*)::int AS total
+       FROM app_user u
+       ${whereClause}`,
+      params.slice(0, params.length - 2)
+    );
+    const users = rows.map(toAdminUser);
+    const total = Number(countRows[0]?.total || 0);
+    return res.json({ users, total, limit, offset });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.patch("/api/admin/users/:userId/roles", requireAdminRole, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(400).json({ error: "Invalid user id." });
+    }
+    const nextRoleKeys = normalizeRoleKeys(req.body?.roles);
+
+    await withTransaction(async (client) => {
+      const { rows: userRows } = await client.query<{ id: number; is_active: boolean }>(
+        `SELECT id, is_active FROM app_user WHERE id = $1 LIMIT 1`,
+        [userId]
+      );
+      const user = userRows[0];
+      if (!user) throw new AdminApiError(404, "User not found.");
+
+      const { rows: currentRoleRows } = await client.query<{ key: string }>(
+        `SELECT r.key
+         FROM auth_user_role ur
+         JOIN auth_role r ON r.id = ur.role_id
+         WHERE ur.user_id = $1`,
+        [userId]
+      );
+      const currentRoles = new Set(currentRoleRows.map((row) => row.key));
+      const removingAdmin = user.is_active && currentRoles.has("admin") && !nextRoleKeys.includes("admin");
+      if (removingAdmin) {
+        const adminCount = await getActiveAdminCountTx(client);
+        if (adminCount <= 1) {
+          throw new AdminApiError(400, "Cannot remove the last active admin.");
+        }
+      }
+
+      let roleIds: number[] = [];
+      if (nextRoleKeys.length > 0) {
+        const { rows: roleRows } = await client.query<{ id: number; key: string }>(
+          `SELECT id, key
+           FROM auth_role
+           WHERE key = ANY($1::text[])`,
+          [nextRoleKeys]
+        );
+        if (roleRows.length !== nextRoleKeys.length) {
+          const found = new Set(roleRows.map((row) => row.key));
+          const missing = nextRoleKeys.filter((key) => !found.has(key));
+          throw new AdminApiError(400, `Unknown role keys: ${missing.join(", ")}`);
+        }
+        roleIds = roleRows.map((row) => row.id);
+      }
+
+      await client.query(`DELETE FROM auth_user_role WHERE user_id = $1`, [userId]);
+      if (roleIds.length > 0) {
+        const params: any[] = [userId, ...roleIds];
+        const values = roleIds.map((_, idx) => `($1, $${idx + 2})`).join(", ");
+        await client.query(
+          `INSERT INTO auth_user_role (user_id, role_id)
+           VALUES ${values}
+           ON CONFLICT DO NOTHING`,
+          params
+        );
+      }
+    });
+
+    const user = await getAdminUserById(userId);
+    return res.json({ user });
+  } catch (e: any) {
+    if (e instanceof AdminApiError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.patch("/api/admin/users/:userId/status", requireAdminRole, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(400).json({ error: "Invalid user id." });
+    }
+    if (typeof req.body?.is_active !== "boolean") {
+      return res.status(400).json({ error: "body.is_active (boolean) is required." });
+    }
+    const nextIsActive = req.body.is_active as boolean;
+
+    await withTransaction(async (client) => {
+      const { rows: userRows } = await client.query<{ id: number; is_active: boolean; is_admin: boolean }>(
+        `SELECT
+           u.id,
+           u.is_active,
+           EXISTS (
+             SELECT 1
+             FROM auth_user_role ur
+             JOIN auth_role r ON r.id = ur.role_id
+             WHERE ur.user_id = u.id
+               AND r.key = 'admin'
+           ) AS is_admin
+         FROM app_user u
+         WHERE u.id = $1
+         LIMIT 1`,
+        [userId]
+      );
+      const user = userRows[0];
+      if (!user) throw new AdminApiError(404, "User not found.");
+      if (user.is_active === nextIsActive) return;
+
+      if (user.is_admin && user.is_active && !nextIsActive) {
+        const adminCount = await getActiveAdminCountTx(client);
+        if (adminCount <= 1) {
+          throw new AdminApiError(400, "Cannot deactivate the last active admin.");
+        }
+      }
+
+      await client.query(`UPDATE app_user SET is_active = $2 WHERE id = $1`, [userId, nextIsActive]);
+      if (!nextIsActive) {
+        await client.query(
+          `UPDATE auth_session
+           SET revoked_at = now()
+           WHERE user_id = $1
+             AND revoked_at IS NULL`,
+          [userId]
+        );
+      }
+    });
+
+    const user = await getAdminUserById(userId);
+    return res.json({ user });
+  } catch (e: any) {
+    if (e instanceof AdminApiError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
   }
 });
 

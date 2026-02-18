@@ -712,7 +712,18 @@ export async function listRuns(options: {
 }): Promise<AdminIngestionRun[]> {
   const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
   const offset = Math.max(options.offset ?? 0, 0);
-  const pipeline = options.pipeline ?? null;
+  const params: any[] = [];
+  const where: string[] = ["s.name IN ('newsapi', 'openweather')"];
+  if (options.pipeline) {
+    const pipelineIdx = params.push(options.pipeline);
+    where.push(
+      `(r.pipeline = $${pipelineIdx}
+        OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
+        OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather'))`
+    );
+  }
+  const limitIdx = params.push(limit);
+  const offsetIdx = params.push(offset);
 
   const { rows } = await query<RunRow>(
     `SELECT
@@ -734,16 +745,10 @@ export async function listRuns(options: {
        ), 0) AS log_count
      FROM ingestion_run r
      JOIN source s ON s.id = r.source_id
-     WHERE s.name IN ('newsapi', 'openweather')
-       AND (
-       $3::text IS NULL
-       OR r.pipeline = $3::text
-       OR ($3::text = 'news' AND s.name = 'newsapi')
-       OR ($3::text = 'weather' AND s.name = 'openweather')
-     )
+     WHERE ${where.join(" AND ")}
      ORDER BY r.started_at DESC, r.id DESC
-     LIMIT $1 OFFSET $2`,
-    [limit, offset, pipeline]
+     LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+    params
   );
 
   return rows.map(toAdminRun);
@@ -807,7 +812,19 @@ export async function getMetrics(options?: {
   pipeline?: IngestionPipeline;
 }): Promise<{ days: number; points: AdminIngestionMetricPoint[]; totals: AdminIngestionMetricTotal[] }> {
   const days = Math.min(Math.max(options?.days ?? 30, 1), 180);
-  const pipeline = options?.pipeline ?? null;
+  const params: any[] = [days];
+  const where: string[] = [
+    "r.started_at >= now() - make_interval(days => $1::int)",
+    "s.name IN ('newsapi', 'openweather')",
+  ];
+  if (options?.pipeline) {
+    const pipelineIdx = params.push(options.pipeline);
+    where.push(
+      `(r.pipeline = $${pipelineIdx}
+        OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
+        OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather'))`
+    );
+  }
 
   const { rows } = await query<MetricRunRow>(
     `SELECT
@@ -818,16 +835,9 @@ export async function getMetrics(options?: {
        r.stats
      FROM ingestion_run r
      JOIN source s ON s.id = r.source_id
-     WHERE r.started_at >= now() - ($1::text || ' days')::interval
-       AND s.name IN ('newsapi', 'openweather')
-       AND (
-         $2::text IS NULL
-         OR r.pipeline = $2::text
-         OR ($2::text = 'news' AND s.name = 'newsapi')
-         OR ($2::text = 'weather' AND s.name = 'openweather')
-       )
+     WHERE ${where.join(" AND ")}
      ORDER BY r.started_at ASC, r.id ASC`,
-    [String(days), pipeline]
+    params
   );
 
   const pointsByKey = new Map<string, AdminIngestionMetricPoint>();

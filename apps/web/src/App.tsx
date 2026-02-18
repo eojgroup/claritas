@@ -142,6 +142,7 @@ const safeDownload = (filename: string, data: Blob | string) => {
 import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
 import AdminIngestionPanel from "./components/AdminIngestionPanel";
+import AdminUserManagementPanel from "./components/AdminUserManagementPanel";
 import {
   fetchAuthMe,
   fetchAuthProviders,
@@ -2639,7 +2640,10 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "admin" && isAdmin && (
-              <AdminIngestionPanel dark={dark} />
+              <div className="space-y-4">
+                <AdminIngestionPanel dark={dark} />
+                <AdminUserManagementPanel />
+              </div>
             )}
             {activeView === "profile" && (
               <div className="space-y-6">
