@@ -187,7 +187,14 @@ struct LoginView: View {
     }
 
     private func providerEnabled(_ id: AuthProviderId) -> Bool {
-        model.authProviders.first(where: { $0.id == id })?.enabled ?? false
+        if let provider = model.authProviders.first(where: { $0.id == id }) {
+            return provider.enabled
+        }
+        // If provider discovery fails, allow manual sign-in attempts; backend still enforces provider status.
+        if model.authProviders.isEmpty, model.authError != nil {
+            return true
+        }
+        return false
     }
 }
 
@@ -244,18 +251,18 @@ private struct ProviderButton: View {
         Button(action: { if canUse { onTap() } }) {
             HStack(spacing: 12) {
                 ProviderIcon(provider: provider)
-                    .opacity(canUse ? 1 : 0.5)
+                    .opacity(enabled ? 1 : 0.9)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(canUse ? Color(red: 0.07, green: 0.15, blue: 0.2) : Color.gray)
+                        .foregroundStyle(Color(red: 0.07, green: 0.15, blue: 0.2).opacity(enabled ? 1 : 0.75))
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(Color(red: 0.5, green: 0.54, blue: 0.58))
+                        .foregroundStyle(Color(red: 0.5, green: 0.54, blue: 0.58).opacity(enabled ? 1 : 0.8))
                 }
                 Spacer()
-                Text(busy ? "Checking" : enabled ? "Ready" : "Disabled")
+                Text(busy ? "Checking" : enabled ? "Ready" : "Unavailable")
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -264,11 +271,11 @@ private struct ProviderButton: View {
                     .clipShape(Capsule())
             }
             .padding(14)
-            .background(canUse ? Color.white : Color.white.opacity(0.6))
+            .background(Color.white.opacity(enabled ? 1 : 0.92))
             .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay(
                 RoundedRectangle(cornerRadius: 18)
-                    .stroke(canUse ? Color.black.opacity(0.08) : Color.gray.opacity(0.15), lineWidth: 1)
+                    .stroke(enabled ? Color.black.opacity(0.08) : Color.black.opacity(0.06), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
