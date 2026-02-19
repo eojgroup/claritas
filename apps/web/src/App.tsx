@@ -2078,7 +2078,7 @@ export default function ClaritasDashboard() {
                         <div
                           className={`relative min-h-0 rounded-2xl overflow-hidden bg-[color:var(--shell-bg)] ${
                             splitViewEnabled
-                              ? "h-full min-h-[22rem]"
+                              ? "h-full"
                               : "h-[56vh] max-h-[560px]"
                           }`}
                         >
