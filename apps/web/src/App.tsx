@@ -101,7 +101,7 @@ const SPLIT_VIEW_MIN_WIDTH = 700;
 const SPLIT_VIEW_MIN_HEIGHT = 620;
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
-type SearchTopic = "all" | "news" | "weather" | "ai";
+type SearchTopic = "all" | "news" | "weather";
 
 const DATA_WINDOW_OPTIONS: Array<{
   id: DataWindowPreset;
@@ -128,14 +128,13 @@ const SEARCH_TOPIC_OPTIONS: Array<{ id: SearchTopic; label: string }> = [
   { id: "all", label: "All" },
   { id: "news", label: "News" },
   { id: "weather", label: "Weather" },
-  { id: "ai", label: "AI" },
 ];
 
 const SEARCH_TOPIC_ALIASES: Record<string, SearchTopic> = {
   all: "all",
   news: "news",
   weather: "weather",
-  ai: "ai",
+  ai: "news",
   alerts: "news",
   wx: "weather",
 };
@@ -541,19 +540,15 @@ export default function ClaritasDashboard() {
   const effectiveSearchTopic = parsedSearch.topic;
   const hasSearchQuery = searchTerms.length > 0;
   const searchAppliesToNews =
-    effectiveSearchTopic === "all" ||
-    effectiveSearchTopic === "news" ||
-    effectiveSearchTopic === "ai";
+    effectiveSearchTopic === "all" || effectiveSearchTopic === "news";
   const searchAppliesToWeather =
     effectiveSearchTopic === "all" || effectiveSearchTopic === "weather";
   const searchInputPlaceholder =
-    effectiveSearchTopic === "ai"
-      ? "Search AI-relevant signals (e.g. OpenAI policy)"
-      : effectiveSearchTopic === "weather"
-        ? "Search weather topics (e.g. storm, humidity, US)"
-        : effectiveSearchTopic === "news"
-          ? "Search news topics (e.g. market, regulation, AI)"
-          : "Search by topic or keyword (try topic:news OpenAI)";
+    effectiveSearchTopic === "weather"
+      ? "Search weather topics (e.g. storm, humidity, US)"
+      : effectiveSearchTopic === "news"
+        ? "Search news topics (e.g. market, regulation, AI)"
+        : "Search by topic or keyword (try topic:news OpenAI)";
 
   const getSourceLabel = useCallback((item: NewsItem) => {
     const payload = (item as any)?.payload ?? {};
@@ -1186,7 +1181,7 @@ export default function ClaritasDashboard() {
       href: null,
     }));
 
-    if (effectiveSearchTopic === "news" || effectiveSearchTopic === "ai") {
+    if (effectiveSearchTopic === "news") {
       return news;
     }
     if (effectiveSearchTopic === "weather") {
@@ -2969,13 +2964,6 @@ export default function ClaritasDashboard() {
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                           />
-                          <button
-                            type="button"
-                            onClick={() => handleSearchTopicChange("ai")}
-                            className="rounded-lg bg-[color:var(--shell-ink)] px-3 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]"
-                          >
-                            AI scope
-                          </button>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
                           <span>Topic: {activeSearchTopicLabel}</span>

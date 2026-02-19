@@ -30,18 +30,7 @@ export type WorldMapBubblesProps = {
 const countries: any = (feature(worldData as any, (worldData as any).objects.countries) as any).features;
 const MAP_WIDTH = 800;
 const MAP_HEIGHT = 400;
-const MAP_COMPACT_HEIGHT = 260;
-
-// Fixed-size projections that match the component viewBoxes.
-// Compact mode fits country geometry tightly to improve readability in shorter panels.
-const projectionDefault = geoEqualEarth().fitSize([MAP_WIDTH, MAP_HEIGHT], { type: 'Sphere' } as any);
-const projectionCompact = geoEqualEarth().fitExtent(
-  [
-    [14, 10],
-    [MAP_WIDTH - 14, MAP_COMPACT_HEIGHT - 10],
-  ],
-  { type: 'FeatureCollection', features: countries } as any,
-);
+const projection = geoEqualEarth().fitSize([MAP_WIDTH, MAP_HEIGHT], { type: 'Sphere' } as any);
 
 export default memo(function WorldMapBubbles({
   data,
@@ -94,13 +83,11 @@ export default memo(function WorldMapBubbles({
 
   const isDark = !!dark;
   const isCompact = variant === "compact";
-  const projection = isCompact ? projectionCompact : projectionDefault;
-  const viewBox = isCompact
-    ? `0 0 ${MAP_WIDTH} ${MAP_COMPACT_HEIGHT}`
-    : `0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`;
-  const path = useMemo(() => geoPath(projection), [projection]);
-  const landFill = isDark ? '#334155' : '#E5E7EB';
-  const landStroke = isDark ? '#1f2937' : '#CBD5E1';
+  const viewBox = `0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`;
+  const path = useMemo(() => geoPath(projection), []);
+  const oceanGradientId = isDark ? "mapOceanDark" : "mapOceanLight";
+  const landFill = isDark ? '#dbe4f0' : '#e5e7eb';
+  const landStroke = isDark ? '#7c8ea6' : '#cbd5e1';
   const bubbleFill = isDark ? 'rgba(34,197,94,0.75)' : 'rgba(16,115,74,0.75)';
   const bubbleStroke = isDark ? '#16a34a' : '#0f5132';
   const labelColor = isDark ? '#e2e8f0' : '#0f172a';
@@ -121,6 +108,17 @@ export default memo(function WorldMapBubbles({
   return (
     <div ref={containerRef} className="relative w-full h-full">
       <svg viewBox={viewBox} width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="mapOceanDark" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#031426" />
+            <stop offset="100%" stopColor="#081c34" />
+          </linearGradient>
+          <linearGradient id="mapOceanLight" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#eef6fb" />
+            <stop offset="100%" stopColor="#dce9f5" />
+          </linearGradient>
+        </defs>
+        <rect x={0} y={0} width={MAP_WIDTH} height={MAP_HEIGHT} fill={`url(#${oceanGradientId})`} />
         <g>
           {countries.map((geo: any, i: number) => (
             <path key={i} d={path(geo) || ''} fill={landFill} stroke={landStroke} strokeWidth={0.5} />

@@ -46,7 +46,6 @@ Then re-open the `.xcodeproj` in Xcode.
 3. Commit both source files and `apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj`.
 4. If a merge conflict happens in `project.pbxproj`, regenerate from `generate_xcodeproj.rb` and commit the regenerated file.
 5. Open only `apps/mobile/ios/Claritas/Claritas.xcodeproj` (the legacy nested template project was removed).
-6. CI workflow `iOS Xcodeproj Sync` also validates this on pull requests and `main`.
 
 ## Notes
 
