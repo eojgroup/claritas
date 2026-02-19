@@ -21,8 +21,8 @@ async function ensureCountry(iso2) {
     if (!code || code.length !== 2)
         return;
     await (0, db_1.query)(`INSERT INTO country (iso2, name)
-     VALUES ($1, $1)
-     ON CONFLICT (iso2) DO NOTHING`, [code]);
+     VALUES ($1::char(2), $2::text)
+     ON CONFLICT (iso2) DO NOTHING`, [code, code]);
 }
 function toISO(ts) {
     const d = ts ? new Date(ts * 1000) : new Date();

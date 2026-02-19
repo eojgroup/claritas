@@ -35,9 +35,9 @@ async function ensureCountry(iso2: string) {
   if (!code || code.length !== 2) return;
   await query(
     `INSERT INTO country (iso2, name)
-     VALUES ($1, $1)
+     VALUES ($1::char(2), $2::text)
      ON CONFLICT (iso2) DO NOTHING`,
-    [code]
+    [code, code]
   );
 }
 
