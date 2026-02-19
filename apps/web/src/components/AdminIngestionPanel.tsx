@@ -344,7 +344,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const chartGridColor = dark ? "#334155" : "#e2e8f0";
 
   return (
-    <div className="grid gap-4">
+    <div className="admin-panel grid gap-3 sm:gap-4">
       <section className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
           <div>
@@ -355,7 +355,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               Trigger and observe News + Weather pipelines
             </div>
           </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+          <div className="ml-auto flex w-full flex-wrap items-center gap-2 text-sm sm:w-auto sm:text-xs">
             <button
               type="button"
               onClick={() => setPipelineFilter("all")}
@@ -392,7 +392,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <button
               type="button"
               onClick={() => void refreshOverview(false)}
-              className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
+              className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-[color:var(--shell-muted)]"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Refresh
@@ -479,7 +479,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               type="button"
               onClick={() => void handleTriggerNews()}
               disabled={isTriggeringNews}
-              className="mt-3 inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50"
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50 sm:w-auto sm:text-xs"
             >
               <Play className="h-3.5 w-3.5" />
               {isTriggeringNews ? "Starting…" : "Run News"}
@@ -506,7 +506,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               type="button"
               onClick={() => void handleTriggerWeather()}
               disabled={isTriggeringWeather}
-              className="mt-3 inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50"
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50 sm:w-auto sm:text-xs"
             >
               <Play className="h-3.5 w-3.5" />
               {isTriggeringWeather ? "Starting…" : "Run Weather"}
@@ -515,7 +515,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-3">
+      <section className="grid gap-3 sm:gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             News totals ({metricsDays}d)
@@ -564,12 +564,12 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-2">
+      <section className="grid gap-3 sm:gap-4 xl:grid-cols-2">
         <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-2 text-sm font-semibold text-[color:var(--shell-ink)]">
             Ingested rows by day
           </div>
-          <div className="h-64">
+          <div className="h-56 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData}>
                 <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
@@ -602,7 +602,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           <div className="mb-2 text-sm font-semibold text-[color:var(--shell-ink)]">
             Run volume and failures
           </div>
-          <div className="h-64">
+          <div className="h-56 sm:h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData}>
                 <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
@@ -650,7 +650,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+      <section className="grid gap-3 sm:gap-4 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
           <div className="mb-3 flex items-center gap-2">
             <Activity className="h-4 w-4 text-[color:var(--shell-muted)]" />
@@ -658,7 +658,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               Recent runs
             </div>
           </div>
-          <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1">
+          <div className="max-h-[360px] overflow-y-auto space-y-2 pr-1 sm:max-h-[420px]">
             {runs.length === 0 && (
               <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-2 text-xs text-[color:var(--shell-muted)]">
                 No ingestion runs available.
@@ -745,7 +745,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   {getStatNumber(selectedRun.stats, ["totals.skipped", "skipped"])}
                 </div>
               </div>
-              <div className="h-[360px] overflow-y-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] text-slate-100">
+              <div className="h-[300px] overflow-y-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] text-slate-100 sm:h-[360px]">
                 {logs.length === 0 && (
                   <div className="text-slate-400">No log lines yet for this run.</div>
                 )}

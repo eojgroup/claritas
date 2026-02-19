@@ -32,6 +32,10 @@
   --home-border: var(--shell-border);
   --home-ink: var(--shell-ink);
   --home-muted: var(--shell-muted);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 body {
@@ -72,6 +76,19 @@ button, input, select, textarea { font: inherit; }
   animation: dashboard-rise 0.7s ease both;
 }
 
+.app-safe-top {
+  padding-top: var(--safe-top);
+}
+
+.app-safe-bottom {
+  padding-bottom: var(--safe-bottom);
+}
+
+.app-safe-x {
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
 @keyframes dashboard-rise {
   from {
     opacity: 0;
@@ -86,5 +103,18 @@ button, input, select, textarea { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .dashboard-panel {
     animation: none;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .admin-panel input,
+  .admin-panel select,
+  .admin-panel textarea {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .admin-panel button {
+    min-height: 44px;
   }
 }

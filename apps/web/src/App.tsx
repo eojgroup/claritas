@@ -1353,14 +1353,14 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <div className="min-h-screen w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)]">
+    <div className="app-safe-x min-h-[100dvh] w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)]">
       {mobileNavOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
+        <div className="app-safe-top app-safe-bottom fixed inset-0 z-40 lg:hidden">
           <div
             className="absolute inset-0 bg-slate-900/60"
             onClick={() => setMobileNavOpen(false)}
           />
-          <aside className="absolute left-0 top-0 h-full w-72 bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
+          <aside className="absolute left-0 top-0 h-full w-[min(20rem,88vw)] bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
             <div className="flex h-full flex-col">
               <div className="px-6 pt-6 pb-4">
                 <div className="flex items-center gap-3">
@@ -1511,7 +1511,7 @@ export default function ClaritasDashboard() {
         <div className="flex min-w-0 flex-1 flex-col min-h-0">
           <header
             ref={headerRef}
-            className="sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
+            className="app-safe-top sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
           >
             <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 lg:px-8">
               <button
@@ -1582,7 +1582,7 @@ export default function ClaritasDashboard() {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col px-4 sm:px-6 lg:px-8 py-6">
+          <main className="app-safe-bottom mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col px-4 py-6 sm:px-6 lg:px-8">
             {sessionNotice && (
               <div className="mb-6">
                 <div

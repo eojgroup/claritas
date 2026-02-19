@@ -1,0 +1,54 @@
+name: iOS Xcodeproj Sync
+
+on:
+  pull_request:
+    paths:
+      - "apps/mobile/ios/**"
+      - ".github/workflows/ios-xcodeproj-sync.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/mobile/ios/**"
+      - ".github/workflows/ios-xcodeproj-sync.yml"
+  workflow_dispatch:
+
+jobs:
+  verify-xcodeproj-sync:
+    name: Verify iOS project sync
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+
+      - name: Install xcodeproj gem
+        run: gem install xcodeproj --no-document
+
+      - name: Ensure no stale nested template project exists
+        run: |
+          set -euo pipefail
+          nested="apps/mobile/ios/Claritas/Claritas/Claritas/Claritas.xcodeproj"
+          if [ -e "$nested" ]; then
+            echo "::error::Stale nested template project found at $nested"
+            exit 1
+          fi
+
+      - name: Regenerate canonical iOS project
+        run: ruby apps/mobile/ios/generate_xcodeproj.rb
+
+      - name: Fail if project.pbxproj is out of sync
+        run: |
+          set -euo pipefail
+          proj="apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj"
+          if ! git diff --exit-code -- "$proj"; then
+            echo "::error::iOS project file is out of sync."
+            echo "::error::Run: ruby apps/mobile/ios/generate_xcodeproj.rb"
+            echo "::error::Then commit: $proj"
+            exit 1
+          fi

@@ -1,6 +1,7 @@
 # Claritas iOS App (SwiftUI)
 
 Project path: `apps/mobile/ios/Claritas/Claritas.xcodeproj`
+Generator source: `apps/mobile/ios/generate_xcodeproj.rb`
 
 ## Quick Start
 
@@ -15,6 +16,12 @@ Project path: `apps/mobile/ios/Claritas/Claritas.xcodeproj`
    - Country news list (with thumbnail proxy).
    - Weather list (with filters + refresh).
    - Country profile panel reflecting your selection.
+
+## Source Of Truth
+
+- Swift/resources under `apps/mobile/ios/Claritas/Claritas/` are the source of truth.
+- `apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj` is generated; avoid manual edits.
+- If files are added/moved/renamed, regenerate the project rather than editing `.pbxproj` directly.
 
 ## Regenerate the Xcode Project
 
@@ -31,9 +38,16 @@ ruby generate_xcodeproj.rb
 
 Then re-open the `.xcodeproj` in Xcode.
 
+## Keep Project In Sync
+
+1. Make your code/file changes under `apps/mobile/ios/Claritas/Claritas/`.
+2. Run `ruby apps/mobile/ios/generate_xcodeproj.rb` (or run from `apps/mobile/ios`).
+3. Commit both source files and `apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj`.
+4. If a merge conflict happens in `project.pbxproj`, regenerate from `generate_xcodeproj.rb` and commit the regenerated file.
+5. Open only `apps/mobile/ios/Claritas/Claritas.xcodeproj` (there is a nested template project in the tree that should not be used).
+
 ## Notes
 
 - ATS is currently permissive (NSAllowsArbitraryLoads=true) to simplify dev. For production, replace with explicit domain exceptions or HTTPS endpoints.
 - The map view is a placeholder; a future step can add country bubble overlays using MapKit annotations and an ISO2->centroid dataset.
 - The structure is modular (Models, Services, Views) to ease future extensions (auth, settings, notifications, charts).
-

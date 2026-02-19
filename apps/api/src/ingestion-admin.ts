@@ -327,11 +327,11 @@ async function ensureSource(pipeline: IngestionPipeline): Promise<SourceRow> {
   const cfg = SOURCE_CONFIG[pipeline];
   const { rows } = await query<SourceRow>(
     `INSERT INTO source (name, api_base_url, auth_type, metadata)
-     VALUES ($1, $2, 'api_key', jsonb_build_object('provider', $3))
+     VALUES ($1, $2, 'api_key', jsonb_build_object('provider', $3::text))
      ON CONFLICT (name)
      DO UPDATE SET
        api_base_url = EXCLUDED.api_base_url,
-       metadata = COALESCE(source.metadata, '{}'::jsonb) || jsonb_build_object('provider', $3)
+       metadata = COALESCE(source.metadata, '{}'::jsonb) || jsonb_build_object('provider', $3::text)
      RETURNING id, name`,
     [cfg.sourceName, cfg.apiBaseUrl, cfg.provider]
   );

@@ -175,7 +175,7 @@ export default function AdminUserManagementPanel() {
   }, [loadData, newRoleDescription, newRoleKey]);
 
   return (
-    <div className="grid gap-4">
+    <div className="admin-panel grid gap-3 sm:gap-4">
       <section className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
           <div>
@@ -186,18 +186,18 @@ export default function AdminUserManagementPanel() {
               Manage user access, status, and role assignments
             </div>
           </div>
-          <div className="ml-auto flex items-center gap-2 text-xs">
+          <div className="ml-auto flex w-full flex-wrap items-center gap-2 text-sm sm:w-auto sm:text-xs">
             <button
               type="button"
               onClick={() => setAppliedSearch(search.trim())}
-              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
+              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-[color:var(--shell-muted)]"
             >
               Apply filters
             </button>
             <button
               type="button"
               onClick={() => void loadData()}
-              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
+              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-[color:var(--shell-muted)]"
             >
               Refresh
             </button>
@@ -229,7 +229,7 @@ export default function AdminUserManagementPanel() {
               ))}
             </select>
           </label>
-          <label className="mt-5 inline-flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+          <label className="mt-1 inline-flex items-center gap-2 text-xs text-[color:var(--shell-muted)] md:mt-5">
             <input
               type="checkbox"
               checked={includeInactive}
@@ -307,7 +307,7 @@ export default function AdminUserManagementPanel() {
               type="button"
               onClick={() => void handleCreateRole()}
               disabled={isCreatingRole}
-              className="mt-3 rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50"
+              className="mt-3 w-full rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50 sm:w-auto sm:text-xs"
             >
               {isCreatingRole ? "Creating…" : "Create role"}
             </button>
@@ -398,7 +398,7 @@ export default function AdminUserManagementPanel() {
                       type="button"
                       onClick={() => void saveUserRoles(user)}
                       disabled={!isDirty || isSavingRoles}
-                      className="rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-40"
+                      className="w-full rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-40 sm:w-auto sm:py-1 sm:text-xs"
                     >
                       {isSavingRoles ? "Saving…" : "Save roles"}
                     </button>
@@ -406,7 +406,7 @@ export default function AdminUserManagementPanel() {
                       type="button"
                       onClick={() => void toggleUserStatus(user)}
                       disabled={isSavingStatus}
-                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-ink)] disabled:opacity-40"
+                      className="w-full rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-ink)] disabled:opacity-40 sm:w-auto sm:py-1 sm:text-xs"
                     >
                       {isSavingStatus
                         ? "Updating…"
