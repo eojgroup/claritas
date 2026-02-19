@@ -176,6 +176,17 @@ const parseDashboardSearch = (
   return { topic, terms, raw: trimmed };
 };
 
+const stripDashboardSearchTopicTokens = (raw: string) =>
+  raw
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => {
+      const lower = token.toLowerCase();
+      return !/^(?:topic|t):[a-z]+$/.test(lower);
+    })
+    .join(" ");
+
 const safeDownload = (filename: string, data: Blob | string) => {
   const blob = typeof data === "string" ? new Blob([data]) : data;
   const url = URL.createObjectURL(blob);
@@ -719,7 +730,7 @@ export default function ClaritasDashboard() {
     const comparisonIso = comparisonCountry?.toUpperCase() ?? null;
     const perDayCountries = new Map<string, Map<string, number>>();
 
-    newsScope.forEach((item) => {
+    newsSearchScope.forEach((item) => {
       if (!item.event_time) return;
       const key = getDateKey(item.event_time);
       if (!key) return;
@@ -760,7 +771,7 @@ export default function ClaritasDashboard() {
     });
 
     return points;
-  }, [newsScope, selectedCountry, comparisonCountry, defaultRange]);
+  }, [newsSearchScope, selectedCountry, comparisonCountry, defaultRange]);
 
   const newsTrendTotal = useMemo(
     () => newsTrend.reduce((sum, item) => sum + item.count, 0),
@@ -818,7 +829,7 @@ export default function ClaritasDashboard() {
   }, [activeRange, newsTrend, newsTrendTotal]);
 
   const filteredNews = useMemo(() => {
-    let items = newsScope;
+    let items = newsSearchScope;
     if (effectiveRange) {
       items = items.filter((item) => {
         const key = item.event_time ? getDateKey(item.event_time) : null;
@@ -834,7 +845,7 @@ export default function ClaritasDashboard() {
       );
     }
     return items;
-  }, [newsScope, effectiveRange, selectedCountries]);
+  }, [newsSearchScope, effectiveRange, selectedCountries]);
 
   const filteredCountryStats = useMemo(() => {
     const stats = new Map<string, { count: number; sources: Map<string, number> }>();
@@ -907,7 +918,7 @@ export default function ClaritasDashboard() {
   }, [mapDates, mapDayIndex]);
 
   const mapNews = useMemo(() => {
-    let items = newsScope;
+    let items = newsSearchScope;
     if (mapRange) {
       items = items.filter((item) => {
         const key = item.event_time ? getDateKey(item.event_time) : null;
@@ -919,19 +930,13 @@ export default function ClaritasDashboard() {
       const dayKey = mapDates[Math.min(mapDayIndex, mapDates.length - 1)];
       items = items.filter((item) => getDateKey(item.event_time ?? "") === dayKey);
     }
-    if (searchAppliesToNews && searchTerms.length > 0) {
-      items = items.filter(matchesNewsSearch);
-    }
     return items;
   }, [
-    newsScope,
+    newsSearchScope,
     mapRange,
     mapDayMode,
     mapDayIndex,
     mapDates,
-    matchesNewsSearch,
-    searchAppliesToNews,
-    searchTerms.length,
   ]);
 
   const mapCountryStats = useMemo(() => {
@@ -1011,27 +1016,8 @@ export default function ClaritasDashboard() {
   ]);
 
   const mapWeatherScope = useMemo(() => {
-    let w = weatherStats;
-    if (typeof minTemp === "number") {
-      w = w.filter((x) => (x.temp_c ?? -999) >= minTemp);
-    }
-    if (regionCountries) {
-      w = w.filter(
-        (x) => x.country && regionCountries.has(x.country.toUpperCase()),
-      );
-    }
-    if (searchAppliesToWeather && searchTerms.length > 0) {
-      w = w.filter(matchesWeatherSearch);
-    }
-    return w;
-  }, [
-    weatherStats,
-    minTemp,
-    regionCountries,
-    matchesWeatherSearch,
-    searchAppliesToWeather,
-    searchTerms.length,
-  ]);
+    return weatherSearchScope;
+  }, [weatherSearchScope]);
 
   const mapWeatherData = useMemo(() => {
     const withTemp = (mapWeatherScope || []).filter(
@@ -1117,22 +1103,14 @@ export default function ClaritasDashboard() {
   }, [comparisonCountry, countryMeta]);
 
   const filteredWeather = useMemo(() => {
-    let w = weatherStats;
-    if (typeof minTemp === "number") {
-      w = w.filter((x) => (x.temp_c ?? -999) >= minTemp);
-    }
-    if (regionCountries) {
-      w = w.filter(
-        (x) => x.country && regionCountries.has(x.country.toUpperCase()),
-      );
-    }
+    let w = weatherSearchScope;
     if (selectedCountries.size > 0) {
       w = w.filter(
         (x) => x.country && selectedCountries.has(x.country.toUpperCase()),
       );
     }
     return w;
-  }, [weatherStats, minTemp, regionCountries, selectedCountries]);
+  }, [weatherSearchScope, selectedCountries]);
 
   const activeRegions = useMemo(() => {
     const regions = new Set<string>();
@@ -1176,6 +1154,46 @@ export default function ClaritasDashboard() {
     if (comparisonCountry) return comparisonCountry.toUpperCase();
     return regionFilter === "global" ? "Global" : regionLabel;
   }, [selectedCountry, comparisonCountry, regionFilter, regionLabel]);
+
+  const activeSearchTopicLabel =
+    SEARCH_TOPIC_OPTIONS.find((option) => option.id === effectiveSearchTopic)
+      ?.label ?? "All";
+
+  const aiSearchPreview = useMemo(() => {
+    const news = newsSearchScope.slice(0, 4).map((item) => ({
+      key: `news-${item.id}`,
+      kind: "News",
+      title: item.title ?? item.url ?? "Untitled",
+      subtitle: [
+        item.country_iso2 ? item.country_iso2.toUpperCase() : null,
+        item.event_time ? new Date(item.event_time).toLocaleString() : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      href: item.url ?? null,
+    }));
+    const weather = weatherSearchScope.slice(0, 4).map((row, idx) => ({
+      key: `weather-${row.country}-${row.observed_at}-${idx}`,
+      kind: "Weather",
+      title: `${(row.country || "—").toUpperCase()} · ${row.temp_c ?? "—"}°C`,
+      subtitle: [
+        row.weather_main ?? null,
+        row.humidity != null ? `${row.humidity}% humidity` : null,
+        row.observed_at ? new Date(row.observed_at).toLocaleString() : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      href: null,
+    }));
+
+    if (effectiveSearchTopic === "news" || effectiveSearchTopic === "ai") {
+      return news;
+    }
+    if (effectiveSearchTopic === "weather") {
+      return weather;
+    }
+    return [...news.slice(0, 2), ...weather.slice(0, 2)];
+  }, [newsSearchScope, weatherSearchScope, effectiveSearchTopic]);
 
   const splitViewEnabled = useMemo(
     () =>
@@ -1232,6 +1250,28 @@ export default function ClaritasDashboard() {
       setMapPlaying(false);
     }
   }, [mapMode]);
+
+  useEffect(() => {
+    if (activeView !== "dashboard" && mapExpanded) {
+      setMapExpanded(false);
+    }
+  }, [activeView, mapExpanded]);
+
+  useEffect(() => {
+    if (!mapExpanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMapExpanded(false);
+      }
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mapExpanded]);
 
   useLayoutEffect(() => {
     const el = headerRef.current;
@@ -1297,6 +1337,11 @@ export default function ClaritasDashboard() {
     setComparisonCountry(null);
     setCompareMode(false);
   };
+
+  const handleSearchTopicChange = useCallback((topic: SearchTopic) => {
+    setSearchTopic(topic);
+    setQuery((value) => stripDashboardSearchTopicTokens(value));
+  }, []);
 
   const handleAnomalyClick = (dateKey: string) => {
     const index = newsTrend.findIndex((d) => d.dateKey === dateKey);
@@ -1714,14 +1759,45 @@ export default function ClaritasDashboard() {
                   </span>
                   <span>{todayLabel}</span>
                 </div>
-                <div className="hidden md:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-muted)]">
-                  <Search className="h-4 w-4" />
-                  <input
-                    className="w-40 bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
-                    placeholder="Search signals"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
+                <div className="hidden md:flex items-center gap-2">
+                  <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-muted)]">
+                    <Search className="h-4 w-4" />
+                    <input
+                      className="w-44 lg:w-64 bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
+                      placeholder={searchInputPlaceholder}
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                    />
+                    {query && (
+                      <button
+                        type="button"
+                        onClick={() => setQuery("")}
+                        className="rounded-md p-0.5 text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
+                    {SEARCH_TOPIC_OPTIONS.map((option) => {
+                      const active = effectiveSearchTopic === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => handleSearchTopicChange(option.id)}
+                          className={`rounded-lg px-2.5 py-1 transition ${
+                            active
+                              ? "bg-[color:var(--shell-ink)] text-white"
+                              : "text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <button
                   aria-label="Toggle dark mode"
@@ -1829,6 +1905,36 @@ export default function ClaritasDashboard() {
                             : "Load all data"}
                       </button>
                     </div>
+                    <div className="w-full space-y-2 md:hidden">
+                      <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-muted)]">
+                        <Search className="h-4 w-4" />
+                        <input
+                          className="w-full bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
+                          placeholder={searchInputPlaceholder}
+                          value={query}
+                          onChange={(e) => setQuery(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
+                        {SEARCH_TOPIC_OPTIONS.map((option) => {
+                          const active = effectiveSearchTopic === option.id;
+                          return (
+                            <button
+                              key={`mobile-${option.id}`}
+                              type="button"
+                              onClick={() => handleSearchTopicChange(option.id)}
+                              className={`rounded-lg px-2.5 py-1 transition ${
+                                active
+                                  ? "bg-[color:var(--shell-ink)] text-white"
+                                  : "text-[color:var(--shell-muted)]"
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                     {newsLoadError && (
                       <div className="w-full text-xs text-rose-600">
                         Failed to refresh news data: {newsLoadError}
@@ -1886,6 +1992,14 @@ export default function ClaritasDashboard() {
                             }}
                           >
                             Weather
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMapExpanded(true)}
+                            className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] transition hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
+                          >
+                            <Maximize2 className="h-3.5 w-3.5" />
+                            Expand
                           </button>
                         </div>
                       </div>
@@ -1969,7 +2083,7 @@ export default function ClaritasDashboard() {
                         <div
                           className={`relative min-h-0 rounded-2xl overflow-hidden bg-[color:var(--shell-bg)] ${
                             splitViewEnabled
-                              ? "h-full"
+                              ? "h-full min-h-[18rem]"
                               : "h-[52vh] max-h-[520px]"
                           }`}
                         >
@@ -2669,6 +2783,70 @@ export default function ClaritasDashboard() {
                   </section>
                 </div>
 
+                {mapExpanded && (
+                  <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 sm:p-6"
+                    onClick={() => setMapExpanded(false)}
+                  >
+                    <div
+                      className="w-full max-w-6xl rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-2xl"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Expanded map
+                          </div>
+                          <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                            {mapMode === "news"
+                              ? "News coverage by country"
+                              : "Weather observations by country"}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setMapExpanded(false)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
+                          aria-label="Close expanded map"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="p-4">
+                        <div className="h-[min(74vh,760px)] min-h-[20rem] overflow-hidden rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)]">
+                          <WorldMapBubbles
+                            variant="default"
+                            data={
+                              mapMode === "news" ? mapBubbleData : mapWeatherData
+                            }
+                            onSelect={handleMapSelect}
+                            dark={dark}
+                            primaryCountry={selectedCountry}
+                            secondaryCountry={comparisonCountry}
+                            pinnedCountry={pinnedCountry}
+                            scale={mapScale}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 border-t border-[color:var(--shell-border)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
+                        <span>
+                          Window: {mapRangeLabel}
+                          {mapDayMode && mapMode === "news" ? ` · ${mapDayLabel}` : ""}
+                        </span>
+                        <span>
+                          Countries shown:{" "}
+                          {mapMode === "news"
+                            ? mapBubbleData.length
+                            : mapWeatherData.length}
+                        </span>
+                        <span className="ml-auto">
+                          Search topic: {activeSearchTopicLabel}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <details className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
                   <summary className="cursor-pointer text-sm font-semibold text-[color:var(--shell-ink)]">
                     More panels
@@ -2764,21 +2942,94 @@ export default function ClaritasDashboard() {
                         </div>
                       </div>
                       <div className="p-4 space-y-3">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          {SEARCH_TOPIC_OPTIONS.map((option) => {
+                            const active = effectiveSearchTopic === option.id;
+                            return (
+                              <button
+                                key={`ai-${option.id}`}
+                                type="button"
+                                onClick={() => handleSearchTopicChange(option.id)}
+                                className={`rounded-full border px-3 py-1 transition ${
+                                  active
+                                    ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                    : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                         <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2">
                           <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
                           <input
                             className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
-                            placeholder="Search events, alerts, and location activity"
+                            placeholder={searchInputPlaceholder}
                             value={query}
                             onChange={(e) => setQuery(e.target.value)}
                           />
-                          <button className="rounded-lg bg-[color:var(--shell-ink)] px-3 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]">
-                            Search
+                          <button
+                            type="button"
+                            onClick={() => handleSearchTopicChange("ai")}
+                            className="rounded-lg bg-[color:var(--shell-ink)] px-3 py-1.5 text-white text-xs font-semibold uppercase tracking-[0.2em]"
+                          >
+                            AI scope
                           </button>
                         </div>
-                        <p className="text-xs text-[color:var(--shell-muted)]">
-                          Queries return live signal matches from the last 30
-                          days.
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                          <span>Topic: {activeSearchTopicLabel}</span>
+                          <span>News matches: {newsSearchScope.length}</span>
+                          <span>Weather matches: {weatherSearchScope.length}</span>
+                        </div>
+                        {!hasSearchQuery ? (
+                          <p className="text-xs text-[color:var(--shell-muted)]">
+                            Type a query to filter feeds by topic. Prefixes like
+                            <code className="mx-1 rounded bg-[color:var(--shell-bg)] px-1 py-0.5">
+                              topic:weather
+                            </code>
+                            are supported.
+                          </p>
+                        ) : aiSearchPreview.length === 0 ? (
+                          <p className="text-xs text-[color:var(--shell-muted)]">
+                            No matching signals for this topic and query.
+                          </p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {aiSearchPreview.map((result) => (
+                              <li
+                                key={result.key}
+                                className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-2"
+                              >
+                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                                  <span>{result.kind}</span>
+                                </div>
+                                {result.href ? (
+                                  <a
+                                    href={result.href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-1 block text-sm font-semibold text-[color:var(--shell-ink)] hover:underline"
+                                  >
+                                    {result.title}
+                                  </a>
+                                ) : (
+                                  <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                                    {result.title}
+                                  </div>
+                                )}
+                                {result.subtitle && (
+                                  <div className="text-xs text-[color:var(--shell-muted)]">
+                                    {result.subtitle}
+                                  </div>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="text-[11px] text-[color:var(--shell-muted)]">
+                          This card now builds structured search context so an AI
+                          answer pipeline can be attached next.
                         </p>
                       </div>
                     </div>

@@ -28,10 +28,20 @@ export type WorldMapBubblesProps = {
 
 // TopoJSON -> GeoJSON features
 const countries: any = (feature(worldData as any, (worldData as any).objects.countries) as any).features;
+const MAP_WIDTH = 800;
+const MAP_HEIGHT = 400;
+const MAP_COMPACT_HEIGHT = 260;
 
-// Fixed-size projection matching the component's viewBox (800x400)
-// This ensures bubbles and map align predictably across browsers.
-const projection = geoEqualEarth().fitSize([800, 400], { type: 'Sphere' } as any);
+// Fixed-size projections that match the component viewBoxes.
+// Compact mode fits country geometry tightly to improve readability in shorter panels.
+const projectionDefault = geoEqualEarth().fitSize([MAP_WIDTH, MAP_HEIGHT], { type: 'Sphere' } as any);
+const projectionCompact = geoEqualEarth().fitExtent(
+  [
+    [14, 10],
+    [MAP_WIDTH - 14, MAP_COMPACT_HEIGHT - 10],
+  ],
+  { type: 'FeatureCollection', features: countries } as any,
+);
 
 export default memo(function WorldMapBubbles({
   data,
@@ -45,7 +55,6 @@ export default memo(function WorldMapBubbles({
   scale = "linear",
   showLabels = true,
 }: WorldMapBubblesProps) {
-  const path = useMemo(() => geoPath(projection), []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<{
     show: boolean;
@@ -85,6 +94,11 @@ export default memo(function WorldMapBubbles({
 
   const isDark = !!dark;
   const isCompact = variant === "compact";
+  const projection = isCompact ? projectionCompact : projectionDefault;
+  const viewBox = isCompact
+    ? `0 0 ${MAP_WIDTH} ${MAP_COMPACT_HEIGHT}`
+    : `0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`;
+  const path = useMemo(() => geoPath(projection), [projection]);
   const landFill = isDark ? '#334155' : '#E5E7EB';
   const landStroke = isDark ? '#1f2937' : '#CBD5E1';
   const bubbleFill = isDark ? 'rgba(34,197,94,0.75)' : 'rgba(16,115,74,0.75)';
@@ -106,7 +120,7 @@ export default memo(function WorldMapBubbles({
 
   return (
     <div ref={containerRef} className="relative w-full h-full">
-      <svg viewBox="0 0 800 400" width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox={viewBox} width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
         <g>
           {countries.map((geo: any, i: number) => (
             <path key={i} d={path(geo) || ''} fill={landFill} stroke={landStroke} strokeWidth={0.5} />

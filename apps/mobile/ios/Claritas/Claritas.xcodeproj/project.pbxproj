@@ -7,43 +7,43 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		028160B8C5F0DFA6D746A363377C1691 /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0329108E4E719BD4864467921C058D7E /* CountryProfileView.swift */; };
-		047287DFFA5A8D8900E7D9190894754B /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304BE4A17FFA6B5C823ABEBE2AF14C00 /* Models.swift */; };
-		0B36B1F22B5429FBEACD9C7BC4F68936 /* NewsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E9F920FBD62D8FF36E9CF9BF4DE46F /* NewsListView.swift */; };
-		206BE05B4B310157405DEF9AFF637163 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0361BAC8AFC288269E0FC61B09916C /* APIClient.swift */; };
-		2A1C4BB3EF34FDE0E1CAB9C785B4C404 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1B53590D9AA604D32A8F6B79DE55D675 /* Assets.xcassets */; };
-		2BD3D76BD7705796EAD52828C6AD1379 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7D991B0CDB4824E72A253A763D8987 /* App.swift */; };
-		2C557B73FC171253E38B1623F497BC43 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94DC8152FF9905126D1B11BB62ADC0F3 /* ProfileView.swift */; };
-		322ED844E4A33EFF3885F8F270BEA40E /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E74C94CA3771E3B4965B1B5AB7635EF /* LoginView.swift */; };
-		65E918D4E0261EBAA861CBB59927C3DB /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6695463954E96448FE455BDEA65BAF7 /* WeatherListView.swift */; };
-		85782E5076058AB43BB829CEE0404C50 /* AuthSessionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5875DB905CAB6CA0899079E0BED9B2 /* AuthSessionPresenter.swift */; };
-		98171CBBFD1D606A6AE21DE14086C98E /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D0D2B4188726E557BF2D77C5B875C3 /* RootView.swift */; };
-		A9AD8455C624C6CD3397B09F078F2A15 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACB29561F372CD2EBE1AC79E3FDB847 /* DashboardView.swift */; };
-		DE270F300AC3800807F6CD2FCCCECEA3 /* BrandComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6730396A19E6D430F84DD1A50BC7A6D3 /* BrandComponents.swift */; };
+		00A387168784B0E04067B80EDE530CC9 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39BF0BB14373BDA60DE11582C8EF88CE /* AppModel.swift */; };
+		14607786ACF459EC02AA89E9F880AD56 /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F9F2763C67F88A7FF7007882DCB883 /* CountryProfileView.swift */; };
+		1F178FB32B3B18405CBE4FF9E9C19012 /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 75ACDD33807AE6E54A66F91A207EB285 /* Config.plist */; };
+		233C9903BDF8C2AD9264C07CD61673D0 /* BrandComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49253C3F496D8BA24D7F9D316BDF6319 /* BrandComponents.swift */; };
+		3D6710AAB535F80E38D7B4A43F495CEA /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4103ECB8AC1C8DFFCE679E7C168D9BD3 /* RootView.swift */; };
+		5E1FBC583F5D74BC957944C11C7F54C3 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 025B9D1FB417221160613FA83E015036 /* DashboardView.swift */; };
+		707F02CD3C89C6B853E3E6E016257D7C /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDB337E4843546E88D37A67832797F5 /* LoginView.swift */; };
+		7A188D806AF1E1B89B2758FF5938A27A /* AuthSessionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB9830F513FF9F8517C3DA121197EE41 /* AuthSessionPresenter.swift */; };
+		94E96D0D838D407D7AB1B1977911220E /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD335C6D52EFC86DB6CA9F65E89D8010 /* App.swift */; };
+		A53D911CA7A697DA4D6D73C97B79ACC6 /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FFF7D243F9EDC00E6CAF0146668596 /* WeatherListView.swift */; };
+		AC6902DA6CC9BC376914779C51E154A8 /* NewsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96EB767CA5EAFD65DEA933F29077984E /* NewsListView.swift */; };
+		D5B578555497A12CC4E9A3B51929E5A8 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 316A93B6F24247DF833308ADB1127507 /* ProfileView.swift */; };
+		E6F006A6BFDEBB8E52AF25BD8FA6F04F /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD7E8C6F85C00A156566AD2DD0B910EC /* APIClient.swift */; };
 		E835BC6EB3EBFF9535D36F9556E1D18B /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5EC342EF035DC4652651B32EFA516BD /* Foundation.framework */; };
-		F0D92E07006C9197691C728DC1AEDDBA /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F64DD404964470717D301805F2152B9 /* AppModel.swift */; };
-		F80842891EB1513B79A1AF7D6055DDBE /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 2412ADA4B293840D17A27FC2D9D6D7E4 /* Config.plist */; };
+		EBDFF906C8EF7867E3B2E7752F9F49C7 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11FC85CA624E08D251EBB45FA6C43167 /* Models.swift */; };
+		EF258CA8055A5119D358157A263728F7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7108DFF203A8BB40CC6916DAD2A2E3C9 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0329108E4E719BD4864467921C058D7E /* CountryProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CountryProfileView.swift; path = Claritas/Views/CountryProfileView.swift; sourceTree = "<group>"; };
-		0E74C94CA3771E3B4965B1B5AB7635EF /* LoginView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LoginView.swift; path = Claritas/Views/LoginView.swift; sourceTree = "<group>"; };
-		0F0361BAC8AFC288269E0FC61B09916C /* APIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIClient.swift; path = Claritas/Services/APIClient.swift; sourceTree = "<group>"; };
-		0F7D991B0CDB4824E72A253A763D8987 /* App.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = App.swift; path = Claritas/App.swift; sourceTree = "<group>"; };
-		1B53590D9AA604D32A8F6B79DE55D675 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Claritas/Assets.xcassets; sourceTree = "<group>"; };
-		2412ADA4B293840D17A27FC2D9D6D7E4 /* Config.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Config.plist; path = Claritas/Config.plist; sourceTree = "<group>"; };
-		304BE4A17FFA6B5C823ABEBE2AF14C00 /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Models.swift; path = Claritas/Models/Models.swift; sourceTree = "<group>"; };
-		6730396A19E6D430F84DD1A50BC7A6D3 /* BrandComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BrandComponents.swift; path = Claritas/Views/BrandComponents.swift; sourceTree = "<group>"; };
-		7F64DD404964470717D301805F2152B9 /* AppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AppModel.swift; path = Claritas/AppModel.swift; sourceTree = "<group>"; };
-		8A5875DB905CAB6CA0899079E0BED9B2 /* AuthSessionPresenter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AuthSessionPresenter.swift; path = Claritas/Services/AuthSessionPresenter.swift; sourceTree = "<group>"; };
-		8AE0D6C7AADCD246DC0FA09BB5A803DF /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = Claritas/Info.plist; sourceTree = "<group>"; };
-		94DC8152FF9905126D1B11BB62ADC0F3 /* ProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileView.swift; path = Claritas/Views/ProfileView.swift; sourceTree = "<group>"; };
-		99D0D2B4188726E557BF2D77C5B875C3 /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootView.swift; path = Claritas/Views/RootView.swift; sourceTree = "<group>"; };
+		025B9D1FB417221160613FA83E015036 /* DashboardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DashboardView.swift; path = Views/DashboardView.swift; sourceTree = "<group>"; };
+		11FC85CA624E08D251EBB45FA6C43167 /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Models.swift; path = Models/Models.swift; sourceTree = "<group>"; };
+		316A93B6F24247DF833308ADB1127507 /* ProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileView.swift; path = Views/ProfileView.swift; sourceTree = "<group>"; };
+		39BF0BB14373BDA60DE11582C8EF88CE /* AppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		4103ECB8AC1C8DFFCE679E7C168D9BD3 /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootView.swift; path = Views/RootView.swift; sourceTree = "<group>"; };
+		49253C3F496D8BA24D7F9D316BDF6319 /* BrandComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BrandComponents.swift; path = Views/BrandComponents.swift; sourceTree = "<group>"; };
+		7108DFF203A8BB40CC6916DAD2A2E3C9 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		75ACDD33807AE6E54A66F91A207EB285 /* Config.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Config.plist; sourceTree = "<group>"; };
+		7955C88B6B6A7FC58C9A160DF453FD17 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		96EB767CA5EAFD65DEA933F29077984E /* NewsListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NewsListView.swift; path = Views/NewsListView.swift; sourceTree = "<group>"; };
 		9DBFB5484FE07B9E90C21FE106C90B24 /* Claritas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Claritas.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1FFF7D243F9EDC00E6CAF0146668596 /* WeatherListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WeatherListView.swift; path = Views/WeatherListView.swift; sourceTree = "<group>"; };
+		BBDB337E4843546E88D37A67832797F5 /* LoginView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LoginView.swift; path = Views/LoginView.swift; sourceTree = "<group>"; };
 		D5EC342EF035DC4652651B32EFA516BD /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		D6695463954E96448FE455BDEA65BAF7 /* WeatherListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WeatherListView.swift; path = Claritas/Views/WeatherListView.swift; sourceTree = "<group>"; };
-		EACB29561F372CD2EBE1AC79E3FDB847 /* DashboardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DashboardView.swift; path = Claritas/Views/DashboardView.swift; sourceTree = "<group>"; };
-		F6E9F920FBD62D8FF36E9CF9BF4DE46F /* NewsListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NewsListView.swift; path = Claritas/Views/NewsListView.swift; sourceTree = "<group>"; };
+		DB9830F513FF9F8517C3DA121197EE41 /* AuthSessionPresenter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AuthSessionPresenter.swift; path = Services/AuthSessionPresenter.swift; sourceTree = "<group>"; };
+		DD7E8C6F85C00A156566AD2DD0B910EC /* APIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIClient.swift; path = Services/APIClient.swift; sourceTree = "<group>"; };
+		E1F9F2763C67F88A7FF7007882DCB883 /* CountryProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CountryProfileView.swift; path = Views/CountryProfileView.swift; sourceTree = "<group>"; };
+		FD335C6D52EFC86DB6CA9F65E89D8010 /* App.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -58,6 +58,29 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		035F5105932ABCD30239464847D981DB /* Claritas */ = {
+			isa = PBXGroup;
+			children = (
+				FD335C6D52EFC86DB6CA9F65E89D8010 /* App.swift */,
+				39BF0BB14373BDA60DE11582C8EF88CE /* AppModel.swift */,
+				11FC85CA624E08D251EBB45FA6C43167 /* Models.swift */,
+				DD7E8C6F85C00A156566AD2DD0B910EC /* APIClient.swift */,
+				DB9830F513FF9F8517C3DA121197EE41 /* AuthSessionPresenter.swift */,
+				49253C3F496D8BA24D7F9D316BDF6319 /* BrandComponents.swift */,
+				E1F9F2763C67F88A7FF7007882DCB883 /* CountryProfileView.swift */,
+				025B9D1FB417221160613FA83E015036 /* DashboardView.swift */,
+				BBDB337E4843546E88D37A67832797F5 /* LoginView.swift */,
+				96EB767CA5EAFD65DEA933F29077984E /* NewsListView.swift */,
+				316A93B6F24247DF833308ADB1127507 /* ProfileView.swift */,
+				4103ECB8AC1C8DFFCE679E7C168D9BD3 /* RootView.swift */,
+				A1FFF7D243F9EDC00E6CAF0146668596 /* WeatherListView.swift */,
+				7108DFF203A8BB40CC6916DAD2A2E3C9 /* Assets.xcassets */,
+				75ACDD33807AE6E54A66F91A207EB285 /* Config.plist */,
+				7955C88B6B6A7FC58C9A160DF453FD17 /* Info.plist */,
+			);
+			name = Claritas;
+			sourceTree = "<group>";
+		};
 		23A05AC7CA29CD384F4751AFA273798E /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -71,7 +94,7 @@
 			children = (
 				914A8EF40B161A553D18F5C99645F520 /* Products */,
 				23A05AC7CA29CD384F4751AFA273798E /* Frameworks */,
-				C2751D3F4308643DBCC90DF53BF60882 /* Claritas */,
+				035F5105932ABCD30239464847D981DB /* Claritas */,
 			);
 			sourceTree = "<group>";
 		};
@@ -91,30 +114,6 @@
 			name = iOS;
 			sourceTree = "<group>";
 		};
-		C2751D3F4308643DBCC90DF53BF60882 /* Claritas */ = {
-			isa = PBXGroup;
-			children = (
-				0F7D991B0CDB4824E72A253A763D8987 /* App.swift */,
-				7F64DD404964470717D301805F2152B9 /* AppModel.swift */,
-				304BE4A17FFA6B5C823ABEBE2AF14C00 /* Models.swift */,
-				0F0361BAC8AFC288269E0FC61B09916C /* APIClient.swift */,
-				8A5875DB905CAB6CA0899079E0BED9B2 /* AuthSessionPresenter.swift */,
-				6730396A19E6D430F84DD1A50BC7A6D3 /* BrandComponents.swift */,
-				0329108E4E719BD4864467921C058D7E /* CountryProfileView.swift */,
-				EACB29561F372CD2EBE1AC79E3FDB847 /* DashboardView.swift */,
-				0E74C94CA3771E3B4965B1B5AB7635EF /* LoginView.swift */,
-				F6E9F920FBD62D8FF36E9CF9BF4DE46F /* NewsListView.swift */,
-				94DC8152FF9905126D1B11BB62ADC0F3 /* ProfileView.swift */,
-				99D0D2B4188726E557BF2D77C5B875C3 /* RootView.swift */,
-				D6695463954E96448FE455BDEA65BAF7 /* WeatherListView.swift */,
-				1B53590D9AA604D32A8F6B79DE55D675 /* Assets.xcassets */,
-				2412ADA4B293840D17A27FC2D9D6D7E4 /* Config.plist */,
-				8AE0D6C7AADCD246DC0FA09BB5A803DF /* Info.plist */,
-			);
-			name = Claritas;
-			path = Claritas;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -122,9 +121,9 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 4AF2FA5BEEA5CC77A6BE5B3FC6B47438 /* Build configuration list for PBXNativeTarget "Claritas" */;
 			buildPhases = (
-				3D2D0EEA94BEAA4DB6CE720E748E809A /* Sources */,
+				F6AFF2F5B4FE8264CF92BD5EF0EB7810 /* Sources */,
 				66DB4717C46DBCE1B41C8C3C710F22B4 /* Frameworks */,
-				0FAC65608A36C039D7B5A9CB13EA8737 /* Resources */,
+				53EFD297B476F2FE6962D7AC9868FF27 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -165,35 +164,35 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		0FAC65608A36C039D7B5A9CB13EA8737 /* Resources */ = {
+		53EFD297B476F2FE6962D7AC9868FF27 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2A1C4BB3EF34FDE0E1CAB9C785B4C404 /* Assets.xcassets in Resources */,
-				F80842891EB1513B79A1AF7D6055DDBE /* Config.plist in Resources */,
+				EF258CA8055A5119D358157A263728F7 /* Assets.xcassets in Resources */,
+				1F178FB32B3B18405CBE4FF9E9C19012 /* Config.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		3D2D0EEA94BEAA4DB6CE720E748E809A /* Sources */ = {
+		F6AFF2F5B4FE8264CF92BD5EF0EB7810 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2BD3D76BD7705796EAD52828C6AD1379 /* App.swift in Sources */,
-				F0D92E07006C9197691C728DC1AEDDBA /* AppModel.swift in Sources */,
-				047287DFFA5A8D8900E7D9190894754B /* Models.swift in Sources */,
-				206BE05B4B310157405DEF9AFF637163 /* APIClient.swift in Sources */,
-				85782E5076058AB43BB829CEE0404C50 /* AuthSessionPresenter.swift in Sources */,
-				DE270F300AC3800807F6CD2FCCCECEA3 /* BrandComponents.swift in Sources */,
-				028160B8C5F0DFA6D746A363377C1691 /* CountryProfileView.swift in Sources */,
-				A9AD8455C624C6CD3397B09F078F2A15 /* DashboardView.swift in Sources */,
-				322ED844E4A33EFF3885F8F270BEA40E /* LoginView.swift in Sources */,
-				0B36B1F22B5429FBEACD9C7BC4F68936 /* NewsListView.swift in Sources */,
-				2C557B73FC171253E38B1623F497BC43 /* ProfileView.swift in Sources */,
-				98171CBBFD1D606A6AE21DE14086C98E /* RootView.swift in Sources */,
-				65E918D4E0261EBAA861CBB59927C3DB /* WeatherListView.swift in Sources */,
+				94E96D0D838D407D7AB1B1977911220E /* App.swift in Sources */,
+				00A387168784B0E04067B80EDE530CC9 /* AppModel.swift in Sources */,
+				EBDFF906C8EF7867E3B2E7752F9F49C7 /* Models.swift in Sources */,
+				E6F006A6BFDEBB8E52AF25BD8FA6F04F /* APIClient.swift in Sources */,
+				7A188D806AF1E1B89B2758FF5938A27A /* AuthSessionPresenter.swift in Sources */,
+				233C9903BDF8C2AD9264C07CD61673D0 /* BrandComponents.swift in Sources */,
+				14607786ACF459EC02AA89E9F880AD56 /* CountryProfileView.swift in Sources */,
+				5E1FBC583F5D74BC957944C11C7F54C3 /* DashboardView.swift in Sources */,
+				707F02CD3C89C6B853E3E6E016257D7C /* LoginView.swift in Sources */,
+				AC6902DA6CC9BC376914779C51E154A8 /* NewsListView.swift in Sources */,
+				D5B578555497A12CC4E9A3B51929E5A8 /* ProfileView.swift in Sources */,
+				3D6710AAB535F80E38D7B4A43F495CEA /* RootView.swift in Sources */,
+				A53D911CA7A697DA4D6D73C97B79ACC6 /* WeatherListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

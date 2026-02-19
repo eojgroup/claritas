@@ -72,7 +72,7 @@ FileUtils.rm_rf(proj_path)
 project = Xcodeproj::Project.new(proj_path)
 
 main_group = project.main_group
-app_group = main_group.new_group(APP_NAME, APP_NAME)
+app_group = main_group.new_group(APP_NAME)
 
 target = project.new_target(:application, APP_NAME, :ios, IOS_DEPLOYMENT, nil, :swift)
 target.frameworks_build_phase
@@ -81,7 +81,7 @@ target.resources_build_phase
 swift_sources.each do |rel|
   full = File.join(APP_ROOT, rel)
   abort_with("Missing file #{rel}") unless File.exist?(full)
-  file_ref = app_group.new_file(File.join(APP_NAME, rel))
+  file_ref = app_group.new_file(rel)
   target.add_file_references([file_ref])
 end
 
@@ -89,7 +89,7 @@ end
 resources.each do |rel|
   full = File.join(APP_ROOT, rel)
   abort_with("Missing resource #{rel}") unless File.exist?(full)
-  file_ref = app_group.new_file(File.join(APP_NAME, rel))
+  file_ref = app_group.new_file(rel)
   # Info.plist is processed via INFOPLIST_FILE and must not be copied as a resource.
   target.add_resources([file_ref]) unless rel == 'Info.plist'
 end
