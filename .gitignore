@@ -2,3 +2,10 @@
 **/.terraform/
 **/*.tfstate
 **/*.tfstate.*
+
+# macOS
+.DS_Store
+
+# Xcode user state
+**/xcuserdata/
+**/*.xcuserstate

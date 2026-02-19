@@ -30,6 +30,10 @@ final class AppModel: ObservableObject {
     private let authCallbackScheme = "claritas"
     private let authCallbackURL = URL(string: "claritas://auth/callback")!
 
+    var isAdmin: Bool {
+        (authUser?.roles ?? []).contains { $0.lowercased() == "admin" }
+    }
+
     init() {
         self.api = APIClient()
         self.authToken = UserDefaults.standard.string(forKey: authTokenKey)

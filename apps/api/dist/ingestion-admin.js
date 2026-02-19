@@ -46,6 +46,40 @@ exports.IngestionValidationError = IngestionValidationError;
 function toIsoNow() {
     return new Date().toISOString();
 }
+function timestampToString(value) {
+    if (value instanceof Date) {
+        const ts = value.getTime();
+        if (!Number.isNaN(ts))
+            return value.toISOString();
+        return toIsoNow();
+    }
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed)
+            return trimmed;
+    }
+    return toIsoNow();
+}
+function timestampToDateKey(value) {
+    if (value instanceof Date) {
+        const ts = value.getTime();
+        if (!Number.isNaN(ts))
+            return value.toISOString().slice(0, 10);
+        return null;
+    }
+    if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed)
+            return null;
+        if (/^\d{4}-\d{2}-\d{2}/.test(trimmed))
+            return trimmed.slice(0, 10);
+        const parsed = Date.parse(trimmed);
+        if (Number.isNaN(parsed))
+            return null;
+        return new Date(parsed).toISOString().slice(0, 10);
+    }
+    return null;
+}
 function asRecord(value) {
     if (value && typeof value === "object" && !Array.isArray(value)) {
         return value;
@@ -164,8 +198,8 @@ function toAdminRun(row) {
         pipeline: resolvePipeline(row.pipeline, row.source_name),
         source_name: row.source_name,
         status: normalizeStatus(row.status),
-        started_at: row.started_at,
-        finished_at: row.finished_at,
+        started_at: timestampToString(row.started_at),
+        finished_at: row.finished_at == null ? null : timestampToString(row.finished_at),
         error: row.error,
         stats: row.stats ?? null,
         trigger_mode: row.trigger_mode,
@@ -178,7 +212,7 @@ function toAdminLog(row) {
     return {
         id: row.id,
         run_id: row.run_id,
-        logged_at: row.logged_at,
+        logged_at: timestampToString(row.logged_at),
         level: normalizeLogLevel(row.level),
         message: row.message,
         context: row.context ?? null,
@@ -618,7 +652,9 @@ async function getMetrics(options) {
     const pointsByKey = new Map();
     for (const row of rows) {
         const resolvedPipeline = resolvePipeline(row.pipeline, row.source_name);
-        const dateKey = row.started_at.slice(0, 10);
+        const dateKey = timestampToDateKey(row.started_at);
+        if (!dateKey)
+            continue;
         const key = `${dateKey}:${resolvedPipeline}`;
         if (!pointsByKey.has(key)) {
             pointsByKey.set(key, {

@@ -69,13 +69,15 @@ type SourceRow = {
   name: string;
 };
 
+type DbTimestamp = string | Date;
+
 type RunRow = {
   id: number;
   pipeline: string | null;
   source_name: string;
   status: string | null;
-  started_at: string;
-  finished_at: string | null;
+  started_at: DbTimestamp;
+  finished_at: DbTimestamp | null;
   error: string | null;
   stats: any;
   trigger_mode: string | null;
@@ -87,7 +89,7 @@ type RunRow = {
 type RunLogRow = {
   id: number;
   run_id: number;
-  logged_at: string;
+  logged_at: DbTimestamp;
   level: string;
   message: string;
   context: any | null;
@@ -97,7 +99,7 @@ type MetricRunRow = {
   pipeline: string | null;
   source_name: string;
   status: string | null;
-  started_at: string;
+  started_at: DbTimestamp;
   stats: any;
 };
 
@@ -179,6 +181,36 @@ export class IngestionValidationError extends Error {
 
 function toIsoNow(): string {
   return new Date().toISOString();
+}
+
+function timestampToString(value: unknown): string {
+  if (value instanceof Date) {
+    const ts = value.getTime();
+    if (!Number.isNaN(ts)) return value.toISOString();
+    return toIsoNow();
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return toIsoNow();
+}
+
+function timestampToDateKey(value: unknown): string | null {
+  if (value instanceof Date) {
+    const ts = value.getTime();
+    if (!Number.isNaN(ts)) return value.toISOString().slice(0, 10);
+    return null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+    const parsed = Date.parse(trimmed);
+    if (Number.isNaN(parsed)) return null;
+    return new Date(parsed).toISOString().slice(0, 10);
+  }
+  return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -301,8 +333,8 @@ function toAdminRun(row: RunRow): AdminIngestionRun {
     pipeline: resolvePipeline(row.pipeline, row.source_name),
     source_name: row.source_name,
     status: normalizeStatus(row.status),
-    started_at: row.started_at,
-    finished_at: row.finished_at,
+    started_at: timestampToString(row.started_at),
+    finished_at: row.finished_at == null ? null : timestampToString(row.finished_at),
     error: row.error,
     stats: row.stats ?? null,
     trigger_mode: row.trigger_mode,
@@ -316,7 +348,7 @@ function toAdminLog(row: RunLogRow): AdminIngestionLog {
   return {
     id: row.id,
     run_id: row.run_id,
-    logged_at: row.logged_at,
+    logged_at: timestampToString(row.logged_at),
     level: normalizeLogLevel(row.level),
     message: row.message,
     context: row.context ?? null,
@@ -843,7 +875,8 @@ export async function getMetrics(options?: {
   const pointsByKey = new Map<string, AdminIngestionMetricPoint>();
   for (const row of rows) {
     const resolvedPipeline = resolvePipeline(row.pipeline, row.source_name);
-    const dateKey = row.started_at.slice(0, 10);
+    const dateKey = timestampToDateKey(row.started_at);
+    if (!dateKey) continue;
     const key = `${dateKey}:${resolvedPipeline}`;
     if (!pointsByKey.has(key)) {
       pointsByKey.set(key, {
