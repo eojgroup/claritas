@@ -28,9 +28,20 @@ export type WorldMapBubblesProps = {
 
 // TopoJSON -> GeoJSON features
 const countries: any = (feature(worldData as any, (worldData as any).objects.countries) as any).features;
+const countryCollection = {
+  type: 'FeatureCollection',
+  features: countries,
+} as any;
 const MAP_WIDTH = 800;
 const MAP_HEIGHT = 400;
-const projection = geoEqualEarth().fitSize([MAP_WIDTH, MAP_HEIGHT], { type: 'Sphere' } as any);
+const MAP_PADDING = 14;
+const projectionDefault = geoEqualEarth().fitExtent(
+  [
+    [MAP_PADDING, MAP_PADDING],
+    [MAP_WIDTH - MAP_PADDING, MAP_HEIGHT - MAP_PADDING],
+  ],
+  countryCollection,
+);
 
 export default memo(function WorldMapBubbles({
   data,
@@ -84,7 +95,7 @@ export default memo(function WorldMapBubbles({
   const isDark = !!dark;
   const isCompact = variant === "compact";
   const viewBox = `0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`;
-  const path = useMemo(() => geoPath(projection), []);
+  const path = useMemo(() => geoPath(projectionDefault), []);
   const oceanGradientId = isDark ? "mapOceanDark" : "mapOceanLight";
   const landFill = isDark ? '#dbe4f0' : '#e5e7eb';
   const landStroke = isDark ? '#7c8ea6' : '#cbd5e1';
@@ -129,7 +140,7 @@ export default memo(function WorldMapBubbles({
             const key = d.country.toUpperCase();
             const centroid = centroids.get(key) || centroids.get(key === 'UK' ? 'GB' : key);
             if (!centroid) return null;
-            const [x, y] = projection(centroid)!;
+            const [x, y] = projectionDefault(centroid)!;
             if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
             const r = rScale(d.count);
             const handleMove = (e: React.MouseEvent<SVGGElement>) => {

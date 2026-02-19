@@ -2078,8 +2078,8 @@ export default function ClaritasDashboard() {
                         <div
                           className={`relative min-h-0 rounded-2xl overflow-hidden bg-[color:var(--shell-bg)] ${
                             splitViewEnabled
-                              ? "h-full min-h-[18rem]"
-                              : "h-[52vh] max-h-[520px]"
+                              ? "h-full min-h-[22rem]"
+                              : "h-[56vh] max-h-[560px]"
                           }`}
                         >
                           <WorldMapBubbles
@@ -2093,6 +2093,7 @@ export default function ClaritasDashboard() {
                             secondaryCountry={comparisonCountry}
                             pinnedCountry={pinnedCountry}
                             scale={mapScale}
+                            showLabels={false}
                           />
                         </div>
                         {pinnedCountry && (
