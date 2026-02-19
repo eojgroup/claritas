@@ -45,7 +45,46 @@ final class APIClient {
     func fetchAuthProviders() async throws -> [AuthProvider] {
         let url = baseURL.appendingPathComponent("/api/auth/providers")
         let req = URLRequest(url: url)
-        return try await request(req, as: [AuthProvider].self, rootKey: "providers")
+        let (data, resp) = try await session.data(for: authedRequest(req))
+        guard let http = resp as? HTTPURLResponse else { throw APIError(status: -1, message: "No HTTP response") }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
+        }
+
+        let decoded = try JSONSerialization.jsonObject(with: data, options: [])
+        let rawProviders: [Any]
+        if let container = decoded as? [String: Any], let providers = container["providers"] as? [Any] {
+            rawProviders = providers
+        } else if let providers = decoded as? [Any] {
+            rawProviders = providers
+        } else {
+            throw APIError(status: http.statusCode, message: "Unexpected auth providers response format")
+        }
+
+        var seen = Set<AuthProviderId>()
+        var out: [AuthProvider] = []
+        for raw in rawProviders {
+            guard let entry = raw as? [String: Any] else { continue }
+            guard let id = parseProviderId(entry["id"]) else { continue }
+            if seen.contains(id) { continue }
+            seen.insert(id)
+
+            out.append(
+                AuthProvider(
+                    id: id,
+                    enabled: parseBool(entry["enabled"]),
+                    display_name: nonEmpty(entry["display_name"] as? String),
+                    icon: nonEmpty(entry["icon"] as? String),
+                    start_path: nonEmpty(entry["start_path"] as? String)
+                )
+            )
+        }
+
+        let providerOrder = AuthProviderId.allCases
+        out.sort {
+            (providerOrder.firstIndex(of: $0.id) ?? providerOrder.count) < (providerOrder.firstIndex(of: $1.id) ?? providerOrder.count)
+        }
+        return out
     }
 
     func fetchAuthMe() async throws -> AuthUser? {
@@ -313,6 +352,25 @@ final class APIClient {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func parseProviderId(_ value: Any?) -> AuthProviderId? {
+        guard let raw = value as? String else { return nil }
+        return AuthProviderId(rawValue: raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+
+    private func parseBool(_ value: Any?) -> Bool {
+        switch value {
+        case let bool as Bool:
+            return bool
+        case let number as NSNumber:
+            return number.boolValue
+        case let string as String:
+            let normalized = string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return normalized == "true" || normalized == "1" || normalized == "yes"
+        default:
+            return false
+        }
     }
 
     private func authedRequest(_ req: URLRequest) -> URLRequest {
