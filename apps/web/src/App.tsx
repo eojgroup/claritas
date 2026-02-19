@@ -19,6 +19,8 @@ import {
   Menu,
   LayoutGrid,
   FileText,
+  Maximize2,
+  X,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -99,6 +101,7 @@ const SPLIT_VIEW_MIN_WIDTH = 700;
 const SPLIT_VIEW_MIN_HEIGHT = 620;
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
+type SearchTopic = "all" | "news" | "weather" | "ai";
 
 const DATA_WINDOW_OPTIONS: Array<{
   id: DataWindowPreset;
@@ -121,10 +124,56 @@ const REGION_OPTIONS = [
   { id: "oceania", label: "Oceania" },
 ] as const;
 
+const SEARCH_TOPIC_OPTIONS: Array<{ id: SearchTopic; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "news", label: "News" },
+  { id: "weather", label: "Weather" },
+  { id: "ai", label: "AI" },
+];
+
+const SEARCH_TOPIC_ALIASES: Record<string, SearchTopic> = {
+  all: "all",
+  news: "news",
+  weather: "weather",
+  ai: "ai",
+  alerts: "news",
+  wx: "weather",
+};
+
+type ParsedDashboardSearch = {
+  topic: SearchTopic;
+  terms: string[];
+  raw: string;
+};
+
 const getDateKey = (value: Date | string) => {
   const d = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString().slice(0, 10);
+};
+
+const parseDashboardSearch = (
+  raw: string,
+  preferredTopic: SearchTopic,
+): ParsedDashboardSearch => {
+  const trimmed = raw.trim();
+  if (!trimmed) return { topic: preferredTopic, terms: [], raw: "" };
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  let topic = preferredTopic;
+  const terms: string[] = [];
+  tokens.forEach((token) => {
+    const lower = token.toLowerCase();
+    const topicMatch = lower.match(/^(?:topic|t):([a-z]+)$/);
+    if (topicMatch) {
+      const mapped = SEARCH_TOPIC_ALIASES[topicMatch[1]];
+      if (mapped) {
+        topic = mapped;
+        return;
+      }
+    }
+    terms.push(lower);
+  });
+  return { topic, terms, raw: trimmed };
 };
 
 const safeDownload = (filename: string, data: Blob | string) => {
@@ -162,6 +211,7 @@ import {
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
+  const [searchTopic, setSearchTopic] = useState<SearchTopic>("all");
   const [authStatus, setAuthStatus] = useState<
     "checking" | "authed" | "unauthed"
   >("checking");
@@ -215,6 +265,7 @@ export default function ClaritasDashboard() {
   const [mapWindowDays, setMapWindowDays] = useState(NEWS_TREND_WINDOW_DAYS);
   const [mapDayIndex, setMapDayIndex] = useState(0);
   const [mapPlaying, setMapPlaying] = useState(false);
+  const [mapExpanded, setMapExpanded] = useState(false);
   const [chartView, setChartView] = useState<"daily" | "rolling">("daily");
   const [chartRange, setChartRange] = useState<{
     startIndex?: number;
@@ -471,7 +522,29 @@ export default function ClaritasDashboard() {
     );
   }, [news, regionCountries]);
 
-  const getSourceLabel = (item: NewsItem) => {
+  const parsedSearch = useMemo(
+    () => parseDashboardSearch(query, searchTopic),
+    [query, searchTopic],
+  );
+  const searchTerms = parsedSearch.terms;
+  const effectiveSearchTopic = parsedSearch.topic;
+  const hasSearchQuery = searchTerms.length > 0;
+  const searchAppliesToNews =
+    effectiveSearchTopic === "all" ||
+    effectiveSearchTopic === "news" ||
+    effectiveSearchTopic === "ai";
+  const searchAppliesToWeather =
+    effectiveSearchTopic === "all" || effectiveSearchTopic === "weather";
+  const searchInputPlaceholder =
+    effectiveSearchTopic === "ai"
+      ? "Search AI-relevant signals (e.g. OpenAI policy)"
+      : effectiveSearchTopic === "weather"
+        ? "Search weather topics (e.g. storm, humidity, US)"
+        : effectiveSearchTopic === "news"
+          ? "Search news topics (e.g. market, regulation, AI)"
+          : "Search by topic or keyword (try topic:news OpenAI)";
+
+  const getSourceLabel = useCallback((item: NewsItem) => {
     const payload = (item as any)?.payload ?? {};
     const raw = payload?.raw ?? payload;
     const source =
@@ -484,7 +557,74 @@ export default function ClaritasDashboard() {
       payload?.site;
     if (!source) return undefined;
     return typeof source === "string" ? source : source?.name;
-  };
+  }, []);
+
+  const matchesNewsSearch = useCallback(
+    (item: NewsItem) => {
+      if (searchTerms.length === 0) return true;
+      const source = getSourceLabel(item) ?? "";
+      const haystack = [
+        item.title ?? "",
+        item.summary ?? "",
+        item.url ?? "",
+        item.country_iso2 ?? "",
+        source,
+        item.event_time ?? "",
+        (item as any)?.kind ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchTerms.every((term) => haystack.includes(term));
+    },
+    [getSourceLabel, searchTerms],
+  );
+
+  const matchesWeatherSearch = useCallback(
+    (item: CountryWeather) => {
+      if (searchTerms.length === 0) return true;
+      const haystack = [
+        item.country ?? "",
+        item.weather_main ?? "",
+        item.temp_c != null ? String(item.temp_c) : "",
+        item.humidity != null ? String(item.humidity) : "",
+        item.observed_at ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchTerms.every((term) => haystack.includes(term));
+    },
+    [searchTerms],
+  );
+
+  const newsSearchScope = useMemo(() => {
+    if (!searchAppliesToNews || searchTerms.length === 0) return newsScope;
+    return newsScope.filter(matchesNewsSearch);
+  }, [newsScope, matchesNewsSearch, searchAppliesToNews, searchTerms.length]);
+
+  const weatherScope = useMemo(() => {
+    let rows = weatherStats;
+    if (typeof minTemp === "number") {
+      rows = rows.filter((x) => (x.temp_c ?? -999) >= minTemp);
+    }
+    if (regionCountries) {
+      rows = rows.filter(
+        (x) => x.country && regionCountries.has(x.country.toUpperCase()),
+      );
+    }
+    return rows;
+  }, [weatherStats, minTemp, regionCountries]);
+
+  const weatherSearchScope = useMemo(() => {
+    if (!searchAppliesToWeather || searchTerms.length === 0) {
+      return weatherScope;
+    }
+    return weatherScope.filter(matchesWeatherSearch);
+  }, [
+    weatherScope,
+    matchesWeatherSearch,
+    searchAppliesToWeather,
+    searchTerms.length,
+  ]);
 
   const selectedWindowOption = useMemo(
     () =>
@@ -497,13 +637,13 @@ export default function ClaritasDashboard() {
   const selectedWindowLabel = selectedWindowOption.label;
 
   const newsDateBounds = useMemo(() => {
-    const keys = newsScope
+    const keys = newsSearchScope
       .map((item) => (item.event_time ? getDateKey(item.event_time) : null))
       .filter((value): value is string => Boolean(value))
       .sort();
     if (keys.length === 0) return null;
     return { start: keys[0], end: keys[keys.length - 1] };
-  }, [newsScope]);
+  }, [newsSearchScope]);
 
   const newsCoverageLabel = useMemo(() => {
     if (!newsDateBounds) return "No dated articles loaded";
@@ -779,8 +919,20 @@ export default function ClaritasDashboard() {
       const dayKey = mapDates[Math.min(mapDayIndex, mapDates.length - 1)];
       items = items.filter((item) => getDateKey(item.event_time ?? "") === dayKey);
     }
+    if (searchAppliesToNews && searchTerms.length > 0) {
+      items = items.filter(matchesNewsSearch);
+    }
     return items;
-  }, [newsScope, mapRange, mapDayMode, mapDayIndex, mapDates]);
+  }, [
+    newsScope,
+    mapRange,
+    mapDayMode,
+    mapDayIndex,
+    mapDates,
+    matchesNewsSearch,
+    searchAppliesToNews,
+    searchTerms.length,
+  ]);
 
   const mapCountryStats = useMemo(() => {
     const stats = new Map<
@@ -868,8 +1020,18 @@ export default function ClaritasDashboard() {
         (x) => x.country && regionCountries.has(x.country.toUpperCase()),
       );
     }
+    if (searchAppliesToWeather && searchTerms.length > 0) {
+      w = w.filter(matchesWeatherSearch);
+    }
     return w;
-  }, [weatherStats, minTemp, regionCountries]);
+  }, [
+    weatherStats,
+    minTemp,
+    regionCountries,
+    matchesWeatherSearch,
+    searchAppliesToWeather,
+    searchTerms.length,
+  ]);
 
   const mapWeatherData = useMemo(() => {
     const withTemp = (mapWeatherScope || []).filter(

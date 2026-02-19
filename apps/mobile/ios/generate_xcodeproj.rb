@@ -90,8 +90,15 @@ resources.each do |rel|
   full = File.join(APP_ROOT, rel)
   abort_with("Missing resource #{rel}") unless File.exist?(full)
   file_ref = app_group.new_file(File.join(APP_NAME, rel))
-  target.add_resources([file_ref])
+  # Info.plist is processed via INFOPLIST_FILE and must not be copied as a resource.
+  target.add_resources([file_ref]) unless rel == 'Info.plist'
 end
+
+# xcodeproj may still auto-insert Info.plist into Resources for application targets.
+# Remove it explicitly so build settings own plist processing.
+target.resources_build_phase.files
+  .select { |build_file| build_file.file_ref&.path == "#{APP_NAME}/Info.plist" }
+  .each { |build_file| target.resources_build_phase.remove_build_file(build_file) }
 
 target.build_configuration_list.build_configurations.each do |config|
   settings = config.build_settings

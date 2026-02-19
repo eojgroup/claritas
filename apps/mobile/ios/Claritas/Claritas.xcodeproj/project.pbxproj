@@ -7,23 +7,22 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0D538EBD5EB33E63EF02B8C36D2A8B3A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1B53590D9AA604D32A8F6B79DE55D675 /* Assets.xcassets */; };
-		0FB3EAE4428E083D3D278F001EFD08BC /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304BE4A17FFA6B5C823ABEBE2AF14C00 /* Models.swift */; };
-		403802D8993FE0B26642B3809CAE80D0 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0361BAC8AFC288269E0FC61B09916C /* APIClient.swift */; };
-		45DED2E7FD945562816A89357D7E6D40 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8AE0D6C7AADCD246DC0FA09BB5A803DF /* Info.plist */; };
-		47676B0FA807F78A405D97F3B4D69911 /* NewsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E9F920FBD62D8FF36E9CF9BF4DE46F /* NewsListView.swift */; };
-		57FC21C7C2B03461468C69A563BD4429 /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0329108E4E719BD4864467921C058D7E /* CountryProfileView.swift */; };
-		589D0D7711941F4DD08B75220FE5CA7D /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E74C94CA3771E3B4965B1B5AB7635EF /* LoginView.swift */; };
-		5F0318EACC362E14BBBC62DED231449B /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACB29561F372CD2EBE1AC79E3FDB847 /* DashboardView.swift */; };
-		609D1B9163ACC5DA9A006A074C2300C9 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7D991B0CDB4824E72A253A763D8987 /* App.swift */; };
-		624AA9A1B2DD08B03A541D7057550E35 /* AuthSessionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5875DB905CAB6CA0899079E0BED9B2 /* AuthSessionPresenter.swift */; };
-		645B2AFC88AAB1900672AAEC6498368B /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5EC342EF035DC4652651B32EFA516BD /* Foundation.framework */; };
-		8C5E829E17792B343309FBC87C64CE79 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F64DD404964470717D301805F2152B9 /* AppModel.swift */; };
-		99C4C58609EEE986FD31BB245A92B2C9 /* BrandComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6730396A19E6D430F84DD1A50BC7A6D3 /* BrandComponents.swift */; };
-		C4BD3E8D8FD16B333B15CFA62296F3C5 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94DC8152FF9905126D1B11BB62ADC0F3 /* ProfileView.swift */; };
-		C73998880FB5331392FC58424E2F09D5 /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6695463954E96448FE455BDEA65BAF7 /* WeatherListView.swift */; };
-		C9446290E22EB0EB78CD255AD4F89BB0 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D0D2B4188726E557BF2D77C5B875C3 /* RootView.swift */; };
-		FF902C949133FB2AC1EC4B7E0CBDD0AC /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 2412ADA4B293840D17A27FC2D9D6D7E4 /* Config.plist */; };
+		028160B8C5F0DFA6D746A363377C1691 /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0329108E4E719BD4864467921C058D7E /* CountryProfileView.swift */; };
+		047287DFFA5A8D8900E7D9190894754B /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 304BE4A17FFA6B5C823ABEBE2AF14C00 /* Models.swift */; };
+		0B36B1F22B5429FBEACD9C7BC4F68936 /* NewsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E9F920FBD62D8FF36E9CF9BF4DE46F /* NewsListView.swift */; };
+		206BE05B4B310157405DEF9AFF637163 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0361BAC8AFC288269E0FC61B09916C /* APIClient.swift */; };
+		2A1C4BB3EF34FDE0E1CAB9C785B4C404 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1B53590D9AA604D32A8F6B79DE55D675 /* Assets.xcassets */; };
+		2BD3D76BD7705796EAD52828C6AD1379 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F7D991B0CDB4824E72A253A763D8987 /* App.swift */; };
+		2C557B73FC171253E38B1623F497BC43 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94DC8152FF9905126D1B11BB62ADC0F3 /* ProfileView.swift */; };
+		322ED844E4A33EFF3885F8F270BEA40E /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E74C94CA3771E3B4965B1B5AB7635EF /* LoginView.swift */; };
+		65E918D4E0261EBAA861CBB59927C3DB /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6695463954E96448FE455BDEA65BAF7 /* WeatherListView.swift */; };
+		85782E5076058AB43BB829CEE0404C50 /* AuthSessionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5875DB905CAB6CA0899079E0BED9B2 /* AuthSessionPresenter.swift */; };
+		98171CBBFD1D606A6AE21DE14086C98E /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99D0D2B4188726E557BF2D77C5B875C3 /* RootView.swift */; };
+		A9AD8455C624C6CD3397B09F078F2A15 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EACB29561F372CD2EBE1AC79E3FDB847 /* DashboardView.swift */; };
+		DE270F300AC3800807F6CD2FCCCECEA3 /* BrandComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6730396A19E6D430F84DD1A50BC7A6D3 /* BrandComponents.swift */; };
+		E835BC6EB3EBFF9535D36F9556E1D18B /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D5EC342EF035DC4652651B32EFA516BD /* Foundation.framework */; };
+		F0D92E07006C9197691C728DC1AEDDBA /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F64DD404964470717D301805F2152B9 /* AppModel.swift */; };
+		F80842891EB1513B79A1AF7D6055DDBE /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 2412ADA4B293840D17A27FC2D9D6D7E4 /* Config.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,11 +47,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		D6FC8D9F0AB6420D68A62296C0737DFC /* Frameworks */ = {
+		66DB4717C46DBCE1B41C8C3C710F22B4 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				645B2AFC88AAB1900672AAEC6498368B /* Foundation.framework in Frameworks */,
+				E835BC6EB3EBFF9535D36F9556E1D18B /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -119,13 +118,13 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		31BF0EF5C65571EB773660E90F24CDFD /* Claritas */ = {
+		E899BEF4ADF4D406FE0534864D09E33A /* Claritas */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 5468A66822F407290B7CB1FCAFA06BCA /* Build configuration list for PBXNativeTarget "Claritas" */;
+			buildConfigurationList = 4AF2FA5BEEA5CC77A6BE5B3FC6B47438 /* Build configuration list for PBXNativeTarget "Claritas" */;
 			buildPhases = (
-				E72E63C37BF5FA5030D97BA24E0A0384 /* Sources */,
-				D6FC8D9F0AB6420D68A62296C0737DFC /* Frameworks */,
-				2A8B692B74D30AB0FF1908554063D17B /* Resources */,
+				3D2D0EEA94BEAA4DB6CE720E748E809A /* Sources */,
+				66DB4717C46DBCE1B41C8C3C710F22B4 /* Frameworks */,
+				0FAC65608A36C039D7B5A9CB13EA8737 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -160,42 +159,41 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				31BF0EF5C65571EB773660E90F24CDFD /* Claritas */,
+				E899BEF4ADF4D406FE0534864D09E33A /* Claritas */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		2A8B692B74D30AB0FF1908554063D17B /* Resources */ = {
+		0FAC65608A36C039D7B5A9CB13EA8737 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0D538EBD5EB33E63EF02B8C36D2A8B3A /* Assets.xcassets in Resources */,
-				FF902C949133FB2AC1EC4B7E0CBDD0AC /* Config.plist in Resources */,
-				45DED2E7FD945562816A89357D7E6D40 /* Info.plist in Resources */,
+				2A1C4BB3EF34FDE0E1CAB9C785B4C404 /* Assets.xcassets in Resources */,
+				F80842891EB1513B79A1AF7D6055DDBE /* Config.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		E72E63C37BF5FA5030D97BA24E0A0384 /* Sources */ = {
+		3D2D0EEA94BEAA4DB6CE720E748E809A /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				609D1B9163ACC5DA9A006A074C2300C9 /* App.swift in Sources */,
-				8C5E829E17792B343309FBC87C64CE79 /* AppModel.swift in Sources */,
-				0FB3EAE4428E083D3D278F001EFD08BC /* Models.swift in Sources */,
-				403802D8993FE0B26642B3809CAE80D0 /* APIClient.swift in Sources */,
-				624AA9A1B2DD08B03A541D7057550E35 /* AuthSessionPresenter.swift in Sources */,
-				99C4C58609EEE986FD31BB245A92B2C9 /* BrandComponents.swift in Sources */,
-				57FC21C7C2B03461468C69A563BD4429 /* CountryProfileView.swift in Sources */,
-				5F0318EACC362E14BBBC62DED231449B /* DashboardView.swift in Sources */,
-				589D0D7711941F4DD08B75220FE5CA7D /* LoginView.swift in Sources */,
-				47676B0FA807F78A405D97F3B4D69911 /* NewsListView.swift in Sources */,
-				C4BD3E8D8FD16B333B15CFA62296F3C5 /* ProfileView.swift in Sources */,
-				C9446290E22EB0EB78CD255AD4F89BB0 /* RootView.swift in Sources */,
-				C73998880FB5331392FC58424E2F09D5 /* WeatherListView.swift in Sources */,
+				2BD3D76BD7705796EAD52828C6AD1379 /* App.swift in Sources */,
+				F0D92E07006C9197691C728DC1AEDDBA /* AppModel.swift in Sources */,
+				047287DFFA5A8D8900E7D9190894754B /* Models.swift in Sources */,
+				206BE05B4B310157405DEF9AFF637163 /* APIClient.swift in Sources */,
+				85782E5076058AB43BB829CEE0404C50 /* AuthSessionPresenter.swift in Sources */,
+				DE270F300AC3800807F6CD2FCCCECEA3 /* BrandComponents.swift in Sources */,
+				028160B8C5F0DFA6D746A363377C1691 /* CountryProfileView.swift in Sources */,
+				A9AD8455C624C6CD3397B09F078F2A15 /* DashboardView.swift in Sources */,
+				322ED844E4A33EFF3885F8F270BEA40E /* LoginView.swift in Sources */,
+				0B36B1F22B5429FBEACD9C7BC4F68936 /* NewsListView.swift in Sources */,
+				2C557B73FC171253E38B1623F497BC43 /* ProfileView.swift in Sources */,
+				98171CBBFD1D606A6AE21DE14086C98E /* RootView.swift in Sources */,
+				65E918D4E0261EBAA861CBB59927C3DB /* WeatherListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -253,28 +251,6 @@
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
-		353EB9DB81DBF87EA3599FC17B988D6A /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
-				INFOPLIST_FILE = Claritas/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
-				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				UIApplicationSceneManifest = "";
-				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
 		};
@@ -339,7 +315,29 @@
 			};
 			name = Debug;
 		};
-		FA21A4957613D38C2A5478B18A99E1B1 /* Debug */ = {
+		836725377837A5DA085D625EAF9DF77A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				INFOPLIST_FILE = Claritas/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				UIApplicationSceneManifest = "";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		D96F2831A9869F75FC431DE1C8B82597 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -363,11 +361,11 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		5468A66822F407290B7CB1FCAFA06BCA /* Build configuration list for PBXNativeTarget "Claritas" */ = {
+		4AF2FA5BEEA5CC77A6BE5B3FC6B47438 /* Build configuration list for PBXNativeTarget "Claritas" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				353EB9DB81DBF87EA3599FC17B988D6A /* Release */,
-				FA21A4957613D38C2A5478B18A99E1B1 /* Debug */,
+				836725377837A5DA085D625EAF9DF77A /* Release */,
+				D96F2831A9869F75FC431DE1C8B82597 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
