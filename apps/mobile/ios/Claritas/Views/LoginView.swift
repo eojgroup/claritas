@@ -20,6 +20,11 @@ struct LoginView: View {
         AuthProviderId.allCases.filter { providerEnabled($0) }
     }
 
+    private var allProvidersReportedDisabled: Bool {
+        guard !model.authProviders.isEmpty else { return false }
+        return model.authProviders.allSatisfy { !$0.enabled }
+    }
+
     private var primaryProvider: AuthProviderId? {
         guard !isChecking, enabledProviders.count == 1 else { return nil }
         return enabledProviders[0]
@@ -321,7 +326,14 @@ struct LoginView: View {
 
     private func providerEnabled(_ id: AuthProviderId) -> Bool {
         if let provider = model.authProviders.first(where: { $0.id == id }) {
-            return provider.enabled
+            if provider.enabled {
+                return true
+            }
+            if allProvidersReportedDisabled {
+                // Keep sign-in tappable when backend/provider state is inconsistent.
+                return true
+            }
+            return false
         }
         if model.authProviders.isEmpty, model.authError != nil {
             return true

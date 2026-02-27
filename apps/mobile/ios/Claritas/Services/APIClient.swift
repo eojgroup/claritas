@@ -11,8 +11,12 @@ final class APIClient {
     private let baseURL: URL
     private var authToken: String?
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    var baseURLDescription: String {
+        baseURL.absoluteString
+    }
+
+    init(session: URLSession? = nil) {
+        self.session = session ?? APIClient.makeDefaultSession()
 
         // Resolve base URL precedence: UserDefaults override -> Config.plist -> default
         if let override = UserDefaults.standard.string(forKey: "API_BASE_URL"),
@@ -23,6 +27,13 @@ final class APIClient {
         } else {
             self.baseURL = URL(string: "http://localhost:8080")! // dev default
         }
+    }
+
+    private static func makeDefaultSession() -> URLSession {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 15
+        return URLSession(configuration: config)
     }
 
     private static func loadConfigBaseURL() -> URL? {

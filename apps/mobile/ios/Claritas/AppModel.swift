@@ -85,10 +85,20 @@ final class AppModel: ObservableObject {
             errors.append(describeAuthLoadError(error, context: "auth providers"))
         }
 
+        if user == nil, !providers.isEmpty, providers.allSatisfy({ !$0.enabled }) {
+            errors.append("No identity providers are currently enabled at \(api.baseURLDescription).")
+        }
+
         authUser = user
         authProviders = providers
         authStatus = user == nil ? .unauthed : .authed
-        authError = errors.isEmpty ? nil : errors.joined(separator: " | ")
+        authError = errors.isEmpty
+            ? nil
+            : errors
+                .reduce(into: [String]()) { acc, item in
+                    if !acc.contains(item) { acc.append(item) }
+                }
+                .joined(separator: " | ")
     }
 
     func startSignIn(provider: AuthProviderId) {
