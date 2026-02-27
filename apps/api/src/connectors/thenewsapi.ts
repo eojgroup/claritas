@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { query } from "../db";
 import type { FeedRow, NormalizedItem, SourceRow } from "./types";
 
-const BASE_URL = "https://api.thenewsapi.com/api/v1";
+const BASE_URL = "https://api.thenewsapi.com/v1";
 
 type TheNewsApiArticle = {
   uuid?: string | null;
@@ -28,7 +28,7 @@ type TheNewsApiResponse = {
     limit?: number;
     page?: number;
   };
-  error?: string;
+  error?: { code?: string; message?: string } | string;
   errors?: string[];
 };
 
@@ -214,7 +214,7 @@ export async function ingestTheNewsApiNews(params: IngestTheNewsApiParams): Prom
   let newestPublishedAt: string | undefined = fromISO;
 
   while (page <= maxPages) {
-    const url = new URL(`${BASE_URL}/news`);
+    const url = new URL(`${BASE_URL}/news/top`);
     const sp = url.searchParams;
     sp.set("api_token", apiToken);
     sp.set("limit", String(pageSize));
@@ -232,7 +232,12 @@ export async function ingestTheNewsApiNews(params: IngestTheNewsApiParams): Prom
 
     const data = (await resp.json()) as TheNewsApiResponse;
     if (data.error) {
-      throw new Error(`TheNewsAPI error: ${data.error}`);
+      if (typeof data.error === "string") {
+        throw new Error(`TheNewsAPI error: ${data.error}`);
+      }
+      const code = data.error.code || "unknown_error";
+      const message = data.error.message || "Unknown TheNewsAPI error";
+      throw new Error(`TheNewsAPI error ${code}: ${message}`);
     }
     if (Array.isArray(data.errors) && data.errors.length > 0) {
       throw new Error(`TheNewsAPI errors: ${data.errors.join("; ")}`);

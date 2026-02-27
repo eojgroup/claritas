@@ -179,6 +179,8 @@ private struct AdminIngestionPanelView: View {
     @State private var pipelineFilter: PipelineFilter = .all
     @State private var metricsWindow: MetricsWindow = .d30
 
+    @State private var runNewsApiProvider: Bool = true
+    @State private var runTheNewsApiProvider: Bool = true
     @State private var runEverything: Bool = true
     @State private var runTopHeadlines: Bool = true
     @State private var newsQuery: String = "OpenAI"
@@ -253,13 +255,18 @@ private struct AdminIngestionPanelView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Trigger runs")
                         .font(.headline)
-                    Text("News runs include NewsAPI and, when configured, TheNewsAPI.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
 
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("News providers")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Toggle("NewsAPI", isOn: $runNewsApiProvider)
+                        Toggle("TheNewsAPI", isOn: $runTheNewsApiProvider)
+
                         Toggle("Everything", isOn: $runEverything)
+                            .disabled(!runNewsApiProvider)
                         Toggle("Top headlines", isOn: $runTopHeadlines)
+                            .disabled(!runNewsApiProvider)
 
                         HStack(spacing: 8) {
                             TextField("Query", text: $newsQuery)
@@ -357,7 +364,7 @@ private struct AdminIngestionPanelView: View {
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
                                                 .background(Color.primary.opacity(0.08), in: Capsule())
-                                            Text(prettySourceName(run.source_name))
+                                            Text(runSourceSummary(run))
                                                 .font(.caption2.weight(.semibold))
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
@@ -397,7 +404,7 @@ private struct AdminIngestionPanelView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Run #\(selectedRun.id) • \(selectedRun.pipeline.label)")
                                 .font(.subheadline.weight(.semibold))
-                            Text("Source: \(prettySourceName(selectedRun.source_name))")
+                            Text("Source: \(runSourceSummary(selectedRun))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("Status: \(selectedRun.status.label)")
@@ -517,8 +524,14 @@ private struct AdminIngestionPanelView: View {
     }
 
     private func queueNewsRun() async {
-        guard runEverything || runTopHeadlines else {
-            actionError = "Enable at least one News step."
+        guard runNewsApiProvider || runTheNewsApiProvider else {
+            actionError = "Select at least one news provider."
+            actionNotice = nil
+            return
+        }
+
+        guard !runNewsApiProvider || runEverything || runTopHeadlines else {
+            actionError = "Enable at least one NewsAPI step or disable NewsAPI."
             actionNotice = nil
             return
         }
@@ -528,6 +541,8 @@ private struct AdminIngestionPanelView: View {
         actionNotice = nil
         do {
             let detail = try await model.api.triggerAdminNewsIngestion(
+                runNewsApiProvider: runNewsApiProvider,
+                runTheNewsApiProvider: runTheNewsApiProvider,
                 runEverything: runEverything,
                 runTopHeadlines: runTopHeadlines,
                 query: newsQuery,
@@ -619,6 +634,28 @@ private struct AdminIngestionPanelView: View {
         default:
             return value
         }
+    }
+
+    private func runSourceSummary(_ run: AdminIngestionRun) -> String {
+        guard run.pipeline == .news else { return prettySourceName(run.source_name) }
+        guard case .object(let payload)? = run.request_payload,
+              case .object(let providers)? = payload["providers"] else {
+            return prettySourceName(run.source_name)
+        }
+
+        let hasExplicitProviders = providers["newsapi"] != nil || providers["thenewsapi"] != nil
+        guard hasExplicitProviders else { return prettySourceName(run.source_name) }
+
+        var labels: [String] = []
+        if providers["newsapi"]?.bool != false {
+            labels.append("NewsAPI")
+        }
+        if providers["thenewsapi"]?.bool == true {
+            labels.append("TheNewsAPI")
+        }
+
+        if labels.isEmpty { return prettySourceName(run.source_name) }
+        return labels.joined(separator: " + ")
     }
 }
 

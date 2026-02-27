@@ -528,7 +528,7 @@ app.post("/api/ingest/newsapi/top-headlines", requireIngestionAccess, async (req
         res.status(500).json({ error: e.message || String(e) });
     }
 });
-// Ingest TheNewsAPI '/news'
+// Ingest TheNewsAPI '/news/top'
 app.post("/api/ingest/thenewsapi/news", requireIngestionAccess, async (req, res) => {
     try {
         const { q, search, language, locale, pageSize, maxPages, publishedAfter } = req.body || {};

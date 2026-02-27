@@ -14,16 +14,26 @@ const thenewsapi_1 = require("./connectors/thenewsapi");
 const openweather_1 = require("./connectors/openweather");
 const db_1 = require("./db");
 const SOURCE_CONFIG = {
-    news: {
+    newsapi: {
         sourceName: "newsapi",
         apiBaseUrl: "https://newsapi.org/v2",
         provider: "newsapi",
     },
-    weather: {
+    thenewsapi: {
+        sourceName: "thenewsapi",
+        apiBaseUrl: "https://api.thenewsapi.com/api/v1",
+        provider: "thenewsapi",
+    },
+    openweather: {
         sourceName: "openweather",
         apiBaseUrl: "https://api.openweathermap.org",
         provider: "openweather",
     },
+};
+const PIPELINE_SOURCE_DEFAULT = {
+    // For mixed-source news runs we keep NewsAPI as the canonical source row.
+    news: "newsapi",
+    weather: "openweather",
 };
 const DEFAULT_NEWS_EVERYTHING = {
     q: "OpenAI",
@@ -92,6 +102,20 @@ function asString(value) {
         return undefined;
     const trimmed = value.trim();
     return trimmed ? trimmed : undefined;
+}
+function asBoolean(value, fallback) {
+    if (typeof value === "boolean")
+        return value;
+    if (typeof value === "number")
+        return value !== 0;
+    if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on")
+            return true;
+        if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off")
+            return false;
+    }
+    return fallback;
 }
 function clampInt(value, min, max, fallback) {
     const parsed = typeof value === "number" && Number.isFinite(value)
@@ -221,8 +245,9 @@ function toAdminLog(row) {
         context: row.context ?? null,
     };
 }
-async function ensureSource(pipeline) {
-    const cfg = SOURCE_CONFIG[pipeline];
+async function ensureSource(pipeline, sourceNameOverride) {
+    const sourceName = sourceNameOverride ?? PIPELINE_SOURCE_DEFAULT[pipeline];
+    const cfg = SOURCE_CONFIG[sourceName];
     const { rows } = await (0, db_1.query)(`INSERT INTO source (name, api_base_url, auth_type, metadata)
      VALUES ($1, $2, 'api_key', jsonb_build_object('provider', $3::text))
      ON CONFLICT (name)
@@ -233,7 +258,7 @@ async function ensureSource(pipeline) {
     return rows[0];
 }
 async function createRun(input) {
-    const source = await ensureSource(input.pipeline);
+    const source = await ensureSource(input.pipeline, input.sourceNameOverride);
     const stats = {
         pipeline: input.pipeline,
         steps: [],
@@ -296,8 +321,23 @@ function buildNewsRunPlan(rawBody) {
     const body = asRecord(rawBody);
     const everythingRaw = body.everything;
     const topRaw = body.topHeadlines;
+    const theNewsApiRaw = body.theNewsApi;
+    const providersRaw = asRecord(body.providers);
+    const providers = {
+        newsapi: asBoolean(providersRaw.newsapi, true),
+        thenewsapi: asBoolean(providersRaw.thenewsapi, true),
+    };
+    if (!providers.newsapi && !providers.thenewsapi) {
+        throw new IngestionValidationError("Select at least one news provider.");
+    }
+    if (providers.newsapi && !process.env.NEWSAPI_API_KEY) {
+        throw new IngestionValidationError("NewsAPI selected but NEWSAPI_API_KEY is not configured.");
+    }
+    if (providers.thenewsapi && !process.env.THENEWSAPI_API_TOKEN) {
+        throw new IngestionValidationError("TheNewsAPI selected but THENEWSAPI_API_TOKEN is not configured.");
+    }
     let everything = null;
-    if (everythingRaw !== false) {
+    if (providers.newsapi && everythingRaw !== false) {
         const cfg = asRecord(everythingRaw);
         const q = asString(cfg.q) || DEFAULT_NEWS_EVERYTHING.q;
         const language = asString(cfg.language);
@@ -309,7 +349,7 @@ function buildNewsRunPlan(rawBody) {
         };
     }
     let topHeadlines = null;
-    if (topRaw !== false) {
+    if (providers.newsapi && topRaw !== false) {
         const cfg = asRecord(topRaw);
         const country = normalizeIso2(cfg.country, true) || DEFAULT_NEWS_TOP_HEADLINES.country;
         const category = asString(cfg.category) || DEFAULT_NEWS_TOP_HEADLINES.category;
@@ -322,15 +362,40 @@ function buildNewsRunPlan(rawBody) {
             maxPages: clampInt(cfg.maxPages, 1, 10, DEFAULT_NEWS_TOP_HEADLINES.maxPages ?? 2),
         };
     }
-    if (!everything && !topHeadlines) {
-        throw new IngestionValidationError("At least one news ingest step must be enabled.");
+    if (providers.newsapi && !everything && !topHeadlines) {
+        throw new IngestionValidationError("Enable at least one NewsAPI step or disable NewsAPI.");
+    }
+    let theNewsApi = null;
+    if (providers.thenewsapi) {
+        const cfg = asRecord(theNewsApiRaw);
+        const everythingCfg = asRecord(everythingRaw);
+        const topCfg = asRecord(topRaw);
+        theNewsApi = {
+            search: asString(cfg.search) ||
+                asString(cfg.q) ||
+                asString(everythingCfg.q) ||
+                asString(topCfg.q) ||
+                DEFAULT_NEWS_EVERYTHING.q,
+            language: asString(cfg.language) || asString(everythingCfg.language),
+            locale: normalizeIso2(cfg.locale, true) ||
+                normalizeIso2(cfg.country, true) ||
+                normalizeIso2(topCfg.country, true) ||
+                DEFAULT_NEWS_TOP_HEADLINES.country,
+            pageSize: clampInt(cfg.pageSize, 1, 100, DEFAULT_NEWS_EVERYTHING.pageSize ?? 50),
+            maxPages: clampInt(cfg.maxPages, 1, 10, DEFAULT_NEWS_EVERYTHING.maxPages ?? 2),
+            publishedAfter: asString(cfg.publishedAfter),
+        };
     }
     return {
+        providers,
         everything,
         topHeadlines,
+        theNewsApi,
         requestPayload: {
+            providers,
             everything: everything ?? false,
             topHeadlines: topHeadlines ?? false,
+            theNewsApi: theNewsApi ?? false,
         },
     };
 }
@@ -351,7 +416,10 @@ async function executeNewsRun(runId, plan) {
         await safeAppendRunLog(runId, "info", "News ingestion run started.", {
             request: plan.requestPayload,
         });
-        if (plan.everything) {
+        if (!plan.providers.newsapi) {
+            await safeAppendRunLog(runId, "info", "Skipping NewsAPI steps (provider not selected).");
+        }
+        if (plan.providers.newsapi && plan.everything) {
             const stepStartedAt = Date.now();
             await safeAppendRunLog(runId, "info", "Running NewsAPI everything ingest.", {
                 params: plan.everything,
@@ -388,7 +456,7 @@ async function executeNewsRun(runId, plan) {
                 throw err;
             }
         }
-        if (plan.topHeadlines) {
+        if (plan.providers.newsapi && plan.topHeadlines) {
             const stepStartedAt = Date.now();
             await safeAppendRunLog(runId, "info", "Running NewsAPI top-headlines ingest.", {
                 params: plan.topHeadlines,
@@ -425,56 +493,56 @@ async function executeNewsRun(runId, plan) {
                 throw err;
             }
         }
-        if (process.env.THENEWSAPI_API_TOKEN) {
+        if (plan.providers.thenewsapi) {
+            if (!process.env.THENEWSAPI_API_TOKEN) {
+                throw new Error("TheNewsAPI selected but THENEWSAPI_API_TOKEN not set.");
+            }
             const stepStartedAt = Date.now();
-            const search = plan.everything?.q || plan.topHeadlines?.q || DEFAULT_NEWS_EVERYTHING.q;
-            const language = plan.everything?.language;
-            const locale = plan.topHeadlines?.country;
-            const pageSize = Math.min(Math.max(plan.everything?.pageSize || plan.topHeadlines?.pageSize || 50, 1), 100);
-            const maxPages = Math.min(Math.max(plan.everything?.maxPages || plan.topHeadlines?.maxPages || 2, 1), 10);
-            await safeAppendRunLog(runId, "info", "Running TheNewsAPI /news ingest.", {
-                params: { search, language, locale, pageSize, maxPages },
+            const params = {
+                search: plan.theNewsApi?.search || DEFAULT_NEWS_EVERYTHING.q,
+                language: plan.theNewsApi?.language,
+                locale: plan.theNewsApi?.locale,
+                pageSize: Math.min(Math.max(plan.theNewsApi?.pageSize || 50, 1), 100),
+                maxPages: Math.min(Math.max(plan.theNewsApi?.maxPages || 2, 1), 10),
+                publishedAfter: plan.theNewsApi?.publishedAfter,
+            };
+            await safeAppendRunLog(runId, "info", "Running TheNewsAPI /news/top ingest.", {
+                params: params,
             });
             try {
-                const result = (await (0, thenewsapi_1.ingestTheNewsApiNews)({
-                    search,
-                    language,
-                    locale,
-                    pageSize,
-                    maxPages,
-                }));
+                const result = (await (0, thenewsapi_1.ingestTheNewsApiNews)(params));
                 const stepTotals = extractTotals(result);
                 mergeTotals(totals, stepTotals);
                 steps.push({
-                    step: "thenewsapi/news",
+                    step: "thenewsapi/news-top",
                     status: "success",
                     started_at: new Date(stepStartedAt).toISOString(),
                     finished_at: toIsoNow(),
                     duration_ms: Date.now() - stepStartedAt,
                     result,
                 });
-                await safeAppendRunLog(runId, "info", "TheNewsAPI /news ingest completed.", {
+                await safeAppendRunLog(runId, "info", "TheNewsAPI /news/top ingest completed.", {
                     result,
                 });
             }
             catch (err) {
                 const message = toErrorMessage(err);
                 steps.push({
-                    step: "thenewsapi/news",
+                    step: "thenewsapi/news-top",
                     status: "failed",
                     started_at: new Date(stepStartedAt).toISOString(),
                     finished_at: toIsoNow(),
                     duration_ms: Date.now() - stepStartedAt,
                     error: message,
                 });
-                await safeAppendRunLog(runId, "error", "TheNewsAPI /news ingest failed.", {
+                await safeAppendRunLog(runId, "error", "TheNewsAPI /news/top ingest failed.", {
                     error: message,
                 });
                 throw err;
             }
         }
         else {
-            await safeAppendRunLog(runId, "warn", "Skipping TheNewsAPI step (THENEWSAPI_API_TOKEN not set).");
+            await safeAppendRunLog(runId, "info", "Skipping TheNewsAPI step (provider not selected).");
         }
         const stats = {
             pipeline: "news",
@@ -581,10 +649,12 @@ async function executeWeatherRun(runId, plan) {
     }
 }
 async function triggerNewsRun(input) {
+    const sourceNameOverride = input.plan.providers.thenewsapi && !input.plan.providers.newsapi ? "thenewsapi" : "newsapi";
     const run = await createRun({
         pipeline: "news",
         actor: input.actor,
         requestPayload: input.plan.requestPayload,
+        sourceNameOverride,
     });
     await safeAppendRunLog(run.id, "info", "News ingestion run queued.", {
         requested_by: input.actor.email || input.actor.userId,
@@ -597,6 +667,7 @@ async function triggerWeatherRun(input) {
         pipeline: "weather",
         actor: input.actor,
         requestPayload: input.plan.requestPayload,
+        sourceNameOverride: "openweather",
     });
     await safeAppendRunLog(run.id, "info", "Weather ingestion run queued.", {
         requested_by: input.actor.email || input.actor.userId,

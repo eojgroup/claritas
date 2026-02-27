@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ingestTheNewsApiNews = ingestTheNewsApiNews;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const db_1 = require("../db");
-const BASE_URL = "https://api.thenewsapi.com/api/v1";
+const BASE_URL = "https://api.thenewsapi.com/v1";
 function stableFeedKey(kind, params) {
     const entries = Object.entries(params)
         .filter(([_, v]) => v !== undefined && v !== "")
@@ -156,7 +156,7 @@ async function ingestTheNewsApiNews(params) {
     let skipped = 0;
     let newestPublishedAt = fromISO;
     while (page <= maxPages) {
-        const url = new URL(`${BASE_URL}/news`);
+        const url = new URL(`${BASE_URL}/news/top`);
         const sp = url.searchParams;
         sp.set("api_token", apiToken);
         sp.set("limit", String(pageSize));
@@ -176,7 +176,12 @@ async function ingestTheNewsApiNews(params) {
         }
         const data = (await resp.json());
         if (data.error) {
-            throw new Error(`TheNewsAPI error: ${data.error}`);
+            if (typeof data.error === "string") {
+                throw new Error(`TheNewsAPI error: ${data.error}`);
+            }
+            const code = data.error.code || "unknown_error";
+            const message = data.error.message || "Unknown TheNewsAPI error";
+            throw new Error(`TheNewsAPI error ${code}: ${message}`);
         }
         if (Array.isArray(data.errors) && data.errors.length > 0) {
             throw new Error(`TheNewsAPI errors: ${data.errors.join("; ")}`);

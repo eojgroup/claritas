@@ -586,7 +586,7 @@ app.post("/api/ingest/newsapi/top-headlines", requireIngestionAccess, async (req
   }
 });
 
-// Ingest TheNewsAPI '/news'
+// Ingest TheNewsAPI '/news/top'
 app.post("/api/ingest/thenewsapi/news", requireIngestionAccess, async (req, res) => {
   try {
     const { q, search, language, locale, pageSize, maxPages, publishedAfter } = req.body || {};

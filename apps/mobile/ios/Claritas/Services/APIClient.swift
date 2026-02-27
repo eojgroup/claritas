@@ -187,6 +187,8 @@ final class APIClient {
     }
 
     func triggerAdminNewsIngestion(
+        runNewsApiProvider: Bool,
+        runTheNewsApiProvider: Bool,
         runEverything: Bool,
         runTopHeadlines: Bool,
         query: String,
@@ -194,8 +196,14 @@ final class APIClient {
         country: String?,
         category: String?
     ) async throws -> AdminIngestionRunDetail {
-        var payload: [String: Any] = [:]
-        if runEverything {
+        var payload: [String: Any] = [
+            "providers": [
+                "newsapi": runNewsApiProvider,
+                "thenewsapi": runTheNewsApiProvider
+            ]
+        ]
+
+        if runNewsApiProvider && runEverything {
             var everything: [String: Any] = [
                 "q": nonEmpty(query) ?? "OpenAI",
                 "pageSize": 50,
@@ -209,7 +217,7 @@ final class APIClient {
             payload["everything"] = false
         }
 
-        if runTopHeadlines {
+        if runNewsApiProvider && runTopHeadlines {
             var topHeadlines: [String: Any] = [
                 "country": nonEmpty(country) ?? "us",
                 "category": nonEmpty(category) ?? "technology",
@@ -222,6 +230,21 @@ final class APIClient {
             payload["topHeadlines"] = topHeadlines
         } else {
             payload["topHeadlines"] = false
+        }
+
+        if runTheNewsApiProvider {
+            var theNewsApi: [String: Any] = [
+                "search": nonEmpty(query) ?? "OpenAI",
+                "locale": nonEmpty(country) ?? "us",
+                "pageSize": 50,
+                "maxPages": 2
+            ]
+            if let language = nonEmpty(language) {
+                theNewsApi["language"] = language
+            }
+            payload["theNewsApi"] = theNewsApi
+        } else {
+            payload["theNewsApi"] = false
         }
 
         var req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/ingestion/news/run"))

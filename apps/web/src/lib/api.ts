@@ -172,6 +172,10 @@ export async function ingestWeatherNow(country?: string) {
 }
 
 export async function triggerAdminNewsIngestion(payload?: {
+  providers?: {
+    newsapi?: boolean;
+    thenewsapi?: boolean;
+  };
   everything?: false | {
     q?: string;
     language?: string;
@@ -184,6 +188,16 @@ export async function triggerAdminNewsIngestion(payload?: {
     q?: string;
     pageSize?: number;
     maxPages?: number;
+  };
+  theNewsApi?: false | {
+    search?: string;
+    q?: string;
+    language?: string;
+    locale?: string;
+    country?: string;
+    pageSize?: number;
+    maxPages?: number;
+    publishedAfter?: string;
   };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/news/run`, {

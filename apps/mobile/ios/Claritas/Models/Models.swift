@@ -334,6 +334,7 @@ enum JSONValue: Codable {
 
     var string: String? { if case .string(let s) = self { return s } else { return nil } }
     var object: [String: JSONValue]? { if case .object(let o) = self { return o } else { return nil } }
+    var bool: Bool? { if case .bool(let b) = self { return b } else { return nil } }
 }
 
 enum APIDateParser {
