@@ -173,19 +173,29 @@ final class AppModel: ObservableObject {
     }
 
     func loadInitial() async {
-        async let stats = api.fetchCountryStats(days: 30)
-        async let weath = api.fetchCountryWeather()
-        async let newsItems = api.fetchNews(limit: 20, offset: 0, q: nil, country: nil)
-        do {
-            let (s, w, n) = try await (stats, weath, newsItems)
-            self.countryStats = s
-            self.weather = w
-            self.news = n
-        } catch {
-            // Basic fallback: clear on failure
-            self.countryStats = []
-            self.weather = []
-            self.news = []
+        async let statsResult: Result<[CountryStat], Error> = {
+            do { return .success(try await api.fetchCountryStats(days: 30)) }
+            catch { return .failure(error) }
+        }()
+        async let weatherResult: Result<[CountryWeather], Error> = {
+            do { return .success(try await api.fetchCountryWeather()) }
+            catch { return .failure(error) }
+        }()
+        async let newsResult: Result<[NewsItem], Error> = {
+            do { return .success(try await api.fetchNews(limit: 20, offset: 0, q: nil, country: nil)) }
+            catch { return .failure(error) }
+        }()
+
+        let (resolvedStats, resolvedWeather, resolvedNews) = await (statsResult, weatherResult, newsResult)
+
+        if case .success(let stats) = resolvedStats {
+            countryStats = stats
+        }
+        if case .success(let weatherRows) = resolvedWeather {
+            weather = weatherRows
+        }
+        if case .success(let newsItems) = resolvedNews {
+            news = newsItems
         }
     }
 
@@ -199,7 +209,7 @@ final class AppModel: ObservableObject {
         do {
             news = try await api.fetchNews(limit: 20, offset: 0, q: nil, country: selectedCountry)
         } catch {
-            news = []
+            // Keep current rows on transient failures instead of blanking the list.
         }
     }
 

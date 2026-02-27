@@ -106,6 +106,15 @@ private struct AdminWorkspaceView: View {
                             }
                         }
                         .pickerStyle(.segmented)
+                        .padding(6)
+                        .background(
+                            Color(.systemBackground).opacity(0.86),
+                            in: RoundedRectangle(cornerRadius: 14)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                        )
 
                         if panel == .ingestion {
                             AdminIngestionPanelView()
