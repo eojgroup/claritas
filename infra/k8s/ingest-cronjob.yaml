@@ -50,6 +50,13 @@ spec:
                     -d '{"country":"us","category":"technology","pageSize":50,"maxPages":2}' \
                     "$BASE_URL/api/ingest/newsapi/top-headlines"
                   echo
+                  echo "> /api/ingest/thenewsapi/news (search=OpenAI, locale=us)"
+                  curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
+                    -H 'content-type: application/json' \
+                    -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
+                    -d '{"search":"OpenAI","locale":"us","language":"en","pageSize":50,"maxPages":2}' \
+                    "$BASE_URL/api/ingest/thenewsapi/news" || echo "TheNewsAPI ingest skipped or unavailable."
+                  echo
                   echo "> /api/ingest/openweather/country-current (global sample set)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
                     -H 'content-type: application/json' \

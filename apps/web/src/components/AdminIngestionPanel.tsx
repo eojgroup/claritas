@@ -84,6 +84,39 @@ function pipelineLabel(pipeline: IngestionPipeline): string {
   return pipeline === "news" ? "News" : "Weather";
 }
 
+function sourceLabel(sourceName: string): string {
+  const normalized = sourceName.trim().toLowerCase();
+  if (normalized === "newsapi") return "NewsAPI";
+  if (normalized === "thenewsapi") return "TheNewsAPI";
+  if (normalized === "openweather") return "OpenWeather";
+  return sourceName;
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function runSourceSummary(run: AdminIngestionRun): string {
+  if (run.pipeline !== "news") return sourceLabel(run.source_name);
+  const requestPayload = asObject(run.request_payload);
+  const providers = asObject(requestPayload?.providers);
+  if (!providers) return sourceLabel(run.source_name);
+
+  const hasExplicitProviders =
+    Object.prototype.hasOwnProperty.call(providers, "newsapi") ||
+    Object.prototype.hasOwnProperty.call(providers, "thenewsapi");
+  if (!hasExplicitProviders) return sourceLabel(run.source_name);
+
+  const labels: string[] = [];
+  if (providers.newsapi !== false) labels.push("NewsAPI");
+  if (providers.thenewsapi === true) labels.push("TheNewsAPI");
+  if (labels.length === 0) return sourceLabel(run.source_name);
+  return labels.join(" + ");
+}
+
 function buildZeroChartData(days: number): Array<{
   date: string;
   news_inserted: number;
@@ -136,6 +169,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [metricsDays, setMetricsDays] = useState<7 | 30 | 90>(30);
   const [pipelineFilter, setPipelineFilter] = useState<"all" | IngestionPipeline>("all");
 
+  const [runNewsApiProvider, setRunNewsApiProvider] = useState(true);
+  const [runTheNewsApiProvider, setRunTheNewsApiProvider] = useState(true);
   const [runEverything, setRunEverything] = useState(true);
   const [runTopHeadlines, setRunTopHeadlines] = useState(true);
   const [newsQuery, setNewsQuery] = useState("OpenAI");
@@ -226,8 +261,12 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   }, [refreshSelectedRun, selectedRun?.status, selectedRunId]);
 
   const handleTriggerNews = useCallback(async () => {
-    if (!runEverything && !runTopHeadlines) {
-      setActionError("Enable at least one News step.");
+    if (!runNewsApiProvider && !runTheNewsApiProvider) {
+      setActionError("Select at least one news provider.");
+      return;
+    }
+    if (runNewsApiProvider && !runEverything && !runTopHeadlines) {
+      setActionError("Enable at least one NewsAPI step or disable NewsAPI.");
       return;
     }
     setIsTriggeringNews(true);
@@ -235,7 +274,11 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     setActionNotice(null);
     try {
       const payload: Parameters<typeof triggerAdminNewsIngestion>[0] = {
-        everything: runEverything
+        providers: {
+          newsapi: runNewsApiProvider,
+          thenewsapi: runTheNewsApiProvider,
+        },
+        everything: runNewsApiProvider && runEverything
           ? {
               q: newsQuery.trim() || "OpenAI",
               language: newsLanguage.trim() || undefined,
@@ -243,10 +286,20 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               maxPages: 2,
             }
           : false,
-        topHeadlines: runTopHeadlines
+        topHeadlines: runNewsApiProvider && runTopHeadlines
           ? {
               country: newsCountry.trim() || "us",
               category: newsCategory.trim() || "technology",
+              q: newsQuery.trim() || undefined,
+              pageSize: 50,
+              maxPages: 2,
+            }
+          : false,
+        theNewsApi: runTheNewsApiProvider
+          ? {
+              search: newsQuery.trim() || "OpenAI",
+              language: newsLanguage.trim() || undefined,
+              locale: newsCountry.trim() || "us",
               pageSize: 50,
               maxPages: 2,
             }
@@ -269,6 +322,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     newsLanguage,
     newsQuery,
     refreshOverview,
+    runNewsApiProvider,
+    runTheNewsApiProvider,
     runEverything,
     runTopHeadlines,
   ]);
@@ -421,6 +476,24 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               News run
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={runNewsApiProvider}
+                  onChange={(event) => setRunNewsApiProvider(event.currentTarget.checked)}
+                />
+                NewsAPI
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={runTheNewsApiProvider}
+                  onChange={(event) => setRunTheNewsApiProvider(event.currentTarget.checked)}
+                />
+                TheNewsAPI
+              </label>
+            </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <label className="text-xs text-[color:var(--shell-muted)]">
                 Query
@@ -455,11 +528,16 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 />
               </label>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <div
+              className={`mt-3 flex flex-wrap items-center gap-2 text-xs ${
+                runNewsApiProvider ? "" : "opacity-50"
+              }`}
+            >
               <label className="inline-flex items-center gap-2">
                 <input
                   type="checkbox"
                   checked={runEverything}
+                  disabled={!runNewsApiProvider}
                   onChange={(event) => setRunEverything(event.currentTarget.checked)}
                 />
                 Everything
@@ -468,6 +546,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 <input
                   type="checkbox"
                   checked={runTopHeadlines}
+                  disabled={!runNewsApiProvider}
                   onChange={(event) =>
                     setRunTopHeadlines(event.currentTarget.checked)
                   }
@@ -683,6 +762,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
                       {pipelineLabel(run.pipeline)} #{run.id}
                     </span>
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                      {runSourceSummary(run)}
+                    </span>
                     <span
                       className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClasses(run.status)}`}
                     >
@@ -735,6 +817,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           {selectedRun && (
             <>
               <div className="mb-3 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-2 text-xs text-[color:var(--shell-muted)]">
+                <div>Source: {runSourceSummary(selectedRun)}</div>
                 <div>Started: {formatDateTime(selectedRun.started_at)}</div>
                 <div>Finished: {formatDateTime(selectedRun.finished_at)}</div>
                 <div>Requested by: {selectedRun.requested_by_email ?? "Unknown"}</div>

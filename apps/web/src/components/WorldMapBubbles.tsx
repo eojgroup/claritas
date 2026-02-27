@@ -1,5 +1,7 @@
 import { memo, useMemo, useRef, useState } from 'react';
 import { geoEqualEarth, geoPath } from 'd3-geo';
+import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
+import type { GeometryCollection, Topology } from "topojson-specification";
 import { feature } from 'topojson-client';
 import worldData from 'world-atlas/countries-110m.json';
 import worldCountries from 'world-countries';
@@ -26,12 +28,23 @@ export type WorldMapBubblesProps = {
   showLabels?: boolean;
 };
 
+type CountryFeature = Feature<Geometry, GeoJsonProperties>;
+type CountriesTopology = Topology<{ countries: GeometryCollection }>;
+type WorldCountryReference = {
+  cca2?: string;
+  properties?: { cca2?: string };
+  latlng?: [number, number];
+};
+
 // TopoJSON -> GeoJSON features
-const countries: any = (feature(worldData as any, (worldData as any).objects.countries) as any).features;
-const countryCollection = {
+const atlasData = worldData as unknown as CountriesTopology;
+const countries = (
+  feature(atlasData, atlasData.objects.countries) as FeatureCollection<Geometry, GeoJsonProperties>
+).features as CountryFeature[];
+const countryCollection: FeatureCollection<Geometry, GeoJsonProperties> = {
   type: 'FeatureCollection',
   features: countries,
-} as any;
+};
 const MAP_WIDTH = 800;
 const MAP_HEIGHT = 400;
 const MAP_DEFAULT_PADDING = 18;
@@ -75,9 +88,9 @@ export default memo(function WorldMapBubbles({
   // world-countries provides `latlng: [lat, lng]` — flip to [lng, lat] for d3 projections.
   const centroids = useMemo(() => {
     const map = new Map<string, [number, number]>();
-    for (const f of worldCountries as any[]) {
+    for (const f of worldCountries as WorldCountryReference[]) {
       const iso = (f.cca2 || f.properties?.cca2 || '').toUpperCase();
-      const latlng = (f as any).latlng as [number, number] | undefined;
+      const latlng = f.latlng;
       if (!iso || !latlng || latlng.length < 2) continue;
       const [lat, lng] = latlng;
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
@@ -138,7 +151,7 @@ export default memo(function WorldMapBubbles({
         </defs>
         <rect x={0} y={0} width={MAP_WIDTH} height={MAP_HEIGHT} fill={`url(#${oceanGradientId})`} />
         <g>
-          {countries.map((geo: any, i: number) => (
+          {countries.map((geo, i) => (
             <path key={i} d={path(geo) || ''} fill={landFill} stroke={landStroke} strokeWidth={0.5} />
           ))}
         </g>
@@ -147,7 +160,9 @@ export default memo(function WorldMapBubbles({
             const key = d.country.toUpperCase();
             const centroid = centroids.get(key) || centroids.get(key === 'UK' ? 'GB' : key);
             if (!centroid) return null;
-            const [x, y] = projection(centroid)!;
+            const projected = projection(centroid);
+            if (!projected) return null;
+            const [x, y] = projected;
             if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
             const r = rScale(d.count);
             const handleMove = (e: React.MouseEvent<SVGGElement>) => {

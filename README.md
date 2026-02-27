@@ -192,6 +192,22 @@ npm install
 npm run dev
 ```
 
+### 3. Provider API Keys (News/Weather)
+
+- API runtime environment variable names:
+  - `NEWSAPI_API_KEY`
+  - `THENEWSAPI_API_TOKEN`
+  - `OPENWEATHER_API_KEY`
+- Kubernetes deployment env wiring:
+  - `infra/k8s/api-deployment.yaml`
+- Recommended secret names/keys in cluster:
+  - `claritas-newsapi` / `NEWSAPI_API_KEY`
+  - `claritas-thenewsapi` / `THENEWSAPI_API_TOKEN`
+  - `claritas-openweather` / `OPENWEATHER_API_KEY`
+- Production secret source (recommended):
+  - GitHub repository secret: `THENEWSAPI_API_TOKEN`
+  - Used by deploy workflow: `.github/workflows/gke-deploy.yml` (`Ensure API provider secrets exist`)
+
 ---
 
 ## 📚 Documentation

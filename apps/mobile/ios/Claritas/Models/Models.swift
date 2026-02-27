@@ -27,6 +27,7 @@ struct AuthUser: Codable {
 struct NewsItem: Codable, Identifiable {
     let id: Int
     let kind: String?
+    let source_name: String?
     let title: String?
     let summary: String?
     let url: String?
@@ -42,6 +43,7 @@ struct NewsItem: Codable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id
         case kind
+        case source_name
         case title
         case summary
         case url
@@ -54,6 +56,7 @@ struct NewsItem: Codable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeFlexibleInt(forKey: .id)
         kind = try container.decodeIfPresent(String.self, forKey: .kind)
+        source_name = try container.decodeIfPresent(String.self, forKey: .source_name)
         title = try container.decodeIfPresent(String.self, forKey: .title)
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         url = try container.decodeIfPresent(String.self, forKey: .url)
@@ -331,6 +334,7 @@ enum JSONValue: Codable {
 
     var string: String? { if case .string(let s) = self { return s } else { return nil } }
     var object: [String: JSONValue]? { if case .object(let o) = self { return o } else { return nil } }
+    var bool: Bool? { if case .bool(let b) = self { return b } else { return nil } }
 }
 
 enum APIDateParser {

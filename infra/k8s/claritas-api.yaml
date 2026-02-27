@@ -12,6 +12,12 @@
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_USER } }
             - name: DB_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
+            - name: NEWSAPI_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-newsapi, key: NEWSAPI_API_KEY, optional: true } }
+            - name: THENEWSAPI_API_TOKEN
+              valueFrom: { secretKeyRef: { name: claritas-thenewsapi, key: THENEWSAPI_API_TOKEN, optional: true } }
+            - name: OPENWEATHER_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
             - name: AUTH_PROVIDERS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_PROVIDERS } }
             - name: AUTH_ISSUER_URL
