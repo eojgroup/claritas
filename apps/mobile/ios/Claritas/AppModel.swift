@@ -50,18 +50,42 @@ final class AppModel: ObservableObject {
     func loadAuth() async {
         authStatus = .checking
         authError = nil
-        do {
-            async let me = api.fetchAuthMe()
-            async let providers = api.fetchAuthProviders()
-            let (user, providerList) = try await (me, providers)
-            authUser = user
-            authProviders = providerList
-            authStatus = user == nil ? .unauthed : .authed
-        } catch {
-            authError = error.localizedDescription
-            authStatus = .unauthed
-            authProviders = []
+
+        async let userResult: Result<AuthUser?, Error> = {
+            do { return .success(try await api.fetchAuthMe()) }
+            catch { return .failure(error) }
+        }()
+
+        async let providerResult: Result<[AuthProvider], Error> = {
+            do { return .success(try await api.fetchAuthProviders()) }
+            catch { return .failure(error) }
+        }()
+
+        let (resolvedUser, resolvedProviders) = await (userResult, providerResult)
+
+        var errors: [String] = []
+        let user: AuthUser?
+        switch resolvedUser {
+        case .success(let value):
+            user = value
+        case .failure(let error):
+            user = nil
+            errors.append(describeAuthLoadError(error, context: "auth session"))
         }
+
+        let providers: [AuthProvider]
+        switch resolvedProviders {
+        case .success(let value):
+            providers = value
+        case .failure(let error):
+            providers = []
+            errors.append(describeAuthLoadError(error, context: "auth providers"))
+        }
+
+        authUser = user
+        authProviders = providers
+        authStatus = user == nil ? .unauthed : .authed
+        authError = errors.isEmpty ? nil : errors.joined(separator: " | ")
     }
 
     func startSignIn(provider: AuthProviderId) {
@@ -168,5 +192,15 @@ final class AppModel: ObservableObject {
         } catch {
             // ignore
         }
+    }
+
+    private func describeAuthLoadError(_ error: Error, context: String) -> String {
+        if error is DecodingError {
+            return "Could not parse \(context) response."
+        }
+        if let apiError = error as? APIError {
+            return apiError.message
+        }
+        return error.localizedDescription
     }
 }
