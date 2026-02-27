@@ -109,10 +109,27 @@ final class APIClient {
         guard (200..<300).contains(http.statusCode) else {
             throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
         }
-        let container = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
-        let value = container?["user"]
-        let valueData = try JSONSerialization.data(withJSONObject: value ?? NSNull(), options: [])
-        return try JSONDecoder.api.decode(AuthUser?.self, from: valueData)
+        let decoded = try JSONSerialization.jsonObject(with: data, options: [])
+        guard let container = decoded as? [String: Any] else {
+            throw APIError(status: http.statusCode, message: "Unexpected auth session response format")
+        }
+        guard let rawUser = container["user"], !(rawUser is NSNull) else {
+            return nil
+        }
+        guard let user = rawUser as? [String: Any] else {
+            throw APIError(status: http.statusCode, message: "Unexpected auth user payload format")
+        }
+        guard let id = parseInt(user["id"]) else {
+            throw APIError(status: http.statusCode, message: "Missing or invalid auth user id")
+        }
+
+        return AuthUser(
+            id: id,
+            email: nonEmpty(user["email"] as? String),
+            display_name: nonEmpty(user["display_name"] as? String),
+            avatar_url: nonEmpty(user["avatar_url"] as? String),
+            roles: parseStringArray(user["roles"])
+        )
     }
 
     func logout() async throws {
@@ -382,6 +399,31 @@ final class APIClient {
         default:
             return false
         }
+    }
+
+    private func parseInt(_ value: Any?) -> Int? {
+        switch value {
+        case let int as Int:
+            return int
+        case let number as NSNumber:
+            return Int(exactly: number.int64Value)
+        case let string as String:
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let int = Int(trimmed) {
+                return int
+            }
+            if let int64 = Int64(trimmed) {
+                return Int(exactly: int64)
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    private func parseStringArray(_ value: Any?) -> [String]? {
+        guard let values = value as? [Any] else { return nil }
+        return values.compactMap { nonEmpty($0 as? String) }
     }
 
     private func authedRequest(_ req: URLRequest) -> URLRequest {
