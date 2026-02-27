@@ -5,5 +5,8 @@
     <!-- Default base URL for API. Override at runtime via UserDefaults key `API_BASE_URL`. -->
     <key>API_BASE_URL</key>
     <string>https://app.claritas.info</string>
+    <!-- OAuth callback URL consumed by ASWebAuthenticationSession and backend redirect handling. -->
+    <key>AUTH_CALLBACK_URL</key>
+    <string>claritas://auth/callback</string>
 </dict>
 </plist>

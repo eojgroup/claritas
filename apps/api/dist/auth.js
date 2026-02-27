@@ -73,10 +73,17 @@ function getAllowedRedirects() {
         .map((v) => v.trim())
         .filter(Boolean);
 }
+function getAllowedRedirectSchemes() {
+    return (optionalEnv("AUTH_ALLOWED_REDIRECT_SCHEMES") || "claritas")
+        .split(",")
+        .map((v) => v.trim().toLowerCase())
+        .filter(Boolean);
+}
 function resolveRedirectUrl(candidate, fallback) {
     if (!candidate)
         return fallback;
     const allowlist = getAllowedRedirects();
+    const allowedSchemes = getAllowedRedirectSchemes();
     if (candidate.startsWith("/") && !candidate.startsWith("//")) {
         if (!fallback)
             return candidate;
@@ -90,8 +97,12 @@ function resolveRedirectUrl(candidate, fallback) {
     }
     try {
         const url = new URL(candidate);
+        const scheme = url.protocol.replace(":", "").toLowerCase();
         if (allowlist.some((prefix) => candidate.startsWith(prefix)))
             return candidate;
+        if (scheme && scheme !== "http" && scheme !== "https") {
+            return allowedSchemes.includes(scheme) ? candidate : fallback;
+        }
         if (fallback) {
             const base = new URL(fallback);
             if (url.origin === base.origin)

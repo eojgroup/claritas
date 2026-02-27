@@ -61,9 +61,13 @@ struct DashboardView: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "magnifyingglass")
                                     .foregroundStyle(.secondary)
-                                TextField("AI Search", text: $query)
-                                Button("Search") {}
-                                    .buttonStyle(.borderedProminent)
+                                TextField("Search news", text: $query)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    Button("Clear") { query = "" }
+                                        .buttonStyle(.bordered)
+                                }
                             }
                             .padding(10)
                             .background(Color.white, in: RoundedRectangle(cornerRadius: 10))
@@ -71,6 +75,12 @@ struct DashboardView: View {
                                 RoundedRectangle(cornerRadius: 10)
                                     .stroke(Color.black.opacity(0.12), lineWidth: 1)
                             )
+
+                            if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text("Showing \(filteredNews().count) of \(model.news.count) news items")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
 
@@ -89,7 +99,7 @@ struct DashboardView: View {
                             }
 
                             if listMode == .news {
-                                NewsListView(items: model.news, onSelectCountry: { iso in
+                                NewsListView(items: filteredNews(), onSelectCountry: { iso in
                                     model.selectedCountry = iso
                                     Task { await model.reloadNewsForSelectedCountry() }
                                 })
@@ -128,6 +138,17 @@ struct DashboardView: View {
         if let minVal { list = list.filter { ($0.temp_c ?? -999) >= minVal } }
         if let iso = model.selectedCountry?.uppercased() { list = list.filter { $0.country.uppercased() == iso } }
         return list
+    }
+
+    private func filteredNews() -> [NewsItem] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !term.isEmpty else { return model.news }
+        return model.news.filter { item in
+            let title = item.title?.lowercased() ?? ""
+            let summary = item.summary?.lowercased() ?? ""
+            let country = item.country_iso2?.lowercased() ?? ""
+            return title.contains(term) || summary.contains(term) || country.contains(term)
+        }
     }
 }
 

@@ -11,6 +11,7 @@ Generator source: `apps/mobile/ios/generate_xcodeproj.rb`
    - Optionally change the Bundle Identifier from the default `com.eojgroup.claritas`.
 3. Configure the API base URL:
    - Edit `apps/mobile/ios/Claritas/Claritas/Config.plist` -> `API_BASE_URL` to point to your backend (e.g. `https://your-host.com`).
+   - Ensure `AUTH_CALLBACK_URL` matches your registered iOS URL scheme (default: `claritas://auth/callback`).
    - Or at runtime set `UserDefaults.standard.set("https://your-host.com", forKey: "API_BASE_URL")` in AppDelegate for advanced configs.
 4. Run on a simulator. The app will load:
    - Country news list (with thumbnail proxy).
@@ -50,5 +51,6 @@ Then re-open the `.xcodeproj` in Xcode.
 ## Notes
 
 - ATS is currently permissive (NSAllowsArbitraryLoads=true) to simplify dev. For production, replace with explicit domain exceptions or HTTPS endpoints.
+- Backend auth redirect validation now supports non-HTTP callback schemes via `AUTH_ALLOWED_REDIRECT_SCHEMES` (default includes `claritas`).
 - The map view is a placeholder; a future step can add country bubble overlays using MapKit annotations and an ISO2->centroid dataset.
 - The structure is modular (Models, Services, Views) to ease future extensions (auth, settings, notifications, charts).

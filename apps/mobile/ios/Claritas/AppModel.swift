@@ -27,16 +27,19 @@ final class AppModel: ObservableObject {
     private let authPresenter = AuthSessionPresenter()
 
     private let authTokenKey = "AUTH_TOKEN"
-    private let authCallbackScheme = "claritas"
-    private let authCallbackURL = URL(string: "claritas://auth/callback")!
+    private let authCallbackScheme: String
+    private let authCallbackURL: URL
 
     var isAdmin: Bool {
         (authUser?.roles ?? []).contains { $0.lowercased() == "admin" }
     }
 
     init() {
+        let callbackURL = Self.resolveAuthCallbackURL()
         self.api = APIClient()
         self.authToken = UserDefaults.standard.string(forKey: authTokenKey)
+        self.authCallbackURL = callbackURL
+        self.authCallbackScheme = callbackURL.scheme ?? "claritas"
         self.api.setAuthToken(authToken)
     }
 
@@ -89,6 +92,8 @@ final class AppModel: ObservableObject {
     }
 
     func startSignIn(provider: AuthProviderId) {
+        authError = nil
+
         let startPath = authProviders.first(where: { $0.id == provider })?.start_path
         guard let authURL = api.authStartURL(provider: provider, redirect: authCallbackURL, startPathOverride: startPath) else {
             authError = "Unable to start sign-in."
@@ -98,17 +103,23 @@ final class AppModel: ObservableObject {
         let session = ASWebAuthenticationSession(url: authURL, callbackURLScheme: authCallbackScheme) { [weak self] callbackURL, error in
             guard let self else { return }
             Task { @MainActor in
+                self.authSession = nil
                 if let callbackURL {
                     self.handleAuthCallback(callbackURL)
                 } else if let error {
-                    self.authError = error.localizedDescription
+                    self.authError = self.describeAuthSessionError(error)
+                } else {
+                    self.authError = "Sign-in did not complete."
                 }
             }
         }
         session.presentationContextProvider = authPresenter
         session.prefersEphemeralWebBrowserSession = false
-        session.start()
         authSession = session
+        if !session.start() {
+            authSession = nil
+            authError = "Unable to open secure sign-in."
+        }
     }
 
     func handleAuthCallback(_ url: URL) {
@@ -202,5 +213,40 @@ final class AppModel: ObservableObject {
             return apiError.message
         }
         return error.localizedDescription
+    }
+
+    private func describeAuthSessionError(_ error: Error) -> String {
+        if let sessionError = error as? ASWebAuthenticationSessionError {
+            switch sessionError.code {
+            case .canceledLogin:
+                return "Sign-in was canceled."
+            case .presentationContextInvalid, .presentationContextNotProvided:
+                return "Unable to present secure sign-in. Please try again."
+            @unknown default:
+                return sessionError.localizedDescription
+            }
+        }
+        return error.localizedDescription
+    }
+
+    private static func resolveAuthCallbackURL() -> URL {
+        let defaultURL = URL(string: "claritas://auth/callback")!
+
+        if let runtimeOverride = UserDefaults.standard.string(forKey: "AUTH_CALLBACK_URL"),
+           let runtimeURL = URL(string: runtimeOverride),
+           runtimeURL.scheme != nil {
+            return runtimeURL
+        }
+
+        guard let configURL = Bundle.main.url(forResource: "Config", withExtension: "plist"),
+              let data = try? Data(contentsOf: configURL),
+              let dict = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let callbackValue = dict["AUTH_CALLBACK_URL"] as? String,
+              let callbackURL = URL(string: callbackValue),
+              callbackURL.scheme != nil else {
+            return defaultURL
+        }
+
+        return callbackURL
     }
 }
