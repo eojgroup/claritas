@@ -253,6 +253,9 @@ private struct AdminIngestionPanelView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Trigger runs")
                         .font(.headline)
+                    Text("News runs include NewsAPI and, when configured, TheNewsAPI.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("Everything", isOn: $runEverything)
@@ -354,6 +357,12 @@ private struct AdminIngestionPanelView: View {
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
                                                 .background(Color.primary.opacity(0.08), in: Capsule())
+                                            Text(prettySourceName(run.source_name))
+                                                .font(.caption2.weight(.semibold))
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 4)
+                                                .background(Color(red: 0.06, green: 0.41, blue: 0.33).opacity(0.16), in: Capsule())
+                                                .foregroundStyle(Color(red: 0.06, green: 0.41, blue: 0.33))
                                         }
                                         Text(formatDateTime(run.started_at))
                                             .font(.caption)
@@ -388,6 +397,9 @@ private struct AdminIngestionPanelView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Run #\(selectedRun.id) • \(selectedRun.pipeline.label)")
                                 .font(.subheadline.weight(.semibold))
+                            Text("Source: \(prettySourceName(selectedRun.source_name))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             Text("Status: \(selectedRun.status.label)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -593,6 +605,19 @@ private struct AdminIngestionPanelView: View {
             return Double(value)
         default:
             return nil
+        }
+    }
+
+    private func prettySourceName(_ value: String) -> String {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "newsapi":
+            return "NewsAPI"
+        case "thenewsapi":
+            return "TheNewsAPI"
+        case "openweather":
+            return "OpenWeather"
+        default:
+            return value
         }
     }
 }

@@ -6,7 +6,8 @@ export type NewsItem = {
   url: string | null;
   country_iso2: string | null;
   event_time: string | null; // ISO
-  payload?: any;
+  source_name?: string | null;
+  payload?: unknown;
 };
 
 export type CountryStat = { country: string; count: number };
@@ -48,10 +49,10 @@ export type AdminIngestionRun = {
   started_at: string;
   finished_at: string | null;
   error: string | null;
-  stats: any;
+  stats: unknown;
   trigger_mode: string | null;
   requested_by_email: string | null;
-  request_payload: any;
+  request_payload: unknown;
   log_count: number;
 };
 export type AdminIngestionLog = {
@@ -60,7 +61,7 @@ export type AdminIngestionLog = {
   logged_at: string;
   level: "info" | "warn" | "error";
   message: string;
-  context: any | null;
+  context: unknown | null;
 };
 export type AdminIngestionMetricsPoint = {
   date: string;

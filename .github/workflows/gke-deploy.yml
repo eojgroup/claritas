@@ -212,6 +212,7 @@ jobs:
         env:
           NS: ${{ env.NAMESPACE }}
           NEWSAPI_API_KEY: ${{ secrets.NEWSAPI_API_KEY }}
+          THENEWSAPI_API_TOKEN: ${{ secrets.THENEWSAPI_API_TOKEN }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
         run: |
           set -euo pipefail
@@ -222,6 +223,15 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::NEWSAPI_API_KEY secret not provided; skipping claritas-newsapi upsert"
+          fi
+
+          # Upsert TheNewsAPI secret if provided
+          if [ -n "${THENEWSAPI_API_TOKEN:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-thenewsapi \
+              --from-literal=THENEWSAPI_API_TOKEN="$THENEWSAPI_API_TOKEN" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::THENEWSAPI_API_TOKEN secret not provided; skipping claritas-thenewsapi upsert"
           fi
 
           # Upsert OpenWeather secret if provided

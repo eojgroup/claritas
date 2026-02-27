@@ -84,6 +84,14 @@ function pipelineLabel(pipeline: IngestionPipeline): string {
   return pipeline === "news" ? "News" : "Weather";
 }
 
+function sourceLabel(sourceName: string): string {
+  const normalized = sourceName.trim().toLowerCase();
+  if (normalized === "newsapi") return "NewsAPI";
+  if (normalized === "thenewsapi") return "TheNewsAPI";
+  if (normalized === "openweather") return "OpenWeather";
+  return sourceName;
+}
+
 function buildZeroChartData(days: number): Array<{
   date: string;
   news_inserted: number;
@@ -421,6 +429,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               News run
             </div>
+            <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+              Runs NewsAPI and TheNewsAPI (when `THENEWSAPI_API_TOKEN` is configured).
+            </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <label className="text-xs text-[color:var(--shell-muted)]">
                 Query
@@ -683,6 +694,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
                       {pipelineLabel(run.pipeline)} #{run.id}
                     </span>
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                      {sourceLabel(run.source_name)}
+                    </span>
                     <span
                       className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusClasses(run.status)}`}
                     >
@@ -735,6 +749,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           {selectedRun && (
             <>
               <div className="mb-3 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-2 text-xs text-[color:var(--shell-muted)]">
+                <div>Source: {sourceLabel(selectedRun.source_name)}</div>
                 <div>Started: {formatDateTime(selectedRun.started_at)}</div>
                 <div>Finished: {formatDateTime(selectedRun.finished_at)}</div>
                 <div>Requested by: {selectedRun.requested_by_email ?? "Unknown"}</div>

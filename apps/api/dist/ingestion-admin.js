@@ -10,6 +10,7 @@ exports.getRunDetail = getRunDetail;
 exports.getRunLogs = getRunLogs;
 exports.getMetrics = getMetrics;
 const newsapi_1 = require("./connectors/newsapi");
+const thenewsapi_1 = require("./connectors/thenewsapi");
 const openweather_1 = require("./connectors/openweather");
 const db_1 = require("./db");
 const SOURCE_CONFIG = {
@@ -176,6 +177,8 @@ function resolvePipeline(pipeline, sourceName) {
     if (pipeline === "news" || pipeline === "weather")
         return pipeline;
     if (sourceName === "newsapi")
+        return "news";
+    if (sourceName === "thenewsapi")
         return "news";
     if (sourceName === "openweather")
         return "weather";
@@ -422,6 +425,57 @@ async function executeNewsRun(runId, plan) {
                 throw err;
             }
         }
+        if (process.env.THENEWSAPI_API_TOKEN) {
+            const stepStartedAt = Date.now();
+            const search = plan.everything?.q || plan.topHeadlines?.q || DEFAULT_NEWS_EVERYTHING.q;
+            const language = plan.everything?.language;
+            const locale = plan.topHeadlines?.country;
+            const pageSize = Math.min(Math.max(plan.everything?.pageSize || plan.topHeadlines?.pageSize || 50, 1), 100);
+            const maxPages = Math.min(Math.max(plan.everything?.maxPages || plan.topHeadlines?.maxPages || 2, 1), 10);
+            await safeAppendRunLog(runId, "info", "Running TheNewsAPI /news ingest.", {
+                params: { search, language, locale, pageSize, maxPages },
+            });
+            try {
+                const result = (await (0, thenewsapi_1.ingestTheNewsApiNews)({
+                    search,
+                    language,
+                    locale,
+                    pageSize,
+                    maxPages,
+                }));
+                const stepTotals = extractTotals(result);
+                mergeTotals(totals, stepTotals);
+                steps.push({
+                    step: "thenewsapi/news",
+                    status: "success",
+                    started_at: new Date(stepStartedAt).toISOString(),
+                    finished_at: toIsoNow(),
+                    duration_ms: Date.now() - stepStartedAt,
+                    result,
+                });
+                await safeAppendRunLog(runId, "info", "TheNewsAPI /news ingest completed.", {
+                    result,
+                });
+            }
+            catch (err) {
+                const message = toErrorMessage(err);
+                steps.push({
+                    step: "thenewsapi/news",
+                    status: "failed",
+                    started_at: new Date(stepStartedAt).toISOString(),
+                    finished_at: toIsoNow(),
+                    duration_ms: Date.now() - stepStartedAt,
+                    error: message,
+                });
+                await safeAppendRunLog(runId, "error", "TheNewsAPI /news ingest failed.", {
+                    error: message,
+                });
+                throw err;
+            }
+        }
+        else {
+            await safeAppendRunLog(runId, "warn", "Skipping TheNewsAPI step (THENEWSAPI_API_TOKEN not set).");
+        }
         const stats = {
             pipeline: "news",
             duration_ms: Date.now() - runStartedAt,
@@ -554,11 +608,12 @@ async function listRuns(options) {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
     const offset = Math.max(options.offset ?? 0, 0);
     const params = [];
-    const where = ["s.name IN ('newsapi', 'openweather')"];
+    const where = ["s.name IN ('newsapi', 'thenewsapi', 'openweather')"];
     if (options.pipeline) {
         const pipelineIdx = params.push(options.pipeline);
         where.push(`(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
+        OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather'))`);
     }
     const limitIdx = params.push(limit);
@@ -608,7 +663,7 @@ async function getRunDetail(runId, logLimit = 200) {
      FROM ingestion_run r
      JOIN source s ON s.id = r.source_id
      WHERE r.id = $1
-       AND s.name IN ('newsapi', 'openweather')
+       AND s.name IN ('newsapi', 'thenewsapi', 'openweather')
      LIMIT 1`, [runId]);
     if (!rows[0])
         return null;
@@ -631,12 +686,13 @@ async function getMetrics(options) {
     const params = [days];
     const where = [
         "r.started_at >= now() - make_interval(days => $1::int)",
-        "s.name IN ('newsapi', 'openweather')",
+        "s.name IN ('newsapi', 'thenewsapi', 'openweather')",
     ];
     if (options?.pipeline) {
         const pipelineIdx = params.push(options.pipeline);
         where.push(`(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
+        OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather'))`);
     }
     const { rows } = await (0, db_1.query)(`SELECT

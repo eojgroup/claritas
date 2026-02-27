@@ -1,5 +1,6 @@
 import express from "express";
 import { ingestNewsApiEverything, ingestNewsApiTopHeadlines } from "./connectors/newsapi";
+import { ingestTheNewsApiNews } from "./connectors/thenewsapi";
 import { getCountryWeatherLatest, ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
 import { pool, query, withTransaction } from "./db";
 import authRouter, { requireAuth, requireRole } from "./auth";
@@ -183,20 +184,21 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     if (q) {
       const i1 = params.push(`%${q}%`); // returns new length as index
       const i2 = params.push(`%${q}%`);
-      where.push(`(title ILIKE $${i1} OR summary ILIKE $${i2})`);
+      where.push(`(i.title ILIKE $${i1} OR i.summary ILIKE $${i2})`);
     }
     if (country) {
       const ci = params.push(country);
-      where.push(`upper(country_iso2) = $${ci}`);
+      where.push(`upper(i.country_iso2) = $${ci}`);
     }
     const li = params.push(limit);
     const oi = params.push(offset);
 
     const sql = `
-      SELECT id, kind, title, summary, url, country_iso2, event_time, payload
-      FROM item
+      SELECT i.id, i.kind, i.title, i.summary, i.url, i.country_iso2, i.event_time, i.payload, s.name AS source_name
+      FROM item i
+      JOIN source s ON s.id = i.source_id
       ${where.length ? "WHERE " + where.join(" AND ") : ""}
-      ORDER BY event_time DESC NULLS LAST, id DESC
+      ORDER BY i.event_time DESC NULLS LAST, i.id DESC
       LIMIT $${li} OFFSET $${oi}
     `;
     const { rows } = await pool.query(sql, params);
@@ -578,6 +580,24 @@ app.post("/api/ingest/newsapi/top-headlines", requireIngestionAccess, async (req
   try {
     const { country, category, q, pageSize, maxPages } = req.body || {};
     const result = await ingestNewsApiTopHeadlines({ country, category, q, pageSize, maxPages });
+    res.json(result);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+// Ingest TheNewsAPI '/news'
+app.post("/api/ingest/thenewsapi/news", requireIngestionAccess, async (req, res) => {
+  try {
+    const { q, search, language, locale, pageSize, maxPages, publishedAfter } = req.body || {};
+    const result = await ingestTheNewsApiNews({
+      search: typeof search === "string" && search.trim() ? search : (typeof q === "string" ? q : undefined),
+      language,
+      locale,
+      pageSize,
+      maxPages,
+      publishedAfter,
+    });
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });

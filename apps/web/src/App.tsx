@@ -139,10 +139,88 @@ const SEARCH_TOPIC_ALIASES: Record<string, SearchTopic> = {
   wx: "weather",
 };
 
+const PROFILE_SECTIONS = [
+  { id: "overview", label: "Overview", description: "Identity snapshot" },
+  { id: "identity", label: "Identity", description: "Account and providers" },
+  {
+    id: "preferences",
+    label: "Preferences",
+    description: "Workspace defaults",
+  },
+  { id: "security", label: "Security", description: "Session posture" },
+  { id: "policies", label: "Policies", description: "Compliance links" },
+] as const;
+
 type ParsedDashboardSearch = {
   topic: SearchTopic;
   terms: string[];
   raw: string;
+};
+
+type JsonObject = Record<string, unknown>;
+type WorldCountryLike = {
+  cca2?: string;
+  properties?: { cca2?: string };
+  name?: { common?: string; official?: string };
+  region?: string;
+  subregion?: string;
+};
+
+const asObject = (value: unknown): JsonObject | undefined => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as JsonObject;
+  }
+  return undefined;
+};
+
+const asTrimmedString = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+};
+
+const prettySourceName = (value: string): string => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "newsapi") return "NewsAPI";
+  if (normalized === "thenewsapi") return "TheNewsAPI";
+  if (normalized === "openweather") return "OpenWeather";
+  return value.trim();
+};
+
+const getNewsImageUrl = (item: NewsItem): string | undefined => {
+  const payload = asObject(item.payload);
+  if (!payload) return undefined;
+  const raw = asObject(payload["raw"]);
+  return (
+    asTrimmedString(payload["urlToImage"]) ??
+    asTrimmedString(payload["image_url"]) ??
+    asTrimmedString(raw?.["urlToImage"]) ??
+    asTrimmedString(raw?.["image_url"])
+  );
+};
+
+const resolveNewsSource = (item: NewsItem): string | undefined => {
+  const sourceName = asTrimmedString(item.source_name);
+  if (sourceName) return prettySourceName(sourceName);
+
+  const payload = asObject(item.payload);
+  const raw = asObject(payload?.["raw"]);
+
+  const pickSource = (value: unknown): string | undefined => {
+    const text = asTrimmedString(value);
+    if (text) return text;
+    const obj = asObject(value);
+    return asTrimmedString(obj?.["name"]) ?? asTrimmedString(obj?.["id"]);
+  };
+
+  const source = (
+    pickSource(raw?.["source"]) ??
+    pickSource(payload?.["source"]) ??
+    asTrimmedString(payload?.["provider"]) ??
+    asTrimmedString(payload?.["publisher"]) ??
+    asTrimmedString(payload?.["site"])
+  );
+  return source ? prettySourceName(source) : undefined;
 };
 
 const getDateKey = (value: Date | string) => {
@@ -285,6 +363,7 @@ export default function ClaritasDashboard() {
   const [profileSection, setProfileSection] = useState<
     "overview" | "identity" | "preferences" | "security" | "policies"
   >("overview");
+  const profileSections = PROFILE_SECTIONS;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
@@ -305,7 +384,9 @@ export default function ClaritasDashboard() {
     else el.classList.remove("dark");
     try {
       localStorage.setItem("theme", dark ? "dark" : "light");
-    } catch {}
+    } catch {
+      // Ignore storage write errors (private mode, quota, etc).
+    }
   }, [dark]);
 
   useEffect(() => {
@@ -343,7 +424,7 @@ export default function ClaritasDashboard() {
     handleHash();
     window.addEventListener("hashchange", handleHash);
     return () => window.removeEventListener("hashchange", handleHash);
-  }, []);
+  }, [profileSections]);
 
   useEffect(() => {
     if (activeView === "profile") {
@@ -475,7 +556,7 @@ export default function ClaritasDashboard() {
       string,
       { name?: string; region?: string; subregion?: string }
     >();
-    for (const c of worldCountries as any[]) {
+    for (const c of worldCountries as WorldCountryLike[]) {
       const iso = (c.cca2 || c.properties?.cca2 || "").toUpperCase();
       if (!iso) continue;
       map.set(iso, {
@@ -551,18 +632,7 @@ export default function ClaritasDashboard() {
         : "Search by topic or keyword (try topic:news OpenAI)";
 
   const getSourceLabel = useCallback((item: NewsItem) => {
-    const payload = (item as any)?.payload ?? {};
-    const raw = payload?.raw ?? payload;
-    const source =
-      raw?.source?.name ??
-      raw?.source?.id ??
-      raw?.source ??
-      payload?.source ??
-      payload?.provider ??
-      payload?.publisher ??
-      payload?.site;
-    if (!source) return undefined;
-    return typeof source === "string" ? source : source?.name;
+    return resolveNewsSource(item);
   }, []);
 
   const matchesNewsSearch = useCallback(
@@ -576,7 +646,7 @@ export default function ClaritasDashboard() {
         item.country_iso2 ?? "",
         source,
         item.event_time ?? "",
-        (item as any)?.kind ?? "",
+        item.kind ?? "",
       ]
         .join(" ")
         .toLowerCase();
@@ -859,7 +929,7 @@ export default function ClaritasDashboard() {
       stats.set(iso, entry);
     });
     return stats;
-  }, [filteredNews]);
+  }, [filteredNews, getSourceLabel]);
 
   const mapRange = useMemo(() => {
     if (activeRange) return activeRange;
@@ -960,7 +1030,7 @@ export default function ClaritasDashboard() {
       stats.set(iso, entry);
     });
     return stats;
-  }, [mapNews]);
+  }, [getSourceLabel, mapNews]);
 
   const mapBubbleData = useMemo(() => {
     if (
@@ -1485,18 +1555,6 @@ export default function ClaritasDashboard() {
     profile: { kicker: "Account", title: "Profile & access" },
     legal: { kicker: "Legal", title: "Policies & usage" },
   } as const;
-
-  const profileSections = [
-    { id: "overview", label: "Overview", description: "Identity snapshot" },
-    { id: "identity", label: "Identity", description: "Account and providers" },
-    {
-      id: "preferences",
-      label: "Preferences",
-      description: "Workspace defaults",
-    },
-    { id: "security", label: "Security", description: "Session posture" },
-    { id: "policies", label: "Policies", description: "Compliance links" },
-  ] as const;
 
   const handleSignIn = (provider: AuthProviderId) => {
     const redirect = `${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -2339,10 +2397,8 @@ export default function ClaritasDashboard() {
                               </div>
                             )}
                             {filteredNews.map((n) => {
-                              const img = imageProxy(
-                                (n as any)?.payload?.urlToImage ??
-                                  (n as any)?.payload?.raw?.urlToImage,
-                              );
+                              const img = imageProxy(getNewsImageUrl(n));
+                              const sourceLabel = getSourceLabel(n);
                               const iso = n.country_iso2?.toUpperCase();
                               const isPrimary =
                                 !!selectedCountry &&
@@ -2388,6 +2444,11 @@ export default function ClaritasDashboard() {
                                         {n.title || n.url || "Untitled"}
                                       </a>
                                       <div className="text-xs text-[color:var(--shell-muted)] mt-2 flex items-center gap-2 flex-wrap">
+                                        {sourceLabel && (
+                                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700">
+                                            {sourceLabel}
+                                          </span>
+                                        )}
                                         {n.country_iso2 && (
                                           <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
                                             {n.country_iso2}
