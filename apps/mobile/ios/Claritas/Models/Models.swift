@@ -38,6 +38,29 @@ struct NewsItem: Codable, Identifiable {
         guard let s = event_time else { return nil }
         return APIDateParser.parse(s)
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case kind
+        case title
+        case summary
+        case url
+        case country_iso2
+        case event_time
+        case payload
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        country_iso2 = try container.decodeIfPresent(String.self, forKey: .country_iso2)
+        event_time = try container.decodeIfPresent(String.self, forKey: .event_time)
+        payload = try container.decodeIfPresent(JSONValue.self, forKey: .payload)
+    }
 }
 
 struct CountryStat: Codable, Identifiable {
@@ -94,6 +117,21 @@ struct AdminRole: Codable, Identifiable {
     let key: String
     let description: String?
     let user_count: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case key
+        case description
+        case user_count
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        key = try container.decode(String.self, forKey: .key)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        user_count = try container.decodeFlexibleInt(forKey: .user_count)
+    }
 }
 
 struct AdminUser: Codable, Identifiable {
@@ -107,6 +145,33 @@ struct AdminUser: Codable, Identifiable {
     let roles: [String]
     let providers: [String]
     let last_seen_at: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case email
+        case display_name
+        case avatar_url
+        case is_active
+        case created_at
+        case updated_at
+        case roles
+        case providers
+        case last_seen_at
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        email = try container.decodeIfPresent(String.self, forKey: .email)
+        display_name = try container.decodeIfPresent(String.self, forKey: .display_name)
+        avatar_url = try container.decodeIfPresent(String.self, forKey: .avatar_url)
+        is_active = try container.decode(Bool.self, forKey: .is_active)
+        created_at = try container.decode(String.self, forKey: .created_at)
+        updated_at = try container.decode(String.self, forKey: .updated_at)
+        roles = try container.decodeIfPresent([String].self, forKey: .roles) ?? []
+        providers = try container.decodeIfPresent([String].self, forKey: .providers) ?? []
+        last_seen_at = try container.decodeIfPresent(String.self, forKey: .last_seen_at)
+    }
 }
 
 struct AdminUsersResponse: Codable {
@@ -129,6 +194,37 @@ struct AdminIngestionRun: Codable, Identifiable {
     let requested_by_email: String?
     let request_payload: JSONValue?
     let log_count: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case pipeline
+        case source_name
+        case status
+        case started_at
+        case finished_at
+        case error
+        case stats
+        case trigger_mode
+        case requested_by_email
+        case request_payload
+        case log_count
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        pipeline = try container.decode(IngestionPipeline.self, forKey: .pipeline)
+        source_name = try container.decode(String.self, forKey: .source_name)
+        status = try container.decode(IngestionRunStatus.self, forKey: .status)
+        started_at = try container.decode(String.self, forKey: .started_at)
+        finished_at = try container.decodeIfPresent(String.self, forKey: .finished_at)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        stats = try container.decodeIfPresent(JSONValue.self, forKey: .stats)
+        trigger_mode = try container.decodeIfPresent(String.self, forKey: .trigger_mode)
+        requested_by_email = try container.decodeIfPresent(String.self, forKey: .requested_by_email)
+        request_payload = try container.decodeIfPresent(JSONValue.self, forKey: .request_payload)
+        log_count = (try? container.decodeFlexibleInt(forKey: .log_count)) ?? 0
+    }
 }
 
 struct AdminIngestionLog: Codable, Identifiable {
@@ -138,6 +234,25 @@ struct AdminIngestionLog: Codable, Identifiable {
     let level: IngestionLogLevel
     let message: String
     let context: JSONValue?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case run_id
+        case logged_at
+        case level
+        case message
+        case context
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        run_id = try container.decodeFlexibleInt(forKey: .run_id)
+        logged_at = try container.decode(String.self, forKey: .logged_at)
+        level = try container.decode(IngestionLogLevel.self, forKey: .level)
+        message = try container.decode(String.self, forKey: .message)
+        context = try container.decodeIfPresent(JSONValue.self, forKey: .context)
+    }
 }
 
 struct AdminIngestionRunDetail: Codable {
@@ -234,5 +349,42 @@ enum APIDateParser {
     static func parse(_ value: String) -> Date? {
         if let d = withFractional.date(from: value) { return d }
         return withoutFractional.date(from: value)
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeFlexibleInt(forKey key: Key) throws -> Int {
+        if let value = try? decode(Int.self, forKey: key) {
+            return value
+        }
+        if let value64 = try? decode(Int64.self, forKey: key),
+           let value = Int(exactly: value64) {
+            return value
+        }
+        if let value = try? decode(Double.self, forKey: key),
+           value.isFinite {
+            let rounded = Int(value.rounded())
+            if Double(rounded) == value {
+                return rounded
+            }
+        }
+        if let text = try? decode(String.self, forKey: key) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value = Int(trimmed) {
+                return value
+            }
+            if let value64 = Int64(trimmed),
+               let value = Int(exactly: value64) {
+                return value
+            }
+            if let value = Double(trimmed),
+               value.isFinite {
+                let rounded = Int(value.rounded())
+                if Double(rounded) == value {
+                    return rounded
+                }
+            }
+        }
+        throw DecodingError.dataCorruptedError(forKey: key, in: self, debugDescription: "Expected integer-compatible value.")
     }
 }
