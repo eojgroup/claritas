@@ -291,6 +291,17 @@ function normalizeIso2(value: unknown, allowEmpty = false): string | undefined {
   return text.toLowerCase();
 }
 
+function normalizeDateOnly(value: unknown): string | undefined {
+  const text = asString(value);
+  if (!text) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const parsed = Date.parse(text);
+  if (Number.isNaN(parsed)) {
+    throw new IngestionValidationError("TheNewsAPI publishedAfter must be a valid date (YYYY-MM-DD).");
+  }
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
@@ -565,6 +576,7 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
     const cfg = asRecord(theNewsApiRaw);
     const everythingCfg = asRecord(everythingRaw);
     const topCfg = asRecord(topRaw);
+    const publishedAfter = normalizeDateOnly(cfg.publishedAfter);
 
     theNewsApi = {
       search:
@@ -581,7 +593,7 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
         DEFAULT_NEWS_TOP_HEADLINES.country,
       pageSize: clampInt(cfg.pageSize, 1, 100, DEFAULT_NEWS_EVERYTHING.pageSize ?? 50),
       maxPages: clampInt(cfg.maxPages, 1, 10, DEFAULT_NEWS_EVERYTHING.maxPages ?? 2),
-      publishedAfter: asString(cfg.publishedAfter),
+      publishedAfter,
     };
   }
 

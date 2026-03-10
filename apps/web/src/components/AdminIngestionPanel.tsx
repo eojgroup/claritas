@@ -191,6 +191,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [newsLanguage, setNewsLanguage] = useState("en");
   const [newsCountry, setNewsCountry] = useState("us");
   const [newsCategory, setNewsCategory] = useState("technology");
+  const [theNewsApiPublishedAfter, setTheNewsApiPublishedAfter] = useState("");
   const [weatherCountry, setWeatherCountry] = useState("");
   const [marketSymbols, setMarketSymbols] = useState("AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM");
 
@@ -317,6 +318,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               locale: newsCountry.trim() || "us",
               pageSize: 50,
               maxPages: 2,
+              publishedAfter: theNewsApiPublishedAfter.trim() || undefined,
             }
           : false,
       };
@@ -336,6 +338,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     newsCountry,
     newsLanguage,
     newsQuery,
+    theNewsApiPublishedAfter,
     refreshOverview,
     runNewsApiProvider,
     runTheNewsApiProvider,
@@ -584,6 +587,15 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 <input
                   value={newsCategory}
                   onChange={(event) => setNewsCategory(event.currentTarget.value)}
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                />
+              </label>
+              <label className="text-xs text-[color:var(--shell-muted)]">
+                TheNewsAPI published after
+                <input
+                  value={theNewsApiPublishedAfter}
+                  onChange={(event) => setTheNewsApiPublishedAfter(event.currentTarget.value)}
+                  placeholder="YYYY-MM-DD"
                   className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
                 />
               </label>

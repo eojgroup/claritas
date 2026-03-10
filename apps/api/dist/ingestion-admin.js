@@ -145,6 +145,18 @@ function normalizeIso2(value, allowEmpty = false) {
     }
     return text.toLowerCase();
 }
+function normalizeDateOnly(value) {
+    const text = asString(value);
+    if (!text)
+        return undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text))
+        return text;
+    const parsed = Date.parse(text);
+    if (Number.isNaN(parsed)) {
+        throw new IngestionValidationError("TheNewsAPI publishedAfter must be a valid date (YYYY-MM-DD).");
+    }
+    return new Date(parsed).toISOString().slice(0, 10);
+}
 function toErrorMessage(err) {
     if (err instanceof Error)
         return err.message;
@@ -381,6 +393,7 @@ function buildNewsRunPlan(rawBody) {
         const cfg = asRecord(theNewsApiRaw);
         const everythingCfg = asRecord(everythingRaw);
         const topCfg = asRecord(topRaw);
+        const publishedAfter = normalizeDateOnly(cfg.publishedAfter);
         theNewsApi = {
             search: asString(cfg.search) ||
                 asString(cfg.q) ||
@@ -394,7 +407,7 @@ function buildNewsRunPlan(rawBody) {
                 DEFAULT_NEWS_TOP_HEADLINES.country,
             pageSize: clampInt(cfg.pageSize, 1, 100, DEFAULT_NEWS_EVERYTHING.pageSize ?? 50),
             maxPages: clampInt(cfg.maxPages, 1, 10, DEFAULT_NEWS_EVERYTHING.maxPages ?? 2),
-            publishedAfter: asString(cfg.publishedAfter),
+            publishedAfter,
         };
     }
     return {

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { query } from "../db";
 import type { FeedRow, NormalizedItem, SourceRow } from "./types";
 
-const BASE_URL = "https://api.thenewsapi.com/v1";
+const BASE_URL = "https://api.thenewsapi.com/api/v1";
 
 type TheNewsApiArticle = {
   uuid?: string | null;
@@ -140,6 +140,25 @@ function normalize(article: TheNewsApiArticle, localeHint?: string | null): Norm
   };
 }
 
+function normalizePublishedAfter(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const parsed = Date.parse(trimmed);
+  if (Number.isNaN(parsed)) return undefined;
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function isPublishedAfterFormattingError(status: number, body: string): boolean {
+  if (status !== 400) return false;
+  const normalized = body.toLowerCase();
+  return (
+    normalized.includes("published_after") &&
+    (normalized.includes("incorrectly formatted") || normalized.includes("malformed_parameters"))
+  );
+}
+
 async function upsertItem(sourceId: number, item: NormalizedItem) {
   await query(
     `INSERT INTO item (source_id, external_id, kind, title, summary, url, country_iso2, event_time, payload, dedupe_hash)
@@ -177,6 +196,7 @@ export type IngestTheNewsApiParams = {
   locale?: string;
   pageSize?: number;
   maxPages?: number;
+  // TheNewsAPI expects YYYY-MM-DD for this filter.
   publishedAfter?: string;
 };
 
@@ -203,7 +223,10 @@ export async function ingestTheNewsApiNews(params: IngestTheNewsApiParams): Prom
   });
 
   const cursor = (await getCursor(feed.id)) || {};
-  const fromISO: string | undefined = params.publishedAfter || cursor.lastPublishedAt || undefined;
+  const fromCandidate: string | undefined =
+    params.publishedAfter || cursor.lastPublishedAfter || cursor.lastPublishedAt || undefined;
+  let effectivePublishedAfter = normalizePublishedAfter(fromCandidate);
+  let retriedWithoutPublishedAfter = false;
 
   let page = 1;
   const pageSize = Math.min(Math.max(params.pageSize || 50, 1), 100);
@@ -211,7 +234,7 @@ export async function ingestTheNewsApiNews(params: IngestTheNewsApiParams): Prom
   let inserted = 0;
   let updated = 0;
   let skipped = 0;
-  let newestPublishedAt: string | undefined = fromISO;
+  let newestPublishedAt: string | undefined = cursor.lastPublishedAt || undefined;
 
   while (page <= maxPages) {
     const url = new URL(`${BASE_URL}/news/top`);
@@ -222,11 +245,17 @@ export async function ingestTheNewsApiNews(params: IngestTheNewsApiParams): Prom
     if (params.search) sp.set("search", params.search);
     if (params.language) sp.set("language", params.language);
     if (params.locale) sp.set("locale", params.locale.toLowerCase());
-    if (fromISO) sp.set("published_after", fromISO);
+    if (effectivePublishedAfter) sp.set("published_after", effectivePublishedAfter);
 
     const resp = await fetch(url.toString());
     if (!resp.ok) {
       const text = await resp.text();
+      if (isPublishedAfterFormattingError(resp.status, text) && effectivePublishedAfter && !retriedWithoutPublishedAfter) {
+        retriedWithoutPublishedAfter = true;
+        effectivePublishedAfter = undefined;
+        page = 1;
+        continue;
+      }
       throw new Error(`TheNewsAPI error HTTP ${resp.status}: ${text}`);
     }
 
@@ -263,8 +292,12 @@ export async function ingestTheNewsApiNews(params: IngestTheNewsApiParams): Prom
     page++;
   }
 
-  if (newestPublishedAt && newestPublishedAt !== fromISO) {
-    await setCursor(feed.id, { lastPublishedAt: newestPublishedAt });
+  if (newestPublishedAt) {
+    const normalizedCursorDate = normalizePublishedAfter(newestPublishedAt);
+    await setCursor(feed.id, {
+      lastPublishedAt: newestPublishedAt,
+      lastPublishedAfter: normalizedCursorDate || newestPublishedAt,
+    });
   }
 
   return { inserted, updated, skipped, lastPublishedAt: newestPublishedAt };
