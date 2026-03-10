@@ -512,7 +512,7 @@ final class AppModel: ObservableObject {
         return callbackURL
     }
 
-    private static func isoDate(_ date: Date) -> String {
+    nonisolated private static func isoDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = TimeZone(secondsFromGMT: 0)

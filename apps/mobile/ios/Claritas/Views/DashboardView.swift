@@ -1119,60 +1119,69 @@ private struct InteractiveCountryBubbleMap: View {
     private var points: [CountryBubblePoint] {
         switch mode {
         case .news:
-            return countryStats.compactMap { stat in
+            var mapped: [CountryBubblePoint] = []
+            for stat in countryStats {
                 let iso = stat.country.uppercased()
-                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { return nil }
-                return CountryBubblePoint(
-                    id: "news-\(iso)",
-                    iso: iso,
-                    coordinate: coordinate,
-                    valueLabel: "\(stat.count)",
-                    detail: "\(stat.count) news",
-                    magnitude: max(Double(stat.count), 1)
+                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { continue }
+                mapped.append(
+                    CountryBubblePoint(
+                        id: "news-\(iso)",
+                        iso: iso,
+                        coordinate: coordinate,
+                        valueLabel: "\(stat.count)",
+                        detail: "\(stat.count) news",
+                        magnitude: max(Double(stat.count), 1)
+                    )
                 )
             }
-            .sorted { $0.magnitude > $1.magnitude }
+            return mapped.sorted { $0.magnitude > $1.magnitude }
 
         case .weather:
-            return weather.compactMap { row in
+            var mapped: [CountryBubblePoint] = []
+            for row in weather {
                 let iso = row.country.uppercased()
-                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { return nil }
+                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { continue }
                 let label = row.temp_c.map { String(format: "%.0f°", $0) } ?? "—"
                 let detail = row.weather_main ?? "Weather"
-                return CountryBubblePoint(
-                    id: "weather-\(iso)",
-                    iso: iso,
-                    coordinate: coordinate,
-                    valueLabel: label,
-                    detail: detail,
-                    magnitude: max(abs(row.temp_c ?? 0), 1)
+                mapped.append(
+                    CountryBubblePoint(
+                        id: "weather-\(iso)",
+                        iso: iso,
+                        coordinate: coordinate,
+                        valueLabel: label,
+                        detail: detail,
+                        magnitude: max(abs(row.temp_c ?? 0), 1)
+                    )
                 )
             }
-            .sorted { $0.magnitude > $1.magnitude }
+            return mapped.sorted { $0.magnitude > $1.magnitude }
         case .market:
             var grouped: [String: [MarketQuote]] = [:]
             for quote in marketQuotes {
                 guard let country = quote.country?.uppercased(), !country.isEmpty else { continue }
                 grouped[country, default: []].append(quote)
             }
-            return grouped.compactMap { (country, quotes) in
-                guard let coordinate = CountryCentroidLookup.coordinate(for: country) else { return nil }
+            var mapped: [CountryBubblePoint] = []
+            for (country, quotes) in grouped {
+                guard let coordinate = CountryCentroidLookup.coordinate(for: country) else { continue }
                 let changes = quotes.compactMap { $0.percent_change }
                 let avgChange = changes.isEmpty ? 0 : changes.reduce(0, +) / Double(changes.count)
                 let marketCodes = quotes
                     .compactMap { marketQuoteMetadata($0).marketCode }
                     .filter { !$0.isEmpty }
                 let primaryMarketCode = marketCodes.first ?? "INDEX"
-                return CountryBubblePoint(
-                    id: "market-\(country)",
-                    iso: country,
-                    valueLabel: "\(Int(abs(avgChange).rounded()))%",
-                    detail: "\(primaryMarketCode) · \(String(format: "%+.2f%%", avgChange))",
-                    magnitude: max(abs(avgChange), 1),
-                    coordinate: coordinate
+                mapped.append(
+                    CountryBubblePoint(
+                        id: "market-\(country)",
+                        iso: country,
+                        valueLabel: "\(Int(abs(avgChange).rounded()))%",
+                        detail: "\(primaryMarketCode) · \(String(format: "%+.2f%%", avgChange))",
+                        magnitude: max(abs(avgChange), 1),
+                        coordinate: coordinate
+                    )
                 )
             }
-            .sorted { $0.magnitude > $1.magnitude }
+            return mapped.sorted { $0.magnitude > $1.magnitude }
         }
     }
 
