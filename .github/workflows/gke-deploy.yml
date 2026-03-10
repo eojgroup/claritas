@@ -123,7 +123,6 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.PROJECT_ID }}
-          install_components: gke-gcloud-auth-plugin
 
       - name: 🧰 Setup Terraform (outputs)
         uses: hashicorp/setup-terraform@v3
@@ -131,10 +130,17 @@ jobs:
           terraform_version: 1.8.5
           terraform_wrapper: false
 
-      - name: 💻 Configure kubectl
+      - name: 💻 Configure kubectl credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+          project_id: ${{ env.PROJECT_ID }}
+          use_auth_provider: false
+
+      - name: 💻 Verify kubectl client
         run: |
-          echo "Getting GKE credentials for cluster ${CLUSTER}"
-          gcloud container clusters get-credentials "${CLUSTER}" --region "${REGION}" --project "${PROJECT_ID}"
+          echo "Configured GKE credentials for cluster ${CLUSTER}"
           kubectl version --client
 
       - name: 🔎 Debug cluster & namespace
