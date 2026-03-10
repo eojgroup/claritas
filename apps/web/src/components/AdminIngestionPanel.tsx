@@ -629,8 +629,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const chartGridColor = dark ? "#334155" : "#e2e8f0";
 
   return (
-    <div className="admin-panel grid gap-3 sm:gap-4">
-      <section className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+    <div className="admin-panel grid w-full min-w-0 max-w-full gap-3 sm:gap-4">
+      <section className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
@@ -712,8 +712,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         )}
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+        <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-3">
+          <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               News run
             </div>
@@ -844,7 +844,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             </button>
           </div>
 
-          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+          <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               Weather run
             </div>
@@ -871,7 +871,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             </button>
           </div>
 
-          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+          <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               Market run
             </div>
@@ -900,7 +900,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         </div>
       </section>
 
-      <section className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+      <section className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
@@ -915,7 +915,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
           {(["news", "weather", "market"] as IngestionPipeline[]).map((pipeline) => {
             const rule = automationRuleByPipeline.get(pipeline);
             const draft = automationDrafts[pipeline];
@@ -925,7 +925,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               return (
                 <div
                   key={pipeline}
-                  className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3 text-xs text-[color:var(--shell-muted)]"
+                  className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3 text-xs text-[color:var(--shell-muted)]"
                 >
                   Loading {pipelineLabel(pipeline)} automation…
                 </div>
@@ -935,7 +935,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             return (
               <div
                 key={pipeline}
-                className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3"
+                className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3"
               >
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
                   {pipelineLabel(pipeline)}
@@ -1140,8 +1140,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         </div>
       </section>
 
-      <section className="grid gap-3 sm:gap-4 lg:grid-cols-4">
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+      <section className="grid min-w-0 gap-3 sm:gap-4 lg:grid-cols-4">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             News totals ({metricsDays}d)
           </div>
@@ -1152,7 +1152,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             rows inserted · {summaryByPipeline.get("news")?.run_count ?? 0} runs
           </div>
         </div>
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             Weather totals ({metricsDays}d)
           </div>
@@ -1163,7 +1163,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             rows inserted · {summaryByPipeline.get("weather")?.run_count ?? 0} runs
           </div>
         </div>
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             Market totals ({metricsDays}d)
           </div>
@@ -1174,7 +1174,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             rows inserted · {summaryByPipeline.get("market")?.run_count ?? 0} runs
           </div>
         </div>
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             Window
           </div>
@@ -1200,8 +1200,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         </div>
       </section>
 
-      <section className="grid gap-3 sm:gap-4 xl:grid-cols-2">
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+      <section className="grid min-w-0 gap-3 sm:gap-4 xl:grid-cols-2">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-2 text-sm font-semibold text-[color:var(--shell-ink)]">
             Ingested rows by day
           </div>
@@ -1242,7 +1242,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-2 text-sm font-semibold text-[color:var(--shell-ink)]">
             Run volume and failures
           </div>
@@ -1311,8 +1311,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         </div>
       </section>
 
-      <section className="grid gap-3 sm:gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
+      <section className="grid min-w-0 gap-3 sm:gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
           <div className="mb-3 flex items-center gap-2">
             <Activity className="h-4 w-4 text-[color:var(--shell-muted)]" />
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
@@ -1373,7 +1373,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
               Run logs

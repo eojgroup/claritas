@@ -3927,7 +3927,7 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "admin" && isAdmin && (
-              <div className="space-y-4">
+              <div className="min-w-0 space-y-4">
                 <AdminIngestionPanel dark={dark} />
                 <AdminUserManagementPanel />
               </div>

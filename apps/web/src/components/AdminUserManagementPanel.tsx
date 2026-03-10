@@ -300,8 +300,8 @@ export default function AdminUserManagementPanel() {
   }, [loadData, newRoleDescription, newRoleKey]);
 
   return (
-    <div className="admin-panel grid gap-3 sm:gap-4">
-      <section className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+    <div className="admin-panel grid w-full min-w-0 max-w-full gap-3 sm:gap-4">
+      <section className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
@@ -329,7 +329,7 @@ export default function AdminUserManagementPanel() {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_200px_auto]">
+        <div className="mt-3 grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_200px_auto]">
           <label className="text-xs text-[color:var(--shell-muted)]">
             Search user
             <input
@@ -376,8 +376,8 @@ export default function AdminUserManagementPanel() {
         )}
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-3 flex items-center gap-2">
             <Shield className="h-4 w-4 text-[color:var(--shell-muted)]" />
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
@@ -439,7 +439,7 @@ export default function AdminUserManagementPanel() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="mb-3 flex items-center gap-2">
             <Users className="h-4 w-4 text-[color:var(--shell-muted)]" />
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
@@ -476,7 +476,7 @@ export default function AdminUserManagementPanel() {
                   className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                    <div className="min-w-0 break-words text-sm font-semibold text-[color:var(--shell-ink)]">
                       {userLabel}
                     </div>
                     <span
