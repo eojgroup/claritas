@@ -2164,8 +2164,14 @@ export default function ClaritasDashboard() {
   const handleClearSelection = () => {
     setSelectedCountry(null);
     setComparisonCountry(null);
+    setPinnedCountry(null);
+    setSelectedSymbol(null);
     setCompareMode(false);
   };
+
+  const hasActiveSelection = Boolean(
+    selectedCountry || comparisonCountry || pinnedCountry || selectedSymbol,
+  );
 
   const handleSearchTopicChange = useCallback((topic: SearchTopic) => {
     setSearchTopic(topic);
@@ -2718,6 +2724,41 @@ export default function ClaritasDashboard() {
               </div>
             )}
 
+            {hasActiveSelection && (
+              <div className="mb-4">
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
+                  <span className="uppercase tracking-[0.3em]">Selection</span>
+                  {selectedCountry && (
+                    <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-[color:var(--shell-ink)]">
+                      Country: {selectedCountry.toUpperCase()}
+                    </span>
+                  )}
+                  {comparisonCountry && (
+                    <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-[color:var(--shell-ink)]">
+                      Compare: {comparisonCountry.toUpperCase()}
+                    </span>
+                  )}
+                  {pinnedCountry && (
+                    <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-[color:var(--shell-ink)]">
+                      Pinned: {pinnedCountry.toUpperCase()}
+                    </span>
+                  )}
+                  {selectedSymbol && (
+                    <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-[color:var(--shell-ink)]">
+                      Symbol: {selectedSymbol.toUpperCase()}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleClearSelection}
+                    className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
+                  >
+                    Reset selection
+                  </button>
+                </div>
+              </div>
+            )}
+
             {activeView === "dashboard" && (
               <div
                 className={`relative flex flex-col gap-4 ${
@@ -2945,12 +2986,12 @@ export default function ClaritasDashboard() {
                               Unpin
                             </button>
                           )}
-                          {(selectedCountry || comparisonCountry) && (
+                          {hasActiveSelection && (
                             <button
                               onClick={handleClearSelection}
                               className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             >
-                              Clear
+                              Reset
                             </button>
                           )}
                         </div>
