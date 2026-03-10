@@ -29,6 +29,9 @@ export type MarketQuote = {
   exchange: string | null;
   country: string | null;
   currency: string | null;
+  market_code?: string | null;
+  market_name?: string | null;
+  market_kind?: string | null;
   price: number | null;
   change: number | null;
   percent_change: number | null;

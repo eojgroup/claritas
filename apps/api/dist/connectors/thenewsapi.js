@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ingestTheNewsApiNews = ingestTheNewsApiNews;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const db_1 = require("../db");
+const country_inference_1 = require("./country-inference");
 const BASE_URL = "https://api.thenewsapi.com/v1";
 function stableFeedKey(kind, params) {
     const entries = Object.entries(params)
@@ -35,46 +36,15 @@ async function getCursor(feedId) {
 async function setCursor(feedId, cursor) {
     await (0, db_1.query)(`UPDATE source_feed SET cursor = $1, updated_at = now() WHERE id = $2`, [cursor, feedId]);
 }
-function inferIso2FromUrl(url) {
-    if (!url)
-        return null;
-    try {
-        const parsed = new URL(url);
-        const host = (parsed.hostname || "").toLowerCase();
-        if (!host)
-            return null;
-        const parts = host.split(".");
-        if (parts.length < 2)
-            return null;
-        const tld = parts[parts.length - 1];
-        const generic = new Set([
-            "com", "net", "org", "info", "biz", "edu", "gov", "mil",
-            "int", "io", "me", "tv", "news", "xyz", "online", "shop",
-            "site", "app", "tech", "cloud", "ai", "dev", "pro", "press",
-        ]);
-        if (generic.has(tld))
-            return null;
-        if (tld === "uk")
-            return "GB";
-        const iso2 = tld.toUpperCase();
-        return /^[A-Z]{2}$/.test(iso2) ? iso2 : null;
-    }
-    catch {
-        return null;
-    }
-}
-function normalizeLocaleToIso2(locale) {
-    if (!locale)
-        return null;
-    const cleaned = locale.trim().toUpperCase();
-    if (!cleaned)
-        return null;
-    if (/^[A-Z]{2}$/.test(cleaned)) {
-        return cleaned === "UK" ? "GB" : cleaned;
-    }
-    return null;
-}
 function normalize(article, localeHint) {
+    const inference = (0, country_inference_1.inferNewsCountry)({
+        title: article.title,
+        summary: article.description || article.snippet || null,
+        url: article.url,
+        keywords: article.keywords ?? null,
+        localeHint: article.locale || localeHint || null,
+        feedCountryHint: localeHint,
+    });
     const external_id = article.uuid || article.url || null;
     const event_time = article.published_at || null;
     const payload = {
@@ -84,19 +54,17 @@ function normalize(article, localeHint) {
         categories: article.categories || [],
         keywords: article.keywords || [],
         locale: article.locale || localeHint || null,
+        country_inference: inference,
         raw: article,
     };
     const dedupeBase = `${external_id || ""}|${event_time || ""}|${article.title || ""}|thenewsapi`;
     const dedupe_hash = node_crypto_1.default.createHash("sha256").update(dedupeBase).digest("hex");
-    const iso2 = normalizeLocaleToIso2(localeHint) ||
-        normalizeLocaleToIso2(article.locale) ||
-        inferIso2FromUrl(article.url);
     return {
         kind: "news_article",
         title: article.title || null,
         summary: article.description || article.snippet || null,
         url: article.url || null,
-        country_iso2: iso2,
+        country_iso2: inference.iso2,
         event_time,
         payload,
         external_id,

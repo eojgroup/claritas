@@ -262,7 +262,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     toLocalDateInputValue(new Date()),
   );
   const [weatherCountry, setWeatherCountry] = useState("");
-  const [marketSymbols, setMarketSymbols] = useState("AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM");
+  const [marketSymbols, setMarketSymbols] = useState("SPY,QQQ,EWQ,EWG,EWU,EWJ,MCHI,INDA,EWA,EWC,EWZ,EZA,EWW");
 
   const refreshOverview = useCallback(
     async (silent = false) => {
@@ -880,7 +880,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <input
                 value={marketSymbols}
                 onChange={(event) => setMarketSymbols(event.currentTarget.value)}
-                placeholder="AAPL,MSFT,NVDA"
+                placeholder="SPY,QQQ,EWQ,EWG,EWJ"
                 className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
               />
             </label>

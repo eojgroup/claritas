@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
-import { query, withTransaction } from "../db";
+import { query } from "../db";
 import type { FeedRow, NormalizedItem, SourceRow } from "./types";
+import { inferNewsCountry } from "./country-inference";
 
 const BASE_URL = "https://newsapi.org/v2";
 
@@ -66,40 +67,15 @@ async function setCursor(feedId: number, cursor: any): Promise<void> {
   await query(`UPDATE source_feed SET cursor = $1, updated_at = now() WHERE id = $2`, [cursor, feedId]);
 }
 
-// Best-effort ISO2 inference from article URL's ccTLD.
-// - Returns a 2-letter uppercase code when the hostname ends with a ccTLD
-//   (e.g., .it -> IT, .pt -> PT). Special-case: 'uk' -> 'GB'.
-// - Falls back to null for generic TLDs (.com, .net, .org, ...).
-function inferIso2FromUrl(url?: string | null): string | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    const host = (u.hostname || "").toLowerCase();
-    if (!host) return null;
-    const parts = host.split(".");
-    if (parts.length < 2) return null;
-    const tld = parts[parts.length - 1];
-    // Generic TLDs we ignore
-    const generic = new Set([
-      "com", "net", "org", "info", "biz", "edu", "gov", "mil",
-      "int", "io", "me", "tv", "news", "xyz", "online", "shop",
-      "site", "app", "tech", "cloud", "ai", "dev", "pro", "press",
-    ]);
-    if (generic.has(tld)) return null;
-
-    // Map special cases where ccTLD differs from ISO2
-    const special: Record<string, string> = {
-      uk: "GB",
-    };
-    const iso2 = (special[tld] || tld).toUpperCase();
-    if (/^[A-Z]{2}$/.test(iso2)) return iso2;
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
 function normalize(article: NewsApiArticle, country?: string | null): NormalizedItem {
+  const inference = inferNewsCountry({
+    title: article.title,
+    summary: article.description,
+    content: article.content,
+    url: article.url,
+    feedCountryHint: country,
+  });
+
   const external_id = article.url || null; // canonical URL
   const event_time = article.publishedAt || null;
   const payload = {
@@ -108,20 +84,18 @@ function normalize(article: NewsApiArticle, country?: string | null): Normalized
     urlToImage: article.urlToImage || null,
     source: article.source?.name || null,
     content: article.content || null,
+    country_inference: inference,
     raw: article,
   };
   const base = `${external_id || ""}|${event_time || ""}|${article.title || ""}`;
   const dedupe_hash = crypto.createHash("sha256").update(base).digest("hex");
-
-  // Prefer explicit country param; else try to infer from URL
-  const iso2 = (country && country.length === 2 ? country.toUpperCase() : inferIso2FromUrl(article.url));
 
   return {
     kind: "news_article",
     title: article.title || null,
     summary: article.description || null,
     url: article.url || null,
-    country_iso2: iso2 || null,
+    country_iso2: inference.iso2 || null,
     event_time,
     payload,
     external_id,

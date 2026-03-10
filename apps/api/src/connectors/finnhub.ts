@@ -49,32 +49,196 @@ type SymbolMetadata = {
   country: string;
   currency: string;
   logo_url?: string;
+  market_code?: string;
+  market_name?: string;
+  market_kind?: string;
 };
 
 const FINNHUB_BASE_URL = "https://api.finnhub.io/api/v1";
 const SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9._:-]{0,23}$/;
 const MAX_SYMBOLS_PER_REQUEST = 25;
 
-export const DEFAULT_MARKET_SYMBOLS = [
-  "AAPL",
-  "MSFT",
-  "NVDA",
-  "AMZN",
-  "GOOGL",
-  "META",
-  "TSLA",
-  "JPM",
-] as const;
+type DefaultMarketBenchmark = {
+  symbol: string;
+  company_name: string;
+  exchange: string;
+  country: string;
+  currency: string;
+  market_code: string;
+  market_name: string;
+  market_kind: "index_proxy";
+};
 
-const DEFAULT_SYMBOL_METADATA: Record<string, SymbolMetadata> = {
-  AAPL: { company_name: "Apple", exchange: "NASDAQ", country: "US", currency: "USD" },
-  MSFT: { company_name: "Microsoft", exchange: "NASDAQ", country: "US", currency: "USD" },
-  NVDA: { company_name: "NVIDIA", exchange: "NASDAQ", country: "US", currency: "USD" },
-  AMZN: { company_name: "Amazon", exchange: "NASDAQ", country: "US", currency: "USD" },
-  GOOGL: { company_name: "Alphabet", exchange: "NASDAQ", country: "US", currency: "USD" },
-  META: { company_name: "Meta", exchange: "NASDAQ", country: "US", currency: "USD" },
-  TSLA: { company_name: "Tesla", exchange: "NASDAQ", country: "US", currency: "USD" },
-  JPM: { company_name: "JPMorgan Chase", exchange: "NYSE", country: "US", currency: "USD" },
+const DEFAULT_MARKET_BENCHMARKS: DefaultMarketBenchmark[] = [
+  {
+    symbol: "SPY",
+    company_name: "SPDR S&P 500 ETF Trust",
+    exchange: "NYSEARCA",
+    country: "US",
+    currency: "USD",
+    market_code: "SPX",
+    market_name: "S&P 500",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "QQQ",
+    company_name: "Invesco QQQ Trust",
+    exchange: "NASDAQ",
+    country: "US",
+    currency: "USD",
+    market_code: "NASDAQ100",
+    market_name: "NASDAQ 100",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EWQ",
+    company_name: "iShares MSCI France ETF",
+    exchange: "NYSEARCA",
+    country: "FR",
+    currency: "USD",
+    market_code: "CAC40",
+    market_name: "CAC 40",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EWG",
+    company_name: "iShares MSCI Germany ETF",
+    exchange: "NYSEARCA",
+    country: "DE",
+    currency: "USD",
+    market_code: "DAX30",
+    market_name: "DAX 30",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EWU",
+    company_name: "iShares MSCI United Kingdom ETF",
+    exchange: "NYSEARCA",
+    country: "GB",
+    currency: "USD",
+    market_code: "FTSE100",
+    market_name: "FTSE 100",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EWJ",
+    company_name: "iShares MSCI Japan ETF",
+    exchange: "NYSEARCA",
+    country: "JP",
+    currency: "USD",
+    market_code: "NIKKEI225",
+    market_name: "Nikkei 225",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "MCHI",
+    company_name: "iShares MSCI China ETF",
+    exchange: "NASDAQ",
+    country: "CN",
+    currency: "USD",
+    market_code: "CSI300",
+    market_name: "CSI 300",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "INDA",
+    company_name: "iShares MSCI India ETF",
+    exchange: "BATS",
+    country: "IN",
+    currency: "USD",
+    market_code: "NIFTY50",
+    market_name: "NIFTY 50",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EWA",
+    company_name: "iShares MSCI Australia ETF",
+    exchange: "NYSEARCA",
+    country: "AU",
+    currency: "USD",
+    market_code: "ASX200",
+    market_name: "ASX 200",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EWC",
+    company_name: "iShares MSCI Canada ETF",
+    exchange: "NYSEARCA",
+    country: "CA",
+    currency: "USD",
+    market_code: "TSX",
+    market_name: "S&P/TSX Composite",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EWZ",
+    company_name: "iShares MSCI Brazil ETF",
+    exchange: "NYSEARCA",
+    country: "BR",
+    currency: "USD",
+    market_code: "IBOVESPA",
+    market_name: "Ibovespa",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EZA",
+    company_name: "iShares MSCI South Africa ETF",
+    exchange: "NYSEARCA",
+    country: "ZA",
+    currency: "USD",
+    market_code: "JSE40",
+    market_name: "FTSE/JSE Top 40",
+    market_kind: "index_proxy",
+  },
+  {
+    symbol: "EWW",
+    company_name: "iShares MSCI Mexico ETF",
+    exchange: "NYSEARCA",
+    country: "MX",
+    currency: "USD",
+    market_code: "IPC",
+    market_name: "S&P/BMV IPC",
+    market_kind: "index_proxy",
+  },
+];
+
+export const DEFAULT_MARKET_SYMBOLS = DEFAULT_MARKET_BENCHMARKS.map((entry) => entry.symbol);
+
+const DEFAULT_SYMBOL_METADATA: Record<string, SymbolMetadata> = DEFAULT_MARKET_BENCHMARKS.reduce(
+  (acc, entry) => {
+    acc[entry.symbol] = {
+      company_name: entry.company_name,
+      exchange: entry.exchange,
+      country: entry.country,
+      currency: entry.currency,
+      market_code: entry.market_code,
+      market_name: entry.market_name,
+      market_kind: entry.market_kind,
+    };
+    return acc;
+  },
+  {} as Record<string, SymbolMetadata>
+);
+
+const COUNTRY_PRIMARY_MARKETS: Record<string, { code: string; name: string }> = {
+  US: { code: "NASDAQ", name: "NASDAQ Composite" },
+  FR: { code: "CAC40", name: "CAC 40" },
+  DE: { code: "DAX30", name: "DAX 30" },
+  GB: { code: "FTSE100", name: "FTSE 100" },
+  JP: { code: "NIKKEI225", name: "Nikkei 225" },
+  CN: { code: "CSI300", name: "CSI 300" },
+  IN: { code: "NIFTY50", name: "NIFTY 50" },
+  AU: { code: "ASX200", name: "ASX 200" },
+  CA: { code: "TSX", name: "S&P/TSX Composite" },
+  BR: { code: "IBOVESPA", name: "Ibovespa" },
+  MX: { code: "IPC", name: "S&P/BMV IPC" },
+  ZA: { code: "JSE40", name: "FTSE/JSE Top 40" },
+  KR: { code: "KOSPI", name: "KOSPI" },
+  HK: { code: "HSI", name: "Hang Seng" },
+  SG: { code: "STI", name: "Straits Times Index" },
+  IT: { code: "FTSEMIB", name: "FTSE MIB" },
+  ES: { code: "IBEX35", name: "IBEX 35" },
+  CH: { code: "SMI", name: "Swiss Market Index" },
 };
 
 export type MarketQuote = {
@@ -83,6 +247,9 @@ export type MarketQuote = {
   exchange: string | null;
   country: string | null;
   currency: string | null;
+  market_code?: string | null;
+  market_name?: string | null;
+  market_kind?: string | null;
   price: number | null;
   change: number | null;
   percent_change: number | null;
@@ -102,6 +269,56 @@ const profileMetadataCache = new Map<string, Partial<SymbolMetadata>>();
 function toTimestampString(value: DbTimestamp): string {
   if (value instanceof Date) return value.toISOString();
   return value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function withMarketIdentity(metadata: Partial<SymbolMetadata>, symbol: string): Partial<SymbolMetadata> {
+  const normalizedCountry =
+    typeof metadata.country === "string" && metadata.country.trim()
+      ? metadata.country.trim().toUpperCase()
+      : undefined;
+  const enriched: Partial<SymbolMetadata> = {
+    ...metadata,
+    country: normalizedCountry,
+  };
+
+  if ((!enriched.market_code || !enriched.market_name) && normalizedCountry) {
+    const mapped = COUNTRY_PRIMARY_MARKETS[normalizedCountry];
+    if (mapped) {
+      enriched.market_code = enriched.market_code ?? mapped.code;
+      enriched.market_name = enriched.market_name ?? mapped.name;
+    }
+  }
+
+  if (!enriched.market_code && enriched.exchange) {
+    enriched.market_code = enriched.exchange.replace(/\s+/g, "").toUpperCase();
+  }
+  if (!enriched.market_name && enriched.exchange) {
+    enriched.market_name = enriched.exchange;
+  }
+  if (!enriched.market_kind) {
+    if (DEFAULT_SYMBOL_METADATA[symbol]?.market_kind) {
+      enriched.market_kind = DEFAULT_SYMBOL_METADATA[symbol].market_kind;
+    } else if (enriched.market_code || enriched.market_name) {
+      enriched.market_kind = "country_primary";
+    } else if (enriched.exchange) {
+      enriched.market_kind = "exchange";
+    }
+  }
+
+  return enriched;
 }
 
 function normalizeSymbol(value: string): string {
@@ -202,8 +419,9 @@ async function fetchFinnhubCompanyProfile2(symbol: string): Promise<Partial<Symb
     currency: typeof data.currency === "string" && data.currency.trim() ? data.currency.trim().toUpperCase() : undefined,
     logo_url: typeof data.logo === "string" && data.logo.trim() ? data.logo.trim() : undefined,
   };
-  profileMetadataCache.set(symbol, metadata);
-  return metadata;
+  const enriched = withMarketIdentity(metadata, symbol);
+  profileMetadataCache.set(symbol, enriched);
+  return enriched;
 }
 
 function toObservedAtISO(value: unknown): string {
@@ -236,6 +454,12 @@ async function upsertMarketSnapshot(params: {
       country: params.metadata.country ?? null,
       currency: params.metadata.currency ?? null,
       logo: params.metadata.logo_url ?? null,
+    },
+    market: {
+      code: params.metadata.market_code ?? null,
+      name: params.metadata.market_name ?? null,
+      kind: params.metadata.market_kind ?? null,
+      country: params.metadata.country ?? null,
     },
   };
 
@@ -317,7 +541,10 @@ export async function ingestFinnhubQuotes(symbolsInput?: string[] | null): Promi
     try {
       const quote = await fetchFinnhubQuote(symbol);
       const observedAtISO = toObservedAtISO(quote.t);
-      let metadata: Partial<SymbolMetadata> = DEFAULT_SYMBOL_METADATA[symbol] ?? {};
+      let metadata: Partial<SymbolMetadata> = withMarketIdentity(
+        { ...(DEFAULT_SYMBOL_METADATA[symbol] ?? {}) },
+        symbol
+      );
       if (!metadata.country || !metadata.exchange || !metadata.company_name || !metadata.currency) {
         try {
           const remoteMetadata = await fetchFinnhubCompanyProfile2(symbol);
@@ -327,11 +554,15 @@ export async function ingestFinnhubQuotes(symbolsInput?: string[] | null): Promi
             country: metadata.country ?? remoteMetadata.country,
             currency: metadata.currency ?? remoteMetadata.currency,
             logo_url: metadata.logo_url ?? remoteMetadata.logo_url,
+            market_code: metadata.market_code ?? remoteMetadata.market_code,
+            market_name: metadata.market_name ?? remoteMetadata.market_name,
+            market_kind: metadata.market_kind ?? remoteMetadata.market_kind,
           };
         } catch {
           // Metadata enrich failures are non-fatal for quote ingestion.
         }
       }
+      metadata = withMarketIdentity(metadata, symbol);
       try {
         const result = await upsertMarketSnapshot({
           sourceId: source.id,
@@ -402,22 +633,29 @@ export async function getMarketQuotesLatest(symbolsInput?: string[] | null): Pro
     hasFilter ? [symbols] : []
   );
 
-  return rows.map((row) => ({
-    symbol: row.symbol,
-    company_name: row.company_name,
-    exchange: row.exchange,
-    country: row.country,
-    currency: row.currency,
-    price: row.price,
-    change: row.change,
-    percent_change: row.percent_change,
-    high_price: row.high_price,
-    low_price: row.low_price,
-    open_price: row.open_price,
-    previous_close: row.previous_close,
-    observed_at: toTimestampString(row.observed_at),
-    payload: row.payload,
-  }));
+  return rows.map((row) => {
+    const payload = asRecord(row.payload);
+    const market = asRecord(payload?.market);
+    return {
+      symbol: row.symbol,
+      company_name: row.company_name,
+      exchange: row.exchange,
+      country: row.country,
+      currency: row.currency,
+      market_code: asNonEmptyString(market?.code),
+      market_name: asNonEmptyString(market?.name),
+      market_kind: asNonEmptyString(market?.kind),
+      price: row.price,
+      change: row.change,
+      percent_change: row.percent_change,
+      high_price: row.high_price,
+      low_price: row.low_price,
+      open_price: row.open_price,
+      previous_close: row.previous_close,
+      observed_at: toTimestampString(row.observed_at),
+      payload: row.payload,
+    };
+  });
 }
 
 export async function refreshMarketQuotesRealtime(

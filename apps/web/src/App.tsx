@@ -310,6 +310,53 @@ const getMarketLogoUrl = (quote: MarketQuote): string | undefined => {
 const marketQuoteUrl = (symbol: string): string =>
   `https://finance.yahoo.com/quote/${encodeURIComponent(symbol.trim().toUpperCase())}`;
 
+const COUNTRY_PRIMARY_MARKET_META: Record<string, { code: string; name: string }> = {
+  US: { code: "NASDAQ", name: "NASDAQ Composite" },
+  FR: { code: "CAC40", name: "CAC 40" },
+  DE: { code: "DAX30", name: "DAX 30" },
+  GB: { code: "FTSE100", name: "FTSE 100" },
+  JP: { code: "NIKKEI225", name: "Nikkei 225" },
+  CN: { code: "CSI300", name: "CSI 300" },
+  IN: { code: "NIFTY50", name: "NIFTY 50" },
+  AU: { code: "ASX200", name: "ASX 200" },
+  CA: { code: "TSX", name: "S&P/TSX Composite" },
+  BR: { code: "IBOVESPA", name: "Ibovespa" },
+  MX: { code: "IPC", name: "S&P/BMV IPC" },
+  ZA: { code: "JSE40", name: "FTSE/JSE Top 40" },
+  KR: { code: "KOSPI", name: "KOSPI" },
+  HK: { code: "HSI", name: "Hang Seng" },
+  SG: { code: "STI", name: "Straits Times Index" },
+  IT: { code: "FTSEMIB", name: "FTSE MIB" },
+  ES: { code: "IBEX35", name: "IBEX 35" },
+  CH: { code: "SMI", name: "Swiss Market Index" },
+};
+
+const getMarketIdentity = (quote: MarketQuote): {
+  code?: string;
+  name?: string;
+  kind?: string;
+} => {
+  const payload = asObject(quote.payload);
+  const market = asObject(payload?.["market"]);
+  const country = asTrimmedString(quote.country)?.toUpperCase();
+  const fallback = country ? COUNTRY_PRIMARY_MARKET_META[country] : undefined;
+  const code =
+    asTrimmedString(quote.market_code) ??
+    asTrimmedString(market?.["code"]) ??
+    fallback?.code ??
+    asTrimmedString(quote.exchange);
+  const name =
+    asTrimmedString(quote.market_name) ??
+    asTrimmedString(market?.["name"]) ??
+    fallback?.name ??
+    asTrimmedString(quote.exchange);
+  const kind =
+    asTrimmedString(quote.market_kind) ??
+    asTrimmedString(market?.["kind"]) ??
+    (fallback ? "country_primary" : undefined);
+  return { code, name, kind };
+};
+
 const parseDashboardSearch = (
   raw: string,
   preferredTopic: SearchTopic,
@@ -459,6 +506,7 @@ export default function ClaritasDashboard() {
   );
   const [marketExchangeFilter, setMarketExchangeFilter] = useState<string>("all");
   const [marketCountryFilter, setMarketCountryFilter] = useState<string>("all");
+  const [marketIndexFilter, setMarketIndexFilter] = useState<string>("all");
   const [marketDirectionFilter, setMarketDirectionFilter] = useState<"all" | "gainers" | "losers">(
     "all",
   );
@@ -759,7 +807,7 @@ export default function ClaritasDashboard() {
       : effectiveSearchTopic === "news"
         ? "Search news topics (e.g. market, regulation, AI)"
         : effectiveSearchTopic === "markets"
-          ? "Search market symbols (e.g. AAPL, NASDAQ, USD)"
+          ? "Search market symbols (e.g. QQQ, CAC40, DAX30)"
         : "Search by topic or keyword (try topic:news OpenAI)";
 
   const getSourceLabel = useCallback((item: NewsItem) => {
@@ -806,12 +854,15 @@ export default function ClaritasDashboard() {
   const matchesMarketSearch = useCallback(
     (quote: MarketQuote) => {
       if (searchTerms.length === 0) return true;
+      const market = getMarketIdentity(quote);
       const haystack = [
         quote.symbol ?? "",
         quote.company_name ?? "",
         quote.exchange ?? "",
         quote.country ?? "",
         quote.currency ?? "",
+        market.code ?? "",
+        market.name ?? "",
         quote.price != null ? String(quote.price) : "",
         quote.change != null ? String(quote.change) : "",
         quote.percent_change != null ? String(quote.percent_change) : "",
@@ -1507,6 +1558,18 @@ export default function ClaritasDashboard() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [marketSearchScope]);
 
+  const marketIndexOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    marketSearchScope.forEach((quote) => {
+      const market = getMarketIdentity(quote);
+      if (!market.code) return;
+      map.set(market.code, market.name ?? market.code);
+    });
+    return Array.from(map.entries())
+      .map(([code, name]) => ({ code, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [marketSearchScope]);
+
   const marketPageRows = useMemo(() => {
     let rows = filteredMarket;
     if (marketExchangeFilter !== "all") {
@@ -1516,6 +1579,10 @@ export default function ClaritasDashboard() {
     if (marketCountryFilter !== "all") {
       const normalized = marketCountryFilter.trim().toUpperCase();
       rows = rows.filter((quote) => (quote.country ?? "").trim().toUpperCase() === normalized);
+    }
+    if (marketIndexFilter !== "all") {
+      const normalized = marketIndexFilter.trim().toUpperCase();
+      rows = rows.filter((quote) => (getMarketIdentity(quote).code ?? "").toUpperCase() === normalized);
     }
     if (marketDirectionFilter === "gainers") {
       rows = rows.filter((quote) => (quote.percent_change ?? 0) > 0);
@@ -1534,6 +1601,7 @@ export default function ClaritasDashboard() {
     marketCountryFilter,
     marketDirectionFilter,
     marketExchangeFilter,
+    marketIndexFilter,
     marketMinAbsMove,
   ]);
 
@@ -1545,23 +1613,101 @@ export default function ClaritasDashboard() {
     }));
   }, [marketPageRows]);
 
-  const marketCountryPerfData = useMemo(() => {
-    const byCountry = new Map<string, { count: number; total: number }>();
+  const marketIndexPerfData = useMemo(() => {
+    const byIndex = new Map<
+      string,
+      { name: string; count: number; total: number; gainers: number; losers: number; countries: Set<string> }
+    >();
     marketPageRows.forEach((quote) => {
-      const country = (quote.country || "—").toUpperCase();
-      const current = byCountry.get(country) ?? { count: 0, total: 0 };
+      const market = getMarketIdentity(quote);
+      const code = (market.code ?? "UNMAPPED").toUpperCase();
+      const current = byIndex.get(code) ?? {
+        name: market.name ?? code,
+        count: 0,
+        total: 0,
+        gainers: 0,
+        losers: 0,
+        countries: new Set<string>(),
+      };
       current.count += 1;
       current.total += quote.percent_change ?? 0;
-      byCountry.set(country, current);
+      if ((quote.percent_change ?? 0) > 0) current.gainers += 1;
+      if ((quote.percent_change ?? 0) < 0) current.losers += 1;
+      const country = asTrimmedString(quote.country)?.toUpperCase();
+      if (country) current.countries.add(country);
+      byIndex.set(code, current);
     });
-    return Array.from(byCountry.entries())
-      .map(([country, value]) => ({
-        country,
+
+    return Array.from(byIndex.entries())
+      .map(([code, value]) => ({
+        market_code: code,
+        market_name: value.name,
         avg_change: value.count > 0 ? value.total / value.count : 0,
         count: value.count,
+        gainers: value.gainers,
+        losers: value.losers,
+        country_count: value.countries.size,
       }))
       .sort((a, b) => Math.abs(b.avg_change) - Math.abs(a.avg_change))
-      .slice(0, 10);
+      .slice(0, 12);
+  }, [marketPageRows]);
+
+  const marketCountryMarketRows = useMemo(() => {
+    const byCountry = new Map<
+      string,
+      {
+        count: number;
+        total: number;
+        topSymbol: string | null;
+        topMove: number;
+        indexCounts: Map<string, { name: string; count: number }>;
+      }
+    >();
+
+    marketPageRows.forEach((quote) => {
+      const country = (asTrimmedString(quote.country)?.toUpperCase() ?? "—");
+      const market = getMarketIdentity(quote);
+      const marketCode = (market.code ?? "UNMAPPED").toUpperCase();
+      const marketName = market.name ?? marketCode;
+      const current = byCountry.get(country) ?? {
+        count: 0,
+        total: 0,
+        topSymbol: null,
+        topMove: 0,
+        indexCounts: new Map<string, { name: string; count: number }>(),
+      };
+      current.count += 1;
+      current.total += quote.percent_change ?? 0;
+      const absMove = Math.abs(quote.percent_change ?? quote.change ?? 0);
+      if (!current.topSymbol || absMove > Math.abs(current.topMove)) {
+        current.topSymbol = quote.symbol;
+        current.topMove = quote.percent_change ?? quote.change ?? 0;
+      }
+      const marketCount = current.indexCounts.get(marketCode) ?? {
+        name: marketName,
+        count: 0,
+      };
+      marketCount.count += 1;
+      current.indexCounts.set(marketCode, marketCount);
+      byCountry.set(country, current);
+    });
+
+    return Array.from(byCountry.entries())
+      .map(([country, value]) => {
+        const [primaryMarketCode, primaryMarket] = Array.from(value.indexCounts.entries()).sort(
+          (a, b) => b[1].count - a[1].count
+        )[0] ?? ["UNMAPPED", { name: "Unmapped exchange", count: 0 }];
+        return {
+          country,
+          market_code: primaryMarketCode,
+          market_name: primaryMarket.name,
+          count: value.count,
+          avg_change: value.count > 0 ? value.total / value.count : 0,
+          top_symbol: value.topSymbol ?? "—",
+          top_move: value.topMove,
+        };
+      })
+      .sort((a, b) => a.country.localeCompare(b.country));
   }, [marketPageRows]);
 
   const weatherByCountry = useMemo(() => {
@@ -1610,6 +1756,11 @@ export default function ClaritasDashboard() {
       null
     );
   }, [marketQuotes, selectedSymbol]);
+
+  const selectedSymbolMarket = useMemo(() => {
+    if (!selectedSymbolQuote) return null;
+    return getMarketIdentity(selectedSymbolQuote);
+  }, [selectedSymbolQuote]);
 
   const relationCountry = useMemo(() => {
     const fromCountry = selectedCountry?.toUpperCase();
@@ -4379,6 +4530,7 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
                 </section>
+
               </div>
             )}
             {activeView === "markets" && (
@@ -4408,7 +4560,7 @@ export default function ClaritasDashboard() {
                       </button>
                     )}
                   </div>
-                  <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
                     <label className="text-[color:var(--shell-muted)]">
                       Exchange
                       <select
@@ -4435,6 +4587,21 @@ export default function ClaritasDashboard() {
                         {marketCountryOptions.map((country) => (
                           <option key={country} value={country}>
                             {country}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Index/market
+                      <select
+                        value={marketIndexFilter}
+                        onChange={(event) => setMarketIndexFilter(event.currentTarget.value)}
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="all">All markets</option>
+                        {marketIndexOptions.map((market) => (
+                          <option key={market.code} value={market.code}>
+                            {market.code} · {market.name}
                           </option>
                         ))}
                       </select>
@@ -4484,6 +4651,7 @@ export default function ClaritasDashboard() {
                         const isNegative = (quote.change ?? 0) < 0;
                         const logo = imageProxy(getMarketLogoUrl(quote));
                         const source = getMarketSourceLabel(quote);
+                        const market = getMarketIdentity(quote);
                         return (
                           <button
                             key={`mk-${quote.symbol}-${quote.observed_at}`}
@@ -4521,10 +4689,17 @@ export default function ClaritasDashboard() {
                                     {quote.symbol}
                                   </div>
                                   <div className="truncate text-xs text-[color:var(--shell-muted)]">
-                                    {quote.company_name ?? "—"} · {quote.exchange ?? "—"} · {quote.country ?? "—"}
+                                    {quote.company_name ?? "—"} · {quote.exchange ?? "—"} · {quote.country ?? "—"} · {market.code ?? "—"}
                                   </div>
-                                  <div className="mt-1 inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-700">
-                                    {source}
+                                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                                    <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-700">
+                                      {source}
+                                    </span>
+                                    {market.name && (
+                                      <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700">
+                                        {market.name}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -4565,11 +4740,18 @@ export default function ClaritasDashboard() {
                     </div>
                     <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
                       {selectedSymbolQuote
-                        ? `${selectedSymbolQuote.symbol} · ${selectedSymbolQuote.country ?? "No country"}`
+                        ? `${selectedSymbolQuote.symbol} · ${selectedSymbolMarket?.code ?? selectedSymbolQuote.country ?? "No country"}`
                         : "Choose a symbol"}
                     </div>
                     {selectedSymbolQuote ? (
                       <div className="mt-3 space-y-3">
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
+                          <div className="font-semibold text-[color:var(--shell-ink)]">Primary market</div>
+                          <div className="mt-1 text-[color:var(--shell-muted)]">
+                            {(selectedSymbolMarket?.name ?? "Unknown market")} ({selectedSymbolMarket?.code ?? "—"}) ·{" "}
+                            {selectedSymbolQuote.country ?? "—"}
+                          </div>
+                        </div>
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
                           <div className="font-semibold text-[color:var(--shell-ink)]">Weather in {relationCountry ?? "—"}</div>
                           <div className="mt-1 text-[color:var(--shell-muted)]">
@@ -4652,22 +4834,22 @@ export default function ClaritasDashboard() {
                   </div>
                   <div className={`${cardBase} min-w-0 p-4`}>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Geographic risk
+                      Index regime
                     </div>
                     <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                      Average move by country
+                      Average move by market benchmark
                     </div>
                     <div className="mt-3 h-60">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={marketCountryPerfData}>
+                        <BarChart data={marketIndexPerfData}>
                           <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
-                          <XAxis dataKey="country" />
+                          <XAxis dataKey="market_code" />
                           <YAxis />
                           <Tooltip />
                           <Bar dataKey="avg_change" radius={[6, 6, 0, 0]}>
-                            {marketCountryPerfData.map((entry) => (
+                            {marketIndexPerfData.map((entry) => (
                               <Cell
-                                key={`market-country-${entry.country}`}
+                                key={`market-index-${entry.market_code}`}
                                 fill={entry.avg_change >= 0 ? "#0f766e" : "#be123c"}
                               />
                             ))}
@@ -4675,6 +4857,75 @@ export default function ClaritasDashboard() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
+                  </div>
+                </section>
+
+                <section className={`${cardBase} p-4`}>
+                  <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                    Country market map
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                    Country to benchmark linkage and pressure points
+                  </div>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="min-w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-[color:var(--shell-muted)]">
+                          <th className="px-2 py-2 font-medium">Country</th>
+                          <th className="px-2 py-2 font-medium">Primary market</th>
+                          <th className="px-2 py-2 font-medium">Symbols</th>
+                          <th className="px-2 py-2 font-medium">Avg % move</th>
+                          <th className="px-2 py-2 font-medium">Top mover</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {marketCountryMarketRows.map((row) => (
+                          <tr
+                            key={`market-country-row-${row.country}`}
+                            className="border-t border-[color:var(--shell-border)] text-[color:var(--shell-ink)]"
+                          >
+                            <td className="px-2 py-2">{row.country}</td>
+                            <td className="px-2 py-2">
+                              <span className="font-semibold">{row.market_code}</span>
+                              <span className="ml-2 text-[color:var(--shell-muted)]">{row.market_name}</span>
+                            </td>
+                            <td className="px-2 py-2 text-[color:var(--shell-muted)]">{row.count}</td>
+                            <td
+                              className={`px-2 py-2 ${
+                                row.avg_change > 0
+                                  ? "text-emerald-600"
+                                  : row.avg_change < 0
+                                    ? "text-rose-600"
+                                    : "text-[color:var(--shell-muted)]"
+                              }`}
+                            >
+                              {row.avg_change >= 0 ? "+" : ""}
+                              {row.avg_change.toFixed(2)}%
+                            </td>
+                            <td className="px-2 py-2">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSymbol(row.top_symbol)}
+                                className="rounded-full border border-[color:var(--shell-border)] px-2 py-1 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                              >
+                                {row.top_symbol}
+                                <span className="ml-2 text-[color:var(--shell-muted)]">
+                                  {row.top_move >= 0 ? "+" : ""}
+                                  {row.top_move.toFixed(2)}%
+                                </span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {marketCountryMarketRows.length === 0 && (
+                          <tr className="border-t border-[color:var(--shell-border)]">
+                            <td className="px-2 py-3 text-[color:var(--shell-muted)]" colSpan={5}>
+                              No market-country mapping rows in the current filter scope.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </section>
               </div>

@@ -261,8 +261,18 @@ async function ingestOpenWeatherCountryCurrent(countryIso2) {
     return { inserted, updated, skipped, http_failures, db_errors, last_http_status, last_http_error, last_db_error };
 }
 async function getCountryWeatherLatest() {
-    const { rows } = await (0, db_1.query)(`SELECT country_iso2 AS country, temp_c, humidity, observed_at, weather_main
-     FROM weather_snapshot
+    const { rows } = await (0, db_1.query)(`SELECT
+       ws.country_iso2 AS country,
+       ws.temp_c,
+       ws.humidity,
+       ws.observed_at,
+       ws.weather_main,
+       ws.weather_desc,
+       ws.wind_speed,
+       s.name AS source_name,
+       (ws.payload -> 'weather' -> 0 ->> 'icon')::text AS icon_code
+     FROM weather_snapshot ws
+     LEFT JOIN source s ON s.id = ws.source_id
      ORDER BY country_iso2`);
     return rows.map(r => ({
         country: r.country,
@@ -270,5 +280,9 @@ async function getCountryWeatherLatest() {
         humidity: r.humidity,
         observed_at: r.observed_at,
         weather_main: r.weather_main,
+        weather_desc: r.weather_desc,
+        wind_speed: r.wind_speed,
+        source_name: r.source_name,
+        icon_code: r.icon_code,
     }));
 }

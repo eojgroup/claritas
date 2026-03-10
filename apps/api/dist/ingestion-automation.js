@@ -83,7 +83,7 @@ const RULE_DEFAULTS = {
         demand_threshold: 15,
         failure_backoff_minutes: 10,
         default_payload: {
-            symbols: ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "JPM"],
+            symbols: ["SPY", "QQQ", "EWQ", "EWG", "EWU", "EWJ", "MCHI", "INDA", "EWA", "EWC", "EWZ", "EZA", "EWW"],
         },
     },
 };
