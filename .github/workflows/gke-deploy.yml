@@ -29,15 +29,20 @@ jobs:
           echo "---- apps/api ----" && ls -la ./apps/api || true
 
       - name: 🔐 Authenticate to Google Cloud via OIDC
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
           service_account: "terraform-github-oidc@claritas-457808.iam.gserviceaccount.com"
+          token_format: "access_token"
+          access_token_lifetime: "3600s"
 
-      - name: Configure Docker for Google Cloud Artifact Registry
-        run: |
-          echo "Configuring Docker to use Google Cloud credentials for Artifact Registry"
-          gcloud auth configure-docker europe-west2-docker.pkg.dev --quiet
+      - name: 🔑 Authenticate Docker to Artifact Registry
+        uses: docker/login-action@v3
+        with:
+          registry: europe-west2-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.auth.outputs.access_token }}
 
       - name: 🏗️ Build Docker image (web)
         env:
@@ -50,8 +55,19 @@ jobs:
         env:
           IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
         run: |
-          docker push "${IMAGE_URI_WEB}:${{ github.sha }}"
-          docker push "${IMAGE_URI_WEB}:latest"
+          for tag in "${{ github.sha }}" "latest"; do
+            for attempt in 1 2 3; do
+              if docker push "${IMAGE_URI_WEB}:${tag}"; then
+                break
+              fi
+              if [ "${attempt}" -eq 3 ]; then
+                echo "Failed to push ${IMAGE_URI_WEB}:${tag} after ${attempt} attempts" >&2
+                exit 1
+              fi
+              echo "Retrying ${IMAGE_URI_WEB}:${tag} (attempt ${attempt}/3)..." >&2
+              sleep $((attempt * 10))
+            done
+          done
 
       - name: 🏗️ Build Docker image (api)
         env:
@@ -64,8 +80,19 @@ jobs:
         env:
           IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
         run: |
-          docker push "${IMAGE_URI_API}:${{ github.sha }}"
-          docker push "${IMAGE_URI_API}:latest"
+          for tag in "${{ github.sha }}" "latest"; do
+            for attempt in 1 2 3; do
+              if docker push "${IMAGE_URI_API}:${tag}"; then
+                break
+              fi
+              if [ "${attempt}" -eq 3 ]; then
+                echo "Failed to push ${IMAGE_URI_API}:${tag} after ${attempt} attempts" >&2
+                exit 1
+              fi
+              echo "Retrying ${IMAGE_URI_API}:${tag} (attempt ${attempt}/3)..." >&2
+              sleep $((attempt * 10))
+            done
+          done
 
   deploy:
     name: Deploy to GKE
