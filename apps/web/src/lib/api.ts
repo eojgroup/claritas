@@ -260,6 +260,7 @@ export async function triggerAdminMarketIngestion(payload?: {
     body: JSON.stringify(payload ?? {}),
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger market ingestion"));
+
   return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
 }
 
