@@ -188,6 +188,41 @@ struct MarketQuote: Codable, Identifiable {
     }
 }
 
+struct MarketStatus: Codable, Identifiable {
+    let exchange: String
+    let is_open: Bool?
+    let session: String?
+    let holiday: String?
+    let timezone: String?
+    let observed_at: String?
+    let error: String?
+    let payload: JSONValue?
+
+    var id: String { exchange }
+    var observedDate: Date? {
+        guard let observed_at else { return nil }
+        return APIDateParser.parse(observed_at)
+    }
+}
+
+struct EarningsEvent: Codable, Identifiable {
+    let symbol: String
+    let date: String?
+    let hour: String?
+    let quarter: Int?
+    let year: Int?
+    let eps_actual: Double?
+    let eps_estimate: Double?
+    let revenue_actual: Double?
+    let revenue_estimate: Double?
+    let country: String?
+    let market_code: String?
+    let market_name: String?
+    let payload: JSONValue?
+
+    var id: String { "\(symbol)-\(date ?? "na")-\(hour ?? "na")-\(year ?? 0)-\(quarter ?? 0)" }
+}
+
 enum IngestionPipeline: String, Codable, CaseIterable, Identifiable {
     case news
     case weather
@@ -556,6 +591,7 @@ enum JSONValue: Codable {
     }
 
     var string: String? { if case .string(let s) = self { return s } else { return nil } }
+    var number: Double? { if case .number(let n) = self { return n } else { return nil } }
     var object: [String: JSONValue]? { if case .object(let o) = self { return o } else { return nil } }
     var bool: Bool? { if case .bool(let b) = self { return b } else { return nil } }
     var foundationObject: Any {

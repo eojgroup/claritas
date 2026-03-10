@@ -263,6 +263,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   );
   const [weatherCountry, setWeatherCountry] = useState("");
   const [marketSymbols, setMarketSymbols] = useState("SPY,QQQ,EWQ,EWG,EWU,EWJ,MCHI,INDA,EWA,EWC,EWZ,EZA,EWW");
+  const [marketIncludeNews, setMarketIncludeNews] = useState(true);
+  const [marketNewsCategory, setMarketNewsCategory] = useState<"general" | "forex" | "crypto" | "merger">(
+    "general",
+  );
 
   const refreshOverview = useCallback(
     async (silent = false) => {
@@ -470,7 +474,11 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         .map((symbol) => symbol.trim())
         .filter(Boolean);
       const created = await triggerAdminMarketIngestion(
-        parsedSymbols.length > 0 ? { symbols: parsedSymbols } : undefined,
+        {
+          ...(parsedSymbols.length > 0 ? { symbols: parsedSymbols } : {}),
+          includeNews: marketIncludeNews,
+          newsCategory: marketNewsCategory,
+        },
       );
       setActionNotice(`Market ingestion run #${created.run.id} was queued.`);
       setSelectedRunId(created.run.id);
@@ -482,7 +490,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringMarket(false);
     }
-  }, [marketSymbols, refreshOverview]);
+  }, [marketIncludeNews, marketNewsCategory, marketSymbols, refreshOverview]);
 
   const updateAutomationDraft = useCallback(
     (
@@ -887,6 +895,32 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
               Blank = default market watchlist.
             </div>
+            <label className="mt-3 inline-flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+              <input
+                type="checkbox"
+                checked={marketIncludeNews}
+                onChange={(event) => setMarketIncludeNews(event.currentTarget.checked)}
+                className="h-3.5 w-3.5 rounded border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
+              />
+              Ingest Finnhub market news
+            </label>
+            <label className="mt-2 block text-xs text-[color:var(--shell-muted)]">
+              News category
+              <select
+                value={marketNewsCategory}
+                onChange={(event) =>
+                  setMarketNewsCategory(
+                    event.currentTarget.value as "general" | "forex" | "crypto" | "merger",
+                  )
+                }
+                className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+              >
+                <option value="general">General</option>
+                <option value="forex">Forex</option>
+                <option value="crypto">Crypto</option>
+                <option value="merger">Merger</option>
+              </select>
+            </label>
             <button
               type="button"
               onClick={() => void handleTriggerMarket()}

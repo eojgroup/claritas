@@ -84,6 +84,9 @@ const RULE_DEFAULTS = {
         failure_backoff_minutes: 10,
         default_payload: {
             symbols: ["SPY", "QQQ", "EWQ", "EWG", "EWU", "EWJ", "MCHI", "INDA", "EWA", "EWC", "EWZ", "EZA", "EWW"],
+            includeNews: true,
+            newsCategory: "general",
+            newsMaxItems: 50,
         },
     },
 };

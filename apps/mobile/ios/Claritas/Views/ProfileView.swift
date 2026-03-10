@@ -46,8 +46,8 @@ struct ProfileView: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color(red: 0.08, green: 0.16, blue: 0.22),
-                            Color(red: 0.12, green: 0.2, blue: 0.26)
+                            ClaritasPalette.darkBlue,
+                            ClaritasPalette.darkGreen.opacity(0.82)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -131,8 +131,8 @@ struct ProfileView: View {
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(provider.enabled ? Color.green.opacity(0.18) : Color.gray.opacity(0.18), in: Capsule())
-                            .foregroundStyle(provider.enabled ? Color.green : Color.secondary)
+                            .background(provider.enabled ? ClaritasPalette.darkGreen.opacity(0.2) : ClaritasPalette.grey.opacity(0.2), in: Capsule())
+                            .foregroundStyle(provider.enabled ? ClaritasPalette.darkGreen : ClaritasPalette.grey)
                     }
                     .padding(.vertical, 4)
                 }
@@ -156,6 +156,7 @@ struct ProfileView: View {
                         .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
+                .tint(ClaritasPalette.darkBlue)
             }
         }
     }
@@ -176,7 +177,7 @@ struct ProfileView: View {
                         .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.red.opacity(0.85))
+                .tint(ClaritasPalette.brown.opacity(0.9))
                 .disabled(isSigningOut)
             }
         }

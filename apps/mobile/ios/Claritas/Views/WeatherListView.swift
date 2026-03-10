@@ -28,7 +28,8 @@ struct WeatherListView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .background(ClaritasPalette.offWhite.opacity(0.9), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.beige, lineWidth: 1))
             } else {
                 VStack(spacing: 0) {
                     ForEach(items) { w in
@@ -36,8 +37,8 @@ struct WeatherListView: View {
                         Divider().opacity(0.2)
                     }
                 }
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.2)))
+                .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.beige, lineWidth: 1))
             }
         }
     }
@@ -54,7 +55,7 @@ private struct WeatherRow: View {
                         .font(.caption)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
-                        .background(Color(.secondarySystemBackground), in: Capsule())
+                        .background(ClaritasPalette.offWhite, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 if let d = item.observedDate {

@@ -191,6 +191,40 @@ final class APIClient {
         return try await request(URLRequest(url: comps.url!), as: [MarketQuote].self, rootKey: "quotes")
     }
 
+    func fetchMarketStatus(refresh: Bool = true, exchanges: [String]? = nil) async throws -> [MarketStatus] {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/market/status"), resolvingAgainstBaseURL: false)!
+        var items: [URLQueryItem] = [URLQueryItem(name: "refresh", value: refresh ? "true" : "false")]
+        if let exchanges, !exchanges.isEmpty {
+            items.append(URLQueryItem(name: "exchanges", value: exchanges.joined(separator: ",")))
+        }
+        comps.queryItems = items
+        return try await request(URLRequest(url: comps.url!), as: [MarketStatus].self, rootKey: "status")
+    }
+
+    func fetchMarketEarnings(
+        from: String? = nil,
+        to: String? = nil,
+        symbol: String? = nil,
+        limit: Int? = nil
+    ) async throws -> [EarningsEvent] {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/market/earnings"), resolvingAgainstBaseURL: false)!
+        var items: [URLQueryItem] = []
+        if let from = nonEmpty(from) {
+            items.append(URLQueryItem(name: "from", value: from))
+        }
+        if let to = nonEmpty(to) {
+            items.append(URLQueryItem(name: "to", value: to))
+        }
+        if let symbol = nonEmpty(symbol) {
+            items.append(URLQueryItem(name: "symbol", value: symbol))
+        }
+        if let limit {
+            items.append(URLQueryItem(name: "limit", value: String(limit)))
+        }
+        comps.queryItems = items.isEmpty ? nil : items
+        return try await request(URLRequest(url: comps.url!), as: [EarningsEvent].self, rootKey: "events")
+    }
+
     func ingestWeatherNow(country: String?) async throws -> WeatherIngestResponse {
         var req = URLRequest(url: baseURL.appendingPathComponent("/api/ingest/openweather/country-current"))
         req.httpMethod = "POST"
@@ -288,16 +322,33 @@ final class APIClient {
         return try await request(req, as: AdminIngestionRunDetail.self)
     }
 
-    func triggerAdminMarketIngestion(symbols: [String]?) async throws -> AdminIngestionRunDetail {
+    func triggerAdminMarketIngestion(
+        symbols: [String]?,
+        includeNews: Bool = true,
+        newsCategory: String? = nil,
+        newsMinId: Int? = nil,
+        newsMaxItems: Int? = nil
+    ) async throws -> AdminIngestionRunDetail {
         var req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/ingestion/market/run"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        var payload: [String: Any] = [
+            "includeNews": includeNews
+        ]
         if let symbols, !symbols.isEmpty {
-            req.httpBody = try JSONSerialization.data(withJSONObject: ["symbols": symbols], options: [])
-        } else {
-            req.httpBody = Data("{}".utf8)
+            payload["symbols"] = symbols
         }
+        if let newsCategory = nonEmpty(newsCategory) {
+            payload["newsCategory"] = newsCategory
+        }
+        if let newsMinId {
+            payload["newsMinId"] = newsMinId
+        }
+        if let newsMaxItems {
+            payload["newsMaxItems"] = newsMaxItems
+        }
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
         return try await request(req, as: AdminIngestionRunDetail.self)
     }
 

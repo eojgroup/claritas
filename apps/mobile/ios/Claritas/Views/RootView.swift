@@ -44,7 +44,7 @@ struct RootView: View {
                         .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                         .tag(Tab.profile)
                     }
-                    .tint(Color(red: 0.12, green: 0.42, blue: 0.4))
+                    .tint(ClaritasPalette.darkGreen)
                     .onChange(of: model.isAdmin) { isAdmin in
                         if !isAdmin && tab == .admin {
                             tab = .dashboard
@@ -398,6 +398,9 @@ private struct AdminIngestionPanelView: View {
     @State private var theNewsApiCustomDate: Date = Date()
     @State private var weatherCountry: String = ""
     @State private var marketSymbols: String = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM"
+    @State private var marketIncludeNews: Bool = true
+    @State private var marketNewsCategory: String = "general"
+    @State private var marketNewsMaxItems: String = "50"
 
     @State private var isLoadingOverview: Bool = false
     @State private var isTriggeringNews: Bool = false
@@ -543,6 +546,26 @@ private struct AdminIngestionPanelView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         TextField("Market symbols (optional CSV)", text: $marketSymbols)
                             .textFieldStyle(.roundedBorder)
+
+                        Toggle("Ingest Finnhub market news", isOn: $marketIncludeNews)
+
+                        Picker("News category", selection: $marketNewsCategory) {
+                            Text("General").tag("general")
+                            Text("Forex").tag("forex")
+                            Text("Crypto").tag("crypto")
+                            Text("Merger").tag("merger")
+                        }
+                        .pickerStyle(.segmented)
+
+                        HStack(spacing: 8) {
+                            TextField("News max items", text: $marketNewsMaxItems)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                            Text("1-100")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
                         Button(action: { Task { await queueMarketRun() } }) {
                             Label(isTriggeringMarket ? "Queueing market…" : "Queue Market Run", systemImage: "chart.line.uptrend.xyaxis")
                         }
@@ -1092,7 +1115,19 @@ private struct AdminIngestionPanelView: View {
                 .split(whereSeparator: { $0 == "," || $0.isWhitespace })
                 .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            let detail = try await model.api.triggerAdminMarketIngestion(symbols: symbols.isEmpty ? nil : symbols)
+            let parsedMaxItems = Int(marketNewsMaxItems.trimmingCharacters(in: .whitespacesAndNewlines))
+            let newsMaxItems: Int? = {
+                guard let parsedMaxItems else { return nil }
+                guard parsedMaxItems > 0 else { return nil }
+                return min(max(parsedMaxItems, 1), 100)
+            }()
+            let detail = try await model.api.triggerAdminMarketIngestion(
+                symbols: symbols.isEmpty ? nil : symbols,
+                includeNews: marketIncludeNews,
+                newsCategory: marketNewsCategory,
+                newsMinId: nil,
+                newsMaxItems: newsMaxItems
+            )
             selectedRunId = detail.run.id
             selectedRun = detail.run
             logs = detail.logs

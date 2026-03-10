@@ -6,7 +6,7 @@ import {
 } from "./connectors/newsapi";
 import { ingestTheNewsApiNews, type IngestTheNewsApiParams } from "./connectors/thenewsapi";
 import { ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
-import { ingestFinnhubQuotes, resolveMarketSymbols } from "./connectors/finnhub";
+import { ingestFinnhubMarketNews, ingestFinnhubQuotes, resolveMarketSymbols } from "./connectors/finnhub";
 import { query } from "./db";
 
 export type IngestionPipeline = "news" | "weather" | "market";
@@ -139,6 +139,10 @@ type WeatherRunPlan = {
 
 type MarketRunPlan = {
   symbols: string[];
+  includeNews: boolean;
+  newsCategory?: string;
+  newsMinId?: number;
+  newsMaxItems?: number;
   requestPayload: Record<string, unknown>;
 };
 
@@ -203,6 +207,8 @@ const DEFAULT_NEWS_TOP_HEADLINES: IngestTopHeadlinesParams = {
   pageSize: 50,
   maxPages: 2,
 };
+
+const FINNHUB_NEWS_CATEGORIES = new Set(["general", "forex", "crypto", "merger"]);
 
 const activeRunPromises = new Map<number, Promise<void>>();
 
@@ -634,9 +640,46 @@ export function buildMarketRunPlan(rawBody: unknown): MarketRunPlan {
     throw new IngestionValidationError(toErrorMessage(error));
   }
 
+  const includeNewsRaw = body.includeNews;
+  const includeNews =
+    includeNewsRaw === undefined
+      ? true
+      : includeNewsRaw === true ||
+        (typeof includeNewsRaw === "string" && includeNewsRaw.trim().toLowerCase() === "true");
+  const newsCategoryRaw =
+    typeof body.newsCategory === "string" ? body.newsCategory.trim().toLowerCase() : "";
+  const newsCategory = FINNHUB_NEWS_CATEGORIES.has(newsCategoryRaw) ? newsCategoryRaw : "general";
+  const newsMinIdRaw =
+    typeof body.newsMinId === "number"
+      ? Math.trunc(body.newsMinId)
+      : typeof body.newsMinId === "string" && body.newsMinId.trim()
+        ? Number.parseInt(body.newsMinId, 10)
+        : Number.NaN;
+  const newsMaxItemsRaw =
+    typeof body.newsMaxItems === "number"
+      ? Math.trunc(body.newsMaxItems)
+      : typeof body.newsMaxItems === "string" && body.newsMaxItems.trim()
+        ? Number.parseInt(body.newsMaxItems, 10)
+        : Number.NaN;
+  const newsMinId = Number.isFinite(newsMinIdRaw) && newsMinIdRaw > 0 ? newsMinIdRaw : undefined;
+  const newsMaxItems =
+    Number.isFinite(newsMaxItemsRaw) && newsMaxItemsRaw > 0
+      ? Math.min(Math.max(newsMaxItemsRaw, 1), 100)
+      : undefined;
+
   return {
     symbols,
-    requestPayload: { symbols },
+    includeNews,
+    newsCategory,
+    newsMinId,
+    newsMaxItems,
+    requestPayload: {
+      symbols,
+      includeNews,
+      newsCategory,
+      ...(newsMinId ? { newsMinId } : {}),
+      ...(newsMaxItems ? { newsMaxItems } : {}),
+    },
   };
 }
 
@@ -935,6 +978,59 @@ async function executeMarketRun(runId: number, plan: MarketRunPlan): Promise<voi
         error: message,
       });
       throw err;
+    }
+
+    if (plan.includeNews) {
+      const newsStepStartedAt = Date.now();
+      const newsParams: Record<string, unknown> = {
+        category: plan.newsCategory ?? "general",
+      };
+      if (typeof plan.newsMinId === "number") {
+        newsParams.newsMinId = plan.newsMinId;
+      }
+      if (typeof plan.newsMaxItems === "number") {
+        newsParams.newsMaxItems = plan.newsMaxItems;
+      }
+      await safeAppendRunLog(runId, "info", "Running Finnhub market-news ingest.", {
+        params: newsParams,
+      });
+
+      try {
+        const result = (await ingestFinnhubMarketNews({
+          category: plan.newsCategory,
+          minId: plan.newsMinId,
+          maxItems: plan.newsMaxItems,
+        })) as unknown as Record<string, unknown>;
+        const stepTotals = extractTotals(result);
+        mergeTotals(totals, stepTotals);
+        steps.push({
+          step: "finnhub/market-news",
+          status: "success",
+          started_at: new Date(newsStepStartedAt).toISOString(),
+          finished_at: toIsoNow(),
+          duration_ms: Date.now() - newsStepStartedAt,
+          result,
+        });
+        await safeAppendRunLog(runId, "info", "Finnhub market-news ingest completed.", {
+          result,
+        });
+      } catch (err) {
+        const message = toErrorMessage(err);
+        steps.push({
+          step: "finnhub/market-news",
+          status: "failed",
+          started_at: new Date(newsStepStartedAt).toISOString(),
+          finished_at: toIsoNow(),
+          duration_ms: Date.now() - newsStepStartedAt,
+          error: message,
+        });
+        await safeAppendRunLog(runId, "error", "Finnhub market-news ingest failed.", {
+          error: message,
+        });
+        throw err;
+      }
+    } else {
+      await safeAppendRunLog(runId, "info", "Skipping Finnhub market-news ingest (includeNews=false).");
     }
 
     const stats = {

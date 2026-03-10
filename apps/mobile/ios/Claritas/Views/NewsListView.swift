@@ -11,7 +11,8 @@ struct NewsListView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                .background(ClaritasPalette.offWhite.opacity(0.92), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.beige, lineWidth: 1))
         } else {
             VStack(spacing: 12) {
                 ForEach(items) { n in
@@ -32,11 +33,12 @@ private struct NewsRow: View {
                 .frame(width: 120, height: 75)
                 .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ClaritasPalette.beige, lineWidth: 1))
             VStack(alignment: .leading, spacing: 6) {
                 if let u = item.url, let url = URL(string: u) {
                     Link(item.title ?? u, destination: url)
                         .font(.headline)
+                        .foregroundStyle(ClaritasPalette.darkBlue)
                         .lineLimit(2)
                 } else {
                     Text(item.title ?? "Untitled")
@@ -49,8 +51,8 @@ private struct NewsRow: View {
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 7)
                             .padding(.vertical, 4)
-                            .background(Color(red: 0.07, green: 0.40, blue: 0.32).opacity(0.16), in: Capsule())
-                            .foregroundStyle(Color(red: 0.06, green: 0.43, blue: 0.35))
+                            .background(ClaritasPalette.darkGreen.opacity(0.16), in: Capsule())
+                            .foregroundStyle(ClaritasPalette.darkGreen)
                     }
                     if let iso = item.country_iso2?.uppercased(), !iso.isEmpty {
                         Button(action: { onSelectCountry(iso) }) {
@@ -58,7 +60,7 @@ private struct NewsRow: View {
                                 .font(.caption)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
-                                .background(Color(.secondarySystemBackground), in: Capsule())
+                                .background(ClaritasPalette.offWhite, in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -78,8 +80,8 @@ private struct NewsRow: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.2)))
+        .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.beige, lineWidth: 1))
     }
 
     private func proxiedImageURL() -> URL? {
@@ -87,8 +89,10 @@ private struct NewsRow: View {
         guard let payload = item.payload else { return nil }
         let urlStr: String? = {
             if case .object(let dict) = payload {
+                if let u = dict["image"]?.string { return u }
                 if let u = dict["urlToImage"]?.string { return u }
                 if let u = dict["image_url"]?.string { return u }
+                if let raw = dict["raw"], case .object(let rawObj) = raw, let u = rawObj["image"]?.string { return u }
                 if let raw = dict["raw"], case .object(let rawObj) = raw, let u = rawObj["urlToImage"]?.string { return u }
                 if let raw = dict["raw"], case .object(let rawObj) = raw, let u = rawObj["image_url"]?.string { return u }
             }
@@ -128,6 +132,8 @@ private struct NewsRow: View {
             return "NewsAPI"
         case "thenewsapi":
             return "TheNewsAPI"
+        case "finnhub":
+            return "Finnhub"
         default:
             return trimmed
         }

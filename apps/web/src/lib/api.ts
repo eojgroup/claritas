@@ -43,6 +43,33 @@ export type MarketQuote = {
   payload?: unknown;
 };
 
+export type MarketStatus = {
+  exchange: string;
+  is_open: boolean | null;
+  session: string | null;
+  holiday: string | null;
+  timezone: string | null;
+  observed_at: string | null;
+  error?: string | null;
+  payload?: unknown;
+};
+
+export type EarningsEvent = {
+  symbol: string;
+  date: string | null;
+  hour: string | null;
+  quarter: number | null;
+  year: number | null;
+  eps_actual: number | null;
+  eps_estimate: number | null;
+  revenue_actual: number | null;
+  revenue_estimate: number | null;
+  country: string | null;
+  market_code: string | null;
+  market_name: string | null;
+  payload?: unknown;
+};
+
 export type AuthProviderId = "google" | "microsoft" | "apple";
 export type IngestionPipeline = "news" | "weather" | "market";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
@@ -321,6 +348,35 @@ export async function fetchMarketQuotes(params?: { refresh?: boolean; symbols?: 
   return (data.quotes ?? []) as MarketQuote[];
 }
 
+export async function fetchMarketStatus(params?: { refresh?: boolean; exchanges?: string[] }) {
+  const sp = new URLSearchParams();
+  if (typeof params?.refresh === "boolean") sp.set("refresh", params.refresh ? "true" : "false");
+  if (params?.exchanges && params.exchanges.length > 0) sp.set("exchanges", params.exchanges.join(","));
+  const suffix = sp.toString() ? `?${sp.toString()}` : "";
+  const resp = await fetch(`${API_BASE}/api/market/status${suffix}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch market status"));
+  const data = await resp.json();
+  return (data.status ?? []) as MarketStatus[];
+}
+
+export async function fetchMarketEarnings(params?: {
+  from?: string;
+  to?: string;
+  symbol?: string;
+  limit?: number;
+}) {
+  const sp = new URLSearchParams();
+  if (params?.from) sp.set("from", params.from);
+  if (params?.to) sp.set("to", params.to);
+  if (params?.symbol) sp.set("symbol", params.symbol);
+  if (typeof params?.limit === "number") sp.set("limit", String(params.limit));
+  const suffix = sp.toString() ? `?${sp.toString()}` : "";
+  const resp = await fetch(`${API_BASE}/api/market/earnings${suffix}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch market earnings"));
+  const data = await resp.json();
+  return (data.events ?? []) as EarningsEvent[];
+}
+
 export async function ingestWeatherNow(country?: string) {
   const resp = await fetch(`${API_BASE}/api/ingest/openweather/country-current`, {
     method: "POST",
@@ -391,6 +447,10 @@ export async function triggerAdminWeatherIngestion(payload?: {
 
 export async function triggerAdminMarketIngestion(payload?: {
   symbols?: string[] | string;
+  includeNews?: boolean;
+  newsCategory?: "general" | "forex" | "crypto" | "merger";
+  newsMinId?: number;
+  newsMaxItems?: number;
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/market/run`, {
     method: "POST",

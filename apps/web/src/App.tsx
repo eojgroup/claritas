@@ -209,8 +209,10 @@ const getNewsImageUrl = (item: NewsItem): string | undefined => {
   if (!payload) return undefined;
   const raw = asObject(payload["raw"]);
   return (
+    asTrimmedString(payload["image"]) ??
     asTrimmedString(payload["urlToImage"]) ??
     asTrimmedString(payload["image_url"]) ??
+    asTrimmedString(raw?.["image"]) ??
     asTrimmedString(raw?.["urlToImage"]) ??
     asTrimmedString(raw?.["image_url"])
   );
@@ -244,6 +246,14 @@ const getDateKey = (value: Date | string) => {
   const d = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString().slice(0, 10);
+};
+
+const formatCompactNumber = (value?: number): string => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 2,
+  }).format(value);
 };
 
 const ANALYTICS_COLORS = [
@@ -305,6 +315,26 @@ const getMarketLogoUrl = (quote: MarketQuote): string | undefined => {
   const payload = asObject(quote.payload);
   const profile = asObject(payload?.["profile"]);
   return asTrimmedString(profile?.["logo"]);
+};
+
+const getMarketProfile = (quote: MarketQuote): {
+  industry?: string;
+  marketCap?: number;
+  ipo?: string;
+  webUrl?: string;
+} => {
+  const payload = asObject(quote.payload);
+  const profile = asObject(payload?.["profile"]);
+  const marketCapRaw = profile?.["market_cap"];
+  return {
+    industry: asTrimmedString(profile?.["industry"]) ?? undefined,
+    marketCap:
+      typeof marketCapRaw === "number" && Number.isFinite(marketCapRaw)
+        ? marketCapRaw
+        : undefined,
+    ipo: asTrimmedString(profile?.["ipo"]) ?? undefined,
+    webUrl: asTrimmedString(profile?.["web_url"]) ?? undefined,
+  };
 };
 
 const marketQuoteUrl = (symbol: string): string =>
@@ -409,12 +439,15 @@ import LoginPage from "./components/LoginPage";
 import PaywallPage from "./components/PaywallPage";
 import AdminIngestionPanel from "./components/AdminIngestionPanel";
 import AdminUserManagementPanel from "./components/AdminUserManagementPanel";
+import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePreview";
 import {
   fetchAuthMe,
   fetchAuthProviders,
   fetchCountryStats,
   fetchCountryWeather,
+  fetchMarketEarnings,
   fetchMarketQuotes,
+  fetchMarketStatus,
   fetchNews,
   getAuthStartUrl,
   logoutAuth,
@@ -424,7 +457,9 @@ import {
   type AuthUser,
   type CountryStat,
   type CountryWeather,
+  type EarningsEvent,
   type MarketQuote,
+  type MarketStatus,
   type NewsItem,
 } from "./lib/api";
 
@@ -471,6 +506,9 @@ export default function ClaritasDashboard() {
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
+  const [marketStatusRows, setMarketStatusRows] = useState<MarketStatus[]>([]);
+  const [marketEarnings, setMarketEarnings] = useState<EarningsEvent[]>([]);
+  const [marketEarningsWindowDays, setMarketEarningsWindowDays] = useState<7 | 14 | 30>(14);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [newsLoadMode, setNewsLoadMode] = useState<"recent" | "archive">(
@@ -711,6 +749,46 @@ export default function ClaritasDashboard() {
       window.clearInterval(id);
     };
   }, [authStatus, hasPaidAccess]);
+
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess) return;
+    let cancelled = false;
+    const refreshStatus = async () => {
+      try {
+        const rows = await fetchMarketStatus({ refresh: true });
+        if (!cancelled) setMarketStatusRows(rows);
+      } catch {
+        if (!cancelled) setMarketStatusRows([]);
+      }
+    };
+    void refreshStatus();
+    const id = window.setInterval(() => {
+      void refreshStatus();
+    }, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [authStatus, hasPaidAccess]);
+
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess) return;
+    let cancelled = false;
+    const from = new Date().toISOString().slice(0, 10);
+    const to = new Date(Date.now() + marketEarningsWindowDays * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    fetchMarketEarnings({ from, to, limit: 120 })
+      .then((events) => {
+        if (!cancelled) setMarketEarnings(events);
+      })
+      .catch(() => {
+        if (!cancelled) setMarketEarnings([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, hasPaidAccess, marketEarningsWindowDays]);
 
   const cardBase =
     "rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm";
@@ -1710,6 +1788,47 @@ export default function ClaritasDashboard() {
       .sort((a, b) => a.country.localeCompare(b.country));
   }, [marketPageRows]);
 
+  const marketIndexMapData = useMemo(() => {
+    return marketCountryMarketRows.map((row) => {
+      const scaled = Math.max(1, Math.round(Math.abs(row.avg_change) * 18));
+      return {
+        country: row.country,
+        count: scaled,
+        meta: {
+          subtitle: `${row.market_code} · ${row.avg_change >= 0 ? "+" : ""}${row.avg_change.toFixed(2)}%`,
+          lines: [
+            row.market_name,
+            `${row.count} tracked symbols`,
+          ],
+        },
+      };
+    });
+  }, [marketCountryMarketRows]);
+
+  const marketStatusDisplayRows = useMemo(() => {
+    return [...marketStatusRows].sort((a, b) => {
+      const aOpen = a.is_open ? 1 : 0;
+      const bOpen = b.is_open ? 1 : 0;
+      if (aOpen !== bOpen) return bOpen - aOpen;
+      return a.exchange.localeCompare(b.exchange);
+    });
+  }, [marketStatusRows]);
+
+  const marketStatusSummary = useMemo(() => {
+    const open = marketStatusRows.filter((row) => row.is_open).length;
+    const total = marketStatusRows.length;
+    return { open, total };
+  }, [marketStatusRows]);
+
+  const marketEarningsRows = useMemo(() => {
+    let rows = [...marketEarnings];
+    if (selectedSymbol) {
+      const normalized = selectedSymbol.toUpperCase();
+      rows = rows.filter((row) => row.symbol.toUpperCase() === normalized);
+    }
+    return rows.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""));
+  }, [marketEarnings, selectedSymbol]);
+
   const weatherByCountry = useMemo(() => {
     const map = new Map<string, CountryWeather>();
     weatherStats.forEach((entry) => {
@@ -1760,6 +1879,11 @@ export default function ClaritasDashboard() {
   const selectedSymbolMarket = useMemo(() => {
     if (!selectedSymbolQuote) return null;
     return getMarketIdentity(selectedSymbolQuote);
+  }, [selectedSymbolQuote]);
+
+  const selectedSymbolProfile = useMemo(() => {
+    if (!selectedSymbolQuote) return null;
+    return getMarketProfile(selectedSymbolQuote);
   }, [selectedSymbolQuote]);
 
   const relationCountry = useMemo(() => {
@@ -4146,6 +4270,141 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                  <div className={`${cardBase} overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Index map
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Relative index volatility by country
+                      </div>
+                    </div>
+                    <div className="h-[min(48vh,420px)] min-h-[18rem] p-3">
+                      <div className="h-full overflow-hidden rounded-2xl border border-[color:var(--shell-border)]">
+                        <WorldMapBubbles
+                          data={marketIndexMapData}
+                          onSelect={(iso) => setSelectedCountry(iso)}
+                          dark={dark}
+                          primaryCountry={selectedCountry}
+                          secondaryCountry={comparisonCountry}
+                          pinnedCountry={pinnedCountry}
+                          scale="linear"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <section className={`${cardBase} p-4`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Market status
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                            {marketStatusSummary.open}/{marketStatusSummary.total} tracked exchanges open
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void fetchMarketStatus({ refresh: true })
+                              .then(setMarketStatusRows)
+                              .catch(() => setMarketStatusRows([]))
+                          }
+                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                      <div className="mt-3 max-h-44 space-y-2 overflow-y-auto pr-1">
+                        {marketStatusDisplayRows.map((status) => (
+                          <div
+                            key={`mk-status-${status.exchange}`}
+                            className="flex items-center justify-between rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs"
+                          >
+                            <span className="font-medium text-[color:var(--shell-ink)]">{status.exchange}</span>
+                            <span
+                              className={
+                                status.is_open === true
+                                  ? "text-emerald-600"
+                                  : status.is_open === false
+                                    ? "text-rose-600"
+                                    : "text-[color:var(--shell-muted)]"
+                              }
+                            >
+                              {status.is_open === true ? "Open" : status.is_open === false ? "Closed" : "Unknown"}
+                            </span>
+                          </div>
+                        ))}
+                        {marketStatusDisplayRows.length === 0 && (
+                          <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
+                            No exchange status rows available.
+                          </div>
+                        )}
+                      </div>
+                    </section>
+
+                    <section className={`${cardBase} p-4`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Earnings calendar
+                          </div>
+                          <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                            Upcoming events {selectedSymbol ? `for ${selectedSymbol}` : "(watch scope)"}
+                          </div>
+                        </div>
+                        <div className="inline-flex rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
+                          {[7, 14, 30].map((days) => (
+                            <button
+                              key={`earnings-window-${days}`}
+                              type="button"
+                              onClick={() => setMarketEarningsWindowDays(days as 7 | 14 | 30)}
+                              className={`rounded-full px-2 py-0.5 ${
+                                marketEarningsWindowDays === days
+                                  ? "bg-[color:var(--shell-ink)] text-[color:var(--shell-bg)]"
+                                  : "text-[color:var(--shell-muted)]"
+                              }`}
+                            >
+                              {days}d
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
+                        {marketEarningsRows.slice(0, 24).map((event, idx) => (
+                          <div
+                            key={`mk-earnings-${event.symbol}-${event.date}-${idx}`}
+                            className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedSymbol(event.symbol)}
+                                className="font-semibold text-[color:var(--shell-ink)] hover:underline"
+                              >
+                                {event.symbol}
+                              </button>
+                              <span className="text-[color:var(--shell-muted)]">{event.date ?? "—"}</span>
+                            </div>
+                            <div className="mt-1 text-[color:var(--shell-muted)]">
+                              EPS {event.eps_actual ?? "—"} / {event.eps_estimate ?? "—"} · Rev{" "}
+                              {event.revenue_actual ?? "—"} / {event.revenue_estimate ?? "—"}
+                            </div>
+                          </div>
+                        ))}
+                        {marketEarningsRows.length === 0 && (
+                          <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
+                            No earnings events in the selected window.
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                  </div>
+                </section>
+
                 <section className={`${cardBase} p-4`}>
                   <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                     Correlation
@@ -4652,6 +4911,7 @@ export default function ClaritasDashboard() {
                         const logo = imageProxy(getMarketLogoUrl(quote));
                         const source = getMarketSourceLabel(quote);
                         const market = getMarketIdentity(quote);
+                        const profile = getMarketProfile(quote);
                         return (
                           <button
                             key={`mk-${quote.symbol}-${quote.observed_at}`}
@@ -4691,6 +4951,11 @@ export default function ClaritasDashboard() {
                                   <div className="truncate text-xs text-[color:var(--shell-muted)]">
                                     {quote.company_name ?? "—"} · {quote.exchange ?? "—"} · {quote.country ?? "—"} · {market.code ?? "—"}
                                   </div>
+                                  {(profile.industry || profile.ipo) && (
+                                    <div className="truncate text-[10px] text-[color:var(--shell-muted)]">
+                                      {profile.industry ?? "—"}{profile.ipo ? ` · IPO ${profile.ipo}` : ""}
+                                    </div>
+                                  )}
                                   <div className="mt-1 flex flex-wrap items-center gap-1">
                                     <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-700">
                                       {source}
@@ -4751,6 +5016,19 @@ export default function ClaritasDashboard() {
                             {(selectedSymbolMarket?.name ?? "Unknown market")} ({selectedSymbolMarket?.code ?? "—"}) ·{" "}
                             {selectedSymbolQuote.country ?? "—"}
                           </div>
+                          <div className="mt-1 text-[color:var(--shell-muted)]">
+                            Industry {selectedSymbolProfile?.industry ?? "—"} · Mkt cap {formatCompactNumber(selectedSymbolProfile?.marketCap)}
+                          </div>
+                          {selectedSymbolProfile?.webUrl && (
+                            <a
+                              href={selectedSymbolProfile.webUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-1 inline-block rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[10px] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
+                            >
+                              Company profile
+                            </a>
+                          )}
                         </div>
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
                           <div className="font-semibold text-[color:var(--shell-ink)]">Weather in {relationCountry ?? "—"}</div>
@@ -5384,6 +5662,15 @@ export default function ClaritasDashboard() {
                     </article>
                   ))}
                 </div>
+
+                <details className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4">
+                  <summary className="cursor-pointer text-sm font-semibold text-[color:var(--shell-ink)]">
+                    Brand colour guideline reference
+                  </summary>
+                  <div className="mt-4 overflow-hidden rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)]">
+                    <WebsiteColourPalettePreview />
+                  </div>
+                </details>
 
                 <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 text-xs text-[color:var(--shell-muted)] flex flex-wrap items-center gap-x-6 gap-y-2">
                   <span className="font-semibold uppercase tracking-[0.3em] text-[color:var(--shell-ink)]">

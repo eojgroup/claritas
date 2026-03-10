@@ -8,9 +8,13 @@ exports.parseMarketSymbolsInput = parseMarketSymbolsInput;
 exports.resolveMarketSymbols = resolveMarketSymbols;
 exports.ingestFinnhubQuotes = ingestFinnhubQuotes;
 exports.getMarketQuotesLatest = getMarketQuotesLatest;
+exports.getFinnhubMarketStatus = getFinnhubMarketStatus;
+exports.getFinnhubEarningsCalendar = getFinnhubEarningsCalendar;
+exports.ingestFinnhubMarketNews = ingestFinnhubMarketNews;
 exports.refreshMarketQuotesRealtime = refreshMarketQuotesRealtime;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const db_1 = require("../db");
+const country_inference_1 = require("./country-inference");
 const FINNHUB_BASE_URL = "https://api.finnhub.io/api/v1";
 const SYMBOL_PATTERN = /^[A-Z0-9][A-Z0-9._:-]{0,23}$/;
 const MAX_SYMBOLS_PER_REQUEST = 25;
@@ -179,10 +183,29 @@ const COUNTRY_PRIMARY_MARKETS = {
     ES: { code: "IBEX35", name: "IBEX 35" },
     CH: { code: "SMI", name: "Swiss Market Index" },
 };
+const DEFAULT_MARKET_STATUS_EXCHANGES = [
+    "US",
+    "GB",
+    "DE",
+    "FR",
+    "JP",
+    "CN",
+    "IN",
+    "AU",
+    "CA",
+    "BR",
+    "ZA",
+    "MX",
+];
+const MARKET_NEWS_CATEGORIES = new Set(["general", "forex", "crypto", "merger"]);
+const DEFAULT_MARKET_NEWS_CATEGORY = "general";
+const MAX_MARKET_NEWS_ITEMS = 100;
+const MARKET_STATUS_CACHE_TTL_MS = 60_000;
 let activeRealtimeRefresh = null;
 let lastRealtimeRefreshAt = 0;
 let lastRealtimeSymbolsKey = "";
 const profileMetadataCache = new Map();
+let marketStatusCache = null;
 function toTimestampString(value) {
     if (value instanceof Date)
         return value.toISOString();
@@ -199,6 +222,25 @@ function asNonEmptyString(value) {
         return null;
     const trimmed = value.trim();
     return trimmed ? trimmed : null;
+}
+function asFiniteNumber(value) {
+    if (typeof value !== "number" || !Number.isFinite(value))
+        return null;
+    return value;
+}
+function toIsoFromUnixSeconds(value) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+        return null;
+    const date = new Date(value * 1000);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+function parseRelatedSymbols(value) {
+    if (typeof value !== "string" || !value.trim())
+        return [];
+    return Array.from(new Set(value
+        .split(/[,\s]+/)
+        .map((part) => part.trim().toUpperCase())
+        .filter((part) => SYMBOL_PATTERN.test(part))));
 }
 function withMarketIdentity(metadata, symbol) {
     const normalizedCountry = typeof metadata.country === "string" && metadata.country.trim()
@@ -322,10 +364,155 @@ async function fetchFinnhubCompanyProfile2(symbol) {
         country: typeof data.country === "string" && data.country.trim() ? data.country.trim().toUpperCase() : undefined,
         currency: typeof data.currency === "string" && data.currency.trim() ? data.currency.trim().toUpperCase() : undefined,
         logo_url: typeof data.logo === "string" && data.logo.trim() ? data.logo.trim() : undefined,
+        industry: typeof data.finnhubIndustry === "string" && data.finnhubIndustry.trim()
+            ? data.finnhubIndustry.trim()
+            : undefined,
+        market_cap: asFiniteNumber(data.marketCapitalization) ?? undefined,
+        share_outstanding: asFiniteNumber(data.shareOutstanding) ?? undefined,
+        ipo: typeof data.ipo === "string" && data.ipo.trim() ? data.ipo.trim() : undefined,
+        web_url: typeof data.weburl === "string" && data.weburl.trim() ? data.weburl.trim() : undefined,
+        phone: typeof data.phone === "string" && data.phone.trim() ? data.phone.trim() : undefined,
     };
     const enriched = withMarketIdentity(metadata, symbol);
     profileMetadataCache.set(symbol, enriched);
     return enriched;
+}
+async function fetchFinnhubMarketStatusRaw(exchange) {
+    const token = process.env.FINNHUB_API_KEY || "";
+    if (!token)
+        throw new Error("FINNHUB_API_KEY not set");
+    const url = new URL(`${FINNHUB_BASE_URL}/stock/market-status`);
+    url.searchParams.set("exchange", exchange);
+    url.searchParams.set("token", token);
+    const response = await fetch(url.toString(), {
+        headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+        const body = (await response.text()).slice(0, 200);
+        throw new Error(`Finnhub market-status HTTP ${response.status}: ${body}`);
+    }
+    return (await response.json());
+}
+async function fetchFinnhubEarningsCalendarRaw(params) {
+    const token = process.env.FINNHUB_API_KEY || "";
+    if (!token)
+        throw new Error("FINNHUB_API_KEY not set");
+    const url = new URL(`${FINNHUB_BASE_URL}/calendar/earnings`);
+    url.searchParams.set("from", params.from);
+    url.searchParams.set("to", params.to);
+    if (params.symbol) {
+        url.searchParams.set("symbol", params.symbol);
+    }
+    url.searchParams.set("token", token);
+    const response = await fetch(url.toString(), {
+        headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+        const body = (await response.text()).slice(0, 200);
+        throw new Error(`Finnhub earnings-calendar HTTP ${response.status}: ${body}`);
+    }
+    return (await response.json());
+}
+async function fetchFinnhubMarketNewsRaw(params) {
+    const token = process.env.FINNHUB_API_KEY || "";
+    if (!token)
+        throw new Error("FINNHUB_API_KEY not set");
+    const url = new URL(`${FINNHUB_BASE_URL}/news`);
+    url.searchParams.set("category", params.category);
+    if (typeof params.minId === "number" && Number.isFinite(params.minId) && params.minId > 0) {
+        url.searchParams.set("minId", String(Math.trunc(params.minId)));
+    }
+    url.searchParams.set("token", token);
+    const response = await fetch(url.toString(), {
+        headers: { accept: "application/json" },
+    });
+    if (!response.ok) {
+        const body = (await response.text()).slice(0, 200);
+        throw new Error(`Finnhub market-news HTTP ${response.status}: ${body}`);
+    }
+    const data = (await response.json());
+    return Array.isArray(data) ? data : [];
+}
+function normalizeExchangeCode(value) {
+    const trimmed = value.trim().toUpperCase();
+    if (!trimmed)
+        return "";
+    return trimmed.replace(/[^A-Z0-9_]/g, "");
+}
+function normalizeMarketNewsCategory(value) {
+    if (typeof value !== "string")
+        return DEFAULT_MARKET_NEWS_CATEGORY;
+    const normalized = value.trim().toLowerCase();
+    return MARKET_NEWS_CATEGORIES.has(normalized) ? normalized : DEFAULT_MARKET_NEWS_CATEGORY;
+}
+function parsePositiveInt(value) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+        const n = Math.trunc(value);
+        return n > 0 ? n : null;
+    }
+    if (typeof value === "string" && value.trim()) {
+        const n = Number.parseInt(value, 10);
+        return Number.isFinite(n) && n > 0 ? n : null;
+    }
+    return null;
+}
+async function resolveSymbolCountryMap(symbols) {
+    const map = new Map();
+    for (const symbol of symbols) {
+        const fallbackCountry = DEFAULT_SYMBOL_METADATA[symbol]?.country;
+        if (fallbackCountry) {
+            map.set(symbol, fallbackCountry);
+        }
+    }
+    if (symbols.length === 0)
+        return map;
+    const { rows } = await (0, db_1.query)(`SELECT symbol, country
+     FROM market_snapshot
+     WHERE symbol = ANY($1::text[])
+       AND country IS NOT NULL`, [symbols]);
+    rows.forEach((row) => {
+        if (!row.symbol || !row.country)
+            return;
+        map.set(row.symbol.toUpperCase(), row.country.toUpperCase());
+    });
+    return map;
+}
+function dominantCountry(countries) {
+    if (countries.length === 0)
+        return null;
+    const counts = new Map();
+    countries.forEach((country) => {
+        const iso2 = country.toUpperCase();
+        counts.set(iso2, (counts.get(iso2) ?? 0) + 1);
+    });
+    const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    return ranked[0]?.[0] ?? null;
+}
+async function upsertFinnhubNewsItem(params) {
+    const { rows } = await (0, db_1.query)(`INSERT INTO item (source_id, external_id, kind, title, summary, url, country_iso2, event_time, payload, dedupe_hash)
+     VALUES ($1,$2,'news_article',$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (source_id, external_id)
+     DO UPDATE SET
+       title = COALESCE(EXCLUDED.title, item.title),
+       summary = COALESCE(EXCLUDED.summary, item.summary),
+       url = COALESCE(EXCLUDED.url, item.url),
+       country_iso2 = COALESCE(EXCLUDED.country_iso2, item.country_iso2),
+       event_time = COALESCE(EXCLUDED.event_time, item.event_time),
+       payload = EXCLUDED.payload,
+       dedupe_hash = EXCLUDED.dedupe_hash,
+       updated_at = now()
+     RETURNING (xmax = 0) AS inserted`, [
+        params.sourceId,
+        params.externalId,
+        params.title,
+        params.summary,
+        params.url,
+        params.countryIso2,
+        params.eventTime,
+        JSON.stringify(params.payload),
+        params.dedupeHash,
+    ]);
+    return rows[0]?.inserted ? "inserted" : "updated";
 }
 function toObservedAtISO(value) {
     if (typeof value === "number" && Number.isFinite(value) && value > 0) {
@@ -350,6 +537,12 @@ async function upsertMarketSnapshot(params) {
             country: params.metadata.country ?? null,
             currency: params.metadata.currency ?? null,
             logo: params.metadata.logo_url ?? null,
+            industry: params.metadata.industry ?? null,
+            market_cap: params.metadata.market_cap ?? null,
+            share_outstanding: params.metadata.share_outstanding ?? null,
+            ipo: params.metadata.ipo ?? null,
+            web_url: params.metadata.web_url ?? null,
+            phone: params.metadata.phone ?? null,
         },
         market: {
             code: params.metadata.market_code ?? null,
@@ -433,6 +626,12 @@ async function ingestFinnhubQuotes(symbolsInput) {
                         market_code: metadata.market_code ?? remoteMetadata.market_code,
                         market_name: metadata.market_name ?? remoteMetadata.market_name,
                         market_kind: metadata.market_kind ?? remoteMetadata.market_kind,
+                        industry: metadata.industry ?? remoteMetadata.industry,
+                        market_cap: metadata.market_cap ?? remoteMetadata.market_cap,
+                        share_outstanding: metadata.share_outstanding ?? remoteMetadata.share_outstanding,
+                        ipo: metadata.ipo ?? remoteMetadata.ipo,
+                        web_url: metadata.web_url ?? remoteMetadata.web_url,
+                        phone: metadata.phone ?? remoteMetadata.phone,
                     };
                 }
                 catch {
@@ -531,6 +730,189 @@ async function getMarketQuotesLatest(symbolsInput) {
             payload: row.payload,
         };
     });
+}
+function normalizeExchangeList(values) {
+    if (!values || values.length === 0) {
+        return [...DEFAULT_MARKET_STATUS_EXCHANGES];
+    }
+    const normalized = Array.from(new Set(values
+        .map((value) => normalizeExchangeCode(value))
+        .filter(Boolean)));
+    return normalized.length > 0 ? normalized : [...DEFAULT_MARKET_STATUS_EXCHANGES];
+}
+function normalizeDateInput(value, fallback) {
+    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+        return value.trim();
+    }
+    if (typeof value === "string" && value.trim()) {
+        const parsed = Date.parse(value.trim());
+        if (!Number.isNaN(parsed)) {
+            return new Date(parsed).toISOString().slice(0, 10);
+        }
+    }
+    return fallback.toISOString().slice(0, 10);
+}
+async function getFinnhubMarketStatus(exchangesInput, refresh = false) {
+    const exchanges = normalizeExchangeList(exchangesInput);
+    const cacheKey = exchanges.join(",");
+    const now = Date.now();
+    if (!refresh &&
+        marketStatusCache &&
+        marketStatusCache.key === cacheKey &&
+        now - marketStatusCache.fetchedAt < MARKET_STATUS_CACHE_TTL_MS) {
+        return marketStatusCache.rows;
+    }
+    const rows = [];
+    for (const exchange of exchanges) {
+        try {
+            const data = await fetchFinnhubMarketStatusRaw(exchange);
+            rows.push({
+                exchange: asNonEmptyString(data.exchange) ?? exchange,
+                is_open: typeof data.isOpen === "boolean" ? data.isOpen : null,
+                session: asNonEmptyString(data.session),
+                holiday: asNonEmptyString(data.holiday),
+                timezone: asNonEmptyString(data.timezone),
+                observed_at: toIsoFromUnixSeconds(data.t),
+                payload: data,
+            });
+        }
+        catch (error) {
+            rows.push({
+                exchange,
+                is_open: null,
+                session: null,
+                holiday: null,
+                timezone: null,
+                observed_at: null,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+    marketStatusCache = {
+        key: cacheKey,
+        fetchedAt: now,
+        rows,
+    };
+    return rows;
+}
+async function getFinnhubEarningsCalendar(params) {
+    const today = new Date();
+    const defaultTo = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const from = normalizeDateInput(params?.from, today);
+    const to = normalizeDateInput(params?.to, defaultTo);
+    const symbol = params?.symbol ? normalizeSymbol(params.symbol) : undefined;
+    const limit = Math.min(Math.max(params?.limit ?? 50, 1), 200);
+    const payload = await fetchFinnhubEarningsCalendarRaw({
+        from,
+        to,
+        symbol,
+    });
+    const entries = Array.isArray(payload.earningsCalendar) ? payload.earningsCalendar : [];
+    return entries.slice(0, limit).map((entry) => {
+        const normalizedSymbol = asNonEmptyString(entry.symbol)?.toUpperCase() ?? "";
+        const metadata = normalizedSymbol ? DEFAULT_SYMBOL_METADATA[normalizedSymbol] : undefined;
+        return {
+            symbol: normalizedSymbol || "UNKNOWN",
+            date: asNonEmptyString(entry.date),
+            hour: asNonEmptyString(entry.hour),
+            quarter: asFiniteNumber(entry.quarter),
+            year: asFiniteNumber(entry.year),
+            eps_actual: asFiniteNumber(entry.epsActual),
+            eps_estimate: asFiniteNumber(entry.epsEstimate),
+            revenue_actual: asFiniteNumber(entry.revenueActual),
+            revenue_estimate: asFiniteNumber(entry.revenueEstimate),
+            country: metadata?.country ?? null,
+            market_code: metadata?.market_code ?? null,
+            market_name: metadata?.market_name ?? null,
+            payload: entry,
+        };
+    });
+}
+async function ingestFinnhubMarketNews(params) {
+    const source = await ensureSource();
+    const category = normalizeMarketNewsCategory(params?.category);
+    const minId = parsePositiveInt(params?.minId) ?? undefined;
+    const maxItems = Math.min(Math.max(params?.maxItems ?? 40, 1), MAX_MARKET_NEWS_ITEMS);
+    const articles = await fetchFinnhubMarketNewsRaw({
+        category,
+        minId,
+    });
+    const selected = articles.slice(0, maxItems);
+    const relatedSymbols = Array.from(new Set(selected.flatMap((article) => parseRelatedSymbols(article.related))));
+    const symbolCountryMap = await resolveSymbolCountryMap(relatedSymbols);
+    let inserted = 0;
+    let updated = 0;
+    let skipped = 0;
+    let minSeenId = null;
+    let maxSeenId = null;
+    for (const article of selected) {
+        try {
+            const articleId = parsePositiveInt(article.id);
+            if (articleId != null) {
+                minSeenId = minSeenId == null ? articleId : Math.min(minSeenId, articleId);
+                maxSeenId = maxSeenId == null ? articleId : Math.max(maxSeenId, articleId);
+            }
+            const title = asNonEmptyString(article.headline);
+            const summary = asNonEmptyString(article.summary);
+            const url = asNonEmptyString(article.url);
+            const related = parseRelatedSymbols(article.related);
+            const relatedCountries = related
+                .map((symbol) => symbolCountryMap.get(symbol))
+                .filter((value) => typeof value === "string");
+            const relatedCountryHint = dominantCountry(relatedCountries);
+            const inference = (0, country_inference_1.inferNewsCountry)({
+                title,
+                summary,
+                url,
+            });
+            const countryIso2 = inference.iso2 ??
+                (relatedCountryHint && /^[A-Z]{2}$/.test(relatedCountryHint) ? relatedCountryHint : null);
+            const eventTime = toIsoFromUnixSeconds(article.datetime);
+            const fallbackExternal = url ?? `${title ?? "unknown"}|${eventTime ?? "unknown"}|${category}`;
+            const externalId = articleId != null ? `market-news:${articleId}` : `market-news:${fallbackExternal}`;
+            const dedupeBase = `${externalId}|${eventTime ?? ""}|${title ?? ""}|finnhub-market-news`;
+            const dedupeHash = node_crypto_1.default.createHash("sha256").update(dedupeBase).digest("hex");
+            const result = await upsertFinnhubNewsItem({
+                sourceId: source.id,
+                externalId,
+                title,
+                summary,
+                url,
+                countryIso2,
+                eventTime,
+                payload: {
+                    provider: "finnhub",
+                    category,
+                    source: asNonEmptyString(article.source),
+                    image: asNonEmptyString(article.image),
+                    related,
+                    id: articleId,
+                    country_inference: {
+                        ...inference,
+                        related_country_hint: relatedCountryHint,
+                    },
+                    raw: article,
+                },
+                dedupeHash,
+            });
+            if (result === "inserted")
+                inserted += 1;
+            else
+                updated += 1;
+        }
+        catch {
+            skipped += 1;
+        }
+    }
+    return {
+        inserted,
+        updated,
+        skipped,
+        category,
+        fetched: selected.length,
+        min_id: minSeenId,
+        max_id: maxSeenId,
+    };
 }
 async function refreshMarketQuotesRealtime(symbolsInput, minRefreshMs = 15_000) {
     const symbols = symbolsInput && symbolsInput.length > 0 ? symbolsInput : [...exports.DEFAULT_MARKET_SYMBOLS];

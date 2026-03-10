@@ -915,6 +915,19 @@ app.post("/api/ingest/openweather/country-current", requireIngestionAccess, asyn
 app.post("/api/ingest/finnhub/quotes", requireIngestionAccess, async (req, res) => {
     try {
         let symbols;
+        const includeNews = req.body?.includeNews === true ||
+            String(req.body?.includeNews || "").trim().toLowerCase() === "true";
+        const newsCategory = typeof req.body?.newsCategory === "string" ? req.body.newsCategory : undefined;
+        const newsMinId = typeof req.body?.newsMinId === "number"
+            ? req.body.newsMinId
+            : typeof req.body?.newsMinId === "string"
+                ? Number.parseInt(req.body.newsMinId, 10)
+                : undefined;
+        const newsMaxItems = typeof req.body?.newsMaxItems === "number"
+            ? req.body.newsMaxItems
+            : typeof req.body?.newsMaxItems === "string"
+                ? Number.parseInt(req.body.newsMaxItems, 10)
+                : undefined;
         try {
             const parsed = (0, finnhub_1.parseMarketSymbolsInput)(req.body?.symbols);
             symbols = parsed.length > 0 ? parsed : undefined;
@@ -925,6 +938,38 @@ app.post("/api/ingest/finnhub/quotes", requireIngestionAccess, async (req, res) 
             });
         }
         const result = await (0, finnhub_1.ingestFinnhubQuotes)(symbols);
+        const news = includeNews
+            ? await (0, finnhub_1.ingestFinnhubMarketNews)({
+                category: newsCategory,
+                minId: Number.isFinite(newsMinId) ? newsMinId : undefined,
+                maxItems: Number.isFinite(newsMaxItems) ? newsMaxItems : undefined,
+            })
+            : null;
+        res.json({ ...result, news });
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message || String(e) });
+    }
+});
+// Ingest Finnhub market news into the shared news item feed
+app.post("/api/ingest/finnhub/news", requireIngestionAccess, async (req, res) => {
+    try {
+        const category = typeof req.body?.category === "string" ? req.body.category : undefined;
+        const minId = typeof req.body?.minId === "number"
+            ? req.body.minId
+            : typeof req.body?.minId === "string"
+                ? Number.parseInt(req.body.minId, 10)
+                : undefined;
+        const maxItems = typeof req.body?.maxItems === "number"
+            ? req.body.maxItems
+            : typeof req.body?.maxItems === "string"
+                ? Number.parseInt(req.body.maxItems, 10)
+                : undefined;
+        const result = await (0, finnhub_1.ingestFinnhubMarketNews)({
+            category,
+            minId: Number.isFinite(minId) ? minId : undefined,
+            maxItems: Number.isFinite(maxItems) ? maxItems : undefined,
+        });
         res.json(result);
     }
     catch (e) {
@@ -967,6 +1012,47 @@ app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
         }
         const quotes = await (0, finnhub_1.getMarketQuotesLatest)(symbols);
         res.json({ quotes, refreshed: shouldRefresh, count: quotes.length });
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message || String(e) });
+    }
+});
+// Live market open/close status by exchange
+app.get("/api/market/status", requireAuthenticated, async (req, res) => {
+    try {
+        (0, ingestion_automation_1.trackDemandSignal)("market");
+        const exchangesRaw = typeof req.query.exchanges === "string" ? req.query.exchanges : "";
+        const exchanges = exchangesRaw
+            .split(/[,\s]+/)
+            .map((value) => value.trim().toUpperCase())
+            .filter(Boolean);
+        const refreshRaw = typeof req.query.refresh === "string" ? req.query.refresh.trim().toLowerCase() : "";
+        const shouldRefresh = refreshRaw === "1" ||
+            refreshRaw === "true" ||
+            refreshRaw === "yes" ||
+            refreshRaw === "on";
+        const status = await (0, finnhub_1.getFinnhubMarketStatus)(exchanges.length > 0 ? exchanges : undefined, shouldRefresh);
+        res.json({ status, refreshed: shouldRefresh, count: status.length });
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message || String(e) });
+    }
+});
+// Upcoming earnings events
+app.get("/api/market/earnings", requireAuthenticated, async (req, res) => {
+    try {
+        (0, ingestion_automation_1.trackDemandSignal)("market");
+        const from = typeof req.query.from === "string" ? req.query.from : undefined;
+        const to = typeof req.query.to === "string" ? req.query.to : undefined;
+        const symbol = typeof req.query.symbol === "string" ? req.query.symbol : undefined;
+        const limitRaw = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : undefined;
+        const events = await (0, finnhub_1.getFinnhubEarningsCalendar)({
+            from,
+            to,
+            symbol,
+            limit: Number.isFinite(limitRaw) ? limitRaw : undefined,
+        });
+        res.json({ events, count: events.length });
     }
     catch (e) {
         res.status(500).json({ error: e.message || String(e) });

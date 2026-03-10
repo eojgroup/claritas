@@ -10,6 +10,7 @@ struct DashboardView: View {
     @State private var section: DashboardSection = .overview
     @State private var selectedSymbol: String? = nil
     @State private var minTemp: String = ""
+    @State private var marketEarningsWindowDays: Int = 14
 
     enum ListMode: String, CaseIterable { case news, weather, market }
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
@@ -78,16 +79,17 @@ struct DashboardView: View {
                         DashboardCard {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
-                                    Text("Map: \(mapMode == .news ? "#News per country" : "Weather per country")")
+                                    Text("Map: \(mapTitle)")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                     Spacer()
                                     Picker("Mode", selection: $mapMode) {
                                         Text("News").tag(ListMode.news)
                                         Text("Weather").tag(ListMode.weather)
+                                        Text("Markets").tag(ListMode.market)
                                     }
                                     .pickerStyle(.segmented)
-                                    .frame(maxWidth: 220)
+                                    .frame(maxWidth: 300)
                                     .onChange(of: mapMode) { newValue in
                                         listMode = newValue
                                     }
@@ -98,6 +100,7 @@ struct DashboardView: View {
                                         mode: mapMode,
                                         countryStats: model.countryStats,
                                         weather: model.weather,
+                                        marketQuotes: model.marketQuotes,
                                         selectedCountry: model.selectedCountry,
                                         onSelectCountry: { iso in
                                             let normalized = iso.uppercased()
@@ -108,7 +111,7 @@ struct DashboardView: View {
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 12)
-                                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                                                .stroke(ClaritasPalette.beige, lineWidth: 1)
                                         )
 
                                     if mapMode == .weather && model.weather.isEmpty {
@@ -204,6 +207,64 @@ struct DashboardView: View {
                         }
                     } else {
                         DashboardCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Market index map")
+                                    .font(.headline)
+                                Text("Relative index volatility by country")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                InteractiveCountryBubbleMap(
+                                    mode: .market,
+                                    countryStats: model.countryStats,
+                                    weather: model.weather,
+                                    marketQuotes: model.marketQuotes,
+                                    selectedCountry: model.selectedCountry,
+                                    onSelectCountry: { iso in
+                                        let normalized = iso.uppercased()
+                                        model.selectedCountry = model.selectedCountry?.uppercased() == normalized ? nil : normalized
+                                    }
+                                )
+                                .frame(height: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(ClaritasPalette.beige, lineWidth: 1)
+                                )
+                            }
+                        }
+
+                        DashboardCard {
+                            MarketStatusPanel(
+                                rows: marketStatusRows,
+                                isRefreshing: model.isRefreshingMarketStatus,
+                                onRefresh: { Task { await model.refreshMarketStatus(forceRefresh: true) } }
+                            )
+                        }
+
+                        DashboardCard {
+                            MarketEarningsPanel(
+                                rows: marketEarningsRows,
+                                selectedSymbol: selectedSymbol,
+                                selectedWindowDays: marketEarningsWindowDays,
+                                isRefreshing: model.isRefreshingMarketEarnings,
+                                onSelectWindowDays: { days in
+                                    marketEarningsWindowDays = days
+                                    Task { await model.refreshMarketEarnings(windowDays: days) }
+                                },
+                                onRefresh: {
+                                    Task { await model.refreshMarketEarnings(windowDays: marketEarningsWindowDays) }
+                                },
+                                onSelectSymbol: { symbol in
+                                    selectedSymbol = symbol
+                                    if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
+                                        model.selectedCountry = country.uppercased()
+                                    }
+                                }
+                            )
+                        }
+
+                        DashboardCard {
                             MarketQuoteListView(
                                 quotes: filteredMarketQuotes(),
                                 selectedSymbol: selectedSymbol,
@@ -293,6 +354,18 @@ struct DashboardView: View {
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
             }
         }
+        .task {
+            while !Task.isCancelled {
+                await model.refreshMarketStatus(forceRefresh: true)
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+        }
+        .task {
+            await model.refreshMarketEarnings(windowDays: marketEarningsWindowDays)
+        }
+        .onChange(of: marketEarningsWindowDays) { next in
+            Task { await model.refreshMarketEarnings(windowDays: next) }
+        }
     }
 
     private func filteredWeather() -> [CountryWeather] {
@@ -320,8 +393,15 @@ struct DashboardView: View {
 
     private func filteredMarketQuotes() -> [MarketQuote] {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !term.isEmpty else { return model.marketQuotes }
-        return model.marketQuotes.filter { quote in
+        let baseRows: [MarketQuote] = {
+            if let iso = model.selectedCountry?.uppercased(), !iso.isEmpty {
+                return model.marketQuotes.filter { ($0.country ?? "").uppercased() == iso }
+            }
+            return model.marketQuotes
+        }()
+
+        guard !term.isEmpty else { return baseRows }
+        return baseRows.filter { quote in
             let haystack = [
                 quote.symbol,
                 quote.company_name ?? "",
@@ -370,6 +450,26 @@ struct DashboardView: View {
             .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
     }
 
+    private var marketStatusRows: [MarketStatus] {
+        model.marketStatus
+            .sorted { lhs, rhs in
+                let leftOpen = lhs.is_open == true ? 1 : 0
+                let rightOpen = rhs.is_open == true ? 1 : 0
+                if leftOpen != rightOpen { return leftOpen > rightOpen }
+                return lhs.exchange < rhs.exchange
+            }
+    }
+
+    private var marketEarningsRows: [EarningsEvent] {
+        let baseRows: [EarningsEvent]
+        if let symbol = selectedSymbol?.uppercased(), !symbol.isEmpty {
+            baseRows = model.marketEarnings.filter { $0.symbol.uppercased() == symbol }
+        } else {
+            baseRows = model.marketEarnings
+        }
+        return baseRows.sorted { ($0.date ?? "") < ($1.date ?? "") }
+    }
+
     private func valueOrDash(_ value: Double?) -> String {
         guard let value else { return "—" }
         return String(format: "%.2f", value)
@@ -382,22 +482,29 @@ struct DashboardView: View {
     }
 
     private func changeColor(_ quote: MarketQuote) -> Color {
-        guard let change = quote.change else { return .secondary }
-        if change > 0 { return .green }
-        if change < 0 { return .red }
-        return .secondary
+        guard let change = quote.change else { return ClaritasPalette.grey }
+        if change > 0 { return ClaritasPalette.positive }
+        if change < 0 { return ClaritasPalette.negative }
+        return ClaritasPalette.grey
     }
 
     private var searchFieldBackground: Color {
-        colorScheme == .dark
-            ? Color(red: 0.07, green: 0.11, blue: 0.16)
-            : Color.white
+        colorScheme == .dark ? ClaritasPalette.darkBlue.opacity(0.95) : Color.white.opacity(0.95)
     }
 
     private var searchFieldStroke: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.14)
-            : Color.black.opacity(0.12)
+        colorScheme == .dark ? ClaritasPalette.beige.opacity(0.35) : ClaritasPalette.beige
+    }
+
+    private var mapTitle: String {
+        switch mapMode {
+        case .news:
+            return "#News per country"
+        case .weather:
+            return "Weather per country"
+        case .market:
+            return "Index volatility by country"
+        }
     }
 }
 
@@ -429,6 +536,7 @@ private struct MarketQuoteListView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ForEach(quotes) { quote in
+                    let metadata = marketQuoteMetadata(quote)
                     Button(action: { onSelectSymbol(quote.symbol) }) {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
@@ -446,6 +554,22 @@ private struct MarketQuoteListView: View {
                             Text(quote.company_name ?? "—")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                if let marketCode = metadata.marketCode, !marketCode.isEmpty {
+                                    Text(marketCode)
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(ClaritasPalette.darkBlue.opacity(0.12), in: Capsule())
+                                        .foregroundStyle(ClaritasPalette.darkBlue)
+                                }
+                                if let industry = metadata.industry, !industry.isEmpty {
+                                    Text(industry)
+                                        .font(.caption2)
+                                        .lineLimit(1)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             HStack(spacing: 12) {
                                 Text(changeLabel(quote))
                                     .font(.caption.weight(.semibold))
@@ -460,20 +584,43 @@ private struct MarketQuoteListView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
+                            if let marketCap = metadata.marketCap {
+                                Text("Market cap \(formatCompactNumber(marketCap))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                             Text(
                                 "Observed " +
                                 (quote.observedDate?.formatted(date: .abbreviated, time: .shortened) ?? quote.observed_at)
                             )
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+
+                            if let profileURL = metadata.webURL ?? quoteURL(quote.symbol) {
+                                Link(destination: profileURL) {
+                                    Text("Company profile")
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(ClaritasPalette.offWhite, in: Capsule())
+                                        .overlay(
+                                            Capsule().stroke(ClaritasPalette.beige, lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .background(
                             (selectedSymbol?.uppercased() == quote.symbol.uppercased()
-                                ? Color.green.opacity(0.12)
-                                : Color.primary.opacity(0.04)),
+                                ? ClaritasPalette.darkGreen.opacity(0.12)
+                                : ClaritasPalette.offWhite.opacity(0.82)),
                             in: RoundedRectangle(cornerRadius: 10)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(ClaritasPalette.beige, lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
@@ -497,43 +644,280 @@ private struct MarketQuoteListView: View {
     }
 
     private func changeColor(_ quote: MarketQuote) -> Color {
-        guard let change = quote.change else { return .secondary }
-        if change > 0 { return .green }
-        if change < 0 { return .red }
-        return .secondary
+        guard let change = quote.change else { return ClaritasPalette.grey }
+        if change > 0 { return ClaritasPalette.positive }
+        if change < 0 { return ClaritasPalette.negative }
+        return ClaritasPalette.grey
     }
 
     private func valueOrDash(_ value: Double?) -> String {
         guard let value else { return "—" }
         return String(format: "%.2f", value)
     }
+
+    private func formatCompactNumber(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = value >= 1_000_000_000 ? 1 : 0
+        let suffix: String
+        let scaled: Double
+        if value >= 1_000_000_000_000 {
+            scaled = value / 1_000_000_000_000
+            suffix = "T"
+        } else if value >= 1_000_000_000 {
+            scaled = value / 1_000_000_000
+            suffix = "B"
+        } else if value >= 1_000_000 {
+            scaled = value / 1_000_000
+            suffix = "M"
+        } else if value >= 1_000 {
+            scaled = value / 1_000
+            suffix = "K"
+        } else {
+            scaled = value
+            suffix = ""
+        }
+        let number = formatter.string(from: NSNumber(value: scaled)) ?? String(format: "%.1f", scaled)
+        return number + suffix
+    }
+
+    private func quoteURL(_ symbol: String) -> URL? {
+        URL(string: "https://finance.yahoo.com/quote/\(symbol.uppercased())")
+    }
+}
+
+private struct MarketStatusPanel: View {
+    let rows: [MarketStatus]
+    let isRefreshing: Bool
+    let onRefresh: () -> Void
+
+    private var openCount: Int {
+        rows.filter { $0.is_open == true }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Market status")
+                        .font(.headline)
+                    Text("\(openCount)/\(rows.count) tracked exchanges open")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: onRefresh) {
+                    Text(isRefreshing ? "Refreshing…" : "Refresh")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isRefreshing)
+            }
+
+            if rows.isEmpty {
+                Text("No exchange status rows available.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(rows.prefix(20)) { row in
+                    HStack {
+                        Text(row.exchange)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text(statusLabel(row))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(statusColor(row))
+                    }
+                    .padding(10)
+                    .background(ClaritasPalette.offWhite.opacity(0.9), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(ClaritasPalette.beige, lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    private func statusLabel(_ row: MarketStatus) -> String {
+        if row.is_open == true { return "Open" }
+        if row.is_open == false { return "Closed" }
+        return "Unknown"
+    }
+
+    private func statusColor(_ row: MarketStatus) -> Color {
+        if row.is_open == true { return ClaritasPalette.positive }
+        if row.is_open == false { return ClaritasPalette.negative }
+        return ClaritasPalette.grey
+    }
+}
+
+private struct MarketEarningsPanel: View {
+    let rows: [EarningsEvent]
+    let selectedSymbol: String?
+    let selectedWindowDays: Int
+    let isRefreshing: Bool
+    let onSelectWindowDays: (Int) -> Void
+    let onRefresh: () -> Void
+    let onSelectSymbol: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Earnings calendar")
+                        .font(.headline)
+                    Text(selectedSymbol.map { "Upcoming events for \($0)" } ?? "Upcoming events (watch scope)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    ForEach([7, 14, 30], id: \.self) { window in
+                        Button(action: { onSelectWindowDays(window) }) {
+                            Text("\(window)d")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(
+                                    selectedWindowDays == window
+                                        ? ClaritasPalette.darkBlue
+                                        : ClaritasPalette.offWhite,
+                                    in: Capsule()
+                                )
+                                .foregroundStyle(
+                                    selectedWindowDays == window
+                                        ? ClaritasPalette.offWhite
+                                        : ClaritasPalette.grey
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(4)
+                .background(ClaritasPalette.beige.opacity(0.55), in: Capsule())
+            }
+
+            HStack {
+                Spacer()
+                Button(action: onRefresh) {
+                    Text(isRefreshing ? "Refreshing…" : "Refresh earnings")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isRefreshing)
+            }
+
+            if rows.isEmpty {
+                Text("No earnings events in the selected window.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(rows.prefix(24)) { row in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Button(action: { onSelectSymbol(row.symbol) }) {
+                                Text(row.symbol)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(ClaritasPalette.darkBlue)
+                            }
+                            .buttonStyle(.plain)
+                            Spacer()
+                            Text(row.date ?? "—")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("EPS \(value(row.eps_actual)) / \(value(row.eps_estimate)) · Rev \(value(row.revenue_actual)) / \(value(row.revenue_estimate))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .background(ClaritasPalette.offWhite.opacity(0.9), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(ClaritasPalette.beige, lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+
+    private func value(_ number: Double?) -> String {
+        guard let number else { return "—" }
+        if abs(number) >= 1_000_000_000 {
+            return String(format: "%.2fB", number / 1_000_000_000)
+        }
+        if abs(number) >= 1_000_000 {
+            return String(format: "%.2fM", number / 1_000_000)
+        }
+        if abs(number) >= 1_000 {
+            return String(format: "%.1fK", number / 1_000)
+        }
+        return String(format: "%.2f", number)
+    }
+}
+
+private struct MarketQuoteMetadata {
+    let marketCode: String?
+    let marketName: String?
+    let industry: String?
+    let marketCap: Double?
+    let ipo: String?
+    let webURL: URL?
+}
+
+private func marketQuoteMetadata(_ quote: MarketQuote) -> MarketQuoteMetadata {
+    guard let payload = quote.payload?.object else {
+        return MarketQuoteMetadata(
+            marketCode: nil,
+            marketName: nil,
+            industry: nil,
+            marketCap: nil,
+            ipo: nil,
+            webURL: nil
+        )
+    }
+    let profile = payload["profile"]?.object ?? [:]
+    let webURL: URL?
+    if let web = profile["web_url"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !web.isEmpty {
+        webURL = URL(string: web)
+    } else {
+        webURL = nil
+    }
+
+    return MarketQuoteMetadata(
+        marketCode: profile["market_code"]?.string,
+        marketName: profile["market_name"]?.string,
+        industry: profile["industry"]?.string,
+        marketCap: profile["market_cap"]?.number,
+        ipo: profile["ipo"]?.string,
+        webURL: webURL
+    )
 }
 
 private struct DashboardHeaderView: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(Color(red: 0.05, green: 0.14, blue: 0.24))
+                    .fill(ClaritasPalette.darkBlue)
                     .frame(width: 64, height: 64)
                     .offset(x: -8)
                 Circle()
-                    .fill(Color(red: 0.24, green: 0.32, blue: 0.4))
+                    .fill(ClaritasPalette.darkGreen.opacity(0.75))
                     .frame(width: 64, height: 64)
                     .offset(x: 16)
                 Text("CLARITAS")
                     .font(.system(size: 18, weight: .semibold, design: .serif))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(ClaritasPalette.offWhite)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Signal desk overview")
                     .font(.headline)
-                    .foregroundStyle(titleColor)
+                    .foregroundStyle(ClaritasPalette.text)
                 Text("Global intelligence with trusted identity.")
                     .font(.subheadline)
-                    .foregroundStyle(subtitleColor)
+                    .foregroundStyle(ClaritasPalette.grey)
             }
             Spacer()
             HStack(spacing: 10) {
@@ -541,47 +925,17 @@ private struct DashboardHeaderView: View {
                 Image(systemName: "line.3.horizontal")
                 Image(systemName: "person.crop.circle")
             }
-            .foregroundStyle(iconColor)
+            .foregroundStyle(ClaritasPalette.darkBlue)
             .font(.title3)
         }
         .padding(16)
-        .background(cardBackground, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(cardStroke, lineWidth: 1))
-    }
-
-    private var cardBackground: Color {
-        colorScheme == .dark
-            ? Color(red: 0.08, green: 0.12, blue: 0.18).opacity(0.96)
-            : Color.white.opacity(0.92)
-    }
-
-    private var cardStroke: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.12)
-            : Color.black.opacity(0.12)
-    }
-
-    private var titleColor: Color {
-        colorScheme == .dark
-            ? Color(red: 0.90, green: 0.94, blue: 0.97)
-            : Color(red: 0.07, green: 0.14, blue: 0.2)
-    }
-
-    private var subtitleColor: Color {
-        colorScheme == .dark
-            ? Color(red: 0.70, green: 0.76, blue: 0.82)
-            : Color.secondary
-    }
-
-    private var iconColor: Color {
-        colorScheme == .dark
-            ? Color(red: 0.72, green: 0.80, blue: 0.89)
-            : Color(red: 0.05, green: 0.14, blue: 0.24)
+        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(ClaritasPalette.beige, lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 6)
     }
 }
 
 private struct DashboardBackground<Content: View>: View {
-    @Environment(\.colorScheme) private var colorScheme
     @ViewBuilder var content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -591,15 +945,10 @@ private struct DashboardBackground<Content: View>: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: colorScheme == .dark
-                    ? [
-                        Color(red: 0.06, green: 0.08, blue: 0.11),
-                        Color(red: 0.03, green: 0.05, blue: 0.08)
-                    ]
-                    : [
-                        Color(red: 0.89, green: 0.91, blue: 0.92),
-                        Color(red: 0.93, green: 0.94, blue: 0.95)
-                    ],
+                colors: [
+                    ClaritasPalette.offWhite,
+                    ClaritasPalette.beige.opacity(0.85)
+                ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
@@ -611,7 +960,6 @@ private struct DashboardBackground<Content: View>: View {
 }
 
 private struct DashboardCard<Content: View>: View {
-    @Environment(\.colorScheme) private var colorScheme
     @ViewBuilder var content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -623,21 +971,9 @@ private struct DashboardCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(cardBackground, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(cardStroke, lineWidth: 1))
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.3 : 0.08), radius: 12, x: 0, y: 8)
-    }
-
-    private var cardBackground: Color {
-        colorScheme == .dark
-            ? Color(red: 0.08, green: 0.12, blue: 0.18).opacity(0.96)
-            : Color.white.opacity(0.96)
-    }
-
-    private var cardStroke: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.12)
-            : Color.black.opacity(0.12)
+        .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(ClaritasPalette.beige, lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 8)
     }
 }
 
@@ -771,6 +1107,7 @@ private struct InteractiveCountryBubbleMap: View {
     let mode: DashboardView.ListMode
     let countryStats: [CountryStat]
     let weather: [CountryWeather]
+    let marketQuotes: [MarketQuote]
     let selectedCountry: String?
     let onSelectCountry: (String) -> Void
 
@@ -813,7 +1150,29 @@ private struct InteractiveCountryBubbleMap: View {
             }
             .sorted { $0.magnitude > $1.magnitude }
         case .market:
-            return []
+            var grouped: [String: [MarketQuote]] = [:]
+            for quote in marketQuotes {
+                guard let country = quote.country?.uppercased(), !country.isEmpty else { continue }
+                grouped[country, default: []].append(quote)
+            }
+            return grouped.compactMap { (country, quotes) in
+                guard let coordinate = CountryCentroidLookup.coordinate(for: country) else { return nil }
+                let changes = quotes.compactMap { $0.percent_change }
+                let avgChange = changes.isEmpty ? 0 : changes.reduce(0, +) / Double(changes.count)
+                let marketCodes = quotes
+                    .compactMap { marketQuoteMetadata($0).marketCode }
+                    .filter { !$0.isEmpty }
+                let primaryMarketCode = marketCodes.first ?? "INDEX"
+                return CountryBubblePoint(
+                    id: "market-\(country)",
+                    iso: country,
+                    valueLabel: "\(Int(abs(avgChange).rounded()))%",
+                    detail: "\(primaryMarketCode) · \(String(format: "%+.2f%%", avgChange))",
+                    magnitude: max(abs(avgChange), 1),
+                    coordinate: coordinate
+                )
+            }
+            .sorted { $0.magnitude > $1.magnitude }
         }
     }
 
@@ -865,16 +1224,16 @@ private struct InteractiveCountryBubbleMap: View {
         switch mode {
         case .news:
             fillColor = selected
-                ? Color(red: 0.10, green: 0.58, blue: 0.50)
-                : Color(red: 0.10, green: 0.45, blue: 0.69).opacity(0.9)
+                ? ClaritasPalette.darkGreen
+                : ClaritasPalette.darkBlue.opacity(0.86)
         case .weather:
             fillColor = selected
-                ? Color(red: 0.92, green: 0.51, blue: 0.27)
-                : Color(red: 0.78, green: 0.39, blue: 0.24).opacity(0.86)
+                ? ClaritasPalette.brown
+                : ClaritasPalette.brown.opacity(0.78)
         case .market:
             fillColor = selected
-                ? Color(red: 0.67, green: 0.44, blue: 0.09)
-                : Color(red: 0.55, green: 0.37, blue: 0.06).opacity(0.86)
+                ? ClaritasPalette.darkBlue
+                : ClaritasPalette.darkBlue.opacity(0.72)
         }
 
         return Button(action: { onSelectCountry(point.iso) }) {
@@ -969,10 +1328,10 @@ private struct InteractiveCountryBubbleMap: View {
 private struct CountryBubblePoint: Identifiable {
     let id: String
     let iso: String
-    let coordinate: CLLocationCoordinate2D
     let valueLabel: String
     let detail: String
     let magnitude: Double
+    let coordinate: CLLocationCoordinate2D
 }
 
 private enum CountryCentroidLookup {
