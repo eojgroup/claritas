@@ -1127,10 +1127,10 @@ private struct InteractiveCountryBubbleMap: View {
                     CountryBubblePoint(
                         id: "news-\(iso)",
                         iso: iso,
-                        coordinate: coordinate,
                         valueLabel: "\(stat.count)",
                         detail: "\(stat.count) news",
-                        magnitude: max(Double(stat.count), 1)
+                        magnitude: max(Double(stat.count), 1),
+                        coordinate: coordinate
                     )
                 )
             }
@@ -1147,10 +1147,10 @@ private struct InteractiveCountryBubbleMap: View {
                     CountryBubblePoint(
                         id: "weather-\(iso)",
                         iso: iso,
-                        coordinate: coordinate,
                         valueLabel: label,
                         detail: detail,
-                        magnitude: max(abs(row.temp_c ?? 0), 1)
+                        magnitude: max(abs(row.temp_c ?? 0), 1),
+                        coordinate: coordinate
                     )
                 )
             }
