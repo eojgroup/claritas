@@ -16,12 +16,81 @@ struct AuthProvider: Codable, Identifiable {
     let start_path: String?
 }
 
+struct BillingPlanRef: Codable {
+    let id: Int
+    let code: String
+    let name: String
+    let price_cents: Int
+    let currency: String
+    let interval_unit: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case code
+        case name
+        case price_cents
+        case currency
+        case interval_unit
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        code = try container.decode(String.self, forKey: .code)
+        name = try container.decode(String.self, forKey: .name)
+        price_cents = try container.decodeFlexibleInt(forKey: .price_cents)
+        currency = try container.decode(String.self, forKey: .currency)
+        interval_unit = try container.decode(String.self, forKey: .interval_unit)
+    }
+}
+
+struct BillingSubscription: Codable {
+    let id: Int
+    let status: String
+    let provider: String
+    let started_at: String
+    let current_period_end: String?
+    let canceled_at: String?
+    let plan: BillingPlanRef
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case provider
+        case started_at
+        case current_period_end
+        case canceled_at
+        case plan
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        status = try container.decode(String.self, forKey: .status)
+        provider = try container.decode(String.self, forKey: .provider)
+        started_at = try container.decode(String.self, forKey: .started_at)
+        current_period_end = try container.decodeIfPresent(String.self, forKey: .current_period_end)
+        canceled_at = try container.decodeIfPresent(String.self, forKey: .canceled_at)
+        plan = try container.decode(BillingPlanRef.self, forKey: .plan)
+    }
+}
+
+struct BillingAccessState: Codable {
+    let paywall_enabled: Bool
+    let has_access: Bool
+    let reason: String
+    let checkout_url: String?
+    let portal_url: String?
+    let subscription: BillingSubscription?
+}
+
 struct AuthUser: Codable {
     let id: Int
     let email: String?
     let display_name: String?
     let avatar_url: String?
     let roles: [String]?
+    let billing: BillingAccessState?
 }
 
 struct NewsItem: Codable, Identifiable {
@@ -186,6 +255,7 @@ struct AdminUser: Codable, Identifiable {
     let roles: [String]
     let providers: [String]
     let last_seen_at: String?
+    let subscription: AdminUserSubscription?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -198,6 +268,7 @@ struct AdminUser: Codable, Identifiable {
         case roles
         case providers
         case last_seen_at
+        case subscription
     }
 
     init(from decoder: Decoder) throws {
@@ -212,6 +283,7 @@ struct AdminUser: Codable, Identifiable {
         roles = try container.decodeIfPresent([String].self, forKey: .roles) ?? []
         providers = try container.decodeIfPresent([String].self, forKey: .providers) ?? []
         last_seen_at = try container.decodeIfPresent(String.self, forKey: .last_seen_at)
+        subscription = try container.decodeIfPresent(AdminUserSubscription.self, forKey: .subscription)
     }
 }
 
@@ -220,6 +292,79 @@ struct AdminUsersResponse: Codable {
     let total: Int
     let limit: Int
     let offset: Int
+}
+
+struct AdminBillingPlan: Codable, Identifiable {
+    let id: Int
+    let code: String
+    let name: String
+    let description: String?
+    let price_cents: Int
+    let currency: String
+    let interval_unit: String
+    let is_active: Bool
+    let metadata: JSONValue?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case code
+        case name
+        case description
+        case price_cents
+        case currency
+        case interval_unit
+        case is_active
+        case metadata
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        code = try container.decode(String.self, forKey: .code)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        price_cents = try container.decodeFlexibleInt(forKey: .price_cents)
+        currency = try container.decode(String.self, forKey: .currency)
+        interval_unit = try container.decode(String.self, forKey: .interval_unit)
+        is_active = try container.decode(Bool.self, forKey: .is_active)
+        metadata = try container.decodeIfPresent(JSONValue.self, forKey: .metadata)
+    }
+}
+
+struct AdminUserSubscriptionPlan: Codable {
+    let code: String?
+    let name: String?
+}
+
+struct AdminUserSubscription: Codable {
+    let id: Int
+    let status: String?
+    let provider: String?
+    let started_at: String?
+    let current_period_end: String?
+    let canceled_at: String?
+    let plan: AdminUserSubscriptionPlan?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case provider
+        case started_at
+        case current_period_end
+        case canceled_at
+        case plan
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider)
+        started_at = try container.decodeIfPresent(String.self, forKey: .started_at)
+        current_period_end = try container.decodeIfPresent(String.self, forKey: .current_period_end)
+        canceled_at = try container.decodeIfPresent(String.self, forKey: .canceled_at)
+        plan = try container.decodeIfPresent(AdminUserSubscriptionPlan.self, forKey: .plan)
+    }
 }
 
 struct AdminIngestionRun: Codable, Identifiable {
@@ -338,6 +483,46 @@ struct AdminIngestionMetricsResponse: Codable {
     let totals: [AdminIngestionMetricsTotal]
 }
 
+struct AdminIngestionAutomationRule: Codable, Identifiable {
+    var id: String { pipeline.rawValue }
+    let pipeline: IngestionPipeline
+    let enabled: Bool
+    let schedule_enabled: Bool
+    let schedule_interval_minutes: Int
+    let intelligent_enabled: Bool
+    let min_spacing_minutes: Int
+    let freshness_sla_minutes: Int
+    let demand_window_minutes: Int
+    let demand_threshold: Int
+    let failure_backoff_minutes: Int
+    let next_scheduled_at: String?
+    let last_evaluated_at: String?
+    let last_triggered_at: String?
+    let last_trigger_reason: String?
+    let last_error: String?
+    let default_payload: JSONValue?
+    let created_at: String
+    let updated_at: String
+}
+
+struct AdminIngestionAutomationStatus: Codable, Identifiable {
+    var id: String { pipeline.rawValue }
+    let pipeline: IngestionPipeline
+    let last_run_at: String?
+    let last_success_at: String?
+    let last_failure_at: String?
+    let latest_data_at: String?
+    let data_age_minutes: Int?
+    let demand_requests: Int
+    let active_runs: Int
+}
+
+struct AdminIngestionAutomationResponse: Codable {
+    let poll_seconds: Int
+    let rules: [AdminIngestionAutomationRule]
+    let status: [AdminIngestionAutomationStatus]
+}
+
 // JSON dynamic value to capture `payload` flexibly
 enum JSONValue: Codable {
     case string(String)
@@ -373,6 +558,22 @@ enum JSONValue: Codable {
     var string: String? { if case .string(let s) = self { return s } else { return nil } }
     var object: [String: JSONValue]? { if case .object(let o) = self { return o } else { return nil } }
     var bool: Bool? { if case .bool(let b) = self { return b } else { return nil } }
+    var foundationObject: Any {
+        switch self {
+        case .string(let s):
+            return s
+        case .number(let n):
+            return n
+        case .object(let o):
+            return o.mapValues { $0.foundationObject }
+        case .array(let a):
+            return a.map { $0.foundationObject }
+        case .bool(let b):
+            return b
+        case .null:
+            return NSNull()
+        }
+    }
 }
 
 enum APIDateParser {

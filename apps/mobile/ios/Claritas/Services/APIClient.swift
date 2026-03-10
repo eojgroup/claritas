@@ -122,14 +122,21 @@ final class APIClient {
         guard let id = parseInt(user["id"]) else {
             throw APIError(status: http.statusCode, message: "Missing or invalid auth user id")
         }
+        let billing = parseBillingAccessState(user["billing"] ?? container["billing"])
 
         return AuthUser(
             id: id,
             email: nonEmpty(user["email"] as? String),
             display_name: nonEmpty(user["display_name"] as? String),
             avatar_url: nonEmpty(user["avatar_url"] as? String),
-            roles: parseStringArray(user["roles"])
+            roles: parseStringArray(user["roles"]),
+            billing: billing
         )
+    }
+
+    func fetchBillingMe() async throws -> BillingAccessState {
+        let req = URLRequest(url: baseURL.appendingPathComponent("/api/billing/me"))
+        return try await request(req, as: BillingAccessState.self, rootKey: "billing")
     }
 
     func logout() async throws {
@@ -204,7 +211,8 @@ final class APIClient {
         query: String,
         language: String?,
         country: String?,
-        category: String?
+        category: String?,
+        theNewsApiPublishedAfter: String?
     ) async throws -> AdminIngestionRunDetail {
         var payload: [String: Any] = [
             "providers": [
@@ -251,6 +259,9 @@ final class APIClient {
             ]
             if let language = nonEmpty(language) {
                 theNewsApi["language"] = language
+            }
+            if let publishedAfter = nonEmpty(theNewsApiPublishedAfter) {
+                theNewsApi["publishedAfter"] = publishedAfter
             }
             payload["theNewsApi"] = theNewsApi
         } else {
@@ -329,6 +340,22 @@ final class APIClient {
         return try await request(URLRequest(url: comps.url!), as: AdminIngestionMetricsResponse.self)
     }
 
+    func fetchAdminIngestionAutomation() async throws -> AdminIngestionAutomationResponse {
+        let req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/ingestion/automation"))
+        return try await request(req, as: AdminIngestionAutomationResponse.self)
+    }
+
+    func updateAdminIngestionAutomationRule(
+        pipeline: IngestionPipeline,
+        patch: [String: Any]
+    ) async throws -> AdminIngestionAutomationRule {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/ingestion/automation/\(pipeline.rawValue)"))
+        req.httpMethod = "PATCH"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: patch, options: [])
+        return try await request(req, as: AdminIngestionAutomationRule.self, rootKey: "rule")
+    }
+
     func fetchAdminRoles() async throws -> [AdminRole] {
         let req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/roles"))
         return try await request(req, as: [AdminRole].self, rootKey: "roles")
@@ -344,6 +371,11 @@ final class APIClient {
         }
         req.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
         return try await request(req, as: AdminRole.self, rootKey: "role")
+    }
+
+    func fetchAdminBillingPlans() async throws -> [AdminBillingPlan] {
+        let req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/billing/plans"))
+        return try await request(req, as: [AdminBillingPlan].self, rootKey: "plans")
     }
 
     func fetchAdminUsers(
@@ -385,6 +417,27 @@ final class APIClient {
         req.httpMethod = "PATCH"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: ["is_active": isActive], options: [])
+        let out = try await request(req, as: AdminUserResponse.self)
+        return out.user
+    }
+
+    func updateAdminUserSubscription(
+        userId: Int,
+        planCode: String,
+        status: String,
+        provider: String,
+        currentPeriodEndISO: String?
+    ) async throws -> AdminUser? {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/users/\(userId)/subscription"))
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let payload: [String: Any] = [
+            "plan_code": planCode,
+            "status": status,
+            "provider": provider,
+            "current_period_end": currentPeriodEndISO ?? NSNull()
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
         let out = try await request(req, as: AdminUserResponse.self)
         return out.user
     }
@@ -470,6 +523,15 @@ final class APIClient {
     private func parseStringArray(_ value: Any?) -> [String]? {
         guard let values = value as? [Any] else { return nil }
         return values.compactMap { nonEmpty($0 as? String) }
+    }
+
+    private func parseBillingAccessState(_ value: Any?) -> BillingAccessState? {
+        guard let object = value as? [String: Any],
+              JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: []) else {
+            return nil
+        }
+        return try? JSONDecoder.api.decode(BillingAccessState.self, from: data)
     }
 
     private func authedRequest(_ req: URLRequest) -> URLRequest {

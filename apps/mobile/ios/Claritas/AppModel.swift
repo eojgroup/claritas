@@ -22,6 +22,7 @@ final class AppModel: ObservableObject {
     @Published var authUser: AuthUser? = nil
     @Published var authProviders: [AuthProvider] = []
     @Published var authError: String? = nil
+    @Published var isRefreshingAccess: Bool = false
 
     let api: APIClient
     private var authToken: String? = nil
@@ -36,6 +37,14 @@ final class AppModel: ObservableObject {
         (authUser?.roles ?? []).contains { $0.lowercased() == "admin" }
     }
 
+    var hasPaidAccess: Bool {
+        authUser?.billing?.has_access ?? true
+    }
+
+    var billingState: BillingAccessState? {
+        authUser?.billing
+    }
+
     init() {
         let callbackURL = Self.resolveAuthCallbackURL()
         self.api = APIClient()
@@ -48,7 +57,11 @@ final class AppModel: ObservableObject {
     func bootstrap() async {
         await loadAuth()
         if authStatus == .authed {
-            await loadInitial()
+            if hasPaidAccess {
+                await loadInitial()
+            } else {
+                clearAppData()
+            }
         }
     }
 
@@ -94,6 +107,9 @@ final class AppModel: ObservableObject {
         authUser = user
         authProviders = providers
         authStatus = user == nil ? .unauthed : .authed
+        if authStatus != .authed || !hasPaidAccess {
+            clearAppData()
+        }
         authError = errors.isEmpty
             ? nil
             : errors
@@ -151,7 +167,11 @@ final class AppModel: ObservableObject {
         Task {
             await loadAuth()
             if authStatus == .authed {
-                await loadInitial()
+                if hasPaidAccess {
+                    await loadInitial()
+                } else {
+                    clearAppData()
+                }
             }
         }
     }
@@ -161,7 +181,44 @@ final class AppModel: ObservableObject {
         setAuthToken(nil)
         authUser = nil
         authStatus = .unauthed
+        isRefreshingAccess = false
         clearAppData()
+    }
+
+    func refreshAccess() async {
+        guard !isRefreshingAccess else { return }
+        isRefreshingAccess = true
+        defer { isRefreshingAccess = false }
+
+        do {
+            let user = try await api.fetchAuthMe()
+            authUser = user
+            authStatus = user == nil ? .unauthed : .authed
+
+            guard authStatus == .authed else {
+                clearAppData()
+                return
+            }
+
+            if hasPaidAccess {
+                await loadInitial()
+            } else {
+                clearAppData()
+            }
+        } catch {
+            if let apiError = error as? APIError, apiError.status == 401 {
+                authUser = nil
+                authStatus = .unauthed
+                clearAppData()
+                return
+            }
+            if isPaymentRequired(error) {
+                await synchronizeBillingState()
+                clearAppData()
+                return
+            }
+            authError = describeAuthLoadError(error, context: "billing refresh")
+        }
     }
 
     private func setAuthToken(_ token: String?) {
@@ -175,6 +232,11 @@ final class AppModel: ObservableObject {
     }
 
     func loadInitial() async {
+        guard hasPaidAccess else {
+            clearAppData()
+            return
+        }
+
         async let statsResult: Result<[CountryStat], Error> = {
             do { return .success(try await api.fetchCountryStats(days: 30)) }
             catch { return .failure(error) }
@@ -193,6 +255,25 @@ final class AppModel: ObservableObject {
         }()
 
         let (resolvedStats, resolvedWeather, resolvedNews, resolvedMarket) = await (statsResult, weatherResult, newsResult, marketResult)
+
+        var paymentRequiredDetected = false
+        if case .failure(let error) = resolvedStats, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedWeather, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedNews, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedMarket, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if paymentRequiredDetected {
+            clearAppData()
+            await refreshAccess()
+            return
+        }
 
         if case .success(let stats) = resolvedStats {
             countryStats = stats
@@ -216,34 +297,95 @@ final class AppModel: ObservableObject {
     }
 
     func reloadNewsForSelectedCountry() async {
+        guard hasPaidAccess else {
+            clearAppData()
+            return
+        }
         do {
             news = try await api.fetchNews(limit: 20, offset: 0, q: nil, country: selectedCountry)
         } catch {
+            if isPaymentRequired(error) {
+                clearAppData()
+                await refreshAccess()
+            }
             // Keep current rows on transient failures instead of blanking the list.
         }
     }
 
     func refreshWeatherNow() async {
         guard !isRefreshingWeather else { return }
+        guard hasPaidAccess else {
+            clearAppData()
+            return
+        }
         isRefreshingWeather = true
         defer { isRefreshingWeather = false }
         do {
             _ = try await api.ingestWeatherNow(country: selectedCountry)
             weather = try await api.fetchCountryWeather()
         } catch {
+            if isPaymentRequired(error) {
+                clearAppData()
+                await refreshAccess()
+            }
             // ignore
         }
     }
 
     func refreshMarketQuotes(forceRefresh: Bool = true) async {
         guard !isRefreshingMarketQuotes else { return }
+        guard hasPaidAccess else {
+            clearAppData()
+            return
+        }
         isRefreshingMarketQuotes = true
         defer { isRefreshingMarketQuotes = false }
         do {
             marketQuotes = try await api.fetchMarketQuotes(refresh: forceRefresh)
         } catch {
+            if isPaymentRequired(error) {
+                clearAppData()
+                await refreshAccess()
+            }
             // keep current rows on transient failures
         }
+    }
+
+    private func synchronizeBillingState() async {
+        do {
+            let billing = try await api.fetchBillingMe()
+            if let user = authUser {
+                authUser = withBilling(user, billing: billing)
+            } else {
+                let refreshedUser = try await api.fetchAuthMe()
+                authUser = refreshedUser
+                authStatus = refreshedUser == nil ? .unauthed : .authed
+            }
+        } catch {
+            do {
+                let refreshedUser = try await api.fetchAuthMe()
+                authUser = refreshedUser
+                authStatus = refreshedUser == nil ? .unauthed : .authed
+            } catch {
+                // Keep the current auth state when refresh attempts fail.
+            }
+        }
+    }
+
+    private func withBilling(_ user: AuthUser, billing: BillingAccessState?) -> AuthUser {
+        AuthUser(
+            id: user.id,
+            email: user.email,
+            display_name: user.display_name,
+            avatar_url: user.avatar_url,
+            roles: user.roles,
+            billing: billing
+        )
+    }
+
+    private func isPaymentRequired(_ error: Error) -> Bool {
+        guard let apiError = error as? APIError else { return false }
+        return apiError.status == 402
     }
 
     private func describeAuthLoadError(_ error: Error, context: String) -> String {

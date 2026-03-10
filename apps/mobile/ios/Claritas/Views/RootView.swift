@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct RootView: View {
@@ -14,36 +15,40 @@ struct RootView: View {
     var body: some View {
         Group {
             if model.authStatus == .authed {
-                TabView(selection: $tab) {
-                    NavigationStack {
-                        DashboardView()
-                            .navigationTitle("Claritas")
-                            .toolbar { ToolbarItem(placement: .navigationBarTrailing) { ThemeToggle() } }
-                    }
-                    .tabItem { Label("Dashboard", systemImage: "globe") }
-                    .tag(Tab.dashboard)
-
-                    if model.isAdmin {
+                if !model.hasPaidAccess, model.authUser != nil {
+                    PaywallView()
+                } else {
+                    TabView(selection: $tab) {
                         NavigationStack {
-                            AdminWorkspaceView()
-                                .navigationTitle("Admin")
+                            DashboardView()
+                                .navigationTitle("Claritas")
                                 .toolbar { ToolbarItem(placement: .navigationBarTrailing) { ThemeToggle() } }
                         }
-                        .tabItem { Label("Admin", systemImage: "shield.lefthalf.filled") }
-                        .tag(Tab.admin)
-                    }
+                        .tabItem { Label("Dashboard", systemImage: "globe") }
+                        .tag(Tab.dashboard)
 
-                    NavigationStack {
-                        ProfileView()
-                            .navigationTitle("Profile")
+                        if model.isAdmin {
+                            NavigationStack {
+                                AdminWorkspaceView()
+                                    .navigationTitle("Admin")
+                                    .toolbar { ToolbarItem(placement: .navigationBarTrailing) { ThemeToggle() } }
+                            }
+                            .tabItem { Label("Admin", systemImage: "shield.lefthalf.filled") }
+                            .tag(Tab.admin)
+                        }
+
+                        NavigationStack {
+                            ProfileView()
+                                .navigationTitle("Profile")
+                        }
+                        .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                        .tag(Tab.profile)
                     }
-                    .tabItem { Label("Profile", systemImage: "person.crop.circle") }
-                    .tag(Tab.profile)
-                }
-                .tint(Color(red: 0.12, green: 0.42, blue: 0.4))
-                .onChange(of: model.isAdmin) { isAdmin in
-                    if !isAdmin && tab == .admin {
-                        tab = .dashboard
+                    .tint(Color(red: 0.12, green: 0.42, blue: 0.4))
+                    .onChange(of: model.isAdmin) { isAdmin in
+                        if !isAdmin && tab == .admin {
+                            tab = .dashboard
+                        }
                     }
                 }
             } else {
@@ -64,6 +69,172 @@ struct ThemeToggle: View {
         Button(action: { dark.toggle() }) {
             Image(systemName: dark ? "sun.max" : "moon")
         }
+    }
+}
+
+private struct PaywallView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.openURL) private var openURL
+    @State private var isSigningOut: Bool = false
+
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(spacing: 16) {
+                    AdminCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Payment required")
+                                .font(.caption.weight(.semibold))
+                                .tracking(2)
+                                .foregroundStyle(.secondary)
+
+                            Text("Activate access to Claritas")
+                                .font(.title3.weight(.semibold))
+
+                            Text(
+                                "You are signed in as \(userLabel), but this account does not currently have paid access to the application data endpoints."
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    AdminCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Status: \(reasonLabel)")
+                                .font(.headline)
+
+                            Text(subscriptionSummary)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            if let periodEndSummary {
+                                Text(periodEndSummary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack(spacing: 10) {
+                                Button("Subscribe now") {
+                                    openLink(billing?.checkout_url)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(checkoutURL == nil)
+
+                                if portalURL != nil {
+                                    Button("Manage billing") {
+                                        openLink(billing?.portal_url)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+
+                            HStack(spacing: 10) {
+                                Button(model.isRefreshingAccess ? "Checking…" : "I have paid, refresh") {
+                                    Task {
+                                        await model.refreshAccess()
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(model.isRefreshingAccess)
+
+                                Button(isSigningOut ? "Signing out…" : "Sign out") {
+                                    Task {
+                                        await signOut()
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(isSigningOut)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+            }
+        }
+    }
+
+    private var billing: BillingAccessState? {
+        model.billingState
+    }
+
+    private var userLabel: String {
+        if let email = model.authUser?.email, !email.isEmpty {
+            return email
+        }
+        if let name = model.authUser?.display_name, !name.isEmpty {
+            return name
+        }
+        if let id = model.authUser?.id {
+            return "user #\(id)"
+        }
+        return "your account"
+    }
+
+    private var reasonLabel: String {
+        switch billing?.reason ?? "" {
+        case "no_subscription":
+            return "No active subscription"
+        case "subscription_expired":
+            return "Subscription expired"
+        case "subscription_inactive":
+            return "Subscription inactive"
+        case "trialing_subscription":
+            return "Trial access"
+        case "grace_period":
+            return "Grace period"
+        case "active_subscription":
+            return "Active subscription"
+        case "admin_override":
+            return "Admin override"
+        default:
+            return "Access managed by billing"
+        }
+    }
+
+    private var subscriptionSummary: String {
+        guard let subscription = billing?.subscription else {
+            return "No subscription is currently associated with this account."
+        }
+        return "Plan: \(subscription.plan.name) (\(subscription.plan.code)) - Subscription: \(subscription.status)"
+    }
+
+    private var periodEndSummary: String? {
+        guard let currentPeriodEnd = billing?.subscription?.current_period_end else {
+            return nil
+        }
+        return "Period end: \(formatDateTime(currentPeriodEnd))"
+    }
+
+    private var checkoutURL: URL? {
+        validatedURL(billing?.checkout_url)
+    }
+
+    private var portalURL: URL? {
+        validatedURL(billing?.portal_url)
+    }
+
+    private func openLink(_ rawURL: String?) {
+        guard let url = validatedURL(rawURL) else { return }
+        openURL(url)
+    }
+
+    private func validatedURL(_ rawURL: String?) -> URL? {
+        guard let rawURL,
+              let url = URL(string: rawURL) else {
+            return nil
+        }
+        return url
+    }
+
+    private func signOut() async {
+        guard !isSigningOut else { return }
+        isSigningOut = true
+        await model.logout()
+        isSigningOut = false
     }
 }
 
@@ -169,6 +340,36 @@ private struct AdminIngestionPanelView: View {
         var label: String { "\(rawValue)d" }
     }
 
+    enum TheNewsApiDateMode: String, CaseIterable, Identifiable {
+        case today
+        case custom
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .today:
+                return "Today"
+            case .custom:
+                return "Custom"
+            }
+        }
+    }
+
+    struct AutomationDraft {
+        var enabled: Bool
+        var scheduleEnabled: Bool
+        var scheduleIntervalMinutes: Int
+        var intelligentEnabled: Bool
+        var minSpacingMinutes: Int
+        var freshnessSlaMinutes: Int
+        var demandWindowMinutes: Int
+        var demandThreshold: Int
+        var failureBackoffMinutes: Int
+        var defaultPayloadText: String
+        var dirty: Bool
+    }
+
     @EnvironmentObject private var model: AppModel
 
     @State private var runs: [AdminIngestionRun] = []
@@ -177,6 +378,10 @@ private struct AdminIngestionPanelView: View {
     @State private var logs: [AdminIngestionLog] = []
     @State private var points: [AdminIngestionMetricsPoint] = []
     @State private var totals: [AdminIngestionMetricsTotal] = []
+    @State private var automationRules: [AdminIngestionAutomationRule] = []
+    @State private var automationStatus: [AdminIngestionAutomationStatus] = []
+    @State private var automationDrafts: [IngestionPipeline: AutomationDraft] = [:]
+    @State private var pendingAutomationSave: Set<IngestionPipeline> = []
 
     @State private var pipelineFilter: PipelineFilter = .all
     @State private var metricsWindow: MetricsWindow = .d30
@@ -189,6 +394,8 @@ private struct AdminIngestionPanelView: View {
     @State private var newsLanguage: String = "en"
     @State private var newsCountry: String = "us"
     @State private var newsCategory: String = "technology"
+    @State private var theNewsApiDateMode: TheNewsApiDateMode = .today
+    @State private var theNewsApiCustomDate: Date = Date()
     @State private var weatherCountry: String = ""
     @State private var marketSymbols: String = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM"
 
@@ -286,6 +493,32 @@ private struct AdminIngestionPanelView: View {
                                 .textFieldStyle(.roundedBorder)
                         }
 
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("TheNewsAPI published after")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Picker("Date mode", selection: $theNewsApiDateMode) {
+                                ForEach(TheNewsApiDateMode.allCases) { mode in
+                                    Text(mode.label).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+
+                            if theNewsApiDateMode == .custom {
+                                DatePicker(
+                                    "Custom date",
+                                    selection: $theNewsApiCustomDate,
+                                    displayedComponents: .date
+                                )
+                                .datePickerStyle(.compact)
+                                .labelsHidden()
+                            }
+
+                            Text("Resolved date: \(resolvedTheNewsApiPublishedAfter ?? "—")")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+
                         Button(action: { Task { await queueNewsRun() } }) {
                             Label(isTriggeringNews ? "Queueing news…" : "Queue News Run", systemImage: "paperplane")
                         }
@@ -315,6 +548,198 @@ private struct AdminIngestionPanelView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(isTriggeringMarket || isLoadingOverview)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            AdminCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Pipeline automation")
+                        .font(.headline)
+                    Text("Scheduler + intelligent trigger controls")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    ForEach(IngestionPipeline.allCases) { pipeline in
+                        if let rule = automationRule(for: pipeline),
+                           let draft = automationDrafts[pipeline] {
+                            let status = automationStatusForPipeline(pipeline)
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text(pipeline.label)
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    if pendingAutomationSave.contains(pipeline) {
+                                        ProgressView()
+                                            .scaleEffect(0.8)
+                                    }
+                                }
+
+                                Toggle("Enabled", isOn: Binding(
+                                    get: { draft.enabled },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.enabled = value
+                                        }
+                                    }
+                                ))
+                                Toggle("Scheduler", isOn: Binding(
+                                    get: { draft.scheduleEnabled },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.scheduleEnabled = value
+                                        }
+                                    }
+                                ))
+                                Toggle("Intelligent", isOn: Binding(
+                                    get: { draft.intelligentEnabled },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.intelligentEnabled = value
+                                        }
+                                    }
+                                ))
+
+                                Stepper(value: Binding(
+                                    get: { draft.scheduleIntervalMinutes },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.scheduleIntervalMinutes = value
+                                        }
+                                    }
+                                ), in: 1...10080) {
+                                    Text("Schedule every \(draft.scheduleIntervalMinutes) minutes")
+                                        .font(.caption)
+                                }
+
+                                Stepper(value: Binding(
+                                    get: { draft.freshnessSlaMinutes },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.freshnessSlaMinutes = value
+                                        }
+                                    }
+                                ), in: 1...43200) {
+                                    Text("Freshness SLA \(draft.freshnessSlaMinutes) minutes")
+                                        .font(.caption)
+                                }
+
+                                Stepper(value: Binding(
+                                    get: { draft.demandWindowMinutes },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.demandWindowMinutes = value
+                                        }
+                                    }
+                                ), in: 1...1440) {
+                                    Text("Demand window \(draft.demandWindowMinutes) minutes")
+                                        .font(.caption)
+                                }
+
+                                Stepper(value: Binding(
+                                    get: { draft.demandThreshold },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.demandThreshold = value
+                                        }
+                                    }
+                                ), in: 1...100000) {
+                                    Text("Demand threshold \(draft.demandThreshold) requests")
+                                        .font(.caption)
+                                }
+
+                                Stepper(value: Binding(
+                                    get: { draft.minSpacingMinutes },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.minSpacingMinutes = value
+                                        }
+                                    }
+                                ), in: 1...10080) {
+                                    Text("Min spacing \(draft.minSpacingMinutes) minutes")
+                                        .font(.caption)
+                                }
+
+                                Stepper(value: Binding(
+                                    get: { draft.failureBackoffMinutes },
+                                    set: { value in
+                                        updateAutomationDraft(pipeline) { current in
+                                            current.failureBackoffMinutes = value
+                                        }
+                                    }
+                                ), in: 1...10080) {
+                                    Text("Failure backoff \(draft.failureBackoffMinutes) minutes")
+                                        .font(.caption)
+                                }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Default payload (JSON)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    TextEditor(text: Binding(
+                                        get: { draft.defaultPayloadText },
+                                        set: { value in
+                                            updateAutomationDraft(pipeline) { current in
+                                                current.defaultPayloadText = value
+                                            }
+                                        }
+                                    ))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .frame(minHeight: 120)
+                                    .padding(6)
+                                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Last run: \(formatDateTime(status?.last_run_at))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("Last success: \(formatDateTime(status?.last_success_at))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("Latest data: \(formatDateTime(status?.latest_data_at))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("Data age: \(status?.data_age_minutes.map(String.init) ?? "—") minutes")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("Demand: \(status?.demand_requests ?? 0) requests / \(draft.demandWindowMinutes)m")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("Active runs: \(status?.active_runs ?? 0)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("Next schedule: \(formatDateTime(rule.next_scheduled_at))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("Last trigger: \(rule.last_trigger_reason ?? "—")")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                if let lastError = rule.last_error,
+                                   !lastError.isEmpty {
+                                    AdminErrorText(lastError)
+                                }
+
+                                Button(action: { Task { await saveAutomationRule(for: pipeline) } }) {
+                                    Text(pendingAutomationSave.contains(pipeline) ? "Saving…" : "Save automation")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!draft.dirty || pendingAutomationSave.contains(pipeline))
+                            }
+                            .padding(12)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                        } else {
+                            Text("Loading \(pipeline.label) automation…")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -400,7 +825,10 @@ private struct AdminIngestionPanelView: View {
                                         .foregroundStyle(run.status.badgeColor)
                                 }
                                 .padding(10)
-                                .background((selectedRunId == run.id ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04)), in: RoundedRectangle(cornerRadius: 10))
+                                .background(
+                                    (selectedRunId == run.id ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04)),
+                                    in: RoundedRectangle(cornerRadius: 10)
+                                )
                             }
                             .buttonStyle(.plain)
                         }
@@ -483,27 +911,60 @@ private struct AdminIngestionPanelView: View {
         }
     }
 
+    private var resolvedTheNewsApiPublishedAfter: String? {
+        guard runTheNewsApiProvider else { return nil }
+        switch theNewsApiDateMode {
+        case .today:
+            return localDateInputString(Date())
+        case .custom:
+            return localDateInputString(theNewsApiCustomDate)
+        }
+    }
+
     private func refreshOverview(silent: Bool) async {
         if !silent {
             isLoadingOverview = true
             overviewError = nil
         }
 
-        do {
-            async let runsTask = model.api.fetchAdminIngestionRuns(
-                pipeline: pipelineFilter.pipeline,
-                limit: 100,
-                offset: 0
-            )
-            async let metricsTask = model.api.fetchAdminIngestionMetrics(
-                days: metricsWindow.rawValue,
-                pipeline: pipelineFilter.pipeline
-            )
-            let (nextRuns, metrics) = try await (runsTask, metricsTask)
-            runs = nextRuns
-            points = metrics.points
-            totals = metrics.totals
+        async let runsResult: Result<[AdminIngestionRun], Error> = {
+            do {
+                return .success(try await model.api.fetchAdminIngestionRuns(
+                    pipeline: pipelineFilter.pipeline,
+                    limit: 100,
+                    offset: 0
+                ))
+            } catch {
+                return .failure(error)
+            }
+        }()
 
+        async let metricsResult: Result<AdminIngestionMetricsResponse, Error> = {
+            do {
+                return .success(try await model.api.fetchAdminIngestionMetrics(
+                    days: metricsWindow.rawValue,
+                    pipeline: pipelineFilter.pipeline
+                ))
+            } catch {
+                return .failure(error)
+            }
+        }()
+
+        async let automationResult: Result<AdminIngestionAutomationResponse, Error> = {
+            do {
+                return .success(try await model.api.fetchAdminIngestionAutomation())
+            } catch {
+                return .failure(error)
+            }
+        }()
+
+        let (resolvedRuns, resolvedMetrics, resolvedAutomation) = await (runsResult, metricsResult, automationResult)
+
+        var errors: [String] = []
+
+        switch resolvedRuns {
+        case .success(let nextRuns):
+            runs = nextRuns
             if let current = selectedRunId, nextRuns.contains(where: { $0.id == current }) {
                 selectedRunId = current
             } else {
@@ -513,9 +974,36 @@ private struct AdminIngestionPanelView: View {
                 selectedRun = nil
                 logs = []
             }
-        } catch {
-            overviewError = error.localizedDescription
+        case .failure(let error):
+            errors.append("Runs: \(error.localizedDescription)")
         }
+
+        switch resolvedMetrics {
+        case .success(let metrics):
+            points = metrics.points
+            totals = metrics.totals
+        case .failure(let error):
+            errors.append("Metrics: \(error.localizedDescription)")
+        }
+
+        switch resolvedAutomation {
+        case .success(let automation):
+            automationRules = automation.rules
+            automationStatus = automation.status
+
+            var nextDrafts = automationDrafts
+            for rule in automation.rules {
+                if let existing = nextDrafts[rule.pipeline], existing.dirty {
+                    continue
+                }
+                nextDrafts[rule.pipeline] = createAutomationDraft(from: rule)
+            }
+            automationDrafts = nextDrafts
+        case .failure(let error):
+            errors.append("Automation: \(error.localizedDescription)")
+        }
+
+        overviewError = errors.isEmpty ? nil : errors.joined(separator: " | ")
 
         if !silent {
             isLoadingOverview = false
@@ -564,7 +1052,8 @@ private struct AdminIngestionPanelView: View {
                 query: newsQuery,
                 language: newsLanguage,
                 country: newsCountry,
-                category: newsCategory
+                category: newsCategory,
+                theNewsApiPublishedAfter: resolvedTheNewsApiPublishedAfter
             )
             selectedRunId = detail.run.id
             selectedRun = detail.run
@@ -613,6 +1102,114 @@ private struct AdminIngestionPanelView: View {
             actionError = error.localizedDescription
         }
         isTriggeringMarket = false
+    }
+
+    private func automationRule(for pipeline: IngestionPipeline) -> AdminIngestionAutomationRule? {
+        automationRules.first(where: { $0.pipeline == pipeline })
+    }
+
+    private func automationStatusForPipeline(_ pipeline: IngestionPipeline) -> AdminIngestionAutomationStatus? {
+        automationStatus.first(where: { $0.pipeline == pipeline })
+    }
+
+    private func updateAutomationDraft(_ pipeline: IngestionPipeline, mutate: (inout AutomationDraft) -> Void) {
+        guard var draft = automationDrafts[pipeline] else { return }
+        mutate(&draft)
+        draft.dirty = true
+        automationDrafts[pipeline] = draft
+    }
+
+    private func createAutomationDraft(from rule: AdminIngestionAutomationRule) -> AutomationDraft {
+        AutomationDraft(
+            enabled: rule.enabled,
+            scheduleEnabled: rule.schedule_enabled,
+            scheduleIntervalMinutes: rule.schedule_interval_minutes,
+            intelligentEnabled: rule.intelligent_enabled,
+            minSpacingMinutes: rule.min_spacing_minutes,
+            freshnessSlaMinutes: rule.freshness_sla_minutes,
+            demandWindowMinutes: rule.demand_window_minutes,
+            demandThreshold: rule.demand_threshold,
+            failureBackoffMinutes: rule.failure_backoff_minutes,
+            defaultPayloadText: automationPayloadText(rule.default_payload),
+            dirty: false
+        )
+    }
+
+    private func automationPayloadText(_ value: JSONValue?) -> String {
+        let payloadObject: Any
+        if case .object(let object)? = value {
+            payloadObject = object.mapValues { $0.foundationObject }
+        } else {
+            payloadObject = [String: Any]()
+        }
+
+        guard JSONSerialization.isValidJSONObject(payloadObject),
+              let data = try? JSONSerialization.data(withJSONObject: payloadObject, options: [.prettyPrinted]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return text
+    }
+
+    private func saveAutomationRule(for pipeline: IngestionPipeline) async {
+        guard let draft = automationDrafts[pipeline] else { return }
+
+        let payloadText = draft.defaultPayloadText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedPayloadText = payloadText.isEmpty ? "{}" : payloadText
+
+        guard let payloadData = resolvedPayloadText.data(using: .utf8) else {
+            actionError = "Default payload for \(pipeline.label) is not valid text."
+            actionNotice = nil
+            return
+        }
+
+        let defaultPayload: [String: Any]
+        do {
+            let parsed = try JSONSerialization.jsonObject(with: payloadData, options: [])
+            guard let object = parsed as? [String: Any] else {
+                actionError = "Default payload for \(pipeline.label) must be a JSON object."
+                actionNotice = nil
+                return
+            }
+            defaultPayload = object
+        } catch {
+            actionError = "Default payload for \(pipeline.label) is not valid JSON."
+            actionNotice = nil
+            return
+        }
+
+        pendingAutomationSave.insert(pipeline)
+        actionError = nil
+        actionNotice = nil
+
+        do {
+            let updatedRule = try await model.api.updateAdminIngestionAutomationRule(
+                pipeline: pipeline,
+                patch: [
+                    "enabled": draft.enabled,
+                    "schedule_enabled": draft.scheduleEnabled,
+                    "schedule_interval_minutes": draft.scheduleIntervalMinutes,
+                    "intelligent_enabled": draft.intelligentEnabled,
+                    "min_spacing_minutes": draft.minSpacingMinutes,
+                    "freshness_sla_minutes": draft.freshnessSlaMinutes,
+                    "demand_window_minutes": draft.demandWindowMinutes,
+                    "demand_threshold": draft.demandThreshold,
+                    "failure_backoff_minutes": draft.failureBackoffMinutes,
+                    "default_payload": defaultPayload
+                ]
+            )
+
+            automationRules = automationRules.map { existing in
+                existing.pipeline == pipeline ? updatedRule : existing
+            }
+            automationDrafts[pipeline] = createAutomationDraft(from: updatedRule)
+            actionNotice = "\(pipeline.label) automation updated."
+            await refreshOverview(silent: true)
+        } catch {
+            actionError = error.localizedDescription
+        }
+
+        pendingAutomationSave.remove(pipeline)
     }
 
     private func durationLabel(_ run: AdminIngestionRun) -> String {
@@ -699,9 +1296,17 @@ private struct AdminIngestionPanelView: View {
 }
 
 private struct AdminUserManagementPanelView: View {
+    struct SubscriptionDraft {
+        var planCode: String
+        var status: String
+        var provider: String
+        var currentPeriodEnd: String
+    }
+
     @EnvironmentObject private var model: AppModel
 
     @State private var roles: [AdminRole] = []
+    @State private var billingPlans: [AdminBillingPlan] = []
     @State private var users: [AdminUser] = []
     @State private var totalUsers: Int = 0
 
@@ -714,12 +1319,24 @@ private struct AdminUserManagementPanelView: View {
     @State private var errorMessage: String?
     @State private var noticeMessage: String?
     @State private var roleDrafts: [Int: Set<String>] = [:]
+    @State private var subscriptionDrafts: [Int: SubscriptionDraft] = [:]
     @State private var pendingRoleSave: Set<Int> = []
     @State private var pendingStatusSave: Set<Int> = []
+    @State private var pendingSubscriptionSave: Set<Int> = []
 
     @State private var newRoleKey: String = ""
     @State private var newRoleDescription: String = ""
     @State private var isCreatingRole: Bool = false
+
+    private let allowedStatuses = [
+        "trialing",
+        "active",
+        "past_due",
+        "grace_period",
+        "canceled",
+        "unpaid",
+        "incomplete"
+    ]
 
     var body: some View {
         VStack(spacing: 12) {
@@ -830,7 +1447,13 @@ private struct AdminUserManagementPanelView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
+                        let defaultPlanCode = resolvedDefaultPlanCode()
+
                         ForEach(users) { user in
+                            let roleDraft = roleDrafts[user.id] ?? Set(user.roles)
+                            let subscriptionDraft = subscriptionDrafts[user.id] ?? makeSubscriptionDraft(for: user, defaultPlanCode: defaultPlanCode)
+                            let subscriptionStatus = normalizedSubscriptionStatus(user.subscription?.status)
+
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(alignment: .top) {
                                     VStack(alignment: .leading, spacing: 4) {
@@ -846,19 +1469,94 @@ private struct AdminUserManagementPanelView: View {
                                         }
                                     }
                                     Spacer()
-                                    Text(user.is_active ? "Active" : "Inactive")
-                                        .font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background((user.is_active ? Color.green : Color.gray).opacity(0.16), in: Capsule())
-                                        .foregroundStyle(user.is_active ? Color.green : Color.secondary)
+
+                                    VStack(alignment: .trailing, spacing: 4) {
+                                        Text(user.is_active ? "Active" : "Inactive")
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background((user.is_active ? Color.green : Color.gray).opacity(0.16), in: Capsule())
+                                            .foregroundStyle(user.is_active ? Color.green : Color.secondary)
+
+                                        Text(subscriptionStatus)
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(subscriptionBadgeColor(for: subscriptionStatus).opacity(0.16), in: Capsule())
+                                            .foregroundStyle(subscriptionBadgeColor(for: subscriptionStatus))
+                                    }
+                                }
+
+                                if !user.providers.isEmpty {
+                                    Text("Providers: \(user.providers.joined(separator: ", "))")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Billing")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    Picker("Billing plan", selection: Binding(
+                                        get: { subscriptionDraft.planCode },
+                                        set: { value in
+                                            updateSubscriptionDraft(for: user.id) { current in
+                                                current.planCode = value
+                                            }
+                                        }
+                                    )) {
+                                        if billingPlans.isEmpty {
+                                            Text("No plans").tag("")
+                                        }
+                                        ForEach(billingPlans) { plan in
+                                            Text("\(plan.name) (\(plan.code))").tag(plan.code)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+
+                                    Picker("Subscription status", selection: Binding(
+                                        get: { subscriptionDraft.status },
+                                        set: { value in
+                                            updateSubscriptionDraft(for: user.id) { current in
+                                                current.status = normalizedSubscriptionStatus(value)
+                                            }
+                                        }
+                                    )) {
+                                        ForEach(allowedStatuses, id: \.self) { status in
+                                            Text(status).tag(status)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+
+                                    TextField("Provider", text: Binding(
+                                        get: { subscriptionDraft.provider },
+                                        set: { value in
+                                            updateSubscriptionDraft(for: user.id) { current in
+                                                current.provider = value
+                                            }
+                                        }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+
+                                    TextField("Period end (optional) YYYY-MM-DD", text: Binding(
+                                        get: { subscriptionDraft.currentPeriodEnd },
+                                        set: { value in
+                                            updateSubscriptionDraft(for: user.id) { current in
+                                                current.currentPeriodEnd = value
+                                            }
+                                        }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
                                 }
 
                                 if !roles.isEmpty {
                                     ScrollView(.horizontal, showsIndicators: false) {
                                         HStack(spacing: 6) {
                                             ForEach(roles.map(\.key), id: \.self) { roleKey in
-                                                let selected = (roleDrafts[user.id] ?? Set(user.roles)).contains(roleKey)
+                                                let selected = roleDraft.contains(roleKey)
                                                 Button(roleKey) {
                                                     toggleRole(for: user.id, roleKey: roleKey, fallbackRoles: user.roles)
                                                 }
@@ -876,6 +1574,13 @@ private struct AdminUserManagementPanelView: View {
                                     .buttonStyle(.bordered)
                                     .disabled(pendingRoleSave.contains(user.id) || !isDraftDirty(for: user))
 
+                                    Button(action: { Task { await saveSubscription(for: user) } }) {
+                                        Text(pendingSubscriptionSave.contains(user.id) ? "Saving billing…" : "Save billing")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(.blue)
+                                    .disabled(pendingSubscriptionSave.contains(user.id) || billingPlans.isEmpty)
+
                                     Button(action: { Task { await toggleStatus(for: user) } }) {
                                         Text(pendingStatusSave.contains(user.id) ? "Updating…" : (user.is_active ? "Deactivate" : "Activate"))
                                     }
@@ -884,12 +1589,6 @@ private struct AdminUserManagementPanelView: View {
                                     .disabled(pendingStatusSave.contains(user.id))
 
                                     Spacer()
-                                }
-
-                                if !user.providers.isEmpty {
-                                    Text("Providers: \(user.providers.joined(separator: ", "))")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
                                 }
                             }
                             .padding(10)
@@ -917,20 +1616,73 @@ private struct AdminUserManagementPanelView: View {
                 role: roleFilter == "all" ? nil : roleFilter,
                 includeInactive: includeInactive
             )
-            let (nextRoles, userResponse) = try await (rolesTask, usersTask)
+            async let plansTask = model.api.fetchAdminBillingPlans()
+
+            let (nextRoles, userResponse, nextPlans) = try await (rolesTask, usersTask, plansTask)
             roles = nextRoles
             users = userResponse.users
             totalUsers = userResponse.total
+            billingPlans = nextPlans
 
-            var nextDrafts: [Int: Set<String>] = [:]
+            let defaultPlanCode = nextPlans.first?.code ?? "pro"
+            var nextRoleDrafts: [Int: Set<String>] = [:]
+            var nextSubscriptionDrafts: [Int: SubscriptionDraft] = [:]
+
             for user in userResponse.users {
-                nextDrafts[user.id] = Set(user.roles)
+                nextRoleDrafts[user.id] = Set(user.roles)
+                nextSubscriptionDrafts[user.id] = makeSubscriptionDraft(for: user, defaultPlanCode: defaultPlanCode)
             }
-            roleDrafts = nextDrafts
+
+            roleDrafts = nextRoleDrafts
+            subscriptionDrafts = nextSubscriptionDrafts
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    private func resolvedDefaultPlanCode() -> String {
+        billingPlans.first?.code ?? "pro"
+    }
+
+    private func normalizedSubscriptionStatus(_ value: String?) -> String {
+        guard let value else { return "incomplete" }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if allowedStatuses.contains(normalized) {
+            return normalized
+        }
+        return "incomplete"
+    }
+
+    private func subscriptionBadgeColor(for status: String) -> Color {
+        switch status {
+        case "active", "trialing", "grace_period":
+            return .green
+        default:
+            return .orange
+        }
+    }
+
+    private func makeSubscriptionDraft(for user: AdminUser, defaultPlanCode: String) -> SubscriptionDraft {
+        SubscriptionDraft(
+            planCode: user.subscription?.plan?.code ?? defaultPlanCode,
+            status: normalizedSubscriptionStatus(user.subscription?.status),
+            provider: user.subscription?.provider ?? "manual",
+            currentPeriodEnd: dateInputValue(from: user.subscription?.current_period_end)
+        )
+    }
+
+    private func dateInputValue(from value: String?) -> String {
+        guard let value else { return "" }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 10 else { return "" }
+        return String(trimmed.prefix(10))
+    }
+
+    private func updateSubscriptionDraft(for userId: Int, mutate: (inout SubscriptionDraft) -> Void) {
+        guard var draft = subscriptionDrafts[userId] else { return }
+        mutate(&draft)
+        subscriptionDrafts[userId] = draft
     }
 
     private func toggleRole(for userId: Int, roleKey: String, fallbackRoles: [String]) {
@@ -960,6 +1712,7 @@ private struct AdminUserManagementPanelView: View {
                     candidate.id == user.id ? updated : candidate
                 }
                 roleDrafts[user.id] = Set(updated.roles)
+                subscriptionDrafts[user.id] = makeSubscriptionDraft(for: updated, defaultPlanCode: resolvedDefaultPlanCode())
                 noticeMessage = "Updated roles for \(updated.email ?? updated.display_name ?? "user #\(updated.id)")."
             } else {
                 noticeMessage = "Role update completed."
@@ -969,6 +1722,60 @@ private struct AdminUserManagementPanelView: View {
         }
 
         pendingRoleSave.remove(user.id)
+    }
+
+    private func saveSubscription(for user: AdminUser) async {
+        guard let draft = subscriptionDrafts[user.id] else {
+            subscriptionDrafts[user.id] = makeSubscriptionDraft(for: user, defaultPlanCode: resolvedDefaultPlanCode())
+            return
+        }
+
+        let planCode = draft.planCode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !planCode.isEmpty else {
+            errorMessage = "Select a billing plan before saving subscription."
+            noticeMessage = nil
+            return
+        }
+
+        let status = normalizedSubscriptionStatus(draft.status)
+        let provider = draft.provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedProvider = provider.isEmpty ? "manual" : provider
+        let periodEndInput = draft.currentPeriodEnd.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !periodEndInput.isEmpty && DateFormatter.adminDateInput.date(from: periodEndInput) == nil {
+            errorMessage = "Period end must use YYYY-MM-DD format."
+            noticeMessage = nil
+            return
+        }
+
+        let currentPeriodEndISO = periodEndInput.isEmpty ? nil : "\(periodEndInput)T23:59:59.000Z"
+
+        pendingSubscriptionSave.insert(user.id)
+        errorMessage = nil
+        noticeMessage = nil
+
+        do {
+            if let updated = try await model.api.updateAdminUserSubscription(
+                userId: user.id,
+                planCode: planCode,
+                status: status,
+                provider: resolvedProvider,
+                currentPeriodEndISO: currentPeriodEndISO
+            ) {
+                users = users.map { candidate in
+                    candidate.id == user.id ? updated : candidate
+                }
+                roleDrafts[user.id] = Set(updated.roles)
+                subscriptionDrafts[user.id] = makeSubscriptionDraft(for: updated, defaultPlanCode: resolvedDefaultPlanCode())
+                noticeMessage = "Updated subscription for \(updated.email ?? updated.display_name ?? "user #\(updated.id)")."
+            } else {
+                noticeMessage = "Subscription update completed."
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        pendingSubscriptionSave.remove(user.id)
     }
 
     private func toggleStatus(for user: AdminUser) async {
@@ -981,6 +1788,7 @@ private struct AdminUserManagementPanelView: View {
                     candidate.id == user.id ? updated : candidate
                 }
                 roleDrafts[user.id] = Set(updated.roles)
+                subscriptionDrafts[user.id] = makeSubscriptionDraft(for: updated, defaultPlanCode: resolvedDefaultPlanCode())
                 noticeMessage = "\(updated.email ?? updated.display_name ?? "user #\(updated.id)") is now \(updated.is_active ? "active" : "inactive")."
             } else {
                 noticeMessage = "Status update completed."
@@ -1120,11 +1928,33 @@ private func formatDateTime(_ value: String?) -> String {
     return DateFormatter.adminDateTime.string(from: date)
 }
 
+private func localDateInputString(_ date: Date) -> String {
+    DateFormatter.localDateInput.string(from: date)
+}
+
 private extension DateFormatter {
     static let adminDateTime: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        return formatter
+    }()
+
+    static let localDateInput: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    static let adminDateInput: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
         return formatter
     }()
 }
