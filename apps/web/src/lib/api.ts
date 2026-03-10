@@ -5,13 +5,20 @@ export type NewsItem = {
   summary: string | null;
   url: string | null;
   country_iso2: string | null;
-  event_time: string | null; // ISO
+  event_time: string | null;
   source_name?: string | null;
   payload?: unknown;
 };
 
 export type CountryStat = { country: string; count: number };
-export type CountryWeather = { country: string; temp_c: number | null; humidity: number | null; observed_at: string; weather_main: string | null };
+export type CountryWeather = {
+  country: string;
+  temp_c: number | null;
+  humidity: number | null;
+  observed_at: string;
+  weather_main: string | null;
+};
+
 export type MarketQuote = {
   symbol: string;
   company_name: string | null;
@@ -28,15 +35,69 @@ export type MarketQuote = {
   observed_at: string;
   payload?: unknown;
 };
+
 export type AuthProviderId = "google" | "microsoft" | "apple";
 export type IngestionPipeline = "news" | "weather" | "market";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
+
+export type BillingPlanRef = {
+  id: number;
+  code: string;
+  name: string;
+  price_cents: number;
+  currency: string;
+  interval_unit: string;
+};
+
+export type BillingSubscription = {
+  id: number;
+  status: string;
+  provider: string;
+  started_at: string;
+  current_period_end: string | null;
+  canceled_at: string | null;
+  plan: BillingPlanRef;
+};
+
+export type BillingAccessReason =
+  | "paywall_disabled"
+  | "admin_override"
+  | "active_subscription"
+  | "trialing_subscription"
+  | "grace_period"
+  | "subscription_expired"
+  | "subscription_inactive"
+  | "no_subscription";
+
+export type BillingAccessState = {
+  paywall_enabled: boolean;
+  has_access: boolean;
+  reason: BillingAccessReason;
+  checkout_url: string | null;
+  portal_url: string | null;
+  subscription: BillingSubscription | null;
+};
+
 export type AdminRole = {
   id: number;
   key: string;
   description: string | null;
   user_count: number;
 };
+
+export type AdminUserSubscription = {
+  id: number;
+  status: string | null;
+  provider: string | null;
+  started_at: string | null;
+  current_period_end: string | null;
+  canceled_at: string | null;
+  plan: {
+    code: string | null;
+    name: string | null;
+  };
+};
+
 export type AdminUser = {
   id: number;
   email: string | null;
@@ -48,7 +109,21 @@ export type AdminUser = {
   roles: string[];
   providers: string[];
   last_seen_at: string | null;
+  subscription: AdminUserSubscription | null;
 };
+
+export type AdminBillingPlan = {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  interval_unit: string;
+  is_active: boolean;
+  metadata: unknown;
+};
+
 export type AuthProvider = {
   id: AuthProviderId;
   enabled: boolean;
@@ -56,7 +131,16 @@ export type AuthProvider = {
   icon?: AuthProviderId;
   start_path?: string;
 };
-export type AuthUser = { id: number; email: string | null; display_name: string | null; avatar_url: string | null; roles: string[] };
+
+export type AuthUser = {
+  id: number;
+  email: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+  roles: string[];
+  billing: BillingAccessState;
+};
+
 export type AdminIngestionRun = {
   id: number;
   pipeline: IngestionPipeline;
@@ -71,6 +155,7 @@ export type AdminIngestionRun = {
   request_payload: unknown;
   log_count: number;
 };
+
 export type AdminIngestionLog = {
   id: number;
   run_id: number;
@@ -79,6 +164,7 @@ export type AdminIngestionLog = {
   message: string;
   context: unknown | null;
 };
+
 export type AdminIngestionMetricsPoint = {
   date: string;
   pipeline: IngestionPipeline;
@@ -93,6 +179,7 @@ export type AdminIngestionMetricsPoint = {
   http_failures: number;
   db_errors: number;
 };
+
 export type AdminIngestionMetricsTotal = {
   pipeline: IngestionPipeline;
   run_count: number;
@@ -107,14 +194,46 @@ export type AdminIngestionMetricsTotal = {
   db_errors: number;
 };
 
-const API_BASE = ''; // relative to same host; In dev, consider proxying /api to backend
+export type AdminIngestionAutomationRule = {
+  pipeline: IngestionPipeline;
+  enabled: boolean;
+  schedule_enabled: boolean;
+  schedule_interval_minutes: number;
+  intelligent_enabled: boolean;
+  min_spacing_minutes: number;
+  freshness_sla_minutes: number;
+  demand_window_minutes: number;
+  demand_threshold: number;
+  failure_backoff_minutes: number;
+  next_scheduled_at: string | null;
+  last_evaluated_at: string | null;
+  last_triggered_at: string | null;
+  last_trigger_reason: string | null;
+  last_error: string | null;
+  default_payload: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminIngestionAutomationStatus = {
+  pipeline: IngestionPipeline;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  latest_data_at: string | null;
+  data_age_minutes: number | null;
+  demand_requests: number;
+  active_runs: number;
+};
+
+const API_BASE = "";
 
 async function readError(resp: Response, fallback: string): Promise<string> {
   try {
     const data = await resp.json();
     if (typeof data?.error === "string" && data.error.trim()) return data.error;
   } catch {
-    // ignore
+    // ignore parse errors
   }
   return `${fallback}: ${resp.status}`;
 }
@@ -129,9 +248,16 @@ export async function fetchAuthProviders(): Promise<AuthProvider[]> {
 export async function fetchAuthMe(): Promise<AuthUser | null> {
   const resp = await fetch(`${API_BASE}/api/auth/me`, { credentials: "include" });
   if (resp.status === 401) return null;
-  if (!resp.ok) throw new Error(`Failed to fetch auth session: ${resp.status}`);
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch auth session"));
   const data = await resp.json();
   return (data.user ?? null) as AuthUser | null;
+}
+
+export async function fetchBillingMe(): Promise<BillingAccessState> {
+  const resp = await fetch(`${API_BASE}/api/billing/me`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch billing state"));
+  const data = await resp.json();
+  return data.billing as BillingAccessState;
 }
 
 export async function logoutAuth(): Promise<void> {
@@ -151,28 +277,28 @@ export function getAuthStartUrl(provider: AuthProviderId, redirectUrl?: string):
 
 export async function fetchNews(params?: { limit?: number; offset?: number; q?: string; country?: string }) {
   const sp = new URLSearchParams();
-  if (params?.limit) sp.set('limit', String(params.limit));
-  if (params?.offset) sp.set('offset', String(params.offset));
-  if (params?.q) sp.set('q', params.q);
-  if (params?.country) sp.set('country', params.country);
-  const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`);
-  if (!resp.ok) throw new Error(`Failed to fetch news: ${resp.status}`);
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.offset) sp.set("offset", String(params.offset));
+  if (params?.q) sp.set("q", params.q);
+  if (params?.country) sp.set("country", params.country);
+  const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch news"));
   const data = await resp.json();
   return (data.items ?? []) as NewsItem[];
 }
 
 export async function fetchCountryStats(params?: { days?: number }) {
   const sp = new URLSearchParams();
-  if (params?.days) sp.set('days', String(params.days));
-  const resp = await fetch(`${API_BASE}/api/news/country-stats?${sp.toString()}`);
-  if (!resp.ok) throw new Error(`Failed to fetch country stats: ${resp.status}`);
+  if (params?.days) sp.set("days", String(params.days));
+  const resp = await fetch(`${API_BASE}/api/news/country-stats?${sp.toString()}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country stats"));
   const data = await resp.json();
   return (data.stats ?? []) as CountryStat[];
 }
 
 export async function fetchCountryWeather() {
-  const resp = await fetch(`${API_BASE}/api/weather/country-latest`);
-  if (!resp.ok) throw new Error(`Failed to fetch country weather: ${resp.status}`);
+  const resp = await fetch(`${API_BASE}/api/weather/country-latest`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country weather"));
   const data = await resp.json();
   return (data.stats ?? []) as CountryWeather[];
 }
@@ -182,16 +308,16 @@ export async function fetchMarketQuotes(params?: { refresh?: boolean; symbols?: 
   if (typeof params?.refresh === "boolean") sp.set("refresh", params.refresh ? "true" : "false");
   if (params?.symbols && params.symbols.length > 0) sp.set("symbols", params.symbols.join(","));
   const suffix = sp.toString() ? `?${sp.toString()}` : "";
-  const resp = await fetch(`${API_BASE}/api/market/quotes${suffix}`);
-  if (!resp.ok) throw new Error(`Failed to fetch market quotes: ${resp.status}`);
+  const resp = await fetch(`${API_BASE}/api/market/quotes${suffix}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch market quotes"));
   const data = await resp.json();
   return (data.quotes ?? []) as MarketQuote[];
 }
 
 export async function ingestWeatherNow(country?: string) {
   const resp = await fetch(`${API_BASE}/api/ingest/openweather/country-current`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(country ? { country } : {}),
   });
   if (!resp.ok) throw new Error(`Failed to ingest weather: ${resp.status}`);
@@ -203,29 +329,35 @@ export async function triggerAdminNewsIngestion(payload?: {
     newsapi?: boolean;
     thenewsapi?: boolean;
   };
-  everything?: false | {
-    q?: string;
-    language?: string;
-    pageSize?: number;
-    maxPages?: number;
-  };
-  topHeadlines?: false | {
-    country?: string;
-    category?: string;
-    q?: string;
-    pageSize?: number;
-    maxPages?: number;
-  };
-  theNewsApi?: false | {
-    search?: string;
-    q?: string;
-    language?: string;
-    locale?: string;
-    country?: string;
-    pageSize?: number;
-    maxPages?: number;
-    publishedAfter?: string;
-  };
+  everything?:
+    | false
+    | {
+        q?: string;
+        language?: string;
+        pageSize?: number;
+        maxPages?: number;
+      };
+  topHeadlines?:
+    | false
+    | {
+        country?: string;
+        category?: string;
+        q?: string;
+        pageSize?: number;
+        maxPages?: number;
+      };
+  theNewsApi?:
+    | false
+    | {
+        search?: string;
+        q?: string;
+        language?: string;
+        locale?: string;
+        country?: string;
+        pageSize?: number;
+        maxPages?: number;
+        publishedAfter?: string;
+      };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/news/run`, {
     method: "POST",
@@ -260,7 +392,6 @@ export async function triggerAdminMarketIngestion(payload?: {
     body: JSON.stringify(payload ?? {}),
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger market ingestion"));
-
   return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
 }
 
@@ -333,6 +464,37 @@ export async function fetchAdminIngestionMetrics(params?: {
   };
 }
 
+export async function fetchAdminIngestionAutomation(): Promise<{
+  poll_seconds: number;
+  rules: AdminIngestionAutomationRule[];
+  status: AdminIngestionAutomationStatus[];
+}> {
+  const resp = await fetch(`${API_BASE}/api/admin/ingestion/automation`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch ingestion automation"));
+  return (await resp.json()) as {
+    poll_seconds: number;
+    rules: AdminIngestionAutomationRule[];
+    status: AdminIngestionAutomationStatus[];
+  };
+}
+
+export async function updateAdminIngestionAutomationRule(
+  pipeline: IngestionPipeline,
+  patch: Partial<AdminIngestionAutomationRule>
+): Promise<AdminIngestionAutomationRule> {
+  const resp = await fetch(`${API_BASE}/api/admin/ingestion/automation/${pipeline}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to update ingestion automation"));
+  const data = await resp.json();
+  return data.rule as AdminIngestionAutomationRule;
+}
+
 export async function fetchAdminRoles(): Promise<AdminRole[]> {
   const resp = await fetch(`${API_BASE}/api/admin/roles`, { credentials: "include" });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch roles"));
@@ -355,6 +517,34 @@ export async function createAdminRole(payload: {
   return data.role as AdminRole;
 }
 
+export async function fetchAdminBillingPlans(): Promise<AdminBillingPlan[]> {
+  const resp = await fetch(`${API_BASE}/api/admin/billing/plans`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch billing plans"));
+  const data = await resp.json();
+  return (data.plans ?? []) as AdminBillingPlan[];
+}
+
+export async function createAdminBillingPlan(payload: {
+  code: string;
+  name: string;
+  description?: string;
+  price_cents?: number;
+  currency?: string;
+  interval_unit?: "month" | "year" | "one_time";
+  is_active?: boolean;
+  metadata?: Record<string, unknown>;
+}): Promise<AdminBillingPlan> {
+  const resp = await fetch(`${API_BASE}/api/admin/billing/plans`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to create billing plan"));
+  const data = await resp.json();
+  return data.plan as AdminBillingPlan;
+}
+
 export async function fetchAdminUsers(params?: {
   limit?: number;
   offset?: number;
@@ -370,6 +560,7 @@ export async function fetchAdminUsers(params?: {
   if (typeof params?.includeInactive === "boolean") {
     sp.set("includeInactive", String(params.includeInactive));
   }
+
   const resp = await fetch(`${API_BASE}/api/admin/users?${sp.toString()}`, {
     credentials: "include",
   });
@@ -379,7 +570,7 @@ export async function fetchAdminUsers(params?: {
 
 export async function updateAdminUserRoles(
   userId: number,
-  roles: string[],
+  roles: string[]
 ): Promise<AdminUser | null> {
   const resp = await fetch(`${API_BASE}/api/admin/users/${userId}/roles`, {
     method: "PATCH",
@@ -394,7 +585,7 @@ export async function updateAdminUserRoles(
 
 export async function updateAdminUserStatus(
   userId: number,
-  is_active: boolean,
+  is_active: boolean
 ): Promise<AdminUser | null> {
   const resp = await fetch(`${API_BASE}/api/admin/users/${userId}/status`, {
     method: "PATCH",
@@ -407,12 +598,36 @@ export async function updateAdminUserStatus(
   return (data.user ?? null) as AdminUser | null;
 }
 
+export async function updateAdminUserSubscription(
+  userId: number,
+  payload: {
+    plan_code: string;
+    status: "trialing" | "active" | "past_due" | "grace_period" | "canceled" | "unpaid" | "incomplete";
+    provider?: string;
+    started_at?: string | null;
+    current_period_end?: string | null;
+    canceled_at?: string | null;
+    provider_customer_id?: string | null;
+    provider_subscription_id?: string | null;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<AdminUser | null> {
+  const resp = await fetch(`${API_BASE}/api/admin/users/${userId}/subscription`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to update user subscription"));
+  const data = await resp.json();
+  return (data.user ?? null) as AdminUser | null;
+}
+
 export function imageProxy(url?: string | null): string | undefined {
   if (!url) return undefined;
   try {
-    // Encode once and attach to the API proxy path (same origin)
-    const u = new URL(url);
-    return `/api/proxy-image?url=${encodeURIComponent(u.toString())}`;
+    const resolved = new URL(url);
+    return `/api/proxy-image?url=${encodeURIComponent(resolved.toString())}`;
   } catch {
     return undefined;
   }

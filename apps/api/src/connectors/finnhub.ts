@@ -14,6 +14,15 @@ type FinnhubQuoteResponse = {
   [key: string]: unknown;
 };
 
+type FinnhubCompanyProfile2Response = {
+  ticker?: string;
+  name?: string;
+  exchange?: string;
+  country?: string;
+  currency?: string;
+  [key: string]: unknown;
+};
+
 type DbTimestamp = string | Date;
 
 type MarketSnapshotRow = {
@@ -86,6 +95,7 @@ export type MarketQuote = {
 let activeRealtimeRefresh: Promise<void> | null = null;
 let lastRealtimeRefreshAt = 0;
 let lastRealtimeSymbolsKey = "";
+const profileMetadataCache = new Map<string, Partial<SymbolMetadata>>();
 
 function toTimestampString(value: DbTimestamp): string {
   if (value instanceof Date) return value.toISOString();
@@ -161,6 +171,36 @@ async function fetchFinnhubQuote(symbol: string): Promise<FinnhubQuoteResponse> 
     throw new Error(`Finnhub quote error: ${data.error.trim()}`);
   }
   return data;
+}
+
+async function fetchFinnhubCompanyProfile2(symbol: string): Promise<Partial<SymbolMetadata>> {
+  const cached = profileMetadataCache.get(symbol);
+  if (cached) return cached;
+
+  const token = process.env.FINNHUB_API_KEY || "";
+  if (!token) throw new Error("FINNHUB_API_KEY not set");
+
+  const url = new URL(`${FINNHUB_BASE_URL}/stock/profile2`);
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("token", token);
+
+  const response = await fetch(url.toString(), {
+    headers: { accept: "application/json" },
+  });
+  if (!response.ok) {
+    const body = (await response.text()).slice(0, 200);
+    throw new Error(`Finnhub profile2 HTTP ${response.status}: ${body}`);
+  }
+
+  const data = (await response.json()) as FinnhubCompanyProfile2Response;
+  const metadata: Partial<SymbolMetadata> = {
+    company_name: typeof data.name === "string" && data.name.trim() ? data.name.trim() : undefined,
+    exchange: typeof data.exchange === "string" && data.exchange.trim() ? data.exchange.trim() : undefined,
+    country: typeof data.country === "string" && data.country.trim() ? data.country.trim().toUpperCase() : undefined,
+    currency: typeof data.currency === "string" && data.currency.trim() ? data.currency.trim().toUpperCase() : undefined,
+  };
+  profileMetadataCache.set(symbol, metadata);
+  return metadata;
 }
 
 function toObservedAtISO(value: unknown): string {
@@ -267,7 +307,20 @@ export async function ingestFinnhubQuotes(symbolsInput?: string[] | null): Promi
     try {
       const quote = await fetchFinnhubQuote(symbol);
       const observedAtISO = toObservedAtISO(quote.t);
-      const metadata = DEFAULT_SYMBOL_METADATA[symbol] ?? {};
+      let metadata: Partial<SymbolMetadata> = DEFAULT_SYMBOL_METADATA[symbol] ?? {};
+      if (!metadata.country || !metadata.exchange || !metadata.company_name || !metadata.currency) {
+        try {
+          const remoteMetadata = await fetchFinnhubCompanyProfile2(symbol);
+          metadata = {
+            company_name: metadata.company_name ?? remoteMetadata.company_name,
+            exchange: metadata.exchange ?? remoteMetadata.exchange,
+            country: metadata.country ?? remoteMetadata.country,
+            currency: metadata.currency ?? remoteMetadata.currency,
+          };
+        } catch {
+          // Metadata enrich failures are non-fatal for quote ingestion.
+        }
+      }
       try {
         const result = await upsertMarketSnapshot({
           sourceId: source.id,

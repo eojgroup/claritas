@@ -2,16 +2,34 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Shield, UserCog, Users } from "lucide-react";
 import {
   createAdminRole,
+  fetchAdminBillingPlans,
   fetchAdminRoles,
   fetchAdminUsers,
+  updateAdminUserSubscription,
   updateAdminUserRoles,
   updateAdminUserStatus,
+  type AdminBillingPlan,
   type AdminRole,
   type AdminUser,
 } from "../lib/api";
 
 type RoleDraftMap = Record<number, string[]>;
 type PendingMap = Record<number, boolean>;
+type SubscriptionStatus =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "grace_period"
+  | "canceled"
+  | "unpaid"
+  | "incomplete";
+type SubscriptionDraft = {
+  plan_code: string;
+  status: SubscriptionStatus;
+  provider: string;
+  current_period_end: string;
+};
+type SubscriptionDraftMap = Record<number, SubscriptionDraft>;
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -32,8 +50,31 @@ function formatDateTime(value: string | null): string {
   return new Date(ts).toLocaleString();
 }
 
+function toDateInputValue(value: string | null): string {
+  if (!value) return "";
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return "";
+  return new Date(parsed).toISOString().slice(0, 10);
+}
+
+function normalizeSubscriptionStatus(value: string | null | undefined): SubscriptionStatus {
+  if (
+    value === "trialing" ||
+    value === "active" ||
+    value === "past_due" ||
+    value === "grace_period" ||
+    value === "canceled" ||
+    value === "unpaid" ||
+    value === "incomplete"
+  ) {
+    return value;
+  }
+  return "incomplete";
+}
+
 export default function AdminUserManagementPanel() {
   const [roles, setRoles] = useState<AdminRole[]>([]);
+  const [billingPlans, setBillingPlans] = useState<AdminBillingPlan[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [search, setSearch] = useState("");
@@ -44,8 +85,10 @@ export default function AdminUserManagementPanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [roleDrafts, setRoleDrafts] = useState<RoleDraftMap>({});
+  const [subscriptionDrafts, setSubscriptionDrafts] = useState<SubscriptionDraftMap>({});
   const [pendingRoleSave, setPendingRoleSave] = useState<PendingMap>({});
   const [pendingStatusSave, setPendingStatusSave] = useState<PendingMap>({});
+  const [pendingSubscriptionSave, setPendingSubscriptionSave] = useState<PendingMap>({});
   const [newRoleKey, setNewRoleKey] = useState("");
   const [newRoleDescription, setNewRoleDescription] = useState("");
   const [isCreatingRole, setIsCreatingRole] = useState(false);
@@ -54,7 +97,7 @@ export default function AdminUserManagementPanel() {
     setIsLoading(true);
     setError(null);
     try {
-      const [roleResp, userResp] = await Promise.all([
+      const [roleResp, userResp, billingPlanResp] = await Promise.all([
         fetchAdminRoles(),
         fetchAdminUsers({
           limit: 200,
@@ -63,15 +106,26 @@ export default function AdminUserManagementPanel() {
           role: roleFilter !== "all" ? roleFilter : undefined,
           includeInactive,
         }),
+        fetchAdminBillingPlans(),
       ]);
       setRoles(roleResp);
+      setBillingPlans(billingPlanResp);
       setUsers(userResp.users);
       setTotalUsers(userResp.total);
       const nextDrafts: RoleDraftMap = {};
+      const nextSubscriptionDrafts: SubscriptionDraftMap = {};
+      const defaultPlanCode = billingPlanResp[0]?.code || "pro";
       userResp.users.forEach((user) => {
         nextDrafts[user.id] = sortedUnique(user.roles);
+        nextSubscriptionDrafts[user.id] = {
+          plan_code: user.subscription?.plan.code || defaultPlanCode,
+          status: normalizeSubscriptionStatus(user.subscription?.status || "incomplete"),
+          provider: user.subscription?.provider || "manual",
+          current_period_end: toDateInputValue(user.subscription?.current_period_end || null),
+        };
       });
       setRoleDrafts(nextDrafts);
+      setSubscriptionDrafts(nextSubscriptionDrafts);
     } catch (loadError) {
       setError(toErrorMessage(loadError));
     } finally {
@@ -84,6 +138,14 @@ export default function AdminUserManagementPanel() {
   }, [loadData]);
 
   const roleKeys = useMemo(() => roles.map((role) => role.key), [roles]);
+  const billingPlanOptions = useMemo(
+    () =>
+      billingPlans.map((plan) => ({
+        code: plan.code,
+        label: `${plan.name} (${plan.code})`,
+      })),
+    [billingPlans],
+  );
 
   const toggleRoleForUser = useCallback((userId: number, roleKey: string) => {
     setRoleDrafts((previous) => {
@@ -148,6 +210,69 @@ export default function AdminUserManagementPanel() {
       setPendingStatusSave((previous) => ({ ...previous, [user.id]: false }));
     }
   }, []);
+
+  const updateSubscriptionDraft = useCallback(
+    (userId: number, patch: Partial<SubscriptionDraft>) => {
+      setSubscriptionDrafts((previous) => {
+        const current = previous[userId];
+        if (!current) return previous;
+        return {
+          ...previous,
+          [userId]: {
+            ...current,
+            ...patch,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const saveUserSubscription = useCallback(
+    async (user: AdminUser) => {
+      const draft = subscriptionDrafts[user.id];
+      if (!draft) return;
+      if (!draft.plan_code) {
+        setError("Select a billing plan before saving subscription.");
+        return;
+      }
+
+      setPendingSubscriptionSave((previous) => ({ ...previous, [user.id]: true }));
+      setError(null);
+      setNotice(null);
+      try {
+        const currentPeriodEnd = draft.current_period_end
+          ? new Date(`${draft.current_period_end}T23:59:59.000Z`).toISOString()
+          : null;
+        const updated = await updateAdminUserSubscription(user.id, {
+          plan_code: draft.plan_code,
+          status: draft.status,
+          provider: draft.provider || "manual",
+          current_period_end: currentPeriodEnd,
+        });
+        if (updated) {
+          setUsers((previous) =>
+            previous.map((candidate) => (candidate.id === user.id ? updated : candidate)),
+          );
+          setSubscriptionDrafts((previous) => ({
+            ...previous,
+            [user.id]: {
+              plan_code: updated.subscription?.plan.code || draft.plan_code,
+              status: normalizeSubscriptionStatus(updated.subscription?.status || draft.status),
+              provider: updated.subscription?.provider || draft.provider,
+              current_period_end: toDateInputValue(updated.subscription?.current_period_end || null),
+            },
+          }));
+        }
+        setNotice(`Updated subscription for ${user.email || user.display_name || `user #${user.id}`}.`);
+      } catch (saveError) {
+        setError(toErrorMessage(saveError));
+      } finally {
+        setPendingSubscriptionSave((previous) => ({ ...previous, [user.id]: false }));
+      }
+    },
+    [subscriptionDrafts],
+  );
 
   const handleCreateRole = useCallback(async () => {
     const key = newRoleKey.trim().toLowerCase();
@@ -336,7 +461,15 @@ export default function AdminUserManagementPanel() {
               const isDirty = arrayKey(draftRoles) !== arrayKey(user.roles);
               const isSavingRoles = !!pendingRoleSave[user.id];
               const isSavingStatus = !!pendingStatusSave[user.id];
+              const isSavingSubscription = !!pendingSubscriptionSave[user.id];
+              const subscriptionDraft = subscriptionDrafts[user.id] ?? {
+                plan_code: billingPlanOptions[0]?.code || "pro",
+                status: normalizeSubscriptionStatus(user.subscription?.status || "incomplete"),
+                provider: user.subscription?.provider || "manual",
+                current_period_end: toDateInputValue(user.subscription?.current_period_end || null),
+              };
               const userLabel = user.display_name || user.email || `User #${user.id}`;
+              const subscriptionStatus = normalizeSubscriptionStatus(user.subscription?.status || "incomplete");
               return (
                 <div
                   key={user.id}
@@ -355,6 +488,15 @@ export default function AdminUserManagementPanel() {
                     >
                       {user.is_active ? "Active" : "Inactive"}
                     </span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                        subscriptionStatus === "active" || subscriptionStatus === "trialing" || subscriptionStatus === "grace_period"
+                          ? "border-emerald-700 bg-emerald-900/40 text-emerald-200"
+                          : "border-amber-700 bg-amber-900/40 text-amber-200"
+                      }`}
+                    >
+                      {subscriptionStatus}
+                    </span>
                     <span className="ml-auto text-xs text-[color:var(--shell-muted)]">
                       Last seen: {formatDateTime(user.last_seen_at)}
                     </span>
@@ -371,6 +513,75 @@ export default function AdminUserManagementPanel() {
                         {provider}
                       </span>
                     ))}
+                  </div>
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <label className="text-xs text-[color:var(--shell-muted)]">
+                      Billing plan
+                      <select
+                        value={subscriptionDraft.plan_code}
+                        onChange={(event) =>
+                          updateSubscriptionDraft(user.id, { plan_code: event.currentTarget.value })
+                        }
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                      >
+                        {billingPlanOptions.length === 0 && <option value="">No plans</option>}
+                        {billingPlanOptions.map((plan) => (
+                          <option key={plan.code} value={plan.code}>
+                            {plan.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs text-[color:var(--shell-muted)]">
+                      Subscription status
+                      <select
+                        value={subscriptionDraft.status}
+                        onChange={(event) =>
+                          updateSubscriptionDraft(user.id, {
+                            status: normalizeSubscriptionStatus(event.currentTarget.value),
+                          })
+                        }
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                      >
+                        {[
+                          "trialing",
+                          "active",
+                          "past_due",
+                          "grace_period",
+                          "canceled",
+                          "unpaid",
+                          "incomplete",
+                        ].map((statusValue) => (
+                          <option key={statusValue} value={statusValue}>
+                            {statusValue}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs text-[color:var(--shell-muted)]">
+                      Provider
+                      <input
+                        value={subscriptionDraft.provider}
+                        onChange={(event) =>
+                          updateSubscriptionDraft(user.id, { provider: event.currentTarget.value })
+                        }
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                      />
+                    </label>
+                    <label className="text-xs text-[color:var(--shell-muted)]">
+                      Period end (optional)
+                      <input
+                        type="date"
+                        value={subscriptionDraft.current_period_end}
+                        onChange={(event) =>
+                          updateSubscriptionDraft(user.id, {
+                            current_period_end: event.currentTarget.value,
+                          })
+                        }
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                      />
+                    </label>
                   </div>
 
                   <div className="mt-3 flex flex-wrap gap-1">
@@ -401,6 +612,14 @@ export default function AdminUserManagementPanel() {
                       className="w-full rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-40 sm:w-auto sm:py-1 sm:text-xs"
                     >
                       {isSavingRoles ? "Saving…" : "Save roles"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveUserSubscription(user)}
+                      disabled={isSavingSubscription || billingPlanOptions.length === 0}
+                      className="w-full rounded-full border border-sky-600 bg-sky-900/40 px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-sky-100 disabled:opacity-40 sm:w-auto sm:py-1 sm:text-xs"
+                    >
+                      {isSavingSubscription ? "Saving billing…" : "Save billing"}
                     </button>
                     <button
                       type="button"

@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ingestTheNewsApiNews = ingestTheNewsApiNews;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const db_1 = require("../db");
-const BASE_URL = "https://api.thenewsapi.com/api/v1";
+const BASE_URL = "https://api.thenewsapi.com/v1";
 function stableFeedKey(kind, params) {
     const entries = Object.entries(params)
         .filter(([_, v]) => v !== undefined && v !== "")

@@ -5,11 +5,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireAuth = requireAuth;
 exports.requireRole = requireRole;
+exports.requirePaidAccess = requirePaidAccess;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const express_1 = __importDefault(require("express"));
 const cookie_1 = __importDefault(require("cookie"));
 const openid_client_1 = require("openid-client");
 const db_1 = require("./db");
+const billing_1 = require("./billing");
 const authRouter = express_1.default.Router();
 const issuerCache = new Map();
 const clientCache = new Map();
@@ -284,6 +286,11 @@ async function getAuthContext(req) {
     const row = rows[0];
     if (!row)
         return null;
+    const roles = row.roles || [];
+    const billing = await (0, billing_1.resolveBillingAccessState)({
+        userId: row.user_id,
+        roles,
+    });
     await (0, db_1.query)(`UPDATE auth_session SET last_seen_at = now() WHERE id = $1`, [row.session_id]);
     return {
         sessionId: row.session_id,
@@ -292,7 +299,8 @@ async function getAuthContext(req) {
             email: row.email,
             display_name: row.display_name,
             avatar_url: row.avatar_url,
-            roles: row.roles || [],
+            roles,
+            billing,
         },
     };
 }
@@ -430,7 +438,7 @@ authRouter.get("/me", async (req, res) => {
         const auth = await getAuthContext(req);
         if (!auth)
             return res.status(401).json({ error: "unauthorized" });
-        return res.json({ user: auth.user });
+        return res.json({ user: auth.user, billing: auth.user.billing });
     }
     catch (err) {
         return res.status(500).json({ error: err.message || String(err) });
@@ -475,6 +483,26 @@ function requireRole(role) {
                 return res.status(401).json({ error: "unauthorized" });
             if (!auth.user.roles.includes(role))
                 return res.status(403).json({ error: "forbidden" });
+            res.locals.auth = auth;
+            return next();
+        }
+        catch (err) {
+            return res.status(500).json({ error: err.message || String(err) });
+        }
+    };
+}
+function requirePaidAccess() {
+    return async (req, res, next) => {
+        try {
+            const auth = await getAuthContext(req);
+            if (!auth)
+                return res.status(401).json({ error: "unauthorized" });
+            if (!auth.user.billing.has_access) {
+                return res.status(402).json({
+                    error: "payment_required",
+                    billing: auth.user.billing,
+                });
+            }
             res.locals.auth = auth;
             return next();
         }

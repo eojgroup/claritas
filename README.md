@@ -199,7 +199,7 @@ npm run dev
   - `THENEWSAPI_API_TOKEN`
   - `OPENWEATHER_API_KEY`
 - TheNewsAPI integration notes:
-  - Base API URL: `https://api.thenewsapi.com/api/v1`
+  - Base API URL: `https://api.thenewsapi.com/v1`
   - `publishedAfter` (when provided in admin ingestion payload) must be `YYYY-MM-DD`
 - Kubernetes deployment env wiring:
   - `infra/k8s/api-deployment.yaml`

@@ -10,20 +10,24 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "d3-geo": "^3.1.0",
     "lucide-react": "^0.541.0",
+    "maplibre-gl": "^5.19.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-map-gl": "^8.1.0",
     "recharts": "^3.1.2",
-    "d3-geo": "^3.1.0",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2",
     "world-countries": "^4.0.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.12",
     "@eslint/js": "^9.22.0",
+    "@tailwindcss/postcss": "^4.1.12",
+    "@types/d3-geo": "^3.1.0",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "@types/topojson-client": "^3.1.3",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.22.0",
@@ -34,8 +38,6 @@
     "tailwindcss": "^4.1.12",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.26.1",
-    "vite": "^6.3.1",
-    "@types/d3-geo": "^3.1.0",
-    "@types/topojson-client": "^3.1.3"
+    "vite": "^6.3.1"
   }
 }

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { query } from "../db";
 import type { FeedRow, NormalizedItem, SourceRow } from "./types";
 
-const BASE_URL = "https://api.thenewsapi.com/api/v1";
+const BASE_URL = "https://api.thenewsapi.com/v1";
 
 type TheNewsApiArticle = {
   uuid?: string | null;

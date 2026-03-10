@@ -7,9 +7,12 @@ struct DashboardView: View {
     @State private var query: String = ""
     @State private var mapMode: ListMode = .news
     @State private var listMode: ListMode = .news
+    @State private var section: DashboardSection = .overview
+    @State private var selectedSymbol: String? = nil
     @State private var minTemp: String = ""
 
     enum ListMode: String, CaseIterable { case news, weather, market }
+    enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
 
     var body: some View {
         DashboardBackground {
@@ -19,67 +22,16 @@ struct DashboardView: View {
 
                     DashboardCard {
                         VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("Map: \(mapMode == .news ? "#News per country" : "Weather per country")")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Picker("Mode", selection: $mapMode) {
-                                    Text("News").tag(ListMode.news)
-                                    Text("Weather").tag(ListMode.weather)
-                                }
-                                .pickerStyle(.segmented)
-                                .frame(maxWidth: 220)
-                                .onChange(of: mapMode) { newValue in
-                                    listMode = newValue
-                                }
+                            Text("Workspace")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Picker("Workspace", selection: $section) {
+                                Text("Overview").tag(DashboardSection.overview)
+                                Text("News").tag(DashboardSection.news)
+                                Text("Weather").tag(DashboardSection.weather)
+                                Text("Markets").tag(DashboardSection.market)
                             }
-
-                            ZStack {
-                                InteractiveCountryBubbleMap(
-                                    mode: mapMode,
-                                    countryStats: model.countryStats,
-                                    weather: model.weather,
-                                    selectedCountry: model.selectedCountry,
-                                    onSelectCountry: { iso in
-                                        let normalized = iso.uppercased()
-                                        model.selectedCountry = model.selectedCountry?.uppercased() == normalized ? nil : normalized
-                                    }
-                                )
-                                    .frame(height: 220)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                                    )
-
-                                if mapMode == .weather && model.weather.isEmpty {
-                                    HStack(spacing: 8) {
-                                        Text("No weather stats yet.")
-                                            .font(.caption)
-                                        Button(action: { Task { await model.refreshWeatherNow() } }) {
-                                            Text(model.isRefreshingWeather ? "Refreshing…" : "Refresh now")
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .disabled(model.isRefreshingWeather)
-                                    }
-                                    .padding(10)
-                                    .background(.ultraThinMaterial, in: Capsule())
-                                }
-                            }
-
-                            if let selected = model.selectedCountry?.uppercased() {
-                                HStack(spacing: 10) {
-                                    Text("Selected country: \(selected)")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Button("Clear") {
-                                        model.selectedCountry = nil
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
-                            }
+                            .pickerStyle(.segmented)
 
                             HStack(spacing: 8) {
                                 Image(systemName: "magnifyingglass")
@@ -99,55 +51,231 @@ struct DashboardView: View {
                                     .stroke(searchFieldStroke, lineWidth: 1)
                             )
 
-                            if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text("Showing \(filteredNews().count) of \(model.news.count) news items")
+                            HStack(spacing: 10) {
+                                if let selected = model.selectedCountry?.uppercased() {
+                                    Text("Country: \(selected)")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                if let selectedSymbol {
+                                    Text("Symbol: \(selectedSymbol)")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if model.selectedCountry != nil || selectedSymbol != nil {
+                                    Button("Clear focus") {
+                                        model.selectedCountry = nil
+                                        selectedSymbol = nil
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    }
+
+                    if section == .overview {
+                        DashboardCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text("Map: \(mapMode == .news ? "#News per country" : "Weather per country")")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Picker("Mode", selection: $mapMode) {
+                                        Text("News").tag(ListMode.news)
+                                        Text("Weather").tag(ListMode.weather)
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .frame(maxWidth: 220)
+                                    .onChange(of: mapMode) { newValue in
+                                        listMode = newValue
+                                    }
+                                }
+
+                                ZStack {
+                                    InteractiveCountryBubbleMap(
+                                        mode: mapMode,
+                                        countryStats: model.countryStats,
+                                        weather: model.weather,
+                                        selectedCountry: model.selectedCountry,
+                                        onSelectCountry: { iso in
+                                            let normalized = iso.uppercased()
+                                            model.selectedCountry = model.selectedCountry?.uppercased() == normalized ? nil : normalized
+                                        }
+                                    )
+                                        .frame(height: 220)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                                        )
+
+                                    if mapMode == .weather && model.weather.isEmpty {
+                                        HStack(spacing: 8) {
+                                            Text("No weather stats yet.")
+                                                .font(.caption)
+                                            Button(action: { Task { await model.refreshWeatherNow() } }) {
+                                                Text(model.isRefreshingWeather ? "Refreshing…" : "Refresh now")
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .disabled(model.isRefreshingWeather)
+                                        }
+                                        .padding(10)
+                                        .background(.ultraThinMaterial, in: Capsule())
+                                    }
+                                }
+                            }
+                        }
+
+                        DashboardCard {
+                            VStack(spacing: 12) {
+                                HStack {
+                                    Text("List")
+                                        .font(.headline)
+                                    Spacer()
+                                    Picker("List Mode", selection: $listMode) {
+                                        Text("News").tag(ListMode.news)
+                                        Text("Weather").tag(ListMode.weather)
+                                        Text("Markets").tag(ListMode.market)
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .frame(maxWidth: 220)
+                                }
+
+                                if listMode == .news {
+                                    NewsListView(items: filteredNews(), onSelectCountry: { iso in
+                                        model.selectedCountry = iso
+                                    })
+                                } else if listMode == .weather {
+                                    WeatherListView(
+                                        items: filteredWeather(),
+                                        minTemp: $minTemp,
+                                        isRefreshing: model.isRefreshingWeather,
+                                        onRefresh: { Task { await model.refreshWeatherNow() } },
+                                        onSelectCountry: { iso in
+                                            model.selectedCountry = iso
+                                        }
+                                    )
+                                } else {
+                                    MarketQuoteListView(
+                                        quotes: filteredMarketQuotes(),
+                                        selectedSymbol: selectedSymbol,
+                                        isRefreshing: model.isRefreshingMarketQuotes,
+                                        onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
+                                        onSelectSymbol: { symbol in
+                                            selectedSymbol = symbol
+                                            if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
+                                                model.selectedCountry = country.uppercased()
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        DashboardCard {
+                            CountryProfileView(selectedCountry: model.selectedCountry)
+                        }
+                    } else if section == .news {
+                        DashboardCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("News stream")
+                                    .font(.headline)
+                                Text("Showing \(filteredNews().count) of \(model.news.count) items")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                NewsListView(items: filteredNews(), onSelectCountry: { iso in
+                                    model.selectedCountry = iso
+                                })
+                            }
+                        }
+                    } else if section == .weather {
+                        DashboardCard {
+                            WeatherListView(
+                                items: filteredWeather(),
+                                minTemp: $minTemp,
+                                isRefreshing: model.isRefreshingWeather,
+                                onRefresh: { Task { await model.refreshWeatherNow() } },
+                                onSelectCountry: { iso in
+                                    model.selectedCountry = iso
+                                }
+                            )
+                        }
+                    } else {
+                        DashboardCard {
+                            MarketQuoteListView(
+                                quotes: filteredMarketQuotes(),
+                                selectedSymbol: selectedSymbol,
+                                isRefreshing: model.isRefreshingMarketQuotes,
+                                onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
+                                onSelectSymbol: { symbol in
+                                    selectedSymbol = symbol
+                                    if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
+                                        model.selectedCountry = country.uppercased()
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    DashboardCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Cross-signal relation")
+                                .font(.headline)
+                            if let relationCountry {
+                                Text("Country context: \(relationCountry)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let weather = relatedWeather {
+                                    Text("Weather: \(valueOrDash(weather.temp_c))°C, \(valueOrDash(weather.humidity))% humidity, \(weather.weather_main ?? "—")")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("Weather: No recent snapshot")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                if !relatedMarkets.isEmpty {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Related symbols")
+                                            .font(.caption.weight(.semibold))
+                                        ForEach(relatedMarkets.prefix(4)) { quote in
+                                            Button(action: {
+                                                selectedSymbol = quote.symbol
+                                                section = .market
+                                            }) {
+                                                HStack {
+                                                    Text(quote.symbol)
+                                                    Spacer()
+                                                    Text(changeLabel(quote))
+                                                        .foregroundStyle(changeColor(quote))
+                                                }
+                                                .font(.caption)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+
+                                if !relatedNews.isEmpty {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("Related headlines")
+                                            .font(.caption.weight(.semibold))
+                                        ForEach(relatedNews.prefix(3)) { item in
+                                            Text(item.title ?? item.url ?? "Untitled")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text("Select a country from news/weather or a market symbol to link signals.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         }
-                    }
-
-                    DashboardCard {
-                        VStack(spacing: 12) {
-                            HStack {
-                                Text("List")
-                                    .font(.headline)
-                                Spacer()
-                                Picker("List Mode", selection: $listMode) {
-                                    Text("News").tag(ListMode.news)
-                                    Text("Weather").tag(ListMode.weather)
-                                    Text("Markets").tag(ListMode.market)
-                                }
-                                .pickerStyle(.segmented)
-                                .frame(maxWidth: 220)
-                            }
-
-                            if listMode == .news {
-                                NewsListView(items: filteredNews(), onSelectCountry: { iso in
-                                    model.selectedCountry = iso
-                                })
-                            } else if listMode == .weather {
-                                WeatherListView(
-                                    items: filteredWeather(),
-                                    minTemp: $minTemp,
-                                    isRefreshing: model.isRefreshingWeather,
-                                    onRefresh: { Task { await model.refreshWeatherNow() } },
-                                    onSelectCountry: { iso in
-                                        model.selectedCountry = iso
-                                    }
-                                )
-                            } else {
-                                MarketQuoteListView(
-                                    quotes: filteredMarketQuotes(),
-                                    isRefreshing: model.isRefreshingMarketQuotes,
-                                    onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } }
-                                )
-                            }
-                        }
-                    }
-
-                    DashboardCard {
-                        CountryProfileView(selectedCountry: model.selectedCountry)
                     }
 
                     FooterLinksView()
@@ -205,6 +333,61 @@ struct DashboardView: View {
         }
     }
 
+    private var selectedSymbolQuote: MarketQuote? {
+        guard let selectedSymbol else { return nil }
+        return model.marketQuotes.first { $0.symbol.uppercased() == selectedSymbol.uppercased() }
+    }
+
+    private var relationCountry: String? {
+        if let selected = model.selectedCountry?.uppercased(), !selected.isEmpty {
+            return selected
+        }
+        if let country = selectedSymbolQuote?.country?.uppercased(), !country.isEmpty {
+            return country
+        }
+        return nil
+    }
+
+    private var relatedWeather: CountryWeather? {
+        guard let relationCountry else { return nil }
+        return model.weather
+            .filter { $0.country.uppercased() == relationCountry }
+            .sorted { $0.observed_at > $1.observed_at }
+            .first
+    }
+
+    private var relatedMarkets: [MarketQuote] {
+        guard let relationCountry else { return [] }
+        return model.marketQuotes
+            .filter { ($0.country ?? "").uppercased() == relationCountry }
+            .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
+    }
+
+    private var relatedNews: [NewsItem] {
+        guard let relationCountry else { return [] }
+        return model.news
+            .filter { ($0.country_iso2 ?? "").uppercased() == relationCountry }
+            .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
+    }
+
+    private func valueOrDash(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return String(format: "%.2f", value)
+    }
+
+    private func changeLabel(_ quote: MarketQuote) -> String {
+        guard let change = quote.change else { return "—" }
+        let pct = quote.percent_change.map { String(format: "%.2f%%", $0) } ?? "—"
+        return String(format: "%+.2f", change) + " · " + pct
+    }
+
+    private func changeColor(_ quote: MarketQuote) -> Color {
+        guard let change = quote.change else { return .secondary }
+        if change > 0 { return .green }
+        if change < 0 { return .red }
+        return .secondary
+    }
+
     private var searchFieldBackground: Color {
         colorScheme == .dark
             ? Color(red: 0.07, green: 0.11, blue: 0.16)
@@ -220,8 +403,10 @@ struct DashboardView: View {
 
 private struct MarketQuoteListView: View {
     let quotes: [MarketQuote]
+    let selectedSymbol: String?
     let isRefreshing: Bool
     let onRefresh: () -> Void
+    let onSelectSymbol: (String) -> Void
 
     var body: some View {
         VStack(spacing: 10) {
@@ -244,46 +429,54 @@ private struct MarketQuoteListView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ForEach(quotes) { quote in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(quote.symbol)
-                                .font(.subheadline.weight(.semibold))
-                            if let exchange = quote.exchange, !exchange.isEmpty {
-                                Text(exchange)
-                                    .font(.caption)
+                    Button(action: { onSelectSymbol(quote.symbol) }) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text(quote.symbol)
+                                    .font(.subheadline.weight(.semibold))
+                                if let exchange = quote.exchange, !exchange.isEmpty {
+                                    Text(exchange)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(priceLabel(quote))
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            Text(quote.company_name ?? "—")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                Text(changeLabel(quote))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(changeColor(quote))
+                                Text("Open \(valueOrDash(quote.open_price))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("High \(valueOrDash(quote.high_price))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Low \(valueOrDash(quote.low_price))")
+                                    .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            Text(priceLabel(quote))
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        Text(quote.company_name ?? "—")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 12) {
-                            Text(changeLabel(quote))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(changeColor(quote))
-                            Text("Open \(valueOrDash(quote.open_price))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text("High \(valueOrDash(quote.high_price))")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text("Low \(valueOrDash(quote.low_price))")
+                            Text(
+                                "Observed " +
+                                (quote.observedDate?.formatted(date: .abbreviated, time: .shortened) ?? quote.observed_at)
+                            )
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
-                        Text(
-                            "Observed " +
-                            (quote.observedDate?.formatted(date: .abbreviated, time: .shortened) ?? quote.observed_at)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(
+                            (selectedSymbol?.uppercased() == quote.symbol.uppercased()
+                                ? Color.green.opacity(0.12)
+                                : Color.primary.opacity(0.04)),
+                            in: RoundedRectangle(cornerRadius: 10)
                         )
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                    .buttonStyle(.plain)
                 }
             }
         }

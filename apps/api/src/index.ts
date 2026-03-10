@@ -9,7 +9,7 @@ import {
   refreshMarketQuotesRealtime,
 } from "./connectors/finnhub";
 import { pool, query, withTransaction } from "./db";
-import authRouter, { requireAuth, requireRole } from "./auth";
+import authRouter, { requireAuth, requirePaidAccess, requireRole } from "./auth";
 import {
   IngestionValidationError,
   buildMarketRunPlan,
@@ -24,6 +24,15 @@ import {
   triggerWeatherRun,
   type IngestionPipeline,
 } from "./ingestion-admin";
+import {
+  AutomationValidationError,
+  getAutomationOverview,
+  parseAutomationRulePatch,
+  startIngestionAutomationWorker,
+  trackDemandSignal,
+  updateAutomationRule,
+} from "./ingestion-automation";
+import { getBillingPublicUrls } from "./billing";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -36,7 +45,8 @@ app.get("/api/hello", (_req, res) => res.json({ hello: "world" }));
 app.use("/api/auth", authRouter);
 
 const requireAdminRole = requireRole("admin");
-const requireAuthenticated = requireAuth();
+const requireSession = requireAuth();
+const requireAuthenticated = requirePaidAccess();
 
 type AdminRoleRow = {
   id: number;
@@ -56,6 +66,26 @@ type AdminUserRow = {
   roles: string[] | null;
   providers: string[] | null;
   last_seen_at: string | null;
+  subscription_id: number | null;
+  subscription_status: string | null;
+  subscription_provider: string | null;
+  subscription_started_at: string | null;
+  subscription_current_period_end: string | null;
+  subscription_canceled_at: string | null;
+  subscription_plan_code: string | null;
+  subscription_plan_name: string | null;
+};
+
+type BillingPlanRow = {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  price_cents: number;
+  currency: string;
+  interval_unit: string;
+  is_active: boolean;
+  metadata: unknown;
 };
 
 class AdminApiError extends Error {
@@ -78,12 +108,44 @@ const ADMIN_USER_BASE_SELECT = `
     u.updated_at,
     COALESCE(ARRAY_REMOVE(ARRAY_AGG(DISTINCT r.key), NULL), '{}') AS roles,
     COALESCE(ARRAY_REMOVE(ARRAY_AGG(DISTINCT ai.provider), NULL), '{}') AS providers,
-    MAX(s.last_seen_at) AS last_seen_at
+    MAX(s.last_seen_at) AS last_seen_at,
+    bs_latest.subscription_id,
+    bs_latest.subscription_status,
+    bs_latest.subscription_provider,
+    bs_latest.subscription_started_at,
+    bs_latest.subscription_current_period_end,
+    bs_latest.subscription_canceled_at,
+    bs_latest.subscription_plan_code,
+    bs_latest.subscription_plan_name
   FROM app_user u
   LEFT JOIN auth_user_role ur ON ur.user_id = u.id
   LEFT JOIN auth_role r ON r.id = ur.role_id
   LEFT JOIN auth_identity ai ON ai.user_id = u.id
   LEFT JOIN auth_session s ON s.user_id = u.id
+  LEFT JOIN LATERAL (
+    SELECT
+      bs.id AS subscription_id,
+      bs.status AS subscription_status,
+      bs.provider AS subscription_provider,
+      bs.started_at AS subscription_started_at,
+      bs.current_period_end AS subscription_current_period_end,
+      bs.canceled_at AS subscription_canceled_at,
+      bp.code AS subscription_plan_code,
+      bp.name AS subscription_plan_name
+    FROM billing_subscription bs
+    JOIN billing_plan bp ON bp.id = bs.plan_id
+    WHERE bs.user_id = u.id
+    ORDER BY
+      CASE
+        WHEN bs.status IN ('active', 'trialing', 'grace_period') THEN 0
+        WHEN bs.status = 'past_due' THEN 1
+        ELSE 2
+      END,
+      COALESCE(bs.current_period_end, 'infinity'::timestamptz) DESC,
+      bs.started_at DESC,
+      bs.id DESC
+    LIMIT 1
+  ) bs_latest ON true
 `;
 
 function isValidRoleKey(key: string): boolean {
@@ -102,6 +164,21 @@ function normalizeRoleKeys(raw: unknown): string[] {
 }
 
 function toAdminUser(row: AdminUserRow) {
+  const subscription =
+    row.subscription_id == null
+      ? null
+      : {
+          id: row.subscription_id,
+          status: row.subscription_status,
+          provider: row.subscription_provider,
+          started_at: row.subscription_started_at,
+          current_period_end: row.subscription_current_period_end,
+          canceled_at: row.subscription_canceled_at,
+          plan: {
+            code: row.subscription_plan_code,
+            name: row.subscription_plan_name,
+          },
+        };
   return {
     id: row.id,
     email: row.email,
@@ -113,6 +190,7 @@ function toAdminUser(row: AdminUserRow) {
     roles: row.roles || [],
     providers: row.providers || [],
     last_seen_at: row.last_seen_at,
+    subscription,
   };
 }
 
@@ -120,7 +198,16 @@ async function getAdminUserById(userId: number): Promise<ReturnType<typeof toAdm
   const { rows } = await query<AdminUserRow>(
     `${ADMIN_USER_BASE_SELECT}
      WHERE u.id = $1
-     GROUP BY u.id
+     GROUP BY
+       u.id,
+       bs_latest.subscription_id,
+       bs_latest.subscription_status,
+       bs_latest.subscription_provider,
+       bs_latest.subscription_started_at,
+       bs_latest.subscription_current_period_end,
+       bs_latest.subscription_canceled_at,
+       bs_latest.subscription_plan_code,
+       bs_latest.subscription_plan_name
      LIMIT 1`,
     [userId]
   );
@@ -142,6 +229,43 @@ async function getActiveAdminCountTx(client: import("pg").PoolClient): Promise<n
 function parsePipeline(value: unknown): IngestionPipeline | undefined {
   if (value === "news" || value === "weather" || value === "market") return value;
   return undefined;
+}
+
+function parseBillingStatus(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "trialing" ||
+    normalized === "active" ||
+    normalized === "past_due" ||
+    normalized === "grace_period" ||
+    normalized === "canceled" ||
+    normalized === "unpaid" ||
+    normalized === "incomplete"
+  ) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function parseOptionalIsoDateTime(value: unknown, fieldName: string): string | null | undefined {
+  if (typeof value === "undefined") return undefined;
+  if (value === null || value === "") return null;
+  if (typeof value !== "string") {
+    throw new AdminApiError(400, `${fieldName} must be an ISO date-time string or null.`);
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    throw new AdminApiError(400, `${fieldName} must be a valid date-time.`);
+  }
+  return new Date(parsed).toISOString();
+}
+
+function sanitizeAutomationPayload(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === "undefined") return undefined;
+  if (value === null) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  throw new AdminApiError(400, "default_payload must be an object.");
 }
 
 function getRequestActor(res: express.Response): { userId: number | null; email: string | null; triggerMode: string } {
@@ -179,9 +303,36 @@ app.get("/api/db/ping", async (_req, res) => {
   }
 });
 
+app.get("/api/billing/me", requireSession, async (_req, res) => {
+  try {
+    const locals = res.locals as {
+      auth?: {
+        user?: {
+          billing?: unknown;
+        };
+      };
+    };
+    const billing = locals.auth?.user?.billing ?? null;
+    const urls = getBillingPublicUrls();
+    return res.json({
+      billing: billing || {
+        paywall_enabled: false,
+        has_access: true,
+        reason: "paywall_disabled",
+        checkout_url: urls.checkout_url,
+        portal_url: urls.portal_url,
+        subscription: null,
+      },
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 // List recent news items with optional filters
 app.get("/api/news", requireAuthenticated, async (req, res) => {
   try {
+    trackDemandSignal("news");
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "20"), 10) || 20, 1), 200);
     const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
@@ -219,6 +370,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
 // Aggregate counts by country (for map bubbles)
 app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
   try {
+    trackDemandSignal("news");
     const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 365);
     const params: any[] = [days];
     const { rows } = await pool.query(
@@ -318,7 +470,16 @@ app.get("/api/admin/users", requireAdminRole, async (req, res) => {
     const { rows } = await query<AdminUserRow>(
       `${ADMIN_USER_BASE_SELECT}
        ${whereClause}
-       GROUP BY u.id
+       GROUP BY
+         u.id,
+         bs_latest.subscription_id,
+         bs_latest.subscription_status,
+         bs_latest.subscription_provider,
+         bs_latest.subscription_started_at,
+         bs_latest.subscription_current_period_end,
+         bs_latest.subscription_canceled_at,
+         bs_latest.subscription_plan_code,
+         bs_latest.subscription_plan_name
        ORDER BY COALESCE(MAX(s.last_seen_at), u.created_at) DESC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`
       ,
@@ -466,6 +627,245 @@ app.patch("/api/admin/users/:userId/status", requireAdminRole, async (req, res) 
   } catch (e: any) {
     if (e instanceof AdminApiError) {
       return res.status(e.status).json({ error: e.message });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/admin/billing/plans", requireAdminRole, async (_req, res) => {
+  try {
+    const { rows } = await query<BillingPlanRow>(
+      `SELECT
+         id,
+         code,
+         name,
+         description,
+         price_cents,
+         currency,
+         interval_unit,
+         is_active,
+         metadata
+       FROM billing_plan
+       ORDER BY price_cents ASC, code ASC`
+    );
+    return res.json({ plans: rows });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.post("/api/admin/billing/plans", requireAdminRole, async (req, res) => {
+  try {
+    const code = typeof req.body?.code === "string" ? req.body.code.trim().toLowerCase() : "";
+    const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+    const description = typeof req.body?.description === "string" ? req.body.description.trim() : "";
+    const intervalUnitRaw =
+      typeof req.body?.interval_unit === "string" ? req.body.interval_unit.trim().toLowerCase() : "month";
+    const currencyRaw = typeof req.body?.currency === "string" ? req.body.currency.trim().toUpperCase() : "USD";
+    const priceCentsRaw = req.body?.price_cents;
+    const isActive = typeof req.body?.is_active === "boolean" ? req.body.is_active : true;
+    const metadata = req.body?.metadata;
+
+    if (!code || !/^[a-z][a-z0-9_-]{1,63}$/.test(code)) {
+      return res.status(400).json({ error: "code must match ^[a-z][a-z0-9_-]{1,63}$." });
+    }
+    if (!name) {
+      return res.status(400).json({ error: "name is required." });
+    }
+    if (!/^[A-Z]{3}$/.test(currencyRaw)) {
+      return res.status(400).json({ error: "currency must be a 3-letter ISO code." });
+    }
+    if (intervalUnitRaw !== "month" && intervalUnitRaw !== "year" && intervalUnitRaw !== "one_time") {
+      return res.status(400).json({ error: "interval_unit must be one of: month, year, one_time." });
+    }
+    const priceCents =
+      typeof priceCentsRaw === "number" && Number.isFinite(priceCentsRaw)
+        ? Math.trunc(priceCentsRaw)
+        : typeof priceCentsRaw === "string" && priceCentsRaw.trim()
+          ? Number.parseInt(priceCentsRaw, 10)
+          : 0;
+    if (!Number.isFinite(priceCents) || priceCents < 0) {
+      return res.status(400).json({ error: "price_cents must be a non-negative integer." });
+    }
+    if (typeof metadata !== "undefined" && (!metadata || typeof metadata !== "object" || Array.isArray(metadata))) {
+      return res.status(400).json({ error: "metadata must be an object when provided." });
+    }
+
+    const { rows } = await query<BillingPlanRow>(
+      `INSERT INTO billing_plan (
+         code,
+         name,
+         description,
+         price_cents,
+         currency,
+         interval_unit,
+         is_active,
+         metadata
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING
+         id,
+         code,
+         name,
+         description,
+         price_cents,
+         currency,
+         interval_unit,
+         is_active,
+         metadata`,
+      [
+        code,
+        name,
+        description || null,
+        priceCents,
+        currencyRaw,
+        intervalUnitRaw,
+        isActive,
+        JSON.stringify((metadata as Record<string, unknown>) || {}),
+      ]
+    );
+
+    return res.status(201).json({ plan: rows[0] });
+  } catch (e: any) {
+    if (e?.code === "23505") {
+      return res.status(409).json({ error: "Billing plan code already exists." });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.put("/api/admin/users/:userId/subscription", requireAdminRole, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return res.status(400).json({ error: "Invalid user id." });
+    }
+
+    const planCode = typeof req.body?.plan_code === "string" ? req.body.plan_code.trim().toLowerCase() : "";
+    if (!planCode) {
+      return res.status(400).json({ error: "plan_code is required." });
+    }
+    const status = parseBillingStatus(req.body?.status);
+    if (!status) {
+      return res.status(400).json({
+        error:
+          "status is required and must be one of: trialing, active, past_due, grace_period, canceled, unpaid, incomplete.",
+      });
+    }
+
+    const provider = typeof req.body?.provider === "string" ? req.body.provider.trim() : "manual";
+    const startedAt = parseOptionalIsoDateTime(req.body?.started_at, "started_at");
+    const currentPeriodEnd = parseOptionalIsoDateTime(req.body?.current_period_end, "current_period_end");
+    const canceledAtRaw = parseOptionalIsoDateTime(req.body?.canceled_at, "canceled_at");
+    const canceledAt =
+      typeof canceledAtRaw !== "undefined" ? canceledAtRaw : status === "canceled" ? new Date().toISOString() : null;
+    const providerCustomerId =
+      typeof req.body?.provider_customer_id === "string" ? req.body.provider_customer_id.trim() || null : null;
+    const providerSubscriptionId =
+      typeof req.body?.provider_subscription_id === "string" ? req.body.provider_subscription_id.trim() || null : null;
+    const metadata = req.body?.metadata;
+    if (typeof metadata !== "undefined" && (!metadata || typeof metadata !== "object" || Array.isArray(metadata))) {
+      return res.status(400).json({ error: "metadata must be an object when provided." });
+    }
+
+    await withTransaction(async (client) => {
+      const { rows: userRows } = await client.query<{ id: number }>(
+        `SELECT id FROM app_user WHERE id = $1 LIMIT 1`,
+        [userId]
+      );
+      if (!userRows[0]) throw new AdminApiError(404, "User not found.");
+
+      const { rows: planRows } = await client.query<{ id: number }>(
+        `SELECT id FROM billing_plan WHERE code = $1 LIMIT 1`,
+        [planCode]
+      );
+      const planId = planRows[0]?.id;
+      if (!planId) {
+        throw new AdminApiError(400, `Unknown billing plan code: ${planCode}`);
+      }
+
+      // Close any currently-accessible subscription before writing the new state.
+      // This keeps billing access deterministic when admins change a user to non-active statuses.
+      await client.query(
+        `UPDATE billing_subscription
+         SET status = 'canceled',
+             canceled_at = COALESCE(canceled_at, now()),
+             updated_at = now()
+         WHERE user_id = $1
+           AND status IN ('trialing', 'active', 'grace_period')
+           AND canceled_at IS NULL`,
+        [userId]
+      );
+
+      await client.query(
+        `INSERT INTO billing_subscription (
+           user_id,
+           plan_id,
+           status,
+           provider,
+           provider_customer_id,
+           provider_subscription_id,
+           started_at,
+           current_period_end,
+           canceled_at,
+           metadata
+         ) VALUES (
+           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+         )`,
+        [
+          userId,
+          planId,
+          status,
+          provider || "manual",
+          providerCustomerId,
+          providerSubscriptionId,
+          startedAt || new Date().toISOString(),
+          currentPeriodEnd ?? null,
+          canceledAt ?? null,
+          JSON.stringify((metadata as Record<string, unknown>) || {}),
+        ]
+      );
+    });
+
+    const user = await getAdminUserById(userId);
+    return res.json({ user });
+  } catch (e: any) {
+    if (e instanceof AdminApiError) {
+      return res.status(e.status).json({ error: e.message });
+    }
+    if (e?.code === "23505") {
+      return res.status(409).json({ error: "Only one active or trial subscription is allowed per user." });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/admin/ingestion/automation", requireAdminRole, async (_req, res) => {
+  try {
+    const overview = await getAutomationOverview();
+    return res.json(overview);
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.patch("/api/admin/ingestion/automation/:pipeline", requireAdminRole, async (req, res) => {
+  try {
+    const pipeline = parsePipeline(req.params.pipeline?.trim().toLowerCase());
+    if (!pipeline) {
+      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market." });
+    }
+
+    const patchInput: Record<string, unknown> = { ...(req.body || {}) };
+    if (Object.prototype.hasOwnProperty.call(patchInput, "default_payload")) {
+      patchInput.default_payload = sanitizeAutomationPayload(patchInput.default_payload);
+    }
+    const patch = parseAutomationRulePatch(patchInput);
+    const rule = await updateAutomationRule(pipeline, patch);
+    return res.json({ rule });
+  } catch (e: any) {
+    if (e instanceof AutomationValidationError || e instanceof IngestionValidationError || e instanceof AdminApiError) {
+      return res.status(400).json({ error: e.message || String(e) });
     }
     return res.status(500).json({ error: e.message || String(e) });
   }
@@ -663,6 +1063,7 @@ app.post("/api/ingest/finnhub/quotes", requireIngestionAccess, async (req, res) 
 // Latest weather per country for map overlay
 app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) => {
   try {
+    trackDemandSignal("weather");
     const rows = await getCountryWeatherLatest();
     res.json({ stats: rows });
   } catch (e: any) {
@@ -673,6 +1074,7 @@ app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) =
 // Latest market quotes with optional on-demand refresh for near real-time views
 app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
   try {
+    trackDemandSignal("market");
     let symbols: string[] | undefined;
     try {
       const parsed = parseMarketSymbolsInput(req.query.symbols);
@@ -722,6 +1124,8 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
     res.status(500).send("proxy error");
   }
 });
+
+startIngestionAutomationWorker();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API listening on http://0.0.0.0:${PORT}`);

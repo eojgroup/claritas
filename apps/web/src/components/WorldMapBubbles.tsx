@@ -1,13 +1,10 @@
-import { memo, useMemo, useRef, useState } from 'react';
-import { geoEqualEarth, geoPath } from 'd3-geo';
-import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
-import type { GeometryCollection, Topology } from "topojson-specification";
-import { feature } from 'topojson-client';
-import worldData from 'world-atlas/countries-110m.json';
-import worldCountries from 'world-countries';
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import MapView, { Marker, NavigationControl, type MapRef } from "react-map-gl/maplibre";
+import "maplibre-gl/dist/maplibre-gl.css";
+import worldCountries from "world-countries";
 
 export type BubbleDatum = {
-  country: string; // ISO2 code (not strictly needed for centroids)
+  country: string;
   count: number;
   meta?: {
     subtitle?: string;
@@ -28,39 +25,35 @@ export type WorldMapBubblesProps = {
   showLabels?: boolean;
 };
 
-type CountryFeature = Feature<Geometry, GeoJsonProperties>;
-type CountriesTopology = Topology<{ countries: GeometryCollection }>;
 type WorldCountryReference = {
   cca2?: string;
   properties?: { cca2?: string };
   latlng?: [number, number];
 };
 
-// TopoJSON -> GeoJSON features
-const atlasData = worldData as unknown as CountriesTopology;
-const countries = (
-  feature(atlasData, atlasData.objects.countries) as FeatureCollection<Geometry, GeoJsonProperties>
-).features as CountryFeature[];
-const countryCollection: FeatureCollection<Geometry, GeoJsonProperties> = {
-  type: 'FeatureCollection',
-  features: countries,
+type BubbleMarker = {
+  country: string;
+  count: number;
+  coordinate: [number, number];
+  meta?: BubbleDatum["meta"];
 };
-const MAP_WIDTH = 800;
-const MAP_HEIGHT = 400;
-const MAP_DEFAULT_PADDING = 18;
-const MAP_COMPACT_PADDING = 36;
 
-const createProjection = (padding: number) =>
-  geoEqualEarth().fitExtent(
-    [
-      [padding, padding],
-      [MAP_WIDTH - padding, MAP_HEIGHT - padding],
-    ],
-    countryCollection,
-  );
+const DEFAULT_STYLE_URL = "https://tiles.openfreemap.org/styles/liberty";
+const DEFAULT_DARK_STYLE_URL = "https://tiles.openfreemap.org/styles/dark";
 
-const projectionDefault = createProjection(MAP_DEFAULT_PADDING);
-const projectionCompact = createProjection(MAP_COMPACT_PADDING);
+const INITIAL_VIEW_STATE = {
+  latitude: 14,
+  longitude: 8,
+  zoom: 0.9,
+};
+
+const getEnvValue = (key: string): string | undefined => {
+  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+  const value = env?.[key];
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+};
 
 export default memo(function WorldMapBubbles({
   data,
@@ -74,6 +67,7 @@ export default memo(function WorldMapBubbles({
   scale = "linear",
   showLabels = true,
 }: WorldMapBubblesProps) {
+  const mapRef = useRef<MapRef | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [tip, setTip] = useState<{
     show: boolean;
@@ -83,169 +77,253 @@ export default memo(function WorldMapBubbles({
     value: number;
     meta?: BubbleDatum["meta"];
   } | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
 
-  // Build coarse centroids keyed by ISO2 using world-countries lat/lng metadata.
-  // world-countries provides `latlng: [lat, lng]` — flip to [lng, lat] for d3 projections.
   const centroids = useMemo(() => {
-    const map = new Map<string, [number, number]>();
-    for (const f of worldCountries as WorldCountryReference[]) {
-      const iso = (f.cca2 || f.properties?.cca2 || '').toUpperCase();
-      const latlng = f.latlng;
+    const map = new globalThis.Map<string, [number, number]>();
+    for (const item of worldCountries as WorldCountryReference[]) {
+      const iso = (item.cca2 || item.properties?.cca2 || "").toUpperCase();
+      const latlng = item.latlng;
       if (!iso || !latlng || latlng.length < 2) continue;
       const [lat, lng] = latlng;
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
         map.set(iso, [lng, lat]);
       }
     }
-    // Aliases
-    if (map.has('GB')) map.set('UK', map.get('GB')!);
+    if (map.has("GB")) map.set("UK", map.get("GB")!);
     return map;
   }, []);
 
-  const max = useMemo(
-    () => data.reduce((m, d) => Math.max(m, d.count), 0) || 1,
-    [data],
-  );
+  const markers = useMemo(() => {
+    const next: BubbleMarker[] = [];
+    data.forEach((datum) => {
+      const iso = datum.country.toUpperCase();
+      const coordinate = centroids.get(iso) || centroids.get(iso === "UK" ? "GB" : iso);
+      if (!coordinate) return;
+      next.push({
+        country: iso,
+        count: datum.count,
+        coordinate,
+        meta: datum.meta,
+      });
+    });
+    return next;
+  }, [centroids, data]);
+
+  const max = useMemo(() => markers.reduce((m, d) => Math.max(m, d.count), 0) || 1, [markers]);
   const min = useMemo(() => {
-    const value = data.reduce((m, d) => Math.min(m, d.count), Infinity);
+    const value = markers.reduce((m, d) => Math.min(m, d.count), Infinity);
     return Number.isFinite(value) ? value : 0;
-  }, [data]);
+  }, [markers]);
 
   const isDark = !!dark;
   const isCompact = variant === "compact";
-  const projection = isCompact ? projectionCompact : projectionDefault;
-  const viewBox = `0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`;
-  const path = useMemo(() => geoPath(projection), [projection]);
-  const oceanGradientId = isDark ? "mapOceanDark" : "mapOceanLight";
-  const landFill = isDark ? '#dbe4f0' : '#e5e7eb';
-  const landStroke = isDark ? '#7c8ea6' : '#cbd5e1';
-  const bubbleFill = isDark ? 'rgba(34,197,94,0.75)' : 'rgba(16,115,74,0.75)';
-  const bubbleStroke = isDark ? '#16a34a' : '#0f5132';
-  const labelColor = isDark ? '#e2e8f0' : '#0f172a';
+  const labelColor = isDark ? "#e2e8f0" : "#0f172a";
 
-  const rScale = (v: number) => {
+  const mapStyle = useMemo(() => {
+    const custom = getEnvValue(isDark ? "VITE_MAP_STYLE_DARK_URL" : "VITE_MAP_STYLE_URL");
+    if (custom) return custom;
+    const shared = getEnvValue("VITE_MAP_STYLE_URL");
+    if (shared) return shared;
+    return isDark ? DEFAULT_DARK_STYLE_URL : DEFAULT_STYLE_URL;
+  }, [isDark]);
+
+  const rScale = (value: number) => {
     const ratio =
       scale === "log"
-        ? Math.log10(v + 1) / Math.log10(max + 1)
-        : v / max;
-    return (isCompact ? 4 : 6) + (isCompact ? 16 : 22) * Math.sqrt(ratio);
+        ? Math.log10(value + 1) / Math.log10(max + 1)
+        : value / max;
+    return (isCompact ? 4 : 6) + (isCompact ? 14 : 20) * Math.sqrt(Math.max(0, ratio));
   };
-  const labelSize = isCompact ? 9 : 10;
-  const labelOffset = isCompact ? 1 : 2;
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || markers.length === 0) return;
+    const [firstLng, firstLat] = markers[0].coordinate;
+    let minLng = firstLng;
+    let maxLng = firstLng;
+    let minLat = firstLat;
+    let maxLat = firstLat;
+
+    for (const marker of markers) {
+      const [lng, lat] = marker.coordinate;
+      minLng = Math.min(minLng, lng);
+      maxLng = Math.max(maxLng, lng);
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+    }
+
+    if (minLng === maxLng && minLat === maxLat) {
+      map.flyTo({ center: [minLng, minLat], zoom: 3, duration: 450 });
+      return;
+    }
+
+    map.fitBounds(
+      [
+        [minLng, minLat],
+        [maxLng, maxLat],
+      ],
+      {
+        padding: isCompact ? 42 : 84,
+        duration: 600,
+        maxZoom: isCompact ? 3.8 : 4.8,
+      },
+    );
+  }, [isCompact, markers]);
+
   const primaryIso = primaryCountry?.toUpperCase();
   const secondaryIso = secondaryCountry?.toUpperCase();
   const pinnedIso = pinnedCountry?.toUpperCase();
 
   return (
-    <div ref={containerRef} className="relative w-full h-full">
-      <svg viewBox={viewBox} width="100%" height="100%" preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <linearGradient id="mapOceanDark" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#031426" />
-            <stop offset="100%" stopColor="#081c34" />
-          </linearGradient>
-          <linearGradient id="mapOceanLight" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#eef6fb" />
-            <stop offset="100%" stopColor="#dce9f5" />
-          </linearGradient>
-        </defs>
-        <rect x={0} y={0} width={MAP_WIDTH} height={MAP_HEIGHT} fill={`url(#${oceanGradientId})`} />
-        <g>
-          {countries.map((geo, i) => (
-            <path key={i} d={path(geo) || ''} fill={landFill} stroke={landStroke} strokeWidth={0.5} />
-          ))}
-        </g>
-        <g>
-          {data.map((d) => {
-            const key = d.country.toUpperCase();
-            const centroid = centroids.get(key) || centroids.get(key === 'UK' ? 'GB' : key);
-            if (!centroid) return null;
-            const projected = projection(centroid);
-            if (!projected) return null;
-            const [x, y] = projected;
-            if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-            const r = rScale(d.count);
-            const handleMove = (e: React.MouseEvent<SVGGElement>) => {
-              const rect = containerRef.current?.getBoundingClientRect();
-              if (!rect) return;
-              const px = e.clientX - rect.left + 8; // small offset
-              const py = e.clientY - rect.top + 8;
-              setTip({
-                show: true,
-                x: px,
-                y: py,
-                country: key,
-                value: d.count,
-                meta: d.meta,
-              });
-            };
-            const isPrimary = primaryIso === key;
-            const isSecondary = secondaryIso === key;
-            const isPinned = pinnedIso === key;
-            const fill = isPrimary
-              ? 'rgba(14,165,233,0.75)'
-              : isSecondary
-                ? 'rgba(250,204,21,0.75)'
-                : bubbleFill;
-            const stroke = isPrimary
-              ? '#0284c7'
-              : isSecondary
-                ? '#d97706'
-                : bubbleStroke;
-            return (
-              <g
-                key={key}
-                transform={`translate(${x},${y})`}
-                onClick={() => onSelect?.(key)}
-                onMouseEnter={handleMove}
-                onMouseMove={handleMove}
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-xl">
+      <MapView
+        ref={mapRef}
+        mapLib={import("maplibre-gl")}
+        initialViewState={INITIAL_VIEW_STATE}
+        mapStyle={mapStyle}
+        dragRotate={false}
+        touchZoomRotate={false}
+        projection="globe"
+        reuseMaps
+        onError={(event) => {
+          const reason =
+            event?.error && event.error instanceof Error
+              ? event.error.message
+              : "Map style failed to load.";
+          setMapError(reason);
+        }}
+        style={{ width: "100%", height: "100%" }}
+      >
+        <NavigationControl position="top-right" showCompass={false} visualizePitch={false} />
+
+        {markers.map((marker) => {
+          const isPrimary = primaryIso === marker.country;
+          const isSecondary = secondaryIso === marker.country;
+          const isPinned = pinnedIso === marker.country;
+
+          const fill = isPrimary
+            ? "rgba(14,165,233,0.8)"
+            : isSecondary
+              ? "rgba(250,204,21,0.82)"
+              : isDark
+                ? "rgba(34,197,94,0.78)"
+                : "rgba(16,115,74,0.78)";
+          const stroke = isPrimary
+            ? "#0284c7"
+            : isSecondary
+              ? "#d97706"
+              : isDark
+                ? "#16a34a"
+                : "#0f5132";
+          const size = rScale(marker.count) * 2;
+
+          const updateTip = (event: React.MouseEvent<HTMLButtonElement>) => {
+            const rect = containerRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            setTip({
+              show: true,
+              x: event.clientX - rect.left + 8,
+              y: event.clientY - rect.top + 8,
+              country: marker.country,
+              value: marker.count,
+              meta: marker.meta,
+            });
+          };
+
+          return (
+            <Marker
+              key={marker.country}
+              longitude={marker.coordinate[0]}
+              latitude={marker.coordinate[1]}
+              anchor="center"
+            >
+              <button
+                type="button"
+                aria-label={`${marker.country}: ${marker.count}`}
+                className="relative border-0 bg-transparent p-0"
+                onMouseEnter={updateTip}
+                onMouseMove={updateTip}
                 onMouseLeave={() => setTip(null)}
-                style={{ cursor: 'pointer' }}
+                onClick={() => onSelect?.(marker.country)}
+                style={{ cursor: "pointer" }}
               >
-                <circle r={r} fill={fill} stroke={stroke} strokeWidth={1} />
+                <span
+                  style={{
+                    width: size,
+                    height: size,
+                    borderRadius: 999,
+                    border: `1px solid ${stroke}`,
+                    background: fill,
+                    display: "block",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.16)",
+                  }}
+                />
                 {isPinned && (
-                  <circle
-                    r={r + 4}
-                    fill="none"
-                    stroke={isDark ? '#fde047' : '#f59e0b'}
-                    strokeWidth={1.5}
+                  <span
+                    style={{
+                      position: "absolute",
+                      inset: -4,
+                      borderRadius: 999,
+                      border: `1.5px solid ${isDark ? "#fde047" : "#f59e0b"}`,
+                    }}
                   />
                 )}
-                <title>{`${key}: ${d.count}`}</title>
                 {showLabels && (
-                  <text
-                    textAnchor="middle"
-                    y={-r - labelOffset}
-                    style={{ fontSize: labelSize, fill: labelColor }}
+                  <span
+                    style={{
+                      position: "absolute",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      top: -18,
+                      fontSize: isCompact ? 9 : 10,
+                      color: labelColor,
+                      textShadow: "0 1px 2px rgba(0,0,0,0.45)",
+                      fontWeight: 600,
+                      letterSpacing: "0.04em",
+                      pointerEvents: "none",
+                    }}
                   >
-                    {key}
-                  </text>
+                    {marker.country}
+                  </span>
                 )}
-              </g>
-            );
-          })}
-        </g>
-      </svg>
+              </button>
+            </Marker>
+          );
+        })}
+      </MapView>
 
       {legend && (
-        <div className="absolute left-2 bottom-2 px-2 py-1 rounded border text-[11px]"
-             style={{
-               background: isDark ? 'rgba(30,41,59,0.85)' : 'rgba(255,255,255,0.85)',
-               color: labelColor,
-               borderColor: isDark ? '#334155' : '#cbd5e1'
-             }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <svg width={isCompact ? 64 : 80} height={isCompact ? 24 : 28}>
-              {([0.2, 0.5, 1] as number[]).map((f, i) => {
-                const r = rScale(Math.max(1, max * f));
-                const cx = (isCompact ? 10 : 12) + i * (isCompact ? 20 : 24);
+        <div
+          className="absolute bottom-2 left-2 rounded border px-2 py-1 text-[11px]"
+          style={{
+            background: isDark ? "rgba(15,23,42,0.84)" : "rgba(255,255,255,0.9)",
+            color: labelColor,
+            borderColor: isDark ? "#334155" : "#cbd5e1",
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <svg width={isCompact ? 66 : 82} height={isCompact ? 24 : 28}>
+              {[0.2, 0.5, 1].map((factor, index) => {
+                const radius = rScale(Math.max(1, max * factor));
+                const cx = (isCompact ? 10 : 12) + index * (isCompact ? 21 : 25);
                 const cy = isCompact ? 14 : 16;
-                return <circle key={i} cx={cx} cy={cy} r={r} fill={bubbleFill} stroke={bubbleStroke} strokeWidth={1} />;
+                return (
+                  <circle
+                    key={factor}
+                    cx={cx}
+                    cy={cy}
+                    r={radius}
+                    fill={isDark ? "rgba(34,197,94,0.78)" : "rgba(16,115,74,0.78)"}
+                    stroke={isDark ? "#16a34a" : "#0f5132"}
+                    strokeWidth={1}
+                  />
+                );
               })}
             </svg>
             <span>Relative size · {scale === "log" ? "Log" : "Linear"}</span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginTop: 2 }}>
+          <div className="mt-0.5 flex justify-between text-[10px]">
             <span>Min {min}</span>
             <span>Max {max}</span>
           </div>
@@ -253,13 +331,28 @@ export default memo(function WorldMapBubbles({
       )}
 
       {tip && tip.show && (
-        <div className="pointer-events-none absolute rounded border px-2 py-1 text-xs shadow"
-             style={{ left: tip.x, top: tip.y, background: isDark ? '#0f172a' : '#ffffff', color: labelColor, borderColor: isDark ? '#334155' : '#cbd5e1' }}>
-          <div style={{ fontWeight: 600 }}>{tip.country}</div>
-          <div>{tip.meta?.subtitle ?? `${tip.value} ${tip.value === 1 ? 'item' : 'items'}`}</div>
-          {tip.meta?.lines?.map((line, i) => (
-            <div key={i}>{line}</div>
+        <div
+          className="pointer-events-none absolute rounded border px-2 py-1 text-xs shadow"
+          style={{
+            left: tip.x,
+            top: tip.y,
+            background: isDark ? "#0f172a" : "#ffffff",
+            color: labelColor,
+            borderColor: isDark ? "#334155" : "#cbd5e1",
+            maxWidth: 240,
+          }}
+        >
+          <div className="font-semibold">{tip.country}</div>
+          <div>{tip.meta?.subtitle ?? `${tip.value} ${tip.value === 1 ? "item" : "items"}`}</div>
+          {tip.meta?.lines?.map((line, index) => (
+            <div key={`${tip.country}-${index}`}>{line}</div>
           ))}
+        </div>
+      )}
+
+      {mapError && (
+        <div className="pointer-events-none absolute inset-x-3 bottom-3 rounded-lg border border-amber-300 bg-amber-50/90 px-3 py-2 text-xs text-amber-800">
+          Map provider error: {mapError}
         </div>
       )}
     </div>

@@ -12,6 +12,9 @@ import {
   Bell,
   Settings,
   User,
+  CloudSun,
+  Newspaper,
+  ChartNoAxesCombined,
   Moon,
   Sun,
   LogOut,
@@ -284,6 +287,7 @@ const safeDownload = (filename: string, data: Blob | string) => {
 
 import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
+import PaywallPage from "./components/PaywallPage";
 import AdminIngestionPanel from "./components/AdminIngestionPanel";
 import AdminUserManagementPanel from "./components/AdminUserManagementPanel";
 import {
@@ -315,10 +319,11 @@ export default function ClaritasDashboard() {
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<
-    "dashboard" | "admin" | "profile" | "legal"
+    "dashboard" | "news" | "weather" | "markets" | "admin" | "profile" | "legal"
   >("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isRefreshingAccess, setIsRefreshingAccess] = useState(false);
   const [sessionNotice, setSessionNotice] = useState<{
     tone: "error" | "success" | "info";
     message: string;
@@ -347,6 +352,7 @@ export default function ClaritasDashboard() {
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [newsLoadMode, setNewsLoadMode] = useState<"recent" | "archive">(
     "recent",
@@ -442,6 +448,7 @@ export default function ClaritasDashboard() {
   }, [activeView]);
 
   const isAdmin = (authUser?.roles ?? []).includes("admin");
+  const hasPaidAccess = authUser?.billing?.has_access ?? true;
 
   useEffect(() => {
     if (!isAdmin && activeView === "admin") {
@@ -536,7 +543,7 @@ export default function ClaritasDashboard() {
 
   useEffect(() => {
     // Load initial data
-    if (authStatus !== "authed") return;
+    if (authStatus !== "authed" || !hasPaidAccess) return;
     fetchCountryStats({ days: 30 })
       .then(setCountryStats)
       .catch(() => setCountryStats([]));
@@ -547,10 +554,10 @@ export default function ClaritasDashboard() {
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
     void loadNewsData("recent");
-  }, [authStatus, loadNewsData]);
+  }, [authStatus, hasPaidAccess, loadNewsData]);
 
   useEffect(() => {
-    if (authStatus !== "authed") return;
+    if (authStatus !== "authed" || !hasPaidAccess) return;
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -567,7 +574,7 @@ export default function ClaritasDashboard() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [authStatus]);
+  }, [authStatus, hasPaidAccess]);
 
   const cardBase =
     "rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm";
@@ -1250,6 +1257,79 @@ export default function ClaritasDashboard() {
     return marketSearchScope;
   }, [marketSearchScope]);
 
+  const weatherByCountry = useMemo(() => {
+    const map = new Map<string, CountryWeather>();
+    weatherStats.forEach((entry) => {
+      const iso = entry.country?.toUpperCase();
+      if (!iso) return;
+      const current = map.get(iso);
+      if (!current) {
+        map.set(iso, entry);
+        return;
+      }
+      if ((entry.observed_at || "") > (current.observed_at || "")) {
+        map.set(iso, entry);
+      }
+    });
+    return map;
+  }, [weatherStats]);
+
+  const marketByCountry = useMemo(() => {
+    const map = new Map<string, MarketQuote[]>();
+    marketQuotes.forEach((quote) => {
+      const iso = quote.country?.toUpperCase();
+      if (!iso) return;
+      const list = map.get(iso) ?? [];
+      list.push(quote);
+      map.set(iso, list);
+    });
+    map.forEach((quotes, iso) => {
+      map.set(
+        iso,
+        [...quotes].sort(
+          (a, b) =>
+            Math.abs(b.percent_change ?? 0) - Math.abs(a.percent_change ?? 0),
+        ),
+      );
+    });
+    return map;
+  }, [marketQuotes]);
+
+  const selectedSymbolQuote = useMemo(() => {
+    if (!selectedSymbol) return null;
+    const normalized = selectedSymbol.toUpperCase();
+    return (
+      marketQuotes.find((quote) => quote.symbol.toUpperCase() === normalized) ??
+      null
+    );
+  }, [marketQuotes, selectedSymbol]);
+
+  const relationCountry = useMemo(() => {
+    const fromCountry = selectedCountry?.toUpperCase();
+    if (fromCountry) return fromCountry;
+    const fromSymbol = selectedSymbolQuote?.country?.toUpperCase();
+    if (fromSymbol) return fromSymbol;
+    return null;
+  }, [selectedCountry, selectedSymbolQuote]);
+
+  const relatedWeather = useMemo(() => {
+    if (!relationCountry) return null;
+    return weatherByCountry.get(relationCountry) ?? null;
+  }, [relationCountry, weatherByCountry]);
+
+  const relatedMarkets = useMemo(() => {
+    if (!relationCountry) return [];
+    return (marketByCountry.get(relationCountry) ?? []).slice(0, 6);
+  }, [marketByCountry, relationCountry]);
+
+  const relatedNews = useMemo(() => {
+    if (!relationCountry) return [];
+    return [...news]
+      .filter((item) => item.country_iso2?.toUpperCase() === relationCountry)
+      .sort((a, b) => (b.event_time || "").localeCompare(a.event_time || ""))
+      .slice(0, 6);
+  }, [news, relationCountry]);
+
   const activeRegions = useMemo(() => {
     const regions = new Set<string>();
     filteredNews.forEach(
@@ -1377,6 +1457,14 @@ export default function ClaritasDashboard() {
       setCompareMode(false);
     }
   }, [selectedCountry]);
+
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    const hasSymbol = marketQuotes.some(
+      (quote) => quote.symbol.toUpperCase() === selectedSymbol.toUpperCase(),
+    );
+    if (!hasSymbol) setSelectedSymbol(null);
+  }, [marketQuotes, selectedSymbol]);
 
   useEffect(() => {
     if (dataWindowPreset === "all" || !newsDateBounds) return;
@@ -1636,6 +1724,24 @@ export default function ClaritasDashboard() {
       view: "dashboard" as const,
       icon: LayoutGrid,
     },
+    {
+      id: "news",
+      label: "News",
+      view: "news" as const,
+      icon: Newspaper,
+    },
+    {
+      id: "weather",
+      label: "Weather",
+      view: "weather" as const,
+      icon: CloudSun,
+    },
+    {
+      id: "markets",
+      label: "Markets",
+      view: "markets" as const,
+      icon: ChartNoAxesCombined,
+    },
     ...(isAdmin
       ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings }]
       : []),
@@ -1645,6 +1751,9 @@ export default function ClaritasDashboard() {
 
   const viewMeta = {
     dashboard: { kicker: "Dashboard", title: "Signal desk overview" },
+    news: { kicker: "News", title: "Global news signal stream" },
+    weather: { kicker: "Weather", title: "Weather signal operations" },
+    markets: { kicker: "Markets", title: "Market watch and correlations" },
     admin: { kicker: "Admin", title: "Data ingestion control" },
     profile: { kicker: "Account", title: "Profile & access" },
     legal: { kicker: "Legal", title: "Policies & usage" },
@@ -1683,6 +1792,36 @@ export default function ClaritasDashboard() {
     }
   };
 
+  const handleRefreshAccess = async () => {
+    if (isRefreshingAccess) return;
+    setIsRefreshingAccess(true);
+    setSessionNotice(null);
+    try {
+      const user = await fetchAuthMe();
+      setAuthUser(user);
+      setAuthStatus(user ? "authed" : "unauthed");
+      if (user?.billing?.has_access) {
+        setSessionNotice({
+          tone: "success",
+          message: "Billing access is active. Dashboard unlocked.",
+        });
+      } else {
+        setSessionNotice({
+          tone: "info",
+          message: "Payment not active yet for this account. Try again after checkout confirmation.",
+        });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setSessionNotice({
+        tone: "error",
+        message: `Billing refresh failed: ${message}`,
+      });
+    } finally {
+      setIsRefreshingAccess(false);
+    }
+  };
+
   const handleProfileNav = (
     sectionId: (typeof profileSections)[number]["id"],
   ) => {
@@ -1702,6 +1841,19 @@ export default function ClaritasDashboard() {
         status={authStatus}
         error={authError}
         onSignIn={handleSignIn}
+      />
+    );
+  }
+
+  if (!hasPaidAccess && authUser) {
+    return (
+      <PaywallPage
+        user={authUser}
+        billing={authUser.billing}
+        onRefresh={() => void handleRefreshAccess()}
+        onSignOut={() => void handleSignOut()}
+        refreshing={isRefreshingAccess}
+        signingOut={isSigningOut}
       />
     );
   }
@@ -3283,6 +3435,495 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
                 </details>
+              </div>
+            )}
+            {activeView === "news" && (
+              <div className="space-y-4">
+                <section
+                  className={`${cardBase} flex flex-wrap items-center gap-3 px-4 py-3`}
+                >
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      News workspace
+                    </div>
+                    <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                      Region: {regionLabel} · Showing {filteredNews.length} stories
+                    </div>
+                  </div>
+                  <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+                    <button
+                      onClick={() =>
+                        void loadNewsData(
+                          newsLoadMode === "archive" ? "recent" : "archive",
+                        )
+                      }
+                      disabled={isLoadingNews}
+                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
+                    >
+                      {isLoadingNews
+                        ? "Loading…"
+                        : newsLoadMode === "archive"
+                          ? "Use recent"
+                          : "Load all data"}
+                    </button>
+                    <button
+                      onClick={() => setRegionFilter("global")}
+                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                    >
+                      Global
+                    </button>
+                  </div>
+                </section>
+
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                  <div className={`${cardBase} overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        News map
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Country coverage
+                      </div>
+                    </div>
+                    <div className="h-[min(56vh,520px)] min-h-[20rem] p-3">
+                      <div className="h-full overflow-hidden rounded-2xl border border-[color:var(--shell-border)]">
+                        <WorldMapBubbles
+                          variant="default"
+                          data={mapBubbleData}
+                          onSelect={(iso) => {
+                            setSelectedCountry(iso);
+                            setActiveView("news");
+                          }}
+                          dark={dark}
+                          primaryCountry={selectedCountry}
+                          secondaryCountry={comparisonCountry}
+                          pinnedCountry={pinnedCountry}
+                          scale={mapScale}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={`${cardBase} overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Headlines
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Filtered story stream
+                      </div>
+                    </div>
+                    <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
+                      {filteredNews.length === 0 && (
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
+                          No stories match the current filters.
+                        </div>
+                      )}
+                      {filteredNews.map((item) => {
+                        const iso = item.country_iso2?.toUpperCase();
+                        const selected = iso && selectedCountry?.toUpperCase() === iso;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              if (iso) setSelectedCountry(iso);
+                            }}
+                            className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                              selected
+                                ? "border-emerald-200 bg-emerald-50/70"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                          >
+                            <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                              {item.title || item.url || "Untitled"}
+                            </div>
+                            <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+                              {[iso ?? null, item.event_time ? new Date(item.event_time).toLocaleString() : null]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </div>
+                            {item.summary && (
+                              <p className="mt-2 line-clamp-2 text-xs text-[color:var(--shell-muted)]">
+                                {item.summary}
+                              </p>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </section>
+
+                <section className={`${cardBase} p-4`}>
+                  <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                    Correlation
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                    {relationCountry
+                      ? `Cross-signal context for ${relationCountry}`
+                      : "Select a country or symbol to relate signals"}
+                  </div>
+                  {relationCountry ? (
+                    <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-3">
+                      <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs text-[color:var(--shell-muted)]">
+                        <div className="text-[11px] uppercase tracking-[0.26em]">Weather</div>
+                        <div className="mt-2 text-sm font-semibold text-[color:var(--shell-ink)]">
+                          {relatedWeather?.temp_c ?? "—"}°C
+                        </div>
+                        <div>Humidity: {relatedWeather?.humidity ?? "—"}%</div>
+                        <div>Condition: {relatedWeather?.weather_main ?? "—"}</div>
+                      </div>
+                      <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs text-[color:var(--shell-muted)]">
+                        <div className="text-[11px] uppercase tracking-[0.26em]">Markets</div>
+                        {relatedMarkets.slice(0, 4).map((quote) => (
+                          <button
+                            key={`news-rel-${quote.symbol}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSymbol(quote.symbol);
+                              setActiveView("markets");
+                            }}
+                            className="mt-2 flex w-full items-center justify-between rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-left text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                          >
+                            <span>{quote.symbol}</span>
+                            <span>
+                              {quote.percent_change != null
+                                ? `${quote.percent_change >= 0 ? "+" : ""}${quote.percent_change.toFixed(2)}%`
+                                : "—"}
+                            </span>
+                          </button>
+                        ))}
+                        {relatedMarkets.length === 0 && <div className="mt-2">No symbols linked.</div>}
+                      </div>
+                      <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs text-[color:var(--shell-muted)]">
+                        <div className="text-[11px] uppercase tracking-[0.26em]">News</div>
+                        {relatedNews.slice(0, 3).map((item) => (
+                          <a
+                            key={`news-rel-item-${item.id}`}
+                            href={item.url ?? "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-2 block rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                          >
+                            {item.title ?? item.url ?? "Untitled"}
+                          </a>
+                        ))}
+                        {relatedNews.length === 0 && <div className="mt-2">No related stories.</div>}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-[color:var(--shell-muted)]">
+                      Pick a country on the map or choose a market symbol to unlock related weather/news context.
+                    </p>
+                  )}
+                </section>
+              </div>
+            )}
+            {activeView === "weather" && (
+              <div className="space-y-4">
+                <section className={`${cardBase} flex flex-wrap items-center gap-3 px-4 py-3`}>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Weather workspace
+                    </div>
+                    <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                      {filteredWeather.length} observations in scope
+                    </div>
+                  </div>
+                  <div className="ml-auto flex items-center gap-2 text-xs">
+                    <button
+                      onClick={() => setMinTemp(undefined)}
+                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
+                    >
+                      Reset temp
+                    </button>
+                    <button
+                      onClick={() => setRegionFilter("global")}
+                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
+                    >
+                      Global
+                    </button>
+                  </div>
+                </section>
+
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                  <div className={`${cardBase} overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Weather map
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Temperature overlay by country
+                      </div>
+                    </div>
+                    <div className="h-[min(56vh,520px)] min-h-[20rem] p-3">
+                      <div className="h-full overflow-hidden rounded-2xl border border-[color:var(--shell-border)]">
+                        <WorldMapBubbles
+                          variant="default"
+                          data={mapWeatherData}
+                          onSelect={(iso) => setSelectedCountry(iso)}
+                          dark={dark}
+                          primaryCountry={selectedCountry}
+                          secondaryCountry={comparisonCountry}
+                          pinnedCountry={pinnedCountry}
+                          scale="linear"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={`${cardBase} overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Weather feed
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Live observations
+                      </div>
+                    </div>
+                    <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
+                      {filteredWeather.map((entry, index) => {
+                        const iso = entry.country?.toUpperCase();
+                        const selected = iso && selectedCountry?.toUpperCase() === iso;
+                        return (
+                          <button
+                            key={`${entry.country}-${entry.observed_at}-${index}`}
+                            type="button"
+                            onClick={() => iso && setSelectedCountry(iso)}
+                            className={`w-full rounded-xl border px-3 py-2 text-left text-xs transition ${
+                              selected
+                                ? "border-emerald-200 bg-emerald-50/70"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                          >
+                            <div className="font-semibold text-[color:var(--shell-ink)]">
+                              {iso ?? "—"} · {entry.temp_c ?? "—"}°C
+                            </div>
+                            <div className="mt-1 text-[color:var(--shell-muted)]">
+                              Humidity {entry.humidity ?? "—"}% · {entry.weather_main ?? "—"}
+                            </div>
+                            <div className="mt-1 text-[color:var(--shell-muted)]">
+                              {new Date(entry.observed_at).toLocaleString()}
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {filteredWeather.length === 0 && (
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
+                          No weather rows available.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                <section className={`${cardBase} p-4`}>
+                  <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                    Weather to market/news
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                    {relationCountry
+                      ? `Linked market and news signals for ${relationCountry}`
+                      : "Select a weather country to open linked market/news context"}
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+                    <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                        Related symbols
+                      </div>
+                      {relatedMarkets.slice(0, 6).map((quote) => (
+                        <button
+                          key={`wx-market-${quote.symbol}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSymbol(quote.symbol);
+                            setActiveView("markets");
+                          }}
+                          className="mt-2 flex w-full items-center justify-between rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-xs text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                        >
+                          <span>{quote.symbol}</span>
+                          <span>
+                            {quote.percent_change != null
+                              ? `${quote.percent_change >= 0 ? "+" : ""}${quote.percent_change.toFixed(2)}%`
+                              : "—"}
+                          </span>
+                        </button>
+                      ))}
+                      {relatedMarkets.length === 0 && (
+                        <p className="mt-2 text-xs text-[color:var(--shell-muted)]">No symbols mapped for this country.</p>
+                      )}
+                    </div>
+                    <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                        Related stories
+                      </div>
+                      {relatedNews.slice(0, 4).map((item) => (
+                        <a
+                          key={`wx-news-${item.id}`}
+                          href={item.url ?? "#"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-2 block rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-xs text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                        >
+                          {item.title ?? item.url ?? "Untitled"}
+                        </a>
+                      ))}
+                      {relatedNews.length === 0 && (
+                        <p className="mt-2 text-xs text-[color:var(--shell-muted)]">No stories mapped for this country.</p>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              </div>
+            )}
+            {activeView === "markets" && (
+              <div className="space-y-4">
+                <section className={`${cardBase} flex flex-wrap items-center gap-3 px-4 py-3`}>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Market workspace
+                    </div>
+                    <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                      {filteredMarket.length} quotes in watch scope
+                    </div>
+                  </div>
+                  <div className="ml-auto flex items-center gap-2 text-xs">
+                    <button
+                      onClick={() => void fetchMarketQuotes({ refresh: true }).then(setMarketQuotes).catch(() => undefined)}
+                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
+                    >
+                      Refresh
+                    </button>
+                    {selectedSymbol && (
+                      <button
+                        onClick={() => setSelectedSymbol(null)}
+                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
+                      >
+                        Clear symbol
+                      </button>
+                    )}
+                  </div>
+                </section>
+
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+                  <div className={`${cardBase} overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Watchlist
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Select a symbol to relate with weather and news
+                      </div>
+                    </div>
+                    <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
+                      {filteredMarket.map((quote) => {
+                        const selected = selectedSymbol?.toUpperCase() === quote.symbol.toUpperCase();
+                        const isPositive = (quote.change ?? 0) > 0;
+                        const isNegative = (quote.change ?? 0) < 0;
+                        return (
+                          <button
+                            key={`mk-${quote.symbol}-${quote.observed_at}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSymbol(quote.symbol);
+                              if (quote.country) setSelectedCountry(quote.country.toUpperCase());
+                            }}
+                            className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                              selected
+                                ? "border-emerald-200 bg-emerald-50/70"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                                  {quote.symbol}
+                                </div>
+                                <div className="text-xs text-[color:var(--shell-muted)]">
+                                  {quote.company_name ?? "—"} · {quote.exchange ?? "—"} · {quote.country ?? "—"}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                                  {quote.price ?? "—"} {quote.currency ?? ""}
+                                </div>
+                                <div className={`text-xs ${isPositive ? "text-emerald-600" : isNegative ? "text-rose-600" : "text-[color:var(--shell-muted)]"}`}>
+                                  {quote.percent_change != null
+                                    ? `${quote.percent_change >= 0 ? "+" : ""}${quote.percent_change.toFixed(2)}%`
+                                    : "—"}
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className={`${cardBase} p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Symbol correlation
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                      {selectedSymbolQuote
+                        ? `${selectedSymbolQuote.symbol} · ${selectedSymbolQuote.country ?? "No country"}`
+                        : "Choose a symbol"}
+                    </div>
+                    {selectedSymbolQuote ? (
+                      <div className="mt-3 space-y-3">
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
+                          <div className="font-semibold text-[color:var(--shell-ink)]">Weather in {relationCountry ?? "—"}</div>
+                          <div className="mt-1 text-[color:var(--shell-muted)]">
+                            Temp {relatedWeather?.temp_c ?? "—"}°C · Humidity {relatedWeather?.humidity ?? "—"}% · {relatedWeather?.weather_main ?? "—"}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
+                          <div className="font-semibold text-[color:var(--shell-ink)]">Related stories</div>
+                          {relatedNews.slice(0, 4).map((item) => (
+                            <a
+                              key={`mk-news-${item.id}`}
+                              href={item.url ?? "#"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 block rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                            >
+                              {item.title ?? item.url ?? "Untitled"}
+                            </a>
+                          ))}
+                          {relatedNews.length === 0 && (
+                            <div className="mt-2 text-[color:var(--shell-muted)]">No stories mapped to this country.</div>
+                          )}
+                        </div>
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
+                          <div className="font-semibold text-[color:var(--shell-ink)]">Peer symbols in country</div>
+                          {relatedMarkets
+                            .filter((quote) => quote.symbol !== selectedSymbolQuote.symbol)
+                            .slice(0, 5)
+                            .map((quote) => (
+                              <button
+                                key={`mk-peer-${quote.symbol}`}
+                                type="button"
+                                onClick={() => setSelectedSymbol(quote.symbol)}
+                                className="mt-2 flex w-full items-center justify-between rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-left text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                              >
+                                <span>{quote.symbol}</span>
+                                <span>
+                                  {quote.percent_change != null
+                                    ? `${quote.percent_change >= 0 ? "+" : ""}${quote.percent_change.toFixed(2)}%`
+                                    : "—"}
+                                </span>
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-xs text-[color:var(--shell-muted)]">
+                        Select a symbol from the watchlist to relate market movement with local weather and recent news.
+                      </p>
+                    )}
+                  </div>
+                </section>
               </div>
             )}
             {activeView === "admin" && isAdmin && (

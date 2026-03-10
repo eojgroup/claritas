@@ -14,11 +14,15 @@ import {
 } from "recharts";
 import {
   fetchAdminIngestionMetrics,
+  fetchAdminIngestionAutomation,
   fetchAdminIngestionRun,
   fetchAdminIngestionRuns,
   triggerAdminMarketIngestion,
   triggerAdminNewsIngestion,
   triggerAdminWeatherIngestion,
+  updateAdminIngestionAutomationRule,
+  type AdminIngestionAutomationRule,
+  type AdminIngestionAutomationStatus,
   type AdminIngestionLog,
   type AdminIngestionMetricsPoint,
   type AdminIngestionMetricsTotal,
@@ -29,6 +33,8 @@ import {
 type AdminIngestionPanelProps = {
   dark: boolean;
 };
+
+type TheNewsApiDateMode = "today" | "custom";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -61,6 +67,13 @@ function formatDateTime(value: string | null): string {
   const ts = Date.parse(value);
   if (Number.isNaN(ts)) return value;
   return new Date(ts).toLocaleString();
+}
+
+function toLocalDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatDurationMs(run: AdminIngestionRun): string {
@@ -121,6 +134,47 @@ function runSourceSummary(run: AdminIngestionRun): string {
   return labels.join(" + ");
 }
 
+type AutomationDraft = {
+  enabled: boolean;
+  schedule_enabled: boolean;
+  schedule_interval_minutes: number;
+  intelligent_enabled: boolean;
+  min_spacing_minutes: number;
+  freshness_sla_minutes: number;
+  demand_window_minutes: number;
+  demand_threshold: number;
+  failure_backoff_minutes: number;
+  default_payload_text: string;
+  dirty: boolean;
+};
+
+type AutomationDraftMap = Record<IngestionPipeline, AutomationDraft | null>;
+type AutomationPendingMap = Record<IngestionPipeline, boolean>;
+
+function toAutomationPayloadText(payload: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return "{}";
+  }
+}
+
+function createAutomationDraft(rule: AdminIngestionAutomationRule): AutomationDraft {
+  return {
+    enabled: rule.enabled,
+    schedule_enabled: rule.schedule_enabled,
+    schedule_interval_minutes: rule.schedule_interval_minutes,
+    intelligent_enabled: rule.intelligent_enabled,
+    min_spacing_minutes: rule.min_spacing_minutes,
+    freshness_sla_minutes: rule.freshness_sla_minutes,
+    demand_window_minutes: rule.demand_window_minutes,
+    demand_threshold: rule.demand_threshold,
+    failure_backoff_minutes: rule.failure_backoff_minutes,
+    default_payload_text: toAutomationPayloadText(rule.default_payload ?? {}),
+    dirty: false,
+  };
+}
+
 function buildZeroChartData(days: number): Array<{
   date: string;
   news_inserted: number;
@@ -172,6 +226,18 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [logs, setLogs] = useState<AdminIngestionLog[]>([]);
   const [points, setPoints] = useState<AdminIngestionMetricsPoint[]>([]);
   const [totals, setTotals] = useState<AdminIngestionMetricsTotal[]>([]);
+  const [automationRules, setAutomationRules] = useState<AdminIngestionAutomationRule[]>([]);
+  const [automationStatus, setAutomationStatus] = useState<AdminIngestionAutomationStatus[]>([]);
+  const [automationDrafts, setAutomationDrafts] = useState<AutomationDraftMap>({
+    news: null,
+    weather: null,
+    market: null,
+  });
+  const [pendingAutomationSave, setPendingAutomationSave] = useState<AutomationPendingMap>({
+    news: false,
+    weather: false,
+    market: false,
+  });
   const [isLoadingOverview, setIsLoadingOverview] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
@@ -191,7 +257,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [newsLanguage, setNewsLanguage] = useState("en");
   const [newsCountry, setNewsCountry] = useState("us");
   const [newsCategory, setNewsCategory] = useState("technology");
-  const [theNewsApiPublishedAfter, setTheNewsApiPublishedAfter] = useState("");
+  const [theNewsApiDateMode, setTheNewsApiDateMode] = useState<TheNewsApiDateMode>("today");
+  const [theNewsApiCustomDate, setTheNewsApiCustomDate] = useState(() =>
+    toLocalDateInputValue(new Date()),
+  );
   const [weatherCountry, setWeatherCountry] = useState("");
   const [marketSymbols, setMarketSymbols] = useState("AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM");
 
@@ -200,9 +269,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       if (!silent) setIsLoadingOverview(true);
       if (!silent) setOverviewError(null);
       const selectedPipeline = pipelineFilter === "all" ? undefined : pipelineFilter;
-      const [runsRes, metricsRes] = await Promise.allSettled([
+      const [runsRes, metricsRes, automationRes] = await Promise.allSettled([
         fetchAdminIngestionRuns({ pipeline: selectedPipeline, limit: 100 }),
         fetchAdminIngestionMetrics({ pipeline: selectedPipeline, days: metricsDays }),
+        fetchAdminIngestionAutomation(),
       ]);
 
       const errors: string[] = [];
@@ -222,6 +292,23 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         setTotals(metricsRes.value.totals);
       } else {
         errors.push(`Metrics: ${toErrorMessage(metricsRes.reason)}`);
+      }
+
+      if (automationRes.status === "fulfilled") {
+        setAutomationRules(automationRes.value.rules);
+        setAutomationStatus(automationRes.value.status);
+        setAutomationDrafts((previous) => {
+          const next = { ...previous };
+          automationRes.value.rules.forEach((rule) => {
+            const draft = previous[rule.pipeline];
+            if (!draft || !draft.dirty) {
+              next[rule.pipeline] = createAutomationDraft(rule);
+            }
+          });
+          return next;
+        });
+      } else {
+        errors.push(`Automation: ${toErrorMessage(automationRes.reason)}`);
       }
 
       setOverviewError(errors.length > 0 ? errors.join(" | ") : null);
@@ -289,6 +376,11 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     setActionError(null);
     setActionNotice(null);
     try {
+      const resolvedTheNewsApiPublishedAfter = runTheNewsApiProvider
+        ? theNewsApiDateMode === "today"
+          ? toLocalDateInputValue(new Date())
+          : theNewsApiCustomDate || undefined
+        : undefined;
       const payload: Parameters<typeof triggerAdminNewsIngestion>[0] = {
         providers: {
           newsapi: runNewsApiProvider,
@@ -318,7 +410,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               locale: newsCountry.trim() || "us",
               pageSize: 50,
               maxPages: 2,
-              publishedAfter: theNewsApiPublishedAfter.trim() || undefined,
+              publishedAfter: resolvedTheNewsApiPublishedAfter,
             }
           : false,
       };
@@ -338,7 +430,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     newsCountry,
     newsLanguage,
     newsQuery,
-    theNewsApiPublishedAfter,
+    theNewsApiCustomDate,
+    theNewsApiDateMode,
     refreshOverview,
     runNewsApiProvider,
     runTheNewsApiProvider,
@@ -390,6 +483,79 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       setIsTriggeringMarket(false);
     }
   }, [marketSymbols, refreshOverview]);
+
+  const updateAutomationDraft = useCallback(
+    (
+      pipeline: IngestionPipeline,
+      updater: (current: AutomationDraft) => AutomationDraft,
+    ) => {
+      setAutomationDrafts((previous) => {
+        const current = previous[pipeline];
+        if (!current) return previous;
+        return {
+          ...previous,
+          [pipeline]: {
+            ...updater(current),
+            dirty: true,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const saveAutomationRule = useCallback(
+    async (pipeline: IngestionPipeline) => {
+      const draft = automationDrafts[pipeline];
+      if (!draft) return;
+
+      let payload: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(draft.default_payload_text || "{}") as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          setActionError(`Default payload for ${pipelineLabel(pipeline)} must be a JSON object.`);
+          return;
+        }
+        payload = parsed as Record<string, unknown>;
+      } catch {
+        setActionError(`Default payload for ${pipelineLabel(pipeline)} is not valid JSON.`);
+        return;
+      }
+
+      setPendingAutomationSave((previous) => ({ ...previous, [pipeline]: true }));
+      setActionError(null);
+      setActionNotice(null);
+      try {
+        const updatedRule = await updateAdminIngestionAutomationRule(pipeline, {
+          enabled: draft.enabled,
+          schedule_enabled: draft.schedule_enabled,
+          schedule_interval_minutes: draft.schedule_interval_minutes,
+          intelligent_enabled: draft.intelligent_enabled,
+          min_spacing_minutes: draft.min_spacing_minutes,
+          freshness_sla_minutes: draft.freshness_sla_minutes,
+          demand_window_minutes: draft.demand_window_minutes,
+          demand_threshold: draft.demand_threshold,
+          failure_backoff_minutes: draft.failure_backoff_minutes,
+          default_payload: payload,
+        });
+
+        setAutomationRules((previous) =>
+          previous.map((rule) => (rule.pipeline === pipeline ? updatedRule : rule)),
+        );
+        setAutomationDrafts((previous) => ({
+          ...previous,
+          [pipeline]: createAutomationDraft(updatedRule),
+        }));
+        setActionNotice(`${pipelineLabel(pipeline)} automation updated.`);
+        await refreshOverview(true);
+      } catch (error) {
+        setActionError(toErrorMessage(error));
+      } finally {
+        setPendingAutomationSave((previous) => ({ ...previous, [pipeline]: false }));
+      }
+    },
+    [automationDrafts, refreshOverview],
+  );
 
   const chartData = useMemo(() => {
     const byDate = new Map<
@@ -447,6 +613,18 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     totals.forEach((total) => summary.set(total.pipeline, total));
     return summary;
   }, [totals]);
+
+  const automationRuleByPipeline = useMemo(() => {
+    const map = new Map<IngestionPipeline, AdminIngestionAutomationRule>();
+    automationRules.forEach((rule) => map.set(rule.pipeline, rule));
+    return map;
+  }, [automationRules]);
+
+  const automationStatusByPipeline = useMemo(() => {
+    const map = new Map<IngestionPipeline, AdminIngestionAutomationStatus>();
+    automationStatus.forEach((state) => map.set(state.pipeline, state));
+    return map;
+  }, [automationStatus]);
 
   const chartGridColor = dark ? "#334155" : "#e2e8f0";
 
@@ -590,15 +768,44 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
                 />
               </label>
-              <label className="text-xs text-[color:var(--shell-muted)]">
-                TheNewsAPI published after
-                <input
-                  value={theNewsApiPublishedAfter}
-                  onChange={(event) => setTheNewsApiPublishedAfter(event.currentTarget.value)}
-                  placeholder="YYYY-MM-DD"
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
-                />
-              </label>
+              <div className="sm:col-span-2">
+                <div className="text-xs text-[color:var(--shell-muted)]">
+                  TheNewsAPI published after
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="thenewsapi-date-mode"
+                      checked={theNewsApiDateMode === "today"}
+                      onChange={() => setTheNewsApiDateMode("today")}
+                    />
+                    From today ({toLocalDateInputValue(new Date())})
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="thenewsapi-date-mode"
+                      checked={theNewsApiDateMode === "custom"}
+                      onChange={() => {
+                        setTheNewsApiDateMode("custom");
+                        if (!theNewsApiCustomDate) {
+                          setTheNewsApiCustomDate(toLocalDateInputValue(new Date()));
+                        }
+                      }}
+                    />
+                    Pick date
+                  </label>
+                  {theNewsApiDateMode === "custom" && (
+                    <input
+                      type="date"
+                      value={theNewsApiCustomDate}
+                      onChange={(event) => setTheNewsApiCustomDate(event.currentTarget.value)}
+                      className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                    />
+                  )}
+                </div>
+              </div>
             </div>
             <div
               className={`mt-3 flex flex-wrap items-center gap-2 text-xs ${
@@ -690,6 +897,246 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               {isTriggeringMarket ? "Starting…" : "Run Market"}
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
+              Pipeline automation
+            </div>
+            <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+              Scheduler + intelligent trigger controls
+            </div>
+          </div>
+          <div className="ml-auto text-xs text-[color:var(--shell-muted)]">
+            Runs are triggered by schedule, freshness SLA, and demand thresholds.
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-3">
+          {(["news", "weather", "market"] as IngestionPipeline[]).map((pipeline) => {
+            const rule = automationRuleByPipeline.get(pipeline);
+            const draft = automationDrafts[pipeline];
+            const status = automationStatusByPipeline.get(pipeline);
+            const isSaving = pendingAutomationSave[pipeline];
+            if (!rule || !draft) {
+              return (
+                <div
+                  key={pipeline}
+                  className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3 text-xs text-[color:var(--shell-muted)]"
+                >
+                  Loading {pipelineLabel(pipeline)} automation…
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={pipeline}
+                className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3"
+              >
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                  {pipelineLabel(pipeline)}
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={draft.enabled}
+                      onChange={(event) =>
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          enabled: event.currentTarget.checked,
+                        }))
+                      }
+                    />
+                    Enabled
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={draft.schedule_enabled}
+                      onChange={(event) =>
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          schedule_enabled: event.currentTarget.checked,
+                        }))
+                      }
+                    />
+                    Scheduler
+                  </label>
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={draft.intelligent_enabled}
+                      onChange={(event) =>
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          intelligent_enabled: event.currentTarget.checked,
+                        }))
+                      }
+                    />
+                    Intelligent
+                  </label>
+                </div>
+
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <label className="text-xs text-[color:var(--shell-muted)]">
+                    Schedule (minutes)
+                    <input
+                      type="number"
+                      min={1}
+                      max={10080}
+                      value={draft.schedule_interval_minutes}
+                      onChange={(event) => {
+                        const numeric = Number.parseInt(event.currentTarget.value, 10);
+                        if (!Number.isFinite(numeric)) return;
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          schedule_interval_minutes: numeric,
+                        }));
+                      }}
+                      className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                    />
+                  </label>
+                  <label className="text-xs text-[color:var(--shell-muted)]">
+                    Freshness SLA (minutes)
+                    <input
+                      type="number"
+                      min={1}
+                      max={43200}
+                      value={draft.freshness_sla_minutes}
+                      onChange={(event) => {
+                        const numeric = Number.parseInt(event.currentTarget.value, 10);
+                        if (!Number.isFinite(numeric)) return;
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          freshness_sla_minutes: numeric,
+                        }));
+                      }}
+                      className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                    />
+                  </label>
+                  <label className="text-xs text-[color:var(--shell-muted)]">
+                    Demand window (minutes)
+                    <input
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={draft.demand_window_minutes}
+                      onChange={(event) => {
+                        const numeric = Number.parseInt(event.currentTarget.value, 10);
+                        if (!Number.isFinite(numeric)) return;
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          demand_window_minutes: numeric,
+                        }));
+                      }}
+                      className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                    />
+                  </label>
+                  <label className="text-xs text-[color:var(--shell-muted)]">
+                    Demand threshold (requests)
+                    <input
+                      type="number"
+                      min={1}
+                      max={100000}
+                      value={draft.demand_threshold}
+                      onChange={(event) => {
+                        const numeric = Number.parseInt(event.currentTarget.value, 10);
+                        if (!Number.isFinite(numeric)) return;
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          demand_threshold: numeric,
+                        }));
+                      }}
+                      className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                    />
+                  </label>
+                  <label className="text-xs text-[color:var(--shell-muted)]">
+                    Min spacing (minutes)
+                    <input
+                      type="number"
+                      min={1}
+                      max={10080}
+                      value={draft.min_spacing_minutes}
+                      onChange={(event) => {
+                        const numeric = Number.parseInt(event.currentTarget.value, 10);
+                        if (!Number.isFinite(numeric)) return;
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          min_spacing_minutes: numeric,
+                        }));
+                      }}
+                      className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                    />
+                  </label>
+                  <label className="text-xs text-[color:var(--shell-muted)]">
+                    Failure backoff (minutes)
+                    <input
+                      type="number"
+                      min={1}
+                      max={10080}
+                      value={draft.failure_backoff_minutes}
+                      onChange={(event) => {
+                        const numeric = Number.parseInt(event.currentTarget.value, 10);
+                        if (!Number.isFinite(numeric)) return;
+                        updateAutomationDraft(pipeline, (current) => ({
+                          ...current,
+                          failure_backoff_minutes: numeric,
+                        }));
+                      }}
+                      className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                    />
+                  </label>
+                </div>
+
+                <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
+                  Default payload (JSON)
+                  <textarea
+                    value={draft.default_payload_text}
+                    onChange={(event) =>
+                      updateAutomationDraft(pipeline, (current) => ({
+                        ...current,
+                        default_payload_text: event.currentTarget.value,
+                      }))
+                    }
+                    className="mt-1 h-32 w-full rounded-lg border border-[color:var(--shell-border)] bg-slate-950 px-2 py-1 font-mono text-[11px] text-slate-100"
+                  />
+                </label>
+
+                <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-[11px] text-[color:var(--shell-muted)]">
+                  <div>Last run: {formatDateTime(status?.last_run_at ?? null)}</div>
+                  <div>Last success: {formatDateTime(status?.last_success_at ?? null)}</div>
+                  <div>Latest data: {formatDateTime(status?.latest_data_at ?? null)}</div>
+                  <div>Data age: {status?.data_age_minutes ?? "—"} minutes</div>
+                  <div>
+                    Demand: {status?.demand_requests ?? 0} requests / {draft.demand_window_minutes}m
+                  </div>
+                  <div>Active runs: {status?.active_runs ?? 0}</div>
+                  <div>Next schedule: {formatDateTime(rule.next_scheduled_at)}</div>
+                  <div>Last trigger: {rule.last_trigger_reason ?? "—"}</div>
+                </div>
+
+                {rule.last_error && (
+                  <div className="mt-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700">
+                    {rule.last_error}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => void saveAutomationRule(pipeline)}
+                  disabled={!draft.dirty || isSaving}
+                  className="mt-3 inline-flex w-full items-center justify-center rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50"
+                >
+                  {isSaving ? "Saving…" : "Save automation"}
+                </button>
+              </div>
+            );
+          })}
         </div>
       </section>
 

@@ -4,6 +4,7 @@ import cookie from "cookie";
 import { Issuer, generators, type Client } from "openid-client";
 import type { Request } from "express";
 import { query, withTransaction } from "./db";
+import { resolveBillingAccessState, type BillingAccessState } from "./billing";
 
 type ProviderName = "google" | "microsoft" | "apple";
 
@@ -23,6 +24,7 @@ type AuthContext = {
     display_name: string | null;
     avatar_url: string | null;
     roles: string[];
+    billing: BillingAccessState;
   };
   sessionId: number;
 };
@@ -376,6 +378,11 @@ async function getAuthContext(req: Request): Promise<AuthContext | null> {
 
   const row = rows[0];
   if (!row) return null;
+  const roles = row.roles || [];
+  const billing = await resolveBillingAccessState({
+    userId: row.user_id,
+    roles,
+  });
 
   await query(`UPDATE auth_session SET last_seen_at = now() WHERE id = $1`, [row.session_id]);
 
@@ -386,7 +393,8 @@ async function getAuthContext(req: Request): Promise<AuthContext | null> {
       email: row.email,
       display_name: row.display_name,
       avatar_url: row.avatar_url,
-      roles: row.roles || [],
+      roles,
+      billing,
     },
   };
 }
@@ -545,7 +553,7 @@ authRouter.get("/me", async (req, res) => {
   try {
     const auth = await getAuthContext(req);
     if (!auth) return res.status(401).json({ error: "unauthorized" });
-    return res.json({ user: auth.user });
+    return res.json({ user: auth.user, billing: auth.user.billing });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || String(err) });
   }
@@ -590,6 +598,25 @@ export function requireRole(role: string) {
       const auth = await getAuthContext(req);
       if (!auth) return res.status(401).json({ error: "unauthorized" });
       if (!auth.user.roles.includes(role)) return res.status(403).json({ error: "forbidden" });
+      res.locals.auth = auth;
+      return next();
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || String(err) });
+    }
+  };
+}
+
+export function requirePaidAccess() {
+  return async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    try {
+      const auth = await getAuthContext(req);
+      if (!auth) return res.status(401).json({ error: "unauthorized" });
+      if (!auth.user.billing.has_access) {
+        return res.status(402).json({
+          error: "payment_required",
+          billing: auth.user.billing,
+        });
+      }
       res.locals.auth = auth;
       return next();
     } catch (err: any) {

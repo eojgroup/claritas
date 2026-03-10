@@ -169,7 +169,7 @@ const SOURCE_CONFIG: Record<SourceConfigKey, { sourceName: string; apiBaseUrl: s
   },
   thenewsapi: {
     sourceName: "thenewsapi",
-    apiBaseUrl: "https://api.thenewsapi.com/api/v1",
+    apiBaseUrl: "https://api.thenewsapi.com/v1",
     provider: "thenewsapi",
   },
   openweather: {
