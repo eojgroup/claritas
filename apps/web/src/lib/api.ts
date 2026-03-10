@@ -17,6 +17,10 @@ export type CountryWeather = {
   humidity: number | null;
   observed_at: string;
   weather_main: string | null;
+  weather_desc?: string | null;
+  wind_speed?: number | null;
+  source_name?: string | null;
+  icon_code?: string | null;
 };
 
 export type MarketQuote = {

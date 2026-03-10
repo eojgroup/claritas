@@ -32,7 +32,15 @@ import {
   Tooltip,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  ScatterChart,
+  Scatter,
   CartesianGrid,
+  Legend,
   Brush,
   ReferenceDot,
   Line,
@@ -238,6 +246,70 @@ const getDateKey = (value: Date | string) => {
   return d.toISOString().slice(0, 10);
 };
 
+const ANALYTICS_COLORS = [
+  "#0f766e",
+  "#0369a1",
+  "#b45309",
+  "#7c3aed",
+  "#be123c",
+  "#334155",
+  "#0ea5e9",
+  "#22c55e",
+];
+
+const OPENWEATHER_ICON_BASE = "https://openweathermap.org/img/wn";
+
+const WEATHER_SYMBOLS: Record<string, string> = {
+  clear: "☀️",
+  clouds: "☁️",
+  rain: "🌧️",
+  drizzle: "🌦️",
+  thunderstorm: "⛈️",
+  snow: "❄️",
+  mist: "🌫️",
+  haze: "🌫️",
+  fog: "🌫️",
+  smoke: "🌫️",
+  dust: "🌬️",
+  sand: "🌬️",
+  ash: "🌋",
+  squall: "💨",
+  tornado: "🌪️",
+};
+
+const weatherSymbol = (condition?: string | null): string => {
+  if (!condition) return "🌤️";
+  return WEATHER_SYMBOLS[condition.trim().toLowerCase()] ?? "🌤️";
+};
+
+const getWeatherIconUrl = (item: CountryWeather): string | undefined => {
+  const code = asTrimmedString(item.icon_code);
+  if (!code) return undefined;
+  return `${OPENWEATHER_ICON_BASE}/${code}@2x.png`;
+};
+
+const weatherDrilldownUrl = (countryIso2?: string | null): string | undefined => {
+  const iso = asTrimmedString(countryIso2)?.toUpperCase();
+  if (!iso) return undefined;
+  return `https://openweathermap.org/find?q=${encodeURIComponent(iso)}`;
+};
+
+const getMarketSourceLabel = (quote: MarketQuote): string => {
+  const payload = asObject(quote.payload);
+  const provider = asTrimmedString(payload?.["provider"]);
+  if (provider) return prettySourceName(provider);
+  return "Finnhub";
+};
+
+const getMarketLogoUrl = (quote: MarketQuote): string | undefined => {
+  const payload = asObject(quote.payload);
+  const profile = asObject(payload?.["profile"]);
+  return asTrimmedString(profile?.["logo"]);
+};
+
+const marketQuoteUrl = (symbol: string): string =>
+  `https://finance.yahoo.com/quote/${encodeURIComponent(symbol.trim().toUpperCase())}`;
+
 const parseDashboardSearch = (
   raw: string,
   preferredTopic: SearchTopic,
@@ -375,6 +447,22 @@ export default function ClaritasDashboard() {
     endIndex?: number;
   }>({});
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
+  const [newsSourceFilter, setNewsSourceFilter] = useState<string>("all");
+  const [newsCountryFilter, setNewsCountryFilter] = useState("");
+  const [newsHasImageOnly, setNewsHasImageOnly] = useState(false);
+  const [newsSortBy, setNewsSortBy] = useState<"newest" | "oldest" | "source">("newest");
+  const [weatherConditionFilter, setWeatherConditionFilter] = useState<string>("all");
+  const [weatherCountryFilter, setWeatherCountryFilter] = useState("");
+  const [weatherHumidityFloor, setWeatherHumidityFloor] = useState<number | undefined>(undefined);
+  const [weatherSortBy, setWeatherSortBy] = useState<"latest" | "hottest" | "coldest" | "humidity">(
+    "latest",
+  );
+  const [marketExchangeFilter, setMarketExchangeFilter] = useState<string>("all");
+  const [marketCountryFilter, setMarketCountryFilter] = useState<string>("all");
+  const [marketDirectionFilter, setMarketDirectionFilter] = useState<"all" | "gainers" | "losers">(
+    "all",
+  );
+  const [marketMinAbsMove, setMarketMinAbsMove] = useState<number>(0);
   const [profileSection, setProfileSection] = useState<
     "overview" | "identity" | "preferences" | "security" | "policies"
   >("overview");
@@ -1256,6 +1344,225 @@ export default function ClaritasDashboard() {
   const filteredMarket = useMemo(() => {
     return marketSearchScope;
   }, [marketSearchScope]);
+
+  const newsSourceOptions = useMemo(() => {
+    const sources = new Set<string>();
+    newsSearchScope.forEach((item) => {
+      const source = getSourceLabel(item);
+      if (source) sources.add(source);
+    });
+    return Array.from(sources).sort((a, b) => a.localeCompare(b));
+  }, [getSourceLabel, newsSearchScope]);
+
+  const newsPageItems = useMemo(() => {
+    let items = filteredNews;
+    if (newsSourceFilter !== "all") {
+      const normalized = newsSourceFilter.trim().toLowerCase();
+      items = items.filter((item) => (getSourceLabel(item) ?? "").toLowerCase() === normalized);
+    }
+    if (newsHasImageOnly) {
+      items = items.filter((item) => Boolean(getNewsImageUrl(item)));
+    }
+    const countryTerm = newsCountryFilter.trim().toUpperCase();
+    if (countryTerm) {
+      items = items.filter((item) => (item.country_iso2 ?? "").toUpperCase().includes(countryTerm));
+    }
+    const sorted = [...items];
+    if (newsSortBy === "newest") {
+      sorted.sort((a, b) => (b.event_time || "").localeCompare(a.event_time || ""));
+    } else if (newsSortBy === "oldest") {
+      sorted.sort((a, b) => (a.event_time || "").localeCompare(b.event_time || ""));
+    } else {
+      sorted.sort((a, b) => {
+        const sourceCmp = (getSourceLabel(a) ?? "").localeCompare(getSourceLabel(b) ?? "");
+        if (sourceCmp !== 0) return sourceCmp;
+        return (b.event_time || "").localeCompare(a.event_time || "");
+      });
+    }
+    return sorted;
+  }, [
+    filteredNews,
+    getSourceLabel,
+    newsCountryFilter,
+    newsHasImageOnly,
+    newsSortBy,
+    newsSourceFilter,
+  ]);
+
+  const newsPageTimelineData = useMemo(() => {
+    const byDate = new Map<string, number>();
+    newsPageItems.forEach((item) => {
+      const key = item.event_time ? getDateKey(item.event_time) : null;
+      if (!key) return;
+      byDate.set(key, (byDate.get(key) ?? 0) + 1);
+    });
+    return Array.from(byDate.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, stories]) => ({ date, stories }));
+  }, [newsPageItems]);
+
+  const newsPageSourceData = useMemo(() => {
+    const bySource = new Map<string, number>();
+    newsPageItems.forEach((item) => {
+      const source = getSourceLabel(item) ?? "Unknown";
+      bySource.set(source, (bySource.get(source) ?? 0) + 1);
+    });
+    return Array.from(bySource.entries())
+      .map(([source, stories]) => ({ source, stories }))
+      .sort((a, b) => b.stories - a.stories)
+      .slice(0, 8);
+  }, [getSourceLabel, newsPageItems]);
+
+  const weatherConditionOptions = useMemo(() => {
+    const values = new Set<string>();
+    weatherScope.forEach((row) => {
+      const condition = asTrimmedString(row.weather_main);
+      if (condition) values.add(condition);
+    });
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [weatherScope]);
+
+  const weatherPageRows = useMemo(() => {
+    let rows = filteredWeather;
+    if (weatherConditionFilter !== "all") {
+      const normalized = weatherConditionFilter.trim().toLowerCase();
+      rows = rows.filter((row) => (row.weather_main ?? "").trim().toLowerCase() === normalized);
+    }
+    const countryTerm = weatherCountryFilter.trim().toUpperCase();
+    if (countryTerm) {
+      rows = rows.filter((row) => (row.country ?? "").toUpperCase().includes(countryTerm));
+    }
+    if (typeof weatherHumidityFloor === "number" && Number.isFinite(weatherHumidityFloor)) {
+      rows = rows.filter((row) => (row.humidity ?? -1) >= weatherHumidityFloor);
+    }
+    const sorted = [...rows];
+    if (weatherSortBy === "hottest") {
+      sorted.sort((a, b) => (b.temp_c ?? -999) - (a.temp_c ?? -999));
+    } else if (weatherSortBy === "coldest") {
+      sorted.sort((a, b) => (a.temp_c ?? 999) - (b.temp_c ?? 999));
+    } else if (weatherSortBy === "humidity") {
+      sorted.sort((a, b) => (b.humidity ?? -1) - (a.humidity ?? -1));
+    } else {
+      sorted.sort((a, b) => (b.observed_at || "").localeCompare(a.observed_at || ""));
+    }
+    return sorted;
+  }, [
+    filteredWeather,
+    weatherConditionFilter,
+    weatherCountryFilter,
+    weatherHumidityFloor,
+    weatherSortBy,
+  ]);
+
+  const weatherConditionChartData = useMemo(() => {
+    const counts = new Map<string, number>();
+    weatherPageRows.forEach((row) => {
+      const condition = asTrimmedString(row.weather_main) ?? "Unknown";
+      counts.set(condition, (counts.get(condition) ?? 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .map(([condition, count]) => ({ condition, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8);
+  }, [weatherPageRows]);
+
+  const weatherTempChartData = useMemo(() => {
+    return weatherPageRows
+      .filter((row) => row.temp_c != null)
+      .slice()
+      .sort((a, b) => (b.temp_c ?? -999) - (a.temp_c ?? -999))
+      .slice(0, 12)
+      .map((row) => ({
+        country: (row.country || "—").toUpperCase(),
+        temp_c: row.temp_c ?? null,
+        humidity: row.humidity ?? null,
+      }));
+  }, [weatherPageRows]);
+
+  const weatherScatterData = useMemo(() => {
+    return weatherPageRows
+      .filter((row) => row.temp_c != null && row.humidity != null)
+      .map((row) => ({
+        country: (row.country || "—").toUpperCase(),
+        temp_c: Number(row.temp_c),
+        humidity: Number(row.humidity),
+      }));
+  }, [weatherPageRows]);
+
+  const marketExchangeOptions = useMemo(() => {
+    const set = new Set<string>();
+    marketSearchScope.forEach((quote) => {
+      const exchange = asTrimmedString(quote.exchange);
+      if (exchange) set.add(exchange);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [marketSearchScope]);
+
+  const marketCountryOptions = useMemo(() => {
+    const set = new Set<string>();
+    marketSearchScope.forEach((quote) => {
+      const country = asTrimmedString(quote.country)?.toUpperCase();
+      if (country) set.add(country);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [marketSearchScope]);
+
+  const marketPageRows = useMemo(() => {
+    let rows = filteredMarket;
+    if (marketExchangeFilter !== "all") {
+      const normalized = marketExchangeFilter.trim().toLowerCase();
+      rows = rows.filter((quote) => (quote.exchange ?? "").trim().toLowerCase() === normalized);
+    }
+    if (marketCountryFilter !== "all") {
+      const normalized = marketCountryFilter.trim().toUpperCase();
+      rows = rows.filter((quote) => (quote.country ?? "").trim().toUpperCase() === normalized);
+    }
+    if (marketDirectionFilter === "gainers") {
+      rows = rows.filter((quote) => (quote.percent_change ?? 0) > 0);
+    } else if (marketDirectionFilter === "losers") {
+      rows = rows.filter((quote) => (quote.percent_change ?? 0) < 0);
+    }
+    if (marketMinAbsMove > 0) {
+      rows = rows.filter((quote) => Math.abs(quote.percent_change ?? 0) >= marketMinAbsMove);
+    }
+    return [...rows].sort(
+      (a, b) =>
+        Math.abs(b.percent_change ?? b.change ?? 0) - Math.abs(a.percent_change ?? a.change ?? 0),
+    );
+  }, [
+    filteredMarket,
+    marketCountryFilter,
+    marketDirectionFilter,
+    marketExchangeFilter,
+    marketMinAbsMove,
+  ]);
+
+  const marketMoversChartData = useMemo(() => {
+    return marketPageRows.slice(0, 12).map((quote) => ({
+      symbol: quote.symbol,
+      percent_change: quote.percent_change ?? 0,
+      change: quote.change ?? 0,
+    }));
+  }, [marketPageRows]);
+
+  const marketCountryPerfData = useMemo(() => {
+    const byCountry = new Map<string, { count: number; total: number }>();
+    marketPageRows.forEach((quote) => {
+      const country = (quote.country || "—").toUpperCase();
+      const current = byCountry.get(country) ?? { count: 0, total: 0 };
+      current.count += 1;
+      current.total += quote.percent_change ?? 0;
+      byCountry.set(country, current);
+    });
+    return Array.from(byCountry.entries())
+      .map(([country, value]) => ({
+        country,
+        avg_change: value.count > 0 ? value.total / value.count : 0,
+        count: value.count,
+      }))
+      .sort((a, b) => Math.abs(b.avg_change) - Math.abs(a.avg_change))
+      .slice(0, 10);
+  }, [marketPageRows]);
 
   const weatherByCountry = useMemo(() => {
     const map = new Map<string, CountryWeather>();
@@ -3447,7 +3754,7 @@ export default function ClaritasDashboard() {
                       News workspace
                     </div>
                     <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                      Region: {regionLabel} · Showing {filteredNews.length} stories
+                      Region: {regionLabel} · Showing {newsPageItems.length} stories
                     </div>
                   </div>
                   <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
@@ -3472,6 +3779,54 @@ export default function ClaritasDashboard() {
                     >
                       Global
                     </button>
+                  </div>
+                  <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                    <label className="text-[color:var(--shell-muted)]">
+                      Source
+                      <select
+                        value={newsSourceFilter}
+                        onChange={(event) => setNewsSourceFilter(event.currentTarget.value)}
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="all">All sources</option>
+                        {newsSourceOptions.map((source) => (
+                          <option key={source} value={source}>
+                            {source}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Country
+                      <input
+                        value={newsCountryFilter}
+                        onChange={(event) => setNewsCountryFilter(event.currentTarget.value)}
+                        placeholder="e.g. US"
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      />
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Sort
+                      <select
+                        value={newsSortBy}
+                        onChange={(event) => setNewsSortBy(event.currentTarget.value as "newest" | "oldest" | "source")}
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="source">By source</option>
+                      </select>
+                    </label>
+                    <div className="flex items-end">
+                      <label className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-[color:var(--shell-muted)]">
+                        <input
+                          type="checkbox"
+                          checked={newsHasImageOnly}
+                          onChange={(event) => setNewsHasImageOnly(event.currentTarget.checked)}
+                        />
+                        Images only
+                      </label>
+                    </div>
                   </div>
                 </section>
 
@@ -3514,43 +3869,128 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
                     <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
-                      {filteredNews.length === 0 && (
+                      {newsPageItems.length === 0 && (
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
                           No stories match the current filters.
                         </div>
                       )}
-                      {filteredNews.map((item) => {
+                      {newsPageItems.map((item) => {
+                        const img = imageProxy(getNewsImageUrl(item));
+                        const sourceLabel = getSourceLabel(item);
                         const iso = item.country_iso2?.toUpperCase();
                         const selected = iso && selectedCountry?.toUpperCase() === iso;
+                        const storyUrl = item.url ?? "#";
                         return (
-                          <button
+                          <article
                             key={item.id}
-                            type="button"
-                            onClick={() => {
-                              if (iso) setSelectedCountry(iso);
-                            }}
                             className={`w-full rounded-xl border px-3 py-3 text-left transition ${
                               selected
                                 ? "border-emerald-200 bg-emerald-50/70"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
-                            <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                              {item.title || item.url || "Untitled"}
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                              <div className="relative h-20 w-28 overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-slate-100/50 flex-none">
+                                {img && (
+                                  <img
+                                    src={img}
+                                    alt={item.title ?? "news thumbnail"}
+                                    loading="lazy"
+                                    decoding="async"
+                                    referrerPolicy="no-referrer"
+                                    className="h-full w-full object-cover"
+                                  />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <a
+                                  href={storyUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm font-semibold text-[color:var(--shell-ink)] hover:underline"
+                                >
+                                  {item.title || item.url || "Untitled"}
+                                </a>
+                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                                  {sourceLabel && (
+                                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                                      {sourceLabel}
+                                    </span>
+                                  )}
+                                  {iso && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedCountry(iso)}
+                                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                                    >
+                                      {iso}
+                                    </button>
+                                  )}
+                                  {item.event_time && (
+                                    <span>{new Date(item.event_time).toLocaleString()}</span>
+                                  )}
+                                </div>
+                                {item.summary && (
+                                  <p className="mt-2 line-clamp-2 text-xs text-[color:var(--shell-muted)]">
+                                    {item.summary}
+                                  </p>
+                                )}
+                              </div>
                             </div>
-                            <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
-                              {[iso ?? null, item.event_time ? new Date(item.event_time).toLocaleString() : null]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </div>
-                            {item.summary && (
-                              <p className="mt-2 line-clamp-2 text-xs text-[color:var(--shell-muted)]">
-                                {item.summary}
-                              </p>
-                            )}
-                          </button>
+                          </article>
                         );
                       })}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      News analytics
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                      Story volume by day
+                    </div>
+                    <div className="mt-3 h-60">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={newsPageTimelineData}>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis allowDecimals={false} />
+                          <Tooltip />
+                          <Area
+                            type="monotone"
+                            dataKey="stories"
+                            stroke={ANALYTICS_COLORS[0]}
+                            fill={ANALYTICS_COLORS[0]}
+                            fillOpacity={0.25}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Source mix
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                      Top publishers in current scope
+                    </div>
+                    <div className="mt-3 h-60">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={newsPageSourceData}>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis dataKey="source" tick={{ fontSize: 11 }} />
+                          <YAxis allowDecimals={false} />
+                          <Tooltip />
+                          <Bar dataKey="stories" radius={[6, 6, 0, 0]}>
+                            {newsPageSourceData.map((entry, index) => (
+                              <Cell key={`news-source-${entry.source}`} fill={ANALYTICS_COLORS[index % ANALYTICS_COLORS.length]} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
                     </div>
                   </div>
                 </section>
@@ -3628,10 +4068,10 @@ export default function ClaritasDashboard() {
                       Weather workspace
                     </div>
                     <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                      {filteredWeather.length} observations in scope
+                      {weatherPageRows.length} observations in scope
                     </div>
                   </div>
-                  <div className="ml-auto flex items-center gap-2 text-xs">
+                  <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
                     <button
                       onClick={() => setMinTemp(undefined)}
                       className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
@@ -3644,6 +4084,66 @@ export default function ClaritasDashboard() {
                     >
                       Global
                     </button>
+                  </div>
+                  <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                    <label className="text-[color:var(--shell-muted)]">
+                      Condition
+                      <select
+                        value={weatherConditionFilter}
+                        onChange={(event) => setWeatherConditionFilter(event.currentTarget.value)}
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="all">All conditions</option>
+                        {weatherConditionOptions.map((condition) => (
+                          <option key={condition} value={condition}>
+                            {condition}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Country
+                      <input
+                        value={weatherCountryFilter}
+                        onChange={(event) => setWeatherCountryFilter(event.currentTarget.value)}
+                        placeholder="e.g. US"
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      />
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Min humidity %
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={weatherHumidityFloor ?? ""}
+                        onChange={(event) =>
+                          setWeatherHumidityFloor(
+                            event.currentTarget.value === ""
+                              ? undefined
+                              : Number(event.currentTarget.value),
+                          )
+                        }
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      />
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Sort
+                      <select
+                        value={weatherSortBy}
+                        onChange={(event) =>
+                          setWeatherSortBy(
+                            event.currentTarget.value as "latest" | "hottest" | "coldest" | "humidity",
+                          )
+                        }
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="latest">Latest first</option>
+                        <option value="hottest">Hottest first</option>
+                        <option value="coldest">Coldest first</option>
+                        <option value="humidity">Most humid</option>
+                      </select>
+                    </label>
                   </div>
                 </section>
 
@@ -3683,38 +4183,142 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
                     <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
-                      {filteredWeather.map((entry, index) => {
+                      {weatherPageRows.map((entry, index) => {
                         const iso = entry.country?.toUpperCase();
                         const selected = iso && selectedCountry?.toUpperCase() === iso;
+                        const weatherLink = weatherDrilldownUrl(iso);
+                        const iconUrl = getWeatherIconUrl(entry);
+                        const source = prettySourceName(entry.source_name ?? "openweather");
                         return (
-                          <button
+                          <article
                             key={`${entry.country}-${entry.observed_at}-${index}`}
-                            type="button"
-                            onClick={() => iso && setSelectedCountry(iso)}
                             className={`w-full rounded-xl border px-3 py-2 text-left text-xs transition ${
                               selected
                                 ? "border-emerald-200 bg-emerald-50/70"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
-                            <div className="font-semibold text-[color:var(--shell-ink)]">
-                              {iso ?? "—"} · {entry.temp_c ?? "—"}°C
+                            <div className="flex flex-wrap items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={() => iso && setSelectedCountry(iso)}
+                                className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-1 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                              >
+                                {iconUrl ? (
+                                  <img
+                                    src={iconUrl}
+                                    alt={entry.weather_main ?? "weather"}
+                                    className="h-6 w-6"
+                                    loading="lazy"
+                                    decoding="async"
+                                  />
+                                ) : (
+                                  <span>{weatherSymbol(entry.weather_main)}</span>
+                                )}
+                                <span>{iso ?? "—"}</span>
+                              </button>
+                              <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-700">
+                                {source}
+                              </span>
+                              {weatherLink && (
+                                <a
+                                  href={weatherLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                                >
+                                  Open detail
+                                </a>
+                              )}
+                            </div>
+                            <div className="mt-2 font-semibold text-[color:var(--shell-ink)]">
+                              {entry.temp_c ?? "—"}°C · {entry.weather_main ?? "—"}
                             </div>
                             <div className="mt-1 text-[color:var(--shell-muted)]">
-                              Humidity {entry.humidity ?? "—"}% · {entry.weather_main ?? "—"}
+                              Humidity {entry.humidity ?? "—"}% · Wind {entry.wind_speed ?? "—"} m/s
+                              {entry.weather_desc ? ` · ${entry.weather_desc}` : ""}
                             </div>
                             <div className="mt-1 text-[color:var(--shell-muted)]">
                               {new Date(entry.observed_at).toLocaleString()}
                             </div>
-                          </button>
+                          </article>
                         );
                       })}
-                      {filteredWeather.length === 0 && (
+                      {weatherPageRows.length === 0 && (
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
                           No weather rows available.
                         </div>
                       )}
                     </div>
+                  </div>
+                </section>
+
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
+                  <div className={`${cardBase} min-w-0 p-4 xl:col-span-2`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Weather analytics
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                      Temperature vs humidity
+                    </div>
+                    <div className="mt-3 h-60">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ScatterChart>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis dataKey="temp_c" name="Temp °C" />
+                          <YAxis dataKey="humidity" name="Humidity %" />
+                          <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+                          <Scatter data={weatherScatterData} fill={ANALYTICS_COLORS[1]} />
+                        </ScatterChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Condition mix
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                      Current weather states
+                    </div>
+                    <div className="mt-3 h-60">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Tooltip />
+                          <Legend />
+                          <Pie
+                            data={weatherConditionChartData}
+                            dataKey="count"
+                            nameKey="condition"
+                            outerRadius={84}
+                            innerRadius={42}
+                          >
+                            {weatherConditionChartData.map((entry, index) => (
+                              <Cell key={`weather-condition-${entry.condition}`} fill={ANALYTICS_COLORS[index % ANALYTICS_COLORS.length]} />
+                            ))}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </section>
+
+                <section className={`${cardBase} p-4`}>
+                  <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                    Temperature ranking
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                    Warmest countries in current filter set
+                  </div>
+                  <div className="mt-3 h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={weatherTempChartData}>
+                        <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                        <XAxis dataKey="country" />
+                        <YAxis />
+                        <Tooltip />
+                        <Bar dataKey="temp_c" fill={ANALYTICS_COLORS[0]} radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
                 </section>
 
@@ -3785,10 +4389,10 @@ export default function ClaritasDashboard() {
                       Market workspace
                     </div>
                     <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                      {filteredMarket.length} quotes in watch scope
+                      {marketPageRows.length} quotes in watch scope
                     </div>
                   </div>
-                  <div className="ml-auto flex items-center gap-2 text-xs">
+                  <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
                     <button
                       onClick={() => void fetchMarketQuotes({ refresh: true }).then(setMarketQuotes).catch(() => undefined)}
                       className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
@@ -3804,6 +4408,63 @@ export default function ClaritasDashboard() {
                       </button>
                     )}
                   </div>
+                  <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                    <label className="text-[color:var(--shell-muted)]">
+                      Exchange
+                      <select
+                        value={marketExchangeFilter}
+                        onChange={(event) => setMarketExchangeFilter(event.currentTarget.value)}
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="all">All exchanges</option>
+                        {marketExchangeOptions.map((exchange) => (
+                          <option key={exchange} value={exchange}>
+                            {exchange}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Country
+                      <select
+                        value={marketCountryFilter}
+                        onChange={(event) => setMarketCountryFilter(event.currentTarget.value)}
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="all">All countries</option>
+                        {marketCountryOptions.map((country) => (
+                          <option key={country} value={country}>
+                            {country}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Direction
+                      <select
+                        value={marketDirectionFilter}
+                        onChange={(event) =>
+                          setMarketDirectionFilter(event.currentTarget.value as "all" | "gainers" | "losers")
+                        }
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="all">All</option>
+                        <option value="gainers">Gainers</option>
+                        <option value="losers">Losers</option>
+                      </select>
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Min |% move|
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={marketMinAbsMove}
+                        onChange={(event) => setMarketMinAbsMove(Number(event.currentTarget.value) || 0)}
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      />
+                    </label>
+                  </div>
                 </section>
 
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.08fr_0.92fr]">
@@ -3817,10 +4478,12 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
                     <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
-                      {filteredMarket.map((quote) => {
+                      {marketPageRows.map((quote) => {
                         const selected = selectedSymbol?.toUpperCase() === quote.symbol.toUpperCase();
                         const isPositive = (quote.change ?? 0) > 0;
                         const isNegative = (quote.change ?? 0) < 0;
+                        const logo = imageProxy(getMarketLogoUrl(quote));
+                        const source = getMarketSourceLabel(quote);
                         return (
                           <button
                             key={`mk-${quote.symbol}-${quote.observed_at}`}
@@ -3835,13 +4498,34 @@ export default function ClaritasDashboard() {
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                                  {quote.symbol}
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="h-10 w-10 overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)]">
+                                  {logo ? (
+                                    <img
+                                      src={logo}
+                                      alt={`${quote.symbol} logo`}
+                                      loading="lazy"
+                                      decoding="async"
+                                      referrerPolicy="no-referrer"
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="grid h-full w-full place-items-center text-xs font-semibold text-[color:var(--shell-muted)]">
+                                      {quote.symbol.slice(0, 2)}
+                                    </div>
+                                  )}
                                 </div>
-                                <div className="text-xs text-[color:var(--shell-muted)]">
-                                  {quote.company_name ?? "—"} · {quote.exchange ?? "—"} · {quote.country ?? "—"}
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                                    {quote.symbol}
+                                  </div>
+                                  <div className="truncate text-xs text-[color:var(--shell-muted)]">
+                                    {quote.company_name ?? "—"} · {quote.exchange ?? "—"} · {quote.country ?? "—"}
+                                  </div>
+                                  <div className="mt-1 inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-700">
+                                    {source}
+                                  </div>
                                 </div>
                               </div>
                               <div className="text-right">
@@ -3853,11 +4537,25 @@ export default function ClaritasDashboard() {
                                     ? `${quote.percent_change >= 0 ? "+" : ""}${quote.percent_change.toFixed(2)}%`
                                     : "—"}
                                 </div>
+                                <a
+                                  href={marketQuoteUrl(quote.symbol)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(event) => event.stopPropagation()}
+                                  className="mt-1 inline-block rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[10px] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
+                                >
+                                  Open quote
+                                </a>
                               </div>
                             </div>
                           </button>
                         );
                       })}
+                      {marketPageRows.length === 0 && (
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
+                          No quotes match the current market filters.
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -3922,6 +4620,61 @@ export default function ClaritasDashboard() {
                         Select a symbol from the watchlist to relate market movement with local weather and recent news.
                       </p>
                     )}
+                  </div>
+                </section>
+
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Market analytics
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                      Top movers (% change)
+                    </div>
+                    <div className="mt-3 h-60">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={marketMoversChartData}>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis dataKey="symbol" />
+                          <YAxis />
+                          <Tooltip />
+                          <Bar dataKey="percent_change" radius={[6, 6, 0, 0]}>
+                            {marketMoversChartData.map((entry, index) => (
+                              <Cell
+                                key={`market-mover-${entry.symbol}`}
+                                fill={entry.percent_change >= 0 ? ANALYTICS_COLORS[index % ANALYTICS_COLORS.length] : "#be123c"}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Geographic risk
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                      Average move by country
+                    </div>
+                    <div className="mt-3 h-60">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={marketCountryPerfData}>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis dataKey="country" />
+                          <YAxis />
+                          <Tooltip />
+                          <Bar dataKey="avg_change" radius={[6, 6, 0, 0]}>
+                            {marketCountryPerfData.map((entry) => (
+                              <Cell
+                                key={`market-country-${entry.country}`}
+                                fill={entry.avg_change >= 0 ? "#0f766e" : "#be123c"}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 </section>
               </div>

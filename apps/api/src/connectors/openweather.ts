@@ -16,6 +16,10 @@ export type CountryWeather = {
   humidity: number | null;
   observed_at: string; // ISO
   weather_main: string | null;
+  weather_desc: string | null;
+  wind_speed: number | null;
+  source_name: string | null;
+  icon_code: string | null;
 };
 
 async function ensureSource(name: string, apiBaseUrl: string) {
@@ -304,9 +308,23 @@ export async function getCountryWeatherLatest(): Promise<CountryWeather[]> {
     humidity: number | null;
     observed_at: string;
     weather_main: string | null;
+    weather_desc: string | null;
+    wind_speed: number | null;
+    source_name: string | null;
+    icon_code: string | null;
   }>(
-    `SELECT country_iso2 AS country, temp_c, humidity, observed_at, weather_main
-     FROM weather_snapshot
+    `SELECT
+       ws.country_iso2 AS country,
+       ws.temp_c,
+       ws.humidity,
+       ws.observed_at,
+       ws.weather_main,
+       ws.weather_desc,
+       ws.wind_speed,
+       s.name AS source_name,
+       (ws.payload -> 'weather' -> 0 ->> 'icon')::text AS icon_code
+     FROM weather_snapshot ws
+     LEFT JOIN source s ON s.id = ws.source_id
      ORDER BY country_iso2`
   );
   return rows.map(r => ({
@@ -315,5 +333,9 @@ export async function getCountryWeatherLatest(): Promise<CountryWeather[]> {
     humidity: r.humidity,
     observed_at: r.observed_at,
     weather_main: r.weather_main,
+    weather_desc: r.weather_desc,
+    wind_speed: r.wind_speed,
+    source_name: r.source_name,
+    icon_code: r.icon_code,
   }));
 }

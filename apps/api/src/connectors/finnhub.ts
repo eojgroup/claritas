@@ -20,6 +20,7 @@ type FinnhubCompanyProfile2Response = {
   exchange?: string;
   country?: string;
   currency?: string;
+  logo?: string;
   [key: string]: unknown;
 };
 
@@ -47,6 +48,7 @@ type SymbolMetadata = {
   exchange: string;
   country: string;
   currency: string;
+  logo_url?: string;
 };
 
 const FINNHUB_BASE_URL = "https://api.finnhub.io/api/v1";
@@ -198,6 +200,7 @@ async function fetchFinnhubCompanyProfile2(symbol: string): Promise<Partial<Symb
     exchange: typeof data.exchange === "string" && data.exchange.trim() ? data.exchange.trim() : undefined,
     country: typeof data.country === "string" && data.country.trim() ? data.country.trim().toUpperCase() : undefined,
     currency: typeof data.currency === "string" && data.currency.trim() ? data.currency.trim().toUpperCase() : undefined,
+    logo_url: typeof data.logo === "string" && data.logo.trim() ? data.logo.trim() : undefined,
   };
   profileMetadataCache.set(symbol, metadata);
   return metadata;
@@ -227,6 +230,13 @@ async function upsertMarketSnapshot(params: {
     provider: "finnhub",
     symbol: params.symbol,
     quote: params.quote,
+    profile: {
+      company_name: params.metadata.company_name ?? null,
+      exchange: params.metadata.exchange ?? null,
+      country: params.metadata.country ?? null,
+      currency: params.metadata.currency ?? null,
+      logo: params.metadata.logo_url ?? null,
+    },
   };
 
   const { rows } = await query<{ inserted: boolean }>(
@@ -316,6 +326,7 @@ export async function ingestFinnhubQuotes(symbolsInput?: string[] | null): Promi
             exchange: metadata.exchange ?? remoteMetadata.exchange,
             country: metadata.country ?? remoteMetadata.country,
             currency: metadata.currency ?? remoteMetadata.currency,
+            logo_url: metadata.logo_url ?? remoteMetadata.logo_url,
           };
         } catch {
           // Metadata enrich failures are non-fatal for quote ingestion.
