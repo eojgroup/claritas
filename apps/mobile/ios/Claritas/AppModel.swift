@@ -15,7 +15,9 @@ final class AppModel: ObservableObject {
     @Published var news: [NewsItem] = []
     @Published var countryStats: [CountryStat] = []
     @Published var weather: [CountryWeather] = []
+    @Published var marketQuotes: [MarketQuote] = []
     @Published var isRefreshingWeather: Bool = false
+    @Published var isRefreshingMarketQuotes: Bool = false
     @Published var authStatus: AuthStatus = .checking
     @Published var authUser: AuthUser? = nil
     @Published var authProviders: [AuthProvider] = []
@@ -185,8 +187,12 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchNews(limit: 20, offset: 0, q: nil, country: nil)) }
             catch { return .failure(error) }
         }()
+        async let marketResult: Result<[MarketQuote], Error> = {
+            do { return .success(try await api.fetchMarketQuotes(refresh: true)) }
+            catch { return .failure(error) }
+        }()
 
-        let (resolvedStats, resolvedWeather, resolvedNews) = await (statsResult, weatherResult, newsResult)
+        let (resolvedStats, resolvedWeather, resolvedNews, resolvedMarket) = await (statsResult, weatherResult, newsResult, marketResult)
 
         if case .success(let stats) = resolvedStats {
             countryStats = stats
@@ -197,12 +203,16 @@ final class AppModel: ObservableObject {
         if case .success(let newsItems) = resolvedNews {
             news = newsItems
         }
+        if case .success(let quotes) = resolvedMarket {
+            marketQuotes = quotes
+        }
     }
 
     func clearAppData() {
         countryStats = []
         weather = []
         news = []
+        marketQuotes = []
     }
 
     func reloadNewsForSelectedCountry() async {
@@ -222,6 +232,17 @@ final class AppModel: ObservableObject {
             weather = try await api.fetchCountryWeather()
         } catch {
             // ignore
+        }
+    }
+
+    func refreshMarketQuotes(forceRefresh: Bool = true) async {
+        guard !isRefreshingMarketQuotes else { return }
+        isRefreshingMarketQuotes = true
+        defer { isRefreshingMarketQuotes = false }
+        do {
+            marketQuotes = try await api.fetchMarketQuotes(refresh: forceRefresh)
+        } catch {
+            // keep current rows on transient failures
         }
     }
 

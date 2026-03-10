@@ -71,6 +71,7 @@ locals {
     "claritas-auth-apple-private-key"      = var.auth_apple_private_key
     "claritas-auth-keycloak-client-secret" = var.auth_keycloak_client_secret
     "claritas-ingest-api-token"            = var.ingest_api_token
+    "claritas-finnhub-api-key"             = var.finnhub_api_key
     "claritas-keycloak-admin-password"     = var.keycloak_admin_password
   }
 

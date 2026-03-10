@@ -102,6 +102,13 @@ variable "ingest_api_token" {
   sensitive   = true
 }
 
+variable "finnhub_api_key" {
+  description = "Finnhub API key for market quote ingestion."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "keycloak_admin" {
   description = "Keycloak initial admin username."
   type        = string

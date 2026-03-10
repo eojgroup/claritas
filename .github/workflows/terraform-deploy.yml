@@ -20,6 +20,7 @@ jobs:
       K8S_NAMESPACE: claritas
       NETWORK: default
       DOMAIN: app.claritas.info
+      TF_VAR_finnhub_api_key: ${{ secrets.FINNHUB_API_KEY }}
 
     steps:
       - name: 📦 Checkout
@@ -157,6 +158,18 @@ jobs:
           else
             kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-openweather \
               --from-literal=OPENWEATHER_API_KEY="$OPENWEATHER_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          fi
+
+      - name: 🔐 Upsert Secret (claritas-finnhub)
+        env:
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: |
+          if [ -z "${FINNHUB_API_KEY:-}" ]; then
+            echo "::warning::FINNHUB_API_KEY not set in GitHub Secrets; skipping secret upsert";
+          else
+            kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-finnhub \
+              --from-literal=FINNHUB_API_KEY="$FINNHUB_API_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
           fi
 

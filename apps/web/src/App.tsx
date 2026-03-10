@@ -101,7 +101,7 @@ const SPLIT_VIEW_MIN_WIDTH = 700;
 const SPLIT_VIEW_MIN_HEIGHT = 620;
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
-type SearchTopic = "all" | "news" | "weather";
+type SearchTopic = "all" | "news" | "weather" | "markets";
 
 const DATA_WINDOW_OPTIONS: Array<{
   id: DataWindowPreset;
@@ -128,12 +128,17 @@ const SEARCH_TOPIC_OPTIONS: Array<{ id: SearchTopic; label: string }> = [
   { id: "all", label: "All" },
   { id: "news", label: "News" },
   { id: "weather", label: "Weather" },
+  { id: "markets", label: "Markets" },
 ];
 
 const SEARCH_TOPIC_ALIASES: Record<string, SearchTopic> = {
   all: "all",
   news: "news",
   weather: "weather",
+  market: "markets",
+  markets: "markets",
+  finance: "markets",
+  financial: "markets",
   ai: "news",
   alerts: "news",
   wx: "weather",
@@ -184,6 +189,7 @@ const prettySourceName = (value: string): string => {
   if (normalized === "newsapi") return "NewsAPI";
   if (normalized === "thenewsapi") return "TheNewsAPI";
   if (normalized === "openweather") return "OpenWeather";
+  if (normalized === "finnhub") return "Finnhub";
   return value.trim();
 };
 
@@ -285,6 +291,7 @@ import {
   fetchAuthProviders,
   fetchCountryStats,
   fetchCountryWeather,
+  fetchMarketQuotes,
   fetchNews,
   getAuthStartUrl,
   logoutAuth,
@@ -294,6 +301,7 @@ import {
   type AuthUser,
   type CountryStat,
   type CountryWeather,
+  type MarketQuote,
   type NewsItem,
 } from "./lib/api";
 
@@ -338,6 +346,7 @@ export default function ClaritasDashboard() {
     useState<(typeof REGION_OPTIONS)[number]["id"]>("global");
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
+  const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [newsLoadMode, setNewsLoadMode] = useState<"recent" | "archive">(
     "recent",
@@ -347,7 +356,7 @@ export default function ClaritasDashboard() {
   const [dataWindowPreset, setDataWindowPreset] =
     useState<DataWindowPreset>("30d");
   const [mapMode, setMapMode] = useState<"news" | "weather">("news");
-  const [listMode, setListMode] = useState<"news" | "weather">("news");
+  const [listMode, setListMode] = useState<"news" | "weather" | "market">("news");
   const [mapScale, setMapScale] = useState<"linear" | "log">("linear");
   const [mapDayMode, setMapDayMode] = useState(false);
   const [mapWindowDays, setMapWindowDays] = useState(NEWS_TREND_WINDOW_DAYS);
@@ -534,8 +543,31 @@ export default function ClaritasDashboard() {
     fetchCountryWeather()
       .then(setWeatherStats)
       .catch(() => setWeatherStats([]));
+    fetchMarketQuotes({ refresh: true })
+      .then(setMarketQuotes)
+      .catch(() => setMarketQuotes([]));
     void loadNewsData("recent");
   }, [authStatus, loadNewsData]);
+
+  useEffect(() => {
+    if (authStatus !== "authed") return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const quotes = await fetchMarketQuotes({ refresh: true });
+        if (!cancelled) setMarketQuotes(quotes);
+      } catch {
+        // keep last successful market snapshot on transient failures
+      }
+    };
+    const id = window.setInterval(() => {
+      void refresh();
+    }, 20_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [authStatus]);
 
   const cardBase =
     "rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm";
@@ -624,11 +656,15 @@ export default function ClaritasDashboard() {
     effectiveSearchTopic === "all" || effectiveSearchTopic === "news";
   const searchAppliesToWeather =
     effectiveSearchTopic === "all" || effectiveSearchTopic === "weather";
+  const searchAppliesToMarkets =
+    effectiveSearchTopic === "all" || effectiveSearchTopic === "markets";
   const searchInputPlaceholder =
     effectiveSearchTopic === "weather"
       ? "Search weather topics (e.g. storm, humidity, US)"
       : effectiveSearchTopic === "news"
         ? "Search news topics (e.g. market, regulation, AI)"
+        : effectiveSearchTopic === "markets"
+          ? "Search market symbols (e.g. AAPL, NASDAQ, USD)"
         : "Search by topic or keyword (try topic:news OpenAI)";
 
   const getSourceLabel = useCallback((item: NewsItem) => {
@@ -672,6 +708,27 @@ export default function ClaritasDashboard() {
     [searchTerms],
   );
 
+  const matchesMarketSearch = useCallback(
+    (quote: MarketQuote) => {
+      if (searchTerms.length === 0) return true;
+      const haystack = [
+        quote.symbol ?? "",
+        quote.company_name ?? "",
+        quote.exchange ?? "",
+        quote.country ?? "",
+        quote.currency ?? "",
+        quote.price != null ? String(quote.price) : "",
+        quote.change != null ? String(quote.change) : "",
+        quote.percent_change != null ? String(quote.percent_change) : "",
+        quote.observed_at ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return searchTerms.every((term) => haystack.includes(term));
+    },
+    [searchTerms],
+  );
+
   const newsSearchScope = useMemo(() => {
     if (!searchAppliesToNews || searchTerms.length === 0) return newsScope;
     return newsScope.filter(matchesNewsSearch);
@@ -699,6 +756,18 @@ export default function ClaritasDashboard() {
     weatherScope,
     matchesWeatherSearch,
     searchAppliesToWeather,
+    searchTerms.length,
+  ]);
+
+  const marketSearchScope = useMemo(() => {
+    if (!searchAppliesToMarkets || searchTerms.length === 0) {
+      return marketQuotes;
+    }
+    return marketQuotes.filter(matchesMarketSearch);
+  }, [
+    marketQuotes,
+    matchesMarketSearch,
+    searchAppliesToMarkets,
     searchTerms.length,
   ]);
 
@@ -1177,6 +1246,10 @@ export default function ClaritasDashboard() {
     return w;
   }, [weatherSearchScope, selectedCountries]);
 
+  const filteredMarket = useMemo(() => {
+    return marketSearchScope;
+  }, [marketSearchScope]);
+
   const activeRegions = useMemo(() => {
     const regions = new Set<string>();
     filteredNews.forEach(
@@ -1201,6 +1274,10 @@ export default function ClaritasDashboard() {
       const time = Date.parse(item.observed_at);
       if (!Number.isNaN(time)) times.push(time);
     });
+    filteredMarket.forEach((quote) => {
+      const time = Date.parse(quote.observed_at);
+      if (!Number.isNaN(time)) times.push(time);
+    });
     if (times.length === 0) return "Awaiting new syncs";
     const latest = new Date(Math.max(...times));
     return new Intl.DateTimeFormat("en-US", {
@@ -1209,7 +1286,7 @@ export default function ClaritasDashboard() {
       hour: "numeric",
       minute: "2-digit",
     }).format(latest);
-  }, [filteredNews, filteredWeather]);
+  }, [filteredNews, filteredWeather, filteredMarket]);
 
   const focusLabel = useMemo(() => {
     if (selectedCountry && comparisonCountry) {
@@ -1250,6 +1327,20 @@ export default function ClaritasDashboard() {
         .join(" · "),
       href: null,
     }));
+    const markets = marketSearchScope.slice(0, 4).map((quote, idx) => ({
+      key: `market-${quote.symbol}-${quote.observed_at}-${idx}`,
+      kind: "Market",
+      title: `${quote.symbol} · ${quote.price ?? "—"}`,
+      subtitle: [
+        quote.company_name ?? null,
+        quote.exchange ?? null,
+        quote.percent_change != null ? `${quote.percent_change.toFixed(2)}%` : null,
+        quote.observed_at ? new Date(quote.observed_at).toLocaleString() : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      href: null,
+    }));
 
     if (effectiveSearchTopic === "news") {
       return news;
@@ -1257,8 +1348,11 @@ export default function ClaritasDashboard() {
     if (effectiveSearchTopic === "weather") {
       return weather;
     }
-    return [...news.slice(0, 2), ...weather.slice(0, 2)];
-  }, [newsSearchScope, weatherSearchScope, effectiveSearchTopic]);
+    if (effectiveSearchTopic === "markets") {
+      return markets;
+    }
+    return [...news.slice(0, 2), ...weather.slice(0, 1), ...markets.slice(0, 1)];
+  }, [effectiveSearchTopic, marketSearchScope, newsSearchScope, weatherSearchScope]);
 
   const splitViewEnabled = useMemo(
     () =>
@@ -2358,6 +2452,16 @@ export default function ClaritasDashboard() {
                           >
                             Weather
                           </button>
+                          <button
+                            className={`rounded-full border px-3 py-1 transition ${
+                              listMode === "market"
+                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                            onClick={() => setListMode("market")}
+                          >
+                            Markets
+                          </button>
                         </div>
                       </div>
 
@@ -2483,7 +2587,7 @@ export default function ClaritasDashboard() {
                               );
                             })}
                           </div>
-                        ) : (
+                        ) : listMode === "weather" ? (
                           <div className="h-full overflow-y-auto p-4 space-y-4">
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <label className="text-[color:var(--shell-muted)]">
@@ -2553,6 +2657,84 @@ export default function ClaritasDashboard() {
                               ))}
                             </ul>
                           </div>
+                        ) : (
+                          <div className="h-full overflow-y-auto p-4 space-y-4">
+                            <div className="flex flex-wrap items-center gap-3 text-sm">
+                              <div className="text-[color:var(--shell-muted)]">
+                                Real-time quotes from Finnhub
+                              </div>
+                              <div className="ml-auto text-xs text-[color:var(--shell-muted)]">
+                                {filteredMarket.length} symbols
+                              </div>
+                            </div>
+                            <ul className="list-none divide-y divide-[color:var(--shell-border)]">
+                              {filteredMarket.length === 0 && (
+                                <li className="text-sm text-[color:var(--shell-muted)] py-3">
+                                  No market rows.
+                                </li>
+                              )}
+                              {filteredMarket.map((quote) => {
+                                const isPositive =
+                                  typeof quote.change === "number" && quote.change > 0;
+                                const isNegative =
+                                  typeof quote.change === "number" && quote.change < 0;
+                                return (
+                                  <li
+                                    key={`${quote.symbol}-${quote.observed_at}`}
+                                    className="py-3 flex flex-col gap-2"
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center gap-2">
+                                          <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
+                                            {quote.symbol}
+                                          </span>
+                                          {quote.exchange && (
+                                            <span className="text-xs text-[color:var(--shell-muted)]">
+                                              {quote.exchange}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="text-xs text-[color:var(--shell-muted)] mt-1">
+                                          {quote.company_name ?? "—"}
+                                        </div>
+                                      </div>
+                                      <div className="text-right">
+                                        <div className="text-base font-semibold text-[color:var(--shell-ink)]">
+                                          {quote.price ?? "—"}
+                                          {quote.currency ? ` ${quote.currency}` : ""}
+                                        </div>
+                                        <div
+                                          className={`text-xs ${
+                                            isPositive
+                                              ? "text-emerald-600"
+                                              : isNegative
+                                                ? "text-rose-600"
+                                                : "text-[color:var(--shell-muted)]"
+                                          }`}
+                                        >
+                                          {quote.change != null ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}` : "—"}
+                                          {" · "}
+                                          {quote.percent_change != null
+                                            ? `${quote.percent_change >= 0 ? "+" : ""}${quote.percent_change.toFixed(2)}%`
+                                            : "—"}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
+                                      <span>Open {quote.open_price ?? "—"}</span>
+                                      <span>High {quote.high_price ?? "—"}</span>
+                                      <span>Low {quote.low_price ?? "—"}</span>
+                                      <span>Prev {quote.previous_close ?? "—"}</span>
+                                      <span className="ml-auto">
+                                        {new Date(quote.observed_at).toLocaleString()}
+                                      </span>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2601,13 +2783,13 @@ export default function ClaritasDashboard() {
                           </div>
                           <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Weather rows
+                              Market quotes
                             </div>
                             <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                              {filteredWeather.length}
+                              {filteredMarket.length}
                             </div>
                             <div className="text-xs text-[color:var(--shell-muted)]">
-                              Latest observations
+                              Realtime snapshots
                             </div>
                           </div>
                           <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
@@ -3031,6 +3213,7 @@ export default function ClaritasDashboard() {
                           <span>Topic: {activeSearchTopicLabel}</span>
                           <span>News matches: {newsSearchScope.length}</span>
                           <span>Weather matches: {weatherSearchScope.length}</span>
+                          <span>Market matches: {marketSearchScope.length}</span>
                         </div>
                         {!hasSearchQuery ? (
                           <p className="text-xs text-[color:var(--shell-muted)]">

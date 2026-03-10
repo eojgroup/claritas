@@ -9,7 +9,7 @@ struct DashboardView: View {
     @State private var listMode: ListMode = .news
     @State private var minTemp: String = ""
 
-    enum ListMode: String, CaseIterable { case news, weather }
+    enum ListMode: String, CaseIterable { case news, weather, market }
 
     var body: some View {
         DashboardBackground {
@@ -84,7 +84,7 @@ struct DashboardView: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "magnifyingglass")
                                     .foregroundStyle(.secondary)
-                                TextField("Search news", text: $query)
+                                TextField("Search news, weather, or markets", text: $query)
                                     .textInputAutocapitalization(.never)
                                     .autocorrectionDisabled()
                                 if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -116,6 +116,7 @@ struct DashboardView: View {
                                 Picker("List Mode", selection: $listMode) {
                                     Text("News").tag(ListMode.news)
                                     Text("Weather").tag(ListMode.weather)
+                                    Text("Markets").tag(ListMode.market)
                                 }
                                 .pickerStyle(.segmented)
                                 .frame(maxWidth: 220)
@@ -125,7 +126,7 @@ struct DashboardView: View {
                                 NewsListView(items: filteredNews(), onSelectCountry: { iso in
                                     model.selectedCountry = iso
                                 })
-                            } else {
+                            } else if listMode == .weather {
                                 WeatherListView(
                                     items: filteredWeather(),
                                     minTemp: $minTemp,
@@ -134,6 +135,12 @@ struct DashboardView: View {
                                     onSelectCountry: { iso in
                                         model.selectedCountry = iso
                                     }
+                                )
+                            } else {
+                                MarketQuoteListView(
+                                    quotes: filteredMarketQuotes(),
+                                    isRefreshing: model.isRefreshingMarketQuotes,
+                                    onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } }
                                 )
                             }
                         }
@@ -151,6 +158,12 @@ struct DashboardView: View {
         }
         .onChange(of: model.selectedCountry) { _ in
             Task { await model.reloadNewsForSelectedCountry() }
+        }
+        .task {
+            while !Task.isCancelled {
+                await model.refreshMarketQuotes(forceRefresh: true)
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+            }
         }
     }
 
@@ -177,6 +190,21 @@ struct DashboardView: View {
         }
     }
 
+    private func filteredMarketQuotes() -> [MarketQuote] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !term.isEmpty else { return model.marketQuotes }
+        return model.marketQuotes.filter { quote in
+            let haystack = [
+                quote.symbol,
+                quote.company_name ?? "",
+                quote.exchange ?? "",
+                quote.country ?? "",
+                quote.currency ?? ""
+            ].joined(separator: " ").lowercased()
+            return haystack.contains(term)
+        }
+    }
+
     private var searchFieldBackground: Color {
         colorScheme == .dark
             ? Color(red: 0.07, green: 0.11, blue: 0.16)
@@ -187,6 +215,104 @@ struct DashboardView: View {
         colorScheme == .dark
             ? Color.white.opacity(0.14)
             : Color.black.opacity(0.12)
+    }
+}
+
+private struct MarketQuoteListView: View {
+    let quotes: [MarketQuote]
+    let isRefreshing: Bool
+    let onRefresh: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Text("Finnhub real-time quotes")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: onRefresh) {
+                    Text(isRefreshing ? "Refreshing…" : "Refresh")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isRefreshing)
+            }
+
+            if quotes.isEmpty {
+                Text("No market rows.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(quotes) { quote in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(quote.symbol)
+                                .font(.subheadline.weight(.semibold))
+                            if let exchange = quote.exchange, !exchange.isEmpty {
+                                Text(exchange)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(priceLabel(quote))
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        Text(quote.company_name ?? "—")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            Text(changeLabel(quote))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(changeColor(quote))
+                            Text("Open \(valueOrDash(quote.open_price))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("High \(valueOrDash(quote.high_price))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("Low \(valueOrDash(quote.low_price))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(
+                            "Observed " +
+                            (quote.observedDate?.formatted(date: .abbreviated, time: .shortened) ?? quote.observed_at)
+                        )
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+        }
+    }
+
+    private func priceLabel(_ quote: MarketQuote) -> String {
+        let price = valueOrDash(quote.price)
+        if let currency = quote.currency, !currency.isEmpty {
+            return "\(price) \(currency)"
+        }
+        return price
+    }
+
+    private func changeLabel(_ quote: MarketQuote) -> String {
+        guard let change = quote.change else { return "—" }
+        let pct = quote.percent_change.map { String(format: "%.2f%%", $0) } ?? "—"
+        return String(format: "%+.2f", change) + " · " + pct
+    }
+
+    private func changeColor(_ quote: MarketQuote) -> Color {
+        guard let change = quote.change else { return .secondary }
+        if change > 0 { return .green }
+        if change < 0 { return .red }
+        return .secondary
+    }
+
+    private func valueOrDash(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return String(format: "%.2f", value)
     }
 }
 
@@ -493,6 +619,8 @@ private struct InteractiveCountryBubbleMap: View {
                 )
             }
             .sorted { $0.magnitude > $1.magnitude }
+        case .market:
+            return []
         }
     }
 
@@ -509,7 +637,13 @@ private struct InteractiveCountryBubbleMap: View {
             }
 
             if points.isEmpty {
-                Text(mode == .news ? "No mapped news stats yet." : "No mapped weather stats yet.")
+                Text(
+                    mode == .news
+                        ? "No mapped news stats yet."
+                        : mode == .weather
+                            ? "No mapped weather stats yet."
+                            : "No mapped market stats yet."
+                )
                     .font(.footnote)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -534,9 +668,21 @@ private struct InteractiveCountryBubbleMap: View {
     private func bubbleView(for point: CountryBubblePoint) -> some View {
         let selected = point.iso == selectedCountry?.uppercased()
         let size = bubbleSize(for: point)
-        let fillColor: Color = mode == .news
-            ? (selected ? Color(red: 0.10, green: 0.58, blue: 0.50) : Color(red: 0.10, green: 0.45, blue: 0.69).opacity(0.9))
-            : (selected ? Color(red: 0.92, green: 0.51, blue: 0.27) : Color(red: 0.78, green: 0.39, blue: 0.24).opacity(0.86))
+        let fillColor: Color
+        switch mode {
+        case .news:
+            fillColor = selected
+                ? Color(red: 0.10, green: 0.58, blue: 0.50)
+                : Color(red: 0.10, green: 0.45, blue: 0.69).opacity(0.9)
+        case .weather:
+            fillColor = selected
+                ? Color(red: 0.92, green: 0.51, blue: 0.27)
+                : Color(red: 0.78, green: 0.39, blue: 0.24).opacity(0.86)
+        case .market:
+            fillColor = selected
+                ? Color(red: 0.67, green: 0.44, blue: 0.09)
+                : Color(red: 0.55, green: 0.37, blue: 0.06).opacity(0.86)
+        }
 
         return Button(action: { onSelectCountry(point.iso) }) {
             VStack(spacing: 4) {

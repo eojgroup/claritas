@@ -40,6 +40,7 @@ const express_1 = __importDefault(require("express"));
 const newsapi_1 = require("./connectors/newsapi");
 const thenewsapi_1 = require("./connectors/thenewsapi");
 const openweather_1 = require("./connectors/openweather");
+const finnhub_1 = require("./connectors/finnhub");
 const db_1 = require("./db");
 const auth_1 = __importStar(require("./auth"));
 const ingestion_admin_1 = require("./ingestion-admin");
@@ -124,7 +125,7 @@ async function getActiveAdminCountTx(client) {
     return Number(rows[0]?.count || 0);
 }
 function parsePipeline(value) {
-    if (value === "news" || value === "weather")
+    if (value === "news" || value === "weather" || value === "market")
         return value;
     return undefined;
 }
@@ -441,12 +442,31 @@ app.post("/api/admin/ingestion/weather/run", requireAdminRole, async (req, res) 
         return res.status(500).json({ error: e.message || String(e) });
     }
 });
+app.post("/api/admin/ingestion/market/run", requireAdminRole, async (req, res) => {
+    try {
+        const plan = (0, ingestion_admin_1.buildMarketRunPlan)(req.body || {});
+        const run = await (0, ingestion_admin_1.triggerMarketRun)({
+            actor: getRequestActor(res),
+            plan,
+        });
+        const detail = await (0, ingestion_admin_1.getRunDetail)(run.runId, 150);
+        if (!detail)
+            return res.status(500).json({ error: "Failed to load created run." });
+        return res.status(202).json(detail);
+    }
+    catch (e) {
+        if (e instanceof ingestion_admin_1.IngestionValidationError) {
+            return res.status(400).json({ error: e.message || String(e) });
+        }
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
 app.get("/api/admin/ingestion/runs", requireAdminRole, async (req, res) => {
     try {
         const pipelineRaw = typeof req.query.pipeline === "string" ? req.query.pipeline.trim().toLowerCase() : undefined;
         const pipeline = parsePipeline(pipelineRaw);
         if (pipelineRaw && !pipeline) {
-            return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather." });
+            return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market." });
         }
         const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10) || 50, 1), 200);
         const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
@@ -494,7 +514,7 @@ app.get("/api/admin/ingestion/metrics", requireAdminRole, async (req, res) => {
         const pipelineRaw = typeof req.query.pipeline === "string" ? req.query.pipeline.trim().toLowerCase() : undefined;
         const pipeline = parsePipeline(pipelineRaw);
         if (pipelineRaw && !pipeline) {
-            return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather." });
+            return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market." });
         }
         const metrics = await (0, ingestion_admin_1.getMetrics)({ days, pipeline });
         return res.json(metrics);
@@ -557,11 +577,60 @@ app.post("/api/ingest/openweather/country-current", requireIngestionAccess, asyn
         res.status(500).json({ error: e.message || String(e) });
     }
 });
+// Ingest Finnhub quotes for a symbol list (or defaults)
+app.post("/api/ingest/finnhub/quotes", requireIngestionAccess, async (req, res) => {
+    try {
+        let symbols;
+        try {
+            const parsed = (0, finnhub_1.parseMarketSymbolsInput)(req.body?.symbols);
+            symbols = parsed.length > 0 ? parsed : undefined;
+        }
+        catch (validationError) {
+            return res.status(400).json({
+                error: validationError instanceof Error ? validationError.message : String(validationError),
+            });
+        }
+        const result = await (0, finnhub_1.ingestFinnhubQuotes)(symbols);
+        res.json(result);
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message || String(e) });
+    }
+});
 // Latest weather per country for map overlay
 app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) => {
     try {
         const rows = await (0, openweather_1.getCountryWeatherLatest)();
         res.json({ stats: rows });
+    }
+    catch (e) {
+        res.status(500).json({ error: e.message || String(e) });
+    }
+});
+// Latest market quotes with optional on-demand refresh for near real-time views
+app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
+    try {
+        let symbols;
+        try {
+            const parsed = (0, finnhub_1.parseMarketSymbolsInput)(req.query.symbols);
+            symbols = parsed.length > 0 ? parsed : undefined;
+        }
+        catch (validationError) {
+            return res.status(400).json({
+                error: validationError instanceof Error ? validationError.message : String(validationError),
+            });
+        }
+        const refreshRaw = typeof req.query.refresh === "string" ? req.query.refresh.trim().toLowerCase() : "";
+        const shouldRefresh = refreshRaw === "" ||
+            refreshRaw === "1" ||
+            refreshRaw === "true" ||
+            refreshRaw === "yes" ||
+            refreshRaw === "on";
+        if (shouldRefresh) {
+            await (0, finnhub_1.refreshMarketQuotesRealtime)(symbols);
+        }
+        const quotes = await (0, finnhub_1.getMarketQuotesLatest)(symbols);
+        res.json({ quotes, refreshed: shouldRefresh, count: quotes.length });
     }
     catch (e) {
         res.status(500).json({ error: e.message || String(e) });

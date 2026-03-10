@@ -42,6 +42,7 @@ spec:
                 ('country'),
                 ('item'),
                 ('weather_snapshot'),
+                ('market_snapshot'),
                 ('app_user'),
                 ('auth_identity'),
                 ('auth_session'),
@@ -62,6 +63,7 @@ spec:
                   ('country'),
                   ('item'),
                   ('weather_snapshot'),
+                  ('market_snapshot'),
                   ('app_user'),
                   ('auth_identity'),
                   ('auth_session'),
@@ -75,7 +77,7 @@ spec:
 
               -- Ensure all expected migrations are marked successful
               SELECT count(*) AS missing_versions
-              FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7')) AS v(version)
+              FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7'), ('8'), ('9')) AS v(version)
               WHERE NOT EXISTS (
                 SELECT 1
                 FROM flyway_schema_history f
@@ -86,7 +88,7 @@ spec:
               \if :missing_versions != 0
                 \echo 'Missing successful Flyway versions:'
                 SELECT array_agg(v.version)
-                FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7')) AS v(version)
+                FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7'), ('8'), ('9')) AS v(version)
                 WHERE NOT EXISTS (
                   SELECT 1
                   FROM flyway_schema_history f

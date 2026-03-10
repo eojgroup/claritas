@@ -12,8 +12,24 @@ export type NewsItem = {
 
 export type CountryStat = { country: string; count: number };
 export type CountryWeather = { country: string; temp_c: number | null; humidity: number | null; observed_at: string; weather_main: string | null };
+export type MarketQuote = {
+  symbol: string;
+  company_name: string | null;
+  exchange: string | null;
+  country: string | null;
+  currency: string | null;
+  price: number | null;
+  change: number | null;
+  percent_change: number | null;
+  high_price: number | null;
+  low_price: number | null;
+  open_price: number | null;
+  previous_close: number | null;
+  observed_at: string;
+  payload?: unknown;
+};
 export type AuthProviderId = "google" | "microsoft" | "apple";
-export type IngestionPipeline = "news" | "weather";
+export type IngestionPipeline = "news" | "weather" | "market";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
 export type AdminRole = {
   id: number;
@@ -161,6 +177,17 @@ export async function fetchCountryWeather() {
   return (data.stats ?? []) as CountryWeather[];
 }
 
+export async function fetchMarketQuotes(params?: { refresh?: boolean; symbols?: string[] }) {
+  const sp = new URLSearchParams();
+  if (typeof params?.refresh === "boolean") sp.set("refresh", params.refresh ? "true" : "false");
+  if (params?.symbols && params.symbols.length > 0) sp.set("symbols", params.symbols.join(","));
+  const suffix = sp.toString() ? `?${sp.toString()}` : "";
+  const resp = await fetch(`${API_BASE}/api/market/quotes${suffix}`);
+  if (!resp.ok) throw new Error(`Failed to fetch market quotes: ${resp.status}`);
+  const data = await resp.json();
+  return (data.quotes ?? []) as MarketQuote[];
+}
+
 export async function ingestWeatherNow(country?: string) {
   const resp = await fetch(`${API_BASE}/api/ingest/openweather/country-current`, {
     method: 'POST',
@@ -220,6 +247,19 @@ export async function triggerAdminWeatherIngestion(payload?: {
     body: JSON.stringify(payload ?? {}),
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger weather ingestion"));
+  return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
+}
+
+export async function triggerAdminMarketIngestion(payload?: {
+  symbols?: string[] | string;
+}): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
+  const resp = await fetch(`${API_BASE}/api/admin/ingestion/market/run`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger market ingestion"));
   return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
 }
 

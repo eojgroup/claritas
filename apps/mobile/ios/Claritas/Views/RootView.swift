@@ -146,6 +146,7 @@ private struct AdminIngestionPanelView: View {
         case all
         case news
         case weather
+        case market
 
         var id: String { rawValue }
         var label: String { rawValue.capitalized }
@@ -154,6 +155,7 @@ private struct AdminIngestionPanelView: View {
             case .all: return nil
             case .news: return .news
             case .weather: return .weather
+            case .market: return .market
             }
         }
     }
@@ -188,10 +190,12 @@ private struct AdminIngestionPanelView: View {
     @State private var newsCountry: String = "us"
     @State private var newsCategory: String = "technology"
     @State private var weatherCountry: String = ""
+    @State private var marketSymbols: String = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM"
 
     @State private var isLoadingOverview: Bool = false
     @State private var isTriggeringNews: Bool = false
     @State private var isTriggeringWeather: Bool = false
+    @State private var isTriggeringMarket: Bool = false
     @State private var overviewError: String?
     @State private var runError: String?
     @State private var actionError: String?
@@ -299,6 +303,18 @@ private struct AdminIngestionPanelView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(isTriggeringWeather || isLoadingOverview)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Market symbols (optional CSV)", text: $marketSymbols)
+                            .textFieldStyle(.roundedBorder)
+                        Button(action: { Task { await queueMarketRun() } }) {
+                            Label(isTriggeringMarket ? "Queueing market…" : "Queue Market Run", systemImage: "chart.line.uptrend.xyaxis")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isTriggeringMarket || isLoadingOverview)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -578,6 +594,27 @@ private struct AdminIngestionPanelView: View {
         isTriggeringWeather = false
     }
 
+    private func queueMarketRun() async {
+        isTriggeringMarket = true
+        actionError = nil
+        actionNotice = nil
+        do {
+            let symbols = marketSymbols
+                .split(whereSeparator: { $0 == "," || $0.isWhitespace })
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let detail = try await model.api.triggerAdminMarketIngestion(symbols: symbols.isEmpty ? nil : symbols)
+            selectedRunId = detail.run.id
+            selectedRun = detail.run
+            logs = detail.logs
+            actionNotice = "Market ingestion run #\(detail.run.id) was queued."
+            await refreshOverview(silent: true)
+        } catch {
+            actionError = error.localizedDescription
+        }
+        isTriggeringMarket = false
+    }
+
     private func durationLabel(_ run: AdminIngestionRun) -> String {
         if let durationMs = firstStatNumber(run.stats, paths: ["duration_ms"]),
            durationMs > 0 {
@@ -631,6 +668,8 @@ private struct AdminIngestionPanelView: View {
             return "TheNewsAPI"
         case "openweather":
             return "OpenWeather"
+        case "finnhub":
+            return "Finnhub"
         default:
             return value
         }
@@ -1038,6 +1077,7 @@ private extension IngestionPipeline {
         switch self {
         case .news: return "News"
         case .weather: return "Weather"
+        case .market: return "Market"
         }
     }
 }

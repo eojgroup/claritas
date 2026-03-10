@@ -82,9 +82,47 @@ struct CountryWeather: Codable, Identifiable {
     var observedDate: Date? { APIDateParser.parse(observed_at) }
 }
 
+struct MarketQuote: Codable, Identifiable {
+    let symbol: String
+    let company_name: String?
+    let exchange: String?
+    let country: String?
+    let currency: String?
+    let price: Double?
+    let change: Double?
+    let percent_change: Double?
+    let high_price: Double?
+    let low_price: Double?
+    let open_price: Double?
+    let previous_close: Double?
+    let observed_at: String
+    let payload: JSONValue?
+
+    var id: String { "\(symbol)-\(observed_at)" }
+    var observedDate: Date? { APIDateParser.parse(observed_at) }
+
+    enum CodingKeys: String, CodingKey {
+        case symbol
+        case company_name
+        case exchange
+        case country
+        case currency
+        case price
+        case change
+        case percent_change
+        case high_price
+        case low_price
+        case open_price
+        case previous_close
+        case observed_at
+        case payload
+    }
+}
+
 enum IngestionPipeline: String, Codable, CaseIterable, Identifiable {
     case news
     case weather
+    case market
 
     var id: String { rawValue }
 }

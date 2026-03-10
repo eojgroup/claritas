@@ -174,6 +174,16 @@ final class APIClient {
         return try await request(req, as: [CountryWeather].self, rootKey: "stats")
     }
 
+    func fetchMarketQuotes(refresh: Bool = true, symbols: [String]? = nil) async throws -> [MarketQuote] {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/market/quotes"), resolvingAgainstBaseURL: false)!
+        var items: [URLQueryItem] = [URLQueryItem(name: "refresh", value: refresh ? "true" : "false")]
+        if let symbols, !symbols.isEmpty {
+            items.append(URLQueryItem(name: "symbols", value: symbols.joined(separator: ",")))
+        }
+        comps.queryItems = items
+        return try await request(URLRequest(url: comps.url!), as: [MarketQuote].self, rootKey: "quotes")
+    }
+
     func ingestWeatherNow(country: String?) async throws -> WeatherIngestResponse {
         var req = URLRequest(url: baseURL.appendingPathComponent("/api/ingest/openweather/country-current"))
         req.httpMethod = "POST"
@@ -261,6 +271,19 @@ final class APIClient {
 
         if let country = nonEmpty(country) {
             req.httpBody = try JSONSerialization.data(withJSONObject: ["country": country], options: [])
+        } else {
+            req.httpBody = Data("{}".utf8)
+        }
+        return try await request(req, as: AdminIngestionRunDetail.self)
+    }
+
+    func triggerAdminMarketIngestion(symbols: [String]?) async throws -> AdminIngestionRunDetail {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/ingestion/market/run"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        if let symbols, !symbols.isEmpty {
+            req.httpBody = try JSONSerialization.data(withJSONObject: ["symbols": symbols], options: [])
         } else {
             req.httpBody = Data("{}".utf8)
         }

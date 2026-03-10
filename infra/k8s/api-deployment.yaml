@@ -22,6 +22,8 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-thenewsapi, key: THENEWSAPI_API_TOKEN, optional: true } }
             - name: OPENWEATHER_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
+            - name: FINNHUB_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-finnhub, key: FINNHUB_API_KEY, optional: true } }
             - name: INSTANCE_CONNECTION_NAME
               valueFrom: { configMapKeyRef: { name: claritas-config, key: INSTANCE_CONNECTION_NAME } }
             - name: DB_NAME

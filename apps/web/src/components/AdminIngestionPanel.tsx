@@ -16,6 +16,7 @@ import {
   fetchAdminIngestionMetrics,
   fetchAdminIngestionRun,
   fetchAdminIngestionRuns,
+  triggerAdminMarketIngestion,
   triggerAdminNewsIngestion,
   triggerAdminWeatherIngestion,
   type AdminIngestionLog,
@@ -81,7 +82,9 @@ function statusClasses(status: AdminIngestionRun["status"]): string {
 }
 
 function pipelineLabel(pipeline: IngestionPipeline): string {
-  return pipeline === "news" ? "News" : "Weather";
+  if (pipeline === "news") return "News";
+  if (pipeline === "weather") return "Weather";
+  return "Market";
 }
 
 function sourceLabel(sourceName: string): string {
@@ -89,6 +92,7 @@ function sourceLabel(sourceName: string): string {
   if (normalized === "newsapi") return "NewsAPI";
   if (normalized === "thenewsapi") return "TheNewsAPI";
   if (normalized === "openweather") return "OpenWeather";
+  if (normalized === "finnhub") return "Finnhub";
   return sourceName;
 }
 
@@ -121,19 +125,25 @@ function buildZeroChartData(days: number): Array<{
   date: string;
   news_inserted: number;
   weather_inserted: number;
+  market_inserted: number;
   news_runs: number;
   weather_runs: number;
+  market_runs: number;
   news_failed: number;
   weather_failed: number;
+  market_failed: number;
 }> {
   const out: Array<{
     date: string;
     news_inserted: number;
     weather_inserted: number;
+    market_inserted: number;
     news_runs: number;
     weather_runs: number;
+    market_runs: number;
     news_failed: number;
     weather_failed: number;
+    market_failed: number;
   }> = [];
   const now = new Date();
   for (let idx = days - 1; idx >= 0; idx -= 1) {
@@ -143,10 +153,13 @@ function buildZeroChartData(days: number): Array<{
       date: d.toISOString().slice(0, 10),
       news_inserted: 0,
       weather_inserted: 0,
+      market_inserted: 0,
       news_runs: 0,
       weather_runs: 0,
+      market_runs: 0,
       news_failed: 0,
       weather_failed: 0,
+      market_failed: 0,
     });
   }
   return out;
@@ -166,6 +179,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [isTriggeringNews, setIsTriggeringNews] = useState(false);
   const [isTriggeringWeather, setIsTriggeringWeather] = useState(false);
+  const [isTriggeringMarket, setIsTriggeringMarket] = useState(false);
   const [metricsDays, setMetricsDays] = useState<7 | 30 | 90>(30);
   const [pipelineFilter, setPipelineFilter] = useState<"all" | IngestionPipeline>("all");
 
@@ -178,6 +192,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [newsCountry, setNewsCountry] = useState("us");
   const [newsCategory, setNewsCategory] = useState("technology");
   const [weatherCountry, setWeatherCountry] = useState("");
+  const [marketSymbols, setMarketSymbols] = useState("AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM");
 
   const refreshOverview = useCallback(
     async (silent = false) => {
@@ -349,6 +364,30 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     }
   }, [refreshOverview, weatherCountry]);
 
+  const handleTriggerMarket = useCallback(async () => {
+    setIsTriggeringMarket(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const parsedSymbols = marketSymbols
+        .split(/[,\s]+/)
+        .map((symbol) => symbol.trim())
+        .filter(Boolean);
+      const created = await triggerAdminMarketIngestion(
+        parsedSymbols.length > 0 ? { symbols: parsedSymbols } : undefined,
+      );
+      setActionNotice(`Market ingestion run #${created.run.id} was queued.`);
+      setSelectedRunId(created.run.id);
+      setSelectedRun(created.run);
+      setLogs(created.logs);
+      await refreshOverview(true);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setIsTriggeringMarket(false);
+    }
+  }, [marketSymbols, refreshOverview]);
+
   const chartData = useMemo(() => {
     const byDate = new Map<
       string,
@@ -356,10 +395,13 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         date: string;
         news_inserted: number;
         weather_inserted: number;
+        market_inserted: number;
         news_runs: number;
         weather_runs: number;
+        market_runs: number;
         news_failed: number;
         weather_failed: number;
+        market_failed: number;
       }
     >();
     points.forEach((point) => {
@@ -368,10 +410,13 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           date: point.date,
           news_inserted: 0,
           weather_inserted: 0,
+          market_inserted: 0,
           news_runs: 0,
           weather_runs: 0,
+          market_runs: 0,
           news_failed: 0,
           weather_failed: 0,
+          market_failed: 0,
         });
       }
       const row = byDate.get(point.date)!;
@@ -379,10 +424,14 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         row.news_inserted = point.inserted;
         row.news_runs = point.run_count;
         row.news_failed = point.failed_count;
-      } else {
+      } else if (point.pipeline === "weather") {
         row.weather_inserted = point.inserted;
         row.weather_runs = point.run_count;
         row.weather_failed = point.failed_count;
+      } else {
+        row.market_inserted = point.inserted;
+        row.market_runs = point.run_count;
+        row.market_failed = point.failed_count;
       }
     });
     const resolved = Array.from(byDate.values()).sort((a, b) => a.date.localeCompare(b.date));
@@ -407,7 +456,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               Admin ingestion
             </div>
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-              Trigger and observe News + Weather pipelines
+              Trigger and observe News + Weather + Market pipelines
             </div>
           </div>
           <div className="ml-auto flex w-full flex-wrap items-center gap-2 text-sm sm:w-auto sm:text-xs">
@@ -446,6 +495,17 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             </button>
             <button
               type="button"
+              onClick={() => setPipelineFilter("market")}
+              className={`rounded-full border px-3 py-1 transition ${
+                pipelineFilter === "market"
+                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
+              }`}
+            >
+              Market
+            </button>
+            <button
+              type="button"
               onClick={() => void refreshOverview(false)}
               className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-[color:var(--shell-muted)]"
             >
@@ -471,7 +531,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         )}
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
           <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               News run
@@ -591,10 +651,37 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               {isTriggeringWeather ? "Starting…" : "Run Weather"}
             </button>
           </div>
+
+          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+              Market run
+            </div>
+            <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
+              Symbols (optional CSV)
+              <input
+                value={marketSymbols}
+                onChange={(event) => setMarketSymbols(event.currentTarget.value)}
+                placeholder="AAPL,MSFT,NVDA"
+                className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+              />
+            </label>
+            <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
+              Blank = default market watchlist.
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleTriggerMarket()}
+              disabled={isTriggeringMarket}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50 sm:w-auto sm:text-xs"
+            >
+              <Play className="h-3.5 w-3.5" />
+              {isTriggeringMarket ? "Starting…" : "Run Market"}
+            </button>
+          </div>
         </div>
       </section>
 
-      <section className="grid gap-3 sm:gap-4 lg:grid-cols-3">
+      <section className="grid gap-3 sm:gap-4 lg:grid-cols-4">
         <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             News totals ({metricsDays}d)
@@ -615,6 +702,17 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
           <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
             rows inserted · {summaryByPipeline.get("weather")?.run_count ?? 0} runs
+          </div>
+        </div>
+        <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+          <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
+            Market totals ({metricsDays}d)
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+            {summaryByPipeline.get("market")?.inserted ?? 0}
+          </div>
+          <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+            rows inserted · {summaryByPipeline.get("market")?.run_count ?? 0} runs
           </div>
         </div>
         <div className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
@@ -672,6 +770,14 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   fill="#bae6fd"
                   fillOpacity={0.45}
                 />
+                <Area
+                  type="monotone"
+                  dataKey="market_inserted"
+                  name="Market inserted"
+                  stroke="#b45309"
+                  fill="#fde68a"
+                  fillOpacity={0.45}
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -707,6 +813,14 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 />
                 <Line
                   type="monotone"
+                  dataKey="market_runs"
+                  name="Market runs"
+                  stroke="#b45309"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
                   dataKey="news_failed"
                   name="News failures"
                   stroke="#be123c"
@@ -719,6 +833,15 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   dataKey="weather_failed"
                   name="Weather failures"
                   stroke="#b91c1c"
+                  strokeWidth={2}
+                  strokeDasharray="5 4"
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="market_failed"
+                  name="Market failures"
+                  stroke="#9a3412"
                   strokeWidth={2}
                   strokeDasharray="5 4"
                   dot={false}

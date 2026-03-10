@@ -18,6 +18,8 @@
               valueFrom: { secretKeyRef: { name: claritas-thenewsapi, key: THENEWSAPI_API_TOKEN, optional: true } }
             - name: OPENWEATHER_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
+            - name: FINNHUB_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-finnhub, key: FINNHUB_API_KEY, optional: true } }
             - name: AUTH_PROVIDERS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_PROVIDERS } }
             - name: AUTH_ISSUER_URL

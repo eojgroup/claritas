@@ -3,8 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.IngestionValidationError = void 0;
 exports.buildNewsRunPlan = buildNewsRunPlan;
 exports.buildWeatherRunPlan = buildWeatherRunPlan;
+exports.buildMarketRunPlan = buildMarketRunPlan;
 exports.triggerNewsRun = triggerNewsRun;
 exports.triggerWeatherRun = triggerWeatherRun;
+exports.triggerMarketRun = triggerMarketRun;
 exports.listRuns = listRuns;
 exports.getRunDetail = getRunDetail;
 exports.getRunLogs = getRunLogs;
@@ -12,6 +14,7 @@ exports.getMetrics = getMetrics;
 const newsapi_1 = require("./connectors/newsapi");
 const thenewsapi_1 = require("./connectors/thenewsapi");
 const openweather_1 = require("./connectors/openweather");
+const finnhub_1 = require("./connectors/finnhub");
 const db_1 = require("./db");
 const SOURCE_CONFIG = {
     newsapi: {
@@ -29,11 +32,17 @@ const SOURCE_CONFIG = {
         apiBaseUrl: "https://api.openweathermap.org",
         provider: "openweather",
     },
+    finnhub: {
+        sourceName: "finnhub",
+        apiBaseUrl: "https://api.finnhub.io/api/v1",
+        provider: "finnhub",
+    },
 };
 const PIPELINE_SOURCE_DEFAULT = {
     // For mixed-source news runs we keep NewsAPI as the canonical source row.
     news: "newsapi",
     weather: "openweather",
+    market: "finnhub",
 };
 const DEFAULT_NEWS_EVERYTHING = {
     q: "OpenAI",
@@ -198,7 +207,7 @@ function mergeTotals(target, delta) {
     target.db_errors += delta.db_errors;
 }
 function resolvePipeline(pipeline, sourceName) {
-    if (pipeline === "news" || pipeline === "weather")
+    if (pipeline === "news" || pipeline === "weather" || pipeline === "market")
         return pipeline;
     if (sourceName === "newsapi")
         return "news";
@@ -206,6 +215,8 @@ function resolvePipeline(pipeline, sourceName) {
         return "news";
     if (sourceName === "openweather")
         return "weather";
+    if (sourceName === "finnhub")
+        return "market";
     return "news";
 }
 function normalizeStatus(status) {
@@ -405,6 +416,24 @@ function buildWeatherRunPlan(rawBody) {
     return {
         country: country ? country.toUpperCase() : undefined,
         requestPayload: country ? { country: country.toUpperCase() } : {},
+    };
+}
+function buildMarketRunPlan(rawBody) {
+    if (!process.env.FINNHUB_API_KEY) {
+        throw new IngestionValidationError("FINNHUB_API_KEY is not configured.");
+    }
+    const body = asRecord(rawBody);
+    const rawSymbols = Object.prototype.hasOwnProperty.call(body, "symbols") ? body.symbols : undefined;
+    let symbols;
+    try {
+        symbols = (0, finnhub_1.resolveMarketSymbols)(rawSymbols);
+    }
+    catch (error) {
+        throw new IngestionValidationError(toErrorMessage(error));
+    }
+    return {
+        symbols,
+        requestPayload: { symbols },
     };
 }
 async function executeNewsRun(runId, plan) {
@@ -648,6 +677,80 @@ async function executeWeatherRun(runId, plan) {
         });
     }
 }
+async function executeMarketRun(runId, plan) {
+    const runStartedAt = Date.now();
+    const steps = [];
+    const totals = emptyTotals();
+    try {
+        await updateRunStatus(runId, "running");
+        await safeAppendRunLog(runId, "info", "Market ingestion run started.", {
+            request: plan.requestPayload,
+        });
+        const stepStartedAt = Date.now();
+        await safeAppendRunLog(runId, "info", "Running Finnhub quote ingest.", {
+            params: plan.requestPayload,
+        });
+        try {
+            const result = (await (0, finnhub_1.ingestFinnhubQuotes)(plan.symbols));
+            const stepTotals = extractTotals(result);
+            mergeTotals(totals, stepTotals);
+            steps.push({
+                step: "finnhub/quotes",
+                status: "success",
+                started_at: new Date(stepStartedAt).toISOString(),
+                finished_at: toIsoNow(),
+                duration_ms: Date.now() - stepStartedAt,
+                result,
+            });
+            await safeAppendRunLog(runId, "info", "Finnhub quote ingest completed.", {
+                result,
+            });
+        }
+        catch (err) {
+            const message = toErrorMessage(err);
+            steps.push({
+                step: "finnhub/quotes",
+                status: "failed",
+                started_at: new Date(stepStartedAt).toISOString(),
+                finished_at: toIsoNow(),
+                duration_ms: Date.now() - stepStartedAt,
+                error: message,
+            });
+            await safeAppendRunLog(runId, "error", "Finnhub quote ingest failed.", {
+                error: message,
+            });
+            throw err;
+        }
+        const stats = {
+            pipeline: "market",
+            duration_ms: Date.now() - runStartedAt,
+            steps,
+            totals,
+        };
+        await updateRunStatus(runId, "success", { stats, finished: true });
+        await safeAppendRunLog(runId, "info", "Market ingestion run finished successfully.", {
+            totals,
+        });
+    }
+    catch (err) {
+        const errorMessage = toErrorMessage(err);
+        const stats = {
+            pipeline: "market",
+            duration_ms: Date.now() - runStartedAt,
+            steps,
+            totals,
+        };
+        await updateRunStatus(runId, "failed", {
+            error: errorMessage,
+            stats,
+            finished: true,
+        });
+        await safeAppendRunLog(runId, "error", "Market ingestion run failed.", {
+            error: errorMessage,
+            totals,
+        });
+    }
+}
 async function triggerNewsRun(input) {
     const sourceNameOverride = input.plan.providers.thenewsapi && !input.plan.providers.newsapi ? "thenewsapi" : "newsapi";
     const run = await createRun({
@@ -675,17 +778,31 @@ async function triggerWeatherRun(input) {
     startRunTask(run.id, () => executeWeatherRun(run.id, input.plan));
     return { runId: run.id };
 }
+async function triggerMarketRun(input) {
+    const run = await createRun({
+        pipeline: "market",
+        actor: input.actor,
+        requestPayload: input.plan.requestPayload,
+        sourceNameOverride: "finnhub",
+    });
+    await safeAppendRunLog(run.id, "info", "Market ingestion run queued.", {
+        requested_by: input.actor.email || input.actor.userId,
+    });
+    startRunTask(run.id, () => executeMarketRun(run.id, input.plan));
+    return { runId: run.id };
+}
 async function listRuns(options) {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
     const offset = Math.max(options.offset ?? 0, 0);
     const params = [];
-    const where = ["s.name IN ('newsapi', 'thenewsapi', 'openweather')"];
+    const where = ["s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub')"];
     if (options.pipeline) {
         const pipelineIdx = params.push(options.pipeline);
         where.push(`(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
-        OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather'))`);
+        OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub'))`);
     }
     const limitIdx = params.push(limit);
     const offsetIdx = params.push(offset);
@@ -734,7 +851,7 @@ async function getRunDetail(runId, logLimit = 200) {
      FROM ingestion_run r
      JOIN source s ON s.id = r.source_id
      WHERE r.id = $1
-       AND s.name IN ('newsapi', 'thenewsapi', 'openweather')
+       AND s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub')
      LIMIT 1`, [runId]);
     if (!rows[0])
         return null;
@@ -757,14 +874,15 @@ async function getMetrics(options) {
     const params = [days];
     const where = [
         "r.started_at >= now() - make_interval(days => $1::int)",
-        "s.name IN ('newsapi', 'thenewsapi', 'openweather')",
+        "s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub')",
     ];
     if (options?.pipeline) {
         const pipelineIdx = params.push(options.pipeline);
         where.push(`(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
-        OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather'))`);
+        OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub'))`);
     }
     const { rows } = await (0, db_1.query)(`SELECT
        r.pipeline,
