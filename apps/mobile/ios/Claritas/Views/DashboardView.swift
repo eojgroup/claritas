@@ -1,16 +1,19 @@
 import SwiftUI
+import Charts
 import MapKit
 
 struct DashboardView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("DEFAULT_MAP_MODE") private var defaultMapModeRaw: String = "news"
+    @AppStorage("DEFAULT_LIST_MODE") private var defaultListModeRaw: String = "news"
     @State private var query: String = ""
     @State private var mapMode: ListMode = .news
     @State private var listMode: ListMode = .news
     @State private var section: DashboardSection = .overview
-    @State private var selectedSymbol: String? = nil
     @State private var minTemp: String = ""
     @State private var marketEarningsWindowDays: Int = 14
+    @State private var hasAppliedStoredModes: Bool = false
 
     enum ListMode: String, CaseIterable { case news, weather, market }
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
@@ -58,21 +61,28 @@ struct DashboardView: View {
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
                                 }
-                                if let selectedSymbol {
+                                if let selectedSymbol = model.selectedSymbol {
                                     Text("Symbol: \(selectedSymbol)")
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                if model.selectedCountry != nil || selectedSymbol != nil {
+                                if model.selectedCountry != nil || model.selectedSymbol != nil {
                                     Button("Clear focus") {
-                                        model.selectedCountry = nil
-                                        selectedSymbol = nil
+                                        model.clearSelection()
                                     }
                                     .buttonStyle(.bordered)
                                 }
                             }
                         }
+                    }
+
+                    if section == .overview {
+                        overviewMetricsCard
+                    }
+
+                    if hasSearchQuery {
+                        searchPreviewCard
                     }
 
                     if section == .overview {
@@ -104,7 +114,7 @@ struct DashboardView: View {
                                         selectedCountry: model.selectedCountry,
                                         onSelectCountry: { iso in
                                             let normalized = iso.uppercased()
-                                            model.selectedCountry = model.selectedCountry?.uppercased() == normalized ? nil : normalized
+                                            model.selectedCountry = (model.selectedCountry ?? "").uppercased() == normalized ? nil : normalized
                                         }
                                     )
                                         .frame(height: 220)
@@ -163,11 +173,11 @@ struct DashboardView: View {
                                 } else {
                                     MarketQuoteListView(
                                         quotes: filteredMarketQuotes(),
-                                        selectedSymbol: selectedSymbol,
+                                        selectedSymbol: model.selectedSymbol,
                                         isRefreshing: model.isRefreshingMarketQuotes,
                                         onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
                                         onSelectSymbol: { symbol in
-                                            selectedSymbol = symbol
+                                            model.selectedSymbol = symbol
                                             if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
                                                 model.selectedCountry = country.uppercased()
                                             }
@@ -222,7 +232,7 @@ struct DashboardView: View {
                                     selectedCountry: model.selectedCountry,
                                     onSelectCountry: { iso in
                                         let normalized = iso.uppercased()
-                                        model.selectedCountry = model.selectedCountry?.uppercased() == normalized ? nil : normalized
+                                        model.selectedCountry = (model.selectedCountry ?? "").uppercased() == normalized ? nil : normalized
                                     }
                                 )
                                 .frame(height: 220)
@@ -245,7 +255,7 @@ struct DashboardView: View {
                         DashboardCard {
                             MarketEarningsPanel(
                                 rows: marketEarningsRows,
-                                selectedSymbol: selectedSymbol,
+                                selectedSymbol: model.selectedSymbol,
                                 selectedWindowDays: marketEarningsWindowDays,
                                 isRefreshing: model.isRefreshingMarketEarnings,
                                 onSelectWindowDays: { days in
@@ -256,7 +266,7 @@ struct DashboardView: View {
                                     Task { await model.refreshMarketEarnings(windowDays: marketEarningsWindowDays) }
                                 },
                                 onSelectSymbol: { symbol in
-                                    selectedSymbol = symbol
+                                    model.selectedSymbol = symbol
                                     if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
                                         model.selectedCountry = country.uppercased()
                                     }
@@ -267,11 +277,11 @@ struct DashboardView: View {
                         DashboardCard {
                             MarketQuoteListView(
                                 quotes: filteredMarketQuotes(),
-                                selectedSymbol: selectedSymbol,
+                                selectedSymbol: model.selectedSymbol,
                                 isRefreshing: model.isRefreshingMarketQuotes,
                                 onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
                                 onSelectSymbol: { symbol in
-                                    selectedSymbol = symbol
+                                    model.selectedSymbol = symbol
                                     if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
                                         model.selectedCountry = country.uppercased()
                                     }
@@ -304,7 +314,7 @@ struct DashboardView: View {
                                             .font(.caption.weight(.semibold))
                                         ForEach(relatedMarkets.prefix(4)) { quote in
                                             Button(action: {
-                                                selectedSymbol = quote.symbol
+                                                model.selectedSymbol = quote.symbol
                                                 section = .market
                                             }) {
                                                 HStack {
@@ -345,23 +355,16 @@ struct DashboardView: View {
                 .padding(.vertical, 24)
             }
         }
-        .onChange(of: model.selectedCountry) { _ in
-            Task { await model.reloadNewsForSelectedCountry() }
+        .onAppear {
+            guard !hasAppliedStoredModes else { return }
+            mapMode = ListMode(rawValue: defaultMapModeRaw) ?? .news
+            listMode = ListMode(rawValue: defaultListModeRaw) ?? mapMode
+            hasAppliedStoredModes = true
         }
         .task {
-            while !Task.isCancelled {
-                await model.refreshMarketQuotes(forceRefresh: true)
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
+            if model.marketEarnings.isEmpty {
+                await model.refreshMarketEarnings(windowDays: marketEarningsWindowDays)
             }
-        }
-        .task {
-            while !Task.isCancelled {
-                await model.refreshMarketStatus(forceRefresh: true)
-                try? await Task.sleep(nanoseconds: 60_000_000_000)
-            }
-        }
-        .task {
-            await model.refreshMarketEarnings(windowDays: marketEarningsWindowDays)
         }
         .onChange(of: marketEarningsWindowDays) { next in
             Task { await model.refreshMarketEarnings(windowDays: next) }
@@ -380,7 +383,7 @@ struct DashboardView: View {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var rows = model.news
         if let iso = model.selectedCountry?.uppercased() {
-            rows = rows.filter { $0.country_iso2?.uppercased() == iso }
+            rows = rows.filter { ($0.country_iso2 ?? "").uppercased() == iso }
         }
         guard !term.isEmpty else { return rows }
         return rows.filter { item in
@@ -407,14 +410,177 @@ struct DashboardView: View {
                 quote.company_name ?? "",
                 quote.exchange ?? "",
                 quote.country ?? "",
-                quote.currency ?? ""
+                quote.currency ?? "",
+                quote.market_code ?? "",
+                quote.market_name ?? ""
             ].joined(separator: " ").lowercased()
             return haystack.contains(term)
         }
     }
 
+    private var hasSearchQuery: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var focusLabel: String {
+        if let country = model.selectedCountry?.uppercased(), !country.isEmpty {
+            return country
+        }
+        if let symbol = model.selectedSymbol?.uppercased(), !symbol.isEmpty {
+            return symbol
+        }
+        return "Global"
+    }
+
+    private var uniqueCountryCount: Int {
+        var countries = Set<String>()
+        model.news.compactMap(\.country_iso2).forEach { countries.insert($0.uppercased()) }
+        model.weather.map(\.country).forEach { countries.insert($0.uppercased()) }
+        model.marketQuotes.compactMap(\.country).forEach { countries.insert($0.uppercased()) }
+        return countries.count
+    }
+
+    private var latestSyncLabel: String {
+        let allTimestamps =
+            model.news.compactMap(\.event_time) +
+            model.weather.map(\.observed_at) +
+            model.marketQuotes.map(\.observed_at)
+        let parsed = allTimestamps.compactMap(APIDateParser.parse)
+        guard let latest = parsed.max() else { return "Awaiting sync" }
+        return latest.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var newsCoverageLabel: String {
+        let dates = model.news.compactMap(\.eventDate).sorted()
+        guard let start = dates.first, let end = dates.last else { return "No dated news" }
+        return "\(start.formatted(date: .abbreviated, time: .omitted)) - \(end.formatted(date: .abbreviated, time: .omitted))"
+    }
+
+    private var overviewMetricsCard: some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 14) {
+                BrandSectionHeader(
+                    kicker: "Overview",
+                    title: "Signal coverage",
+                    detail: "A quick native snapshot of the same news, weather, and market feeds exposed on web."
+                )
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                    BrandMetricCard(
+                        title: "Focus",
+                        value: focusLabel,
+                        detail: model.selectedCountry != nil || model.selectedSymbol != nil ? "Current active selection" : "No pinned country or symbol",
+                        tone: nil
+                    )
+                    BrandMetricCard(
+                        title: "Countries",
+                        value: "\(uniqueCountryCount)",
+                        detail: "Countries represented across loaded signals",
+                        tone: nil
+                    )
+                    BrandMetricCard(
+                        title: "Market status",
+                        value: "\(marketStatusRows.filter { $0.is_open == true }.count)/\(marketStatusRows.count)",
+                        detail: "Tracked exchanges currently open",
+                        tone: ClaritasPalette.darkGreen
+                    )
+                    BrandMetricCard(
+                        title: "News window",
+                        value: "\(model.news.count) items",
+                        detail: newsCoverageLabel,
+                        tone: nil
+                    )
+                    BrandMetricCard(
+                        title: "Latest sync",
+                        value: latestSyncLabel,
+                        detail: "Most recent event loaded into the app",
+                        tone: nil
+                    )
+                }
+            }
+        }
+    }
+
+    private var searchPreviewItems: [SearchPreviewItem] {
+        let newsItems = filteredNews().prefix(2).map {
+            SearchPreviewItem(
+                id: "news-\($0.id)",
+                kind: "News",
+                title: $0.title ?? $0.url ?? "Untitled",
+                detail: [($0.country_iso2 ?? "").uppercased(), shortDateTimeLabel($0.event_time)]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " • ")
+            )
+        }
+
+        let weatherItems = filteredWeather().prefix(2).map {
+            SearchPreviewItem(
+                id: "weather-\($0.id)",
+                kind: "Weather",
+                title: "\($0.country.uppercased()) • \(valueOrDash($0.temp_c))°C",
+                detail: [$0.weather_main ?? "Weather", shortDateTimeLabel($0.observed_at)]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " • ")
+            )
+        }
+
+        let marketItems = filteredMarketQuotes().prefix(2).map {
+            SearchPreviewItem(
+                id: "market-\($0.id)",
+                kind: "Market",
+                title: "\($0.symbol) • \(valueOrDash($0.price)) \($0.currency ?? "")",
+                detail: [$0.company_name ?? "Market quote", changeLabel($0)]
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " • ")
+            )
+        }
+
+        return Array(newsItems + weatherItems + marketItems)
+    }
+
+    private var searchPreviewCard: some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 12) {
+                BrandSectionHeader(
+                    kicker: "Search",
+                    title: "Cross-signal preview",
+                    detail: "Matching results across news, weather, and markets."
+                )
+
+                if searchPreviewItems.isEmpty {
+                    Text("No results match the current query.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(searchPreviewItems) { item in
+                        HStack(alignment: .top, spacing: 12) {
+                            BrandPill(label: item.kind, tone: previewTone(for: item.kind))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                Text(item.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(
+                            ClaritasPalette.shellRaised(for: colorScheme),
+                            in: RoundedRectangle(cornerRadius: 14)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private var selectedSymbolQuote: MarketQuote? {
-        guard let selectedSymbol else { return nil }
+        guard let selectedSymbol = model.selectedSymbol else { return nil }
         return model.marketQuotes.first { $0.symbol.uppercased() == selectedSymbol.uppercased() }
     }
 
@@ -462,7 +628,7 @@ struct DashboardView: View {
 
     private var marketEarningsRows: [EarningsEvent] {
         let baseRows: [EarningsEvent]
-        if let symbol = selectedSymbol?.uppercased(), !symbol.isEmpty {
+        if let symbol = model.selectedSymbol?.uppercased(), !symbol.isEmpty {
             baseRows = model.marketEarnings.filter { $0.symbol.uppercased() == symbol }
         } else {
             baseRows = model.marketEarnings
@@ -488,6 +654,17 @@ struct DashboardView: View {
         return ClaritasPalette.grey
     }
 
+    private func previewTone(for kind: String) -> Color {
+        switch kind.lowercased() {
+        case "news":
+            return ClaritasPalette.darkBlue
+        case "weather":
+            return ClaritasPalette.brown
+        default:
+            return ClaritasPalette.darkGreen
+        }
+    }
+
     private var searchFieldBackground: Color {
         colorScheme == .dark ? ClaritasPalette.darkBlue.opacity(0.95) : Color.white.opacity(0.95)
     }
@@ -508,12 +685,1213 @@ struct DashboardView: View {
     }
 }
 
+private struct SearchPreviewItem: Identifiable {
+    let id: String
+    let kind: String
+    let title: String
+    let detail: String
+}
+
+private struct ChartDateCount: Identifiable {
+    let date: String
+    let count: Int
+    var id: String { date }
+}
+
+private struct LabeledCount: Identifiable {
+    let label: String
+    let count: Int
+    var id: String { label }
+}
+
+private struct LabeledValue: Identifiable {
+    let label: String
+    let value: Double
+    let detail: String
+    var id: String { label }
+}
+
+private struct WeatherScatterPoint: Identifiable {
+    let country: String
+    let humidity: Double
+    let temp: Double
+    var id: String { country }
+}
+
+private struct CountryMarketSummary: Identifiable {
+    let country: String
+    let marketCode: String
+    let marketName: String
+    let symbolCount: Int
+    let avgChange: Double
+    let topSymbol: String
+    let topMove: Double
+    var id: String { country }
+}
+
+private struct MarketOption: Identifiable {
+    let code: String
+    let name: String
+    var id: String { code }
+}
+
+struct NewsWorkspaceView: View {
+    enum Sort: String, CaseIterable, Identifiable {
+        case newest
+        case oldest
+        case source
+
+        var id: String { rawValue }
+        var title: String { rawValue.capitalized }
+    }
+
+    @EnvironmentObject private var model: AppModel
+    @State private var query: String = ""
+    @State private var sourceFilter: String = "all"
+    @State private var countryFilter: String = ""
+    @State private var imagesOnly: Bool = false
+    @State private var sort: Sort = .newest
+    @State private var loadMode: AppModel.NewsLoadMode = .recent
+
+    private var sourceOptions: [String] {
+        let sources = Set(model.news.compactMap(newsSourceLabel))
+        return Array(sources).sorted()
+    }
+
+    private var rows: [NewsItem] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var filtered = model.news
+
+        if let selectedCountry = model.selectedCountry?.uppercased(), !selectedCountry.isEmpty {
+            filtered = filtered.filter { ($0.country_iso2 ?? "").uppercased() == selectedCountry }
+        }
+
+        if sourceFilter != "all" {
+            filtered = filtered.filter { (newsSourceLabel($0) ?? "").lowercased() == sourceFilter.lowercased() }
+        }
+        if imagesOnly {
+            filtered = filtered.filter(newsHasImage)
+        }
+
+        let typedCountry = countryFilter.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !typedCountry.isEmpty {
+            filtered = filtered.filter { ($0.country_iso2 ?? "").uppercased().contains(typedCountry) }
+        }
+
+        if !term.isEmpty {
+            filtered = filtered.filter { item in
+                [
+                    item.title ?? "",
+                    item.summary ?? "",
+                    item.country_iso2 ?? "",
+                    newsSourceLabel(item) ?? ""
+                ]
+                .joined(separator: " ")
+                .lowercased()
+                .contains(term)
+            }
+        }
+
+        switch sort {
+        case .newest:
+            return filtered.sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
+        case .oldest:
+            return filtered.sorted { ($0.event_time ?? "") < ($1.event_time ?? "") }
+        case .source:
+            return filtered.sorted {
+                let lhs = newsSourceLabel($0) ?? ""
+                let rhs = newsSourceLabel($1) ?? ""
+                if lhs != rhs { return lhs < rhs }
+                return ($0.event_time ?? "") > ($1.event_time ?? "")
+            }
+        }
+    }
+
+    private var timelineData: [ChartDateCount] {
+        var counts: [String: Int] = [:]
+        for item in rows {
+            guard let key = dateOnlyLabel(item.event_time) else { continue }
+            counts[key, default: 0] += 1
+        }
+        return counts
+            .map { ChartDateCount(date: $0.key, count: $0.value) }
+            .sorted { $0.date < $1.date }
+    }
+
+    private var sourceData: [LabeledCount] {
+        var counts: [String: Int] = [:]
+        for item in rows {
+            counts[newsSourceLabel(item) ?? "Unknown", default: 0] += 1
+        }
+        return counts
+            .map { LabeledCount(label: $0.key, count: $0.value) }
+            .sorted { $0.count > $1.count }
+            .prefix(8)
+            .map { $0 }
+    }
+
+    private var coverageLabel: String {
+        let dates = rows.compactMap(\.eventDate).sorted()
+        guard let start = dates.first, let end = dates.last else { return "No dated articles" }
+        return "\(start.formatted(date: .abbreviated, time: .omitted)) - \(end.formatted(date: .abbreviated, time: .omitted))"
+    }
+
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(spacing: 18) {
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 14) {
+                            BrandSectionHeader(
+                                kicker: "News",
+                                title: "Global signal stream",
+                                detail: "Filter the same recent and archive news feeds available on web."
+                            )
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                                BrandMetricCard(title: "Loaded", value: "\(rows.count)", detail: "Filtered articles in view", tone: nil)
+                                BrandMetricCard(title: "Sources", value: "\(sourceOptions.count)", detail: "Distinct publishers in current dataset", tone: nil)
+                                BrandMetricCard(title: "Coverage", value: loadMode.rawValue.capitalized, detail: coverageLabel, tone: nil)
+                            }
+
+                            HStack(spacing: 8) {
+                                Picker("Load mode", selection: $loadMode) {
+                                    Text("Recent").tag(AppModel.NewsLoadMode.recent)
+                                    Text("Archive").tag(AppModel.NewsLoadMode.archive)
+                                }
+                                .pickerStyle(.segmented)
+
+                                Button(model.isRefreshingNews ? "Refreshing…" : "Refresh") {
+                                    Task { await model.refreshNews(mode: loadMode) }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(model.isRefreshingNews)
+                            }
+
+                            if let error = model.newsLoadError, !error.isEmpty {
+                                Text(error)
+                                    .font(.footnote)
+                                    .foregroundStyle(ClaritasPalette.negative)
+                            }
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Filters")
+                                .font(.headline)
+
+                            HStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                TextField("Search headlines, summaries, or countries", text: $query)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
+                            .padding(10)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+                            HStack(spacing: 10) {
+                                Picker("Source", selection: $sourceFilter) {
+                                    Text("All sources").tag("all")
+                                    ForEach(sourceOptions, id: \.self) { source in
+                                        Text(source).tag(source)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+
+                                TextField("Country", text: $countryFilter)
+                                    .textInputAutocapitalization(.characters)
+                                    .autocorrectionDisabled()
+                                    .textFieldStyle(.roundedBorder)
+                            }
+
+                            Toggle("Only articles with images", isOn: $imagesOnly)
+
+                            Picker("Sort", selection: $sort) {
+                                ForEach(Sort.allCases) { sort in
+                                    Text(sort.title).tag(sort)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                    }
+
+                    if !timelineData.isEmpty || !sourceData.isEmpty {
+                        VStack(spacing: 12) {
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Timeline")
+                                        .font(.headline)
+                                    Chart(timelineData) { item in
+                                        LineMark(
+                                            x: .value("Date", item.date),
+                                            y: .value("Stories", item.count)
+                                        )
+                                        .foregroundStyle(ClaritasPalette.darkBlue)
+                                    }
+                                    .frame(height: 180)
+                                }
+                            }
+
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Top sources")
+                                        .font(.headline)
+                                    Chart(sourceData) { item in
+                                        BarMark(
+                                            x: .value("Source", item.label),
+                                            y: .value("Stories", item.count)
+                                        )
+                                        .foregroundStyle(ClaritasPalette.darkGreen)
+                                    }
+                                    .frame(height: 180)
+                                }
+                            }
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Stories")
+                                .font(.headline)
+                            NewsListView(items: rows) { iso in
+                                model.selectedCountry = iso
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+            }
+        }
+        .task {
+            loadMode = model.newsLoadMode
+            if model.news.isEmpty {
+                await model.refreshNews(mode: loadMode)
+            }
+        }
+        .onChange(of: loadMode) { next in
+            Task { await model.refreshNews(mode: next) }
+        }
+    }
+}
+
+struct WeatherWorkspaceView: View {
+    enum Sort: String, CaseIterable, Identifiable {
+        case latest
+        case hottest
+        case coldest
+        case humidity
+
+        var id: String { rawValue }
+        var title: String { rawValue.capitalized }
+    }
+
+    @EnvironmentObject private var model: AppModel
+    @State private var query: String = ""
+    @State private var conditionFilter: String = "all"
+    @State private var countryFilter: String = ""
+    @State private var minTempText: String = ""
+    @State private var humidityFloorText: String = ""
+    @State private var sort: Sort = .latest
+
+    private var conditionOptions: [String] {
+        let values = Set(model.weather.compactMap { $0.weather_main?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        return Array(values).sorted()
+    }
+
+    private var rows: [CountryWeather] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let minTemp = Double(minTempText)
+        let humidityFloor = Double(humidityFloorText)
+        var filtered = model.weather
+
+        if let selectedCountry = model.selectedCountry?.uppercased(), !selectedCountry.isEmpty {
+            filtered = filtered.filter { $0.country.uppercased() == selectedCountry }
+        }
+        if conditionFilter != "all" {
+            filtered = filtered.filter { ($0.weather_main ?? "").caseInsensitiveCompare(conditionFilter) == .orderedSame }
+        }
+        let typedCountry = countryFilter.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if !typedCountry.isEmpty {
+            filtered = filtered.filter { $0.country.uppercased().contains(typedCountry) }
+        }
+        if let minTemp {
+            filtered = filtered.filter { ($0.temp_c ?? -999) >= minTemp }
+        }
+        if let humidityFloor {
+            filtered = filtered.filter { ($0.humidity ?? -1) >= humidityFloor }
+        }
+        if !term.isEmpty {
+            filtered = filtered.filter { row in
+                [
+                    row.country,
+                    row.weather_main ?? "",
+                    row.weather_desc ?? "",
+                    row.source_name ?? ""
+                ]
+                .joined(separator: " ")
+                .lowercased()
+                .contains(term)
+            }
+        }
+
+        switch sort {
+        case .latest:
+            return filtered.sorted { $0.observed_at > $1.observed_at }
+        case .hottest:
+            return filtered.sorted { ($0.temp_c ?? -999) > ($1.temp_c ?? -999) }
+        case .coldest:
+            return filtered.sorted { ($0.temp_c ?? 999) < ($1.temp_c ?? 999) }
+        case .humidity:
+            return filtered.sorted { ($0.humidity ?? -1) > ($1.humidity ?? -1) }
+        }
+    }
+
+    private var temperatureLeaders: [LabeledValue] {
+        rows
+            .filter { $0.temp_c != nil }
+            .prefix(12)
+            .map {
+                LabeledValue(
+                    label: $0.country.uppercased(),
+                    value: $0.temp_c ?? 0,
+                    detail: "\(($0.humidity ?? 0).formatted(.number.precision(.fractionLength(0))))% humidity"
+                )
+            }
+    }
+
+    private var scatterRows: [WeatherScatterPoint] {
+        rows.compactMap { row in
+            guard let humidity = row.humidity, let temp = row.temp_c else { return nil }
+            return WeatherScatterPoint(country: row.country.uppercased(), humidity: humidity, temp: temp)
+        }
+    }
+
+    private var hottestLabel: String {
+        guard let hottest = rows.max(by: { ($0.temp_c ?? -999) < ($1.temp_c ?? -999) }) else { return "—" }
+        return "\(hottest.country.uppercased()) • \(compactNumber(hottest.temp_c))°C"
+    }
+
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(spacing: 18) {
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 14) {
+                            BrandSectionHeader(
+                                kicker: "Weather",
+                                title: "Country weather operations",
+                                detail: "Filter current-country snapshots and correlate temperature with humidity."
+                            )
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                                BrandMetricCard(title: "Rows", value: "\(rows.count)", detail: "Country snapshots in scope", tone: nil)
+                                BrandMetricCard(title: "Hottest", value: hottestLabel, detail: "Highest observed temperature", tone: ClaritasPalette.brown)
+                                BrandMetricCard(title: "Conditions", value: "\(conditionOptions.count)", detail: "Distinct weather conditions", tone: nil)
+                            }
+
+                            Button(model.isRefreshingWeather ? "Refreshing…" : "Refresh weather now") {
+                                Task { await model.refreshWeatherNow() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(ClaritasPalette.darkGreen)
+                            .disabled(model.isRefreshingWeather)
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Filters")
+                                .font(.headline)
+
+                            HStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                TextField("Search country, condition, or source", text: $query)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
+                            .padding(10)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+                            HStack(spacing: 10) {
+                                Picker("Condition", selection: $conditionFilter) {
+                                    Text("All conditions").tag("all")
+                                    ForEach(conditionOptions, id: \.self) { condition in
+                                        Text(condition).tag(condition)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+
+                                TextField("Country", text: $countryFilter)
+                                    .textInputAutocapitalization(.characters)
+                                    .autocorrectionDisabled()
+                                    .textFieldStyle(.roundedBorder)
+                            }
+
+                            HStack(spacing: 10) {
+                                TextField("Min temp °C", text: $minTempText)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .textFieldStyle(.roundedBorder)
+                                TextField("Min humidity %", text: $humidityFloorText)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+
+                            Picker("Sort", selection: $sort) {
+                                ForEach(Sort.allCases) { sort in
+                                    Text(sort.title).tag(sort)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                    }
+
+                    if !temperatureLeaders.isEmpty || !scatterRows.isEmpty {
+                        VStack(spacing: 12) {
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Temperature leaders")
+                                        .font(.headline)
+                                    Chart(temperatureLeaders) { item in
+                                        BarMark(
+                                            x: .value("Country", item.label),
+                                            y: .value("Temp", item.value)
+                                        )
+                                        .foregroundStyle(ClaritasPalette.brown)
+                                    }
+                                    .frame(height: 180)
+                                }
+                            }
+
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Temp vs humidity")
+                                        .font(.headline)
+                                    Chart(scatterRows) { item in
+                                        PointMark(
+                                            x: .value("Humidity", item.humidity),
+                                            y: .value("Temperature", item.temp)
+                                        )
+                                        .foregroundStyle(ClaritasPalette.darkBlue)
+                                    }
+                                    .frame(height: 180)
+                                }
+                            }
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Snapshots")
+                                .font(.headline)
+                            WeatherListView(
+                                items: rows,
+                                minTemp: $minTempText,
+                                isRefreshing: model.isRefreshingWeather,
+                                onRefresh: { Task { await model.refreshWeatherNow() } },
+                                onSelectCountry: { iso in model.selectedCountry = iso },
+                                showsControls: false
+                            )
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+            }
+        }
+    }
+}
+
+struct MarketsWorkspaceView: View {
+    enum Direction: String, CaseIterable, Identifiable {
+        case all
+        case gainers
+        case losers
+
+        var id: String { rawValue }
+        var title: String { rawValue.capitalized }
+    }
+
+    @EnvironmentObject private var model: AppModel
+    @State private var query: String = ""
+    @State private var exchangeFilter: String = "all"
+    @State private var countryFilter: String = "all"
+    @State private var marketFilter: String = "all"
+    @State private var directionFilter: Direction = .all
+    @State private var minMoveText: String = "0"
+    @State private var earningsWindowDays: Int = 14
+
+    private var exchangeOptions: [String] {
+        Array(Set(model.marketQuotes.compactMap { $0.exchange?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
+    }
+
+    private var countryOptions: [String] {
+        Array(Set(model.marketQuotes.compactMap { $0.country?.uppercased() }.filter { !$0.isEmpty })).sorted()
+    }
+
+    private var marketOptions: [MarketOption] {
+        var mapped: [String: String] = [:]
+        for quote in model.marketQuotes {
+            let identity = marketIdentity(for: quote)
+            guard let code = identity.code, !code.isEmpty else { continue }
+            mapped[code] = identity.name ?? code
+        }
+        return mapped
+            .map { MarketOption(code: $0.key, name: $0.value) }
+            .sorted { $0.name < $1.name }
+    }
+
+    private var rows: [MarketQuote] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let minMove = Double(minMoveText) ?? 0
+        var filtered = model.marketQuotes
+
+        if let selectedCountry = model.selectedCountry?.uppercased(), !selectedCountry.isEmpty {
+            filtered = filtered.filter { ($0.country ?? "").uppercased() == selectedCountry }
+        }
+        if exchangeFilter != "all" {
+            filtered = filtered.filter { ($0.exchange ?? "").caseInsensitiveCompare(exchangeFilter) == .orderedSame }
+        }
+        if countryFilter != "all" {
+            filtered = filtered.filter { ($0.country ?? "").uppercased() == countryFilter }
+        }
+        if marketFilter != "all" {
+            filtered = filtered.filter { (marketIdentity(for: $0).code ?? "").uppercased() == marketFilter }
+        }
+        switch directionFilter {
+        case .all:
+            break
+        case .gainers:
+            filtered = filtered.filter { ($0.percent_change ?? 0) > 0 }
+        case .losers:
+            filtered = filtered.filter { ($0.percent_change ?? 0) < 0 }
+        }
+        if minMove > 0 {
+            filtered = filtered.filter { abs($0.percent_change ?? 0) >= minMove }
+        }
+        if !term.isEmpty {
+            filtered = filtered.filter { quote in
+                [
+                    quote.symbol,
+                    quote.company_name ?? "",
+                    quote.exchange ?? "",
+                    quote.country ?? "",
+                    quote.market_code ?? "",
+                    quote.market_name ?? ""
+                ]
+                .joined(separator: " ")
+                .lowercased()
+                .contains(term)
+            }
+        }
+
+        return filtered.sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
+    }
+
+    private var selectedQuote: MarketQuote? {
+        guard let selectedSymbol = model.selectedSymbol?.uppercased(), !selectedSymbol.isEmpty else { return nil }
+        return model.marketQuotes.first { $0.symbol.uppercased() == selectedSymbol }
+    }
+
+    private var relatedCountry: String? {
+        if let selectedCountry = model.selectedCountry?.uppercased(), !selectedCountry.isEmpty {
+            return selectedCountry
+        }
+        if let country = selectedQuote?.country?.uppercased(), !country.isEmpty {
+            return country
+        }
+        return nil
+    }
+
+    private var relatedWeather: CountryWeather? {
+        guard let relatedCountry else { return nil }
+        return model.weather
+            .filter { $0.country.uppercased() == relatedCountry }
+            .sorted { $0.observed_at > $1.observed_at }
+            .first
+    }
+
+    private var relatedNews: [NewsItem] {
+        guard let relatedCountry else { return [] }
+        return model.news
+            .filter { ($0.country_iso2 ?? "").uppercased() == relatedCountry }
+            .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
+            .prefix(4)
+            .map { $0 }
+    }
+
+    private var peerQuotes: [MarketQuote] {
+        guard let relatedCountry else { return [] }
+        return model.marketQuotes
+            .filter { ($0.country ?? "").uppercased() == relatedCountry && $0.symbol != selectedQuote?.symbol }
+            .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    private var moversData: [LabeledValue] {
+        rows.prefix(12).map {
+            LabeledValue(
+                label: $0.symbol,
+                value: $0.percent_change ?? 0,
+                detail: $0.company_name ?? "Market quote"
+            )
+        }
+    }
+
+    private var marketAverages: [LabeledValue] {
+        var grouped: [String: (name: String, total: Double, count: Int)] = [:]
+        for quote in rows {
+            let identity = marketIdentity(for: quote)
+            let code = identity.code ?? "UNMAPPED"
+            let current = grouped[code] ?? (identity.name ?? code, 0, 0)
+            grouped[code] = (current.name, current.total + (quote.percent_change ?? 0), current.count + 1)
+        }
+        return grouped.map { key, value in
+            LabeledValue(
+                label: key,
+                value: value.count == 0 ? 0 : value.total / Double(value.count),
+                detail: value.name
+            )
+        }
+        .sorted { abs($0.value) > abs($1.value) }
+        .prefix(8)
+        .map { $0 }
+    }
+
+    private var countrySummaryRows: [CountryMarketSummary] {
+        var grouped: [String: [MarketQuote]] = [:]
+        for quote in rows {
+            guard let country = quote.country?.uppercased(), !country.isEmpty else { continue }
+            grouped[country, default: []].append(quote)
+        }
+
+        return grouped.map { country, quotes in
+            let identity = marketIdentity(for: quotes[0])
+            let avg = quotes.map { $0.percent_change ?? 0 }.reduce(0, +) / Double(max(quotes.count, 1))
+            let top = quotes.max { abs($0.percent_change ?? 0) < abs($1.percent_change ?? 0) }
+            return CountryMarketSummary(
+                country: country,
+                marketCode: identity.code ?? "UNMAPPED",
+                marketName: identity.name ?? (identity.code ?? "Unmapped"),
+                symbolCount: quotes.count,
+                avgChange: avg,
+                topSymbol: top?.symbol ?? "—",
+                topMove: top?.percent_change ?? 0
+            )
+        }
+        .sorted { $0.country < $1.country }
+    }
+
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(spacing: 18) {
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 14) {
+                            BrandSectionHeader(
+                                kicker: "Markets",
+                                title: "Market watch and correlations",
+                                detail: "Quotes, exchange status, earnings, and country-level correlation views."
+                            )
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                                BrandMetricCard(title: "Quotes", value: "\(rows.count)", detail: "Quotes after current filters", tone: nil)
+                                BrandMetricCard(title: "Open exchanges", value: "\(model.marketStatus.filter { $0.is_open == true }.count)", detail: "Currently open", tone: ClaritasPalette.darkGreen)
+                                BrandMetricCard(
+                                    title: "Focus",
+                                    value: model.selectedSymbol?.uppercased() ?? relatedCountry ?? "Global",
+                                    detail: model.selectedSymbol != nil ? "Selected symbol" : "Country correlation focus",
+                                    tone: nil
+                                )
+                            }
+
+                            HStack(spacing: 8) {
+                                Button(model.isRefreshingMarketQuotes ? "Refreshing quotes…" : "Refresh quotes") {
+                                    Task { await model.refreshMarketQuotes(forceRefresh: true) }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(ClaritasPalette.darkGreen)
+                                .disabled(model.isRefreshingMarketQuotes)
+
+                                Button(model.isRefreshingMarketStatus ? "Refreshing status…" : "Refresh status") {
+                                    Task { await model.refreshMarketStatus(forceRefresh: true) }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(model.isRefreshingMarketStatus)
+
+                                if model.selectedSymbol != nil {
+                                    Button("Clear symbol") {
+                                        model.selectedSymbol = nil
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Filters")
+                                .font(.headline)
+
+                            HStack(spacing: 8) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                TextField("Search symbol, company, exchange, or market", text: $query)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                            }
+                            .padding(10)
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+
+                            HStack(spacing: 10) {
+                                Picker("Exchange", selection: $exchangeFilter) {
+                                    Text("All exchanges").tag("all")
+                                    ForEach(exchangeOptions, id: \.self) { exchange in
+                                        Text(exchange).tag(exchange)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+
+                                Picker("Country", selection: $countryFilter) {
+                                    Text("All countries").tag("all")
+                                    ForEach(countryOptions, id: \.self) { country in
+                                        Text(country).tag(country)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            }
+
+                            HStack(spacing: 10) {
+                                Picker("Market", selection: $marketFilter) {
+                                    Text("All markets").tag("all")
+                                    ForEach(marketOptions) { market in
+                                        Text("\(market.code) · \(market.name)").tag(market.code)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+
+                                Picker("Direction", selection: $directionFilter) {
+                                    ForEach(Direction.allCases) { direction in
+                                        Text(direction.title).tag(direction)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                            }
+
+                            TextField("Min absolute % move", text: $minMoveText)
+                                .keyboardType(.numbersAndPunctuation)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    BrandCard {
+                        MarketStatusPanel(
+                            rows: model.marketStatus.sorted {
+                                let left = $0.is_open == true ? 1 : 0
+                                let right = $1.is_open == true ? 1 : 0
+                                if left != right { return left > right }
+                                return $0.exchange < $1.exchange
+                            },
+                            isRefreshing: model.isRefreshingMarketStatus,
+                            onRefresh: { Task { await model.refreshMarketStatus(forceRefresh: true) } }
+                        )
+                    }
+
+                    BrandCard {
+                        MarketEarningsPanel(
+                            rows: model.marketEarnings
+                                .filter { model.selectedSymbol == nil || $0.symbol.uppercased() == model.selectedSymbol?.uppercased() }
+                                .sorted { ($0.date ?? "") < ($1.date ?? "") },
+                            selectedSymbol: model.selectedSymbol,
+                            selectedWindowDays: earningsWindowDays,
+                            isRefreshing: model.isRefreshingMarketEarnings,
+                            onSelectWindowDays: { days in
+                                earningsWindowDays = days
+                                Task { await model.refreshMarketEarnings(windowDays: days, symbol: model.selectedSymbol) }
+                            },
+                            onRefresh: { Task { await model.refreshMarketEarnings(windowDays: earningsWindowDays, symbol: model.selectedSymbol) } },
+                            onSelectSymbol: { symbol in model.selectedSymbol = symbol }
+                        )
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Watchlist")
+                                .font(.headline)
+                            MarketQuoteListView(
+                                quotes: rows,
+                                selectedSymbol: model.selectedSymbol,
+                                isRefreshing: model.isRefreshingMarketQuotes,
+                                onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
+                                onSelectSymbol: { symbol in
+                                    model.selectedSymbol = symbol
+                                    if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
+                                        model.selectedCountry = country.uppercased()
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Symbol correlation")
+                                .font(.headline)
+                            if let selectedQuote {
+                                let identity = marketIdentity(for: selectedQuote)
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ProfileFactRow(label: "Primary market", value: "\(identity.name ?? "Unknown") (\(identity.code ?? "—"))")
+                                    ProfileFactRow(label: "Country", value: selectedQuote.country?.uppercased() ?? "—")
+                                    ProfileFactRow(label: "Weather", value: relatedWeather.map { "\(compactNumber($0.temp_c))°C • \(compactNumber($0.humidity))% • \($0.weather_main ?? "—")" } ?? "No recent snapshot")
+
+                                    if !relatedNews.isEmpty {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("Related stories")
+                                                .font(.caption.weight(.semibold))
+                                            ForEach(relatedNews) { item in
+                                                Text(item.title ?? item.url ?? "Untitled")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+
+                                    if !peerQuotes.isEmpty {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("Peer symbols")
+                                                .font(.caption.weight(.semibold))
+                                            ForEach(peerQuotes) { quote in
+                                                Button(action: { model.selectedSymbol = quote.symbol }) {
+                                                    HStack {
+                                                        Text(quote.symbol)
+                                                        Spacer()
+                                                        Text(changeText(for: quote))
+                                                            .foregroundStyle(changeColor(for: quote))
+                                                    }
+                                                    .font(.caption)
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text("Select a symbol to relate market movement with country weather and recent stories.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    if !moversData.isEmpty || !marketAverages.isEmpty {
+                        VStack(spacing: 12) {
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Top movers")
+                                        .font(.headline)
+                                    Chart(moversData) { item in
+                                        BarMark(
+                                            x: .value("Symbol", item.label),
+                                            y: .value("% change", item.value)
+                                        )
+                                        .foregroundStyle(item.value >= 0 ? ClaritasPalette.darkGreen : ClaritasPalette.negative)
+                                    }
+                                    .frame(height: 180)
+                                }
+                            }
+
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Index regime")
+                                        .font(.headline)
+                                    Chart(marketAverages) { item in
+                                        BarMark(
+                                            x: .value("Market", item.label),
+                                            y: .value("Average change", item.value)
+                                        )
+                                        .foregroundStyle(item.value >= 0 ? ClaritasPalette.darkBlue : ClaritasPalette.negative)
+                                    }
+                                    .frame(height: 180)
+                                }
+                            }
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Country market map")
+                                .font(.headline)
+                            if countrySummaryRows.isEmpty {
+                                Text("No country-level market groups match the current filters.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                ForEach(countrySummaryRows) { row in
+                                    HStack(alignment: .top) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text("\(row.country) • \(row.marketCode)")
+                                                .font(.subheadline.weight(.semibold))
+                                            Text(row.marketName)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        VStack(alignment: .trailing, spacing: 4) {
+                                            Text("\(row.symbolCount) symbols")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            Text("\(row.avgChange >= 0 ? "+" : "")\(row.avgChange.formatted(.number.precision(.fractionLength(2))))%")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(row.avgChange >= 0 ? ClaritasPalette.darkGreen : ClaritasPalette.negative)
+                                            Text("Top: \(row.topSymbol) • \(row.topMove >= 0 ? "+" : "")\(row.topMove.formatted(.number.precision(.fractionLength(2))))%")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(10)
+                                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+            }
+        }
+        .task {
+            if model.marketEarnings.isEmpty {
+                await model.refreshMarketEarnings(windowDays: earningsWindowDays)
+            }
+        }
+    }
+
+    private func changeText(for quote: MarketQuote) -> String {
+        let value = quote.percent_change ?? quote.change ?? 0
+        return "\(value >= 0 ? "+" : "")\(value.formatted(.number.precision(.fractionLength(2))))%"
+    }
+
+    private func changeColor(for quote: MarketQuote) -> Color {
+        (quote.percent_change ?? quote.change ?? 0) >= 0 ? ClaritasPalette.darkGreen : ClaritasPalette.negative
+    }
+}
+
+struct PoliciesWorkspaceView: View {
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(spacing: 18) {
+                    BrandCard {
+                        BrandSectionHeader(
+                            kicker: "Policies",
+                            title: "Policies and usage guidelines",
+                            detail: "Review the same policy summaries and brand palette guidance available on web."
+                        )
+                    }
+
+                    ForEach(legalPolicies) { policy in
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(policy.title)
+                                    .font(.title3.weight(.semibold))
+                                Text(policy.intro)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(policy.items, id: \.self) { item in
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Circle()
+                                                .fill(ClaritasPalette.darkBlue.opacity(0.75))
+                                                .frame(width: 7, height: 7)
+                                                .padding(.top, 5)
+                                            Text(item)
+                                                .font(.footnote)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+
+                                Text(policy.note)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 14) {
+                            BrandSectionHeader(
+                                kicker: "Palette",
+                                title: "Claritas colour reference",
+                                detail: "The native app now uses the same shell colours and accents as the web product."
+                            )
+
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+                                BrandSwatch(name: "Shell Sidebar", hex: "#1F3A5F", color: ClaritasPalette.darkBlue)
+                                BrandSwatch(name: "Shell Accent", hex: "#2F5D50", color: ClaritasPalette.darkGreen)
+                                BrandSwatch(name: "Shell Border", hex: "#E8DDC8", color: ClaritasPalette.beige)
+                                BrandSwatch(name: "Support Amber", hex: "#7A5C46", color: ClaritasPalette.brown)
+                                BrandSwatch(name: "Surface", hex: "#FFFDFA", color: Color(hex: "#FFFDFA"))
+                                BrandSwatch(name: "Ink", hex: "#222222", color: ClaritasPalette.text)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+            }
+        }
+    }
+}
+
+private struct BrandSwatch: View {
+    let name: String
+    let hex: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            RoundedRectangle(cornerRadius: 14)
+                .fill(color)
+                .frame(height: 68)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                )
+            Text(name)
+                .font(.subheadline.weight(.semibold))
+            Text(hex)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ProfileFactRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private func shortDateTimeLabel(_ value: String?) -> String {
+    guard let value, let date = APIDateParser.parse(value) else { return "" }
+    return date.formatted(date: .abbreviated, time: .shortened)
+}
+
+private func dateOnlyLabel(_ value: String?) -> String? {
+    guard let value, let date = APIDateParser.parse(value) else { return nil }
+    return date.formatted(.dateTime.year().month(.abbreviated).day())
+}
+
+private func compactNumber(_ value: Double?) -> String {
+    guard let value else { return "—" }
+    let formatter = NumberFormatter()
+    formatter.numberStyle = .decimal
+    formatter.maximumFractionDigits = abs(value) >= 100 ? 0 : 1
+    return formatter.string(from: NSNumber(value: value)) ?? String(format: "%.1f", value)
+}
+
+private func trimmed(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let next = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return next.isEmpty ? nil : next
+}
+
+private func normalizedProviderName(_ value: String?) -> String? {
+    guard let value = trimmed(value) else { return nil }
+    switch value.lowercased() {
+    case "newsapi":
+        return "NewsAPI"
+    case "thenewsapi":
+        return "TheNewsAPI"
+    case "openweather":
+        return "OpenWeather"
+    case "finnhub":
+        return "Finnhub"
+    default:
+        return value
+    }
+}
+
+private func newsImageURLString(_ item: NewsItem) -> String? {
+    guard let payload = item.payload?.object else { return nil }
+    if let image = trimmed(payload["image"]?.string) { return image }
+    if let image = trimmed(payload["urlToImage"]?.string) { return image }
+    if let image = trimmed(payload["image_url"]?.string) { return image }
+    if let raw = payload["raw"]?.object {
+        if let image = trimmed(raw["image"]?.string) { return image }
+        if let image = trimmed(raw["urlToImage"]?.string) { return image }
+        if let image = trimmed(raw["image_url"]?.string) { return image }
+    }
+    return nil
+}
+
+private func newsHasImage(_ item: NewsItem) -> Bool {
+    newsImageURLString(item) != nil
+}
+
+private func newsSourceLabel(_ item: NewsItem) -> String? {
+    if let source = normalizedProviderName(item.source_name) {
+        return source
+    }
+    guard let payload = item.payload?.object else { return nil }
+    if let source = normalizedProviderName(payload["provider"]?.string) {
+        return source
+    }
+    if let source = normalizedProviderName(payload["source"]?.string) {
+        return source
+    }
+    if let raw = payload["raw"]?.object {
+        if let source = normalizedProviderName(raw["source"]?.string) {
+            return source
+        }
+        if let source = normalizedProviderName(raw["publisher"]?.string) {
+            return source
+        }
+    }
+    return nil
+}
+
+private func marketIdentity(for quote: MarketQuote) -> (code: String?, name: String?, kind: String?) {
+    let payload = quote.payload?.object
+    let market = payload?["market"]?.object
+    let profile = payload?["profile"]?.object
+    return (
+        trimmed(quote.market_code)
+            ?? trimmed(market?["code"]?.string)
+            ?? trimmed(profile?["market_code"]?.string),
+        trimmed(quote.market_name)
+            ?? trimmed(market?["name"]?.string)
+            ?? trimmed(profile?["market_name"]?.string),
+        trimmed(quote.market_kind)
+            ?? trimmed(market?["kind"]?.string)
+    )
+}
+
 private struct MarketQuoteListView: View {
     let quotes: [MarketQuote]
     let selectedSymbol: String?
     let isRefreshing: Bool
     let onRefresh: () -> Void
     let onSelectSymbol: (String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 10) {
@@ -602,9 +1980,9 @@ private struct MarketQuoteListView: View {
                                         .font(.caption2.weight(.semibold))
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 5)
-                                        .background(ClaritasPalette.offWhite, in: Capsule())
+                                        .background(ClaritasPalette.shellSurface(for: colorScheme), in: Capsule())
                                         .overlay(
-                                            Capsule().stroke(ClaritasPalette.beige, lineWidth: 1)
+                                            Capsule().stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                                         )
                                 }
                                 .buttonStyle(.plain)
@@ -613,14 +1991,14 @@ private struct MarketQuoteListView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .background(
-                            (selectedSymbol?.uppercased() == quote.symbol.uppercased()
+                            ((selectedSymbol ?? "").uppercased() == quote.symbol.uppercased()
                                 ? ClaritasPalette.darkGreen.opacity(0.12)
-                                : ClaritasPalette.offWhite.opacity(0.82)),
+                                : ClaritasPalette.shellSurface(for: colorScheme)),
                             in: RoundedRectangle(cornerRadius: 10)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
-                                .stroke(ClaritasPalette.beige, lineWidth: 1)
+                                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                         )
                     }
                     .buttonStyle(.plain)
@@ -690,6 +2068,7 @@ private struct MarketStatusPanel: View {
     let rows: [MarketStatus]
     let isRefreshing: Bool
     let onRefresh: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     private var openCount: Int {
         rows.filter { $0.is_open == true }.count
@@ -720,19 +2099,34 @@ private struct MarketStatusPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 ForEach(rows.prefix(20)) { row in
-                    HStack {
-                        Text(row.exchange)
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Text(statusLabel(row))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(statusColor(row))
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(row.exchange)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(statusLabel(row))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(statusColor(row))
+                        }
+                        Text(
+                            [
+                                row.session,
+                                row.timezone,
+                                row.holiday,
+                                trimmed(shortDateTimeLabel(row.observed_at))
+                            ]
+                            .compactMap { $0 }
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " • ")
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     }
                     .padding(10)
-                    .background(ClaritasPalette.offWhite.opacity(0.9), in: RoundedRectangle(cornerRadius: 10))
+                    .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(ClaritasPalette.beige, lineWidth: 1)
+                            .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                     )
                 }
             }
@@ -760,6 +2154,7 @@ private struct MarketEarningsPanel: View {
     let onSelectWindowDays: (Int) -> Void
     let onRefresh: () -> Void
     let onSelectSymbol: (String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -827,15 +2222,28 @@ private struct MarketEarningsPanel: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        Text(
+                            [
+                                row.market_code,
+                                row.market_name,
+                                row.country?.uppercased(),
+                                row.hour
+                            ]
+                            .compactMap { $0 }
+                            .filter { !$0.isEmpty }
+                            .joined(separator: " • ")
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                         Text("EPS \(value(row.eps_actual)) / \(value(row.eps_estimate)) · Rev \(value(row.revenue_actual)) / \(value(row.revenue_estimate))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     .padding(10)
-                    .background(ClaritasPalette.offWhite.opacity(0.9), in: RoundedRectangle(cornerRadius: 10))
+                    .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(ClaritasPalette.beige, lineWidth: 1)
+                            .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                     )
                 }
             }
@@ -869,8 +2277,8 @@ private struct MarketQuoteMetadata {
 private func marketQuoteMetadata(_ quote: MarketQuote) -> MarketQuoteMetadata {
     guard let payload = quote.payload?.object else {
         return MarketQuoteMetadata(
-            marketCode: nil,
-            marketName: nil,
+            marketCode: quote.market_code,
+            marketName: quote.market_name,
             industry: nil,
             marketCap: nil,
             ipo: nil,
@@ -886,8 +2294,8 @@ private func marketQuoteMetadata(_ quote: MarketQuote) -> MarketQuoteMetadata {
     }
 
     return MarketQuoteMetadata(
-        marketCode: profile["market_code"]?.string,
-        marketName: profile["market_name"]?.string,
+        marketCode: trimmed(quote.market_code) ?? profile["market_code"]?.string,
+        marketName: trimmed(quote.market_name) ?? profile["market_name"]?.string,
         industry: profile["industry"]?.string,
         marketCap: profile["market_cap"]?.number,
         ipo: profile["ipo"]?.string,
@@ -896,6 +2304,8 @@ private func marketQuoteMetadata(_ quote: MarketQuote) -> MarketQuoteMetadata {
 }
 
 private struct DashboardHeaderView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
             ZStack {
@@ -914,10 +2324,10 @@ private struct DashboardHeaderView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Signal desk overview")
                     .font(.headline)
-                    .foregroundStyle(ClaritasPalette.text)
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                 Text("Global intelligence with trusted identity.")
                     .font(.subheadline)
-                    .foregroundStyle(ClaritasPalette.grey)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             }
             Spacer()
             HStack(spacing: 10) {
@@ -925,18 +2335,22 @@ private struct DashboardHeaderView: View {
                 Image(systemName: "line.3.horizontal")
                 Image(systemName: "person.crop.circle")
             }
-            .foregroundStyle(ClaritasPalette.darkBlue)
+            .foregroundStyle(ClaritasPalette.shellSidebar(for: colorScheme))
             .font(.title3)
         }
         .padding(16)
-        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(ClaritasPalette.beige, lineWidth: 1))
+        .background(ClaritasPalette.shellRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+        )
         .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 6)
     }
 }
 
 private struct DashboardBackground<Content: View>: View {
     @ViewBuilder var content: Content
+    @Environment(\.colorScheme) private var colorScheme
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -946,13 +2360,27 @@ private struct DashboardBackground<Content: View>: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    ClaritasPalette.offWhite,
-                    ClaritasPalette.beige.opacity(0.85)
+                    ClaritasPalette.shellBackground(for: colorScheme),
+                    colorScheme == .dark
+                        ? ClaritasPalette.shellSidebar(for: colorScheme).opacity(0.94)
+                        : ClaritasPalette.beige.opacity(0.85)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
+
+            Circle()
+                .fill(ClaritasPalette.darkGreen.opacity(colorScheme == .dark ? 0.2 : 0.12))
+                .frame(width: 340, height: 340)
+                .blur(radius: 32)
+                .offset(x: -160, y: -260)
+
+            Circle()
+                .fill(ClaritasPalette.darkBlue.opacity(colorScheme == .dark ? 0.22 : 0.1))
+                .frame(width: 300, height: 300)
+                .blur(radius: 36)
+                .offset(x: 180, y: 280)
 
             content
         }
@@ -961,6 +2389,7 @@ private struct DashboardBackground<Content: View>: View {
 
 private struct DashboardCard<Content: View>: View {
     @ViewBuilder var content: Content
+    @Environment(\.colorScheme) private var colorScheme
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -971,8 +2400,11 @@ private struct DashboardCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(ClaritasPalette.beige, lineWidth: 1))
+        .background(ClaritasPalette.shellRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+        )
         .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 8)
     }
 }
@@ -1007,7 +2439,7 @@ private struct FooterLinksView: View {
     }
 }
 
-private struct LegalPolicy: Identifiable {
+struct LegalPolicy: Identifiable {
     let id: String
     let title: String
     let intro: String
@@ -1015,7 +2447,7 @@ private struct LegalPolicy: Identifiable {
     let note: String
 }
 
-private let legalPolicies: [LegalPolicy] = [
+let legalPolicies: [LegalPolicy] = [
     LegalPolicy(
         id: "cookie-policy",
         title: "Cookie Policy",
@@ -1066,7 +2498,7 @@ private let legalPolicies: [LegalPolicy] = [
     )
 ]
 
-private struct PolicyDetailView: View {
+struct PolicyDetailView: View {
     let policy: LegalPolicy
 
     var body: some View {

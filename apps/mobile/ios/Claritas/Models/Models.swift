@@ -147,6 +147,10 @@ struct CountryWeather: Codable, Identifiable {
     let humidity: Double?
     let observed_at: String
     let weather_main: String?
+    let weather_desc: String?
+    let wind_speed: Double?
+    let source_name: String?
+    let icon_code: String?
     var id: String { country + observed_at }
     var observedDate: Date? { APIDateParser.parse(observed_at) }
 }
@@ -157,6 +161,9 @@ struct MarketQuote: Codable, Identifiable {
     let exchange: String?
     let country: String?
     let currency: String?
+    let market_code: String?
+    let market_name: String?
+    let market_kind: String?
     let price: Double?
     let change: Double?
     let percent_change: Double?
@@ -176,6 +183,9 @@ struct MarketQuote: Codable, Identifiable {
         case exchange
         case country
         case currency
+        case market_code
+        case market_name
+        case market_kind
         case price
         case change
         case percent_change

@@ -3,6 +3,7 @@ import SwiftUI
 struct NewsListView: View {
     let items: [NewsItem]
     var onSelectCountry: (String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if items.isEmpty {
@@ -11,8 +12,8 @@ struct NewsListView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(ClaritasPalette.offWhite.opacity(0.92), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.beige, lineWidth: 1))
+                .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
         } else {
             VStack(spacing: 12) {
                 ForEach(items) { n in
@@ -26,6 +27,7 @@ struct NewsListView: View {
 private struct NewsRow: View {
     let item: NewsItem
     var onSelectCountry: (String) -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -33,7 +35,7 @@ private struct NewsRow: View {
                 .frame(width: 120, height: 75)
                 .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ClaritasPalette.beige, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
             VStack(alignment: .leading, spacing: 6) {
                 if let u = item.url, let url = URL(string: u) {
                     Link(item.title ?? u, destination: url)
@@ -60,7 +62,7 @@ private struct NewsRow: View {
                                 .font(.caption)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
-                                .background(ClaritasPalette.offWhite, in: Capsule())
+                                .background(ClaritasPalette.shellSurface(for: colorScheme), in: Capsule())
                         }
                         .buttonStyle(.plain)
                     }
@@ -80,8 +82,8 @@ private struct NewsRow: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.beige, lineWidth: 1))
+        .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
     }
 
     private func proxiedImageURL() -> URL? {

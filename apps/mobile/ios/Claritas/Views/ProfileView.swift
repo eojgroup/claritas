@@ -1,9 +1,32 @@
 import SwiftUI
 
 struct ProfileView: View {
+    enum Section: String, CaseIterable, Identifiable {
+        case overview
+        case identity
+        case preferences
+        case security
+        case policies
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .overview: return "Overview"
+            case .identity: return "Identity"
+            case .preferences: return "Preferences"
+            case .security: return "Security"
+            case .policies: return "Policies"
+            }
+        }
+    }
+
     @EnvironmentObject private var model: AppModel
     @AppStorage("THEME_DARK") private var dark: Bool = false
+    @AppStorage("DEFAULT_MAP_MODE") private var defaultMapMode: String = "news"
+    @AppStorage("DEFAULT_LIST_MODE") private var defaultListMode: String = "news"
     @State private var isSigningOut: Bool = false
+    @State private var section: Section = .overview
 
     private var displayName: String {
         model.authUser?.display_name ?? model.authUser?.email ?? "Signed in"
@@ -29,14 +52,45 @@ struct ProfileView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     headerCard
-                    accountDetailsCard
-                    providerCard
-                    preferencesCard
-                    sessionCard
+                    sectionPicker
+                    sectionContent
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 24)
             }
+        }
+    }
+
+    private var sectionPicker: some View {
+        BrandCard {
+            Picker("Section", selection: $section) {
+                ForEach(Section.allCases) { section in
+                    Text(section.title).tag(section)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    @ViewBuilder
+    private var sectionContent: some View {
+        switch section {
+        case .overview:
+            accountDetailsCard
+            sessionHealthCard
+            preferencesCard
+        case .identity:
+            accountDetailsCard
+            providerCard
+        case .preferences:
+            preferencesCard
+            workspaceDefaultsCard
+        case .security:
+            securityCard
+            sessionHealthCard
+            sessionCard
+        case .policies:
+            policiesCard
         }
     }
 
@@ -161,6 +215,79 @@ struct ProfileView: View {
         }
     }
 
+    private var workspaceDefaultsCard: some View {
+        BrandCard(title: "Workspace defaults", icon: "globe") {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Default map mode")
+                        .font(.subheadline.weight(.semibold))
+                    Picker("Default map mode", selection: $defaultMapMode) {
+                        Text("News").tag("news")
+                        Text("Weather").tag("weather")
+                        Text("Markets").tag("market")
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Default list mode")
+                        .font(.subheadline.weight(.semibold))
+                    Picker("Default list mode", selection: $defaultListMode) {
+                        Text("News").tag("news")
+                        Text("Weather").tag("weather")
+                        Text("Markets").tag("market")
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                Text("These defaults are applied when the dashboard overview opens.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var securityCard: some View {
+        BrandCard(title: "Access roles", icon: "checkmark.shield") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Session tokens are short-lived and scoped to approved identity providers.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                FlexibleRoleCloud(roles: model.authUser?.roles ?? ["Standard access"])
+            }
+        }
+    }
+
+    private var sessionHealthCard: some View {
+        BrandCard(title: "Session health", icon: "waveform.path.ecg") {
+            ProfileRow(label: "Session status", value: "Active")
+            ProfileRow(label: "Provider", value: "Managed")
+            ProfileRow(label: "Role count", value: String(model.authUser?.roles?.count ?? 1))
+
+            Text("All access events are recorded for audit readiness.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+        }
+    }
+
+    private var policiesCard: some View {
+        BrandCard(title: "Policies", icon: "doc.text") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Claritas policies define how data is protected, retained, and used across the platform.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+
+                FlexibleRoleCloud(roles: legalPolicies.map(\.title))
+
+                Text("Open the Policies tab for the full legal summaries and brand palette reference.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var sessionCard: some View {
         BrandCard(title: "Session", icon: "checkmark.seal") {
             HStack {
@@ -198,6 +325,25 @@ struct ProfileView: View {
         case .google: return "Google"
         case .microsoft: return "Microsoft"
         case .apple: return "Apple"
+        }
+    }
+}
+
+private struct FlexibleRoleCloud: View {
+    let roles: [String]
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(roles, id: \.self) { role in
+                Text(role.uppercased())
+                    .font(.caption2.weight(.semibold))
+                    .tracking(1.8)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(ClaritasPalette.darkGreen.opacity(0.14), in: Capsule())
+                    .foregroundStyle(ClaritasPalette.darkGreen)
+            }
         }
     }
 }

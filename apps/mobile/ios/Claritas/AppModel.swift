@@ -11,17 +11,26 @@ final class AppModel: ObservableObject {
         case unauthed
     }
 
+    enum NewsLoadMode: String {
+        case recent
+        case archive
+    }
+
     @Published var selectedCountry: String? = nil
+    @Published var selectedSymbol: String? = nil
     @Published var news: [NewsItem] = []
     @Published var countryStats: [CountryStat] = []
     @Published var weather: [CountryWeather] = []
     @Published var marketQuotes: [MarketQuote] = []
     @Published var marketStatus: [MarketStatus] = []
     @Published var marketEarnings: [EarningsEvent] = []
+    @Published var isRefreshingNews: Bool = false
     @Published var isRefreshingWeather: Bool = false
     @Published var isRefreshingMarketQuotes: Bool = false
     @Published var isRefreshingMarketStatus: Bool = false
     @Published var isRefreshingMarketEarnings: Bool = false
+    @Published var newsLoadMode: NewsLoadMode = .recent
+    @Published var newsLoadError: String? = nil
     @Published var authStatus: AuthStatus = .checking
     @Published var authUser: AuthUser? = nil
     @Published var authProviders: [AuthProvider] = []
@@ -36,6 +45,9 @@ final class AppModel: ObservableObject {
     private let authTokenKey = "AUTH_TOKEN"
     private let authCallbackScheme: String
     private let authCallbackURL: URL
+    private let recentNewsLimit = 120
+    private let archiveNewsPageSize = 100
+    private let archiveNewsMaxPages = 4
 
     var isAdmin: Bool {
         (authUser?.roles ?? []).contains { $0.lowercased() == "admin" }
@@ -250,7 +262,7 @@ final class AppModel: ObservableObject {
             catch { return .failure(error) }
         }()
         async let newsResult: Result<[NewsItem], Error> = {
-            do { return .success(try await api.fetchNews(limit: 20, offset: 0, q: nil, country: nil)) }
+            do { return .success(try await fetchNewsBatch(mode: .recent, country: nil)) }
             catch { return .failure(error) }
         }()
         async let marketResult: Result<[MarketQuote], Error> = {
@@ -306,6 +318,8 @@ final class AppModel: ObservableObject {
         }
         if case .success(let newsItems) = resolvedNews {
             news = newsItems
+            newsLoadMode = .recent
+            newsLoadError = nil
         }
         if case .success(let quotes) = resolvedMarket {
             marketQuotes = quotes
@@ -319,27 +333,42 @@ final class AppModel: ObservableObject {
     }
 
     func clearAppData() {
+        clearSelection()
         countryStats = []
         weather = []
         news = []
         marketQuotes = []
         marketStatus = []
         marketEarnings = []
+        newsLoadError = nil
     }
 
-    func reloadNewsForSelectedCountry() async {
+    func clearSelection() {
+        selectedCountry = nil
+        selectedSymbol = nil
+    }
+
+    func refreshNews(mode: NewsLoadMode = .recent, country: String? = nil) async {
+        guard !isRefreshingNews else { return }
         guard hasPaidAccess else {
             clearAppData()
             return
         }
+
+        isRefreshingNews = true
+        newsLoadError = nil
+        defer { isRefreshingNews = false }
+
         do {
-            news = try await api.fetchNews(limit: 20, offset: 0, q: nil, country: selectedCountry)
+            news = try await fetchNewsBatch(mode: mode, country: country)
+            newsLoadMode = mode
         } catch {
             if isPaymentRequired(error) {
                 clearAppData()
                 await refreshAccess()
+                return
             }
-            // Keep current rows on transient failures instead of blanking the list.
+            newsLoadError = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
@@ -519,5 +548,35 @@ final class AppModel: ObservableObject {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+
+    private func fetchNewsBatch(mode: NewsLoadMode, country: String?) async throws -> [NewsItem] {
+        switch mode {
+        case .recent:
+            return try await api.fetchNews(limit: recentNewsLimit, offset: 0, q: nil, country: country)
+        case .archive:
+            var combined: [NewsItem] = []
+            var seenIds = Set<Int>()
+            var offset = 0
+
+            for _ in 0..<archiveNewsMaxPages {
+                let batch = try await api.fetchNews(
+                    limit: archiveNewsPageSize,
+                    offset: offset,
+                    q: nil,
+                    country: country
+                )
+                if batch.isEmpty { break }
+
+                for item in batch where !seenIds.contains(item.id) {
+                    seenIds.insert(item.id)
+                    combined.append(item)
+                }
+
+                offset += batch.count
+                if batch.count < archiveNewsPageSize { break }
+            }
+            return combined
+        }
     }
 }

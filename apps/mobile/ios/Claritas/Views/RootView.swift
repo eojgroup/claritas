@@ -4,8 +4,12 @@ import SwiftUI
 struct RootView: View {
     enum Tab: Hashable {
         case dashboard
+        case news
+        case weather
+        case markets
         case admin
         case profile
+        case policies
     }
 
     @EnvironmentObject private var model: AppModel
@@ -22,16 +26,40 @@ struct RootView: View {
                         NavigationStack {
                             DashboardView()
                                 .navigationTitle("Claritas")
-                                .toolbar { ToolbarItem(placement: .navigationBarTrailing) { ThemeToggle() } }
+                                .modifier(ShellNavigationChrome())
                         }
-                        .tabItem { Label("Dashboard", systemImage: "globe") }
+                        .tabItem { Label("Dashboard", systemImage: "square.grid.2x2") }
                         .tag(Tab.dashboard)
+
+                        NavigationStack {
+                            NewsWorkspaceView()
+                                .navigationTitle("News")
+                                .modifier(ShellNavigationChrome())
+                        }
+                        .tabItem { Label("News", systemImage: "newspaper") }
+                        .tag(Tab.news)
+
+                        NavigationStack {
+                            WeatherWorkspaceView()
+                                .navigationTitle("Weather")
+                                .modifier(ShellNavigationChrome())
+                        }
+                        .tabItem { Label("Weather", systemImage: "cloud.sun") }
+                        .tag(Tab.weather)
+
+                        NavigationStack {
+                            MarketsWorkspaceView()
+                                .navigationTitle("Markets")
+                                .modifier(ShellNavigationChrome())
+                        }
+                        .tabItem { Label("Markets", systemImage: "chart.line.uptrend.xyaxis") }
+                        .tag(Tab.markets)
 
                         if model.isAdmin {
                             NavigationStack {
                                 AdminWorkspaceView()
                                     .navigationTitle("Admin")
-                                    .toolbar { ToolbarItem(placement: .navigationBarTrailing) { ThemeToggle() } }
+                                    .modifier(ShellNavigationChrome())
                             }
                             .tabItem { Label("Admin", systemImage: "shield.lefthalf.filled") }
                             .tag(Tab.admin)
@@ -40,9 +68,18 @@ struct RootView: View {
                         NavigationStack {
                             ProfileView()
                                 .navigationTitle("Profile")
+                                .modifier(ShellNavigationChrome())
                         }
                         .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                         .tag(Tab.profile)
+
+                        NavigationStack {
+                            PoliciesWorkspaceView()
+                                .navigationTitle("Policies")
+                                .modifier(ShellNavigationChrome())
+                        }
+                        .tabItem { Label("Policies", systemImage: "doc.text") }
+                        .tag(Tab.policies)
                     }
                     .tint(ClaritasPalette.darkGreen)
                     .onChange(of: model.isAdmin) { isAdmin in
@@ -59,6 +96,28 @@ struct RootView: View {
         .task {
             await model.bootstrap()
         }
+        .task(id: marketRefreshTaskKey) {
+            guard model.authStatus == .authed, model.hasPaidAccess else { return }
+            while !Task.isCancelled {
+                await model.refreshMarketQuotes(forceRefresh: true)
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
+            }
+        }
+        .task(id: marketStatusTaskKey) {
+            guard model.authStatus == .authed, model.hasPaidAccess else { return }
+            while !Task.isCancelled {
+                await model.refreshMarketStatus(forceRefresh: true)
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+        }
+    }
+
+    private var marketRefreshTaskKey: String {
+        "\(model.authStatus.rawValue)-\(model.hasPaidAccess)-quotes"
+    }
+
+    private var marketStatusTaskKey: String {
+        "\(model.authStatus.rawValue)-\(model.hasPaidAccess)-status"
     }
 }
 
@@ -69,6 +128,21 @@ struct ThemeToggle: View {
         Button(action: { dark.toggle() }) {
             Image(systemName: dark ? "sun.max" : "moon")
         }
+    }
+}
+
+private struct ShellNavigationChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    ThemeToggle()
+                }
+            }
+            .toolbarBackground(ClaritasPalette.darkBlue, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }
 
