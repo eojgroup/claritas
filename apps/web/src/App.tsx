@@ -1,8 +1,6 @@
 import {
-  type CSSProperties,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -576,9 +574,7 @@ export default function ClaritasDashboard() {
   const profileSections = PROFILE_SECTIONS;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
-  const headerRef = useRef<HTMLDivElement | null>(null);
   const newsRequestIdRef = useRef(0);
-  const [headerHeight, setHeaderHeight] = useState(0);
   const [viewportSize, setViewportSize] = useState(() => ({
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
     height: typeof window !== "undefined" ? window.innerHeight : 800,
@@ -2140,15 +2136,7 @@ export default function ClaritasDashboard() {
     [viewportSize.height, viewportSize.width],
   );
 
-  const dashboardPanelClass = `${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden${
-    splitViewEnabled ? " h-full" : ""
-  }`;
-
-  const dashboardHeight = useMemo(() => {
-    const padding = 48; // py-6 on main (top + bottom)
-    if (!headerHeight) return `calc(100dvh - ${padding}px)`;
-    return `calc(100dvh - ${headerHeight}px - ${padding}px)`;
-  }, [headerHeight]);
+  const dashboardPanelClass = `${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`;
 
   useEffect(() => {
     if (!selectedCountry) {
@@ -2218,18 +2206,6 @@ export default function ClaritasDashboard() {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [mapExpanded]);
-
-  useLayoutEffect(() => {
-    const el = headerRef.current;
-    if (!el) return;
-    const update = () => {
-      setHeaderHeight(el.getBoundingClientRect().height);
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     const update = () =>
@@ -2357,7 +2333,7 @@ export default function ClaritasDashboard() {
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.scale(dpr, dpr);
-      ctx.fillStyle = dark ? "#0f172a" : "#ffffff";
+      ctx.fillStyle = dark ? "#0d1724" : "#ffffff";
       ctx.fillRect(0, 0, rect.width, rect.height);
       ctx.drawImage(img, 0, 0, rect.width, rect.height);
       canvas.toBlob((blob) => {
@@ -2575,10 +2551,10 @@ export default function ClaritasDashboard() {
             <div className="flex h-full flex-col">
               <div className="px-6 pt-6 pb-4">
                 <div className="flex items-center gap-3">
-                  <div className="relative h-10 w-10">
-                    <div className="absolute -left-2 top-0 h-10 w-10 rounded-full bg-[#102739]" />
-                    <div className="absolute left-1 top-0 h-10 w-10 rounded-full bg-[#1F3C52] opacity-90" />
-                    <div className="absolute left-4 top-0 h-10 w-10 rounded-full bg-[#2D556F] opacity-80" />
+                  <div className="relative h-10 w-14 flex-none">
+                    <div className="absolute left-0 top-0 h-10 w-10 rounded-full bg-[color:var(--brand-mark-1)]" />
+                    <div className="absolute left-2 top-0 h-10 w-10 rounded-full bg-[color:var(--brand-mark-2)] opacity-90" />
+                    <div className="absolute left-4 top-0 h-10 w-10 rounded-full bg-[color:var(--brand-mark-3)] opacity-80" />
                   </div>
                   <div>
                     <div
@@ -2652,10 +2628,10 @@ export default function ClaritasDashboard() {
         <aside className="hidden lg:flex lg:w-[18.5rem] lg:flex-col border-r border-[color:var(--shell-sidebar-border)] bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
           <div className="px-6 pt-7 pb-5">
             <div className="flex items-center gap-3">
-              <div className="relative h-11 w-11">
-                <div className="absolute -left-2 top-0 h-11 w-11 rounded-full bg-[#102739]" />
-                <div className="absolute left-1 top-0 h-11 w-11 rounded-full bg-[#1F3C52] opacity-90" />
-                <div className="absolute left-4 top-0 h-11 w-11 rounded-full bg-[#2D556F] opacity-80" />
+              <div className="relative h-11 w-16 flex-none">
+                <div className="absolute left-0 top-0 h-11 w-11 rounded-full bg-[color:var(--brand-mark-1)]" />
+                <div className="absolute left-2.5 top-0 h-11 w-11 rounded-full bg-[color:var(--brand-mark-2)] opacity-90" />
+                <div className="absolute left-5 top-0 h-11 w-11 rounded-full bg-[color:var(--brand-mark-3)] opacity-80" />
               </div>
               <div>
                 <div
@@ -2720,10 +2696,7 @@ export default function ClaritasDashboard() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col min-h-0">
-          <header
-            ref={headerRef}
-            className="app-safe-top sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/88 backdrop-blur-xl"
-          >
+          <header className="app-safe-top sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/88 backdrop-blur-xl">
             <div className="mx-auto flex w-full max-w-[1720px] flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
               <button
                 type="button"
@@ -2733,10 +2706,10 @@ export default function ClaritasDashboard() {
                 <Menu className="h-5 w-5" />
               </button>
               <div className="flex items-center gap-2 lg:hidden">
-                <div className="relative h-7 w-7">
-                  <div className="absolute -left-1 top-0 h-7 w-7 rounded-full bg-[#102739]" />
-                  <div className="absolute left-1 top-0 h-7 w-7 rounded-full bg-[#1F3C52] opacity-90" />
-                  <div className="absolute left-3.5 top-0 h-7 w-7 rounded-full bg-[#2D556F] opacity-80" />
+                <div className="relative h-7 w-11 flex-none">
+                  <div className="absolute left-0 top-0 h-7 w-7 rounded-full bg-[color:var(--brand-mark-1)]" />
+                  <div className="absolute left-2 top-0 h-7 w-7 rounded-full bg-[color:var(--brand-mark-2)] opacity-90" />
+                  <div className="absolute left-4 top-0 h-7 w-7 rounded-full bg-[color:var(--brand-mark-3)] opacity-80" />
                 </div>
                 <span
                   className="text-xs font-semibold tracking-[0.32em]"
@@ -2757,7 +2730,7 @@ export default function ClaritasDashboard() {
 
               <div className="ml-auto flex items-center gap-3">
                 <div className="hidden lg:flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
                   <span className="font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]">
                     Live
                   </span>
@@ -2817,7 +2790,7 @@ export default function ClaritasDashboard() {
                   </span>
                 </button>
                 <div className="hidden sm:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-muted)]">
-                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
                   <span className="max-w-[160px] truncate">{userLabel}</span>
                 </div>
               </div>
@@ -2877,19 +2850,8 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div
-                className={`relative flex flex-col gap-4 ${
-                  splitViewEnabled
-                    ? "flex-1 min-h-0 overflow-hidden h-[var(--dashboard-h)]"
-                    : ""
-                }`}
-                style={{ "--dashboard-h": dashboardHeight } as CSSProperties}
-              >
-                <div
-                  className={`relative flex flex-col gap-4 ${
-                    splitViewEnabled ? "flex-1 min-h-0 overflow-hidden" : ""
-                  }`}
-                >
+              <div className="relative flex flex-col gap-4">
+                <div className="relative flex flex-col gap-4">
                   <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-3xl" />
                   <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-[color:var(--signal-sky-soft)] opacity-80 blur-3xl" />
 
@@ -3052,9 +3014,9 @@ export default function ClaritasDashboard() {
                   </div>
 
                   <section
-                    className={`relative grid flex-1 min-h-0 gap-4 ${
+                    className={`relative grid gap-4 ${
                       splitViewEnabled
-                        ? "xl:grid-cols-12 xl:auto-rows-[minmax(17.5rem,1fr)] h-full overflow-hidden"
+                        ? "xl:grid-cols-12 xl:auto-rows-[minmax(18rem,auto)]"
                         : "grid-cols-1"
                     }`}
                   >
@@ -3192,8 +3154,8 @@ export default function ClaritasDashboard() {
                         <div
                           className={`app-map-frame relative min-h-0 ${
                             splitViewEnabled
-                              ? "h-full"
-                              : "h-[56vh] max-h-[560px]"
+                              ? "h-[min(46vh,32rem)] min-h-[24rem]"
+                              : "h-[56vh] max-h-[560px] min-h-[22rem]"
                           }`}
                         >
                           <WorldMapBubbles
@@ -3432,7 +3394,7 @@ export default function ClaritasDashboard() {
                         </div>
                       </div>
 
-                      <div className="flex-1 min-h-0 overflow-hidden">
+                      <div className="flex-1 min-h-0 overflow-hidden xl:min-h-[34rem]">
                         {listMode === "news" ? (
                           <div
                             ref={feedRef}
@@ -3853,7 +3815,7 @@ export default function ClaritasDashboard() {
                           Export PNG
                         </button>
                       </div>
-                      <div ref={chartRef} className="flex-1 min-h-0 p-4">
+                      <div ref={chartRef} className="min-h-[18rem] flex-1 p-4">
                         {newsTrendTotal === 0 ? (
                           <div className="h-full grid place-items-center text-sm text-[color:var(--shell-muted)]">
                             No timestamped articles yet.
@@ -3862,18 +3824,18 @@ export default function ClaritasDashboard() {
                           <>
                             <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
                               <span className="inline-flex items-center gap-2">
-                                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                                <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
                                 {regionLabel}
                               </span>
                               {selectedCountry && (
                                 <span className="inline-flex items-center gap-2">
-                                  <span className="h-2 w-2 rounded-full bg-sky-500" />
+                                  <span className="h-2 w-2 rounded-full bg-[color:var(--signal-sky)]" />
                                   {selectedCountry.toUpperCase()}
                                 </span>
                               )}
                               {comparisonCountry && (
                                 <span className="inline-flex items-center gap-2">
-                                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                                  <span className="h-2 w-2 rounded-full bg-[color:var(--signal-amber)]" />
                                   {comparisonCountry.toUpperCase()}
                                 </span>
                               )}
@@ -3940,7 +3902,7 @@ export default function ClaritasDashboard() {
                                       ? "selectedRollingAvg"
                                       : "selectedCount"
                                   }
-                                  stroke="#0ea5e9"
+                                  stroke="var(--signal-sky)"
                                   strokeWidth={2}
                                   dot={false}
                                 />
@@ -3953,7 +3915,7 @@ export default function ClaritasDashboard() {
                                       ? "comparisonRollingAvg"
                                       : "comparisonCount"
                                   }
-                                  stroke="#f59e0b"
+                                  stroke="var(--signal-amber)"
                                   strokeWidth={2}
                                   dot={false}
                                 />
@@ -3964,15 +3926,15 @@ export default function ClaritasDashboard() {
                                   x={point.label}
                                   y={point.count}
                                   r={5}
-                                  fill="#ef4444"
-                                  stroke="#b91c1c"
+                                  fill="var(--signal-rose)"
+                                  stroke="var(--viz-negative)"
                                   onClick={() => handleAnomalyClick(point.dateKey)}
                                 />
                               ))}
                               <Brush
                                 dataKey="label"
                                 height={24}
-                                stroke="#94a3b8"
+                                stroke="var(--shell-muted)"
                                 startIndex={chartRange.startIndex}
                                 endIndex={chartRange.endIndex}
                                 onChange={(range) =>
@@ -5598,7 +5560,7 @@ export default function ClaritasDashboard() {
                             {marketMoversChartData.map((entry, index) => (
                               <Cell
                                 key={`market-mover-${entry.symbol}`}
-                                fill={entry.percent_change >= 0 ? ANALYTICS_COLORS[index % ANALYTICS_COLORS.length] : "#be123c"}
+                                fill={entry.percent_change >= 0 ? ANALYTICS_COLORS[index % ANALYTICS_COLORS.length] : "var(--viz-negative)"}
                               />
                             ))}
                           </Bar>
@@ -5624,7 +5586,7 @@ export default function ClaritasDashboard() {
                             {marketIndexPerfData.map((entry) => (
                               <Cell
                                 key={`market-index-${entry.market_code}`}
-                                fill={entry.avg_change >= 0 ? "#0f766e" : "#be123c"}
+                                fill={entry.avg_change >= 0 ? "var(--viz-positive)" : "var(--viz-negative)"}
                               />
                             ))}
                           </Bar>

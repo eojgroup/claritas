@@ -167,10 +167,10 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
       <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-4 py-12 sm:px-6 lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-8 lg:py-20">
         <section className="order-2 space-y-10 lg:order-1">
           <div className="flex items-center gap-3">
-            <div className="relative h-12 w-12">
-              <div className="absolute -left-3 top-0 h-12 w-12 rounded-full bg-[#102739]" />
-              <div className="absolute left-1 top-0 h-12 w-12 rounded-full bg-[#1F3C52] opacity-90" />
-              <div className="absolute left-5 top-0 h-12 w-12 rounded-full bg-[#2D556F] opacity-80" />
+            <div className="relative h-12 w-[4.25rem] flex-none">
+              <div className="absolute left-0 top-0 h-12 w-12 rounded-full bg-[color:var(--brand-mark-1)]" />
+              <div className="absolute left-2.5 top-0 h-12 w-12 rounded-full bg-[color:var(--brand-mark-2)] opacity-90" />
+              <div className="absolute left-5 top-0 h-12 w-12 rounded-full bg-[color:var(--brand-mark-3)] opacity-80" />
             </div>
             <div>
               <div className="text-xs uppercase tracking-[0.35em] text-[color:var(--login-ink-soft)]">Claritas</div>

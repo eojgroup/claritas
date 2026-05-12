@@ -1,25 +1,49 @@
-export default function WebsiteColourPalettePreview() {
-  const colors = [
-    { name: "Dark Blue", hex: "#1F3A5F", text: "#F7F3EC" },
-    { name: "Dark Green", hex: "#2F5D50", text: "#F7F3EC" },
-    { name: "Grey", hex: "#5B6166", text: "#F7F3EC" },
-    { name: "Beige", hex: "#E8DDC8", text: "#222222" },
-    { name: "Brown", hex: "#7A5C46", text: "#F7F3EC" },
-    { name: "Off-white", hex: "#F7F3EC", text: "#222222" },
-    { name: "Text", hex: "#222222", text: "#F7F3EC" },
-  ];
+const palette = {
+  navy: "#14233A",
+  blue: "#2F4F73",
+  teal: "#2F6F73",
+  steel: "#687789",
+  platinum: "#D8E0EA",
+  cloud: "#F6F8FB",
+  graphite: "#172033",
+  bronze: "#9B6B3F",
+};
 
+const colors = [
+  { name: "Executive Navy", hex: palette.navy, text: palette.cloud, role: "Navigation, headers, primary structure" },
+  { name: "Boardroom Blue", hex: palette.blue, text: palette.cloud, role: "Data emphasis and selected states" },
+  { name: "Operational Teal", hex: palette.teal, text: palette.cloud, role: "Positive states, live signals, confirmed actions" },
+  { name: "Steel Gray", hex: palette.steel, text: palette.cloud, role: "Secondary text, labels, and inactive controls" },
+  { name: "Platinum", hex: palette.platinum, text: palette.graphite, role: "Borders, dividers, and quiet panels" },
+  { name: "Cloud", hex: palette.cloud, text: palette.graphite, role: "Page backgrounds and elevated surfaces" },
+  { name: "Graphite", hex: palette.graphite, text: palette.cloud, role: "Body copy and high-contrast text" },
+  { name: "Muted Bronze", hex: palette.bronze, text: palette.cloud, role: "Warnings, premium accents, and rare highlights" },
+];
+
+export default function WebsiteColourPalettePreview() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: "#F7F3EC", color: "#222222" }}>
+    <div className="min-h-screen" style={{ backgroundColor: palette.cloud, color: palette.graphite }}>
       <div className="mx-auto max-w-6xl space-y-10 p-8 md:p-12">
-        <header className="space-y-3">
-          <p className="text-sm uppercase tracking-[0.2em]" style={{ color: "#5B6166" }}>
-            Colour palette preview
-          </p>
-          <h1 className="text-4xl font-semibold md:text-5xl">Website palette visualisation</h1>
-          <p className="max-w-3xl text-base md:text-lg" style={{ color: "#5B6166" }}>
-            A visual reference for your selected tones across swatches, UI elements, and a sample landing section.
-          </p>
+        <header className="grid gap-6 lg:grid-cols-[1fr_18rem] lg:items-end">
+          <div className="space-y-3">
+            <p className="text-sm uppercase tracking-[0.2em]" style={{ color: palette.steel }}>
+              Enterprise colour system
+            </p>
+            <h1 className="text-4xl font-semibold md:text-5xl">Claritas palette preview</h1>
+            <p className="max-w-3xl text-base md:text-lg" style={{ color: palette.steel }}>
+              A restrained executive palette for dashboards, policy surfaces, analytics, and authentication flows.
+            </p>
+          </div>
+          <div className="rounded-lg border p-4" style={{ backgroundColor: "#FFFFFF", borderColor: palette.platinum }}>
+            <div className="text-xs uppercase tracking-[0.2em]" style={{ color: palette.steel }}>
+              Primary stack
+            </div>
+            <div className="mt-3 flex h-14 overflow-hidden rounded-md">
+              {[palette.navy, palette.blue, palette.teal, palette.steel, palette.bronze].map((hex) => (
+                <div key={hex} className="flex-1" style={{ backgroundColor: hex }} />
+              ))}
+            </div>
+          </div>
         </header>
 
         <section>
@@ -27,14 +51,16 @@ export default function WebsiteColourPalettePreview() {
             {colors.map((c) => (
               <div
                 key={c.hex}
-                className="overflow-hidden rounded-3xl border shadow-sm"
-                style={{ borderColor: "#E8DDC8", backgroundColor: "#FFFFFF" }}
+                className="overflow-hidden rounded-lg border shadow-sm"
+                style={{ borderColor: palette.platinum, backgroundColor: "#FFFFFF" }}
               >
-                <div className="h-32" style={{ backgroundColor: c.hex }} />
-                <div className="space-y-1 p-5">
+                <div className="grid h-32 place-items-center" style={{ backgroundColor: c.hex, color: c.text }}>
+                  <span className="font-mono text-sm font-semibold">{c.hex}</span>
+                </div>
+                <div className="space-y-2 p-5">
                   <div className="text-lg font-medium">{c.name}</div>
-                  <div className="font-mono text-sm" style={{ color: "#5B6166" }}>
-                    {c.hex}
+                  <div className="text-sm" style={{ color: palette.steel }}>
+                    {c.role}
                   </div>
                 </div>
               </div>
@@ -43,141 +69,115 @@ export default function WebsiteColourPalettePreview() {
         </section>
 
         <section className="grid items-start gap-8 lg:grid-cols-2">
-          <div className="rounded-[2rem] p-8 shadow-sm" style={{ backgroundColor: "#E8DDC8" }}>
-            <p className="mb-3 text-sm uppercase tracking-[0.2em]" style={{ color: "#5B6166" }}>
+          <div className="rounded-lg border p-8 shadow-sm" style={{ backgroundColor: "#FFFFFF", borderColor: palette.platinum }}>
+            <p className="mb-3 text-sm uppercase tracking-[0.2em]" style={{ color: palette.steel }}>
               Buttons and controls
             </p>
             <div className="mb-6 flex flex-wrap gap-4">
               <button
-                className="rounded-2xl px-5 py-3 text-sm font-medium shadow-sm"
-                style={{ backgroundColor: "#1F3A5F", color: "#F7F3EC" }}
+                className="rounded-lg px-5 py-3 text-sm font-medium shadow-sm"
+                style={{ backgroundColor: palette.navy, color: palette.cloud }}
                 type="button"
               >
                 Primary action
               </button>
               <button
-                className="rounded-2xl px-5 py-3 text-sm font-medium shadow-sm"
-                style={{ backgroundColor: "#2F5D50", color: "#F7F3EC" }}
+                className="rounded-lg px-5 py-3 text-sm font-medium shadow-sm"
+                style={{ backgroundColor: palette.teal, color: palette.cloud }}
+                type="button"
+              >
+                Approve signal
+              </button>
+              <button
+                className="rounded-lg border px-5 py-3 text-sm font-medium"
+                style={{ borderColor: palette.platinum, color: palette.blue, backgroundColor: palette.cloud }}
                 type="button"
               >
                 Secondary action
               </button>
-              <button
-                className="rounded-2xl px-5 py-3 text-sm font-medium shadow-sm"
-                style={{ backgroundColor: "#7A5C46", color: "#F7F3EC" }}
-                type="button"
-              >
-                Accent action
-              </button>
             </div>
-            <div className="rounded-2xl border p-4" style={{ backgroundColor: "#F7F3EC", borderColor: "#5B6166" }}>
-              <label className="mb-2 block text-sm" style={{ color: "#5B6166" }}>
-                Email address
+            <div className="rounded-lg border p-4" style={{ backgroundColor: palette.cloud, borderColor: palette.platinum }}>
+              <label className="mb-2 block text-sm" style={{ color: palette.steel }}>
+                Enterprise email
               </label>
               <div
-                className="rounded-xl px-4 py-3"
-                style={{ backgroundColor: "#FFFFFF", border: "1px solid #E8DDC8", color: "#222222" }}
+                className="rounded-md px-4 py-3"
+                style={{ backgroundColor: "#FFFFFF", border: `1px solid ${palette.platinum}`, color: palette.graphite }}
               >
                 name@company.com
               </div>
             </div>
           </div>
 
-          <div className="rounded-[2rem] border p-8 shadow-sm" style={{ backgroundColor: "#FFFFFF", border: "1px solid #E8DDC8" }}>
-            <p className="mb-3 text-sm uppercase tracking-[0.2em]" style={{ color: "#5B6166" }}>
-              Card styling
+          <div className="rounded-lg border p-8 shadow-sm" style={{ backgroundColor: "#FFFFFF", borderColor: palette.platinum }}>
+            <p className="mb-3 text-sm uppercase tracking-[0.2em]" style={{ color: palette.steel }}>
+              Dashboard surfaces
             </p>
-            <div className="space-y-4 rounded-3xl p-6" style={{ backgroundColor: "#F7F3EC" }}>
-              <div className="flex items-center justify-between">
-                <h3 className="text-xl font-semibold">Analytics overview</h3>
-                <span className="rounded-full px-3 py-1 text-xs" style={{ backgroundColor: "#2F5D50", color: "#F7F3EC" }}>
-                  Healthy
+            <div className="space-y-4 rounded-lg p-6" style={{ backgroundColor: palette.cloud }}>
+              <div className="flex items-center justify-between gap-4">
+                <h3 className="text-xl font-semibold">Risk operations</h3>
+                <span className="rounded-full px-3 py-1 text-xs" style={{ backgroundColor: "#E8F1F1", color: palette.teal }}>
+                  Stable
                 </span>
               </div>
-              <p style={{ color: "#5B6166" }}>
-                Use dark blue for structure, green for positive actions, beige for warmth, and brown sparingly for
-                emphasis.
+              <p style={{ color: palette.steel }}>
+                Use navy for hierarchy, teal for trusted outcomes, steel for context, and bronze only for rare attention.
               </p>
               <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-2xl p-4" style={{ backgroundColor: "#1F3A5F", color: "#F7F3EC" }}>
-                  <div className="text-xs opacity-80">Visitors</div>
+                <div className="rounded-lg p-4" style={{ backgroundColor: palette.navy, color: palette.cloud }}>
+                  <div className="text-xs opacity-80">Signals</div>
                   <div className="text-2xl font-semibold">24.8k</div>
                 </div>
-                <div className="rounded-2xl p-4" style={{ backgroundColor: "#2F5D50", color: "#F7F3EC" }}>
-                  <div className="text-xs opacity-80">CTR</div>
-                  <div className="text-2xl font-semibold">4.2%</div>
+                <div className="rounded-lg p-4" style={{ backgroundColor: palette.teal, color: palette.cloud }}>
+                  <div className="text-xs opacity-80">Health</div>
+                  <div className="text-2xl font-semibold">98%</div>
                 </div>
-                <div className="rounded-2xl p-4" style={{ backgroundColor: "#7A5C46", color: "#F7F3EC" }}>
-                  <div className="text-xs opacity-80">Leads</div>
-                  <div className="text-2xl font-semibold">312</div>
+                <div className="rounded-lg p-4" style={{ backgroundColor: palette.bronze, color: palette.cloud }}>
+                  <div className="text-xs opacity-80">Watch</div>
+                  <div className="text-2xl font-semibold">12</div>
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-[2rem] shadow-sm">
+        <section className="overflow-hidden rounded-lg border shadow-sm" style={{ borderColor: palette.platinum }}>
           <div className="grid lg:grid-cols-2">
-            <div className="p-10 md:p-12" style={{ backgroundColor: "#1F3A5F", color: "#F7F3EC" }}>
-              <p className="mb-4 text-sm uppercase tracking-[0.2em]" style={{ color: "#E8DDC8" }}>
-                Hero example
+            <div className="p-10 md:p-12" style={{ backgroundColor: palette.navy, color: palette.cloud }}>
+              <p className="mb-4 text-sm uppercase tracking-[0.2em]" style={{ color: "#B8C8D8" }}>
+                Application example
               </p>
-              <h2 className="mb-4 text-4xl font-semibold leading-tight">A grounded palette with authority and warmth</h2>
-              <p className="mb-6 text-base md:text-lg" style={{ color: "#F7F3EC" }}>
-                This combination feels professional without becoming cold, and premium without looking ornate.
+              <h2 className="mb-4 text-4xl font-semibold leading-tight">Designed for executive signal review</h2>
+              <p className="mb-6 text-base md:text-lg" style={{ color: "#D8E0EA" }}>
+                The palette keeps dense data interfaces calm, legible, and credible across light and dark surfaces.
               </p>
               <div className="flex flex-wrap gap-4">
                 <button
-                  className="rounded-2xl px-5 py-3 font-medium"
-                  style={{ backgroundColor: "#2F5D50", color: "#F7F3EC" }}
+                  className="rounded-lg px-5 py-3 font-medium"
+                  style={{ backgroundColor: palette.teal, color: palette.cloud }}
                   type="button"
                 >
-                  Get started
+                  Open dashboard
                 </button>
                 <button
-                  className="rounded-2xl border px-5 py-3 font-medium"
-                  style={{ borderColor: "#E8DDC8", color: "#E8DDC8" }}
+                  className="rounded-lg border px-5 py-3 font-medium"
+                  style={{ borderColor: "#B8C8D8", color: "#D8E0EA" }}
                   type="button"
                 >
-                  Learn more
+                  Review controls
                 </button>
               </div>
             </div>
-            <div className="p-10 md:p-12" style={{ backgroundColor: "#E8DDC8", color: "#222222" }}>
-              <div className="rounded-[2rem] bg-[#F7F3EC] p-8 shadow-sm">
-                <div className="mb-4 h-3 w-24 rounded-full" style={{ backgroundColor: "#7A5C46" }} />
+            <div className="p-10 md:p-12" style={{ backgroundColor: "#EEF3F8", color: palette.graphite }}>
+              <div className="rounded-lg bg-white p-8 shadow-sm">
+                <div className="mb-4 h-2 w-24 rounded-full" style={{ backgroundColor: palette.bronze }} />
                 <h3 className="mb-3 text-2xl font-semibold">Recommended usage</h3>
-                <ul className="space-y-3 text-sm md:text-base" style={{ color: "#5B6166" }}>
-                  <li>
-                    <span className="font-medium" style={{ color: "#222222" }}>
-                      Dark blue
-                    </span>{" "}
-                    for headers, navigation, hero sections
-                  </li>
-                  <li>
-                    <span className="font-medium" style={{ color: "#222222" }}>
-                      Dark green
-                    </span>{" "}
-                    for primary CTAs and positive states
-                  </li>
-                  <li>
-                    <span className="font-medium" style={{ color: "#222222" }}>
-                      Grey
-                    </span>{" "}
-                    for labels, borders, secondary text
-                  </li>
-                  <li>
-                    <span className="font-medium" style={{ color: "#222222" }}>
-                      Beige/off-white
-                    </span>{" "}
-                    for backgrounds and surfaces
-                  </li>
-                  <li>
-                    <span className="font-medium" style={{ color: "#222222" }}>
-                      Brown
-                    </span>{" "}
-                    for selective accents only
-                  </li>
+                <ul className="space-y-3 text-sm md:text-base" style={{ color: palette.steel }}>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Executive navy</span> for primary chrome and high-value headers</li>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Operational teal</span> for live status, health, and approved flows</li>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Boardroom blue</span> for data comparison and selected items</li>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Cloud and platinum</span> for readable surfaces and dividers</li>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Muted bronze</span> for limited warning or premium emphasis</li>
                 </ul>
               </div>
             </div>

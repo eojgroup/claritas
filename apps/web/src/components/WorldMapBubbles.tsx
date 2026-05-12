@@ -71,26 +71,26 @@ function markerPalette(
 ): { fill: string; stroke: string; halo: string } {
   const paletteMap = {
     news: isDark
-      ? { fill: "#60a5fa", stroke: "#bfdbfe", halo: "rgba(96,165,250,0.35)" }
-      : { fill: "#2563eb", stroke: "#1d4ed8", halo: "rgba(37,99,235,0.22)" },
+      ? { fill: "#7fa4dc", stroke: "#c7d7f0", halo: "rgba(127,164,220,0.3)" }
+      : { fill: "#4169a8", stroke: "#2f4f73", halo: "rgba(65,105,168,0.2)" },
     "weather-cold": isDark
-      ? { fill: "#38bdf8", stroke: "#bae6fd", halo: "rgba(56,189,248,0.3)" }
-      : { fill: "#0284c7", stroke: "#0369a1", halo: "rgba(2,132,199,0.2)" },
+      ? { fill: "#5eaec0", stroke: "#b8dfe6", halo: "rgba(94,174,192,0.28)" }
+      : { fill: "#2d7a8a", stroke: "#1f5d6a", halo: "rgba(45,122,138,0.18)" },
     "weather-mild": isDark
-      ? { fill: "#5eead4", stroke: "#99f6e4", halo: "rgba(45,212,191,0.28)" }
-      : { fill: "#0f766e", stroke: "#115e59", halo: "rgba(15,118,110,0.18)" },
+      ? { fill: "#70b8b4", stroke: "#bfe2df", halo: "rgba(112,184,180,0.25)" }
+      : { fill: "#2f6f73", stroke: "#244f53", halo: "rgba(47,111,115,0.17)" },
     "weather-hot": isDark
-      ? { fill: "#fbbf24", stroke: "#fde68a", halo: "rgba(251,191,36,0.32)" }
-      : { fill: "#d97706", stroke: "#b45309", halo: "rgba(217,119,6,0.22)" },
+      ? { fill: "#c59a5b", stroke: "#e8d1ad", halo: "rgba(197,154,91,0.28)" }
+      : { fill: "#9b6b3f", stroke: "#704d2f", halo: "rgba(155,107,63,0.18)" },
     positive: isDark
-      ? { fill: "#5eead4", stroke: "#99f6e4", halo: "rgba(45,212,191,0.3)" }
-      : { fill: "#0f766e", stroke: "#115e59", halo: "rgba(15,118,110,0.18)" },
+      ? { fill: "#70b8b4", stroke: "#bfe2df", halo: "rgba(112,184,180,0.26)" }
+      : { fill: "#2f6f73", stroke: "#244f53", halo: "rgba(47,111,115,0.17)" },
     negative: isDark
-      ? { fill: "#fb7185", stroke: "#fecdd3", halo: "rgba(251,113,133,0.32)" }
-      : { fill: "#be123c", stroke: "#9f1239", halo: "rgba(190,18,60,0.2)" },
+      ? { fill: "#d77a86", stroke: "#efc4c9", halo: "rgba(215,122,134,0.26)" }
+      : { fill: "#a8485b", stroke: "#7d3544", halo: "rgba(168,72,91,0.17)" },
     neutral: isDark
-      ? { fill: "#94a3b8", stroke: "#cbd5e1", halo: "rgba(148,163,184,0.28)" }
-      : { fill: "#64748b", stroke: "#475569", halo: "rgba(100,116,139,0.18)" },
+      ? { fill: "#98a7ba", stroke: "#d8e0ea", halo: "rgba(152,167,186,0.22)" }
+      : { fill: "#687789", stroke: "#4d5a69", halo: "rgba(104,119,137,0.16)" },
   } as const;
 
   return paletteMap[tone ?? "news"] ?? paletteMap.news;
@@ -161,7 +161,7 @@ export default memo(function WorldMapBubbles({
 
   const isDark = !!dark;
   const isCompact = variant === "compact";
-  const labelColor = isDark ? "#e2e8f0" : "#0f172a";
+  const labelColor = isDark ? "#f2f6fa" : "#172033";
   const legendPalette = markerPalette(markers[markers.length - 1]?.tone, isDark);
 
   const mapStyle = useMemo(() => {
@@ -251,26 +251,26 @@ export default memo(function WorldMapBubbles({
           const palette = markerPalette(marker.tone, isDark);
           const fill = isPrimary
             ? isDark
-              ? "#38bdf8"
-              : "#0ea5e9"
+              ? "#5eaec0"
+              : "#2d7a8a"
             : isSecondary
               ? isDark
-                ? "#fbbf24"
-                : "#f59e0b"
+                ? "#c59a5b"
+                : "#9b6b3f"
               : palette.fill;
           const stroke = isPrimary
             ? isDark
-              ? "#bae6fd"
-              : "#0369a1"
+              ? "#b8dfe6"
+              : "#1f5d6a"
             : isSecondary
               ? isDark
-                ? "#fde68a"
-                : "#b45309"
+                ? "#e8d1ad"
+                : "#704d2f"
               : palette.stroke;
           const halo = isPrimary
-            ? "rgba(14,165,233,0.28)"
+            ? "rgba(45,122,138,0.24)"
             : isSecondary
-              ? "rgba(245,158,11,0.28)"
+              ? "rgba(155,107,63,0.24)"
               : palette.halo;
           const size = rScale(marker.count) * 2;
 
@@ -330,8 +330,8 @@ export default memo(function WorldMapBubbles({
                       position: "absolute",
                       inset: -6,
                       borderRadius: 999,
-                      border: `1.5px solid ${isDark ? "#fde68a" : "#f59e0b"}`,
-                      boxShadow: `0 0 0 6px ${isDark ? "rgba(245,158,11,0.18)" : "rgba(245,158,11,0.14)"}`,
+                      border: `1.5px solid ${isDark ? "#e8d1ad" : "#9b6b3f"}`,
+                      boxShadow: `0 0 0 6px ${isDark ? "rgba(197,154,91,0.18)" : "rgba(155,107,63,0.14)"}`,
                     }}
                   />
                 )}
@@ -363,9 +363,9 @@ export default memo(function WorldMapBubbles({
         <div
           className="absolute bottom-3 left-3 rounded-2xl border px-3 py-2 text-[11px] shadow-sm"
           style={{
-            background: isDark ? "rgba(8,18,30,0.86)" : "rgba(255,255,255,0.88)",
+            background: isDark ? "rgba(13,23,36,0.88)" : "rgba(255,255,255,0.9)",
             color: labelColor,
-            borderColor: isDark ? "#334155" : "#cbd5e1",
+            borderColor: isDark ? "#29384c" : "#d8e0ea",
             backdropFilter: "blur(14px)",
           }}
         >
@@ -406,9 +406,9 @@ export default memo(function WorldMapBubbles({
           style={{
             left: tip.x,
             top: tip.y,
-            background: isDark ? "rgba(7,17,29,0.94)" : "rgba(255,255,255,0.96)",
+            background: isDark ? "rgba(13,23,36,0.94)" : "rgba(255,255,255,0.96)",
             color: labelColor,
-            borderColor: isDark ? "#334155" : "#cbd5e1",
+            borderColor: isDark ? "#29384c" : "#d8e0ea",
             maxWidth: 240,
             backdropFilter: "blur(14px)",
           }}
@@ -418,7 +418,7 @@ export default memo(function WorldMapBubbles({
           {tip.meta?.lines?.map((line, index) => (
             <div
               key={`${tip.country}-${index}`}
-              style={{ color: isDark ? "#b8c7d8" : "#5f6f82" }}
+              style={{ color: isDark ? "#b8c8d8" : "#687789" }}
             >
               {line}
             </div>
