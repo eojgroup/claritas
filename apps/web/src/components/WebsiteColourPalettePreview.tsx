@@ -1,22 +1,22 @@
 const palette = {
-  navy: "#14233A",
-  blue: "#2F4F73",
-  teal: "#2F6F73",
-  steel: "#687789",
-  platinum: "#D8E0EA",
-  cloud: "#F6F8FB",
-  graphite: "#172033",
-  bronze: "#9B6B3F",
+  navy: "#2F2923",
+  blue: "#736A60",
+  teal: "#A15F2B",
+  steel: "#776E65",
+  platinum: "#DED5C9",
+  cloud: "#F7F2EA",
+  graphite: "#28231E",
+  bronze: "#B57136",
 };
 
 const colors = [
-  { name: "Executive Navy", hex: palette.navy, text: palette.cloud, role: "Navigation, headers, primary structure" },
-  { name: "Boardroom Blue", hex: palette.blue, text: palette.cloud, role: "Data emphasis and selected states" },
-  { name: "Operational Teal", hex: palette.teal, text: palette.cloud, role: "Positive states, live signals, confirmed actions" },
-  { name: "Steel Gray", hex: palette.steel, text: palette.cloud, role: "Secondary text, labels, and inactive controls" },
-  { name: "Platinum", hex: palette.platinum, text: palette.graphite, role: "Borders, dividers, and quiet panels" },
-  { name: "Cloud", hex: palette.cloud, text: palette.graphite, role: "Page backgrounds and elevated surfaces" },
-  { name: "Graphite", hex: palette.graphite, text: palette.cloud, role: "Body copy and high-contrast text" },
+  { name: "Charcoal Brown", hex: palette.navy, text: palette.cloud, role: "Navigation, headers, primary structure" },
+  { name: "Warm Grey", hex: palette.blue, text: palette.cloud, role: "Data comparison and selected states" },
+  { name: "Burnt Orange", hex: palette.teal, text: palette.cloud, role: "Live signals, confirmed actions, and emphasis" },
+  { name: "Stone Grey", hex: palette.steel, text: palette.cloud, role: "Secondary text, labels, and inactive controls" },
+  { name: "Linen", hex: palette.platinum, text: palette.graphite, role: "Borders, dividers, and quiet panels" },
+  { name: "Warm Cloud", hex: palette.cloud, text: palette.graphite, role: "Page backgrounds and elevated surfaces" },
+  { name: "Graphite Brown", hex: palette.graphite, text: palette.cloud, role: "Body copy and high-contrast text" },
   { name: "Muted Bronze", hex: palette.bronze, text: palette.cloud, role: "Warnings, premium accents, and rare highlights" },
 ];
 
@@ -116,12 +116,12 @@ export default function WebsiteColourPalettePreview() {
             <div className="space-y-4 rounded-lg p-6" style={{ backgroundColor: palette.cloud }}>
               <div className="flex items-center justify-between gap-4">
                 <h3 className="text-xl font-semibold">Risk operations</h3>
-                <span className="rounded-full px-3 py-1 text-xs" style={{ backgroundColor: "#E8F1F1", color: palette.teal }}>
+                <span className="rounded-full px-3 py-1 text-xs" style={{ backgroundColor: "#EFE3D6", color: palette.teal }}>
                   Stable
                 </span>
               </div>
               <p style={{ color: palette.steel }}>
-                Use navy for hierarchy, teal for trusted outcomes, steel for context, and bronze only for rare attention.
+                Use charcoal for hierarchy, warm grey for context, and orange or bronze only for deliberate emphasis.
               </p>
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-lg p-4" style={{ backgroundColor: palette.navy, color: palette.cloud }}>
@@ -144,11 +144,11 @@ export default function WebsiteColourPalettePreview() {
         <section className="overflow-hidden rounded-lg border shadow-sm" style={{ borderColor: palette.platinum }}>
           <div className="grid lg:grid-cols-2">
             <div className="p-10 md:p-12" style={{ backgroundColor: palette.navy, color: palette.cloud }}>
-              <p className="mb-4 text-sm uppercase tracking-[0.2em]" style={{ color: "#B8C8D8" }}>
+              <p className="mb-4 text-sm uppercase tracking-[0.2em]" style={{ color: "#D5C6B7" }}>
                 Application example
               </p>
               <h2 className="mb-4 text-4xl font-semibold leading-tight">Designed for executive signal review</h2>
-              <p className="mb-6 text-base md:text-lg" style={{ color: "#D8E0EA" }}>
+              <p className="mb-6 text-base md:text-lg" style={{ color: "#E5D8CA" }}>
                 The palette keeps dense data interfaces calm, legible, and credible across light and dark surfaces.
               </p>
               <div className="flex flex-wrap gap-4">
@@ -161,22 +161,22 @@ export default function WebsiteColourPalettePreview() {
                 </button>
                 <button
                   className="rounded-lg border px-5 py-3 font-medium"
-                  style={{ borderColor: "#B8C8D8", color: "#D8E0EA" }}
+                  style={{ borderColor: "#D5C6B7", color: "#E5D8CA" }}
                   type="button"
                 >
                   Review controls
                 </button>
               </div>
             </div>
-            <div className="p-10 md:p-12" style={{ backgroundColor: "#EEF3F8", color: palette.graphite }}>
+            <div className="p-10 md:p-12" style={{ backgroundColor: "#EFE7DC", color: palette.graphite }}>
               <div className="rounded-lg bg-white p-8 shadow-sm">
                 <div className="mb-4 h-2 w-24 rounded-full" style={{ backgroundColor: palette.bronze }} />
                 <h3 className="mb-3 text-2xl font-semibold">Recommended usage</h3>
                 <ul className="space-y-3 text-sm md:text-base" style={{ color: palette.steel }}>
-                  <li><span className="font-medium" style={{ color: palette.graphite }}>Executive navy</span> for primary chrome and high-value headers</li>
-                  <li><span className="font-medium" style={{ color: palette.graphite }}>Operational teal</span> for live status, health, and approved flows</li>
-                  <li><span className="font-medium" style={{ color: palette.graphite }}>Boardroom blue</span> for data comparison and selected items</li>
-                  <li><span className="font-medium" style={{ color: palette.graphite }}>Cloud and platinum</span> for readable surfaces and dividers</li>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Charcoal brown</span> for primary chrome and high-value headers</li>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Burnt orange</span> for live status, health, and approved flows</li>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Warm grey</span> for data comparison and selected items</li>
+                  <li><span className="font-medium" style={{ color: palette.graphite }}>Warm cloud and linen</span> for readable surfaces and dividers</li>
                   <li><span className="font-medium" style={{ color: palette.graphite }}>Muted bronze</span> for limited warning or premium emphasis</li>
                 </ul>
               </div>
