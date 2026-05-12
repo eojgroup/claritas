@@ -257,15 +257,36 @@ const formatCompactNumber = (value?: number): string => {
 };
 
 const ANALYTICS_COLORS = [
-  "#0f766e",
-  "#0369a1",
-  "#b45309",
-  "#7c3aed",
-  "#be123c",
-  "#334155",
-  "#0ea5e9",
-  "#22c55e",
+  "var(--viz-news)",
+  "var(--viz-weather)",
+  "var(--viz-amber)",
+  "var(--viz-violet)",
+  "var(--viz-rose)",
+  "var(--shell-muted)",
+  "var(--viz-market)",
+  "var(--viz-positive)",
 ];
+
+const formatMetricNumber = (
+  value?: number | null,
+  options?: Intl.NumberFormatOptions,
+): string => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 1,
+    ...options,
+  }).format(value);
+};
+
+const formatSignedMetric = (
+  value?: number | null,
+  digits = 2,
+  suffix = "",
+): string => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  const abs = Math.abs(value).toFixed(digits);
+  return `${value >= 0 ? "+" : "-"}${abs}${suffix}`;
+};
 
 const OPENWEATHER_ICON_BASE = "https://openweathermap.org/img/wn";
 
@@ -790,9 +811,8 @@ export default function ClaritasDashboard() {
     };
   }, [authStatus, hasPaidAccess, marketEarningsWindowDays]);
 
-  const cardBase =
-    "rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm";
-  const chartGridColor = dark ? "#1f2937" : "#e2e8f0";
+  const cardBase = "app-card rounded-[1.4rem]";
+  const chartGridColor = "var(--viz-grid)";
 
   const todayLabel = useMemo(
     () =>
@@ -1336,6 +1356,7 @@ export default function ClaritasDashboard() {
       return countryStats.map((stat) => ({
         country: stat.country.toUpperCase(),
         count: stat.count,
+        tone: "news" as const,
         meta: {
           subtitle: `${stat.count} ${stat.count === 1 ? "story" : "stories"}`,
           lines: ["Aggregated over last 30 days"],
@@ -1356,6 +1377,7 @@ export default function ClaritasDashboard() {
       return {
         country,
         count: stat.count,
+        tone: "news" as const,
         meta: {
           subtitle: `${stat.count} ${stat.count === 1 ? "story" : "stories"}`,
           lines: [
@@ -1387,6 +1409,12 @@ export default function ClaritasDashboard() {
     return withTemp.map((w) => ({
       country: (w.country || "").toUpperCase(),
       count: Number(w.temp_c) - min + 1,
+      tone:
+        (w.temp_c ?? 0) >= 28
+          ? ("weather-hot" as const)
+          : (w.temp_c ?? 0) <= 8
+            ? ("weather-cold" as const)
+            : ("weather-mild" as const),
       meta: {
         subtitle: `Temp: ${w.temp_c ?? "—"}°C`,
         lines: ([
@@ -1794,6 +1822,12 @@ export default function ClaritasDashboard() {
       return {
         country: row.country,
         count: scaled,
+        tone:
+          row.avg_change > 0
+            ? ("positive" as const)
+            : row.avg_change < 0
+              ? ("negative" as const)
+              : ("neutral" as const),
         meta: {
           subtitle: `${row.market_code} · ${row.avg_change >= 0 ? "+" : ""}${row.avg_change.toFixed(2)}%`,
           lines: [
@@ -1911,6 +1945,89 @@ export default function ClaritasDashboard() {
       .sort((a, b) => (b.event_time || "").localeCompare(a.event_time || ""))
       .slice(0, 6);
   }, [news, relationCountry]);
+
+  const newsSummary = useMemo(() => {
+    const timelineDays = newsPageTimelineData.length;
+    const withImages = newsPageItems.filter((item) => Boolean(getNewsImageUrl(item))).length;
+    return {
+      stories: newsPageItems.length,
+      countries: filteredCountryStats.size,
+      dominantSource: newsPageSourceData[0]?.source ?? "—",
+      avgPerDay: timelineDays > 0 ? newsPageItems.length / timelineDays : newsPageItems.length,
+      withImages,
+    };
+  }, [filteredCountryStats.size, newsPageItems, newsPageSourceData, newsPageTimelineData.length]);
+
+  const newsCountryCoverageRows = useMemo(() => {
+    return Array.from(filteredCountryStats.entries())
+      .map(([country, value]) => {
+        const topSource = Array.from(value.sources.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([name]) => name)[0];
+        const weather = weatherByCountry.get(country);
+        const market = marketByCountry.get(country)?.[0];
+        return {
+          country,
+          count: value.count,
+          topSource: topSource ?? "—",
+          weather:
+            weather && typeof weather.temp_c === "number"
+              ? `${formatMetricNumber(weather.temp_c)}°C`
+              : "—",
+          topSymbol: market?.symbol ?? "—",
+          topMove:
+            typeof market?.percent_change === "number"
+              ? formatSignedMetric(market.percent_change, 2, "%")
+              : "—",
+        };
+      })
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [filteredCountryStats, marketByCountry, weatherByCountry]);
+
+  const weatherSummary = useMemo(() => {
+    const tempRows = weatherPageRows.filter((row) => typeof row.temp_c === "number");
+    const humidityRows = weatherPageRows.filter((row) => typeof row.humidity === "number");
+    const hottest = tempRows.reduce<CountryWeather | null>(
+      (current, row) =>
+        !current || (row.temp_c ?? -999) > (current.temp_c ?? -999) ? row : current,
+      null,
+    );
+    return {
+      observations: weatherPageRows.length,
+      avgTemp:
+        tempRows.length > 0
+          ? tempRows.reduce((sum, row) => sum + Number(row.temp_c), 0) / tempRows.length
+          : null,
+      avgHumidity:
+        humidityRows.length > 0
+          ? humidityRows.reduce((sum, row) => sum + Number(row.humidity), 0) / humidityRows.length
+          : null,
+      dominantCondition: weatherConditionChartData[0]?.condition ?? "—",
+      hottestCountry: hottest?.country?.toUpperCase() ?? "—",
+      hottestTemp: hottest?.temp_c ?? null,
+    };
+  }, [weatherConditionChartData, weatherPageRows]);
+
+  const marketSummary = useMemo(() => {
+    const gainers = marketPageRows.filter((quote) => (quote.percent_change ?? 0) > 0).length;
+    const losers = marketPageRows.filter((quote) => (quote.percent_change ?? 0) < 0).length;
+    const avgAbsMove =
+      marketPageRows.length > 0
+        ? marketPageRows.reduce(
+            (sum, quote) => sum + Math.abs(quote.percent_change ?? quote.change ?? 0),
+            0,
+          ) / marketPageRows.length
+        : null;
+    return {
+      quotes: marketPageRows.length,
+      gainers,
+      losers,
+      avgAbsMove,
+      topMover: marketPageRows[0] ?? null,
+      strongestBenchmark: marketIndexPerfData[0] ?? null,
+    };
+  }, [marketIndexPerfData, marketPageRows]);
 
   const activeRegions = useMemo(() => {
     const regions = new Set<string>();
@@ -2267,7 +2384,7 @@ export default function ClaritasDashboard() {
     if (!active || !payload || payload.length === 0) return null;
     const point = payload[0].payload;
     return (
-      <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-xs text-[color:var(--shell-ink)] shadow dark:bg-slate-900 dark:text-slate-100">
+      <div className="app-card rounded-lg px-3 py-2 text-xs text-[color:var(--shell-ink)]">
         <div className="font-semibold">{label}</div>
         <div>Total: {point.count}</div>
         {selectedCountry && (
@@ -2447,7 +2564,7 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <div className="app-safe-x min-h-[100dvh] w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)]">
+    <div className="app-shell app-safe-x min-h-[100dvh] w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)]">
       {mobileNavOpen && (
         <div className="app-safe-top app-safe-bottom fixed inset-0 z-40 lg:hidden">
           <div
@@ -2532,7 +2649,7 @@ export default function ClaritasDashboard() {
       )}
 
       <div className="flex min-h-screen">
-        <aside className="hidden lg:flex lg:w-72 lg:flex-col bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
+        <aside className="hidden lg:flex lg:w-[18.5rem] lg:flex-col border-r border-[color:var(--shell-sidebar-border)] bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
           <div className="px-6 pt-7 pb-5">
             <div className="flex items-center gap-3">
               <div className="relative h-11 w-11">
@@ -2605,9 +2722,9 @@ export default function ClaritasDashboard() {
         <div className="flex min-w-0 flex-1 flex-col min-h-0">
           <header
             ref={headerRef}
-            className="app-safe-top sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
+            className="app-safe-top sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/88 backdrop-blur-xl"
           >
-            <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 lg:px-8">
+            <div className="mx-auto flex w-full max-w-[1720px] flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
               <button
                 type="button"
                 onClick={() => setMobileNavOpen(true)}
@@ -2707,7 +2824,7 @@ export default function ClaritasDashboard() {
             </div>
           </header>
 
-          <main className="app-safe-bottom mx-auto w-full max-w-7xl flex-1 min-h-0 flex flex-col px-4 py-6 sm:px-6 lg:px-8">
+          <main className="app-safe-bottom mx-auto w-full max-w-[1720px] flex-1 min-h-0 flex flex-col px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
             {sessionNotice && (
               <div className="mb-6">
                 <div
@@ -2773,61 +2890,131 @@ export default function ClaritasDashboard() {
                     splitViewEnabled ? "flex-1 min-h-0 overflow-hidden" : ""
                   }`}
                 >
-                  <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-3xl dark:bg-emerald-900/40 dark:opacity-40" />
-                  <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-[color:var(--signal-sky-soft)] opacity-80 blur-3xl dark:bg-sky-900/40 dark:opacity-40" />
+                  <div className="pointer-events-none absolute -top-20 right-0 h-64 w-64 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-3xl" />
+                  <div className="pointer-events-none absolute -bottom-24 left-0 h-72 w-72 rounded-full bg-[color:var(--signal-sky-soft)] opacity-80 blur-3xl" />
 
                   <div
-                    className={`${cardBase} dashboard-panel flex flex-wrap items-center gap-3 px-4 py-3`}
+                    className="app-card-hero dashboard-panel rounded-[1.6rem] p-5 sm:p-6"
                     style={{ animationDelay: "0ms" }}
                   >
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                        Window
-                      </span>
-                      {DATA_WINDOW_OPTIONS.map((option) => {
-                        const active = dataWindowPreset === option.id;
-                        return (
-                          <button
-                            key={option.id}
-                            onClick={() => {
-                              setDataWindowPreset(option.id);
-                              setChartRange({});
-                            }}
-                            className={`rounded-full border px-3 py-1 transition ${
-                              active
-                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                          >
-                            {option.label}
-                          </button>
-                        );
-                      })}
+                    <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+                      <div className="max-w-3xl">
+                        <div className="text-[11px] uppercase tracking-[0.34em] text-[color:var(--shell-muted)]">
+                          Global signal desk
+                        </div>
+                        <div
+                          className="mt-3 text-3xl font-semibold text-[color:var(--shell-ink)] sm:text-4xl"
+                          style={{ fontFamily: "var(--font-display)" }}
+                        >
+                          One canvas for news flow, live weather, and market pressure.
+                        </div>
+                        <p className="mt-3 max-w-2xl text-sm text-[color:var(--shell-muted)] sm:text-base">
+                          The dashboard now keeps the visual story aligned: news maps show coverage, weather maps show temperature posture, and market views highlight directional pressure instead of generic counts.
+                        </p>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[32rem] xl:flex-1 xl:grid-cols-4">
+                        <div className="app-stat-card rounded-2xl p-4">
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            News pace
+                          </div>
+                          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                            {formatMetricNumber(newsSummary.avgPerDay)}
+                          </div>
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            Stories per active day
+                          </div>
+                        </div>
+                        <div className="app-stat-card rounded-2xl p-4">
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Weather mean
+                          </div>
+                          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                            {formatMetricNumber(weatherSummary.avgTemp)}°C
+                          </div>
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            Avg temp in current scope
+                          </div>
+                        </div>
+                        <div className="app-stat-card rounded-2xl p-4">
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Market breadth
+                          </div>
+                          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                            {marketSummary.gainers}/{marketSummary.losers}
+                          </div>
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            Gainers vs losers
+                          </div>
+                        </div>
+                        <div className="app-stat-card rounded-2xl p-4">
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Last sync
+                          </div>
+                          <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
+                            {latestEventLabel}
+                          </div>
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            Cross-feed update
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
-                      <span>Coverage: {newsCoverageLabel}</span>
-                      <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-ink)]">
-                        {newsLoadMode === "archive"
-                          ? `Archive (${news.length})`
-                          : `Recent (${news.length})`}
-                      </span>
-                      <button
-                        onClick={() =>
-                          void loadNewsData(
-                            newsLoadMode === "archive" ? "recent" : "archive",
-                          )
-                        }
-                        disabled={isLoadingNews}
-                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
-                      >
-                        {isLoadingNews
-                          ? "Loading…"
-                          : newsLoadMode === "archive"
-                            ? "Use recent"
-                            : "Load all data"}
-                      </button>
+                  </div>
+
+                  <div
+                    className="app-card-muted dashboard-panel rounded-[1.45rem] px-4 py-4"
+                    style={{ animationDelay: "40ms" }}
+                  >
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Window
+                        </span>
+                        {DATA_WINDOW_OPTIONS.map((option) => {
+                          const active = dataWindowPreset === option.id;
+                          return (
+                            <button
+                              key={option.id}
+                              onClick={() => {
+                                setDataWindowPreset(option.id);
+                                setChartRange({});
+                              }}
+                              className={`rounded-full border px-3 py-1 transition ${
+                                active
+                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                        <span>Coverage: {newsCoverageLabel}</span>
+                        <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-ink)]">
+                          {newsLoadMode === "archive"
+                            ? `Archive (${news.length})`
+                            : `Recent (${news.length})`}
+                        </span>
+                        <button
+                          onClick={() =>
+                            void loadNewsData(
+                              newsLoadMode === "archive" ? "recent" : "archive",
+                            )
+                          }
+                          disabled={isLoadingNews}
+                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
+                        >
+                          {isLoadingNews
+                            ? "Loading…"
+                            : newsLoadMode === "archive"
+                              ? "Use recent"
+                              : "Load all data"}
+                        </button>
+                      </div>
                     </div>
-                    <div className="w-full space-y-2 md:hidden">
+                    <div className="mt-4 grid gap-3 md:hidden">
                       <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-muted)]">
                         <Search className="h-4 w-4" />
                         <input
@@ -2858,7 +3045,7 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
                     {newsLoadError && (
-                      <div className="w-full text-xs text-rose-600">
+                      <div className="mt-3 w-full text-xs text-[color:var(--viz-negative)]">
                         Failed to refresh news data: {newsLoadError}
                       </div>
                     )}
@@ -2867,13 +3054,13 @@ export default function ClaritasDashboard() {
                   <section
                     className={`relative grid flex-1 min-h-0 gap-4 ${
                       splitViewEnabled
-                        ? "grid-cols-2 grid-rows-2 h-full overflow-hidden"
+                        ? "xl:grid-cols-12 xl:auto-rows-[minmax(17.5rem,1fr)] h-full overflow-hidden"
                         : "grid-cols-1"
                     }`}
                   >
                     <div
                       id="signal-map-feed"
-                      className={dashboardPanelClass}
+                      className={`${dashboardPanelClass} xl:col-span-7 xl:row-span-2`}
                       style={{ animationDelay: "0ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -3003,7 +3190,7 @@ export default function ClaritasDashboard() {
                       )}
                       <div className="relative flex-1 min-h-0 p-4">
                         <div
-                          className={`relative min-h-0 rounded-2xl overflow-hidden bg-[color:var(--shell-bg)] ${
+                          className={`app-map-frame relative min-h-0 ${
                             splitViewEnabled
                               ? "h-full"
                               : "h-[56vh] max-h-[560px]"
@@ -3021,10 +3208,15 @@ export default function ClaritasDashboard() {
                             pinnedCountry={pinnedCountry}
                             scale={mapScale}
                             showLabels={false}
+                            legendLabel={
+                              mapMode === "news"
+                                ? "Story concentration"
+                                : "Relative temperature"
+                            }
                           />
                         </div>
                         {pinnedCountry && (
-                          <div className="absolute left-4 top-4 w-56 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/95 p-3 text-xs shadow-sm dark:bg-slate-900/90 dark:text-slate-100">
+                          <div className="app-card-muted absolute left-4 top-4 w-56 rounded-2xl p-3 text-xs">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Pinned
                             </div>
@@ -3191,7 +3383,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={dashboardPanelClass}
+                      className={`${dashboardPanelClass} xl:col-span-5 xl:row-span-2`}
                       style={{ animationDelay: "80ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -3244,7 +3436,7 @@ export default function ClaritasDashboard() {
                         {listMode === "news" ? (
                           <div
                             ref={feedRef}
-                            className="h-full overflow-y-auto p-4 space-y-3"
+                            className="app-scroll-panel h-full overflow-y-auto p-4 space-y-3"
                           >
                             {filteredNews.length === 0 && (
                               <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
@@ -3290,14 +3482,14 @@ export default function ClaritasDashboard() {
                                   key={n.id}
                                   className={`rounded-xl border p-3 ${
                                     isPrimary
-                                      ? "border-emerald-200 bg-emerald-50/60"
+                                      ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                       : isSecondary
-                                        ? "border-amber-200 bg-amber-50/60"
+                                        ? "border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)]"
                                         : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
                                   }`}
                                 >
                                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                                    <div className="relative h-20 w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-slate-100 flex-none shrink-0">
+                                    <div className="relative h-20 w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)] flex-none shrink-0">
                                       {img ? (
                                         <img
                                           src={img}
@@ -3324,22 +3516,22 @@ export default function ClaritasDashboard() {
                                       </a>
                                       <div className="text-xs text-[color:var(--shell-muted)] mt-2 flex items-center gap-2 flex-wrap">
                                         {sourceLabel && (
-                                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700">
+                                          <span className="rounded-full border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
                                             {sourceLabel}
                                           </span>
                                         )}
                                         {n.country_iso2 && (
-                                          <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
+                                          <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-muted)]">
                                             {n.country_iso2}
                                           </span>
                                         )}
                                         {isPrimary && (
-                                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                          <span className="rounded-full border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
                                             Primary
                                           </span>
                                         )}
                                         {isSecondary && (
-                                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                                          <span className="rounded-full border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
                                             Compare
                                           </span>
                                         )}
@@ -3352,7 +3544,7 @@ export default function ClaritasDashboard() {
                                         )}
                                       </div>
                                       {n.summary && (
-                                        <p className="text-sm text-slate-600 mt-2 line-clamp-2">
+                                        <p className="mt-2 line-clamp-2 text-sm text-[color:var(--shell-muted)]">
                                           {n.summary}
                                         </p>
                                       )}
@@ -3363,7 +3555,8 @@ export default function ClaritasDashboard() {
                             })}
                           </div>
                         ) : listMode === "weather" ? (
-                          <div className="h-full overflow-y-auto p-4 space-y-4">
+                          <div className="app-scroll-panel h-full overflow-y-auto p-4 space-y-4">
+                            
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <label className="text-[color:var(--shell-muted)]">
                                 Min temp (°C)
@@ -3408,14 +3601,14 @@ export default function ClaritasDashboard() {
                                   className="py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
                                 >
                                   <div className="flex items-center gap-3">
-                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
+                                    <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-muted)]">
                                       {(w.country || "").toUpperCase()}
                                     </span>
-                                    <span className="text-slate-700 text-sm">
+                                    <span className="text-sm text-[color:var(--shell-ink)]">
                                       {new Date(w.observed_at).toLocaleString()}
                                     </span>
                                   </div>
-                                  <div className="text-sm text-slate-800 flex flex-wrap items-center gap-4">
+                                  <div className="flex flex-wrap items-center gap-4 text-sm text-[color:var(--shell-ink)]">
                                     <span title="Temperature">
                                       🌡️ {w.temp_c ?? "—"}°C
                                     </span>
@@ -3423,7 +3616,7 @@ export default function ClaritasDashboard() {
                                       💧 {w.humidity ?? "—"}%
                                     </span>
                                     {w.weather_main && (
-                                      <span className="text-slate-600">
+                                      <span className="text-[color:var(--shell-muted)]">
                                         {w.weather_main}
                                       </span>
                                     )}
@@ -3433,7 +3626,8 @@ export default function ClaritasDashboard() {
                             </ul>
                           </div>
                         ) : (
-                          <div className="h-full overflow-y-auto p-4 space-y-4">
+                          <div className="app-scroll-panel h-full overflow-y-auto p-4 space-y-4">
+                            
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <div className="text-[color:var(--shell-muted)]">
                                 Real-time quotes from Finnhub
@@ -3461,7 +3655,7 @@ export default function ClaritasDashboard() {
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="flex flex-col">
                                         <div className="flex items-center gap-2">
-                                          <span className="px-2 py-0.5 rounded-full bg-slate-100 border border-[color:var(--shell-border)] text-slate-700">
+                                          <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-muted)]">
                                             {quote.symbol}
                                           </span>
                                           {quote.exchange && (
@@ -3515,7 +3709,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={dashboardPanelClass}
+                      className={`${dashboardPanelClass} xl:col-span-4`}
                       style={{ animationDelay: "160ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -3534,7 +3728,7 @@ export default function ClaritasDashboard() {
                       <div className="relative flex-1 min-h-0 p-4">
                         <div className="pointer-events-none absolute -right-10 top-6 h-24 w-24 rounded-full bg-[color:var(--signal-emerald-soft)] opacity-70 blur-2xl" />
                         <div className="relative grid grid-cols-2 gap-3">
-                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                          <div className="app-stat-card rounded-2xl p-3">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Live signals
                             </div>
@@ -3545,7 +3739,7 @@ export default function ClaritasDashboard() {
                               Stories & alerts
                             </div>
                           </div>
-                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                          <div className="app-stat-card rounded-2xl p-3">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Active regions
                             </div>
@@ -3556,7 +3750,7 @@ export default function ClaritasDashboard() {
                               Countries tracked
                             </div>
                           </div>
-                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                          <div className="app-stat-card rounded-2xl p-3">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Market quotes
                             </div>
@@ -3567,7 +3761,7 @@ export default function ClaritasDashboard() {
                               Realtime snapshots
                             </div>
                           </div>
-                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/80 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-950/50">
+                          <div className="app-stat-card rounded-2xl p-3">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Last sync
                             </div>
@@ -3578,7 +3772,7 @@ export default function ClaritasDashboard() {
                               Combined feeds
                             </div>
                           </div>
-                          <div className="col-span-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-3 flex items-center justify-between">
+                          <div className="col-span-2 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-3 flex items-center justify-between">
                             <div>
                               <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                                 Focus
@@ -3600,7 +3794,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={dashboardPanelClass}
+                      className={`${dashboardPanelClass} xl:col-span-8`}
                       style={{ animationDelay: "240ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -3803,7 +3997,7 @@ export default function ClaritasDashboard() {
                     onClick={() => setMapExpanded(false)}
                   >
                     <div
-                      className="w-full max-w-6xl rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-2xl"
+                      className="app-card w-full max-w-6xl rounded-[1.6rem]"
                       onClick={(event) => event.stopPropagation()}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -3827,7 +4021,7 @@ export default function ClaritasDashboard() {
                         </button>
                       </div>
                       <div className="p-4">
-                        <div className="h-[min(74vh,760px)] min-h-[20rem] overflow-hidden rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)]">
+                        <div className="app-map-frame h-[min(74vh,760px)] min-h-[20rem]">
                           <WorldMapBubbles
                             variant="default"
                             data={
@@ -3839,6 +4033,11 @@ export default function ClaritasDashboard() {
                             secondaryCountry={comparisonCountry}
                             pinnedCountry={pinnedCountry}
                             scale={mapScale}
+                            legendLabel={
+                              mapMode === "news"
+                                ? "Story concentration"
+                                : "Relative temperature"
+                            }
                           />
                         </div>
                       </div>
@@ -3861,7 +4060,7 @@ export default function ClaritasDashboard() {
                   </div>
                 )}
 
-                <details className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/70 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
+                <details className="app-card-muted rounded-2xl p-4">
                   <summary className="cursor-pointer text-sm font-semibold text-[color:var(--shell-ink)]">
                     More panels
                   </summary>
@@ -3885,51 +4084,51 @@ export default function ClaritasDashboard() {
                           </div>
                         )}
                         {selectedCountry && (
-                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-emerald-700">
+                          <div className="rounded-xl border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] p-3">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-ink)]">
                               Primary
                             </div>
-                            <div className="text-base font-semibold text-emerald-900">
+                            <div className="text-base font-semibold text-[color:var(--shell-ink)]">
                               {selectedMeta?.name
                                 ? `${selectedMeta.name} (${selectedCountry.toUpperCase()})`
                                 : selectedCountry.toUpperCase()}
                             </div>
-                            <div className="text-xs text-emerald-700">
+                            <div className="text-xs text-[color:var(--shell-muted)]">
                               Region: {selectedMeta?.region ?? "—"}
                             </div>
-                            <div className="text-xs text-emerald-700">
+                            <div className="text-xs text-[color:var(--shell-muted)]">
                               Subregion: {selectedMeta?.subregion ?? "—"}
                             </div>
-                            <div className="text-xs text-emerald-700">
+                            <div className="text-xs text-[color:var(--shell-muted)]">
                               Stories in range:{" "}
                               {selectedCountryStats?.count ?? 0}
                             </div>
-                            <div className="text-xs text-emerald-700">
+                            <div className="text-xs text-[color:var(--shell-muted)]">
                               Top source: {selectedTopSource ?? "—"}
                             </div>
                           </div>
                         )}
                         {comparisonCountry && (
-                          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-amber-700">
+                          <div className="rounded-xl border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] p-3">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-ink)]">
                               Compare
                             </div>
-                            <div className="text-base font-semibold text-amber-900">
+                            <div className="text-base font-semibold text-[color:var(--shell-ink)]">
                               {comparisonMeta?.name
                                 ? `${comparisonMeta.name} (${comparisonCountry.toUpperCase()})`
                                 : comparisonCountry.toUpperCase()}
                             </div>
-                            <div className="text-xs text-amber-700">
+                            <div className="text-xs text-[color:var(--shell-muted)]">
                               Region: {comparisonMeta?.region ?? "—"}
                             </div>
-                            <div className="text-xs text-amber-700">
+                            <div className="text-xs text-[color:var(--shell-muted)]">
                               Subregion: {comparisonMeta?.subregion ?? "—"}
                             </div>
-                            <div className="text-xs text-amber-700">
+                            <div className="text-xs text-[color:var(--shell-muted)]">
                               Stories in range:{" "}
                               {comparisonCountryStats?.count ?? 0}
                             </div>
-                            <div className="text-xs text-amber-700">
+                            <div className="text-xs text-[color:var(--shell-muted)]">
                               Top source: {comparisonTopSource ?? "—"}
                             </div>
                           </div>
@@ -4063,7 +4262,7 @@ export default function ClaritasDashboard() {
             {activeView === "news" && (
               <div className="space-y-4">
                 <section
-                  className={`${cardBase} flex flex-wrap items-center gap-3 px-4 py-3`}
+                  className="app-card-muted flex flex-wrap items-center gap-3 rounded-[1.45rem] px-4 py-3"
                 >
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -4146,6 +4345,53 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
+                <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Stories
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {newsSummary.stories}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Items after filters
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Coverage
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {newsSummary.countries}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Countries represented
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Dominant source
+                    </div>
+                    <div className="mt-2 truncate text-base font-semibold text-[color:var(--shell-ink)]">
+                      {newsSummary.dominantSource}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Highest share in scope
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Visual richness
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {newsSummary.withImages}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Stories with imagery
+                    </div>
+                  </div>
+                </section>
+
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
                   <div className={`${cardBase} overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -4157,7 +4403,7 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
                     <div className="h-[min(56vh,520px)] min-h-[20rem] p-3">
-                      <div className="h-full overflow-hidden rounded-2xl border border-[color:var(--shell-border)]">
+                      <div className="app-map-frame">
                         <WorldMapBubbles
                           variant="default"
                           data={mapBubbleData}
@@ -4170,6 +4416,7 @@ export default function ClaritasDashboard() {
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
                           scale={mapScale}
+                          legendLabel="Story concentration"
                         />
                       </div>
                     </div>
@@ -4184,7 +4431,7 @@ export default function ClaritasDashboard() {
                         Filtered story stream
                       </div>
                     </div>
-                    <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
+                    <div className="app-scroll-panel max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
                       {newsPageItems.length === 0 && (
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
                           No stories match the current filters.
@@ -4201,12 +4448,12 @@ export default function ClaritasDashboard() {
                             key={item.id}
                             className={`w-full rounded-xl border px-3 py-3 text-left transition ${
                               selected
-                                ? "border-emerald-200 bg-emerald-50/70"
+                                ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                              <div className="relative h-20 w-28 overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-slate-100/50 flex-none">
+                              <div className="relative h-20 w-28 overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)] flex-none">
                                 {img && (
                                   <img
                                     src={img}
@@ -4229,7 +4476,7 @@ export default function ClaritasDashboard() {
                                 </a>
                                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
                                   {sourceLabel && (
-                                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-700">
+                                    <span className="rounded-full border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
                                       {sourceLabel}
                                     </span>
                                   )}
@@ -4315,14 +4562,14 @@ export default function ClaritasDashboard() {
                   <div className={`${cardBase} overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                        Index map
+                        Market context map
                       </div>
                       <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                        Relative index volatility by country
+                        Directional market pressure around the story footprint
                       </div>
                     </div>
                     <div className="h-[min(48vh,420px)] min-h-[18rem] p-3">
-                      <div className="h-full overflow-hidden rounded-2xl border border-[color:var(--shell-border)]">
+                      <div className="app-map-frame">
                         <WorldMapBubbles
                           data={marketIndexMapData}
                           onSelect={(iso) => setSelectedCountry(iso)}
@@ -4331,6 +4578,7 @@ export default function ClaritasDashboard() {
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
                           scale="linear"
+                          legendLabel="Market pressure"
                         />
                       </div>
                     </div>
@@ -4338,52 +4586,47 @@ export default function ClaritasDashboard() {
 
                   <div className="space-y-4">
                     <section className={`${cardBase} p-4`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Market status
-                          </div>
-                          <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                            {marketStatusSummary.open}/{marketStatusSummary.total} tracked exchanges open
-                          </div>
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Coverage matrix
                         </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void fetchMarketStatus({ refresh: true })
-                              .then(setMarketStatusRows)
-                              .catch(() => setMarketStatusRows([]))
-                          }
-                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
-                        >
-                          Refresh
-                        </button>
+                        <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                          Countries carrying the strongest story load right now
+                        </div>
                       </div>
-                      <div className="mt-3 max-h-44 space-y-2 overflow-y-auto pr-1">
-                        {marketStatusDisplayRows.map((status) => (
-                          <div
-                            key={`mk-status-${status.exchange}`}
-                            className="flex items-center justify-between rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs"
-                          >
-                            <span className="font-medium text-[color:var(--shell-ink)]">{status.exchange}</span>
-                            <span
-                              className={
-                                status.is_open === true
-                                  ? "text-emerald-600"
-                                  : status.is_open === false
-                                    ? "text-rose-600"
-                                    : "text-[color:var(--shell-muted)]"
-                              }
+                      <div className="app-scroll-panel mt-3 max-h-52 overflow-y-auto pr-1">
+                        <div className="space-y-2">
+                          {newsCountryCoverageRows.map((row) => (
+                            <button
+                              key={`news-country-${row.country}`}
+                              type="button"
+                              onClick={() => setSelectedCountry(row.country)}
+                              className="w-full rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-left text-xs transition hover:border-[color:var(--shell-ink)]"
                             >
-                              {status.is_open === true ? "Open" : status.is_open === false ? "Closed" : "Unknown"}
-                            </span>
-                          </div>
-                        ))}
-                        {marketStatusDisplayRows.length === 0 && (
-                          <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
-                            No exchange status rows available.
-                          </div>
-                        )}
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="font-semibold text-[color:var(--shell-ink)]">
+                                  {row.country}
+                                </span>
+                                <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-muted)]">
+                                  {row.count} stories
+                                </span>
+                              </div>
+                              <div className="mt-1 text-[color:var(--shell-muted)]">
+                                Top source: {row.topSource}
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 text-[color:var(--shell-muted)]">
+                                <span>Weather {row.weather}</span>
+                                <span>Top symbol {row.topSymbol}</span>
+                                <span>{row.topMove}</span>
+                              </div>
+                            </button>
+                          ))}
+                          {newsCountryCoverageRows.length === 0 && (
+                            <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
+                              No country clusters are available for the current filters.
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </section>
 
@@ -4391,10 +4634,10 @@ export default function ClaritasDashboard() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Earnings calendar
+                            Event calendar
                           </div>
                           <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                            Upcoming events {selectedSymbol ? `for ${selectedSymbol}` : "(watch scope)"}
+                            Earnings and catalysts linked to the current market context
                           </div>
                         </div>
                         <div className="inline-flex rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
@@ -4414,7 +4657,7 @@ export default function ClaritasDashboard() {
                           ))}
                         </div>
                       </div>
-                      <div className="mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
+                      <div className="app-scroll-panel mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
                         {marketEarningsRows.slice(0, 24).map((event, idx) => (
                           <div
                             key={`mk-earnings-${event.symbol}-${event.date}-${idx}`}
@@ -4448,7 +4691,7 @@ export default function ClaritasDashboard() {
 
                 <section className={`${cardBase} p-4`}>
                   <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                    Correlation
+                    Cross-signal context
                   </div>
                   <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
                     {relationCountry
@@ -4513,7 +4756,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "weather" && (
               <div className="space-y-4">
-                <section className={`${cardBase} flex flex-wrap items-center gap-3 px-4 py-3`}>
+                <section className="app-card-muted flex flex-wrap items-center gap-3 rounded-[1.45rem] px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Weather workspace
@@ -4598,6 +4841,53 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
+                <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Observations
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {weatherSummary.observations}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Current weather rows
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Avg temp
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {formatMetricNumber(weatherSummary.avgTemp)}°C
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Across active filter set
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Avg humidity
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {formatMetricNumber(weatherSummary.avgHumidity)}%
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Moisture posture
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Hottest
+                    </div>
+                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
+                      {weatherSummary.hottestCountry}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      {formatMetricNumber(weatherSummary.hottestTemp)}°C · {weatherSummary.dominantCondition}
+                    </div>
+                  </div>
+                </section>
+
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
                   <div className={`${cardBase} overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -4609,7 +4899,7 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
                     <div className="h-[min(56vh,520px)] min-h-[20rem] p-3">
-                      <div className="h-full overflow-hidden rounded-2xl border border-[color:var(--shell-border)]">
+                      <div className="app-map-frame">
                         <WorldMapBubbles
                           variant="default"
                           data={mapWeatherData}
@@ -4619,6 +4909,7 @@ export default function ClaritasDashboard() {
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
                           scale="linear"
+                          legendLabel="Relative temperature"
                         />
                       </div>
                     </div>
@@ -4633,7 +4924,7 @@ export default function ClaritasDashboard() {
                         Live observations
                       </div>
                     </div>
-                    <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
+                    <div className="app-scroll-panel max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
                       {weatherPageRows.map((entry, index) => {
                         const iso = entry.country?.toUpperCase();
                         const selected = iso && selectedCountry?.toUpperCase() === iso;
@@ -4645,7 +4936,7 @@ export default function ClaritasDashboard() {
                             key={`${entry.country}-${entry.observed_at}-${index}`}
                             className={`w-full rounded-xl border px-3 py-2 text-left text-xs transition ${
                               selected
-                                ? "border-emerald-200 bg-emerald-50/70"
+                                ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
@@ -4668,7 +4959,7 @@ export default function ClaritasDashboard() {
                                 )}
                                 <span>{iso ?? "—"}</span>
                               </button>
-                              <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-sky-700">
+                              <span className="rounded-full border border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
                                 {source}
                               </span>
                               {weatherLink && (
@@ -4835,7 +5126,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "markets" && (
               <div className="space-y-4">
-                <section className={`${cardBase} flex flex-wrap items-center gap-3 px-4 py-3`}>
+                <section className="app-card-muted flex flex-wrap items-center gap-3 rounded-[1.45rem] px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Market workspace
@@ -4934,6 +5225,170 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
+                <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Quotes
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {marketSummary.quotes}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Symbols in scope
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Breadth
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {marketSummary.gainers}/{marketSummary.losers}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Gainers vs losers
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Avg move
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {formatMetricNumber(marketSummary.avgAbsMove)}%
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Absolute move per symbol
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Strongest regime
+                    </div>
+                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
+                      {marketSummary.strongestBenchmark?.market_code ?? "—"}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      {marketSummary.strongestBenchmark
+                        ? formatSignedMetric(marketSummary.strongestBenchmark.avg_change, 2, "%")
+                        : "Awaiting benchmark mix"}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
+                  <section className={`${cardBase} p-4`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Exchange status
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                          {marketStatusSummary.open}/{marketStatusSummary.total} tracked exchanges open
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void fetchMarketStatus({ refresh: true })
+                            .then(setMarketStatusRows)
+                            .catch(() => setMarketStatusRows([]))
+                        }
+                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    <div className="app-scroll-panel mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
+                      {marketStatusDisplayRows.map((status) => (
+                        <div
+                          key={`market-status-${status.exchange}`}
+                          className="flex items-center justify-between rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs"
+                        >
+                          <span className="font-medium text-[color:var(--shell-ink)]">
+                            {status.exchange}
+                          </span>
+                          <span
+                            className={
+                              status.is_open === true
+                                ? "text-emerald-600"
+                                : status.is_open === false
+                                  ? "text-rose-600"
+                                  : "text-[color:var(--shell-muted)]"
+                            }
+                          >
+                            {status.is_open === true
+                              ? "Open"
+                              : status.is_open === false
+                                ? "Closed"
+                                : "Unknown"}
+                          </span>
+                        </div>
+                      ))}
+                      {marketStatusDisplayRows.length === 0 && (
+                        <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
+                          No exchange status rows available.
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className={`${cardBase} p-4`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Earnings calendar
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                          Upcoming events {selectedSymbol ? `for ${selectedSymbol}` : "(watch scope)"}
+                        </div>
+                      </div>
+                      <div className="inline-flex rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
+                        {[7, 14, 30].map((days) => (
+                          <button
+                            key={`market-earnings-window-${days}`}
+                            type="button"
+                            onClick={() => setMarketEarningsWindowDays(days as 7 | 14 | 30)}
+                            className={`rounded-full px-2 py-0.5 ${
+                              marketEarningsWindowDays === days
+                                ? "bg-[color:var(--shell-ink)] text-[color:var(--shell-bg)]"
+                                : "text-[color:var(--shell-muted)]"
+                            }`}
+                          >
+                            {days}d
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="app-scroll-panel mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
+                      {marketEarningsRows.slice(0, 24).map((event, idx) => (
+                        <div
+                          key={`market-earnings-${event.symbol}-${event.date}-${idx}`}
+                          className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedSymbol(event.symbol)}
+                              className="font-semibold text-[color:var(--shell-ink)] hover:underline"
+                            >
+                              {event.symbol}
+                            </button>
+                            <span className="text-[color:var(--shell-muted)]">{event.date ?? "—"}</span>
+                          </div>
+                          <div className="mt-1 text-[color:var(--shell-muted)]">
+                            EPS {event.eps_actual ?? "—"} / {event.eps_estimate ?? "—"} · Rev{" "}
+                            {event.revenue_actual ?? "—"} / {event.revenue_estimate ?? "—"}
+                          </div>
+                        </div>
+                      ))}
+                      {marketEarningsRows.length === 0 && (
+                        <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
+                          No earnings events in the selected window.
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </section>
+
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.08fr_0.92fr]">
                   <div className={`${cardBase} overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -4944,7 +5399,7 @@ export default function ClaritasDashboard() {
                         Select a symbol to relate with weather and news
                       </div>
                     </div>
-                    <div className="max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
+                    <div className="app-scroll-panel max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
                       {marketPageRows.map((quote) => {
                         const selected = selectedSymbol?.toUpperCase() === quote.symbol.toUpperCase();
                         const isPositive = (quote.change ?? 0) > 0;
@@ -4963,7 +5418,7 @@ export default function ClaritasDashboard() {
                             }}
                             className={`w-full rounded-xl border px-3 py-2 text-left transition ${
                               selected
-                                ? "border-emerald-200 bg-emerald-50/70"
+                                ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
@@ -4998,11 +5453,11 @@ export default function ClaritasDashboard() {
                                     </div>
                                   )}
                                   <div className="mt-1 flex flex-wrap items-center gap-1">
-                                    <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] text-sky-700">
+                                    <span className="inline-flex rounded-full border border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] px-2 py-0.5 text-[10px] text-[color:var(--shell-ink)]">
                                       {source}
                                     </span>
                                     {market.name && (
-                                      <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-700">
+                                      <span className="inline-flex rounded-full border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] px-2 py-0.5 text-[10px] text-[color:var(--shell-ink)]">
                                         {market.name}
                                       </span>
                                     )}

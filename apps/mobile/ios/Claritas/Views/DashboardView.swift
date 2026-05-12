@@ -889,7 +889,11 @@ struct NewsWorkspaceView: View {
                                     .autocorrectionDisabled()
                             }
                             .padding(10)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                            .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+                            )
 
                             HStack(spacing: 10) {
                                 Picker("Source", selection: $sourceFilter) {
@@ -1114,7 +1118,11 @@ struct WeatherWorkspaceView: View {
                                     .autocorrectionDisabled()
                             }
                             .padding(10)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                            .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+                            )
 
                             HStack(spacing: 10) {
                                 Picker("Condition", selection: $conditionFilter) {
@@ -1446,7 +1454,11 @@ struct MarketsWorkspaceView: View {
                                     .autocorrectionDisabled()
                             }
                             .padding(10)
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                            .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+                            )
 
                             HStack(spacing: 10) {
                                 Picker("Exchange", selection: $exchangeFilter) {
@@ -1654,7 +1666,11 @@ struct MarketsWorkspaceView: View {
                                         }
                                     }
                                     .padding(10)
-                                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                                    .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+                                    )
                                 }
                             }
                         }
@@ -2500,6 +2516,7 @@ let legalPolicies: [LegalPolicy] = [
 
 struct PolicyDetailView: View {
     let policy: LegalPolicy
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollView {
@@ -2531,7 +2548,7 @@ struct PolicyDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle(policy.title)
-        .background(Color(.systemGroupedBackground))
+        .background(ClaritasPalette.shellBackground(for: colorScheme))
     }
 }
 

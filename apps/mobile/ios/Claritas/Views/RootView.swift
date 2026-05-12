@@ -327,6 +327,7 @@ private struct AdminWorkspaceView: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var panel: Panel = .ingestion
 
     var body: some View {
@@ -353,12 +354,12 @@ private struct AdminWorkspaceView: View {
                         .pickerStyle(.segmented)
                         .padding(6)
                         .background(
-                            Color(.systemBackground).opacity(0.86),
+                            ClaritasPalette.shellSurface(for: colorScheme),
                             in: RoundedRectangle(cornerRadius: 14)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                         )
 
                         if panel == .ingestion {
@@ -1937,6 +1938,7 @@ private struct AdminUserManagementPanelView: View {
 
 private struct AdminCard<Content: View>: View {
     @ViewBuilder var content: Content
+    @Environment(\.colorScheme) private var colorScheme
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -1947,10 +1949,10 @@ private struct AdminCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(Color(.systemBackground).opacity(0.94), in: RoundedRectangle(cornerRadius: 16))
+        .background(ClaritasPalette.shellRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
         )
     }
 }

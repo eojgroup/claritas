@@ -1,33 +1,56 @@
 @import "tailwindcss";
 @import url("https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600;700&family=Work+Sans:wght@400;500;600;700&display=swap");
 
-/* Reset some Vite defaults so the app stretches full width/height */
 :root {
+  color-scheme: light;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   --font-display: "Fraunces", "Times New Roman", serif;
   --font-body: "Work Sans", "Gill Sans", "Trebuchet MS", sans-serif;
-  --login-ink: #f7f3ec;
-  --login-ink-soft: #e8ddc8;
-  --login-cream: #1f3a5f;
-  --login-sand: #2f5d50;
-  --login-mist: #5b6166;
-  --login-teal: #2f5d50;
-  --login-amber: #7a5c46;
-  --shell-bg: #f7f3ec;
-  --shell-sidebar: #1f3a5f;
-  --shell-surface: #fffdfa;
-  --shell-border: #e8ddc8;
-  --shell-ink: #222222;
-  --shell-muted: #5b6166;
-  --shell-accent: #2f5d50;
-  --signal-emerald: #2f5d50;
-  --signal-emerald-soft: #dbe8e2;
-  --signal-sky: #1f3a5f;
-  --signal-sky-soft: #d7deea;
+  --login-ink: #12273b;
+  --login-ink-soft: #6a7e92;
+  --login-cream: #eef4fa;
+  --login-sand: #d6e7f2;
+  --login-mist: #6a7e92;
+  --login-teal: #0f766e;
+  --login-amber: #b36c2d;
+  --shell-bg: #edf3f8;
+  --shell-bg-elevated: #e4edf4;
+  --shell-sidebar: #0a1727;
+  --shell-sidebar-border: rgba(255, 255, 255, 0.08);
+  --shell-surface: rgba(255, 255, 255, 0.82);
+  --shell-surface-strong: rgba(255, 255, 255, 0.96);
+  --shell-surface-muted: rgba(242, 247, 251, 0.92);
+  --shell-border: rgba(102, 128, 156, 0.18);
+  --shell-border-strong: rgba(78, 104, 132, 0.26);
+  --shell-ink: #101c2c;
+  --shell-muted: #627287;
+  --shell-accent: #0f766e;
+  --shell-accent-2: #1d4ed8;
+  --signal-emerald: #0f766e;
+  --signal-emerald-soft: rgba(94, 234, 212, 0.22);
+  --signal-sky: #1d4ed8;
+  --signal-sky-soft: rgba(96, 165, 250, 0.18);
+  --signal-amber: #d97706;
+  --signal-amber-soft: rgba(251, 191, 36, 0.18);
+  --signal-rose: #be123c;
+  --signal-rose-soft: rgba(251, 113, 133, 0.18);
+  --viz-grid: rgba(95, 122, 149, 0.22);
+  --viz-news: #2563eb;
+  --viz-weather: #0ea5e9;
+  --viz-market: #0f766e;
+  --viz-violet: #7c3aed;
+  --viz-amber: #d97706;
+  --viz-rose: #be123c;
+  --viz-positive: #0f766e;
+  --viz-negative: #be123c;
+  --hero-glow-1: rgba(94, 234, 212, 0.22);
+  --hero-glow-2: rgba(59, 130, 246, 0.18);
+  --shadow-soft: 0 22px 60px rgba(12, 25, 42, 0.08);
+  --shadow-strong: 0 30px 80px rgba(12, 25, 42, 0.14);
   --home-bg: var(--shell-bg);
-  --home-header: #1f3a5f;
+  --home-header: #12273b;
   --home-surface: var(--shell-surface);
   --home-border: var(--shell-border);
   --home-ink: var(--shell-ink);
@@ -38,18 +61,90 @@
   --safe-left: env(safe-area-inset-left, 0px);
 }
 
+html.dark {
+  color-scheme: dark;
+  --login-ink: #e8f1fb;
+  --login-ink-soft: #a7b8cb;
+  --login-cream: #08131f;
+  --login-sand: #133247;
+  --login-mist: #a7b8cb;
+  --login-teal: #5eead4;
+  --login-amber: #f59e0b;
+  --shell-bg: #07111d;
+  --shell-bg-elevated: #0b1725;
+  --shell-sidebar: #06101c;
+  --shell-sidebar-border: rgba(255, 255, 255, 0.06);
+  --shell-surface: rgba(10, 22, 35, 0.82);
+  --shell-surface-strong: rgba(14, 28, 44, 0.96);
+  --shell-surface-muted: rgba(13, 24, 39, 0.92);
+  --shell-border: rgba(127, 151, 178, 0.18);
+  --shell-border-strong: rgba(152, 175, 197, 0.28);
+  --shell-ink: #eef5fc;
+  --shell-muted: #94a8bf;
+  --shell-accent: #5eead4;
+  --shell-accent-2: #60a5fa;
+  --signal-emerald: #5eead4;
+  --signal-emerald-soft: rgba(45, 212, 191, 0.2);
+  --signal-sky: #60a5fa;
+  --signal-sky-soft: rgba(96, 165, 250, 0.16);
+  --signal-amber: #f59e0b;
+  --signal-amber-soft: rgba(245, 158, 11, 0.16);
+  --signal-rose: #fb7185;
+  --signal-rose-soft: rgba(251, 113, 133, 0.16);
+  --viz-grid: rgba(106, 129, 153, 0.28);
+  --viz-news: #60a5fa;
+  --viz-weather: #38bdf8;
+  --viz-market: #5eead4;
+  --viz-violet: #a78bfa;
+  --viz-amber: #fbbf24;
+  --viz-rose: #fb7185;
+  --viz-positive: #5eead4;
+  --viz-negative: #fb7185;
+  --hero-glow-1: rgba(45, 212, 191, 0.18);
+  --hero-glow-2: rgba(96, 165, 250, 0.14);
+  --shadow-soft: 0 24px 64px rgba(0, 0, 0, 0.28);
+  --shadow-strong: 0 34px 96px rgba(0, 0, 0, 0.36);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  display: block; /* ensure children aren't constrained as flex items */
+  display: block;
   background: var(--shell-bg);
   color: var(--shell-ink);
   font-family: var(--font-body);
+  background-image:
+    radial-gradient(circle at top right, var(--hero-glow-1), transparent 26rem),
+    radial-gradient(circle at bottom left, var(--hero-glow-2), transparent 28rem),
+    linear-gradient(180deg, var(--shell-bg-elevated) 0%, var(--shell-bg) 100%);
+  transition:
+    background-color 220ms ease,
+    color 220ms ease,
+    background-image 220ms ease;
 }
 
-/* Ensure form controls inherit the brand font across browsers */
-button, input, select, textarea { font: inherit; }
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}
 
 @keyframes login-fade {
   from {
@@ -74,6 +169,135 @@ button, input, select, textarea { font: inherit; }
 
 .dashboard-panel {
   animation: dashboard-rise 0.7s ease both;
+}
+
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.app-shell::before,
+.app-shell::after {
+  content: "";
+  position: absolute;
+  inset: auto;
+  border-radius: 999px;
+  filter: blur(72px);
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.7;
+}
+
+.app-shell::before {
+  top: 6rem;
+  right: 2rem;
+  width: 22rem;
+  height: 22rem;
+  background: var(--hero-glow-1);
+}
+
+.app-shell::after {
+  bottom: 6rem;
+  left: 1rem;
+  width: 24rem;
+  height: 24rem;
+  background: var(--hero-glow-2);
+}
+
+.app-card {
+  border: 1px solid var(--shell-border);
+  background: var(--shell-surface);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(18px);
+}
+
+.app-card-muted {
+  border: 1px solid var(--shell-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--shell-surface-strong) 78%, transparent), color-mix(in srgb, var(--shell-surface-muted) 94%, transparent));
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(18px);
+}
+
+.app-card-hero {
+  border: 1px solid var(--shell-border-strong);
+  background:
+    radial-gradient(circle at top right, var(--signal-sky-soft), transparent 18rem),
+    radial-gradient(circle at bottom left, var(--signal-emerald-soft), transparent 18rem),
+    linear-gradient(145deg, color-mix(in srgb, var(--shell-surface-strong) 86%, transparent), color-mix(in srgb, var(--shell-surface) 92%, transparent));
+  box-shadow: var(--shadow-strong);
+  backdrop-filter: blur(20px);
+}
+
+.app-stat-card {
+  border: 1px solid var(--shell-border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--shell-surface-strong) 80%, transparent), color-mix(in srgb, var(--shell-surface-muted) 92%, transparent));
+  box-shadow: var(--shadow-soft);
+}
+
+.app-map-frame {
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--shell-border);
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--signal-sky-soft) 75%, transparent), transparent 12rem),
+    linear-gradient(180deg, color-mix(in srgb, var(--shell-bg-elevated) 72%, transparent), color-mix(in srgb, var(--shell-surface) 92%, transparent));
+}
+
+.app-scroll-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--shell-border-strong) transparent;
+}
+
+.app-scroll-panel::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.app-scroll-panel::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shell-border-strong) 82%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.app-scroll-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.world-map .maplibregl-ctrl-top-right {
+  top: 0.75rem;
+  right: 0.75rem;
+}
+
+.world-map .maplibregl-ctrl-group {
+  overflow: hidden;
+  border: 1px solid var(--shell-border);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--shell-surface-strong) 80%, transparent);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(12px);
+}
+
+.world-map .maplibregl-ctrl-group button {
+  width: 2rem;
+  height: 2rem;
+  color: var(--shell-ink);
+  background: transparent;
+}
+
+.world-map .maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--shell-border);
+}
+
+.world-map .maplibregl-ctrl button:not(:disabled):hover {
+  background: color-mix(in srgb, var(--shell-accent) 12%, transparent);
+}
+
+.world-map .maplibregl-canvas {
+  filter: saturate(1.06) contrast(1.02);
 }
 
 .app-safe-top {
@@ -104,6 +328,10 @@ button, input, select, textarea { font: inherit; }
   .dashboard-panel {
     animation: none;
   }
+
+  body {
+    transition: none;
+  }
 }
 
 @media (hover: none) and (pointer: coarse) {
@@ -116,5 +344,37 @@ button, input, select, textarea { font: inherit; }
 
   .admin-panel button {
     min-height: 44px;
+  }
+}
+
+.admin-panel input,
+.admin-panel select,
+.admin-panel textarea {
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.admin-panel input:focus,
+.admin-panel select:focus,
+.admin-panel textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--shell-accent) 56%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--shell-accent) 18%, transparent);
+}
+
+@media (max-width: 640px) {
+  .app-shell::before {
+    right: -2rem;
+    width: 16rem;
+    height: 16rem;
+  }
+
+  .app-shell::after {
+    left: -3rem;
+    width: 18rem;
+    height: 18rem;
   }
 }

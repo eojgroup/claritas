@@ -33,7 +33,7 @@ private struct NewsRow: View {
         HStack(alignment: .top, spacing: 12) {
             RemoteImage(url: proxiedImageURL())
                 .frame(width: 120, height: 75)
-                .background(Color(.secondarySystemBackground))
+                .background(ClaritasPalette.shellSurface(for: colorScheme))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
             VStack(alignment: .leading, spacing: 6) {

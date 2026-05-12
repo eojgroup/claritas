@@ -6,6 +6,14 @@ import worldCountries from "world-countries";
 export type BubbleDatum = {
   country: string;
   count: number;
+  tone?:
+    | "news"
+    | "weather-cold"
+    | "weather-mild"
+    | "weather-hot"
+    | "positive"
+    | "negative"
+    | "neutral";
   meta?: {
     subtitle?: string;
     lines?: string[];
@@ -23,6 +31,7 @@ export type WorldMapBubblesProps = {
   pinnedCountry?: string | null;
   scale?: "linear" | "log";
   showLabels?: boolean;
+  legendLabel?: string;
 };
 
 type WorldCountryReference = {
@@ -35,6 +44,7 @@ type BubbleMarker = {
   country: string;
   count: number;
   coordinate: [number, number];
+  tone?: BubbleDatum["tone"];
   meta?: BubbleDatum["meta"];
 };
 
@@ -55,6 +65,37 @@ const getEnvValue = (key: string): string | undefined => {
   return trimmed || undefined;
 };
 
+function markerPalette(
+  tone: BubbleDatum["tone"],
+  isDark: boolean,
+): { fill: string; stroke: string; halo: string } {
+  const paletteMap = {
+    news: isDark
+      ? { fill: "#60a5fa", stroke: "#bfdbfe", halo: "rgba(96,165,250,0.35)" }
+      : { fill: "#2563eb", stroke: "#1d4ed8", halo: "rgba(37,99,235,0.22)" },
+    "weather-cold": isDark
+      ? { fill: "#38bdf8", stroke: "#bae6fd", halo: "rgba(56,189,248,0.3)" }
+      : { fill: "#0284c7", stroke: "#0369a1", halo: "rgba(2,132,199,0.2)" },
+    "weather-mild": isDark
+      ? { fill: "#5eead4", stroke: "#99f6e4", halo: "rgba(45,212,191,0.28)" }
+      : { fill: "#0f766e", stroke: "#115e59", halo: "rgba(15,118,110,0.18)" },
+    "weather-hot": isDark
+      ? { fill: "#fbbf24", stroke: "#fde68a", halo: "rgba(251,191,36,0.32)" }
+      : { fill: "#d97706", stroke: "#b45309", halo: "rgba(217,119,6,0.22)" },
+    positive: isDark
+      ? { fill: "#5eead4", stroke: "#99f6e4", halo: "rgba(45,212,191,0.3)" }
+      : { fill: "#0f766e", stroke: "#115e59", halo: "rgba(15,118,110,0.18)" },
+    negative: isDark
+      ? { fill: "#fb7185", stroke: "#fecdd3", halo: "rgba(251,113,133,0.32)" }
+      : { fill: "#be123c", stroke: "#9f1239", halo: "rgba(190,18,60,0.2)" },
+    neutral: isDark
+      ? { fill: "#94a3b8", stroke: "#cbd5e1", halo: "rgba(148,163,184,0.28)" }
+      : { fill: "#64748b", stroke: "#475569", halo: "rgba(100,116,139,0.18)" },
+  } as const;
+
+  return paletteMap[tone ?? "news"] ?? paletteMap.news;
+}
+
 export default memo(function WorldMapBubbles({
   data,
   onSelect,
@@ -66,6 +107,7 @@ export default memo(function WorldMapBubbles({
   pinnedCountry,
   scale = "linear",
   showLabels = true,
+  legendLabel = "Relative intensity",
 }: WorldMapBubblesProps) {
   const mapRef = useRef<MapRef | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -104,10 +146,11 @@ export default memo(function WorldMapBubbles({
         country: iso,
         count: datum.count,
         coordinate,
+        tone: datum.tone,
         meta: datum.meta,
       });
     });
-    return next;
+    return next.sort((a, b) => a.count - b.count);
   }, [centroids, data]);
 
   const max = useMemo(() => markers.reduce((m, d) => Math.max(m, d.count), 0) || 1, [markers]);
@@ -119,6 +162,7 @@ export default memo(function WorldMapBubbles({
   const isDark = !!dark;
   const isCompact = variant === "compact";
   const labelColor = isDark ? "#e2e8f0" : "#0f172a";
+  const legendPalette = markerPalette(markers[markers.length - 1]?.tone, isDark);
 
   const mapStyle = useMemo(() => {
     const custom = getEnvValue(isDark ? "VITE_MAP_STYLE_DARK_URL" : "VITE_MAP_STYLE_URL");
@@ -176,7 +220,10 @@ export default memo(function WorldMapBubbles({
   const pinnedIso = pinnedCountry?.toUpperCase();
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden rounded-xl">
+    <div
+      ref={containerRef}
+      className="world-map relative h-full w-full overflow-hidden rounded-[1.1rem]"
+    >
       <MapView
         ref={mapRef}
         mapLib={import("maplibre-gl")}
@@ -201,21 +248,30 @@ export default memo(function WorldMapBubbles({
           const isPrimary = primaryIso === marker.country;
           const isSecondary = secondaryIso === marker.country;
           const isPinned = pinnedIso === marker.country;
-
+          const palette = markerPalette(marker.tone, isDark);
           const fill = isPrimary
-            ? "rgba(14,165,233,0.8)"
+            ? isDark
+              ? "#38bdf8"
+              : "#0ea5e9"
             : isSecondary
-              ? "rgba(250,204,21,0.82)"
-              : isDark
-                ? "rgba(34,197,94,0.78)"
-                : "rgba(16,115,74,0.78)";
+              ? isDark
+                ? "#fbbf24"
+                : "#f59e0b"
+              : palette.fill;
           const stroke = isPrimary
-            ? "#0284c7"
+            ? isDark
+              ? "#bae6fd"
+              : "#0369a1"
             : isSecondary
-              ? "#d97706"
-              : isDark
-                ? "#16a34a"
-                : "#0f5132";
+              ? isDark
+                ? "#fde68a"
+                : "#b45309"
+              : palette.stroke;
+          const halo = isPrimary
+            ? "rgba(14,165,233,0.28)"
+            : isSecondary
+              ? "rgba(245,158,11,0.28)"
+              : palette.halo;
           const size = rScale(marker.count) * 2;
 
           const updateTip = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -253,19 +309,29 @@ export default memo(function WorldMapBubbles({
                     width: size,
                     height: size,
                     borderRadius: 999,
-                    border: `1px solid ${stroke}`,
-                    background: fill,
+                    border: `1.5px solid ${stroke}`,
+                    background: `radial-gradient(circle at 32% 28%, rgba(255,255,255,0.42), transparent 38%), ${fill}`,
                     display: "block",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.16)",
+                    boxShadow: `0 0 0 8px ${halo}, 0 14px 30px rgba(0,0,0,0.18)`,
+                  }}
+                />
+                <span
+                  style={{
+                    position: "absolute",
+                    inset: size * 0.23,
+                    borderRadius: 999,
+                    border: `1px solid rgba(255,255,255,0.36)`,
+                    opacity: 0.75,
                   }}
                 />
                 {isPinned && (
                   <span
                     style={{
                       position: "absolute",
-                      inset: -4,
+                      inset: -6,
                       borderRadius: 999,
-                      border: `1.5px solid ${isDark ? "#fde047" : "#f59e0b"}`,
+                      border: `1.5px solid ${isDark ? "#fde68a" : "#f59e0b"}`,
+                      boxShadow: `0 0 0 6px ${isDark ? "rgba(245,158,11,0.18)" : "rgba(245,158,11,0.14)"}`,
                     }}
                   />
                 )}
@@ -275,12 +341,12 @@ export default memo(function WorldMapBubbles({
                       position: "absolute",
                       left: "50%",
                       transform: "translateX(-50%)",
-                      top: -18,
+                      top: -19,
                       fontSize: isCompact ? 9 : 10,
                       color: labelColor,
-                      textShadow: "0 1px 2px rgba(0,0,0,0.45)",
+                      textShadow: "0 1px 2px rgba(0,0,0,0.5)",
                       fontWeight: 600,
-                      letterSpacing: "0.04em",
+                      letterSpacing: "0.06em",
                       pointerEvents: "none",
                     }}
                   >
@@ -295,13 +361,17 @@ export default memo(function WorldMapBubbles({
 
       {legend && (
         <div
-          className="absolute bottom-2 left-2 rounded border px-2 py-1 text-[11px]"
+          className="absolute bottom-3 left-3 rounded-2xl border px-3 py-2 text-[11px] shadow-sm"
           style={{
-            background: isDark ? "rgba(15,23,42,0.84)" : "rgba(255,255,255,0.9)",
+            background: isDark ? "rgba(8,18,30,0.86)" : "rgba(255,255,255,0.88)",
             color: labelColor,
             borderColor: isDark ? "#334155" : "#cbd5e1",
+            backdropFilter: "blur(14px)",
           }}
         >
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.22em]">
+            {legendLabel}
+          </div>
           <div className="flex items-center gap-2">
             <svg width={isCompact ? 66 : 82} height={isCompact ? 24 : 28}>
               {[0.2, 0.5, 1].map((factor, index) => {
@@ -314,14 +384,14 @@ export default memo(function WorldMapBubbles({
                     cx={cx}
                     cy={cy}
                     r={radius}
-                    fill={isDark ? "rgba(34,197,94,0.78)" : "rgba(16,115,74,0.78)"}
-                    stroke={isDark ? "#16a34a" : "#0f5132"}
-                    strokeWidth={1}
+                    fill={legendPalette.fill}
+                    stroke={legendPalette.stroke}
+                    strokeWidth={1.2}
                   />
                 );
               })}
             </svg>
-            <span>Relative size · {scale === "log" ? "Log" : "Linear"}</span>
+            <span>{scale === "log" ? "Log scale" : "Linear scale"}</span>
           </div>
           <div className="mt-0.5 flex justify-between text-[10px]">
             <span>Min {min}</span>
@@ -332,20 +402,26 @@ export default memo(function WorldMapBubbles({
 
       {tip && tip.show && (
         <div
-          className="pointer-events-none absolute rounded border px-2 py-1 text-xs shadow"
+          className="pointer-events-none absolute rounded-2xl border px-3 py-2 text-xs shadow-lg"
           style={{
             left: tip.x,
             top: tip.y,
-            background: isDark ? "#0f172a" : "#ffffff",
+            background: isDark ? "rgba(7,17,29,0.94)" : "rgba(255,255,255,0.96)",
             color: labelColor,
             borderColor: isDark ? "#334155" : "#cbd5e1",
             maxWidth: 240,
+            backdropFilter: "blur(14px)",
           }}
         >
           <div className="font-semibold">{tip.country}</div>
           <div>{tip.meta?.subtitle ?? `${tip.value} ${tip.value === 1 ? "item" : "items"}`}</div>
           {tip.meta?.lines?.map((line, index) => (
-            <div key={`${tip.country}-${index}`}>{line}</div>
+            <div
+              key={`${tip.country}-${index}`}
+              style={{ color: isDark ? "#b8c7d8" : "#5f6f82" }}
+            >
+              {line}
+            </div>
           ))}
         </div>
       )}
