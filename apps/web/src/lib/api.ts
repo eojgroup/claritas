@@ -73,6 +73,23 @@ export type EarningsEvent = {
 export type AuthProviderId = "google" | "microsoft" | "apple";
 export type IngestionPipeline = "news" | "weather" | "market";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
+export type DailySignalBriefingStatus = "draft" | "published" | "archived";
+
+export type DailySignalBriefing = {
+  id: number;
+  briefing_date: string;
+  title: string;
+  update_text: string;
+  key_takeaways: string[];
+  status: DailySignalBriefingStatus;
+  source_window_start: string | null;
+  source_window_end: string | null;
+  generated_by: string | null;
+  metadata: unknown;
+  published_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export type BillingPlanRef = {
   id: number;
@@ -292,6 +309,13 @@ export async function fetchBillingMe(): Promise<BillingAccessState> {
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch billing state"));
   const data = await resp.json();
   return data.billing as BillingAccessState;
+}
+
+export async function fetchDailySignalBriefingLatest(): Promise<DailySignalBriefing | null> {
+  const resp = await fetch(`${API_BASE}/api/briefings/daily/latest`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch daily briefing"));
+  const data = await resp.json();
+  return (data.briefing ?? null) as DailySignalBriefing | null;
 }
 
 export async function logoutAuth(): Promise<void> {

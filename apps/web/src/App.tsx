@@ -561,6 +561,7 @@ import {
   fetchAuthProviders,
   fetchCountryStats,
   fetchCountryWeather,
+  fetchDailySignalBriefingLatest,
   fetchMarketEarnings,
   fetchMarketQuotes,
   fetchMarketStatus,
@@ -573,6 +574,7 @@ import {
   type AuthUser,
   type CountryStat,
   type CountryWeather,
+  type DailySignalBriefing,
   type EarningsEvent,
   type MarketQuote,
   type MarketStatus,
@@ -632,6 +634,8 @@ export default function ClaritasDashboard() {
   );
   const [isLoadingNews, setIsLoadingNews] = useState(false);
   const [newsLoadError, setNewsLoadError] = useState<string | null>(null);
+  const [dailyBriefing, setDailyBriefing] = useState<DailySignalBriefing | null>(null);
+  const [dailyBriefingError, setDailyBriefingError] = useState<string | null>(null);
   const [dataWindowPreset, setDataWindowPreset] =
     useState<DataWindowPreset>("30d");
   const [mapMode, setMapMode] = useState<"news" | "weather">("news");
@@ -840,6 +844,15 @@ export default function ClaritasDashboard() {
     fetchMarketQuotes({ refresh: true })
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
+    fetchDailySignalBriefingLatest()
+      .then((briefing) => {
+        setDailyBriefing(briefing);
+        setDailyBriefingError(null);
+      })
+      .catch((err) => {
+        setDailyBriefing(null);
+        setDailyBriefingError(err instanceof Error ? err.message : String(err));
+      });
     void loadNewsData("recent");
   }, [authStatus, hasPaidAccess, loadNewsData]);
 
@@ -915,6 +928,16 @@ export default function ClaritasDashboard() {
       }).format(new Date()),
     [],
   );
+
+  const dailyBriefingDateLabel = useMemo(() => {
+    if (!dailyBriefing?.briefing_date) return todayLabel;
+    return new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(`${dailyBriefing.briefing_date}T00:00:00Z`));
+  }, [dailyBriefing?.briefing_date, todayLabel]);
 
   const countryMeta = useMemo(() => {
     const map = new Map<
@@ -3138,6 +3161,65 @@ export default function ClaritasDashboard() {
                       </div>
                     )}
                   </div>
+
+                  <section
+                    className={`${cardBase} dashboard-panel p-4`}
+                    style={{ animationDelay: "80ms" }}
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          <FileText className="h-3.5 w-3.5" />
+                          Daily briefing
+                        </div>
+                        <div
+                          className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]"
+                          style={{ fontFamily: "var(--font-display)" }}
+                        >
+                          {dailyBriefing?.title ?? "Daily signal brief"}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                          <span>
+                            {dailyBriefing ? dailyBriefingDateLabel : "No published briefing"}
+                          </span>
+                          {dailyBriefing?.generated_by && (
+                            <span>{dailyBriefing.generated_by}</span>
+                          )}
+                          {dailyBriefing?.published_at && (
+                            <span>
+                              Updated {new Date(dailyBriefing.published_at).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-3 max-w-4xl text-sm leading-6 text-[color:var(--shell-muted)]">
+                          {dailyBriefing?.update_text ||
+                            (dailyBriefingError ? "Briefing unavailable." : "Awaiting briefing.")}
+                        </p>
+                      </div>
+                      <div className="w-full rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 lg:max-w-md">
+                        <div className="text-[11px] uppercase tracking-[0.25em] text-[color:var(--shell-muted)]">
+                          Key takeaways
+                        </div>
+                        {dailyBriefing?.key_takeaways?.length ? (
+                          <ul className="mt-2 space-y-2 text-sm text-[color:var(--shell-ink)]">
+                            {dailyBriefing.key_takeaways.map((item, idx) => (
+                              <li
+                                key={`${dailyBriefing.id}-takeaway-${idx}`}
+                                className="flex gap-2"
+                              >
+                                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--signal-amber)]" />
+                                <span>{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="mt-2 text-sm text-[color:var(--shell-muted)]">
+                            Takeaways pending.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </section>
 
                   <section
                     className={`relative grid gap-4 ${

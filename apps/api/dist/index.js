@@ -188,6 +188,168 @@ function parsePipeline(value) {
         return value;
     return undefined;
 }
+function timestampToApiString(value) {
+    if (value == null)
+        return null;
+    if (value instanceof Date) {
+        const ts = value.getTime();
+        return Number.isNaN(ts) ? null : value.toISOString();
+    }
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed))
+        return new Date(parsed).toISOString();
+    return value;
+}
+function dateToApiString(value) {
+    if (value instanceof Date)
+        return value.toISOString().slice(0, 10);
+    return value.slice(0, 10);
+}
+function parseBriefingDate(value) {
+    if (typeof value !== "string" || !value.trim()) {
+        throw new AdminApiError(400, "briefing_date is required.");
+    }
+    const trimmed = value.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        throw new AdminApiError(400, "briefing_date must use YYYY-MM-DD.");
+    }
+    const parsed = Date.parse(`${trimmed}T00:00:00Z`);
+    if (Number.isNaN(parsed) || new Date(parsed).toISOString().slice(0, 10) !== trimmed) {
+        throw new AdminApiError(400, "briefing_date must be a valid date.");
+    }
+    return trimmed;
+}
+function parseBriefingStatus(value) {
+    if (value == null || value === "")
+        return "draft";
+    if (typeof value !== "string")
+        throw new AdminApiError(400, "status must be draft, published, or archived.");
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "draft" || normalized === "published" || normalized === "archived")
+        return normalized;
+    throw new AdminApiError(400, "status must be draft, published, or archived.");
+}
+function sanitizeBriefingPayload(raw) {
+    const body = raw && typeof raw === "object" && !Array.isArray(raw)
+        ? raw
+        : {};
+    const titleRaw = typeof body.title === "string" ? body.title.trim() : "";
+    const updateRaw = typeof body.update_text === "string"
+        ? body.update_text.trim()
+        : typeof body.update === "string"
+            ? body.update.trim()
+            : "";
+    const rawTakeaways = Array.isArray(body.key_takeaways)
+        ? body.key_takeaways
+        : Array.isArray(body.takeaways)
+            ? body.takeaways
+            : [];
+    const keyTakeaways = rawTakeaways
+        .map((value) => (typeof value === "string" ? value.trim() : ""))
+        .filter(Boolean)
+        .slice(0, 12);
+    const metadata = body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+        ? body.metadata
+        : {};
+    return {
+        title: titleRaw || "Daily signal brief",
+        update_text: updateRaw,
+        key_takeaways: keyTakeaways,
+        status: parseBriefingStatus(body.status),
+        source_window_start: parseOptionalIsoDateTime(body.source_window_start, "source_window_start") ?? null,
+        source_window_end: parseOptionalIsoDateTime(body.source_window_end, "source_window_end") ?? null,
+        generated_by: typeof body.generated_by === "string" && body.generated_by.trim() ? body.generated_by.trim() : null,
+        metadata,
+        published_at: parseOptionalIsoDateTime(body.published_at, "published_at") ?? null,
+    };
+}
+function toDailySignalBriefing(row) {
+    return {
+        id: Number(row.id),
+        briefing_date: dateToApiString(row.briefing_date),
+        title: row.title,
+        update_text: row.update_text,
+        key_takeaways: Array.isArray(row.key_takeaways) ? row.key_takeaways : [],
+        status: row.status,
+        source_window_start: timestampToApiString(row.source_window_start),
+        source_window_end: timestampToApiString(row.source_window_end),
+        generated_by: row.generated_by,
+        metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
+        published_at: timestampToApiString(row.published_at),
+        created_at: timestampToApiString(row.created_at) || new Date().toISOString(),
+        updated_at: timestampToApiString(row.updated_at) || new Date().toISOString(),
+    };
+}
+async function upsertDailySignalBriefing(briefingDate, payload) {
+    const { rows } = await (0, db_1.query)(`INSERT INTO daily_signal_briefing (
+       briefing_date,
+       title,
+       update_text,
+       key_takeaways,
+       status,
+       source_window_start,
+       source_window_end,
+       generated_by,
+       metadata,
+       published_at
+     )
+     VALUES (
+       $1::date,
+       $2,
+       $3,
+       $4::jsonb,
+       $5,
+       $6,
+       $7,
+       $8,
+       $9::jsonb,
+       CASE WHEN $5 = 'published' THEN COALESCE($10::timestamptz, now()) ELSE $10::timestamptz END
+     )
+     ON CONFLICT (briefing_date)
+     DO UPDATE SET
+       title = EXCLUDED.title,
+       update_text = EXCLUDED.update_text,
+       key_takeaways = EXCLUDED.key_takeaways,
+       status = EXCLUDED.status,
+       source_window_start = EXCLUDED.source_window_start,
+       source_window_end = EXCLUDED.source_window_end,
+       generated_by = EXCLUDED.generated_by,
+       metadata = EXCLUDED.metadata,
+       published_at = CASE
+         WHEN EXCLUDED.status = 'published'
+           THEN COALESCE(EXCLUDED.published_at, daily_signal_briefing.published_at, now())
+         ELSE EXCLUDED.published_at
+       END,
+       updated_at = now()
+     RETURNING
+       id,
+       briefing_date,
+       title,
+       update_text,
+       key_takeaways,
+       status,
+       source_window_start,
+       source_window_end,
+       generated_by,
+       metadata,
+       published_at,
+       created_at,
+       updated_at`, [
+        briefingDate,
+        payload.title,
+        payload.update_text,
+        JSON.stringify(payload.key_takeaways),
+        payload.status,
+        payload.source_window_start,
+        payload.source_window_end,
+        payload.generated_by,
+        JSON.stringify(payload.metadata),
+        payload.published_at,
+    ]);
+    if (!rows[0])
+        throw new AdminApiError(500, "Failed to upsert daily briefing.");
+    return toDailySignalBriefing(rows[0]);
+}
 function parseBillingStatus(value) {
     if (typeof value !== "string")
         return undefined;
@@ -270,6 +432,84 @@ app.get("/api/billing/me", requireSession, async (_req, res) => {
         });
     }
     catch (e) {
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.get("/api/briefings/daily/latest", requireAuthenticated, async (_req, res) => {
+    try {
+        const { rows } = await (0, db_1.query)(`SELECT
+         id,
+         briefing_date,
+         title,
+         update_text,
+         key_takeaways,
+         status,
+         source_window_start,
+         source_window_end,
+         generated_by,
+         metadata,
+         published_at,
+         created_at,
+         updated_at
+       FROM daily_signal_briefing
+       WHERE status = 'published'
+       ORDER BY briefing_date DESC, updated_at DESC
+       LIMIT 1`);
+        return res.json({ briefing: rows[0] ? toDailySignalBriefing(rows[0]) : null });
+    }
+    catch (e) {
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.get("/api/admin/briefings/daily", requireAdminRole, async (req, res) => {
+    try {
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit || "20"), 10) || 20, 1), 100);
+        const { rows } = await (0, db_1.query)(`SELECT
+         id,
+         briefing_date,
+         title,
+         update_text,
+         key_takeaways,
+         status,
+         source_window_start,
+         source_window_end,
+         generated_by,
+         metadata,
+         published_at,
+         created_at,
+         updated_at
+       FROM daily_signal_briefing
+       ORDER BY briefing_date DESC, updated_at DESC
+       LIMIT $1`, [limit]);
+        return res.json({ briefings: rows.map(toDailySignalBriefing) });
+    }
+    catch (e) {
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.put("/api/admin/briefings/daily/:date", requireAdminRole, async (req, res) => {
+    try {
+        const briefingDate = parseBriefingDate(req.params.date);
+        const payload = sanitizeBriefingPayload(req.body);
+        const briefing = await upsertDailySignalBriefing(briefingDate, payload);
+        return res.json({ briefing });
+    }
+    catch (e) {
+        if (e instanceof AdminApiError)
+            return res.status(e.status).json({ error: e.message });
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.put("/api/ingest/briefings/daily/:date", requireIngestionAccess, async (req, res) => {
+    try {
+        const briefingDate = parseBriefingDate(req.params.date);
+        const payload = sanitizeBriefingPayload(req.body);
+        const briefing = await upsertDailySignalBriefing(briefingDate, payload);
+        return res.json({ briefing });
+    }
+    catch (e) {
+        if (e instanceof AdminApiError)
+            return res.status(e.status).json({ error: e.message });
         return res.status(500).json({ error: e.message || String(e) });
     }
 });
