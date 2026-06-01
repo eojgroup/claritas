@@ -9,12 +9,43 @@ const node_crypto_1 = __importDefault(require("node:crypto"));
 const db_1 = require("../db");
 const country_inference_1 = require("./country-inference");
 const BASE_URL = "https://newsapi.org/v2";
+const DEFAULT_EVERYTHING_LOOKBACK_DAYS = 30;
 function stableFeedKey(kind, params) {
     const entries = Object.entries(params)
         .filter(([_, v]) => v !== undefined && v !== "")
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     const qp = entries.map(([k, v]) => `${k}=${v}`).join("&");
     return `${kind}?${qp}`;
+}
+function clampInt(raw, min, max, fallback) {
+    const parsed = typeof raw === "number" && Number.isFinite(raw)
+        ? Math.trunc(raw)
+        : typeof raw === "string" && raw.trim()
+            ? Number.parseInt(raw, 10)
+            : Number.NaN;
+    if (!Number.isFinite(parsed))
+        return fallback;
+    return Math.min(Math.max(parsed, min), max);
+}
+function newsApiEverythingLookbackDays() {
+    return clampInt(process.env.NEWSAPI_EVERYTHING_LOOKBACK_DAYS, 1, 3650, DEFAULT_EVERYTHING_LOOKBACK_DAYS);
+}
+function getUsableEverythingFrom(value) {
+    if (typeof value !== "string" || !value.trim())
+        return undefined;
+    const parsed = Date.parse(value);
+    if (Number.isNaN(parsed))
+        return undefined;
+    const oldestAllowedMs = Date.now() - newsApiEverythingLookbackDays() * 24 * 60 * 60 * 1000;
+    if (parsed < oldestAllowedMs)
+        return undefined;
+    return new Date(parsed).toISOString();
+}
+function isNewsApiFromTooFarBackError(status, body) {
+    if (status !== 426 && status !== 400)
+        return false;
+    const normalized = body.toLowerCase();
+    return normalized.includes("too far in the past") || normalized.includes("far back");
 }
 async function ensureSource(name, apiBaseUrl) {
     const { rows } = await (0, db_1.query)(`INSERT INTO source (name, api_base_url, auth_type, metadata)
@@ -105,7 +136,9 @@ async function ingestNewsApiEverything(params) {
     const feedKey = stableFeedKey("everything", { q: params.q, language: params.language });
     const feed = await ensureFeed(source.id, feedKey, { kind: "everything", q: params.q, language: params.language });
     const cursor = (await getCursor(feed.id)) || {};
-    const fromISO = cursor.lastPublishedAt || undefined;
+    let fromISO = getUsableEverythingFrom(cursor.lastPublishedAt);
+    const originalFromISO = fromISO;
+    let retriedWithoutFrom = false;
     let page = 1;
     const pageSize = Math.min(Math.max(params.pageSize || 50, 1), 100);
     const maxPages = Math.min(Math.max(params.maxPages || 3, 1), 10);
@@ -126,6 +159,13 @@ async function ingestNewsApiEverything(params) {
         const resp = await fetch(url.toString(), { headers: { "X-Api-Key": apiKey } });
         if (!resp.ok) {
             const text = await resp.text();
+            if (fromISO && !retriedWithoutFrom && isNewsApiFromTooFarBackError(resp.status, text)) {
+                retriedWithoutFrom = true;
+                fromISO = undefined;
+                newestPublishedAt = undefined;
+                page = 1;
+                continue;
+            }
             throw new Error(`NewsAPI error HTTP ${resp.status}: ${text}`);
         }
         const data = (await resp.json());
@@ -138,14 +178,11 @@ async function ingestNewsApiEverything(params) {
         // Insert items
         for (const a of articles) {
             const norm = normalize(a);
-            const before = Date.now();
             try {
                 await upsertItem(source.id, norm);
-                // cannot easily distinguish insert vs update without inspecting rowcount; keep it simple
                 inserted++;
             }
             catch (e) {
-                // Fallback as skipped on error; in real impl inspect code for conflicts
                 skipped++;
             }
             const ts = a.publishedAt || undefined;
@@ -158,7 +195,7 @@ async function ingestNewsApiEverything(params) {
             break;
         page++;
     }
-    if (newestPublishedAt && newestPublishedAt !== fromISO) {
+    if (newestPublishedAt && newestPublishedAt !== originalFromISO) {
         await setCursor(feed.id, { lastPublishedAt: newestPublishedAt });
     }
     return { inserted, updated, skipped, lastPublishedAt: newestPublishedAt };

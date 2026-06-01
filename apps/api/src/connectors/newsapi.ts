@@ -4,6 +4,7 @@ import type { FeedRow, NormalizedItem, SourceRow } from "./types";
 import { inferNewsCountry } from "./country-inference";
 
 const BASE_URL = "https://newsapi.org/v2";
+const DEFAULT_EVERYTHING_LOOKBACK_DAYS = 30;
 
 // Minimal types for NewsAPI responses
 type NewsApiArticle = {
@@ -31,6 +32,43 @@ function stableFeedKey(kind: string, params: Record<string, string | number | un
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const qp = entries.map(([k, v]) => `${k}=${v}`).join("&");
   return `${kind}?${qp}`;
+}
+
+function clampInt(raw: unknown, min: number, max: number, fallback: number): number {
+  const parsed =
+    typeof raw === "number" && Number.isFinite(raw)
+      ? Math.trunc(raw)
+      : typeof raw === "string" && raw.trim()
+        ? Number.parseInt(raw, 10)
+        : Number.NaN;
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+}
+
+function newsApiEverythingLookbackDays(): number {
+  return clampInt(
+    process.env.NEWSAPI_EVERYTHING_LOOKBACK_DAYS,
+    1,
+    3650,
+    DEFAULT_EVERYTHING_LOOKBACK_DAYS
+  );
+}
+
+function getUsableEverythingFrom(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return undefined;
+
+  const oldestAllowedMs = Date.now() - newsApiEverythingLookbackDays() * 24 * 60 * 60 * 1000;
+  if (parsed < oldestAllowedMs) return undefined;
+
+  return new Date(parsed).toISOString();
+}
+
+function isNewsApiFromTooFarBackError(status: number, body: string): boolean {
+  if (status !== 426 && status !== 400) return false;
+  const normalized = body.toLowerCase();
+  return normalized.includes("too far in the past") || normalized.includes("far back");
 }
 
 async function ensureSource(name: string, apiBaseUrl: string): Promise<SourceRow> {
@@ -149,7 +187,9 @@ export async function ingestNewsApiEverything(params: IngestEverythingParams): P
   const feedKey = stableFeedKey("everything", { q: params.q, language: params.language });
   const feed = await ensureFeed(source.id, feedKey, { kind: "everything", q: params.q, language: params.language });
   const cursor = (await getCursor(feed.id)) || {};
-  const fromISO: string | undefined = cursor.lastPublishedAt || undefined;
+  let fromISO: string | undefined = getUsableEverythingFrom(cursor.lastPublishedAt);
+  const originalFromISO = fromISO;
+  let retriedWithoutFrom = false;
 
   let page = 1;
   const pageSize = Math.min(Math.max(params.pageSize || 50, 1), 100);
@@ -171,6 +211,13 @@ export async function ingestNewsApiEverything(params: IngestEverythingParams): P
     const resp = await fetch(url.toString(), { headers: { "X-Api-Key": apiKey } });
     if (!resp.ok) {
       const text = await resp.text();
+      if (fromISO && !retriedWithoutFrom && isNewsApiFromTooFarBackError(resp.status, text)) {
+        retriedWithoutFrom = true;
+        fromISO = undefined;
+        newestPublishedAt = undefined;
+        page = 1;
+        continue;
+      }
       throw new Error(`NewsAPI error HTTP ${resp.status}: ${text}`);
     }
     const data = (await resp.json()) as NewsApiResponse;
@@ -183,13 +230,10 @@ export async function ingestNewsApiEverything(params: IngestEverythingParams): P
     // Insert items
     for (const a of articles) {
       const norm = normalize(a);
-      const before = Date.now();
       try {
         await upsertItem(source.id, norm);
-        // cannot easily distinguish insert vs update without inspecting rowcount; keep it simple
         inserted++;
       } catch (e: any) {
-        // Fallback as skipped on error; in real impl inspect code for conflicts
         skipped++;
       }
       const ts = a.publishedAt || undefined;
@@ -203,7 +247,7 @@ export async function ingestNewsApiEverything(params: IngestEverythingParams): P
     page++;
   }
 
-  if (newestPublishedAt && newestPublishedAt !== fromISO) {
+  if (newestPublishedAt && newestPublishedAt !== originalFromISO) {
     await setCursor(feed.id, { lastPublishedAt: newestPublishedAt });
   }
 

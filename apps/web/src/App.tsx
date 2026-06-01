@@ -1301,7 +1301,10 @@ export default function ClaritasDashboard() {
     }
     if (mapDayMode && mapDates.length > 0) {
       const dayKey = mapDates[Math.min(mapDayIndex, mapDates.length - 1)];
-      items = items.filter((item) => getDateKey(item.event_time ?? "") === dayKey);
+      const dayItems = items.filter((item) => getDateKey(item.event_time ?? "") === dayKey);
+      if (dayItems.some((item) => item.country_iso2)) {
+        items = dayItems;
+      }
     }
     return items;
   }, [
