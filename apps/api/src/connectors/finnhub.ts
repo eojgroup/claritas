@@ -274,6 +274,43 @@ const DEFAULT_SYMBOL_METADATA: Record<string, SymbolMetadata> = DEFAULT_MARKET_B
   {} as Record<string, SymbolMetadata>
 );
 
+const COMMON_EQUITY_COUNTRY_HINTS: Record<string, string> = {
+  AAPL: "US",
+  ABBV: "US",
+  ABNB: "US",
+  AMD: "US",
+  AMZN: "US",
+  AVGO: "US",
+  BAC: "US",
+  BRK: "US",
+  "BRK.B": "US",
+  CRM: "US",
+  CSCO: "US",
+  DIS: "US",
+  GOOG: "US",
+  GOOGL: "US",
+  IBM: "US",
+  INTC: "US",
+  JNJ: "US",
+  JPM: "US",
+  KO: "US",
+  MA: "US",
+  META: "US",
+  MSFT: "US",
+  NFLX: "US",
+  NVDA: "US",
+  ORCL: "US",
+  PEP: "US",
+  PFE: "US",
+  PLTR: "US",
+  SLB: "US",
+  TSLA: "US",
+  UBER: "US",
+  V: "US",
+  WMT: "US",
+  XOM: "US",
+};
+
 const COUNTRY_PRIMARY_MARKETS: Record<string, { code: string; name: string }> = {
   US: { code: "NASDAQ", name: "NASDAQ Composite" },
   FR: { code: "CAC40", name: "CAC 40" },
@@ -660,7 +697,7 @@ function parsePositiveInt(value: unknown): number | null {
 async function resolveSymbolCountryMap(symbols: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>();
   for (const symbol of symbols) {
-    const fallbackCountry = DEFAULT_SYMBOL_METADATA[symbol]?.country;
+    const fallbackCountry = DEFAULT_SYMBOL_METADATA[symbol]?.country ?? COMMON_EQUITY_COUNTRY_HINTS[symbol];
     if (fallbackCountry) {
       map.set(symbol, fallbackCountry);
     }

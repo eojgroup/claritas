@@ -163,6 +163,42 @@ const DEFAULT_SYMBOL_METADATA = DEFAULT_MARKET_BENCHMARKS.reduce((acc, entry) =>
     };
     return acc;
 }, {});
+const COMMON_EQUITY_COUNTRY_HINTS = {
+    AAPL: "US",
+    ABBV: "US",
+    ABNB: "US",
+    AMD: "US",
+    AMZN: "US",
+    AVGO: "US",
+    BAC: "US",
+    BRK: "US",
+    "BRK.B": "US",
+    CRM: "US",
+    CSCO: "US",
+    DIS: "US",
+    GOOG: "US",
+    GOOGL: "US",
+    IBM: "US",
+    INTC: "US",
+    JNJ: "US",
+    JPM: "US",
+    KO: "US",
+    MA: "US",
+    META: "US",
+    MSFT: "US",
+    NFLX: "US",
+    NVDA: "US",
+    ORCL: "US",
+    PEP: "US",
+    PFE: "US",
+    PLTR: "US",
+    SLB: "US",
+    TSLA: "US",
+    UBER: "US",
+    V: "US",
+    WMT: "US",
+    XOM: "US",
+};
 const COUNTRY_PRIMARY_MARKETS = {
     US: { code: "NASDAQ", name: "NASDAQ Composite" },
     FR: { code: "CAC40", name: "CAC 40" },
@@ -459,7 +495,7 @@ function parsePositiveInt(value) {
 async function resolveSymbolCountryMap(symbols) {
     const map = new Map();
     for (const symbol of symbols) {
-        const fallbackCountry = DEFAULT_SYMBOL_METADATA[symbol]?.country;
+        const fallbackCountry = DEFAULT_SYMBOL_METADATA[symbol]?.country ?? COMMON_EQUITY_COUNTRY_HINTS[symbol];
         if (fallbackCountry) {
             map.set(symbol, fallbackCountry);
         }

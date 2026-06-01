@@ -240,6 +240,103 @@ const resolveNewsSource = (item: NewsItem): string | undefined => {
   return source ? prettySourceName(source) : undefined;
 };
 
+const NEWS_SYMBOL_COUNTRY_HINTS: Record<string, string> = {
+  AAPL: "US",
+  ABBV: "US",
+  ABNB: "US",
+  AMD: "US",
+  AMZN: "US",
+  AVGO: "US",
+  BAC: "US",
+  "BRK.B": "US",
+  CRM: "US",
+  CSCO: "US",
+  DIS: "US",
+  DIA: "US",
+  EWA: "AU",
+  EWC: "CA",
+  EWG: "DE",
+  EWJ: "JP",
+  EWQ: "FR",
+  EWU: "GB",
+  EWW: "MX",
+  EWZ: "BR",
+  EZA: "ZA",
+  GOOG: "US",
+  GOOGL: "US",
+  IBM: "US",
+  INDA: "IN",
+  INTC: "US",
+  IWM: "US",
+  JNJ: "US",
+  JPM: "US",
+  KO: "US",
+  MA: "US",
+  MCHI: "CN",
+  META: "US",
+  MSFT: "US",
+  NFLX: "US",
+  NDX: "US",
+  NVDA: "US",
+  ORCL: "US",
+  PEP: "US",
+  PFE: "US",
+  PLTR: "US",
+  QQQ: "US",
+  SLB: "US",
+  SPX: "US",
+  SPY: "US",
+  TSLA: "US",
+  UBER: "US",
+  V: "US",
+  WMT: "US",
+  XOM: "US",
+};
+
+const normalizeIso2 = (value: unknown): string | undefined => {
+  const text = asTrimmedString(value)?.toUpperCase();
+  if (!text) return undefined;
+  if (text === "UK") return "GB";
+  return /^[A-Z]{2}$/.test(text) ? text : undefined;
+};
+
+const parseNewsRelatedSymbols = (value: unknown): string[] => {
+  const raw = Array.isArray(value) ? value.join(" ") : asTrimmedString(value);
+  if (!raw) return [];
+  return Array.from(
+    new Set(
+      raw
+        .split(/[,\s]+/)
+        .map((part) => part.trim().toUpperCase().split(":").pop() ?? "")
+        .filter((part) => /^[A-Z0-9][A-Z0-9._-]{0,23}$/.test(part)),
+    ),
+  );
+};
+
+const getNewsSignalCountries = (item: NewsItem): string[] => {
+  const directCountry = normalizeIso2(item.country_iso2);
+  if (directCountry) return [directCountry];
+
+  const payload = asObject(item.payload);
+  const raw = asObject(payload?.["raw"]);
+  const inference = asObject(payload?.["country_inference"]);
+  const inferredCountry =
+    normalizeIso2(inference?.["iso2"]) ??
+    normalizeIso2(inference?.["related_country_hint"]);
+  if (inferredCountry) return [inferredCountry];
+
+  const symbols = [
+    ...parseNewsRelatedSymbols(payload?.["related"]),
+    ...parseNewsRelatedSymbols(raw?.["related"]),
+  ];
+  const countries = new Set<string>();
+  symbols.forEach((symbol) => {
+    const country = NEWS_SYMBOL_COUNTRY_HINTS[symbol];
+    if (country) countries.add(country);
+  });
+  return Array.from(countries);
+};
+
 const getDateKey = (value: Date | string) => {
   const d = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(d.getTime())) return null;
@@ -1568,6 +1665,38 @@ export default function ClaritasDashboard() {
       .slice(0, 8);
   }, [getSourceLabel, newsPageItems]);
 
+  const newsPageCountryStats = useMemo(() => {
+    const byCountry = new Map<string, { count: number; sources: Map<string, number> }>();
+    newsPageItems.forEach((item) => {
+      const countries = getNewsSignalCountries(item);
+      countries.forEach((country) => {
+        const entry = byCountry.get(country) ?? { count: 0, sources: new Map<string, number>() };
+        entry.count += 1;
+        const source = getSourceLabel(item);
+        if (source) entry.sources.set(source, (entry.sources.get(source) ?? 0) + 1);
+        byCountry.set(country, entry);
+      });
+    });
+    return byCountry;
+  }, [getSourceLabel, newsPageItems]);
+
+  const newsPageMapData = useMemo(() => {
+    return Array.from(newsPageCountryStats.entries()).map(([country, value]) => {
+      const topSource = Array.from(value.sources.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([name]) => name)[0];
+      return {
+        country,
+        count: value.count,
+        tone: "news" as const,
+        meta: {
+          subtitle: `${value.count} ${value.count === 1 ? "story" : "stories"}`,
+          lines: [topSource ? `Top source: ${topSource}` : "Top source: —"],
+        },
+      };
+    });
+  }, [newsPageCountryStats]);
+
   const weatherConditionOptions = useMemo(() => {
     const values = new Set<string>();
     weatherScope.forEach((row) => {
@@ -1949,15 +2078,15 @@ export default function ClaritasDashboard() {
     const withImages = newsPageItems.filter((item) => Boolean(getNewsImageUrl(item))).length;
     return {
       stories: newsPageItems.length,
-      countries: filteredCountryStats.size,
+      countries: newsPageCountryStats.size,
       dominantSource: newsPageSourceData[0]?.source ?? "—",
       avgPerDay: timelineDays > 0 ? newsPageItems.length / timelineDays : newsPageItems.length,
       withImages,
     };
-  }, [filteredCountryStats.size, newsPageItems, newsPageSourceData, newsPageTimelineData.length]);
+  }, [newsPageCountryStats.size, newsPageItems, newsPageSourceData, newsPageTimelineData.length]);
 
   const newsCountryCoverageRows = useMemo(() => {
-    return Array.from(filteredCountryStats.entries())
+    return Array.from(newsPageCountryStats.entries())
       .map(([country, value]) => {
         const topSource = Array.from(value.sources.entries())
           .sort((a, b) => b[1] - a[1])
@@ -1981,7 +2110,7 @@ export default function ClaritasDashboard() {
       })
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
-  }, [filteredCountryStats, marketByCountry, weatherByCountry]);
+  }, [marketByCountry, newsPageCountryStats, weatherByCountry]);
 
   const weatherSummary = useMemo(() => {
     const tempRows = weatherPageRows.filter((row) => typeof row.temp_c === "number");
@@ -4352,7 +4481,7 @@ export default function ClaritasDashboard() {
                       <div className="app-map-frame">
                         <WorldMapBubbles
                           variant="default"
-                          data={mapBubbleData}
+                          data={newsPageMapData}
                           onSelect={(iso) => {
                             setSelectedCountry(iso);
                             setActiveView("news");
