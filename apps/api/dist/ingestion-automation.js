@@ -19,6 +19,7 @@ exports.AutomationValidationError = AutomationValidationError;
 const AUTOMATION_LOCK_NAMESPACE = 9432;
 const AUTOMATION_LOCK_KEY = 1;
 const AUTOMATION_POLL_SECONDS = clampInt(process.env.INGEST_AUTOMATION_POLL_SECONDS, 10, 3600, 30);
+const STALE_ACTIVE_RUN_MINUTES = clampInt(process.env.INGEST_STALE_ACTIVE_RUN_MINUTES, 30, 1440, 180);
 const RULE_DEFAULTS = {
     news: {
         pipeline: "news",
@@ -459,12 +460,13 @@ async function getAutomationOverview() {
         status,
     };
 }
-async function tryAcquireAutomationLock() {
-    const { rows } = await (0, db_1.query)(`SELECT pg_try_advisory_lock($1::int, $2::int) AS locked`, [AUTOMATION_LOCK_NAMESPACE, AUTOMATION_LOCK_KEY]);
-    return !!rows[0]?.locked;
-}
-async function releaseAutomationLock() {
-    await (0, db_1.query)(`SELECT pg_advisory_unlock($1::int, $2::int)`, [AUTOMATION_LOCK_NAMESPACE, AUTOMATION_LOCK_KEY]);
+async function withAutomationLock(task) {
+    await (0, db_1.withTransaction)(async (client) => {
+        const { rows } = await client.query(`SELECT pg_try_advisory_xact_lock($1::int, $2::int) AS locked`, [AUTOMATION_LOCK_NAMESPACE, AUTOMATION_LOCK_KEY]);
+        if (!rows[0]?.locked)
+            return;
+        await task();
+    });
 }
 function isWithinMinutes(iso, minutes) {
     if (!iso)
@@ -541,7 +543,30 @@ async function triggerAutomationRun(rule, reason) {
     const plan = (0, ingestion_admin_1.buildMarketRunPlan)(payload);
     await (0, ingestion_admin_1.triggerMarketRun)({ actor, plan });
 }
+async function failStaleActiveRuns(rule) {
+    const { rows } = await (0, db_1.query)(`UPDATE ingestion_run
+     SET status = 'failed',
+         finished_at = now(),
+         error = COALESCE(
+           error,
+           'Marked failed by automation worker after exceeding stale active-run timeout.'
+         )
+     WHERE pipeline = $1
+       AND status IN ('queued', 'running')
+       AND started_at < now() - make_interval(mins => $2::int)
+     RETURNING id`, [rule.pipeline, STALE_ACTIVE_RUN_MINUTES]);
+    await Promise.all(rows.map((row) => (0, db_1.query)(`INSERT INTO ingestion_run_log (run_id, logged_at, level, message, context)
+         VALUES ($1, now(), 'error', $2, $3)`, [
+        row.id,
+        "Automation worker marked stale active ingestion run as failed.",
+        JSON.stringify({
+            pipeline: rule.pipeline,
+            stale_timeout_minutes: STALE_ACTIVE_RUN_MINUTES,
+        }),
+    ])));
+}
 async function evaluateRule(rule) {
+    await failStaleActiveRuns(rule);
     const state = await getPipelineEvaluationState(rule);
     if (!rule.enabled) {
         await persistRuleEvaluation(rule, { error: null, triggered: false });
@@ -600,10 +625,7 @@ async function runAutomationCycle() {
         return;
     automationWorkerRunning = true;
     try {
-        const hasLock = await tryAcquireAutomationLock();
-        if (!hasLock)
-            return;
-        try {
+        await withAutomationLock(async () => {
             await ensureAutomationRulesExist();
             const rules = await listAutomationRules();
             for (const rule of rules) {
@@ -613,10 +635,7 @@ async function runAutomationCycle() {
                 await pruneDemandSignals();
                 lastDemandSignalPruneAt = Date.now();
             }
-        }
-        finally {
-            await releaseAutomationLock();
-        }
+        });
     }
     finally {
         automationWorkerRunning = false;
