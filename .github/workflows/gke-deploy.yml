@@ -171,6 +171,12 @@ jobs:
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/keycloak-sa.yaml
 
       - name: ⚙️ Apply ConfigMaps
+        env:
+          BRIEFING_LLM_PROVIDER: ${{ secrets.BRIEFING_LLM_PROVIDER }}
+          OPENCODE_SERVER_URL: ${{ secrets.OPENCODE_SERVER_URL }}
+          OPENCODE_MODEL: ${{ secrets.OPENCODE_MODEL }}
+          OPENCODE_PROVIDER_ID: ${{ secrets.OPENCODE_PROVIDER_ID }}
+          OPENCODE_MODEL_ID: ${{ secrets.OPENCODE_MODEL_ID }}
         run: |
           # Ensure claritas-config (DB + auth settings) exists
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
@@ -182,6 +188,26 @@ jobs:
             allowed_redirects="${base},claritas://,http://localhost:5173,http://localhost:8080"
             api_redirects="${base}/api/auth/google/callback,${base}/api/auth/microsoft/callback,${base}/api/auth/apple/callback,http://localhost:8080/api/auth/google/callback,http://localhost:8080/api/auth/microsoft/callback,http://localhost:8080/api/auth/apple/callback"
             kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${allowed_redirects}\",\"KEYCLOAK_API_REDIRECT_URIS\":\"${api_redirects}\"}}"
+          fi
+          node <<'NODE'
+          const fs = require("fs");
+          const data = {};
+          for (const key of [
+            "BRIEFING_LLM_PROVIDER",
+            "OPENCODE_SERVER_URL",
+            "OPENCODE_MODEL",
+            "OPENCODE_PROVIDER_ID",
+            "OPENCODE_MODEL_ID",
+          ]) {
+            const value = process.env[key];
+            if (value && value.trim()) data[key] = value.trim();
+          }
+          fs.writeFileSync("/tmp/claritas-briefing-config.json", JSON.stringify({ data }));
+          NODE
+          if node -e 'const patch=require("/tmp/claritas-briefing-config.json"); process.exit(Object.keys(patch.data || {}).length ? 0 : 1)'; then
+            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "$(cat /tmp/claritas-briefing-config.json)"
+          else
+            echo "::warning::OpenCode briefing config secrets not provided; skipping claritas-config patch"
           fi
 
       - name: 🛠️ Apply Kubernetes resources (non-workload)
@@ -284,6 +310,26 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::FINNHUB_API_KEY secret not provided; skipping claritas-finnhub upsert"
+          fi
+
+      - name: 🔐 Ensure OpenCode briefing secrets exist
+        env:
+          NS: ${{ env.NAMESPACE }}
+          OPENCODE_SERVER_USERNAME: ${{ secrets.OPENCODE_SERVER_USERNAME }}
+          OPENCODE_SERVER_PASSWORD: ${{ secrets.OPENCODE_SERVER_PASSWORD }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${OPENCODE_SERVER_USERNAME:-}" ]; then
+            args+=(--from-literal=OPENCODE_SERVER_USERNAME="$OPENCODE_SERVER_USERNAME")
+          fi
+          if [ -n "${OPENCODE_SERVER_PASSWORD:-}" ]; then
+            args+=(--from-literal=OPENCODE_SERVER_PASSWORD="$OPENCODE_SERVER_PASSWORD")
+          fi
+          if [ "${#args[@]}" -gt 0 ]; then
+            kubectl -n "$NS" create secret generic claritas-opencode "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::OpenCode server auth secrets not provided; skipping claritas-opencode upsert"
           fi
 
       - name: 🔐 Ensure Keycloak/API auth secrets exist

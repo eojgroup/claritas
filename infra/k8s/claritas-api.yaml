@@ -20,6 +20,20 @@
               valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
             - name: FINNHUB_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-finnhub, key: FINNHUB_API_KEY, optional: true } }
+            - name: BRIEFING_LLM_PROVIDER
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: BRIEFING_LLM_PROVIDER, optional: true } }
+            - name: OPENCODE_SERVER_URL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_SERVER_URL, optional: true } }
+            - name: OPENCODE_MODEL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_MODEL, optional: true } }
+            - name: OPENCODE_PROVIDER_ID
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_PROVIDER_ID, optional: true } }
+            - name: OPENCODE_MODEL_ID
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_MODEL_ID, optional: true } }
+            - name: OPENCODE_SERVER_USERNAME
+              valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENCODE_SERVER_USERNAME, optional: true } }
+            - name: OPENCODE_SERVER_PASSWORD
+              valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENCODE_SERVER_PASSWORD, optional: true } }
             - name: AUTH_PROVIDERS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_PROVIDERS } }
             - name: AUTH_ISSUER_URL

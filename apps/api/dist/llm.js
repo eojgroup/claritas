@@ -1,0 +1,281 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.OpenCodeLlmClient = exports.LlmProviderError = exports.LlmConfigurationError = void 0;
+exports.createLlmClientFromEnv = createLlmClientFromEnv;
+exports.getLlmRuntimeConfig = getLlmRuntimeConfig;
+class LlmConfigurationError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = "LlmConfigurationError";
+    }
+}
+exports.LlmConfigurationError = LlmConfigurationError;
+class LlmProviderError extends Error {
+    status;
+    responseBody;
+    constructor(message, status = 502, responseBody = null) {
+        super(message);
+        this.name = "LlmProviderError";
+        this.status = status;
+        this.responseBody = responseBody;
+    }
+}
+exports.LlmProviderError = LlmProviderError;
+function asRecord(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value))
+        return null;
+    return value;
+}
+function normalizeBaseUrl(value) {
+    return value.replace(/\/+$/, "");
+}
+function joinUrl(baseUrl, path) {
+    return `${normalizeBaseUrl(baseUrl)}${path.startsWith("/") ? path : `/${path}`}`;
+}
+function getOptionalEnv(name) {
+    const value = process.env[name];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+function parseOpenCodeModel() {
+    const combined = getOptionalEnv("OPENCODE_MODEL") || getOptionalEnv("LLM_MODEL");
+    const explicitProvider = getOptionalEnv("OPENCODE_PROVIDER_ID");
+    const explicitModel = getOptionalEnv("OPENCODE_MODEL_ID");
+    if (explicitProvider || explicitModel) {
+        return {
+            providerID: explicitProvider,
+            modelID: explicitModel,
+            label: explicitProvider && explicitModel ? `${explicitProvider}/${explicitModel}` : explicitModel || explicitProvider,
+        };
+    }
+    if (!combined) {
+        return { providerID: null, modelID: null, label: null };
+    }
+    const slashIndex = combined.indexOf("/");
+    if (slashIndex > 0 && slashIndex < combined.length - 1) {
+        return {
+            providerID: combined.slice(0, slashIndex),
+            modelID: combined.slice(slashIndex + 1),
+            label: combined,
+        };
+    }
+    return { providerID: null, modelID: combined, label: combined };
+}
+function buildOpenCodeConfig() {
+    const baseUrl = getOptionalEnv("OPENCODE_SERVER_URL");
+    if (!baseUrl) {
+        throw new LlmConfigurationError("BRIEFING_LLM_PROVIDER=opencode requires OPENCODE_SERVER_URL, for example http://127.0.0.1:4096.");
+    }
+    return {
+        baseUrl,
+        username: getOptionalEnv("OPENCODE_SERVER_USERNAME") || "opencode",
+        password: getOptionalEnv("OPENCODE_SERVER_PASSWORD"),
+        ...parseOpenCodeModel(),
+    };
+}
+async function readResponseBody(response) {
+    try {
+        return await response.text();
+    }
+    catch {
+        return "";
+    }
+}
+function tryParseJson(value) {
+    try {
+        return JSON.parse(value);
+    }
+    catch {
+        return undefined;
+    }
+}
+function parseJsonObjectFromText(text) {
+    const direct = tryParseJson(text);
+    if (direct !== undefined)
+        return direct;
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced?.[1]) {
+        const parsed = tryParseJson(fenced[1].trim());
+        if (parsed !== undefined)
+            return parsed;
+    }
+    const firstBrace = text.indexOf("{");
+    const lastBrace = text.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+        const parsed = tryParseJson(text.slice(firstBrace, lastBrace + 1));
+        if (parsed !== undefined)
+            return parsed;
+    }
+    throw new LlmProviderError("OpenCode response did not contain parseable JSON output.");
+}
+function collectText(value, output = []) {
+    if (typeof value === "string")
+        return output;
+    const record = asRecord(value);
+    if (record) {
+        if (typeof record.text === "string")
+            output.push(record.text);
+        if (typeof record.content === "string")
+            output.push(record.content);
+        for (const child of Object.values(record))
+            collectText(child, output);
+    }
+    else if (Array.isArray(value)) {
+        for (const child of value)
+            collectText(child, output);
+    }
+    return output;
+}
+function findStructuredOutput(value) {
+    const record = asRecord(value);
+    if (record) {
+        if (Object.prototype.hasOwnProperty.call(record, "structured_output")) {
+            return record.structured_output;
+        }
+        if (Object.prototype.hasOwnProperty.call(record, "structuredOutput")) {
+            return record.structuredOutput;
+        }
+        for (const child of Object.values(record)) {
+            const found = findStructuredOutput(child);
+            if (typeof found !== "undefined")
+                return found;
+        }
+    }
+    else if (Array.isArray(value)) {
+        for (const child of value) {
+            const found = findStructuredOutput(child);
+            if (typeof found !== "undefined")
+                return found;
+        }
+    }
+    return undefined;
+}
+function findSessionId(value) {
+    const record = asRecord(value);
+    if (!record)
+        return null;
+    for (const key of ["id", "sessionID", "sessionId", "session_id"]) {
+        const candidate = record[key];
+        if (typeof candidate === "string" && candidate.trim())
+            return candidate.trim();
+    }
+    for (const child of Object.values(record)) {
+        const candidate = findSessionId(child);
+        if (candidate)
+            return candidate;
+    }
+    return null;
+}
+function findProviderError(value) {
+    const record = asRecord(value);
+    if (!record)
+        return null;
+    const error = asRecord(record.error);
+    if (error) {
+        const name = typeof error.name === "string" ? error.name : "provider error";
+        const message = typeof error.message === "string" ? error.message : "";
+        return message ? `${name}: ${message}` : name;
+    }
+    const info = asRecord(record.info);
+    return info ? findProviderError(info) : null;
+}
+class OpenCodeLlmClient {
+    config;
+    constructor(config = buildOpenCodeConfig()) {
+        this.config = config;
+    }
+    async generateStructured(request) {
+        const session = await this.requestJson("/session", {
+            method: "POST",
+            body: JSON.stringify({ title: request.title || "Claritas daily briefing generation" }),
+        });
+        const sessionId = findSessionId(session);
+        if (!sessionId) {
+            throw new LlmProviderError("OpenCode did not return a session id.");
+        }
+        const body = {
+            system: request.system,
+            parts: [{ type: "text", text: request.prompt }],
+            format: {
+                type: "json_schema",
+                schema: request.schema,
+                retryCount: request.retryCount ?? 2,
+            },
+        };
+        if (this.config.providerID && this.config.modelID) {
+            body.model = {
+                providerID: this.config.providerID,
+                modelID: this.config.modelID,
+            };
+        }
+        const message = await this.requestJson(`/session/${encodeURIComponent(sessionId)}/message`, {
+            method: "POST",
+            body: JSON.stringify(body),
+        });
+        const providerError = findProviderError(message);
+        if (providerError) {
+            throw new LlmProviderError(`OpenCode generation failed: ${providerError}`);
+        }
+        const structured = findStructuredOutput(message);
+        const output = typeof structured === "undefined"
+            ? parseJsonObjectFromText(collectText(message).join("\n").trim())
+            : structured;
+        return {
+            output: output,
+            provider: "opencode",
+            model: this.config.label,
+            metadata: {
+                session_id: sessionId,
+                server_url: this.config.baseUrl,
+                provider_id: this.config.providerID,
+                model_id: this.config.modelID,
+            },
+        };
+    }
+    async requestJson(path, init) {
+        const headers = {
+            "content-type": "application/json",
+        };
+        if (this.config.password) {
+            headers.authorization = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
+        }
+        const response = await fetch(joinUrl(this.config.baseUrl, path), {
+            ...init,
+            headers: {
+                ...headers,
+                ...(init.headers || {}),
+            },
+        });
+        const body = await readResponseBody(response);
+        if (!response.ok) {
+            throw new LlmProviderError(`OpenCode HTTP ${response.status}: ${body || response.statusText}`, 502, body || null);
+        }
+        if (!body)
+            return {};
+        const parsed = tryParseJson(body);
+        if (typeof parsed === "undefined") {
+            throw new LlmProviderError("OpenCode returned a non-JSON response.", 502, body);
+        }
+        return parsed;
+    }
+}
+exports.OpenCodeLlmClient = OpenCodeLlmClient;
+function createLlmClientFromEnv() {
+    const provider = (getOptionalEnv("BRIEFING_LLM_PROVIDER") || getOptionalEnv("LLM_PROVIDER") || "opencode").toLowerCase();
+    if (provider === "opencode")
+        return new OpenCodeLlmClient();
+    throw new LlmConfigurationError(`Unsupported BRIEFING_LLM_PROVIDER: ${provider}. Currently supported: opencode.`);
+}
+function getLlmRuntimeConfig() {
+    const provider = (getOptionalEnv("BRIEFING_LLM_PROVIDER") || getOptionalEnv("LLM_PROVIDER") || "opencode").toLowerCase();
+    const model = parseOpenCodeModel();
+    return {
+        provider,
+        opencode: {
+            server_url_configured: Boolean(getOptionalEnv("OPENCODE_SERVER_URL")),
+            auth_configured: Boolean(getOptionalEnv("OPENCODE_SERVER_PASSWORD")),
+            provider_id: model.providerID,
+            model_id: model.modelID,
+            model: model.label,
+        },
+    };
+}

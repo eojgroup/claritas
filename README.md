@@ -98,6 +98,10 @@ Claritas targets an enterprise architecture on Google Cloud Platform with a shar
   - Keycloak for IAM
   - PostgreSQL for application and identity-linked data
   - Kubernetes + Terraform for runtime and infra lifecycle
+- Keep AI-assisted product features provider-neutral:
+  - Daily briefing generation uses a Claritas-owned LLM adapter boundary.
+  - OpenCode is supported as the first runtime LLM backend for local/open-provider deployments.
+  - The browser never calls the LLM backend directly.
 - Keep an abstraction boundary in the API auth layer so identity provider choice remains swappable.
 - Avoid provider lock-in by storing app authorization in Claritas-owned tables, not only in IdP-specific claims.
 
@@ -210,6 +214,22 @@ npm run dev
 - Production secret source (recommended):
   - GitHub repository secret: `THENEWSAPI_API_TOKEN`
   - Used by deploy workflow: `.github/workflows/gke-deploy.yml` (`Ensure API provider secrets exist`)
+
+### 4. Daily Briefing AI Backend
+
+The daily briefing generator can use OpenCode as an internal LLM service:
+
+- API env:
+  - `BRIEFING_LLM_PROVIDER=opencode`
+  - `OPENCODE_SERVER_URL`
+  - `OPENCODE_MODEL` or `OPENCODE_PROVIDER_ID` + `OPENCODE_MODEL_ID`
+  - `OPENCODE_SERVER_USERNAME`
+  - `OPENCODE_SERVER_PASSWORD`
+- Trigger endpoint:
+  - `POST /api/ingest/briefings/daily/:date/generate`
+  - `POST /api/admin/briefings/daily/:date/generate`
+- Full setup guide:
+  - [`docs/daily-briefing-opencode.md`](./docs/daily-briefing-opencode.md)
 
 ---
 

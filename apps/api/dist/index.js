@@ -46,6 +46,8 @@ const auth_1 = __importStar(require("./auth"));
 const ingestion_admin_1 = require("./ingestion-admin");
 const ingestion_automation_1 = require("./ingestion-automation");
 const billing_1 = require("./billing");
+const briefing_generator_1 = require("./briefing-generator");
+const llm_1 = require("./llm");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 app.set("trust proxy", 1);
@@ -229,6 +231,13 @@ function parseBriefingStatus(value) {
         return normalized;
     throw new AdminApiError(400, "status must be draft, published, or archived.");
 }
+function parseGeneratedBriefingStatus(value) {
+    const status = parseBriefingStatus(value);
+    if (status === "archived") {
+        throw new AdminApiError(400, "Generated briefings can only be draft or published.");
+    }
+    return status;
+}
 function sanitizeBriefingPayload(raw) {
     const body = raw && typeof raw === "object" && !Array.isArray(raw)
         ? raw
@@ -379,6 +388,45 @@ function parseOptionalIsoDateTime(value, fieldName) {
     }
     return new Date(parsed).toISOString();
 }
+function parseOptionalPositiveInt(value, fieldName, max) {
+    if (typeof value === "undefined" || value === null || value === "")
+        return undefined;
+    const parsed = typeof value === "number"
+        ? Math.trunc(value)
+        : typeof value === "string"
+            ? Number.parseInt(value, 10)
+            : Number.NaN;
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new AdminApiError(400, `${fieldName} must be a positive integer.`);
+    }
+    return Math.min(parsed, max);
+}
+function parseBriefingGenerationOptions(briefingDate, raw) {
+    const body = raw && typeof raw === "object" && !Array.isArray(raw)
+        ? raw
+        : {};
+    const status = typeof body.publish === "boolean"
+        ? body.publish
+            ? "published"
+            : "draft"
+        : typeof body.status === "undefined"
+            ? "published"
+            : parseGeneratedBriefingStatus(body.status);
+    const instructions = typeof body.instructions === "string"
+        ? body.instructions.trim().slice(0, 2000)
+        : typeof body.prompt === "string"
+            ? body.prompt.trim().slice(0, 2000)
+            : null;
+    return {
+        briefingDate,
+        status,
+        instructions,
+        lookbackHours: parseOptionalPositiveInt(body.lookback_hours ?? body.lookbackHours, "lookback_hours", 168),
+        maxNewsItems: parseOptionalPositiveInt(body.max_news_items ?? body.maxNewsItems, "max_news_items", 80),
+        maxMarketItems: parseOptionalPositiveInt(body.max_market_items ?? body.maxMarketItems, "max_market_items", 60),
+        maxWeatherItems: parseOptionalPositiveInt(body.max_weather_items ?? body.maxWeatherItems, "max_weather_items", 80),
+    };
+}
 function sanitizeAutomationPayload(value) {
     if (typeof value === "undefined")
         return undefined;
@@ -487,6 +535,33 @@ app.get("/api/admin/briefings/daily", requireAdminRole, async (req, res) => {
         return res.status(500).json({ error: e.message || String(e) });
     }
 });
+app.get("/api/admin/briefings/daily/generation/config", requireAdminRole, async (_req, res) => {
+    try {
+        return res.json({ generator: (0, briefing_generator_1.getDailyBriefingGeneratorConfig)() });
+    }
+    catch (e) {
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.post("/api/admin/briefings/daily/:date/generate", requireAdminRole, async (req, res) => {
+    try {
+        const briefingDate = parseBriefingDate(req.params.date);
+        const generated = await (0, briefing_generator_1.generateDailySignalBriefing)(parseBriefingGenerationOptions(briefingDate, req.body));
+        const briefing = await upsertDailySignalBriefing(briefingDate, generated.payload);
+        return res.json({ briefing, generation: generated.generation });
+    }
+    catch (e) {
+        if (e instanceof AdminApiError)
+            return res.status(e.status).json({ error: e.message });
+        if (e instanceof briefing_generator_1.BriefingGenerationError)
+            return res.status(e.status).json({ error: e.message });
+        if (e instanceof llm_1.LlmConfigurationError)
+            return res.status(503).json({ error: e.message });
+        if (e instanceof llm_1.LlmProviderError)
+            return res.status(e.status).json({ error: e.message });
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
 app.put("/api/admin/briefings/daily/:date", requireAdminRole, async (req, res) => {
     try {
         const briefingDate = parseBriefingDate(req.params.date);
@@ -496,6 +571,25 @@ app.put("/api/admin/briefings/daily/:date", requireAdminRole, async (req, res) =
     }
     catch (e) {
         if (e instanceof AdminApiError)
+            return res.status(e.status).json({ error: e.message });
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.post("/api/ingest/briefings/daily/:date/generate", requireIngestionAccess, async (req, res) => {
+    try {
+        const briefingDate = parseBriefingDate(req.params.date);
+        const generated = await (0, briefing_generator_1.generateDailySignalBriefing)(parseBriefingGenerationOptions(briefingDate, req.body));
+        const briefing = await upsertDailySignalBriefing(briefingDate, generated.payload);
+        return res.json({ briefing, generation: generated.generation });
+    }
+    catch (e) {
+        if (e instanceof AdminApiError)
+            return res.status(e.status).json({ error: e.message });
+        if (e instanceof briefing_generator_1.BriefingGenerationError)
+            return res.status(e.status).json({ error: e.message });
+        if (e instanceof llm_1.LlmConfigurationError)
+            return res.status(503).json({ error: e.message });
+        if (e instanceof llm_1.LlmProviderError)
             return res.status(e.status).json({ error: e.message });
         return res.status(500).json({ error: e.message || String(e) });
     }
