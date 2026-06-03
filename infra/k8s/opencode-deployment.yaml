@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opencode
+  namespace: claritas
+  labels:
+    app: opencode
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opencode
+  template:
+    metadata:
+      labels:
+        app: opencode
+    spec:
+      containers:
+        - name: opencode
+          image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/opencode:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /home/opencode
+            - name: OPENCODE_SERVER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: OPENCODE_SERVER_USERNAME
+                  optional: true
+            - name: OPENCODE_SERVER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: OPENCODE_SERVER_PASSWORD
+                  optional: true
+            - name: OPENCODE_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: claritas-config
+                  key: OPENCODE_MODEL
+                  optional: true
+            - name: OPENCODE_AUTH_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: OPENCODE_AUTH_JSON
+                  optional: true
+            - name: OPENCODE_CONFIG_JSON
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: OPENCODE_CONFIG_JSON
+                  optional: true
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: OPENROUTER_API_KEY
+                  optional: true
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: OPENAI_API_KEY
+                  optional: true
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+            - name: GOOGLE_GENERATIVE_AI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: GOOGLE_GENERATIVE_AI_API_KEY
+                  optional: true
+            - name: GROQ_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: GROQ_API_KEY
+                  optional: true
+            - name: XAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: XAI_API_KEY
+                  optional: true
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-opencode
+                  key: DEEPSEEK_API_KEY
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 4096
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - name: opencode-home
+              mountPath: /home/opencode
+      volumes:
+        - name: opencode-home
+          emptyDir: {}

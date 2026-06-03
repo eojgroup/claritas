@@ -99,7 +99,43 @@ OPENCODE_PROVIDER_ID
 OPENCODE_MODEL_ID
 OPENCODE_SERVER_USERNAME
 OPENCODE_SERVER_PASSWORD
+OPENCODE_AUTH_JSON
+OPENCODE_CONFIG_JSON
+OPENROUTER_API_KEY
+OPENAI_API_KEY
+ANTHROPIC_API_KEY
+GOOGLE_GENERATIVE_AI_API_KEY
+GROQ_API_KEY
+XAI_API_KEY
+DEEPSEEK_API_KEY
 ```
+
+The workflow also builds and deploys an internal `opencode` Deployment and Service:
+
+```text
+opencode.claritas.svc.cluster.local:4096
+```
+
+For this default service-based deployment, set:
+
+```bash
+OPENCODE_SERVER_URL=http://opencode:4096
+```
+
+`127.0.0.1` only works if OpenCode is running as a sidecar in the same pod as `claritas-api`.
+
+OpenCode still needs access to an LLM provider. The most flexible path is `OPENCODE_AUTH_JSON`, for example:
+
+```json
+{
+  "openrouter": {
+    "type": "api",
+    "key": "sk-or-your-key"
+  }
+}
+```
+
+For common API-key providers, the deployment can also build `auth.json` from individual provider secrets such as `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`.
 
 Create or patch config:
 
@@ -121,6 +157,27 @@ kubectl -n claritas create secret generic claritas-opencode \
 ```
 
 Run OpenCode as an internal service or sidecar and point `OPENCODE_SERVER_URL` at it. Keep it off the public ingress; Claritas should be the only service calling it.
+
+## Troubleshooting
+
+`Cannot reach OpenCode at http://opencode:4096/session: fetch failed` means the API pod could not open a network connection to the internal OpenCode service. Check the OpenCode workload first:
+
+```bash
+kubectl -n claritas get deploy opencode
+kubectl -n claritas get svc opencode
+kubectl -n claritas rollout status deploy/opencode
+kubectl -n claritas logs deploy/opencode --tail=100
+```
+
+If the workload exists and is ready, confirm the API config:
+
+```bash
+kubectl -n claritas get configmap claritas-config -o jsonpath='{.data.OPENCODE_SERVER_URL}{"\n"}'
+kubectl -n claritas get configmap claritas-config -o jsonpath='{.data.OPENCODE_MODEL}{"\n"}'
+kubectl -n claritas get secret claritas-opencode
+```
+
+`OPENCODE_SERVER_URL` should be `http://opencode:4096` for the default GKE deployment. `OPENCODE_MODEL` must be a real OpenCode model id, not `provider-id/model-id`, and `claritas-opencode` must include either `OPENCODE_AUTH_JSON` or a provider API key such as `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`.
 
 ## Request Body
 
