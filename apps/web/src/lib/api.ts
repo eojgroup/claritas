@@ -91,6 +91,33 @@ export type DailySignalBriefing = {
   updated_at: string;
 };
 
+export type AdminDailyBriefingGeneratorConfig = {
+  prompt_version: string;
+  llm: {
+    provider: string;
+    opencode?: {
+      server_url_configured: boolean;
+      auth_configured: boolean;
+      provider_id: string | null;
+      model_id: string | null;
+      model: string | null;
+    };
+  };
+};
+
+export type AdminDailyBriefingGenerationSummary = {
+  provider: string;
+  model: string | null;
+  source_counts: {
+    news: number;
+    markets: number;
+    weather: number;
+  };
+  source_window_start: string;
+  source_window_end: string;
+  data_quality_notes: string[];
+};
+
 export type BillingPlanRef = {
   id: number;
   code: string;
@@ -316,6 +343,43 @@ export async function fetchDailySignalBriefingLatest(): Promise<DailySignalBrief
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch daily briefing"));
   const data = await resp.json();
   return (data.briefing ?? null) as DailySignalBriefing | null;
+}
+
+export async function fetchAdminDailyBriefingGeneratorConfig(): Promise<AdminDailyBriefingGeneratorConfig> {
+  const resp = await fetch(`${API_BASE}/api/admin/briefings/daily/generation/config`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch briefing generator config"));
+  const data = await resp.json();
+  return data.generator as AdminDailyBriefingGeneratorConfig;
+}
+
+export async function generateAdminDailySignalBriefing(
+  date: string,
+  payload?: {
+    publish?: boolean;
+    status?: "draft" | "published";
+    lookback_hours?: number;
+    max_news_items?: number;
+    max_market_items?: number;
+    max_weather_items?: number;
+    instructions?: string;
+  },
+): Promise<{
+  briefing: DailySignalBriefing;
+  generation: AdminDailyBriefingGenerationSummary;
+}> {
+  const resp = await fetch(`${API_BASE}/api/admin/briefings/daily/${encodeURIComponent(date)}/generate`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload ?? {}),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to generate daily briefing"));
+  return (await resp.json()) as {
+    briefing: DailySignalBriefing;
+    generation: AdminDailyBriefingGenerationSummary;
+  };
 }
 
 export async function logoutAuth(): Promise<void> {

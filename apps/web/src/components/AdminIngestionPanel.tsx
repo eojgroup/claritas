@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Play, RefreshCw } from "lucide-react";
+import { Activity, FileText, Play, RefreshCw, Sparkles } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -17,16 +17,21 @@ import {
   fetchAdminIngestionAutomation,
   fetchAdminIngestionRun,
   fetchAdminIngestionRuns,
+  fetchAdminDailyBriefingGeneratorConfig,
+  generateAdminDailySignalBriefing,
   triggerAdminMarketIngestion,
   triggerAdminNewsIngestion,
   triggerAdminWeatherIngestion,
   updateAdminIngestionAutomationRule,
   type AdminIngestionAutomationRule,
   type AdminIngestionAutomationStatus,
+  type AdminDailyBriefingGenerationSummary,
+  type AdminDailyBriefingGeneratorConfig,
   type AdminIngestionLog,
   type AdminIngestionMetricsPoint,
   type AdminIngestionMetricsTotal,
   type AdminIngestionRun,
+  type DailySignalBriefing,
   type IngestionPipeline,
 } from "../lib/api";
 
@@ -267,6 +272,31 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [marketNewsCategory, setMarketNewsCategory] = useState<"general" | "forex" | "crypto" | "merger">(
     "general",
   );
+  const [briefingConfig, setBriefingConfig] = useState<AdminDailyBriefingGeneratorConfig | null>(null);
+  const [briefingConfigError, setBriefingConfigError] = useState<string | null>(null);
+  const [isLoadingBriefingConfig, setIsLoadingBriefingConfig] = useState(false);
+  const [briefingDate, setBriefingDate] = useState(() => toLocalDateInputValue(new Date()));
+  const [briefingPublish, setBriefingPublish] = useState(true);
+  const [briefingLookbackHours, setBriefingLookbackHours] = useState(24);
+  const [briefingInstructions, setBriefingInstructions] = useState(
+    "Prioritize globally material changes and be explicit when source data is thin.",
+  );
+  const [isGeneratingBriefing, setIsGeneratingBriefing] = useState(false);
+  const [generatedBriefing, setGeneratedBriefing] = useState<DailySignalBriefing | null>(null);
+  const [generationSummary, setGenerationSummary] = useState<AdminDailyBriefingGenerationSummary | null>(null);
+
+  const refreshBriefingConfig = useCallback(async () => {
+    setIsLoadingBriefingConfig(true);
+    setBriefingConfigError(null);
+    try {
+      setBriefingConfig(await fetchAdminDailyBriefingGeneratorConfig());
+    } catch (error) {
+      setBriefingConfig(null);
+      setBriefingConfigError(toErrorMessage(error));
+    } finally {
+      setIsLoadingBriefingConfig(false);
+    }
+  }, []);
 
   const refreshOverview = useCallback(
     async (silent = false) => {
@@ -338,6 +368,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   useEffect(() => {
     void refreshOverview(false);
   }, [refreshOverview]);
+
+  useEffect(() => {
+    void refreshBriefingConfig();
+  }, [refreshBriefingConfig]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -491,6 +525,30 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       setIsTriggeringMarket(false);
     }
   }, [marketIncludeNews, marketNewsCategory, marketSymbols, refreshOverview]);
+
+  const handleGenerateBriefing = useCallback(async () => {
+    setIsGeneratingBriefing(true);
+    setActionError(null);
+    setActionNotice(null);
+    setGeneratedBriefing(null);
+    setGenerationSummary(null);
+    try {
+      const result = await generateAdminDailySignalBriefing(briefingDate, {
+        publish: briefingPublish,
+        lookback_hours: briefingLookbackHours,
+        instructions: briefingInstructions.trim() || undefined,
+      });
+      setGeneratedBriefing(result.briefing);
+      setGenerationSummary(result.generation);
+      setActionNotice(
+        `Daily briefing for ${result.briefing.briefing_date} generated as ${result.briefing.status}.`,
+      );
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setIsGeneratingBriefing(false);
+    }
+  }, [briefingDate, briefingInstructions, briefingLookbackHours, briefingPublish]);
 
   const updateAutomationDraft = useCallback(
     (
@@ -930,6 +988,171 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <Play className="h-3.5 w-3.5" />
               {isTriggeringMarket ? "Starting…" : "Run Market"}
             </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+        <div className="flex flex-wrap items-start gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
+              <FileText className="h-3.5 w-3.5" />
+              Daily briefing
+            </div>
+            <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+              Generate the published dashboard briefing from current source data
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshBriefingConfig()}
+            className="ml-auto inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-xs text-[color:var(--shell-muted)]"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            {isLoadingBriefingConfig ? "Checking…" : "Check config"}
+          </button>
+        </div>
+
+        {briefingConfigError && (
+          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            {briefingConfigError}
+          </div>
+        )}
+
+        <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[1.2fr_1fr]">
+          <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2.5 py-1 text-[color:var(--shell-muted)]">
+                Provider: {briefingConfig?.llm.provider ?? "—"}
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 ${
+                  briefingConfig?.llm.opencode?.server_url_configured
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700"
+                }`}
+              >
+                URL {briefingConfig?.llm.opencode?.server_url_configured ? "configured" : "missing"}
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 ${
+                  briefingConfig?.llm.opencode?.auth_configured
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700"
+                }`}
+              >
+                Auth {briefingConfig?.llm.opencode?.auth_configured ? "configured" : "missing"}
+              </span>
+              <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2.5 py-1 text-[color:var(--shell-muted)]">
+                Model: {briefingConfig?.llm.opencode?.model ?? "—"}
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <label className="text-xs text-[color:var(--shell-muted)]">
+                Briefing date
+                <input
+                  type="date"
+                  value={briefingDate}
+                  onChange={(event) => setBriefingDate(event.currentTarget.value)}
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                />
+              </label>
+              <label className="text-xs text-[color:var(--shell-muted)]">
+                Lookback hours
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={briefingLookbackHours}
+                  onChange={(event) => {
+                    const numeric = Number.parseInt(event.currentTarget.value, 10);
+                    if (Number.isFinite(numeric)) {
+                      setBriefingLookbackHours(Math.min(Math.max(numeric, 1), 168));
+                    }
+                  }}
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                />
+              </label>
+              <label className="flex items-end gap-2 text-xs text-[color:var(--shell-muted)]">
+                <input
+                  type="checkbox"
+                  checked={briefingPublish}
+                  onChange={(event) => setBriefingPublish(event.currentTarget.checked)}
+                  className="mb-2 h-4 w-4 rounded border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
+                />
+                <span className="pb-1.5">Publish immediately</span>
+              </label>
+            </div>
+
+            <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
+              Editorial instruction
+              <textarea
+                value={briefingInstructions}
+                onChange={(event) => setBriefingInstructions(event.currentTarget.value)}
+                className="mt-1 h-24 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-sm text-[color:var(--shell-ink)]"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={() => void handleGenerateBriefing()}
+              disabled={isGeneratingBriefing}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50 sm:w-auto sm:text-xs"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {isGeneratingBriefing
+                ? "Generating…"
+                : briefingPublish
+                  ? "Generate + Publish"
+                  : "Generate Draft"}
+            </button>
+          </div>
+
+          <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+              Last generated
+            </div>
+            {generatedBriefing ? (
+              <div className="mt-3 min-w-0 text-sm text-[color:var(--shell-muted)]">
+                <div className="font-semibold text-[color:var(--shell-ink)]">
+                  {generatedBriefing.title}
+                </div>
+                <div className="mt-1 text-xs">
+                  {generatedBriefing.briefing_date} · {generatedBriefing.status} ·{" "}
+                  {generatedBriefing.generated_by ?? "generator"}
+                </div>
+                <p className="mt-3 leading-6">{generatedBriefing.update_text}</p>
+                {generationSummary && (
+                  <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-[11px]">
+                    <div>
+                      Source window: {formatDateTime(generationSummary.source_window_start)} -{" "}
+                      {formatDateTime(generationSummary.source_window_end)}
+                    </div>
+                    <div>
+                      Sources: {generationSummary.source_counts.news} news ·{" "}
+                      {generationSummary.source_counts.markets} markets ·{" "}
+                      {generationSummary.source_counts.weather} weather
+                    </div>
+                    <div>
+                      LLM: {generationSummary.provider}
+                      {generationSummary.model ? `:${generationSummary.model}` : ""}
+                    </div>
+                  </div>
+                )}
+                {generationSummary?.data_quality_notes.length ? (
+                  <ul className="mt-3 space-y-1 text-xs">
+                    {generationSummary.data_quality_notes.map((note, idx) => (
+                      <li key={`briefing-note-${idx}`}>• {note}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mt-3 text-sm text-[color:var(--shell-muted)]">
+                No briefing generated in this admin session.
+              </div>
+            )}
           </div>
         </div>
       </section>
