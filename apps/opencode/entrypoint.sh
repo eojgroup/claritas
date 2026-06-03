@@ -43,12 +43,45 @@ const os = require("os");
 const path = require("path");
 
 const model = process.env.OPENCODE_MODEL;
-const config = model && model.trim()
+const providerApiKeyEnv = {
+  openrouter: "OPENROUTER_API_KEY",
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  google: "GOOGLE_GENERATIVE_AI_API_KEY",
+  groq: "GROQ_API_KEY",
+  xai: "XAI_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+};
+
+const normalizedModel = model && model.trim();
+const config = normalizedModel
   ? {
       $schema: "https://opencode.ai/config.json",
-      model: model.trim(),
+      model: normalizedModel,
     }
   : {};
+
+if (normalizedModel) {
+  const slashIndex = normalizedModel.indexOf("/");
+  if (slashIndex > 0 && slashIndex < normalizedModel.length - 1) {
+    const providerID = normalizedModel.slice(0, slashIndex);
+    const modelID = normalizedModel.slice(slashIndex + 1);
+    const provider = {
+      models: {
+        [modelID]: {},
+      },
+    };
+    const apiKeyEnv = providerApiKeyEnv[providerID];
+    if (apiKeyEnv && process.env[apiKeyEnv]) {
+      provider.options = {
+        apiKey: `{env:${apiKeyEnv}}`,
+      };
+    }
+    config.provider = {
+      [providerID]: provider,
+    };
+  }
+}
 
 if (Object.keys(config).length > 0) {
   const target = path.join(os.homedir(), ".config", "opencode", "opencode.json");

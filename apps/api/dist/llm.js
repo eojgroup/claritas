@@ -66,11 +66,15 @@ function buildOpenCodeConfig() {
     if (!baseUrl) {
         throw new LlmConfigurationError("BRIEFING_LLM_PROVIDER=opencode requires OPENCODE_SERVER_URL, for example http://127.0.0.1:4096.");
     }
+    const model = parseOpenCodeModel();
+    if (model.providerID === "provider-id" || model.modelID === "model-id" || model.label === "provider-id/model-id") {
+        throw new LlmConfigurationError("OPENCODE_MODEL is still set to the placeholder provider-id/model-id. Replace it with a real OpenCode provider/model id.");
+    }
     return {
         baseUrl,
         username: getOptionalEnv("OPENCODE_SERVER_USERNAME") || "opencode",
         password: getOptionalEnv("OPENCODE_SERVER_PASSWORD"),
-        ...parseOpenCodeModel(),
+        ...model,
     };
 }
 async function readResponseBody(response) {

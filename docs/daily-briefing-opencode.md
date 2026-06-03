@@ -179,6 +179,25 @@ kubectl -n claritas get secret claritas-opencode
 
 `OPENCODE_SERVER_URL` should be `http://opencode:4096` for the default GKE deployment. `OPENCODE_MODEL` must be a real OpenCode model id, not `provider-id/model-id`, and `claritas-opencode` must include either `OPENCODE_AUTH_JSON` or a provider API key such as `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`.
 
+An OpenCode response like this usually means the model id is not known to OpenCode:
+
+```json
+{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_..."}}
+```
+
+The matching OpenCode pod log will contain `ProviderModelNotFoundError`. Replace the placeholder model secret with a real provider/model value and redeploy:
+
+```bash
+OPENCODE_MODEL=openrouter/openai/gpt-4o-mini
+```
+
+To inspect available models from inside the cluster, port-forward the internal service and call OpenCode's provider config endpoint:
+
+```bash
+kubectl -n claritas port-forward svc/opencode 4096:4096
+curl -u opencode:$OPENCODE_SERVER_PASSWORD http://127.0.0.1:4096/config/providers
+```
+
 ## Request Body
 
 ```json
