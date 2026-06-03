@@ -105,6 +105,20 @@ export type AdminDailyBriefingGeneratorConfig = {
   };
 };
 
+export type AdminDailyBriefingConnectionCheck = {
+  provider: string;
+  reachable: boolean;
+  model: string | null;
+  latency_ms: number;
+  metadata: {
+    session_id?: string | null;
+    server_url?: string;
+    provider_id?: string | null;
+    model_id?: string | null;
+    [key: string]: unknown;
+  };
+};
+
 export type AdminDailyBriefingGenerationSummary = {
   provider: string;
   model: string | null;
@@ -352,6 +366,16 @@ export async function fetchAdminDailyBriefingGeneratorConfig(): Promise<AdminDai
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch briefing generator config"));
   const data = await resp.json();
   return data.generator as AdminDailyBriefingGeneratorConfig;
+}
+
+export async function testAdminDailyBriefingGeneratorConnection(): Promise<AdminDailyBriefingConnectionCheck> {
+  const resp = await fetch(`${API_BASE}/api/admin/briefings/daily/generation/test`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to test briefing generator connection"));
+  const data = await resp.json();
+  return data.connection as AdminDailyBriefingConnectionCheck;
 }
 
 export async function generateAdminDailySignalBriefing(

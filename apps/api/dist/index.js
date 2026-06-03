@@ -543,6 +543,19 @@ app.get("/api/admin/briefings/daily/generation/config", requireAdminRole, async 
         return res.status(500).json({ error: e.message || String(e) });
     }
 });
+app.post("/api/admin/briefings/daily/generation/test", requireAdminRole, async (_req, res) => {
+    try {
+        const connection = await (0, llm_1.checkLlmConnectionFromEnv)();
+        return res.json({ connection });
+    }
+    catch (e) {
+        if (e instanceof llm_1.LlmConfigurationError)
+            return res.status(503).json({ error: e.message });
+        if (e instanceof llm_1.LlmProviderError)
+            return res.status(e.status).json({ error: e.message });
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
 app.post("/api/admin/briefings/daily/:date/generate", requireAdminRole, async (req, res) => {
     try {
         const briefingDate = parseBriefingDate(req.params.date);

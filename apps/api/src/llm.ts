@@ -17,6 +17,14 @@ export interface LlmClient {
   generateStructured<T>(request: LlmStructuredRequest): Promise<LlmStructuredResponse<T>>;
 }
 
+export type LlmConnectionCheck = {
+  provider: string;
+  reachable: boolean;
+  model: string | null;
+  latency_ms: number;
+  metadata: Record<string, unknown>;
+};
+
 export class LlmConfigurationError extends Error {
   constructor(message: string) {
     super(message);
@@ -272,6 +280,26 @@ export class OpenCodeLlmClient implements LlmClient {
     };
   }
 
+  async checkConnection(): Promise<LlmConnectionCheck> {
+    const startedAt = Date.now();
+    const session = await this.requestJson("/session", {
+      method: "POST",
+      body: JSON.stringify({ title: "Claritas OpenCode connectivity check" }),
+    });
+    return {
+      provider: "opencode",
+      reachable: true,
+      model: this.config.label,
+      latency_ms: Date.now() - startedAt,
+      metadata: {
+        session_id: findSessionId(session),
+        server_url: this.config.baseUrl,
+        provider_id: this.config.providerID,
+        model_id: this.config.modelID,
+      },
+    };
+  }
+
   private async requestJson(path: string, init: RequestInit): Promise<unknown> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
@@ -280,13 +308,20 @@ export class OpenCodeLlmClient implements LlmClient {
       headers.authorization = `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString("base64")}`;
     }
 
-    const response = await fetch(joinUrl(this.config.baseUrl, path), {
-      ...init,
-      headers: {
-        ...headers,
-        ...(init.headers || {}),
-      },
-    });
+    const url = joinUrl(this.config.baseUrl, path);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: {
+          ...headers,
+          ...(init.headers || {}),
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new LlmProviderError(`Cannot reach OpenCode at ${url}: ${message}`, 502);
+    }
 
     const body = await readResponseBody(response);
     if (!response.ok) {
@@ -305,6 +340,12 @@ export class OpenCodeLlmClient implements LlmClient {
 export function createLlmClientFromEnv(): LlmClient {
   const provider = (getOptionalEnv("BRIEFING_LLM_PROVIDER") || getOptionalEnv("LLM_PROVIDER") || "opencode").toLowerCase();
   if (provider === "opencode") return new OpenCodeLlmClient();
+  throw new LlmConfigurationError(`Unsupported BRIEFING_LLM_PROVIDER: ${provider}. Currently supported: opencode.`);
+}
+
+export async function checkLlmConnectionFromEnv(): Promise<LlmConnectionCheck> {
+  const provider = (getOptionalEnv("BRIEFING_LLM_PROVIDER") || getOptionalEnv("LLM_PROVIDER") || "opencode").toLowerCase();
+  if (provider === "opencode") return await new OpenCodeLlmClient().checkConnection();
   throw new LlmConfigurationError(`Unsupported BRIEFING_LLM_PROVIDER: ${provider}. Currently supported: opencode.`);
 }
 

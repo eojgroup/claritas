@@ -19,12 +19,14 @@ import {
   fetchAdminIngestionRuns,
   fetchAdminDailyBriefingGeneratorConfig,
   generateAdminDailySignalBriefing,
+  testAdminDailyBriefingGeneratorConnection,
   triggerAdminMarketIngestion,
   triggerAdminNewsIngestion,
   triggerAdminWeatherIngestion,
   updateAdminIngestionAutomationRule,
   type AdminIngestionAutomationRule,
   type AdminIngestionAutomationStatus,
+  type AdminDailyBriefingConnectionCheck,
   type AdminDailyBriefingGenerationSummary,
   type AdminDailyBriefingGeneratorConfig,
   type AdminIngestionLog,
@@ -275,6 +277,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [briefingConfig, setBriefingConfig] = useState<AdminDailyBriefingGeneratorConfig | null>(null);
   const [briefingConfigError, setBriefingConfigError] = useState<string | null>(null);
   const [isLoadingBriefingConfig, setIsLoadingBriefingConfig] = useState(false);
+  const [briefingConnection, setBriefingConnection] = useState<AdminDailyBriefingConnectionCheck | null>(null);
+  const [briefingConnectionError, setBriefingConnectionError] = useState<string | null>(null);
+  const [isTestingBriefingConnection, setIsTestingBriefingConnection] = useState(false);
   const [briefingDate, setBriefingDate] = useState(() => toLocalDateInputValue(new Date()));
   const [briefingPublish, setBriefingPublish] = useState(true);
   const [briefingLookbackHours, setBriefingLookbackHours] = useState(24);
@@ -295,6 +300,19 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       setBriefingConfigError(toErrorMessage(error));
     } finally {
       setIsLoadingBriefingConfig(false);
+    }
+  }, []);
+
+  const testBriefingConnection = useCallback(async () => {
+    setIsTestingBriefingConnection(true);
+    setBriefingConnectionError(null);
+    try {
+      setBriefingConnection(await testAdminDailyBriefingGeneratorConnection());
+    } catch (error) {
+      setBriefingConnection(null);
+      setBriefingConnectionError(toErrorMessage(error));
+    } finally {
+      setIsTestingBriefingConnection(false);
     }
   }, []);
 
@@ -1011,11 +1029,24 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <RefreshCw className="h-3.5 w-3.5" />
             {isLoadingBriefingConfig ? "Checking…" : "Check config"}
           </button>
+          <button
+            type="button"
+            onClick={() => void testBriefingConnection()}
+            className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-xs text-[color:var(--shell-muted)]"
+          >
+            <Activity className="h-3.5 w-3.5" />
+            {isTestingBriefingConnection ? "Testing…" : "Test connection"}
+          </button>
         </div>
 
         {briefingConfigError && (
           <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
             {briefingConfigError}
+          </div>
+        )}
+        {briefingConnectionError && (
+          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+            {briefingConnectionError}
           </div>
         )}
 
@@ -1042,6 +1073,21 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 }`}
               >
                 Auth {briefingConfig?.llm.opencode?.auth_configured ? "configured" : "missing"}
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 ${
+                  briefingConnection?.reachable
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : briefingConnectionError
+                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                      : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
+                }`}
+              >
+                {briefingConnection?.reachable
+                  ? `Reachable ${briefingConnection.latency_ms}ms`
+                  : briefingConnectionError
+                    ? "Unreachable"
+                    : "Not tested"}
               </span>
               <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2.5 py-1 text-[color:var(--shell-muted)]">
                 Model: {briefingConfig?.llm.opencode?.model ?? "—"}

@@ -43,7 +43,7 @@ import {
   type DailyBriefingGenerationOptions,
   type GeneratedBriefingStatus,
 } from "./briefing-generator";
-import { LlmConfigurationError, LlmProviderError } from "./llm";
+import { checkLlmConnectionFromEnv, LlmConfigurationError, LlmProviderError } from "./llm";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -660,6 +660,17 @@ app.get("/api/admin/briefings/daily/generation/config", requireAdminRole, async 
   try {
     return res.json({ generator: getDailyBriefingGeneratorConfig() });
   } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.post("/api/admin/briefings/daily/generation/test", requireAdminRole, async (_req, res) => {
+  try {
+    const connection = await checkLlmConnectionFromEnv();
+    return res.json({ connection });
+  } catch (e: any) {
+    if (e instanceof LlmConfigurationError) return res.status(503).json({ error: e.message });
+    if (e instanceof LlmProviderError) return res.status(e.status).json({ error: e.message });
     return res.status(500).json({ error: e.message || String(e) });
   }
 });
