@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 46;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -16,12 +16,8 @@
 		0411E9A02F51F9CB00590CE3 /* noalpha_AppIcon-iOS-Dark-1024x1024@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E9952F51F9CB00590CE3 /* noalpha_AppIcon-iOS-Dark-1024x1024@1x.png */; };
 		0411E9A12F51F9CB00590CE3 /* AppIcon-iOS-ClearDark-1024x1024@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E98C2F51F9CB00590CE3 /* AppIcon-iOS-ClearDark-1024x1024@1x.png */; };
 		0411E9A22F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearDark-1024x1024@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E9932F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearDark-1024x1024@1x.png */; };
-		0411E9A32F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedDark-1024x1024@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E9972F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedDark-1024x1024@1x.png */; };
-		0411E9A42F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearLight-1024x1024@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E9942F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearLight-1024x1024@1x.png */; };
 		0411E9A52F51F9CB00590CE3 /* AppIcon-watchOS-Default-1088x1088@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E9922F51F9CB00590CE3 /* AppIcon-watchOS-Default-1088x1088@1x.png */; };
-		0411E9A62F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedLight-1024x1024@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E9982F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedLight-1024x1024@1x.png */; };
 		0411E9A72F51F9CB00590CE3 /* AppIcon-iOS-Dark-1024x1024@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E98E2F51F9CB00590CE3 /* AppIcon-iOS-Dark-1024x1024@1x.png */; };
-		0411E9A82F51F9CB00590CE3 /* noalpha_AppIcon-watchOS-Default-1088x1088@1x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0411E9992F51F9CB00590CE3 /* noalpha_AppIcon-watchOS-Default-1088x1088@1x.png */; };
 		04BCF2F42F474FF0002598C4 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 04BCF2F32F474FF0002598C4 /* Foundation.framework */; };
 		14607786ACF459EC02AA89E9F880AD56 /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1F9F2763C67F88A7FF7007882DCB883 /* CountryProfileView.swift */; };
 		1F178FB32B3B18405CBE4FF9E9C19012 /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 75ACDD33807AE6E54A66F91A207EB285 /* Config.plist */; };
@@ -49,12 +45,8 @@
 		0411E9912F51F9CB00590CE3 /* AppIcon-iOS-TintedLight-1024x1024@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon-iOS-TintedLight-1024x1024@1x.png"; sourceTree = "<group>"; };
 		0411E9922F51F9CB00590CE3 /* AppIcon-watchOS-Default-1088x1088@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "AppIcon-watchOS-Default-1088x1088@1x.png"; sourceTree = "<group>"; };
 		0411E9932F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearDark-1024x1024@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "noalpha_AppIcon-iOS-ClearDark-1024x1024@1x.png"; sourceTree = "<group>"; };
-		0411E9942F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearLight-1024x1024@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "noalpha_AppIcon-iOS-ClearLight-1024x1024@1x.png"; sourceTree = "<group>"; };
 		0411E9952F51F9CB00590CE3 /* noalpha_AppIcon-iOS-Dark-1024x1024@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "noalpha_AppIcon-iOS-Dark-1024x1024@1x.png"; sourceTree = "<group>"; };
 		0411E9962F51F9CB00590CE3 /* noalpha_AppIcon-iOS-Default-1024x1024@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "noalpha_AppIcon-iOS-Default-1024x1024@1x.png"; sourceTree = "<group>"; };
-		0411E9972F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedDark-1024x1024@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "noalpha_AppIcon-iOS-TintedDark-1024x1024@1x.png"; sourceTree = "<group>"; };
-		0411E9982F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedLight-1024x1024@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "noalpha_AppIcon-iOS-TintedLight-1024x1024@1x.png"; sourceTree = "<group>"; };
-		0411E9992F51F9CB00590CE3 /* noalpha_AppIcon-watchOS-Default-1088x1088@1x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "noalpha_AppIcon-watchOS-Default-1088x1088@1x.png"; sourceTree = "<group>"; };
 		04BCF2F32F474FF0002598C4 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.2.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		11FC85CA624E08D251EBB45FA6C43167 /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Models.swift; path = ../Models/Models.swift; sourceTree = "<group>"; };
 		316A93B6F24247DF833308ADB1127507 /* ProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
@@ -112,12 +104,8 @@
 				0411E9912F51F9CB00590CE3 /* AppIcon-iOS-TintedLight-1024x1024@1x.png */,
 				0411E9922F51F9CB00590CE3 /* AppIcon-watchOS-Default-1088x1088@1x.png */,
 				0411E9932F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearDark-1024x1024@1x.png */,
-				0411E9942F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearLight-1024x1024@1x.png */,
 				0411E9952F51F9CB00590CE3 /* noalpha_AppIcon-iOS-Dark-1024x1024@1x.png */,
 				0411E9962F51F9CB00590CE3 /* noalpha_AppIcon-iOS-Default-1024x1024@1x.png */,
-				0411E9972F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedDark-1024x1024@1x.png */,
-				0411E9982F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedLight-1024x1024@1x.png */,
-				0411E9992F51F9CB00590CE3 /* noalpha_AppIcon-watchOS-Default-1088x1088@1x.png */,
 			);
 			path = "AppIcon Exports";
 			sourceTree = "<group>";
@@ -206,8 +194,9 @@
 		091CD28EDF15F9A5AB3B4B1F52E047D0 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				BuildIndependentTargetsInParallel = YES;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					E899BEF4ADF4D406FE0534864D09E33A = {
 						DevelopmentTeam = VTBJTFDTQY;
@@ -247,12 +236,8 @@
 				0411E9A02F51F9CB00590CE3 /* noalpha_AppIcon-iOS-Dark-1024x1024@1x.png in Resources */,
 				0411E9A12F51F9CB00590CE3 /* AppIcon-iOS-ClearDark-1024x1024@1x.png in Resources */,
 				0411E9A22F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearDark-1024x1024@1x.png in Resources */,
-				0411E9A32F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedDark-1024x1024@1x.png in Resources */,
-				0411E9A42F51F9CB00590CE3 /* noalpha_AppIcon-iOS-ClearLight-1024x1024@1x.png in Resources */,
 				0411E9A52F51F9CB00590CE3 /* AppIcon-watchOS-Default-1088x1088@1x.png in Resources */,
-				0411E9A62F51F9CB00590CE3 /* noalpha_AppIcon-iOS-TintedLight-1024x1024@1x.png in Resources */,
 				0411E9A72F51F9CB00590CE3 /* AppIcon-iOS-Dark-1024x1024@1x.png in Resources */,
-				0411E9A82F51F9CB00590CE3 /* noalpha_AppIcon-watchOS-Default-1088x1088@1x.png in Resources */,
 				1F178FB32B3B18405CBE4FF9E9C19012 /* Config.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -287,6 +272,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -317,9 +303,12 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = VTBJTFDTQY;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -331,7 +320,9 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_OPTIMIZATION_LEVEL = "-Owholemodule";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -340,6 +331,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -370,9 +362,12 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = VTBJTFDTQY;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -391,6 +386,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -407,12 +403,14 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = VTBJTFDTQY;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.news";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -434,12 +432,14 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = VTBJTFDTQY;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.news";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
 				PROVISIONING_PROFILE_SPECIFIER = "";
