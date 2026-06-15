@@ -24,7 +24,6 @@ import {
   X,
   ArrowUpRight,
   CheckCheck,
-  AlertTriangle,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -1431,25 +1430,6 @@ export default function ClaritasDashboard() {
     return items;
   }, [newsSearchScope, effectiveRange, selectedCountries]);
 
-  const filteredCountryStats = useMemo(() => {
-    const stats = new Map<string, { count: number; sources: Map<string, number> }>();
-    filteredNews.forEach((item) => {
-      if (!item.country_iso2) return;
-      const iso = item.country_iso2.toUpperCase();
-      const entry = stats.get(iso) ?? {
-        count: 0,
-        sources: new Map<string, number>(),
-      };
-      entry.count += 1;
-      const source = getSourceLabel(item);
-      if (source) {
-        entry.sources.set(source, (entry.sources.get(source) ?? 0) + 1);
-      }
-      stats.set(iso, entry);
-    });
-    return stats;
-  }, [filteredNews, getSourceLabel]);
-
   const mapRange = useMemo(() => {
     if (activeRange) return activeRange;
     const anchorDate = newsDateBounds?.end
@@ -1647,32 +1627,6 @@ export default function ClaritasDashboard() {
       .map(([name]) => name)[0];
   }, [pinnedNewsSummary]);
 
-  const selectedCountryStats = useMemo(() => {
-    if (!selectedCountry) return null;
-    return filteredCountryStats.get(selectedCountry.toUpperCase()) ?? null;
-  }, [selectedCountry, filteredCountryStats]);
-
-  const selectedTopSource = useMemo(() => {
-    if (!selectedCountryStats || selectedCountryStats.sources.size === 0)
-      return null;
-    return Array.from(selectedCountryStats.sources.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([name]) => name)[0];
-  }, [selectedCountryStats]);
-
-  const comparisonCountryStats = useMemo(() => {
-    if (!comparisonCountry) return null;
-    return filteredCountryStats.get(comparisonCountry.toUpperCase()) ?? null;
-  }, [comparisonCountry, filteredCountryStats]);
-
-  const comparisonTopSource = useMemo(() => {
-    if (!comparisonCountryStats || comparisonCountryStats.sources.size === 0)
-      return null;
-    return Array.from(comparisonCountryStats.sources.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([name]) => name)[0];
-  }, [comparisonCountryStats]);
-
   const pinnedWeatherSummary = useMemo(() => {
     if (!pinnedCountry) return null;
     return (
@@ -1686,16 +1640,6 @@ export default function ClaritasDashboard() {
     if (!pinnedCountry) return null;
     return countryMeta.get(pinnedCountry.toUpperCase()) ?? null;
   }, [pinnedCountry, countryMeta]);
-
-  const selectedMeta = useMemo(() => {
-    if (!selectedCountry) return null;
-    return countryMeta.get(selectedCountry.toUpperCase()) ?? null;
-  }, [selectedCountry, countryMeta]);
-
-  const comparisonMeta = useMemo(() => {
-    if (!comparisonCountry) return null;
-    return countryMeta.get(comparisonCountry.toUpperCase()) ?? null;
-  }, [comparisonCountry, countryMeta]);
 
   const filteredWeather = useMemo(() => {
     let w = weatherSearchScope;
@@ -2322,7 +2266,7 @@ export default function ClaritasDashboard() {
       ?.label ?? "All";
 
   const aiSearchPreview = useMemo(() => {
-    const news = newsSearchScope.slice(0, 4).map((item) => ({
+    const news = newsSearchScope.slice(0, 8).map((item) => ({
       key: `news-${item.id}`,
       kind: "News",
       view: "news" as const,
@@ -2337,7 +2281,7 @@ export default function ClaritasDashboard() {
       country: item.country_iso2?.toUpperCase() ?? null,
       symbol: null,
     }));
-    const weather = weatherSearchScope.slice(0, 4).map((row, idx) => ({
+    const weather = weatherSearchScope.slice(0, 8).map((row, idx) => ({
       key: `weather-${row.country}-${row.observed_at}-${idx}`,
       kind: "Weather",
       view: "weather" as const,
@@ -2353,7 +2297,7 @@ export default function ClaritasDashboard() {
       country: row.country?.toUpperCase() ?? null,
       symbol: null,
     }));
-    const markets = marketSearchScope.slice(0, 4).map((quote, idx) => ({
+    const markets = marketSearchScope.slice(0, 8).map((quote, idx) => ({
       key: `market-${quote.symbol}-${quote.observed_at}-${idx}`,
       kind: "Market",
       view: "markets" as const,
@@ -2380,7 +2324,7 @@ export default function ClaritasDashboard() {
     if (effectiveSearchTopic === "markets") {
       return markets;
     }
-    return [...news.slice(0, 2), ...weather.slice(0, 1), ...markets.slice(0, 1)];
+    return [...news.slice(0, 4), ...weather.slice(0, 2), ...markets.slice(0, 2)];
   }, [effectiveSearchTopic, marketSearchScope, newsSearchScope, weatherSearchScope]);
 
   const signalNotifications = useMemo<SignalNotification[]>(() => {
@@ -2430,7 +2374,7 @@ export default function ClaritasDashboard() {
       });
     }
 
-    const latestAnomaly = trendAnomalies.at(-1);
+    const latestAnomaly = trendAnomalies[trendAnomalies.length - 1];
     if (latestAnomaly) {
       items.push({
         id: `news-anomaly-${latestAnomaly.dateKey}`,
@@ -2451,7 +2395,7 @@ export default function ClaritasDashboard() {
       )[0];
     if (topMover && Math.abs(topMover.percent_change ?? 0) >= 2) {
       items.push({
-        id: `market-move-${topMover.symbol}-${topMover.observed_at}`,
+        id: `market-move-${topMover.symbol}-${getDateKey(topMover.observed_at) ?? "current"}`,
         title: `${topMover.symbol} moved ${formatSignedMetric(topMover.percent_change, 2, "%")}`,
         description:
           topMover.company_name ??
@@ -2636,6 +2580,17 @@ export default function ClaritasDashboard() {
     setQuery((value) => stripDashboardSearchTopicTokens(value));
   }, []);
 
+  const handleSearchResult = (result: (typeof aiSearchPreview)[number]) => {
+    setActiveView(result.view);
+    if (result.country) {
+      setSelectedCountry(result.country);
+    }
+    if (result.symbol) {
+      setSelectedSymbol(result.symbol);
+    }
+    setSearchOpen(false);
+  };
+
   const handleAnomalyClick = (dateKey: string) => {
     const index = newsTrend.findIndex((d) => d.dateKey === dateKey);
     if (index >= 0) {
@@ -2645,6 +2600,24 @@ export default function ClaritasDashboard() {
         feedRef.current?.scrollTo({ top: 0, behavior: "smooth" });
       });
     }
+  };
+
+  const markNotificationRead = (id: string) => {
+    setReadNotificationIds((current) =>
+      current.includes(id) ? current : [...current, id],
+    );
+  };
+
+  const handleNotificationClick = (notification: SignalNotification) => {
+    markNotificationRead(notification.id);
+    setActiveView(notification.view);
+    if (notification.symbol) {
+      setSelectedSymbol(notification.symbol);
+    }
+    if (notification.dateKey) {
+      handleAnomalyClick(notification.dateKey);
+    }
+    setNotificationsOpen(false);
   };
 
   const handleExportCsv = () => {
@@ -3099,46 +3072,50 @@ export default function ClaritasDashboard() {
                   </span>
                   <span>{todayLabel}</span>
                 </div>
-                <div className="hidden md:flex items-center gap-2">
-                  <div className="app-control flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-[color:var(--shell-muted)]">
-                    <Search className="h-4 w-4" />
-                    <input
-                      className="w-44 lg:w-64 bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
-                      placeholder={searchInputPlaceholder}
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                    />
-                    {query && (
-                      <button
-                        type="button"
-                        onClick={() => setQuery("")}
-                        className="rounded-md p-0.5 text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
-                        aria-label="Clear search"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  <div className="app-control flex items-center gap-1 rounded-xl p-1 text-xs">
-                    {SEARCH_TOPIC_OPTIONS.map((option) => {
-                      const active = effectiveSearchTopic === option.id;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => handleSearchTopicChange(option.id)}
-                          className={`rounded-lg px-2.5 py-1 transition ${
-                            active
-                              ? "bg-[color:var(--shell-selected)] text-[color:var(--shell-on-selected)] shadow-sm"
-                              : "text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotificationsOpen(false);
+                    setSearchOpen(true);
+                  }}
+                  className="app-control hidden min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-sm text-[color:var(--shell-muted)] md:flex"
+                  aria-label="Open search"
+                >
+                  <Search className="h-4 w-4 shrink-0" />
+                  <span className="w-36 truncate text-left lg:w-56">
+                    {query || "Search signals"}
+                  </span>
+                  <span className="rounded-md border border-[color:var(--shell-border)] px-1.5 py-0.5 text-[10px] text-[color:var(--shell-muted)]">
+                    ⌘K
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotificationsOpen(false);
+                    setSearchOpen(true);
+                  }}
+                  className="app-control inline-flex h-10 w-10 items-center justify-center rounded-xl text-[color:var(--shell-ink)] md:hidden"
+                  aria-label="Open search"
+                >
+                  <Search className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchOpen(false);
+                    setNotificationsOpen(true);
+                  }}
+                  className="app-control relative inline-flex h-10 w-10 items-center justify-center rounded-xl text-[color:var(--shell-ink)]"
+                  aria-label={`Open notifications${unreadNotificationCount ? `, ${unreadNotificationCount} unread` : ""}`}
+                >
+                  <Bell className="h-4 w-4" />
+                  {unreadNotificationCount > 0 && (
+                    <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-[color:var(--shell-accent)] px-1 text-[9px] font-bold text-[color:var(--shell-on-accent)]">
+                      {unreadNotificationCount}
+                    </span>
+                  )}
+                </button>
                 <button
                   aria-label="Toggle dark mode"
                   onClick={() => setDark((v) => !v)}
@@ -3159,6 +3136,250 @@ export default function ClaritasDashboard() {
               </div>
             </div>
           </header>
+
+          {searchOpen && (
+            <div
+              className="fixed inset-0 z-50 flex items-start justify-center bg-[color:var(--shell-sidebar)]/55 p-3 pt-[max(4rem,10vh)] backdrop-blur-sm sm:p-6"
+              onClick={() => setSearchOpen(false)}
+            >
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-label="Search signals"
+                className="app-card flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-center gap-3 border-b border-[color:var(--shell-border)] px-4 py-3">
+                  <Search className="h-5 w-5 shrink-0 text-[color:var(--shell-muted)]" />
+                  <input
+                    autoFocus
+                    className="min-w-0 flex-1 bg-transparent text-base text-[color:var(--shell-ink)] outline-none placeholder:text-[color:var(--shell-muted)]"
+                    placeholder={searchInputPlaceholder}
+                    value={query}
+                    onChange={(event) => setQuery(event.currentTarget.value)}
+                  />
+                  {query && (
+                    <button
+                      type="button"
+                      onClick={() => setQuery("")}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[color:var(--shell-muted)] hover:bg-[color:var(--shell-surface-muted)] hover:text-[color:var(--shell-ink)]"
+                      aria-label="Clear search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSearchOpen(false)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[color:var(--shell-border)] text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
+                    aria-label="Close search"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-4 py-3">
+                  {SEARCH_TOPIC_OPTIONS.map((option) => {
+                    const active = effectiveSearchTopic === option.id;
+                    return (
+                      <button
+                        key={`search-dialog-${option.id}`}
+                        type="button"
+                        onClick={() => handleSearchTopicChange(option.id)}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                          active
+                            ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
+                            : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                  <div className="ml-auto flex flex-wrap gap-3 text-xs text-[color:var(--shell-muted)]">
+                    <span>{newsSearchScope.length} news</span>
+                    <span>{weatherSearchScope.length} weather</span>
+                    <span>{marketSearchScope.length} markets</span>
+                  </div>
+                </div>
+
+                <div className="app-scroll-panel min-h-0 flex-1 overflow-y-auto p-3">
+                  {!hasSearchQuery ? (
+                    <div className="grid min-h-48 place-items-center px-6 text-center">
+                      <div>
+                        <Search className="mx-auto h-7 w-7 text-[color:var(--shell-accent)]" />
+                        <div className="mt-3 text-sm font-semibold text-[color:var(--shell-ink)]">
+                          Search across the live signal desk
+                        </div>
+                        <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+                          Find headlines, countries, weather conditions, companies, or market symbols.
+                        </div>
+                      </div>
+                    </div>
+                  ) : aiSearchPreview.length === 0 ? (
+                    <div className="grid min-h-48 place-items-center px-6 text-center text-sm text-[color:var(--shell-muted)]">
+                      No matching signals for this topic and query.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {aiSearchPreview.map((result) => (
+                        <div
+                          key={result.key}
+                          className="flex items-start gap-2 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-2"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleSearchResult(result)}
+                            className="min-w-0 flex-1 rounded-md px-2 py-1 text-left hover:bg-[color:var(--signal-sky-soft)]"
+                          >
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">
+                              {result.kind}
+                            </div>
+                            <div className="mt-1 text-sm font-semibold leading-5 text-[color:var(--shell-ink)]">
+                              {result.title}
+                            </div>
+                            {result.subtitle && (
+                              <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+                                {result.subtitle}
+                              </div>
+                            )}
+                          </button>
+                          {result.href && (
+                            <a
+                              href={result.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[color:var(--shell-border)] text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
+                              aria-label={`Open ${result.title} in a new tab`}
+                            >
+                              <ArrowUpRight className="h-4 w-4" />
+                            </a>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {notificationsOpen && (
+            <div
+              className="fixed inset-0 z-50 flex justify-end bg-[color:var(--shell-sidebar)]/45 backdrop-blur-sm"
+              onClick={() => setNotificationsOpen(false)}
+            >
+              <aside
+                role="dialog"
+                aria-modal="true"
+                aria-label="Signal notifications"
+                className="app-card flex h-full w-full max-w-md flex-col rounded-none border-y-0 border-r-0"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start gap-3 border-b border-[color:var(--shell-border)] px-4 py-4">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--signal-amber-soft)] text-[color:var(--shell-ink)]">
+                    <Bell className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-semibold text-[color:var(--shell-ink)]">
+                      Signal notifications
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      {unreadNotificationCount} unread · {signalNotifications.length} active
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setNotificationsOpen(false)}
+                    className="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[color:var(--shell-border)] text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
+                    aria-label="Close notifications"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-2 text-xs">
+                  <span className="text-[color:var(--shell-muted)]">
+                    Generated from live workspace signals
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReadNotificationIds((current) => [
+                        ...new Set([
+                          ...current,
+                          ...signalNotifications.map((notification) => notification.id),
+                        ]),
+                      ])
+                    }
+                    disabled={unreadNotificationCount === 0}
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 font-semibold text-[color:var(--shell-ink)] hover:bg-[color:var(--shell-surface-muted)] disabled:opacity-40"
+                  >
+                    <CheckCheck className="h-3.5 w-3.5" />
+                    Mark all read
+                  </button>
+                </div>
+
+                <div className="app-scroll-panel min-h-0 flex-1 overflow-y-auto p-3">
+                  {signalNotifications.length === 0 ? (
+                    <div className="grid min-h-64 place-items-center px-6 text-center">
+                      <div>
+                        <CheckCheck className="mx-auto h-7 w-7 text-[color:var(--shell-accent-2)]" />
+                        <div className="mt-3 text-sm font-semibold text-[color:var(--shell-ink)]">
+                          No active notifications
+                        </div>
+                        <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+                          Briefings, anomalies, major market moves, and system issues will appear here.
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {signalNotifications.map((notification) => {
+                        const unread = !readNotificationIds.includes(notification.id);
+                        return (
+                          <button
+                            key={notification.id}
+                            type="button"
+                            onClick={() => handleNotificationClick(notification)}
+                            className={`w-full rounded-lg border p-3 text-left transition hover:border-[color:var(--shell-border-strong)] ${
+                              unread
+                                ? "border-[color:var(--shell-accent)] bg-[color:var(--signal-amber-soft)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <span
+                                className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${
+                                  notification.tone === "critical"
+                                    ? "bg-[color:var(--signal-rose)]"
+                                    : notification.tone === "attention"
+                                      ? "bg-[color:var(--signal-amber)]"
+                                      : "bg-[color:var(--signal-sky)]"
+                                }`}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                                  {notification.title}
+                                </div>
+                                <div className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">
+                                  {notification.description}
+                                </div>
+                                <div className="mt-2 flex items-center justify-between gap-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                                  <span>{notification.timeLabel}</span>
+                                  <span>Open {notification.view}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </div>
+          )}
 
           <main className="app-safe-bottom mx-auto w-full max-w-[1720px] flex-1 min-h-0 flex flex-col px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
             {sessionNotice && (
@@ -4433,203 +4654,6 @@ export default function ClaritasDashboard() {
                   </div>
                 )}
 
-                <details className="app-card-muted rounded-2xl p-4">
-                  <summary className="cursor-pointer text-sm font-semibold text-[color:var(--shell-ink)]">
-                    More panels
-                  </summary>
-                  <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-                    <div
-                      className={`${cardBase} dashboard-panel`}
-                      style={{ animationDelay: "320ms" }}
-                    >
-                      <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          Country profile
-                        </div>
-                        <div className="text-sm font-semibold">
-                          Selected location overview
-                        </div>
-                      </div>
-                      <div className="p-4 text-sm text-[color:var(--shell-muted)] space-y-2">
-                        {!selectedCountry && !comparisonCountry && (
-                          <div>
-                            Select a bubble on the map to see a brief profile.
-                          </div>
-                        )}
-                        {selectedCountry && (
-                          <div className="rounded-xl border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] p-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-ink)]">
-                              Primary
-                            </div>
-                            <div className="text-base font-semibold text-[color:var(--shell-ink)]">
-                              {selectedMeta?.name
-                                ? `${selectedMeta.name} (${selectedCountry.toUpperCase()})`
-                                : selectedCountry.toUpperCase()}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Region: {selectedMeta?.region ?? "—"}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Subregion: {selectedMeta?.subregion ?? "—"}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Stories in range:{" "}
-                              {selectedCountryStats?.count ?? 0}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Top source: {selectedTopSource ?? "—"}
-                            </div>
-                          </div>
-                        )}
-                        {comparisonCountry && (
-                          <div className="rounded-xl border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] p-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-ink)]">
-                              Compare
-                            </div>
-                            <div className="text-base font-semibold text-[color:var(--shell-ink)]">
-                              {comparisonMeta?.name
-                                ? `${comparisonMeta.name} (${comparisonCountry.toUpperCase()})`
-                                : comparisonCountry.toUpperCase()}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Region: {comparisonMeta?.region ?? "—"}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Subregion: {comparisonMeta?.subregion ?? "—"}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Stories in range:{" "}
-                              {comparisonCountryStats?.count ?? 0}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Top source: {comparisonTopSource ?? "—"}
-                            </div>
-                          </div>
-                        )}
-                        {(selectedCountry || comparisonCountry) && (
-                          <div className="text-xs text-[color:var(--shell-muted)]">
-                            Drill down by clicking a country bubble. Compare
-                            mode lets you add a second focus.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div
-                      className={`${cardBase} dashboard-panel`}
-                      style={{ animationDelay: "360ms" }}
-                    >
-                      <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          AI search
-                        </div>
-                        <div className="text-sm font-semibold">
-                          Ask Claritas for signal context
-                        </div>
-                      </div>
-                      <div className="p-4 space-y-3">
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          {SEARCH_TOPIC_OPTIONS.map((option) => {
-                            const active = effectiveSearchTopic === option.id;
-                            return (
-                              <button
-                                key={`ai-${option.id}`}
-                                type="button"
-                                onClick={() => handleSearchTopicChange(option.id)}
-                                className={`rounded-full border px-3 py-1 transition ${
-                                  active
-                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                    : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                                }`}
-                              >
-                                {option.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2">
-                          <Search className="h-5 w-5 text-[color:var(--shell-muted)]" />
-                          <input
-                            className="w-full bg-transparent outline-none placeholder:text-[color:var(--shell-muted)] text-inherit"
-                            placeholder={searchInputPlaceholder}
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                          />
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
-                          <span>Topic: {activeSearchTopicLabel}</span>
-                          <span>News matches: {newsSearchScope.length}</span>
-                          <span>Weather matches: {weatherSearchScope.length}</span>
-                          <span>Market matches: {marketSearchScope.length}</span>
-                        </div>
-                        {!hasSearchQuery ? (
-                          <p className="text-xs text-[color:var(--shell-muted)]">
-                            Type a query to filter feeds by topic. Prefixes like
-                            <code className="mx-1 rounded bg-[color:var(--shell-bg)] px-1 py-0.5">
-                              topic:weather
-                            </code>
-                            are supported.
-                          </p>
-                        ) : aiSearchPreview.length === 0 ? (
-                          <p className="text-xs text-[color:var(--shell-muted)]">
-                            No matching signals for this topic and query.
-                          </p>
-                        ) : (
-                          <ul className="space-y-2">
-                            {aiSearchPreview.map((result) => (
-                              <li
-                                key={result.key}
-                                className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-2"
-                              >
-                                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                                  <span>{result.kind}</span>
-                                </div>
-                                {result.href ? (
-                                  <a
-                                    href={result.href}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="mt-1 block text-sm font-semibold text-[color:var(--shell-ink)] hover:underline"
-                                  >
-                                    {result.title}
-                                  </a>
-                                ) : (
-                                  <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                                    {result.title}
-                                  </div>
-                                )}
-                                {result.subtitle && (
-                                  <div className="text-xs text-[color:var(--shell-muted)]">
-                                    {result.subtitle}
-                                  </div>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <p className="text-[11px] text-[color:var(--shell-muted)]">
-                          This card now builds structured search context so an AI
-                          answer pipeline can be attached next.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div
-                      className={`${cardBase} dashboard-panel`}
-                      style={{ animationDelay: "400ms" }}
-                    >
-                      <div className="border-b border-[color:var(--shell-border)] px-4 py-3 flex items-center gap-2">
-                        <Bell className="h-4 w-4" />
-                        <div className="text-sm font-semibold">
-                          Notifications
-                        </div>
-                      </div>
-                      <div className="p-4 text-sm text-[color:var(--shell-muted)]">
-                        No notifications yet.
-                      </div>
-                    </div>
-                  </div>
-                </details>
               </div>
             )}
             {activeView === "news" && (
