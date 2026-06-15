@@ -604,6 +604,8 @@ jobs:
           kubectl -n "$ns" set image deployment/claritas-web claritas-web="${IMAGE_URI_WEB}:${{ github.sha }}"
           kubectl -n "$ns" set image deployment/claritas-api claritas-api="${IMAGE_URI_API}:${{ github.sha }}"
           kubectl -n "$ns" set image deployment/opencode opencode="${IMAGE_URI_OPENCODE}:${{ github.sha }}"
+          kubectl -n "$ns" rollout restart deployment/claritas-api
+          kubectl -n "$ns" rollout restart deployment/opencode
 
           wait_rollout () {
             local dep="$1"

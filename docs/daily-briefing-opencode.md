@@ -198,6 +198,43 @@ kubectl -n claritas port-forward svc/opencode 4096:4096
 curl -u opencode:$OPENCODE_SERVER_PASSWORD http://127.0.0.1:4096/config/providers
 ```
 
+`OpenCode generation failed: APIError` means OpenCode reached the selected provider, but the provider rejected or failed the generation request. Inspect the OpenCode log first:
+
+```bash
+kubectl -n claritas logs deploy/opencode --tail=300 | grep -C 8 -E 'APIError|ERROR|statusCode'
+```
+
+Confirm that the OpenRouter key exists in the Kubernetes secret without printing it:
+
+```bash
+kubectl -n claritas get secret claritas-opencode -o jsonpath='{.data.OPENROUTER_API_KEY}' | grep -q . \
+  && echo "OPENROUTER_API_KEY exists" \
+  || echo "OPENROUTER_API_KEY is missing"
+```
+
+After adding or changing GitHub secrets, rerun the GKE deployment. Kubernetes does not update environment variables in already-running pods until they restart.
+
+To test the configured OpenRouter key and free router directly from the OpenCode pod, bypassing OpenCode:
+
+```bash
+kubectl -n claritas exec deploy/opencode -- node -e '
+fetch("https://openrouter.ai/api/v1/chat/completions", {
+  method: "POST",
+  headers: {
+    authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+    "content-type": "application/json"
+  },
+  body: JSON.stringify({
+    model: "openrouter/free",
+    messages: [{ role: "user", content: "Reply with OK" }],
+    max_tokens: 5
+  })
+}).then(async response => console.log(response.status, await response.text()))
+'
+```
+
+A `200` response confirms the key and free router work, leaving the OpenCode request as the failing layer. A `401`, `402`, `429`, or other provider response identifies the credential, credit-limit, or rate-limit issue directly.
+
 ## Request Body
 
 ```json

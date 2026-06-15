@@ -1035,7 +1035,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-xs text-[color:var(--shell-muted)]"
           >
             <Activity className="h-3.5 w-3.5" />
-            {isTestingBriefingConnection ? "Testing…" : "Test connection"}
+            {isTestingBriefingConnection ? "Testing…" : "Test model"}
           </button>
         </div>
 
@@ -1072,7 +1072,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                     : "border-amber-200 bg-amber-50 text-amber-700"
                 }`}
               >
-                Auth {briefingConfig?.llm.opencode?.auth_configured ? "configured" : "missing"}
+                Server auth {briefingConfig?.llm.opencode?.auth_configured ? "configured" : "missing"}
               </span>
               <span
                 className={`rounded-full border px-2.5 py-1 ${
@@ -1084,9 +1084,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 }`}
               >
                 {briefingConnection?.reachable
-                  ? `Reachable ${briefingConnection.latency_ms}ms`
+                  ? `Model ready ${briefingConnection.latency_ms}ms`
                   : briefingConnectionError
-                    ? "Unreachable"
+                    ? "Model test failed"
                     : "Not tested"}
               </span>
               <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2.5 py-1 text-[color:var(--shell-muted)]">

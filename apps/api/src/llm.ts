@@ -210,17 +210,60 @@ function findSessionId(value: unknown): string | null {
   return null;
 }
 
+function findMessage(value: unknown): string | null {
+  const record = asRecord(value);
+  if (record) {
+    if (typeof record.message === "string" && record.message.trim()) return record.message.trim();
+    for (const child of Object.values(record)) {
+      const message = findMessage(child);
+      if (message) return message;
+    }
+  } else if (Array.isArray(value)) {
+    for (const child of value) {
+      const message = findMessage(child);
+      if (message) return message;
+    }
+  }
+  return null;
+}
+
+function describeProviderError(error: Record<string, unknown>): string {
+  const data = asRecord(error.data);
+  const name = typeof error.name === "string" && error.name.trim() ? error.name.trim() : "provider error";
+  const statusValue = data?.statusCode ?? data?.status ?? error.statusCode ?? error.status;
+  const status =
+    typeof statusValue === "number" || (typeof statusValue === "string" && statusValue.trim())
+      ? ` (${String(statusValue).trim()})`
+      : "";
+  let message = findMessage(error);
+
+  if (data && typeof data.responseBody === "string") {
+    const responseBody = data.responseBody.trim();
+    const responseMessage = findMessage(tryParseJson(responseBody));
+    if (responseMessage && responseMessage !== message) {
+      message = message ? `${message}; provider response: ${responseMessage}` : responseMessage;
+    }
+  }
+
+  return message ? `${name}${status}: ${message}` : `${name}${status}`;
+}
+
 function findProviderError(value: unknown): string | null {
   const record = asRecord(value);
-  if (!record) return null;
-  const error = asRecord(record.error);
-  if (error) {
-    const name = typeof error.name === "string" ? error.name : "provider error";
-    const message = typeof error.message === "string" ? error.message : "";
-    return message ? `${name}: ${message}` : name;
+  if (record) {
+    const error = asRecord(record.error);
+    if (error) return describeProviderError(error);
+    for (const child of Object.values(record)) {
+      const providerError = findProviderError(child);
+      if (providerError) return providerError;
+    }
+  } else if (Array.isArray(value)) {
+    for (const child of value) {
+      const providerError = findProviderError(child);
+      if (providerError) return providerError;
+    }
   }
-  const info = asRecord(record.info);
-  return info ? findProviderError(info) : null;
+  return null;
 }
 
 export class OpenCodeLlmClient implements LlmClient {
@@ -288,9 +331,19 @@ export class OpenCodeLlmClient implements LlmClient {
 
   async checkConnection(): Promise<LlmConnectionCheck> {
     const startedAt = Date.now();
-    const session = await this.requestJson("/session", {
-      method: "POST",
-      body: JSON.stringify({ title: "Claritas OpenCode connectivity check" }),
+    const response = await this.generateStructured<{ ok?: unknown }>({
+      title: "Claritas OpenCode connectivity check",
+      system: "You are a connectivity test. Return only the requested structured output.",
+      prompt: "Return ok=true.",
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ok: { type: "boolean" },
+        },
+        required: ["ok"],
+      },
+      retryCount: 0,
     });
     return {
       provider: "opencode",
@@ -298,10 +351,8 @@ export class OpenCodeLlmClient implements LlmClient {
       model: this.config.label,
       latency_ms: Date.now() - startedAt,
       metadata: {
-        session_id: findSessionId(session),
-        server_url: this.config.baseUrl,
-        provider_id: this.config.providerID,
-        model_id: this.config.modelID,
+        ...response.metadata,
+        structured_generation_tested: true,
       },
     };
   }
