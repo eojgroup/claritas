@@ -95,6 +95,7 @@ if (normalizedModel && !config.provider) {
 if (disableTools) {
   const toolNames = [
     "*",
+    "StructuredOutput",
     "apply_patch",
     "bash",
     "edit",
@@ -102,6 +103,8 @@ if (disableTools) {
     "grep",
     "list",
     "lsp",
+    "plan_enter",
+    "plan_exit",
     "question",
     "read",
     "skill",
@@ -115,10 +118,20 @@ if (disableTools) {
     ...(config.tools && typeof config.tools === "object" && !Array.isArray(config.tools) ? config.tools : {}),
     ...Object.fromEntries(toolNames.map((name) => [name, false])),
   };
-  // This server only summarizes evidence supplied by Claritas. Denying all
-  // tool permissions also prevents newly introduced OpenCode tools from being
-  // offered to provider endpoints that do not support tool calling.
-  config.permission = "deny";
+  // Keep permissions as an object so OpenCode can merge the legacy tools
+  // compatibility config without changing the wildcard deny rule.
+  config.permission = { "*": "deny" };
+  config.default_agent = "briefing";
+  config.agent = {
+    ...(config.agent && typeof config.agent === "object" && !Array.isArray(config.agent) ? config.agent : {}),
+    briefing: {
+      mode: "primary",
+      description: "Generates text-only Claritas daily briefings from supplied evidence.",
+      prompt: "You are a text-only briefing generator. Use only supplied evidence. Never call tools. Return the requested response directly.",
+      permission: { "*": "deny" },
+      steps: 1,
+    },
+  };
   config.snapshot = false;
   config.share = "disabled";
 }

@@ -164,6 +164,39 @@ resource "google_project_iam_member" "gsa_cloudsql_client" {
   member  = "serviceAccount:${google_service_account.claritas_sql_gsa.email}"
 }
 
+############################################
+# Cloud SQL export access
+############################################
+# Starting August 1, 2026, Cloud SQL Viewer no longer includes
+# cloudsql.instances.export. Keep export access additive and opt-in instead of
+# granting the substantially broader roles/cloudsql.editor role.
+resource "google_project_iam_custom_role" "cloud_sql_exporter" {
+  count = length(var.cloud_sql_export_members) > 0 ? 1 : 0
+
+  project     = var.project_id
+  role_id     = "claritasCloudSqlExporter"
+  title       = "Claritas Cloud SQL Exporter"
+  description = "Allows explicitly approved operators to export Cloud SQL data."
+  permissions = [
+    "cloudsql.instances.export",
+    "cloudsql.instances.get",
+  ]
+  stage = "GA"
+
+  depends_on = [
+    google_project_service.enabled_services["iam.googleapis.com"],
+    google_project_service.enabled_services["sqladmin.googleapis.com"]
+  ]
+}
+
+resource "google_project_iam_member" "cloud_sql_exporter" {
+  for_each = var.cloud_sql_export_members
+
+  project = var.project_id
+  role    = google_project_iam_custom_role.cloud_sql_exporter[0].name
+  member  = each.value
+}
+
 locals {
   wi_bindings = [
     "serviceAccount:${var.project_id}.svc.id.goog[claritas/api-sa]",

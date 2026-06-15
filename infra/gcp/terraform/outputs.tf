@@ -57,6 +57,16 @@ output "claritas_sql_gsa_email" {
   value = google_service_account.claritas_sql_gsa.email
 }
 
+output "cloud_sql_export_role_name" {
+  description = "Custom Cloud SQL export role when export members are configured."
+  value       = try(google_project_iam_custom_role.cloud_sql_exporter[0].name, null)
+}
+
+output "cloud_sql_export_members" {
+  description = "IAM members explicitly granted the least-privilege Cloud SQL exporter role."
+  value       = sort(tolist(var.cloud_sql_export_members))
+}
+
 output "auth_secret_ids" {
   value = { for key, secret in google_secret_manager_secret.auth : key => secret.id }
 }

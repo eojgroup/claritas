@@ -136,9 +136,11 @@ opencode.claritas.svc.cluster.local:4096
 ```
 
 The bundled OpenCode container defaults `OPENCODE_DISABLE_TOOLS=true` and
-enforces a text-only configuration at startup, including when
-`OPENCODE_CONFIG_JSON` is supplied. This is intentional: the service is a
-briefing summarizer, not a coding agent.
+enforces a dedicated one-step, text-only briefing agent at startup, including
+when `OPENCODE_CONFIG_JSON` is supplied. The Claritas API also sends an explicit
+disabled-tool map and requests JSON as plain text, because OpenCode's
+`json_schema` mode itself requires a tool call. This is intentional: the
+service is a briefing summarizer, not a coding agent.
 
 For this default service-based deployment, set:
 
@@ -229,19 +231,20 @@ kubectl -n claritas logs deploy/opencode --tail=300 | grep -C 8 -E 'APIError|ERR
 ```
 
 `No endpoints found that support tool use. Try disabling "bash"` means OpenCode
-offered coding tools to a model route that only supports text generation. The
-bundled deployment fixes this with `OPENCODE_DISABLE_TOOLS=true`. Redeploy and
-verify the effective generated config:
+offered tools to a model route that only supports text generation. The bundled
+deployment fixes this with `OPENCODE_DISABLE_TOOLS=true`, a dedicated briefing
+agent, and tool-free JSON-text requests from the Claritas API. Redeploy both
+the API and OpenCode service, then verify the effective generated config:
 
 ```bash
 kubectl -n claritas rollout restart deploy/opencode
 kubectl -n claritas rollout status deploy/opencode
 kubectl -n claritas exec deploy/opencode -- \
-  node -e 'const c=require("/home/opencode/.config/opencode/opencode.json"); console.log({model:c.model, permission:c.permission, tools:c.tools})'
+  node -e 'const c=require("/home/opencode/.config/opencode/opencode.json"); console.log({model:c.model, default_agent:c.default_agent, permission:c.permission, tools:c.tools})'
 ```
 
-The output should show `permission: "deny"` and each tool, including `bash`,
-set to `false`.
+The output should show `default_agent: "briefing"`,
+`permission: {"*":"deny"}`, and each tool, including `bash`, set to `false`.
 
 Confirm that the OpenRouter key exists in the Kubernetes secret without printing it:
 

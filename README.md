@@ -239,6 +239,7 @@ The daily briefing generator can use OpenCode as an internal LLM service:
 - **Architecture Diagrams**: [`docs/architecture`](./docs/architecture)
 - **ADR Records**: [`docs/ADRs`](./docs/ADRs)
 - **GCP Setup Guide**: [`infra/gcp`](./infra/gcp)
+- **Cloud SQL Export IAM Transition**: [`docs/cloud-sql-export-iam.md`](./docs/cloud-sql-export-iam.md)
 
 ---
 

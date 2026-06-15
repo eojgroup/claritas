@@ -638,6 +638,24 @@ jobs:
           wait_rollout opencode
           wait_rollout keycloak
 
+      - name: 🧪 Verify OpenCode tool-free briefing runtime
+        run: |
+          set -euo pipefail
+          kubectl -n "${NAMESPACE}" exec deployment/opencode -- node -e '
+            const config = require("/home/opencode/.config/opencode/opencode.json");
+            const failures = [];
+            if (config.default_agent !== "briefing") failures.push("default_agent must be briefing");
+            if (config.permission?.["*"] !== "deny") failures.push("global wildcard permission must be deny");
+            if (config.agent?.briefing?.permission?.["*"] !== "deny") failures.push("briefing agent wildcard permission must be deny");
+            if (config.tools?.bash !== false) failures.push("bash tool must be disabled");
+            if (config.tools?.StructuredOutput !== false) failures.push("StructuredOutput tool must be disabled");
+            if (failures.length) {
+              console.error(failures.join("; "));
+              process.exit(1);
+            }
+            console.log("OpenCode briefing runtime is tool-free.");
+          '
+
       - name: 🔒 Check ManagedCertificate (best-effort)
         continue-on-error: true
         run: |

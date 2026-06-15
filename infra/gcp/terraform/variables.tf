@@ -82,6 +82,20 @@ variable "terraform_runner_service_account" {
   default     = ""
 }
 
+variable "cloud_sql_export_members" {
+  description = "IAM members allowed to inspect and export Cloud SQL data using the least-privilege Claritas exporter role."
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for member in var.cloud_sql_export_members :
+      can(regex("^(user|group|serviceAccount):[^[:space:]]+$", member))
+    ])
+    error_message = "Each Cloud SQL export member must use user:, group:, or serviceAccount: IAM member syntax."
+  }
+}
+
 variable "k8s_namespace" {
   description = "Kubernetes namespace where Claritas workloads run."
   type        = string

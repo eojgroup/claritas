@@ -54,7 +54,31 @@ type OpenCodeClientConfig = OpenCodeModelConfig & {
   baseUrl: string;
   username: string;
   password: string | null;
+  toolsDisabled: boolean;
 };
+
+const OPENCODE_TOOL_NAMES = [
+  "*",
+  "StructuredOutput",
+  "apply_patch",
+  "bash",
+  "edit",
+  "glob",
+  "grep",
+  "invalid",
+  "list",
+  "lsp",
+  "plan_enter",
+  "plan_exit",
+  "question",
+  "read",
+  "skill",
+  "task",
+  "todowrite",
+  "webfetch",
+  "websearch",
+  "write",
+] as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -127,8 +151,25 @@ function buildOpenCodeConfig(): OpenCodeClientConfig {
     baseUrl,
     username: getOptionalEnv("OPENCODE_SERVER_USERNAME") || "opencode",
     password: getOptionalEnv("OPENCODE_SERVER_PASSWORD"),
+    toolsDisabled: getBooleanEnv("OPENCODE_DISABLE_TOOLS", true),
     ...model,
   };
+}
+
+function buildJsonTextPrompt(request: LlmStructuredRequest, retry = false): string {
+  return [
+    request.prompt,
+    "",
+    retry ? "The previous response was not valid JSON. Correct it and return a complete replacement." : "",
+    "Return one valid JSON object only. Do not wrap it in Markdown or call tools.",
+    `The JSON object must match this JSON Schema: ${JSON.stringify(request.schema)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildDisabledToolMap(): Record<string, false> {
+  return Object.fromEntries(OPENCODE_TOOL_NAMES.map((name) => [name, false]));
 }
 
 async function readResponseBody(response: Response): Promise<string> {
@@ -277,7 +318,8 @@ function addOpenCodeErrorGuidance(providerError: string): string {
     return [
       providerError,
       "Claritas daily briefings do not require tools.",
-      "Deploy the bundled OpenCode service with OPENCODE_DISABLE_TOOLS=true, then restart the opencode deployment.",
+      "Redeploy both claritas-api and the bundled OpenCode service with OPENCODE_DISABLE_TOOLS=true.",
+      "The current API uses tool-free JSON-text generation for models that do not support tool calling.",
     ].join(" ");
   }
   return providerError;
@@ -300,15 +342,20 @@ export class OpenCodeLlmClient implements LlmClient {
       throw new LlmProviderError("OpenCode did not return a session id.");
     }
 
-    const body: Record<string, unknown> = {
-      system: request.system,
-      parts: [{ type: "text", text: request.prompt }],
-      format: {
+    const body: Record<string, unknown> = { system: request.system };
+
+    if (this.config.toolsDisabled) {
+      // OpenCode's json_schema format is implemented as a required
+      // StructuredOutput tool. Tool-free models must receive plain text JSON
+      // instructions and an explicit disabled-tool map instead.
+      body.tools = buildDisabledToolMap();
+    } else {
+      body.format = {
         type: "json_schema",
         schema: request.schema,
         retryCount: request.retryCount ?? 2,
-      },
-    };
+      };
+    }
 
     if (this.config.providerID && this.config.modelID) {
       body.model = {
@@ -317,34 +364,55 @@ export class OpenCodeLlmClient implements LlmClient {
       };
     }
 
-    const message = await this.requestJson(`/session/${encodeURIComponent(sessionId)}/message`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    const maxAttempts = this.config.toolsDisabled ? Math.min(Math.max((request.retryCount ?? 2) + 1, 1), 3) : 1;
+    let lastParseError: LlmProviderError | null = null;
 
-    const providerError = findProviderError(message);
-    if (providerError) {
-      throw new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      body.parts = [
+        {
+          type: "text",
+          text: this.config.toolsDisabled ? buildJsonTextPrompt(request, attempt > 1) : request.prompt,
+        },
+      ];
+
+      const message = await this.requestJson(`/session/${encodeURIComponent(sessionId)}/message`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+
+      const providerError = findProviderError(message);
+      if (providerError) {
+        throw new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`);
+      }
+
+      try {
+        const structured = findStructuredOutput(message);
+        const output =
+          typeof structured === "undefined"
+            ? parseJsonObjectFromText(collectText(message).join("\n").trim())
+            : structured;
+
+        return {
+          output: output as T,
+          provider: "opencode",
+          model: this.config.label,
+          metadata: {
+            session_id: sessionId,
+            server_url: this.config.baseUrl,
+            provider_id: this.config.providerID,
+            model_id: this.config.modelID,
+            tools_disabled: this.config.toolsDisabled,
+            structured_output_mode: this.config.toolsDisabled ? "json_text" : "json_schema_tool",
+            attempts: attempt,
+          },
+        };
+      } catch (error) {
+        if (!(error instanceof LlmProviderError) || attempt === maxAttempts) throw error;
+        lastParseError = error;
+      }
     }
 
-    const structured = findStructuredOutput(message);
-    const output =
-      typeof structured === "undefined"
-        ? parseJsonObjectFromText(collectText(message).join("\n").trim())
-        : structured;
-
-    return {
-      output: output as T,
-      provider: "opencode",
-      model: this.config.label,
-      metadata: {
-        session_id: sessionId,
-        server_url: this.config.baseUrl,
-        provider_id: this.config.providerID,
-        model_id: this.config.modelID,
-        tools_disabled: getBooleanEnv("OPENCODE_DISABLE_TOOLS", true),
-      },
-    };
+    throw lastParseError || new LlmProviderError("OpenCode did not return parseable JSON output.");
   }
 
   async checkConnection(): Promise<LlmConnectionCheck> {

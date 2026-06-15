@@ -1,7 +1,9 @@
 FROM node:20-alpine
 
+ARG OPENCODE_VERSION=1.17.7
+
 RUN apk add --no-cache git openssh-client ca-certificates \
-  && npm install -g opencode-ai@latest
+  && npm install -g "opencode-ai@${OPENCODE_VERSION}"
 
 WORKDIR /workspace
 
