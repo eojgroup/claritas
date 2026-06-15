@@ -155,6 +155,57 @@ struct CountryWeather: Codable, Identifiable {
     var observedDate: Date? { APIDateParser.parse(observed_at) }
 }
 
+struct DailySignalBriefing: Codable, Identifiable {
+    let id: Int
+    let briefing_date: String
+    let title: String
+    let update_text: String
+    let key_takeaways: [String]
+    let status: String
+    let source_window_start: String?
+    let source_window_end: String?
+    let generated_by: String?
+    let metadata: JSONValue?
+    let published_at: String?
+    let created_at: String
+    let updated_at: String
+
+    var updatedDate: Date? { APIDateParser.parse(updated_at) }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case briefing_date
+        case title
+        case update_text
+        case key_takeaways
+        case status
+        case source_window_start
+        case source_window_end
+        case generated_by
+        case metadata
+        case published_at
+        case created_at
+        case updated_at
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        briefing_date = try container.decode(String.self, forKey: .briefing_date)
+        title = try container.decode(String.self, forKey: .title)
+        update_text = try container.decode(String.self, forKey: .update_text)
+        key_takeaways = try container.decodeIfPresent([String].self, forKey: .key_takeaways) ?? []
+        status = try container.decode(String.self, forKey: .status)
+        source_window_start = try container.decodeIfPresent(String.self, forKey: .source_window_start)
+        source_window_end = try container.decodeIfPresent(String.self, forKey: .source_window_end)
+        generated_by = try container.decodeIfPresent(String.self, forKey: .generated_by)
+        metadata = try container.decodeIfPresent(JSONValue.self, forKey: .metadata)
+        published_at = try container.decodeIfPresent(String.self, forKey: .published_at)
+        created_at = try container.decode(String.self, forKey: .created_at)
+        updated_at = try container.decode(String.self, forKey: .updated_at)
+    }
+}
+
 struct MarketQuote: Codable, Identifiable {
     let symbol: String
     let company_name: String?

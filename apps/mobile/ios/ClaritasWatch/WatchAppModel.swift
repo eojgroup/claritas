@@ -1,0 +1,152 @@
+import Combine
+import Foundation
+
+@MainActor
+final class WatchAppModel: ObservableObject {
+    enum ConnectionState {
+        case waitingForPhone
+        case ready
+        case refreshing
+        case failed(String)
+    }
+
+    @Published private(set) var briefing: DailySignalBriefing?
+    @Published private(set) var news: [NewsItem] = []
+    @Published private(set) var weather: [CountryWeather] = []
+    @Published private(set) var markets: [MarketQuote] = []
+    @Published private(set) var connectionState: ConnectionState = .waitingForPhone
+    @Published private(set) var lastUpdated: Date?
+
+    private let connectivity = WatchConnectivityClient()
+    private var api = APIClient()
+    private let cacheKey = "CLARITAS_WATCH_SNAPSHOT"
+
+    var hasSession: Bool {
+        WatchKeychain.authToken != nil
+    }
+
+    var marketDirection: Double {
+        let changes = markets.compactMap(\.percent_change)
+        guard !changes.isEmpty else { return 0 }
+        return changes.reduce(0, +) / Double(changes.count)
+    }
+
+    init() {
+        loadCache()
+        connectivity.onContext = { [weak self] context in
+            Task { @MainActor in
+                self?.apply(context: context)
+            }
+        }
+        connectivity.activate()
+    }
+
+    func bootstrap() async {
+        connectivity.requestContext()
+        guard hasSession else {
+            connectionState = .waitingForPhone
+            return
+        }
+        await refresh()
+    }
+
+    func refresh() async {
+        guard let token = WatchKeychain.authToken else {
+            connectionState = .waitingForPhone
+            connectivity.requestContext()
+            return
+        }
+
+        connectionState = .refreshing
+        api = APIClient()
+        api.setAuthToken(token)
+
+        async let briefingResult = result { try await api.fetchLatestDailyBriefing() }
+        async let newsResult = result { try await api.fetchNews(limit: 12) }
+        async let weatherResult = result { try await api.fetchCountryWeather() }
+        async let marketResult = result { try await api.fetchMarketQuotes(refresh: false) }
+
+        let results = await (briefingResult, newsResult, weatherResult, marketResult)
+        var errors: [String] = []
+
+        switch results.0 {
+        case .success(let value): briefing = value
+        case .failure(let error): errors.append(error.localizedDescription)
+        }
+        switch results.1 {
+        case .success(let value): news = Array(value.prefix(12))
+        case .failure(let error): errors.append(error.localizedDescription)
+        }
+        switch results.2 {
+        case .success(let value): weather = Array(value.prefix(20))
+        case .failure(let error): errors.append(error.localizedDescription)
+        }
+        switch results.3 {
+        case .success(let value): markets = Array(value.prefix(20))
+        case .failure(let error): errors.append(error.localizedDescription)
+        }
+
+        if errors.isEmpty {
+            lastUpdated = Date()
+            connectionState = .ready
+            saveCache()
+        } else if errors.contains(where: { $0.contains("401") || $0.lowercased().contains("unauthorized") }) {
+            WatchKeychain.authToken = nil
+            connectionState = .waitingForPhone
+        } else {
+            connectionState = .failed(errors[0])
+        }
+    }
+
+    func requestPhoneSync() {
+        connectivity.requestContext()
+    }
+
+    private func apply(context: [String: Any]) {
+        if let baseURL = context["apiBaseURL"] as? String, !baseURL.isEmpty {
+            UserDefaults.standard.set(baseURL, forKey: "API_BASE_URL")
+        }
+        if let token = context["authToken"] as? String {
+            WatchKeychain.authToken = token.isEmpty ? nil : token
+        }
+        api = APIClient()
+        Task { await refresh() }
+    }
+
+    private func result<T>(_ operation: () async throws -> T) async -> Result<T, Error> {
+        do { return .success(try await operation()) }
+        catch { return .failure(error) }
+    }
+
+    private func saveCache() {
+        let snapshot = WatchSnapshot(
+            briefing: briefing,
+            news: news,
+            weather: weather,
+            markets: markets,
+            lastUpdated: lastUpdated
+        )
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        UserDefaults.standard.set(data, forKey: cacheKey)
+    }
+
+    private func loadCache() {
+        guard let data = UserDefaults.standard.data(forKey: cacheKey),
+              let snapshot = try? JSONDecoder.api.decode(WatchSnapshot.self, from: data) else {
+            return
+        }
+        briefing = snapshot.briefing
+        news = snapshot.news
+        weather = snapshot.weather
+        markets = snapshot.markets
+        lastUpdated = snapshot.lastUpdated
+    }
+}
+
+private struct WatchSnapshot: Codable {
+    let briefing: DailySignalBriefing?
+    let news: [NewsItem]
+    let weather: [CountryWeather]
+    let markets: [MarketQuote]
+    let lastUpdated: Date?
+}

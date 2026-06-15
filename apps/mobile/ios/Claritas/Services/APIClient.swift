@@ -181,6 +181,11 @@ final class APIClient {
         return try await request(req, as: [CountryWeather].self, rootKey: "stats")
     }
 
+    func fetchLatestDailyBriefing() async throws -> DailySignalBriefing? {
+        let req = URLRequest(url: baseURL.appendingPathComponent("/api/briefings/daily/latest"))
+        return try await request(req, as: DailySignalBriefingResponse.self).briefing
+    }
+
     func fetchMarketQuotes(refresh: Bool = true, symbols: [String]? = nil) async throws -> [MarketQuote] {
         var comps = URLComponents(url: baseURL.appendingPathComponent("/api/market/quotes"), resolvingAgainstBaseURL: false)!
         var items: [URLQueryItem] = [URLQueryItem(name: "refresh", value: refresh ? "true" : "false")]
@@ -594,6 +599,9 @@ final class APIClient {
 }
 
 private struct EmptyResponse: Decodable {}
+private struct DailySignalBriefingResponse: Decodable {
+    let briefing: DailySignalBriefing?
+}
 private struct AdminUserResponse: Decodable {
     let user: AdminUser?
 }

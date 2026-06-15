@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
     private var authToken: String? = nil
     private var authSession: ASWebAuthenticationSession?
     private let authPresenter = AuthSessionPresenter()
+    private let watchSync = WatchSyncCoordinator.shared
 
     private let authTokenKey = "AUTH_TOKEN"
     private let authCallbackScheme: String
@@ -68,6 +69,7 @@ final class AppModel: ObservableObject {
         self.authCallbackURL = callbackURL
         self.authCallbackScheme = callbackURL.scheme ?? "claritas"
         self.api.setAuthToken(authToken)
+        self.watchSync.update(baseURL: api.baseURLDescription, authToken: authToken)
     }
 
     func bootstrap() async {
@@ -245,6 +247,7 @@ final class AppModel: ObservableObject {
         } else {
             UserDefaults.standard.removeObject(forKey: authTokenKey)
         }
+        watchSync.update(baseURL: api.baseURLDescription, authToken: token)
     }
 
     func loadInitial() async {
