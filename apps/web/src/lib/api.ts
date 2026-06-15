@@ -11,6 +11,16 @@ export type NewsItem = {
 };
 
 export type CountryStat = { country: string; count: number };
+export type CountryStatsCoverage = {
+  window_days: number;
+  total: number;
+  mapped: number;
+  unmapped: number;
+};
+export type CountryStatsResult = {
+  stats: CountryStat[];
+  coverage: CountryStatsCoverage;
+};
 export type CountryWeather = {
   country: string;
   temp_c: number | null;
@@ -433,13 +443,23 @@ export async function fetchNews(params?: { limit?: number; offset?: number; q?: 
   return (data.items ?? []) as NewsItem[];
 }
 
-export async function fetchCountryStats(params?: { days?: number }) {
+export async function fetchCountryStats(params?: { days?: number }): Promise<CountryStatsResult> {
   const sp = new URLSearchParams();
   if (params?.days) sp.set("days", String(params.days));
   const resp = await fetch(`${API_BASE}/api/news/country-stats?${sp.toString()}`, { credentials: "include" });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country stats"));
   const data = await resp.json();
-  return (data.stats ?? []) as CountryStat[];
+  const stats = (data.stats ?? []) as CountryStat[];
+  const coverage = data.coverage as CountryStatsCoverage | undefined;
+  return {
+    stats,
+    coverage: coverage ?? {
+      window_days: params?.days ?? 30,
+      total: stats.reduce((sum, stat) => sum + Number(stat.count || 0), 0),
+      mapped: stats.reduce((sum, stat) => sum + Number(stat.count || 0), 0),
+      unmapped: 0,
+    },
+  };
 }
 
 export async function fetchCountryWeather() {

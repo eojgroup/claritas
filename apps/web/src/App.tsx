@@ -573,6 +573,7 @@ import {
   type AuthProviderId,
   type AuthUser,
   type CountryStat,
+  type CountryStatsCoverage,
   type CountryWeather,
   type DailySignalBriefing,
   type EarningsEvent,
@@ -622,6 +623,7 @@ export default function ClaritasDashboard() {
   const [regionFilter, setRegionFilter] =
     useState<(typeof REGION_OPTIONS)[number]["id"]>("global");
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
+  const [countryStatsCoverage, setCountryStatsCoverage] = useState<CountryStatsCoverage | null>(null);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [marketStatusRows, setMarketStatusRows] = useState<MarketStatus[]>([]);
@@ -835,9 +837,6 @@ export default function ClaritasDashboard() {
   useEffect(() => {
     // Load initial data
     if (authStatus !== "authed" || !hasPaidAccess) return;
-    fetchCountryStats({ days: 30 })
-      .then(setCountryStats)
-      .catch(() => setCountryStats([]));
     fetchCountryWeather()
       .then(setWeatherStats)
       .catch(() => setWeatherStats([]));
@@ -855,6 +854,27 @@ export default function ClaritasDashboard() {
       });
     void loadNewsData("recent");
   }, [authStatus, hasPaidAccess, loadNewsData]);
+
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess) return;
+    let cancelled = false;
+    fetchCountryStats({ days: mapWindowDays })
+      .then((result) => {
+        if (!cancelled) {
+          setCountryStats(result.stats);
+          setCountryStatsCoverage(result.coverage);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCountryStats([]);
+          setCountryStatsCoverage(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, hasPaidAccess, mapWindowDays]);
 
   useEffect(() => {
     if (authStatus !== "authed" || !hasPaidAccess) return;
@@ -1421,10 +1441,7 @@ export default function ClaritasDashboard() {
     }
     if (mapDayMode && mapDates.length > 0) {
       const dayKey = mapDates[Math.min(mapDayIndex, mapDates.length - 1)];
-      const dayItems = items.filter((item) => getDateKey(item.event_time ?? "") === dayKey);
-      if (dayItems.some((item) => item.country_iso2)) {
-        items = dayItems;
-      }
+      items = items.filter((item) => getDateKey(item.event_time ?? "") === dayKey);
     }
     return items;
   }, [
@@ -1463,21 +1480,24 @@ export default function ClaritasDashboard() {
     return stats;
   }, [getSourceLabel, mapNews]);
 
+  const useDatabaseCountryStats =
+    !activeRange &&
+    !mapDayMode &&
+    (!searchAppliesToNews || searchTerms.length === 0) &&
+    countryStatsCoverage?.window_days === mapWindowDays;
+
   const mapBubbleData = useMemo(() => {
-    if (
-      mapCountryStats.size === 0 &&
-      !activeRange &&
-      !regionCountries &&
-      !mapDayMode &&
-      countryStats.length > 0
-    ) {
-      return countryStats.map((stat) => ({
+    if (useDatabaseCountryStats) {
+      const stats = regionCountries
+        ? countryStats.filter((stat) => regionCountries.has(stat.country.toUpperCase()))
+        : countryStats;
+      return stats.map((stat) => ({
         country: stat.country.toUpperCase(),
         count: stat.count,
         tone: "news" as const,
         meta: {
           subtitle: `${stat.count} ${stat.count === 1 ? "story" : "stories"}`,
-          lines: ["Aggregated over last 30 days"],
+          lines: [`Aggregated from database over last ${mapWindowDays} days`],
         },
       }));
     }
@@ -1507,10 +1527,10 @@ export default function ClaritasDashboard() {
     });
   }, [
     mapCountryStats,
-    activeRange,
     regionCountries,
-    mapDayMode,
     countryStats,
+    mapWindowDays,
+    useDatabaseCountryStats,
   ]);
 
   const mapWeatherScope = useMemo(() => {
@@ -3425,10 +3445,11 @@ export default function ClaritasDashboard() {
                           </div>
                         )}
                         {mapMode === "news" &&
-                          mapBubbleData.length === 0 &&
-                          countryStats.length === 0 && (
+                          mapBubbleData.length === 0 && (
                             <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-[color:var(--shell-surface)] px-2 py-1 rounded border border-[color:var(--shell-border)]">
-                              No news data in the selected window.
+                              {useDatabaseCountryStats && countryStatsCoverage?.total
+                                ? "No country-tagged news in the selected window."
+                                : "No news data in the selected window."}
                             </div>
                           )}
                         {mapMode === "weather" &&
@@ -3502,6 +3523,12 @@ export default function ClaritasDashboard() {
                               <span className="ml-auto text-[color:var(--shell-muted)]">
                                 {mapRangeLabel}
                               </span>
+                              {useDatabaseCountryStats && countryStatsCoverage && (
+                                <span className="text-[color:var(--shell-muted)]">
+                                  {countryStatsCoverage.mapped.toLocaleString()} /{" "}
+                                  {countryStatsCoverage.total.toLocaleString()} stories mapped
+                                </span>
+                              )}
                             </div>
                             {mapDayMode && mapDates.length > 0 && (
                               <div className="mt-2 flex flex-wrap items-center gap-3">

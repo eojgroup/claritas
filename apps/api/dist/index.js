@@ -662,13 +662,30 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
         (0, ingestion_automation_1.trackDemandSignal)("news");
         const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 365);
         const params = [days];
-        const { rows } = await db_1.pool.query(`SELECT country_iso2 AS country, COUNT(*)::int AS count
-       FROM item
-       WHERE country_iso2 IS NOT NULL
-         AND (event_time IS NULL OR event_time >= now() - ($1 || ' days')::interval)
-       GROUP BY country_iso2
-       ORDER BY count DESC`, params);
-        res.json({ stats: rows });
+        const [statsResult, coverageResult] = await Promise.all([
+            db_1.pool.query(`SELECT upper(country_iso2) AS country, COUNT(*)::int AS count
+         FROM item
+         WHERE country_iso2 IS NOT NULL
+           AND COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval
+         GROUP BY upper(country_iso2)
+         ORDER BY count DESC`, params),
+            db_1.pool.query(`SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE country_iso2 IS NOT NULL)::int AS mapped
+         FROM item
+         WHERE COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval`, params),
+        ]);
+        const total = Number(coverageResult.rows[0]?.total ?? 0);
+        const mapped = Number(coverageResult.rows[0]?.mapped ?? 0);
+        res.json({
+            stats: statsResult.rows,
+            coverage: {
+                window_days: days,
+                total,
+                mapped,
+                unmapped: Math.max(0, total - mapped),
+            },
+        });
     }
     catch (e) {
         res.status(500).json({ error: e.message || String(e) });
