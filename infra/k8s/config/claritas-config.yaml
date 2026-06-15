@@ -22,6 +22,9 @@ data:
   AUTH_COOKIE_SECURE: "true"
   AUTH_SESSION_TTL_DAYS: "30"
   AUTH_STATE_TTL_MINUTES: "10"
+  # Daily briefings are text-only. Disabling OpenCode tools allows routing to
+  # free/non-tool-capable models and prevents unnecessary container access.
+  OPENCODE_DISABLE_TOOLS: "true"
   KEYCLOAK_REALM: "claritas"
   KEYCLOAK_WEB_CLIENT_ID: "claritas-web"
   KEYCLOAK_MOBILE_CLIENT_ID: "claritas-mobile"

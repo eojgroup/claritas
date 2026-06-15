@@ -40,6 +40,12 @@ spec:
                   name: claritas-config
                   key: OPENCODE_MODEL
                   optional: true
+            - name: OPENCODE_DISABLE_TOOLS
+              valueFrom:
+                configMapKeyRef:
+                  name: claritas-config
+                  key: OPENCODE_DISABLE_TOOLS
+                  optional: true
             - name: OPENCODE_AUTH_JSON
               valueFrom:
                 secretKeyRef:

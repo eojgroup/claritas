@@ -225,6 +225,7 @@ The daily briefing generator can use OpenCode as an internal LLM service:
   - `OPENCODE_MODEL` or `OPENCODE_PROVIDER_ID` + `OPENCODE_MODEL_ID`
   - `OPENCODE_SERVER_USERNAME`
   - `OPENCODE_SERVER_PASSWORD`
+  - `OPENCODE_DISABLE_TOOLS=true` for text-only briefing generation
 - Trigger endpoint:
   - `POST /api/ingest/briefings/daily/:date/generate`
   - `POST /api/admin/briefings/daily/:date/generate`

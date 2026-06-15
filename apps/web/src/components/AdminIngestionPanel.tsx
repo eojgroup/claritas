@@ -1089,6 +1089,15 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                     ? "Model test failed"
                     : "Not tested"}
               </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 ${
+                  briefingConfig?.llm.opencode?.tools_disabled
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700"
+                }`}
+              >
+                Tools {briefingConfig?.llm.opencode?.tools_disabled ? "disabled" : "enabled"}
+              </span>
               <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2.5 py-1 text-[color:var(--shell-muted)]">
                 Model: {briefingConfig?.llm.opencode?.model ?? "—"}
               </span>

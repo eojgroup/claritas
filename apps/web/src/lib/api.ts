@@ -111,6 +111,7 @@ export type AdminDailyBriefingGeneratorConfig = {
       provider_id: string | null;
       model_id: string | null;
       model: string | null;
+      tools_disabled: boolean;
     };
   };
 };

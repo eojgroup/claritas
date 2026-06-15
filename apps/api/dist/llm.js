@@ -37,6 +37,12 @@ function getOptionalEnv(name) {
     const value = process.env[name];
     return typeof value === "string" && value.trim() ? value.trim() : null;
 }
+function getBooleanEnv(name, fallback) {
+    const value = getOptionalEnv(name);
+    if (!value)
+        return fallback;
+    return !["0", "false", "no", "off"].includes(value.toLowerCase());
+}
 function parseOpenCodeModel() {
     const combined = getOptionalEnv("OPENCODE_MODEL") || getOptionalEnv("LLM_MODEL");
     const explicitProvider = getOptionalEnv("OPENCODE_PROVIDER_ID");
@@ -228,6 +234,16 @@ function findProviderError(value) {
     }
     return null;
 }
+function addOpenCodeErrorGuidance(providerError) {
+    if (/no endpoints found that support tool use/i.test(providerError)) {
+        return [
+            providerError,
+            "Claritas daily briefings do not require tools.",
+            "Deploy the bundled OpenCode service with OPENCODE_DISABLE_TOOLS=true, then restart the opencode deployment.",
+        ].join(" ");
+    }
+    return providerError;
+}
 class OpenCodeLlmClient {
     config;
     constructor(config = buildOpenCodeConfig()) {
@@ -263,7 +279,7 @@ class OpenCodeLlmClient {
         });
         const providerError = findProviderError(message);
         if (providerError) {
-            throw new LlmProviderError(`OpenCode generation failed: ${providerError}`);
+            throw new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`);
         }
         const structured = findStructuredOutput(message);
         const output = typeof structured === "undefined"
@@ -278,6 +294,7 @@ class OpenCodeLlmClient {
                 server_url: this.config.baseUrl,
                 provider_id: this.config.providerID,
                 model_id: this.config.modelID,
+                tools_disabled: getBooleanEnv("OPENCODE_DISABLE_TOOLS", true),
             },
         };
     }
@@ -367,6 +384,7 @@ function getLlmRuntimeConfig() {
             provider_id: model.providerID,
             model_id: model.modelID,
             model: model.label,
+            tools_disabled: getBooleanEnv("OPENCODE_DISABLE_TOOLS", true),
         },
     };
 }

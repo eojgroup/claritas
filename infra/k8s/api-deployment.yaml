@@ -34,6 +34,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_PROVIDER_ID, optional: true } }
             - name: OPENCODE_MODEL_ID
               valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_MODEL_ID, optional: true } }
+            - name: OPENCODE_DISABLE_TOOLS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_DISABLE_TOOLS, optional: true } }
             - name: OPENCODE_SERVER_USERNAME
               valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENCODE_SERVER_USERNAME, optional: true } }
             - name: OPENCODE_SERVER_PASSWORD

@@ -25,6 +25,7 @@ OPENCODE_SERVER_URL=http://127.0.0.1:4096
 OPENCODE_MODEL=ollama/qwen2.5:7b-instruct
 OPENCODE_SERVER_USERNAME=opencode
 OPENCODE_SERVER_PASSWORD=replace-with-a-local-secret
+OPENCODE_DISABLE_TOOLS=true
 ```
 
 You can also split the model into separate fields:
@@ -52,6 +53,24 @@ Configure a provider:
 ```
 
 For a local-first setup, run a local model provider such as Ollama or LM Studio, configure it in OpenCode, and select the model with `/models`.
+
+Daily briefing generation supplies all evidence in the prompt and does not need
+OpenCode's coding-agent tools. Disable them so non-tool-capable models and
+OpenRouter's free router can serve the request:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "deny",
+  "tools": {
+    "*": false,
+    "bash": false,
+    "edit": false,
+    "read": false,
+    "write": false
+  }
+}
+```
 
 Start the OpenCode HTTP server:
 
@@ -115,6 +134,11 @@ The workflow also builds and deploys an internal `opencode` Deployment and Servi
 ```text
 opencode.claritas.svc.cluster.local:4096
 ```
+
+The bundled OpenCode container defaults `OPENCODE_DISABLE_TOOLS=true` and
+enforces a text-only configuration at startup, including when
+`OPENCODE_CONFIG_JSON` is supplied. This is intentional: the service is a
+briefing summarizer, not a coding agent.
 
 For this default service-based deployment, set:
 
@@ -203,6 +227,21 @@ curl -u opencode:$OPENCODE_SERVER_PASSWORD http://127.0.0.1:4096/config/provider
 ```bash
 kubectl -n claritas logs deploy/opencode --tail=300 | grep -C 8 -E 'APIError|ERROR|statusCode'
 ```
+
+`No endpoints found that support tool use. Try disabling "bash"` means OpenCode
+offered coding tools to a model route that only supports text generation. The
+bundled deployment fixes this with `OPENCODE_DISABLE_TOOLS=true`. Redeploy and
+verify the effective generated config:
+
+```bash
+kubectl -n claritas rollout restart deploy/opencode
+kubectl -n claritas rollout status deploy/opencode
+kubectl -n claritas exec deploy/opencode -- \
+  node -e 'const c=require("/home/opencode/.config/opencode/opencode.json"); console.log({model:c.model, permission:c.permission, tools:c.tools})'
+```
+
+The output should show `permission: "deny"` and each tool, including `bash`,
+set to `false`.
 
 Confirm that the OpenRouter key exists in the Kubernetes secret without printing it:
 
