@@ -16,10 +16,10 @@ jobs:
 
     steps:
       - name: 📦 Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 🚀 Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: 🧾 Debug repo layout
         run: |
@@ -137,7 +137,7 @@ jobs:
 
     steps:
       - name: 📦 Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 🔐 Authenticate to GKE with OIDC
         uses: google-github-actions/auth@v2
@@ -253,7 +253,7 @@ jobs:
       - name: 🔁 Reconcile Cloud SQL user passwords from Terraform state
         run: |
           set -euo pipefail
-          terraform -chdir=infra/gcp/terraform init -input=false -backend=true
+          ./infra/scripts/terraform-init-retry.sh infra/gcp/terraform
           DB_PASS="$(terraform -chdir=infra/gcp/terraform output -raw db_pass 2>/dev/null || true)"
           KC_DB_PASS="$(terraform -chdir=infra/gcp/terraform output -raw keycloak_db_pass 2>/dev/null || true)"
           ICN="$(terraform -chdir=infra/gcp/terraform output -raw instance_connection_name 2>/dev/null || true)"
@@ -282,7 +282,7 @@ jobs:
           DB_USER=$(kubectl -n "$NS" get configmap claritas-config -o jsonpath='{.data.DB_USER}')
           # Extract password from Terraform output (remote state via GCS backend).
           DB_PASS=""
-          terraform -chdir=infra/gcp/terraform init -input=false -backend=true
+          ./infra/scripts/terraform-init-retry.sh infra/gcp/terraform
           DB_PASS=$(terraform -chdir=infra/gcp/terraform output -raw db_pass 2>/dev/null || true)
           if [ -z "$DB_PASS" ] || [ "$DB_PASS" = "null" ]; then
             echo "::error::Could not extract DB password from Terraform output (db_pass). Refusing deploy to avoid broken API DB auth." >&2
@@ -416,7 +416,7 @@ jobs:
           set -euo pipefail
 
           tf_ready=0
-          if terraform -chdir=infra/gcp/terraform init -input=false -backend=true; then
+          if ./infra/scripts/terraform-init-retry.sh infra/gcp/terraform; then
             tf_ready=1
           else
             echo "::warning::Terraform init failed in deploy job; will rely on existing cluster/GitHub secrets."
