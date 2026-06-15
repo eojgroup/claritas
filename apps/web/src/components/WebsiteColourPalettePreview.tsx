@@ -2,53 +2,53 @@ import { useState } from "react";
 
 const themes = {
   light: {
-    canvas: "#F4EFE5",
-    surface: "#FFFDF8",
-    surfaceMuted: "#E9E0D2",
-    surfaceStrong: "#D8C9B6",
-    border: "#D2C5B5",
-    borderStrong: "#A79887",
-    text: "#132833",
-    textMuted: "#52656A",
-    textSubtle: "#62706D",
-    inverseText: "#FFFDF7",
-    navy: "#173342",
-    navyHover: "#244B5D",
-    forest: "#1E493B",
-    forestHover: "#2E624D",
-    positiveText: "#2E624D",
-    sage: "#C2DEC2",
-    sageStrong: "#8BB99A",
-    sageText: "#173B31",
-    orange: "#D97932",
-    orangeStrong: "#A94E1D",
-    accentText: "#172A31",
+    canvas: "#F3E9D7",
+    surface: "#FFFAF1",
+    surfaceMuted: "#E9DCC8",
+    surfaceStrong: "#DFC8A9",
+    border: "#D5C1A4",
+    borderStrong: "#9A8067",
+    text: "#172F42",
+    textMuted: "#53616A",
+    textSubtle: "#6D6257",
+    inverseText: "#FFFAF1",
+    navy: "#172F42",
+    navyHover: "#2A5268",
+    blue: "#3E6A80",
+    blueHover: "#2A5268",
+    positiveText: "#244B61",
+    orangeSoft: "#F3CDAA",
+    orangeMuted: "#E8B98D",
+    orangeText: "#532A16",
+    orange: "#E6A06A",
+    orangeStrong: "#934719",
+    accentText: "#172F42",
     danger: "#A73B32",
     dangerSoft: "#F6D8D2",
     infoSoft: "#D7E6EA",
   },
   dark: {
-    canvas: "#0B1718",
-    surface: "#112325",
-    surfaceMuted: "#173033",
-    surfaceStrong: "#214044",
-    border: "#355257",
-    borderStrong: "#587276",
-    text: "#F3EEE4",
-    textMuted: "#B7C3BD",
-    textSubtle: "#91A29D",
-    inverseText: "#F3EEE4",
+    canvas: "#0C1720",
+    surface: "#122431",
+    surfaceMuted: "#1A3040",
+    surfaceStrong: "#274456",
+    border: "#35566A",
+    borderStrong: "#718A97",
+    text: "#F6EBDD",
+    textMuted: "#C9BBA9",
+    textSubtle: "#AEA08E",
+    inverseText: "#FFFAF1",
     navy: "#315E73",
     navyHover: "#477A8D",
-    forest: "#376D57",
-    forestHover: "#4E856C",
-    positiveText: "#68A082",
-    sage: "#294A3A",
-    sageStrong: "#91C19A",
-    sageText: "#F3EEE4",
-    orange: "#E58B4A",
-    orangeStrong: "#F1A66E",
-    accentText: "#102225",
+    blue: "#3E6A80",
+    blueHover: "#7FA6B8",
+    positiveText: "#A9CEDC",
+    orangeSoft: "#6F4932",
+    orangeMuted: "#9A6847",
+    orangeText: "#FFF7ED",
+    orange: "#EAA36C",
+    orangeStrong: "#F0B888",
+    accentText: "#172F42",
     danger: "#D96B62",
     dangerSoft: "#482C2B",
     infoSoft: "#223E4C",
@@ -59,12 +59,12 @@ type Mode = keyof typeof themes;
 type Theme = (typeof themes)[Mode];
 
 const chartSeries = [
-  { color: "#315E73", text: "#FFFDF7" },
-  { color: "#D97932", text: "#172A31" },
-  { color: "#4B785F", text: "#FFFDF7" },
-  { color: "#8BB99A", text: "#173B31" },
-  { color: "#A94E1D", text: "#FFFDF7" },
-  { color: "#919BA0", text: "#132833" },
+  { color: "#315E73", text: "#FFFAF1" },
+  { color: "#E6A06A", text: "#172F42" },
+  { color: "#3E6A80", text: "#FFFAF1" },
+  { color: "#E8B98D", text: "#172F42" },
+  { color: "#934719", text: "#FFFAF1" },
+  { color: "#A9B8BF", text: "#172F42" },
 ];
 
 function ColourSwatch({
@@ -145,10 +145,10 @@ export default function WebsiteColourPalettePreview() {
       role: "Navigation, primary actions, selected tabs, and high-value structure.",
     },
     {
-      name: "Deep forest",
-      value: theme.forest,
+      name: "Intelligence blue",
+      value: theme.blue,
       foreground: theme.inverseText,
-      role: "Approval, positive decisions, durable success, and trusted data.",
+      role: "Trusted data, secondary actions, comparisons, and analytical series.",
     },
     {
       name: "Signal orange",
@@ -157,10 +157,10 @@ export default function WebsiteColourPalettePreview() {
       role: "Live activity, attention, current focus, and deliberate emphasis.",
     },
     {
-      name: "Strategic sage",
-      value: theme.sageStrong,
+      name: "Warm orange",
+      value: theme.orangeMuted,
       foreground: theme.accentText,
-      role: "Comparison data, secondary highlights, and positive chart series.",
+      role: "Selected controls, comparison states, and warm supporting emphasis.",
     },
   ];
 
@@ -204,8 +204,8 @@ export default function WebsiteColourPalettePreview() {
             </p>
             <h1 className="max-w-3xl text-4xl font-semibold md:text-5xl">Colour with a clear operational role</h1>
             <p className="max-w-3xl text-base leading-7 md:text-lg" style={{ color: theme.textMuted }}>
-              Navy creates hierarchy, forest communicates judgment, orange directs attention, sage supports comparison,
-              and beige keeps dense intelligence surfaces calm.
+              Navy creates hierarchy, blue structures analytical information, orange directs attention, and layered
+              beige keeps dense intelligence surfaces calm.
             </p>
           </div>
 
@@ -283,8 +283,8 @@ export default function WebsiteColourPalettePreview() {
             <SectionLabel theme={theme}>Interaction contract</SectionLabel>
             <h2 className="text-2xl font-semibold">Controls stay readable in every state</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6" style={{ color: theme.textMuted }}>
-              Selected controls use intentional foreground pairs. Orange and light green use dark text; navy and forest
-              use light text.
+              Selected controls use intentional foreground pairs. Light orange and beige use navy text; navy and blue
+              use warm light text.
             </p>
 
             <div className="mt-6 flex flex-wrap gap-3">
@@ -297,7 +297,7 @@ export default function WebsiteColourPalettePreview() {
               </button>
               <button
                 className="min-h-11 rounded-md px-5 text-sm font-semibold"
-                style={{ backgroundColor: theme.forest, color: theme.inverseText }}
+                style={{ backgroundColor: theme.blue, color: theme.inverseText }}
                 type="button"
               >
                 Approve decision
@@ -355,8 +355,8 @@ export default function WebsiteColourPalettePreview() {
                       aria-pressed={index === 0}
                       className="min-h-9 rounded px-2 text-xs font-semibold"
                       style={{
-                        backgroundColor: index === 0 ? theme.sage : "transparent",
-                        color: index === 0 ? theme.sageText : theme.textMuted,
+                        backgroundColor: index === 0 ? theme.orangeSoft : "transparent",
+                        color: index === 0 ? theme.orangeText : theme.textMuted,
                       }}
                       type="button"
                     >
@@ -373,7 +373,7 @@ export default function WebsiteColourPalettePreview() {
             <h2 className="text-2xl font-semibold">Status and data colours</h2>
 
             <div className="mt-5 flex flex-wrap gap-2">
-              <StatusBadge background={theme.sage} color={theme.sageText}>
+              <StatusBadge background={theme.orangeSoft} color={theme.orangeText}>
                 Published
               </StatusBadge>
               <StatusBadge background={theme.infoSoft} border={theme.navyHover} color={theme.text}>
@@ -414,7 +414,7 @@ export default function WebsiteColourPalettePreview() {
             </div>
 
             <div className="mt-7 grid grid-cols-2 gap-3">
-              <div className="rounded-md p-4" style={{ backgroundColor: theme.sage, color: theme.sageText }}>
+              <div className="rounded-md p-4" style={{ backgroundColor: theme.blue, color: theme.inverseText }}>
                 <div className="text-xs font-semibold uppercase">Positive</div>
                 <div className="mt-1 text-2xl font-semibold">+18.4%</div>
               </div>
@@ -430,7 +430,7 @@ export default function WebsiteColourPalettePreview() {
           <div className="grid lg:grid-cols-[16rem_1fr]">
             <aside className="p-5" style={{ backgroundColor: theme.navy, color: theme.inverseText }}>
               <div className="border-b pb-5" style={{ borderColor: theme.navyHover }}>
-                <div className="text-xs font-semibold uppercase" style={{ color: theme.sageStrong }}>
+                <div className="text-xs font-semibold uppercase" style={{ color: theme.orangeStrong }}>
                   Claritas
                 </div>
                 <div className="mt-2 text-lg font-semibold">Strategic intelligence</div>
@@ -441,8 +441,8 @@ export default function WebsiteColourPalettePreview() {
                     key={item}
                     className="rounded-md px-3 py-2.5 text-sm font-semibold"
                     style={{
-                      backgroundColor: index === 0 ? theme.sage : "transparent",
-                      color: index === 0 ? theme.sageText : theme.inverseText,
+                      backgroundColor: index === 0 ? theme.orangeSoft : "transparent",
+                      color: index === 0 ? theme.orangeText : theme.inverseText,
                     }}
                   >
                     {item}
@@ -468,7 +468,7 @@ export default function WebsiteColourPalettePreview() {
               <div className="mt-6 grid gap-4 md:grid-cols-3">
                 {[
                   { label: "Market confidence", value: "72.4", change: "+4.8", color: theme.navy },
-                  { label: "Positive signals", value: "184", change: "+18", color: theme.forest },
+                  { label: "Positive signals", value: "184", change: "+18", color: theme.blue },
                   { label: "Needs attention", value: "12", change: "-3", color: theme.orange },
                 ].map((metric) => (
                   <article
@@ -504,7 +504,7 @@ export default function WebsiteColourPalettePreview() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <StatusBadge background={theme.sage} color={theme.sageText}>
+                    <StatusBadge background={theme.orangeSoft} color={theme.orangeText}>
                       Stable
                     </StatusBadge>
                     <StatusBadge background={theme.orange} color={theme.accentText}>

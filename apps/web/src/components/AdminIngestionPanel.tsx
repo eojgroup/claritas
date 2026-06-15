@@ -94,7 +94,9 @@ function formatDurationMs(run: AdminIngestionRun): string {
 }
 
 function statusClasses(status: AdminIngestionRun["status"]): string {
-  if (status === "success") return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  if (status === "success") {
+    return "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]";
+  }
   if (status === "failed") return "bg-rose-50 text-rose-700 border-rose-200";
   if (status === "running") return "bg-sky-50 text-sky-700 border-sky-200";
   if (status === "queued") return "bg-amber-50 text-amber-700 border-amber-200";
@@ -791,7 +793,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         )}
         {actionNotice && (
-          <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+          <div className="mt-3 rounded-xl border border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] px-3 py-2 text-xs text-[color:var(--shell-ink)]">
             {actionNotice}
           </div>
         )}
@@ -1059,7 +1061,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <span
                 className={`rounded-full border px-2.5 py-1 ${
                   briefingConfig?.llm.opencode?.server_url_configured
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    ? "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]"
                     : "border-amber-200 bg-amber-50 text-amber-700"
                 }`}
               >
@@ -1068,7 +1070,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <span
                 className={`rounded-full border px-2.5 py-1 ${
                   briefingConfig?.llm.opencode?.auth_configured
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    ? "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]"
                     : "border-amber-200 bg-amber-50 text-amber-700"
                 }`}
               >
@@ -1077,7 +1079,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <span
                 className={`rounded-full border px-2.5 py-1 ${
                   briefingConnection?.reachable
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    ? "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]"
                     : briefingConnectionError
                       ? "border-rose-200 bg-rose-50 text-rose-700"
                       : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
@@ -1092,7 +1094,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <span
                 className={`rounded-full border px-2.5 py-1 ${
                   briefingConfig?.llm.opencode?.tools_disabled
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    ? "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]"
                     : "border-amber-200 bg-amber-50 text-amber-700"
                 }`}
               >
@@ -1529,25 +1531,25 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   type="monotone"
                   dataKey="news_inserted"
                   name="News inserted"
-                  stroke="#0f766e"
-                  fill="#99f6e4"
-                  fillOpacity={0.45}
+                  stroke="var(--viz-news)"
+                  fill="var(--viz-news)"
+                  fillOpacity={0.28}
                 />
                 <Area
                   type="monotone"
                   dataKey="weather_inserted"
                   name="Weather inserted"
-                  stroke="#0369a1"
-                  fill="#bae6fd"
-                  fillOpacity={0.45}
+                  stroke="var(--viz-weather)"
+                  fill="var(--viz-weather)"
+                  fillOpacity={0.28}
                 />
                 <Area
                   type="monotone"
                   dataKey="market_inserted"
                   name="Market inserted"
-                  stroke="#b45309"
-                  fill="#fde68a"
-                  fillOpacity={0.45}
+                  stroke="var(--viz-market)"
+                  fill="var(--viz-market)"
+                  fillOpacity={0.28}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -1570,7 +1572,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   type="monotone"
                   dataKey="news_runs"
                   name="News runs"
-                  stroke="#0f766e"
+                  stroke="var(--viz-news)"
                   strokeWidth={2}
                   dot={false}
                 />
@@ -1578,7 +1580,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   type="monotone"
                   dataKey="weather_runs"
                   name="Weather runs"
-                  stroke="#0369a1"
+                  stroke="var(--viz-weather)"
                   strokeWidth={2}
                   dot={false}
                 />
@@ -1586,7 +1588,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   type="monotone"
                   dataKey="market_runs"
                   name="Market runs"
-                  stroke="#b45309"
+                  stroke="var(--viz-market)"
                   strokeWidth={2}
                   dot={false}
                 />
@@ -1648,7 +1650,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                   onClick={() => setSelectedRunId(run.id)}
                   className={`w-full rounded-xl border p-3 text-left transition ${
                     isActive
-                      ? "border-[color:var(--shell-ink)] bg-slate-800/40"
+                      ? "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)]"
                       : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-slate-400"
                   }`}
                 >
@@ -1656,7 +1658,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                     <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
                       {pipelineLabel(run.pipeline)} #{run.id}
                     </span>
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                    <span className="rounded-full border border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] px-2 py-0.5 text-[11px] font-semibold text-[color:var(--shell-ink)]">
                       {runSourceSummary(run)}
                     </span>
                     <span

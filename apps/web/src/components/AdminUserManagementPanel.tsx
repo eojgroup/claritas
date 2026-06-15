@@ -370,7 +370,7 @@ export default function AdminUserManagementPanel() {
           </div>
         )}
         {notice && (
-          <div className="mt-3 rounded-xl border border-emerald-700 bg-emerald-900/30 px-3 py-2 text-xs text-emerald-200">
+          <div className="mt-3 rounded-xl border border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] px-3 py-2 text-xs text-[color:var(--shell-ink)]">
             {notice}
           </div>
         )}
@@ -482,8 +482,8 @@ export default function AdminUserManagementPanel() {
                     <span
                       className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
                         user.is_active
-                          ? "border-emerald-700 bg-emerald-900/40 text-emerald-200"
-                          : "border-slate-600 bg-slate-800/40 text-slate-300"
+                          ? "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]"
+                          : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface-muted)] text-[color:var(--shell-muted)]"
                       }`}
                     >
                       {user.is_active ? "Active" : "Inactive"}
@@ -491,7 +491,7 @@ export default function AdminUserManagementPanel() {
                     <span
                       className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
                         subscriptionStatus === "active" || subscriptionStatus === "trialing" || subscriptionStatus === "grace_period"
-                          ? "border-emerald-700 bg-emerald-900/40 text-emerald-200"
+                          ? "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]"
                           : "border-amber-700 bg-amber-900/40 text-amber-200"
                       }`}
                     >
@@ -594,7 +594,7 @@ export default function AdminUserManagementPanel() {
                           onClick={() => toggleRoleForUser(user.id, roleKey)}
                           className={`rounded-full border px-2 py-0.5 text-[11px] uppercase tracking-[0.16em] ${
                             hasRole
-                              ? "border-emerald-700 bg-emerald-900/40 text-emerald-200"
+                              ? "border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]"
                               : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
                           }`}
                         >

@@ -22,6 +22,9 @@ import {
   FileText,
   Maximize2,
   X,
+  ArrowUpRight,
+  CheckCheck,
+  AlertTriangle,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -111,6 +114,24 @@ const SPLIT_VIEW_MIN_HEIGHT = 620;
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
 type SearchTopic = "all" | "news" | "weather" | "markets";
+type AppView =
+  | "dashboard"
+  | "news"
+  | "weather"
+  | "markets"
+  | "admin"
+  | "profile"
+  | "legal";
+type SignalNotification = {
+  id: string;
+  title: string;
+  description: string;
+  timeLabel: string;
+  tone: "critical" | "attention" | "info";
+  view: AppView;
+  symbol?: string;
+  dateKey?: string;
+};
 
 const DATA_WINDOW_OPTIONS: Array<{
   id: DataWindowPreset;
@@ -585,15 +606,25 @@ import {
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
   const [searchTopic, setSearchTopic] = useState<SearchTopic>("all");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [readNotificationIds, setReadNotificationIds] = useState<string[]>(
+    () => {
+      try {
+        const value = localStorage.getItem("read-signal-notifications");
+        return value ? (JSON.parse(value) as string[]) : [];
+      } catch {
+        return [];
+      }
+    },
+  );
   const [authStatus, setAuthStatus] = useState<
     "checking" | "authed" | "unauthed"
   >("checking");
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<
-    "dashboard" | "news" | "weather" | "markets" | "admin" | "profile" | "legal"
-  >("dashboard");
+  const [activeView, setActiveView] = useState<AppView>("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isRefreshingAccess, setIsRefreshingAccess] = useState(false);
@@ -696,6 +727,46 @@ export default function ClaritasDashboard() {
       // Ignore storage write errors (private mode, quota, etc).
     }
   }, [dark]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "read-signal-notifications",
+        JSON.stringify(readNotificationIds),
+      );
+    } catch {
+      // Ignore storage write errors.
+    }
+  }, [readNotificationIds]);
+
+  useEffect(() => {
+    const handleKeyboard = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setNotificationsOpen(false);
+        setSearchOpen(true);
+        return;
+      }
+      if (event.key === "/" && !isTyping) {
+        event.preventDefault();
+        setNotificationsOpen(false);
+        setSearchOpen(true);
+        return;
+      }
+      if (event.key === "Escape") {
+        setSearchOpen(false);
+        setNotificationsOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyboard);
+    return () => window.removeEventListener("keydown", handleKeyboard);
+  }, []);
 
   useEffect(() => {
     const legalIds = new Set(legalPolicies.map((policy) => policy.id));
@@ -2254,6 +2325,7 @@ export default function ClaritasDashboard() {
     const news = newsSearchScope.slice(0, 4).map((item) => ({
       key: `news-${item.id}`,
       kind: "News",
+      view: "news" as const,
       title: item.title ?? item.url ?? "Untitled",
       subtitle: [
         item.country_iso2 ? item.country_iso2.toUpperCase() : null,
@@ -2262,10 +2334,13 @@ export default function ClaritasDashboard() {
         .filter(Boolean)
         .join(" · "),
       href: item.url ?? null,
+      country: item.country_iso2?.toUpperCase() ?? null,
+      symbol: null,
     }));
     const weather = weatherSearchScope.slice(0, 4).map((row, idx) => ({
       key: `weather-${row.country}-${row.observed_at}-${idx}`,
       kind: "Weather",
+      view: "weather" as const,
       title: `${(row.country || "—").toUpperCase()} · ${row.temp_c ?? "—"}°C`,
       subtitle: [
         row.weather_main ?? null,
@@ -2275,10 +2350,13 @@ export default function ClaritasDashboard() {
         .filter(Boolean)
         .join(" · "),
       href: null,
+      country: row.country?.toUpperCase() ?? null,
+      symbol: null,
     }));
     const markets = marketSearchScope.slice(0, 4).map((quote, idx) => ({
       key: `market-${quote.symbol}-${quote.observed_at}-${idx}`,
       kind: "Market",
+      view: "markets" as const,
       title: `${quote.symbol} · ${quote.price ?? "—"}`,
       subtitle: [
         quote.company_name ?? null,
@@ -2289,6 +2367,8 @@ export default function ClaritasDashboard() {
         .filter(Boolean)
         .join(" · "),
       href: null,
+      country: quote.country?.toUpperCase() ?? null,
+      symbol: quote.symbol,
     }));
 
     if (effectiveSearchTopic === "news") {
@@ -2302,6 +2382,117 @@ export default function ClaritasDashboard() {
     }
     return [...news.slice(0, 2), ...weather.slice(0, 1), ...markets.slice(0, 1)];
   }, [effectiveSearchTopic, marketSearchScope, newsSearchScope, weatherSearchScope]);
+
+  const signalNotifications = useMemo<SignalNotification[]>(() => {
+    const items: SignalNotification[] = [];
+    const formatTime = (value: string | null | undefined) => {
+      if (!value) return "Current";
+      const time = Date.parse(value);
+      if (Number.isNaN(time)) return value;
+      return new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(new Date(time));
+    };
+
+    if (newsLoadError) {
+      items.push({
+        id: `news-error-${newsLoadError}`,
+        title: "News refresh needs attention",
+        description: newsLoadError,
+        timeLabel: "Current",
+        tone: "critical",
+        view: "news",
+      });
+    }
+    if (dailyBriefingError) {
+      items.push({
+        id: `briefing-error-${dailyBriefingError}`,
+        title: "Daily briefing unavailable",
+        description: dailyBriefingError,
+        timeLabel: "Current",
+        tone: "critical",
+        view: "dashboard",
+      });
+    }
+    if (dailyBriefing?.published_at) {
+      items.push({
+        id: `briefing-${dailyBriefing.id}-${dailyBriefing.published_at}`,
+        title: dailyBriefing.title,
+        description:
+          dailyBriefing.key_takeaways[0] ??
+          "The latest daily signal briefing is ready to review.",
+        timeLabel: formatTime(dailyBriefing.published_at),
+        tone: "info",
+        view: "dashboard",
+      });
+    }
+
+    const latestAnomaly = trendAnomalies.at(-1);
+    if (latestAnomaly) {
+      items.push({
+        id: `news-anomaly-${latestAnomaly.dateKey}`,
+        title: "Unusual news volume detected",
+        description: `${latestAnomaly.count} stories were recorded on ${latestAnomaly.label}.`,
+        timeLabel: latestAnomaly.label,
+        tone: "attention",
+        view: "dashboard",
+        dateKey: latestAnomaly.dateKey,
+      });
+    }
+
+    const topMover = [...marketQuotes]
+      .filter((quote) => typeof quote.percent_change === "number")
+      .sort(
+        (a, b) =>
+          Math.abs(b.percent_change ?? 0) - Math.abs(a.percent_change ?? 0),
+      )[0];
+    if (topMover && Math.abs(topMover.percent_change ?? 0) >= 2) {
+      items.push({
+        id: `market-move-${topMover.symbol}-${topMover.observed_at}`,
+        title: `${topMover.symbol} moved ${formatSignedMetric(topMover.percent_change, 2, "%")}`,
+        description:
+          topMover.company_name ??
+          `${topMover.exchange ?? "Market"} price movement requires review.`,
+        timeLabel: formatTime(topMover.observed_at),
+        tone: "attention",
+        view: "markets",
+        symbol: topMover.symbol,
+      });
+    }
+
+    const nextEarning = marketEarningsRows.find((event) => event.date);
+    if (nextEarning?.date) {
+      items.push({
+        id: `earnings-${nextEarning.symbol}-${nextEarning.date}`,
+        title: `${nextEarning.symbol} earnings approaching`,
+        description: `${nextEarning.market_name ?? nextEarning.market_code ?? "Market"} · ${nextEarning.hour ?? "Time pending"}`,
+        timeLabel: nextEarning.date,
+        tone: "info",
+        view: "markets",
+        symbol: nextEarning.symbol,
+      });
+    }
+
+    return items.slice(0, 8);
+  }, [
+    dailyBriefing,
+    dailyBriefingError,
+    marketEarningsRows,
+    marketQuotes,
+    newsLoadError,
+    trendAnomalies,
+  ]);
+
+  const unreadNotificationCount = useMemo(
+    () =>
+      signalNotifications.filter(
+        (notification) => !readNotificationIds.includes(notification.id),
+      ).length,
+    [readNotificationIds, signalNotifications],
+  );
 
   const splitViewEnabled = useMemo(
     () =>
@@ -3248,7 +3439,7 @@ export default function ClaritasDashboard() {
                   >
                     <div
                       id="signal-map-feed"
-                      className={`${dashboardPanelClass} xl:col-span-7`}
+                      className={`${dashboardPanelClass} xl:col-span-5`}
                       style={{ animationDelay: "0ms" }}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
@@ -3457,7 +3648,7 @@ export default function ClaritasDashboard() {
                               {isAdmin ? (
                                 <button
                                   onClick={() => setActiveView("admin")}
-                                  className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:bg-slate-800/40"
+                                  className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:bg-[color:var(--signal-sky-soft)]"
                                 >
                                   Open admin ingest
                                 </button>
@@ -3567,7 +3758,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${dashboardPanelClass} xl:col-span-5`}
+                      className={`${dashboardPanelClass} xl:col-span-7`}
                       style={{ animationDelay: "80ms" }}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
@@ -3662,9 +3853,9 @@ export default function ClaritasDashboard() {
                                 !!comparisonCountry &&
                                 iso === comparisonCountry.toUpperCase();
                               return (
-                                <div
+                                <article
                                   key={n.id}
-                                  className={`rounded-xl border p-3 ${
+                                  className={`rounded-xl border p-4 transition hover:border-[color:var(--shell-border-strong)] ${
                                     isPrimary
                                       ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                       : isSecondary
@@ -3673,7 +3864,7 @@ export default function ClaritasDashboard() {
                                   }`}
                                 >
                                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                                    <div className="relative h-20 w-28 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)] flex-none shrink-0">
+                                    <div className="relative h-24 w-36 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)] flex-none shrink-0">
                                       {img ? (
                                         <img
                                           src={img}
@@ -3694,7 +3885,7 @@ export default function ClaritasDashboard() {
                                         href={n.url ?? "#"}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="font-semibold text-[color:var(--shell-ink)] hover:underline"
+                                        className="text-base font-semibold leading-6 text-[color:var(--shell-ink)] hover:underline"
                                       >
                                         {n.title || n.url || "Untitled"}
                                       </a>
@@ -3728,13 +3919,13 @@ export default function ClaritasDashboard() {
                                         )}
                                       </div>
                                       {n.summary && (
-                                        <p className="mt-2 line-clamp-2 text-sm text-[color:var(--shell-muted)]">
+                                        <p className="mt-2 line-clamp-3 text-sm leading-6 text-[color:var(--shell-muted)]">
                                           {n.summary}
                                         </p>
                                       )}
                                     </div>
                                   </div>
-                                </div>
+                                </article>
                               );
                             })}
                           </div>
@@ -3763,7 +3954,7 @@ export default function ClaritasDashboard() {
                               {isAdmin ? (
                                 <button
                                   onClick={() => setActiveView("admin")}
-                                  className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-slate-800/40"
+                                  className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-[color:var(--signal-sky-soft)]"
                                 >
                                   Open admin ingest
                                 </button>
@@ -4574,7 +4765,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(20rem,0.72fr)_minmax(32rem,1.28fr)]">
                   <div className={`${cardBase} overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -4584,7 +4775,7 @@ export default function ClaritasDashboard() {
                         Country coverage
                       </div>
                     </div>
-                    <div className="h-[min(56vh,520px)] min-h-[20rem] p-3">
+                    <div className="h-[min(64vh,680px)] min-h-[24rem] p-3">
                       <div className="app-map-frame">
                         <WorldMapBubbles
                           variant="default"
@@ -4612,7 +4803,7 @@ export default function ClaritasDashboard() {
                         Filtered story stream
                       </div>
                     </div>
-                    <div className="app-scroll-panel max-h-[56vh] min-h-[20rem] overflow-y-auto p-3 space-y-2">
+                    <div className="app-scroll-panel h-[min(64vh,680px)] min-h-[24rem] overflow-y-auto p-3 space-y-3">
                       {newsPageItems.length === 0 && (
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
                           No stories match the current filters.
@@ -4627,14 +4818,14 @@ export default function ClaritasDashboard() {
                         return (
                           <article
                             key={item.id}
-                            className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                            className={`w-full rounded-xl border px-4 py-4 text-left transition ${
                               selected
                                 ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
                             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                              <div className="relative h-20 w-28 overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)] flex-none">
+                              <div className="relative h-24 w-36 overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)] flex-none">
                                 {img && (
                                   <img
                                     src={img}
@@ -4651,7 +4842,7 @@ export default function ClaritasDashboard() {
                                   href={storyUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-sm font-semibold text-[color:var(--shell-ink)] hover:underline"
+                                  className="text-base font-semibold leading-6 text-[color:var(--shell-ink)] hover:underline"
                                 >
                                   {item.title || item.url || "Untitled"}
                                 </a>
@@ -4675,7 +4866,7 @@ export default function ClaritasDashboard() {
                                   )}
                                 </div>
                                 {item.summary && (
-                                  <p className="mt-2 line-clamp-2 text-xs text-[color:var(--shell-muted)]">
+                                  <p className="mt-2 line-clamp-3 text-sm leading-6 text-[color:var(--shell-muted)]">
                                     {item.summary}
                                   </p>
                                 )}

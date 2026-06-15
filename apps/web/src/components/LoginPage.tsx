@@ -106,7 +106,7 @@ function ProviderButton({
   const badgeClass = busy
     ? "bg-slate-700/60 text-slate-200"
     : enabled
-      ? "bg-emerald-900/60 text-emerald-200"
+      ? "bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]"
       : "bg-slate-700/60 text-slate-300";
 
   return (
