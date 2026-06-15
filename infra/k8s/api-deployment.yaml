@@ -74,6 +74,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_FAILURE_REDIRECT_URL } }
             - name: AUTH_ALLOWED_REDIRECTS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_ALLOWED_REDIRECTS } }
+            - name: AUTH_ALLOWED_REDIRECT_SCHEMES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_ALLOWED_REDIRECT_SCHEMES } }
             - name: AUTH_KEYCLOAK_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_KEYCLOAK_CLIENT_SECRET, optional: true } }
             - name: INGEST_API_TOKEN

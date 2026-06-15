@@ -150,7 +150,7 @@ private struct ShellNavigationChrome: ViewModifier {
     }
 }
 
-private struct PaywallView: View {
+struct PaywallView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openURL) private var openURL
     @State private var isSigningOut: Bool = false
@@ -316,7 +316,7 @@ private struct PaywallView: View {
     }
 }
 
-private struct AdminWorkspaceView: View {
+struct AdminWorkspaceView: View {
     enum Panel: String, CaseIterable, Identifiable {
         case ingestion
         case users

@@ -18,6 +18,7 @@ final class AppModel: ObservableObject {
 
     @Published var selectedCountry: String? = nil
     @Published var selectedSymbol: String? = nil
+    @Published var dailyBriefing: DailySignalBriefing? = nil
     @Published var news: [NewsItem] = []
     @Published var countryStats: [CountryStat] = []
     @Published var weather: [CountryWeather] = []
@@ -260,6 +261,10 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchCountryStats(days: 30)) }
             catch { return .failure(error) }
         }()
+        async let briefingResult: Result<DailySignalBriefing?, Error> = {
+            do { return .success(try await api.fetchLatestDailyBriefing()) }
+            catch { return .failure(error) }
+        }()
         async let weatherResult: Result<[CountryWeather], Error> = {
             do { return .success(try await api.fetchCountryWeather()) }
             catch { return .failure(error) }
@@ -285,11 +290,14 @@ final class AppModel: ObservableObject {
             catch { return .failure(error) }
         }()
 
-        let (resolvedStats, resolvedWeather, resolvedNews, resolvedMarket, resolvedMarketStatus, resolvedMarketEarnings) =
-            await (statsResult, weatherResult, newsResult, marketResult, marketStatusResult, marketEarningsResult)
+        let (resolvedStats, resolvedBriefing, resolvedWeather, resolvedNews, resolvedMarket, resolvedMarketStatus, resolvedMarketEarnings) =
+            await (statsResult, briefingResult, weatherResult, newsResult, marketResult, marketStatusResult, marketEarningsResult)
 
         var paymentRequiredDetected = false
         if case .failure(let error) = resolvedStats, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedBriefing, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedWeather, isPaymentRequired(error) {
@@ -316,6 +324,9 @@ final class AppModel: ObservableObject {
         if case .success(let stats) = resolvedStats {
             countryStats = stats
         }
+        if case .success(let briefing) = resolvedBriefing {
+            dailyBriefing = briefing
+        }
         if case .success(let weatherRows) = resolvedWeather {
             weather = weatherRows
         }
@@ -337,6 +348,7 @@ final class AppModel: ObservableObject {
 
     func clearAppData() {
         clearSelection()
+        dailyBriefing = nil
         countryStats = []
         weather = []
         news = []

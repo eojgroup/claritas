@@ -3,24 +3,36 @@
 Project path: `apps/mobile/ios/Claritas/Claritas.xcodeproj`
 Generator source: `apps/mobile/ios/generate_xcodeproj.rb`
 
-The project contains the paired `Claritas` iPhone/iPad target and `Claritas Watch App` watchOS 10+ target.
+The project contains three native targets:
+
+- `Claritas`: iPhone app and Apple Watch companion authority.
+- `Claritas iPad`: iPadOS 16+ split-view intelligence workspace.
+- `Claritas Watch App`: watchOS 10+ glanceable briefing and signal app.
 
 ## Quick Start
 
 1. Open the project in Xcode: `File -> Open` and select `apps/mobile/ios/Claritas/Claritas.xcodeproj`.
 2. Set your signing team:
    - Select the `Claritas` target -> Signing & Capabilities -> Team -> choose your team.
+   - Select `Claritas iPad` and choose the same team.
    - Select `Claritas Watch App` and choose the same team.
    - Optionally change the Bundle Identifier from the default `com.eojgroup.claritas`.
+   - Keep the iPad identifier distinct, such as `com.yourorg.claritas.ipad`.
    - Keep the watch bundle identifier as a child identifier, such as `com.yourorg.claritas.watchkitapp`.
 3. Configure the API base URL:
    - Edit `apps/mobile/ios/Claritas/Config.plist` -> `API_BASE_URL` to point to your backend (e.g. `https://your-host.com`).
    - Keep `apps/mobile/ios/ClaritasWatch/Config.plist` aligned for first launch. The iPhone app sends its active URL to the watch after pairing.
+   - Keep `apps/mobile/ios/ClaritasPad/Config.plist` aligned. Its default auth callback is `claritaspad://auth/callback`.
    - Ensure `AUTH_CALLBACK_URL` matches your registered iOS URL scheme (default: `claritas://auth/callback`).
    - Or at runtime set `UserDefaults.standard.set("https://your-host.com", forKey: "API_BASE_URL")` in AppDelegate for advanced configs.
 4. Run `Claritas` on a paired iPhone + Apple Watch simulator or devices and sign in on iPhone.
 5. Run/install `Claritas Watch App`. It loads the latest published briefing, news, markets, and weather, and caches the last successful update.
-6. The iPhone app will load:
+6. Run `Claritas iPad` on an iPad simulator or device. It provides:
+   - Persistent split-view navigation.
+   - Daily briefing and cross-signal command center.
+   - Full dashboard, news, weather, markets, admin, profile, and policies workspaces.
+   - Multi-window iPadOS support.
+7. The iPhone app will load:
    - Country news list (with thumbnail proxy).
    - Weather list (with filters + refresh).
    - Country profile panel reflecting your selection.
@@ -34,9 +46,17 @@ The project contains the paired `Claritas` iPhone/iPad target and `Claritas Watc
 - Signing out on iPhone clears the watch token on the next sync.
 - Open the iPhone app once after installing the watch app, then tap `Connect` on watch if it does not sync automatically.
 
+## iPad Authentication
+
+- The iPad app signs in independently using `claritaspad://auth/callback`.
+- Deploy the committed Kubernetes configuration before testing production sign-in. It adds `claritaspad://` and the `claritaspad` scheme to the API redirect allowlist.
+- If configuring the API outside Kubernetes, set:
+  - `AUTH_ALLOWED_REDIRECTS=https://your-host,claritas://,claritaspad://`
+  - `AUTH_ALLOWED_REDIRECT_SCHEMES=claritas,claritaspad`
+
 ## Source Of Truth
 
-- Swift/resources under `apps/mobile/ios/Claritas/` and `apps/mobile/ios/ClaritasWatch/` are the source of truth.
+- Swift/resources under `apps/mobile/ios/Claritas/`, `apps/mobile/ios/ClaritasPad/`, and `apps/mobile/ios/ClaritasWatch/` are the source of truth.
 - `apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj` is generated; avoid manual edits.
 - If files are added/moved/renamed, regenerate the project rather than editing `.pbxproj` directly.
 
@@ -48,8 +68,10 @@ The Xcode project was generated with Ruby `xcodeproj`. If you add/move files, yo
 gem install xcodeproj --no-document
 cd apps/mobile/ios
 BUNDLE_ID=com.yourorg.claritas \
+IPAD_BUNDLE_ID=com.yourorg.claritas.ipad \
 DEVELOPMENT_TEAM=YOURTEAMID \
 IOS_DEPLOYMENT_TARGET=16.0 \
+IPADOS_DEPLOYMENT_TARGET=16.0 \
 WATCHOS_DEPLOYMENT_TARGET=10.0 \
 ruby generate_xcodeproj.rb
 ```
@@ -58,7 +80,7 @@ Then re-open the `.xcodeproj` in Xcode.
 
 ## Keep Project In Sync
 
-1. Make code/file changes under `apps/mobile/ios/Claritas/` or `apps/mobile/ios/ClaritasWatch/`.
+1. Make code/file changes under `apps/mobile/ios/Claritas/`, `apps/mobile/ios/ClaritasPad/`, or `apps/mobile/ios/ClaritasWatch/`.
 2. Run `ruby apps/mobile/ios/generate_xcodeproj.rb` (or run from `apps/mobile/ios`).
 3. Commit both source files and `apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj`.
 4. If a merge conflict happens in `project.pbxproj`, regenerate from `generate_xcodeproj.rb` and commit the regenerated file.

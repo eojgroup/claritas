@@ -125,7 +125,7 @@ jobs:
             base="https://${base}"
           fi
           kubectl -n "$ns" apply -f infra/k8s/config/claritas-config.yaml
-          kubectl -n "$ns" patch configmap claritas-config --type merge -p "{\"data\":{\"INSTANCE_CONNECTION_NAME\":\"${{ steps.tf_out.outputs.icn }}\",\"DB_NAME\":\"${{ steps.tf_out.outputs.db_name }}\",\"DB_USER\":\"${{ steps.tf_out.outputs.db_user }}\",\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${base}\"}}"
+          kubectl -n "$ns" patch configmap claritas-config --type merge -p "{\"data\":{\"INSTANCE_CONNECTION_NAME\":\"${{ steps.tf_out.outputs.icn }}\",\"DB_NAME\":\"${{ steps.tf_out.outputs.db_name }}\",\"DB_USER\":\"${{ steps.tf_out.outputs.db_user }}\",\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${base},claritas://,claritaspad://\",\"AUTH_ALLOWED_REDIRECT_SCHEMES\":\"claritas,claritaspad\"}}"
 
       - name: 🔐 Upsert Secret (claritas-db)
         run: |
