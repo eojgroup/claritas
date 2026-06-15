@@ -22,6 +22,7 @@ struct ProfileView: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     @AppStorage("THEME_DARK") private var dark: Bool = false
     @AppStorage("DEFAULT_MAP_MODE") private var defaultMapMode: String = "news"
     @AppStorage("DEFAULT_LIST_MODE") private var defaultListMode: String = "news"
@@ -210,7 +211,7 @@ struct ProfileView: View {
                         .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
-                .tint(ClaritasPalette.darkBlue)
+                .tint(ClaritasPalette.shellAccent(for: colorScheme))
             }
         }
     }
@@ -304,7 +305,7 @@ struct ProfileView: View {
                         .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(ClaritasPalette.brown.opacity(0.9))
+                .tint(ClaritasPalette.shellAccent(for: colorScheme))
                 .disabled(isSigningOut)
             }
         }
@@ -331,6 +332,7 @@ struct ProfileView: View {
 
 private struct FlexibleRoleCloud: View {
     let roles: [String]
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
@@ -342,7 +344,7 @@ private struct FlexibleRoleCloud: View {
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(ClaritasPalette.darkGreen.opacity(0.14), in: Capsule())
-                    .foregroundStyle(ClaritasPalette.darkGreen)
+                    .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
             }
         }
     }

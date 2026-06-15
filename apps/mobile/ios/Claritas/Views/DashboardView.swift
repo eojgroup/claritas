@@ -649,8 +649,8 @@ struct DashboardView: View {
 
     private func changeColor(_ quote: MarketQuote) -> Color {
         guard let change = quote.change else { return ClaritasPalette.grey }
-        if change > 0 { return ClaritasPalette.positive }
-        if change < 0 { return ClaritasPalette.negative }
+        if change > 0 { return ClaritasPalette.positiveText(for: colorScheme) }
+        if change < 0 { return ClaritasPalette.negativeText(for: colorScheme) }
         return ClaritasPalette.grey
     }
 
@@ -746,6 +746,7 @@ struct NewsWorkspaceView: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var query: String = ""
     @State private var sourceFilter: String = "all"
     @State private var countryFilter: String = ""
@@ -871,7 +872,7 @@ struct NewsWorkspaceView: View {
                             if let error = model.newsLoadError, !error.isEmpty {
                                 Text(error)
                                     .font(.footnote)
-                                    .foregroundStyle(ClaritasPalette.negative)
+                                    .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
                             }
                         }
                     }
@@ -932,7 +933,7 @@ struct NewsWorkspaceView: View {
                                             x: .value("Date", item.date),
                                             y: .value("Stories", item.count)
                                         )
-                                        .foregroundStyle(ClaritasPalette.darkBlue)
+                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                                     }
                                     .frame(height: 180)
                                 }
@@ -947,7 +948,7 @@ struct NewsWorkspaceView: View {
                                             x: .value("Source", item.label),
                                             y: .value("Stories", item.count)
                                         )
-                                        .foregroundStyle(ClaritasPalette.darkGreen)
+                                        .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
                                     }
                                     .frame(height: 180)
                                 }
@@ -993,6 +994,7 @@ struct WeatherWorkspaceView: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var query: String = ""
     @State private var conditionFilter: String = "all"
     @State private var countryFilter: String = ""
@@ -1183,7 +1185,7 @@ struct WeatherWorkspaceView: View {
                                             x: .value("Humidity", item.humidity),
                                             y: .value("Temperature", item.temp)
                                         )
-                                        .foregroundStyle(ClaritasPalette.darkBlue)
+                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                                     }
                                     .frame(height: 180)
                                 }
@@ -1224,6 +1226,7 @@ struct MarketsWorkspaceView: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var query: String = ""
     @State private var exchangeFilter: String = "all"
     @State private var countryFilter: String = "all"
@@ -1611,7 +1614,7 @@ struct MarketsWorkspaceView: View {
                                             x: .value("Symbol", item.label),
                                             y: .value("% change", item.value)
                                         )
-                                        .foregroundStyle(item.value >= 0 ? ClaritasPalette.darkGreen : ClaritasPalette.negative)
+                                        .foregroundStyle(item.value >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
                                     }
                                     .frame(height: 180)
                                 }
@@ -1626,7 +1629,7 @@ struct MarketsWorkspaceView: View {
                                             x: .value("Market", item.label),
                                             y: .value("Average change", item.value)
                                         )
-                                        .foregroundStyle(item.value >= 0 ? ClaritasPalette.darkBlue : ClaritasPalette.negative)
+                                        .foregroundStyle(item.value >= 0 ? ClaritasPalette.dataBlue(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
                                     }
                                     .frame(height: 180)
                                 }
@@ -1659,7 +1662,7 @@ struct MarketsWorkspaceView: View {
                                                 .foregroundStyle(.secondary)
                                             Text("\(row.avgChange >= 0 ? "+" : "")\(row.avgChange.formatted(.number.precision(.fractionLength(2))))%")
                                                 .font(.caption.weight(.semibold))
-                                                .foregroundStyle(row.avgChange >= 0 ? ClaritasPalette.darkGreen : ClaritasPalette.negative)
+                                                .foregroundStyle(row.avgChange >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
                                             Text("Top: \(row.topSymbol) • \(row.topMove >= 0 ? "+" : "")\(row.topMove.formatted(.number.precision(.fractionLength(2))))%")
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
@@ -1693,7 +1696,9 @@ struct MarketsWorkspaceView: View {
     }
 
     private func changeColor(for quote: MarketQuote) -> Color {
-        (quote.percent_change ?? quote.change ?? 0) >= 0 ? ClaritasPalette.darkGreen : ClaritasPalette.negative
+        (quote.percent_change ?? quote.change ?? 0) >= 0
+            ? ClaritasPalette.positiveText(for: colorScheme)
+            : ClaritasPalette.negativeText(for: colorScheme)
     }
 }
 
@@ -1749,12 +1754,12 @@ struct PoliciesWorkspaceView: View {
                             )
 
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
-                                BrandSwatch(name: "Shell Sidebar", hex: "#1F3A5F", color: ClaritasPalette.darkBlue)
-                                BrandSwatch(name: "Shell Accent", hex: "#2F5D50", color: ClaritasPalette.darkGreen)
-                                BrandSwatch(name: "Shell Border", hex: "#E8DDC8", color: ClaritasPalette.beige)
-                                BrandSwatch(name: "Support Amber", hex: "#7A5C46", color: ClaritasPalette.brown)
-                                BrandSwatch(name: "Surface", hex: "#FFFDFA", color: Color(hex: "#FFFDFA"))
-                                BrandSwatch(name: "Ink", hex: "#222222", color: ClaritasPalette.text)
+                                BrandSwatch(name: "Command Navy", hex: "#173342", color: ClaritasPalette.darkBlue)
+                                BrandSwatch(name: "Deep Forest", hex: "#1E493B", color: ClaritasPalette.darkGreen)
+                                BrandSwatch(name: "Strategic Sage", hex: "#8BB99A", color: ClaritasPalette.sage)
+                                BrandSwatch(name: "Signal Orange", hex: "#D97932", color: ClaritasPalette.orange)
+                                BrandSwatch(name: "Warm Surface", hex: "#FFFDF8", color: Color(hex: "#FFFDF8"))
+                                BrandSwatch(name: "Primary Ink", hex: "#132833", color: ClaritasPalette.text)
                             }
                         }
                     }
@@ -1955,7 +1960,7 @@ private struct MarketQuoteListView: View {
                                         .padding(.horizontal, 7)
                                         .padding(.vertical, 3)
                                         .background(ClaritasPalette.darkBlue.opacity(0.12), in: Capsule())
-                                        .foregroundStyle(ClaritasPalette.darkBlue)
+                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                                 }
                                 if let industry = metadata.industry, !industry.isEmpty {
                                     Text(industry)
@@ -2039,8 +2044,8 @@ private struct MarketQuoteListView: View {
 
     private func changeColor(_ quote: MarketQuote) -> Color {
         guard let change = quote.change else { return ClaritasPalette.grey }
-        if change > 0 { return ClaritasPalette.positive }
-        if change < 0 { return ClaritasPalette.negative }
+        if change > 0 { return ClaritasPalette.positiveText(for: colorScheme) }
+        if change < 0 { return ClaritasPalette.negativeText(for: colorScheme) }
         return ClaritasPalette.grey
     }
 
@@ -2156,8 +2161,8 @@ private struct MarketStatusPanel: View {
     }
 
     private func statusColor(_ row: MarketStatus) -> Color {
-        if row.is_open == true { return ClaritasPalette.positive }
-        if row.is_open == false { return ClaritasPalette.negative }
+        if row.is_open == true { return ClaritasPalette.positiveText(for: colorScheme) }
+        if row.is_open == false { return ClaritasPalette.negativeText(for: colorScheme) }
         return ClaritasPalette.grey
     }
 }
@@ -2230,7 +2235,7 @@ private struct MarketEarningsPanel: View {
                             Button(action: { onSelectSymbol(row.symbol) }) {
                                 Text(row.symbol)
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(ClaritasPalette.darkBlue)
+                                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                             }
                             .buttonStyle(.plain)
                             Spacer()
@@ -2325,17 +2330,19 @@ private struct DashboardHeaderView: View {
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
             ZStack {
-                Circle()
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(ClaritasPalette.darkBlue)
-                    .frame(width: 64, height: 64)
-                    .offset(x: -8)
-                Circle()
-                    .fill(ClaritasPalette.darkGreen.opacity(0.75))
-                    .frame(width: 64, height: 64)
-                    .offset(x: 16)
-                Text("CLARITAS")
-                    .font(.system(size: 18, weight: .semibold, design: .serif))
+                    .frame(width: 58, height: 58)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                    .frame(width: 58, height: 58)
+                Text("C")
+                    .font(.system(size: 24, weight: .semibold, design: .serif))
                     .foregroundStyle(ClaritasPalette.offWhite)
+                Circle()
+                    .fill(ClaritasPalette.orange)
+                    .frame(width: 9, height: 9)
+                    .offset(x: 20, y: -20)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Signal desk overview")
@@ -2355,12 +2362,7 @@ private struct DashboardHeaderView: View {
             .font(.title3)
         }
         .padding(16)
-        .background(ClaritasPalette.shellRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 6)
+        .brandGlass(cornerRadius: 18, elevated: true)
     }
 }
 
@@ -2378,25 +2380,25 @@ private struct DashboardBackground<Content: View>: View {
                 colors: [
                     ClaritasPalette.shellBackground(for: colorScheme),
                     colorScheme == .dark
-                        ? ClaritasPalette.shellSidebar(for: colorScheme).opacity(0.94)
-                        : ClaritasPalette.beige.opacity(0.85)
+                        ? Color(hex: "#102426")
+                        : Color(hex: "#E8E1D5"),
+                    ClaritasPalette.shellBackground(for: colorScheme)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
-            Circle()
-                .fill(ClaritasPalette.darkGreen.opacity(colorScheme == .dark ? 0.2 : 0.12))
-                .frame(width: 340, height: 340)
-                .blur(radius: 32)
-                .offset(x: -160, y: -260)
-
-            Circle()
-                .fill(ClaritasPalette.darkBlue.opacity(colorScheme == .dark ? 0.22 : 0.1))
-                .frame(width: 300, height: 300)
-                .blur(radius: 36)
-                .offset(x: 180, y: 280)
+            LinearGradient(
+                colors: [
+                    ClaritasPalette.darkGreen.opacity(colorScheme == .dark ? 0.14 : 0.08),
+                    Color.clear,
+                    ClaritasPalette.orange.opacity(colorScheme == .dark ? 0.1 : 0.06)
+                ],
+                startPoint: .topTrailing,
+                endPoint: .bottomLeading
+            )
+            .ignoresSafeArea()
 
             content
         }
@@ -2405,7 +2407,6 @@ private struct DashboardBackground<Content: View>: View {
 
 private struct DashboardCard<Content: View>: View {
     @ViewBuilder var content: Content
-    @Environment(\.colorScheme) private var colorScheme
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -2416,12 +2417,7 @@ private struct DashboardCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(ClaritasPalette.shellRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.06), radius: 12, x: 0, y: 8)
+        .brandGlass(cornerRadius: 18, elevated: true)
     }
 }
 

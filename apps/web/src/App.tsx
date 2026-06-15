@@ -2721,7 +2721,7 @@ export default function ClaritasDashboard() {
             className="absolute inset-0 bg-slate-900/60"
             onClick={() => setMobileNavOpen(false)}
           />
-          <aside className="absolute left-0 top-0 h-full w-[min(20rem,88vw)] bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
+          <aside className="app-sidebar absolute left-0 top-0 h-full w-[min(20rem,88vw)] text-white">
             <div className="flex h-full flex-col">
               <div className="px-6 pt-6 pb-4">
                 <div className="flex items-center gap-3">
@@ -2755,10 +2755,9 @@ export default function ClaritasDashboard() {
                         setActiveView(item.view);
                         setMobileNavOpen(false);
                       }}
-                      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                        active
-                          ? "bg-[color:var(--shell-surface)]/10 text-white"
-                          : "text-white/70 hover:bg-[color:var(--shell-surface)]/10 hover:text-white"
+                      aria-current={active ? "page" : undefined}
+                      className={`app-nav-item flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium ${
+                        active ? "" : "text-white/70 hover:bg-white/10 hover:text-white"
                       }`}
                     >
                       <Icon className="h-4 w-4" />
@@ -2799,7 +2798,7 @@ export default function ClaritasDashboard() {
       )}
 
       <div className="flex min-h-screen">
-        <aside className="hidden lg:flex lg:w-[18.5rem] lg:flex-col border-r border-[color:var(--shell-sidebar-border)] bg-[color:var(--shell-sidebar)] text-white shadow-2xl">
+        <aside className="app-sidebar relative hidden border-r border-[color:var(--shell-sidebar-border)] text-white lg:flex lg:w-[18.5rem] lg:flex-col">
           <div className="px-6 pt-7 pb-5">
             <div className="flex items-center gap-3">
               <div className="relative h-11 w-16 flex-none">
@@ -2829,10 +2828,9 @@ export default function ClaritasDashboard() {
                   key={item.id}
                   type="button"
                   onClick={() => setActiveView(item.view)}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
-                    active
-                      ? "bg-[color:var(--shell-surface)]/10 text-white"
-                      : "text-white/70 hover:bg-[color:var(--shell-surface)]/10 hover:text-white"
+                  aria-current={active ? "page" : undefined}
+                  className={`app-nav-item flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium ${
+                    active ? "" : "text-white/70 hover:bg-white/10 hover:text-white"
                   }`}
                 >
                   <Icon className="h-4 w-4" />
@@ -2870,7 +2868,7 @@ export default function ClaritasDashboard() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col min-h-0">
-          <header className="app-safe-top sticky top-0 z-20 border-b border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]/88 backdrop-blur-xl">
+          <header className="app-safe-top app-topbar sticky top-0 z-20 border-b border-[color:var(--shell-border)]">
             <div className="mx-auto flex w-full max-w-[1720px] flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
               <button
                 type="button"
@@ -2911,7 +2909,7 @@ export default function ClaritasDashboard() {
                   <span>{todayLabel}</span>
                 </div>
                 <div className="hidden md:flex items-center gap-2">
-                  <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-muted)]">
+                  <div className="app-control flex items-center gap-2 rounded-xl px-3 py-2 text-sm text-[color:var(--shell-muted)]">
                     <Search className="h-4 w-4" />
                     <input
                       className="w-44 lg:w-64 bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
@@ -2930,7 +2928,7 @@ export default function ClaritasDashboard() {
                       </button>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
+                  <div className="app-control flex items-center gap-1 rounded-xl p-1 text-xs">
                     {SEARCH_TOPIC_OPTIONS.map((option) => {
                       const active = effectiveSearchTopic === option.id;
                       return (
@@ -2940,7 +2938,7 @@ export default function ClaritasDashboard() {
                           onClick={() => handleSearchTopicChange(option.id)}
                           className={`rounded-lg px-2.5 py-1 transition ${
                             active
-                              ? "bg-[color:var(--shell-ink)] text-white"
+                              ? "bg-[color:var(--shell-selected)] text-[color:var(--shell-on-selected)] shadow-sm"
                               : "text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
                           }`}
                         >
@@ -2953,7 +2951,7 @@ export default function ClaritasDashboard() {
                 <button
                   aria-label="Toggle dark mode"
                   onClick={() => setDark((v) => !v)}
-                  className="h-10 w-10 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] hover:bg-slate-800/40"
+                  className="app-control h-10 w-10 rounded-xl text-[color:var(--shell-ink)] hover:bg-[color:var(--shell-surface-strong)]"
                 >
                   <span className="grid h-full w-full place-items-center">
                     {dark ? (
@@ -2963,7 +2961,7 @@ export default function ClaritasDashboard() {
                     )}
                   </span>
                 </button>
-                <div className="hidden sm:flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-muted)]">
+                <div className="app-control hidden items-center gap-2 rounded-xl px-3 py-1 text-xs text-[color:var(--shell-muted)] sm:flex">
                   <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
                   <span className="max-w-[160px] truncate">{userLabel}</span>
                 </div>
@@ -3112,7 +3110,7 @@ export default function ClaritasDashboard() {
                               }}
                               className={`rounded-full border px-3 py-1 transition ${
                                 active
-                                  ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                  ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                   : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                               }`}
                             >
@@ -3165,7 +3163,7 @@ export default function ClaritasDashboard() {
                               onClick={() => handleSearchTopicChange(option.id)}
                               className={`rounded-lg px-2.5 py-1 transition ${
                                 active
-                                  ? "bg-[color:var(--shell-ink)] text-white"
+                                  ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                   : "text-[color:var(--shell-muted)]"
                               }`}
                             >
@@ -3269,7 +3267,7 @@ export default function ClaritasDashboard() {
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
                               mapMode === "news"
-                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => {
@@ -3282,7 +3280,7 @@ export default function ClaritasDashboard() {
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
                               mapMode === "weather"
-                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => {
@@ -3312,7 +3310,7 @@ export default function ClaritasDashboard() {
                                 onClick={() => setRegionFilter(region.id)}
                                 className={`rounded-full border px-2.5 py-1 transition ${
                                   active
-                                    ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                     : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                                 }`}
                               >
@@ -3326,7 +3324,7 @@ export default function ClaritasDashboard() {
                             onClick={() => setCompareMode((v) => !v)}
                             className={`rounded-full border px-3 py-1 transition ${
                               compareMode
-                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
@@ -3480,7 +3478,7 @@ export default function ClaritasDashboard() {
                                 onClick={() => setMapDayMode(false)}
                                 className={`rounded-full border px-3 py-1 ${
                                   !mapDayMode
-                                    ? "bg-[color:var(--shell-ink)] text-white border-[color:var(--shell-ink)]"
+                                    ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
                                     : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
                                 }`}
                               >
@@ -3490,7 +3488,7 @@ export default function ClaritasDashboard() {
                                 onClick={() => setMapDayMode(true)}
                                 className={`rounded-full border px-3 py-1 ${
                                   mapDayMode
-                                    ? "bg-[color:var(--shell-ink)] text-white border-[color:var(--shell-ink)]"
+                                    ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
                                     : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
                                 }`}
                               >
@@ -3588,7 +3586,7 @@ export default function ClaritasDashboard() {
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
                               listMode === "news"
-                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => setListMode("news")}
@@ -3598,7 +3596,7 @@ export default function ClaritasDashboard() {
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
                               listMode === "weather"
-                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => setListMode("weather")}
@@ -3608,7 +3606,7 @@ export default function ClaritasDashboard() {
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
                               listMode === "market"
-                                ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                             }`}
                             onClick={() => setListMode("market")}
@@ -4003,7 +4001,7 @@ export default function ClaritasDashboard() {
                           onClick={() => setChartView("daily")}
                           className={`rounded-full border px-3 py-1 ${
                             chartView === "daily"
-                              ? "bg-[color:var(--shell-ink)] text-white border-[color:var(--shell-ink)]"
+                              ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
                               : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
                           }`}
                         >
@@ -4013,7 +4011,7 @@ export default function ClaritasDashboard() {
                           onClick={() => setChartView("rolling")}
                           className={`rounded-full border px-3 py-1 ${
                             chartView === "rolling"
-                              ? "bg-[color:var(--shell-ink)] text-white border-[color:var(--shell-ink)]"
+                              ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
                               : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
                           }`}
                         >
@@ -4349,7 +4347,7 @@ export default function ClaritasDashboard() {
                                 onClick={() => handleSearchTopicChange(option.id)}
                                 className={`rounded-full border px-3 py-1 transition ${
                                   active
-                                    ? "border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] text-white"
+                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
                                     : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                                 }`}
                               >
@@ -4831,7 +4829,7 @@ export default function ClaritasDashboard() {
                               onClick={() => setMarketEarningsWindowDays(days as 7 | 14 | 30)}
                               className={`rounded-full px-2 py-0.5 ${
                                 marketEarningsWindowDays === days
-                                  ? "bg-[color:var(--shell-ink)] text-[color:var(--shell-bg)]"
+                                  ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-bg)]"
                                   : "text-[color:var(--shell-muted)]"
                               }`}
                             >
@@ -5532,7 +5530,7 @@ export default function ClaritasDashboard() {
                             onClick={() => setMarketEarningsWindowDays(days as 7 | 14 | 30)}
                             className={`rounded-full px-2 py-0.5 ${
                               marketEarningsWindowDays === days
-                                ? "bg-[color:var(--shell-ink)] text-[color:var(--shell-bg)]"
+                                ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-bg)]"
                                 : "text-[color:var(--shell-muted)]"
                             }`}
                           >
@@ -6195,8 +6193,8 @@ export default function ClaritasDashboard() {
                                 }}
                                 className={`rounded-full border px-3 py-1 ${
                                   mapMode === "news"
-                                    ? "bg-slate-900 text-white border-slate-900"
-                                    : "border-slate-200 text-slate-600"
+                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
+                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
                                 }`}
                               >
                                 News
@@ -6209,8 +6207,8 @@ export default function ClaritasDashboard() {
                                 }}
                                 className={`rounded-full border px-3 py-1 ${
                                   mapMode === "weather"
-                                    ? "bg-slate-900 text-white border-slate-900"
-                                    : "border-slate-200 text-slate-600"
+                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
+                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
                                 }`}
                               >
                                 Weather

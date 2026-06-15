@@ -432,7 +432,7 @@ export default function AdminUserManagementPanel() {
               type="button"
               onClick={() => void handleCreateRole()}
               disabled={isCreatingRole}
-              className="mt-3 w-full rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-50 sm:w-auto sm:text-xs"
+              className="mt-3 w-full rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-on-strong)] disabled:opacity-50 sm:w-auto sm:text-xs"
             >
               {isCreatingRole ? "Creating…" : "Create role"}
             </button>
@@ -609,7 +609,7 @@ export default function AdminUserManagementPanel() {
                       type="button"
                       onClick={() => void saveUserRoles(user)}
                       disabled={!isDirty || isSavingRoles}
-                      className="w-full rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-white disabled:opacity-40 sm:w-auto sm:py-1 sm:text-xs"
+                      className="w-full rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-on-strong)] disabled:opacity-40 sm:w-auto sm:py-1 sm:text-xs"
                     >
                       {isSavingRoles ? "Saving…" : "Save roles"}
                     </button>

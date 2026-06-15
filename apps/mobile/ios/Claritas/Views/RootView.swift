@@ -81,7 +81,7 @@ struct RootView: View {
                         .tabItem { Label("Policies", systemImage: "doc.text") }
                         .tag(Tab.policies)
                     }
-                    .tint(ClaritasPalette.darkGreen)
+                    .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
                     .onChange(of: model.isAdmin) { isAdmin in
                         if !isAdmin && tab == .admin {
                             tab = .dashboard
@@ -132,6 +132,8 @@ struct ThemeToggle: View {
 }
 
 private struct ShellNavigationChrome: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+
     func body(content: Content) -> some View {
         content
             .navigationBarTitleDisplayMode(.inline)
@@ -140,9 +142,11 @@ private struct ShellNavigationChrome: ViewModifier {
                     ThemeToggle()
                 }
             }
-            .toolbarBackground(ClaritasPalette.darkBlue, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
+            .tint(ClaritasPalette.shellAccent(for: colorScheme))
     }
 }
 
@@ -1938,7 +1942,6 @@ private struct AdminUserManagementPanelView: View {
 
 private struct AdminCard<Content: View>: View {
     @ViewBuilder var content: Content
-    @Environment(\.colorScheme) private var colorScheme
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -1949,11 +1952,7 @@ private struct AdminCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(ClaritasPalette.shellRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-        )
+        .brandGlass(cornerRadius: 16)
     }
 }
 

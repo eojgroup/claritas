@@ -1,31 +1,39 @@
 import SwiftUI
 
 enum ClaritasPalette {
-    static let darkBlue = Color(hex: "#1F3A5F")
-    static let darkGreen = Color(hex: "#2F5D50")
-    static let grey = Color(hex: "#5B6166")
-    static let beige = Color(hex: "#E8DDC8")
-    static let brown = Color(hex: "#7A5C46")
-    static let offWhite = Color(hex: "#F7F3EC")
-    static let text = Color(hex: "#222222")
+    static let darkBlue = Color(hex: "#173342")
+    static let darkGreen = Color(hex: "#1E493B")
+    static let lightGreen = Color(hex: "#C2DEC2")
+    static let sage = Color(hex: "#8BB99A")
+    static let orange = Color(hex: "#D97932")
+    static let orangeStrong = Color(hex: "#A94E1D")
+    static let grey = Color(hex: "#52656A")
+    static let beige = Color(hex: "#D2C5B5")
+    static let brown = orangeStrong
+    static let offWhite = Color(hex: "#FFFDF7")
+    static let text = Color(hex: "#132833")
 
     static let positive = darkGreen
     static let negative = Color(red: 0.72, green: 0.23, blue: 0.23)
 
     static func shellBackground(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#0F1722") : offWhite
+        scheme == .dark ? Color(hex: "#0B1718") : Color(hex: "#F4EFE5")
     }
 
     static func shellSurface(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#172434") : Color(hex: "#FFFDFA")
+        scheme == .dark ? Color(hex: "#112325").opacity(0.82) : Color(hex: "#FFFDF8").opacity(0.78)
     }
 
     static func shellRaised(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#1E3045") : Color.white.opacity(0.96)
+        scheme == .dark ? Color(hex: "#173033").opacity(0.86) : Color(hex: "#FFFDF8").opacity(0.9)
     }
 
     static func shellBorder(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? beige.opacity(0.18) : beige
+        scheme == .dark ? Color(hex: "#B7C3BD").opacity(0.2) : darkBlue.opacity(0.16)
+    }
+
+    static func shellBorderStrong(for scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(hex: "#B7C3BD").opacity(0.34) : darkBlue.opacity(0.3)
     }
 
     static func shellInk(for scheme: ColorScheme) -> Color {
@@ -33,15 +41,35 @@ enum ClaritasPalette {
     }
 
     static func shellMuted(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#B5C2D1") : grey
+        scheme == .dark ? Color(hex: "#B7C3BD") : grey
     }
 
     static func shellSidebar(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#12233A") : darkBlue
+        scheme == .dark ? Color(hex: "#081416") : darkBlue
     }
 
     static func shellHighlight(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? darkGreen.opacity(0.28) : darkGreen.opacity(0.12)
+        scheme == .dark ? Color(hex: "#294A3A") : lightGreen
+    }
+
+    static func shellAccent(for scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(hex: "#E58B4A") : orange
+    }
+
+    static func positiveText(for scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(hex: "#68A082") : darkGreen
+    }
+
+    static func negativeText(for scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(hex: "#D96B62") : Color(hex: "#A73B32")
+    }
+
+    static func dataBlue(for scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(hex: "#5E91A3") : darkBlue
+    }
+
+    static func glassHighlight(for scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color.white.opacity(0.14) : Color.white.opacity(0.72)
     }
 }
 
@@ -79,31 +107,25 @@ struct BrandBackground<Content: View>: View {
                 colors: [
                     ClaritasPalette.shellBackground(for: colorScheme),
                     colorScheme == .dark
-                        ? ClaritasPalette.shellSidebar(for: colorScheme).opacity(0.92)
-                        : ClaritasPalette.beige.opacity(0.88)
+                        ? Color(hex: "#102426")
+                        : Color(hex: "#E8E1D5"),
+                    ClaritasPalette.shellBackground(for: colorScheme)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
-            Circle()
-                .fill(ClaritasPalette.darkGreen.opacity(0.15))
-                .frame(width: 320, height: 320)
-                .blur(radius: 28)
-                .offset(x: -140, y: -220)
-
-            Circle()
-                .fill(ClaritasPalette.brown.opacity(0.18))
-                .frame(width: 260, height: 260)
-                .blur(radius: 24)
-                .offset(x: 150, y: -260)
-
-            Circle()
-                .fill(ClaritasPalette.darkBlue.opacity(colorScheme == .dark ? 0.22 : 0.1))
-                .frame(width: 280, height: 280)
-                .blur(radius: 30)
-                .offset(x: 180, y: 280)
+            LinearGradient(
+                colors: [
+                    ClaritasPalette.darkGreen.opacity(colorScheme == .dark ? 0.14 : 0.08),
+                    Color.clear,
+                    ClaritasPalette.orange.opacity(colorScheme == .dark ? 0.1 : 0.06)
+                ],
+                startPoint: .topTrailing,
+                endPoint: .bottomLeading
+            )
+            .ignoresSafeArea()
 
             content
         }
@@ -139,12 +161,7 @@ struct BrandCard<Content: View>: View {
             content
         }
         .padding(16)
-        .background(ClaritasPalette.shellRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 8)
+        .brandGlass(cornerRadius: 18, elevated: true)
     }
 }
 
@@ -197,14 +214,7 @@ struct BrandMetricCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(ClaritasPalette.shellSurface(for: colorScheme))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-        )
+        .brandGlass(cornerRadius: 16)
     }
 }
 
@@ -223,9 +233,51 @@ struct BrandPill: View {
                 in: Capsule()
             )
             .foregroundStyle(
-                tone == nil
-                    ? ClaritasPalette.shellInk(for: colorScheme)
-                    : ClaritasPalette.offWhite
+                tone == nil ? ClaritasPalette.shellInk(for: colorScheme) : ClaritasPalette.offWhite
             )
+    }
+}
+
+struct BrandGlassModifier: ViewModifier {
+    let cornerRadius: CGFloat
+    let elevated: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(elevated
+                        ? ClaritasPalette.shellRaised(for: colorScheme)
+                        : ClaritasPalette.shellSurface(for: colorScheme))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                ClaritasPalette.glassHighlight(for: colorScheme),
+                                ClaritasPalette.shellBorder(for: colorScheme),
+                                ClaritasPalette.shellBorderStrong(for: colorScheme)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.24 : 0.08),
+                radius: elevated ? 20 : 12,
+                x: 0,
+                y: elevated ? 12 : 7
+            )
+    }
+}
+
+extension View {
+    func brandGlass(cornerRadius: CGFloat = 18, elevated: Bool = false) -> some View {
+        modifier(BrandGlassModifier(cornerRadius: cornerRadius, elevated: elevated))
     }
 }

@@ -116,7 +116,7 @@ function ProviderButton({
       disabled={!canUse}
       className={`group flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${
         canUse
-          ? "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm hover:-translate-y-0.5 hover:border-emerald-800 hover:shadow-md"
+          ? "app-card-muted border-[color:var(--shell-border)] hover:-translate-y-0.5 hover:border-[color:var(--shell-border-strong)] hover:shadow-md"
           : "cursor-not-allowed border-slate-700 bg-slate-800/70 text-slate-400"
       }`}
     >
@@ -162,7 +162,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
   };
 
   return (
-    <div className="relative min-h-screen bg-[color:var(--login-cream)] text-[color:var(--login-ink)]">
+    <div className="app-shell relative min-h-screen bg-[color:var(--login-cream)] text-[color:var(--login-ink)]">
 
       <div className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col gap-12 px-4 py-12 sm:px-6 lg:grid lg:grid-cols-[1.05fr_0.95fr] lg:items-center lg:px-8 lg:py-20">
         <section className="order-2 space-y-10 lg:order-1">
@@ -179,7 +179,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
           </div>
 
           <div className="space-y-4">
-            <div className="overflow-hidden rounded-3xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] shadow-sm">
+            <div className="app-card overflow-hidden rounded-3xl">
               <div
                 className="h-56 sm:h-64 bg-[color:var(--login-sand)] bg-cover bg-center"
                 style={{ backgroundImage: `url(${heroImageUrl})` }}
@@ -195,7 +195,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             {highlightCards.map((feature, index) => (
               <div
                 key={feature.title}
-                className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 text-[color:var(--shell-ink)] shadow-sm backdrop-blur motion-safe:animate-[login-fade_900ms_ease-out_both]"
+                className="app-card rounded-2xl p-4 text-[color:var(--shell-ink)] motion-safe:animate-[login-fade_900ms_ease-out_both]"
                 style={{ animationDelay: `${index * 120}ms` }}
               >
                 <div className="text-sm font-semibold text-[color:var(--login-ink)]">{feature.title}</div>
@@ -216,7 +216,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
           </div>
         </section>
 
-        <section className="order-1 rounded-3xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-8 text-[color:var(--shell-ink)] shadow-[0_24px_60px_rgba(6,13,20,0.5)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
+        <section className="app-card-hero order-1 rounded-3xl p-8 text-[color:var(--shell-ink)] motion-safe:animate-[login-fade_800ms_ease-out_both] lg:order-2">
           <div className="flex items-start justify-between gap-4">
             <div>
               <div className="text-xs uppercase tracking-[0.25em] text-slate-500">Secure access</div>
@@ -234,7 +234,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               type="button"
               onClick={() => handleModeChange("signin")}
               className={`flex-1 rounded-full px-4 py-2 text-center transition ${
-                mode === "signin" ? "bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] shadow-sm" : "text-[color:var(--shell-muted)]"
+                mode === "signin" ? "bg-[color:var(--shell-selected)] text-[color:var(--shell-on-selected)] shadow-sm" : "text-[color:var(--shell-muted)]"
               }`}
             >
               Sign in
@@ -243,7 +243,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               type="button"
               onClick={() => handleModeChange("signup")}
               className={`flex-1 rounded-full px-4 py-2 text-center transition ${
-                mode === "signup" ? "bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] shadow-sm" : "text-[color:var(--shell-muted)]"
+                mode === "signup" ? "bg-[color:var(--shell-selected)] text-[color:var(--shell-on-selected)] shadow-sm" : "text-[color:var(--shell-muted)]"
               }`}
             >
               Create account
@@ -270,7 +270,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
               className={`w-full rounded-2xl px-4 py-3 text-sm font-semibold uppercase tracking-[0.2em] transition ${
                 primaryDisabled
                   ? "cursor-not-allowed bg-slate-200 text-slate-500"
-                  : "bg-slate-900 text-white hover:bg-slate-800"
+                  : "bg-[color:var(--shell-accent)] text-[color:var(--shell-on-accent)] shadow-sm hover:brightness-105"
               }`}
             >
               {primaryLabel}
@@ -315,7 +315,7 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
                 <button
                   type="button"
                   onClick={() => handleModeChange("signup")}
-                  className="mt-3 w-full rounded-full border border-slate-200 bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-slate-800"
+                  className="mt-3 w-full rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-on-strong)] transition hover:brightness-110"
                 >
                   Create account
                 </button>

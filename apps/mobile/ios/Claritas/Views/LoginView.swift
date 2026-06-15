@@ -48,25 +48,25 @@ struct LoginView: View {
         ZStack {
             LinearGradient(
                 colors: [
+                    Color(hex: "#081416"),
                     ClaritasPalette.darkBlue,
-                    ClaritasPalette.darkBlue.opacity(0.88)
+                    ClaritasPalette.darkGreen.opacity(0.9)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
-            Circle()
-                .fill(ClaritasPalette.brown.opacity(0.25))
-                .frame(width: 340, height: 340)
-                .blur(radius: 28)
-                .offset(x: -140, y: -250)
-
-            Circle()
-                .fill(ClaritasPalette.darkGreen.opacity(0.24))
-                .frame(width: 300, height: 300)
-                .blur(radius: 24)
-                .offset(x: 160, y: 260)
+            LinearGradient(
+                colors: [
+                    ClaritasPalette.orange.opacity(0.14),
+                    Color.clear,
+                    ClaritasPalette.sage.opacity(0.12)
+                ],
+                startPoint: .topTrailing,
+                endPoint: .bottomLeading
+            )
+            .ignoresSafeArea()
 
             ScrollView {
                 VStack(spacing: 18) {
@@ -144,8 +144,8 @@ struct LoginView: View {
                     .padding(.vertical, 12)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(primaryDisabled ? ClaritasPalette.grey.opacity(0.85) : ClaritasPalette.offWhite)
-            .background(primaryDisabled ? ClaritasPalette.grey.opacity(0.55) : ClaritasPalette.darkGreen)
+            .foregroundStyle(primaryDisabled ? ClaritasPalette.grey.opacity(0.85) : ClaritasPalette.text)
+            .background(primaryDisabled ? ClaritasPalette.grey.opacity(0.55) : ClaritasPalette.orange)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .disabled(primaryDisabled)
 
@@ -207,8 +207,8 @@ struct LoginView: View {
                     .textCase(.uppercase)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .foregroundStyle(ClaritasPalette.offWhite)
-                    .background(ClaritasPalette.brown)
+                    .foregroundStyle(ClaritasPalette.text)
+                    .background(ClaritasPalette.orange)
                     .clipShape(Capsule())
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -230,12 +230,22 @@ struct LoginView: View {
             }
         }
         .padding(18)
-        .background(ClaritasPalette.darkBlue.opacity(0.95))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24)
-                .stroke(ClaritasPalette.beige.opacity(0.45), lineWidth: 1)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(hex: "#102D38").opacity(0.8))
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.32), ClaritasPalette.beige.opacity(0.22)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
         .shadow(color: Color.black.opacity(0.35), radius: 24, x: 0, y: 16)
     }
 
@@ -259,8 +269,8 @@ struct LoginView: View {
                 .font(.footnote.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
-                .foregroundStyle(mode == target ? ClaritasPalette.offWhite : ClaritasPalette.beige.opacity(0.85))
-                .background(mode == target ? ClaritasPalette.darkGreen : Color.clear)
+                .foregroundStyle(mode == target ? ClaritasPalette.text : ClaritasPalette.beige.opacity(0.85))
+                .background(mode == target ? ClaritasPalette.lightGreen : Color.clear)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)

@@ -3,7 +3,6 @@ import SwiftUI
 struct NewsListView: View {
     let items: [NewsItem]
     var onSelectCountry: (String) -> Void
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if items.isEmpty {
@@ -12,8 +11,7 @@ struct NewsListView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity)
                 .padding()
-                .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+                .brandGlass(cornerRadius: 12)
         } else {
             VStack(spacing: 12) {
                 ForEach(items) { n in
@@ -40,7 +38,7 @@ private struct NewsRow: View {
                 if let u = item.url, let url = URL(string: u) {
                     Link(item.title ?? u, destination: url)
                         .font(.headline)
-                        .foregroundStyle(ClaritasPalette.darkBlue)
+                        .foregroundStyle(colorScheme == .dark ? ClaritasPalette.sage : ClaritasPalette.darkBlue)
                         .lineLimit(2)
                 } else {
                     Text(item.title ?? "Untitled")
@@ -54,7 +52,7 @@ private struct NewsRow: View {
                             .padding(.horizontal, 7)
                             .padding(.vertical, 4)
                             .background(ClaritasPalette.darkGreen.opacity(0.16), in: Capsule())
-                            .foregroundStyle(ClaritasPalette.darkGreen)
+                            .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
                     }
                     if let iso = item.country_iso2?.uppercased(), !iso.isEmpty {
                         Button(action: { onSelectCountry(iso) }) {
@@ -82,8 +80,7 @@ private struct NewsRow: View {
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+        .brandGlass(cornerRadius: 12)
     }
 
     private func proxiedImageURL() -> URL? {

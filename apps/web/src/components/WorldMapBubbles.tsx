@@ -71,26 +71,26 @@ function markerPalette(
 ): { fill: string; stroke: string; halo: string } {
   const paletteMap = {
     news: isDark
-      ? { fill: "#d09354", stroke: "#f0c28e", halo: "rgba(208,147,84,0.22)" }
-      : { fill: "#b57136", stroke: "#6b462b", halo: "rgba(181,113,54,0.15)" },
+      ? { fill: "#e58b4a", stroke: "#f1b483", halo: "rgba(229,139,74,0.22)" }
+      : { fill: "#d97932", stroke: "#8d421c", halo: "rgba(217,121,50,0.16)" },
     "weather-cold": isDark
-      ? { fill: "#b2a89d", stroke: "#e3d7c9", halo: "rgba(178,168,157,0.2)" }
-      : { fill: "#776e65", stroke: "#4e463f", halo: "rgba(119,110,101,0.14)" },
+      ? { fill: "#5e91a3", stroke: "#a7ccd7", halo: "rgba(94,145,163,0.2)" }
+      : { fill: "#315e73", stroke: "#173342", halo: "rgba(49,94,115,0.15)" },
     "weather-mild": isDark
-      ? { fill: "#c2a789", stroke: "#ead9c4", halo: "rgba(194,167,137,0.2)" }
-      : { fill: "#8a6a4d", stroke: "#5f4938", halo: "rgba(138,106,77,0.14)" },
+      ? { fill: "#91c19a", stroke: "#c2dec2", halo: "rgba(145,193,154,0.2)" }
+      : { fill: "#8bb99a", stroke: "#376d57", halo: "rgba(139,185,154,0.15)" },
     "weather-hot": isDark
-      ? { fill: "#e0a05d", stroke: "#f3d0a5", halo: "rgba(224,160,93,0.22)" }
-      : { fill: "#c47a3b", stroke: "#7a4d2d", halo: "rgba(196,122,59,0.15)" },
+      ? { fill: "#f1a66e", stroke: "#ffd0aa", halo: "rgba(241,166,110,0.22)" }
+      : { fill: "#a94e1d", stroke: "#713313", halo: "rgba(169,78,29,0.16)" },
     positive: isDark
-      ? { fill: "#d09354", stroke: "#f0c28e", halo: "rgba(208,147,84,0.21)" }
-      : { fill: "#a15f2b", stroke: "#6b462b", halo: "rgba(161,95,43,0.14)" },
+      ? { fill: "#68a082", stroke: "#b4d9bf", halo: "rgba(104,160,130,0.21)" }
+      : { fill: "#1e493b", stroke: "#102d25", halo: "rgba(30,73,59,0.15)" },
     negative: isDark
-      ? { fill: "#c9826e", stroke: "#ecc2b5", halo: "rgba(201,130,110,0.2)" }
-      : { fill: "#9d5645", stroke: "#67372d", halo: "rgba(157,86,69,0.14)" },
+      ? { fill: "#d96b62", stroke: "#f4b4ae", halo: "rgba(217,107,98,0.2)" }
+      : { fill: "#a73b32", stroke: "#702721", halo: "rgba(167,59,50,0.14)" },
     neutral: isDark
-      ? { fill: "#b2a89d", stroke: "#e3d7c9", halo: "rgba(178,168,157,0.18)" }
-      : { fill: "#776e65", stroke: "#4e463f", halo: "rgba(119,110,101,0.13)" },
+      ? { fill: "#91a29d", stroke: "#c8d3ce", halo: "rgba(145,162,157,0.18)" }
+      : { fill: "#62706d", stroke: "#394945", halo: "rgba(98,112,109,0.13)" },
   } as const;
 
   return paletteMap[tone ?? "news"] ?? paletteMap.news;
@@ -251,21 +251,21 @@ export default memo(function WorldMapBubbles({
           const palette = markerPalette(marker.tone, isDark);
           const fill = isPrimary
             ? isDark
-              ? "#e0a05d"
-              : "#b57136"
+              ? "#f1a66e"
+              : "#d97932"
             : isSecondary
               ? isDark
-                ? "#c2b4a5"
-                : "#736a60"
+                ? "#91c19a"
+                : "#8bb99a"
               : palette.fill;
           const stroke = isPrimary
             ? isDark
-              ? "#f3d0a5"
-              : "#6b462b"
+              ? "#ffd0aa"
+              : "#8d421c"
             : isSecondary
               ? isDark
-                ? "#e5dacd"
-                : "#4d443c"
+                ? "#c2dec2"
+                : "#376d57"
               : palette.stroke;
           const halo = isPrimary
             ? "rgba(181,113,54,0.18)"
@@ -330,7 +330,7 @@ export default memo(function WorldMapBubbles({
                       position: "absolute",
                       inset: -6,
                       borderRadius: 999,
-                      border: `1.5px solid ${isDark ? "#f3d0a5" : "#b57136"}`,
+                      border: `1.5px solid ${isDark ? "#ffd0aa" : "#d97932"}`,
                       boxShadow: `0 0 0 5px ${isDark ? "rgba(224,160,93,0.16)" : "rgba(181,113,54,0.12)"}`,
                     }}
                   />

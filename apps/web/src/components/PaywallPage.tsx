@@ -66,7 +66,7 @@ export default function PaywallPage({
             {billing.checkout_url ? (
               <a
                 href={billing.checkout_url}
-                className="inline-flex items-center rounded-full border border-[color:var(--shell-ink)] bg-[color:var(--shell-ink)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white"
+                className="inline-flex items-center rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-on-strong)]"
               >
                 Subscribe now
               </a>

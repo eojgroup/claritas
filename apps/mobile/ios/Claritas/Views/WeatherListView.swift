@@ -7,7 +7,6 @@ struct WeatherListView: View {
     var onRefresh: () -> Void
     var onSelectCountry: (String) -> Void
     var showsControls: Bool = true
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 12) {
@@ -32,8 +31,7 @@ struct WeatherListView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+                    .brandGlass(cornerRadius: 12)
             } else {
                 VStack(spacing: 0) {
                     ForEach(items) { w in
@@ -41,8 +39,7 @@ struct WeatherListView: View {
                         Divider().opacity(0.2)
                     }
                 }
-                .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+                .brandGlass(cornerRadius: 12)
             }
         }
     }
@@ -87,7 +84,7 @@ private struct WeatherRow: View {
                             .padding(.horizontal, 7)
                             .padding(.vertical, 4)
                             .background(ClaritasPalette.darkGreen.opacity(0.14), in: Capsule())
-                            .foregroundStyle(ClaritasPalette.darkGreen)
+                            .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
                     }
 
                     if let d = item.observedDate {

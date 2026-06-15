@@ -106,7 +106,6 @@ private struct CountryMetric: View {
     let label: String
     let value: String
     let detail: String
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -123,10 +122,6 @@ private struct CountryMetric: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-        )
+        .brandGlass(cornerRadius: 12)
     }
 }
