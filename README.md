@@ -11,7 +11,7 @@ claritas/
 │
 ├── apps/
 │   ├── web/                # React + Vite web app
-│   ├── mobile/             # Native iOS app (SwiftUI)
+│   ├── mobile/             # Native iOS + watchOS apps (SwiftUI)
 │   └── api/                # Node.js/Express API + ingestion endpoints
 │
 ├── infra/

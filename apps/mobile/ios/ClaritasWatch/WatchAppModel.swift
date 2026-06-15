@@ -67,34 +67,34 @@ final class WatchAppModel: ObservableObject {
         async let marketResult = result { try await api.fetchMarketQuotes(refresh: false) }
 
         let results = await (briefingResult, newsResult, weatherResult, marketResult)
-        var errors: [String] = []
+        var errors: [Error] = []
 
         switch results.0 {
         case .success(let value): briefing = value
-        case .failure(let error): errors.append(error.localizedDescription)
+        case .failure(let error): errors.append(error)
         }
         switch results.1 {
         case .success(let value): news = Array(value.prefix(12))
-        case .failure(let error): errors.append(error.localizedDescription)
+        case .failure(let error): errors.append(error)
         }
         switch results.2 {
         case .success(let value): weather = Array(value.prefix(20))
-        case .failure(let error): errors.append(error.localizedDescription)
+        case .failure(let error): errors.append(error)
         }
         switch results.3 {
         case .success(let value): markets = Array(value.prefix(20))
-        case .failure(let error): errors.append(error.localizedDescription)
+        case .failure(let error): errors.append(error)
         }
 
         if errors.isEmpty {
             lastUpdated = Date()
             connectionState = .ready
             saveCache()
-        } else if errors.contains(where: { $0.contains("401") || $0.lowercased().contains("unauthorized") }) {
+        } else if errors.contains(where: isUnauthorized) {
             WatchKeychain.authToken = nil
             connectionState = .waitingForPhone
         } else {
-            connectionState = .failed(errors[0])
+            connectionState = .failed(errors[0].localizedDescription)
         }
     }
 
@@ -116,6 +116,14 @@ final class WatchAppModel: ObservableObject {
     private func result<T>(_ operation: () async throws -> T) async -> Result<T, Error> {
         do { return .success(try await operation()) }
         catch { return .failure(error) }
+    }
+
+    private func isUnauthorized(_ error: Error) -> Bool {
+        if let apiError = error as? APIError, apiError.status == 401 {
+            return true
+        }
+        let message = error.localizedDescription.lowercased()
+        return message.contains("401") || message.contains("unauthorized") || message.contains("authentication required")
     }
 
     private func saveCache() {

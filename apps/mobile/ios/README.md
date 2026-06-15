@@ -14,7 +14,7 @@ The project contains the paired `Claritas` iPhone/iPad target and `Claritas Watc
    - Optionally change the Bundle Identifier from the default `com.eojgroup.claritas`.
    - Keep the watch bundle identifier as a child identifier, such as `com.yourorg.claritas.watchkitapp`.
 3. Configure the API base URL:
-   - Edit `apps/mobile/ios/Claritas/Claritas/Config.plist` -> `API_BASE_URL` to point to your backend (e.g. `https://your-host.com`).
+   - Edit `apps/mobile/ios/Claritas/Config.plist` -> `API_BASE_URL` to point to your backend (e.g. `https://your-host.com`).
    - Keep `apps/mobile/ios/ClaritasWatch/Config.plist` aligned for first launch. The iPhone app sends its active URL to the watch after pairing.
    - Ensure `AUTH_CALLBACK_URL` matches your registered iOS URL scheme (default: `claritas://auth/callback`).
    - Or at runtime set `UserDefaults.standard.set("https://your-host.com", forKey: "API_BASE_URL")` in AppDelegate for advanced configs.
@@ -36,7 +36,7 @@ The project contains the paired `Claritas` iPhone/iPad target and `Claritas Watc
 
 ## Source Of Truth
 
-- Swift/resources under `apps/mobile/ios/Claritas/Claritas/` and `apps/mobile/ios/ClaritasWatch/` are the source of truth.
+- Swift/resources under `apps/mobile/ios/Claritas/` and `apps/mobile/ios/ClaritasWatch/` are the source of truth.
 - `apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj` is generated; avoid manual edits.
 - If files are added/moved/renamed, regenerate the project rather than editing `.pbxproj` directly.
 
@@ -58,7 +58,7 @@ Then re-open the `.xcodeproj` in Xcode.
 
 ## Keep Project In Sync
 
-1. Make code/file changes under `apps/mobile/ios/Claritas/Claritas/` or `apps/mobile/ios/ClaritasWatch/`.
+1. Make code/file changes under `apps/mobile/ios/Claritas/` or `apps/mobile/ios/ClaritasWatch/`.
 2. Run `ruby apps/mobile/ios/generate_xcodeproj.rb` (or run from `apps/mobile/ios`).
 3. Commit both source files and `apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj`.
 4. If a merge conflict happens in `project.pbxproj`, regenerate from `generate_xcodeproj.rb` and commit the regenerated file.

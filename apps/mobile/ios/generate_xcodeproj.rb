@@ -22,6 +22,13 @@ project.root_object.attributes["LastUpgradeCheck"] = "1600"
 ios_target = project.new_target(:application, "Claritas", :ios, ios_deployment_target)
 watch_target = project.new_target(:watch2_app, "Claritas Watch App", :watchos, watchos_deployment_target)
 
+# Swift modules autolink these frameworks. Removing xcodeproj's version-pinned
+# framework references keeps the generated project portable across Xcode SDKs.
+[ios_target, watch_target].each do |target|
+  target.frameworks_build_phase.files.each(&:remove_from_project)
+end
+project.frameworks_group.children.each(&:remove_from_project)
+
 def configure_target(target, settings)
   target.build_configurations.each do |configuration|
     configuration.build_settings.merge!(settings)
