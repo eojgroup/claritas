@@ -44,6 +44,7 @@ const OPENCODE_TOOL_NAMES = [
     "websearch",
     "write",
 ];
+const OPENCODE_GENERATION_TRANSPORT_ATTEMPTS = 3;
 function asRecord(value) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         return null;
@@ -97,6 +98,9 @@ function buildOpenCodeConfig() {
     const model = parseOpenCodeModel();
     if (model.providerID === "provider-id" || model.modelID === "model-id" || model.label === "provider-id/model-id") {
         throw new LlmConfigurationError("OPENCODE_MODEL is still set to the placeholder provider-id/model-id. Replace it with a real OpenCode provider/model id.");
+    }
+    if (model.providerID === "openrouter" && model.modelID === "free") {
+        throw new LlmConfigurationError("OPENCODE_MODEL=openrouter/free is not a real OpenRouter model. Use a concrete free model id from OpenRouter, for example openrouter/<model-id>:free.");
     }
     return {
         baseUrl,
@@ -282,20 +286,18 @@ function addOpenCodeErrorGuidance(providerError) {
     }
     return providerError;
 }
+function isOpenCodeTransportError(error) {
+    return (error instanceof LlmProviderError &&
+        error.status === 502 &&
+        error.responseBody === null &&
+        /^Cannot reach OpenCode at /.test(error.message));
+}
 class OpenCodeLlmClient {
     config;
     constructor(config = buildOpenCodeConfig()) {
         this.config = config;
     }
     async generateStructured(request) {
-        const session = await this.requestJson("/session", {
-            method: "POST",
-            body: JSON.stringify({ title: request.title || "Claritas daily briefing generation" }),
-        });
-        const sessionId = findSessionId(session);
-        if (!sessionId) {
-            throw new LlmProviderError("OpenCode did not return a session id.");
-        }
         const body = { system: request.system };
         if (this.config.toolsDisabled) {
             // OpenCode's json_schema format is implemented as a required
@@ -318,59 +320,77 @@ class OpenCodeLlmClient {
         }
         const maxAttempts = this.config.toolsDisabled ? Math.min(Math.max((request.retryCount ?? 2) + 1, 1), 3) : 1;
         let lastParseError = null;
-        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-            body.parts = [
-                {
-                    type: "text",
-                    text: this.config.toolsDisabled ? buildJsonTextPrompt(request, attempt > 1) : request.prompt,
-                },
-            ];
-            const message = await this.requestJson(`/session/${encodeURIComponent(sessionId)}/message`, {
-                method: "POST",
-                body: JSON.stringify(body),
-            });
-            const providerError = findProviderError(message);
-            if (providerError) {
-                throw new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`);
-            }
+        let lastTransportError = null;
+        generationAttempts: for (let generationAttempt = 1; generationAttempt <= OPENCODE_GENERATION_TRANSPORT_ATTEMPTS; generationAttempt += 1) {
+            let sessionId;
             try {
-                const structured = findStructuredOutput(message);
-                const output = typeof structured === "undefined"
-                    ? parseJsonObjectFromText(collectText(message).join("\n").trim())
-                    : structured;
-                return {
-                    output: output,
-                    provider: "opencode",
-                    model: this.config.label,
-                    metadata: {
-                        session_id: sessionId,
-                        server_url: this.config.baseUrl,
-                        provider_id: this.config.providerID,
-                        model_id: this.config.modelID,
-                        tools_disabled: this.config.toolsDisabled,
-                        structured_output_mode: this.config.toolsDisabled ? "json_text" : "json_schema_tool",
-                        attempts: attempt,
-                    },
-                };
+                sessionId = await this.createSession(request.title || "Claritas daily briefing generation");
             }
             catch (error) {
-                if (!(error instanceof LlmProviderError) || attempt === maxAttempts)
+                if (isOpenCodeTransportError(error) && generationAttempt < OPENCODE_GENERATION_TRANSPORT_ATTEMPTS) {
+                    lastTransportError = error;
+                    continue generationAttempts;
+                }
+                throw error;
+            }
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+                body.parts = [
+                    {
+                        type: "text",
+                        text: this.config.toolsDisabled ? buildJsonTextPrompt(request, attempt > 1) : request.prompt,
+                    },
+                ];
+                let message;
+                try {
+                    message = await this.requestJson(`/session/${encodeURIComponent(sessionId)}/message`, {
+                        method: "POST",
+                        body: JSON.stringify(body),
+                    });
+                }
+                catch (error) {
+                    if (isOpenCodeTransportError(error) && generationAttempt < OPENCODE_GENERATION_TRANSPORT_ATTEMPTS) {
+                        lastTransportError = error;
+                        continue generationAttempts;
+                    }
                     throw error;
-                lastParseError = error;
+                }
+                const providerError = findProviderError(message);
+                if (providerError) {
+                    throw new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`);
+                }
+                try {
+                    const structured = findStructuredOutput(message);
+                    const output = typeof structured === "undefined"
+                        ? parseJsonObjectFromText(collectText(message).join("\n").trim())
+                        : structured;
+                    return {
+                        output: output,
+                        provider: "opencode",
+                        model: this.config.label,
+                        metadata: {
+                            session_id: sessionId,
+                            server_url: this.config.baseUrl,
+                            provider_id: this.config.providerID,
+                            model_id: this.config.modelID,
+                            tools_disabled: this.config.toolsDisabled,
+                            structured_output_mode: this.config.toolsDisabled ? "json_text" : "json_schema_tool",
+                            attempts: attempt,
+                            transport_attempts: generationAttempt,
+                        },
+                    };
+                }
+                catch (error) {
+                    if (!(error instanceof LlmProviderError) || attempt === maxAttempts)
+                        throw error;
+                    lastParseError = error;
+                }
             }
         }
-        throw lastParseError || new LlmProviderError("OpenCode did not return parseable JSON output.");
+        throw lastParseError || lastTransportError || new LlmProviderError("OpenCode did not return parseable JSON output.");
     }
     async checkConnection() {
         const startedAt = Date.now();
-        const session = await this.requestJson("/session", {
-            method: "POST",
-            body: JSON.stringify({ title: "Claritas OpenCode service check" }),
-        });
-        const sessionId = findSessionId(session);
-        if (!sessionId) {
-            throw new LlmProviderError("OpenCode did not return a session id.");
-        }
+        const sessionId = await this.createSession("Claritas OpenCode service check");
         return {
             provider: "opencode",
             reachable: true,
@@ -386,6 +406,17 @@ class OpenCodeLlmClient {
                 provider_generation_tested: false,
             },
         };
+    }
+    async createSession(title) {
+        const session = await this.requestJson("/session", {
+            method: "POST",
+            body: JSON.stringify({ title }),
+        });
+        const sessionId = findSessionId(session);
+        if (!sessionId) {
+            throw new LlmProviderError("OpenCode did not return a session id.");
+        }
+        return sessionId;
     }
     async requestJson(path, init) {
         const headers = {
