@@ -36,6 +36,8 @@
               valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENCODE_SERVER_USERNAME, optional: true } }
             - name: OPENCODE_SERVER_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENCODE_SERVER_PASSWORD, optional: true } }
+            - name: OPENROUTER_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENROUTER_API_KEY, optional: true } }
             - name: AUTH_PROVIDERS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_PROVIDERS } }
             - name: AUTH_ISSUER_URL

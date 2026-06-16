@@ -104,6 +104,7 @@ function buildOpenCodeConfig() {
         username: getOptionalEnv("OPENCODE_SERVER_USERNAME") || "opencode",
         password: getOptionalEnv("OPENCODE_SERVER_PASSWORD"),
         toolsDisabled: getBooleanEnv("OPENCODE_DISABLE_TOOLS", true),
+        openRouterApiKey: getOptionalEnv("OPENROUTER_API_KEY"),
         ...model,
     };
 }
@@ -272,6 +273,34 @@ function findProviderError(value) {
     }
     return null;
 }
+function collectOpenRouterMessageContent(value) {
+    const record = asRecord(value);
+    const choices = Array.isArray(record?.choices) ? record.choices : [];
+    const content = choices
+        .map((choice) => {
+        const choiceRecord = asRecord(choice);
+        const message = asRecord(choiceRecord?.message);
+        const contentValue = message?.content;
+        if (typeof contentValue === "string")
+            return contentValue;
+        if (Array.isArray(contentValue)) {
+            return contentValue
+                .map((part) => {
+                const partRecord = asRecord(part);
+                return typeof partRecord?.text === "string" ? partRecord.text : "";
+            })
+                .filter(Boolean)
+                .join("\n");
+        }
+        return "";
+    })
+        .filter(Boolean)
+        .join("\n");
+    if (!content.trim()) {
+        throw new LlmProviderError("OpenRouter fallback returned no message content.", 502, JSON.stringify(value) || null);
+    }
+    return content.trim();
+}
 function addOpenCodeErrorGuidance(providerError) {
     if (/no endpoints found that support tool use/i.test(providerError)) {
         return [
@@ -288,6 +317,15 @@ function isOpenCodeTransportError(error) {
         error.status === 502 &&
         error.responseBody === null &&
         /^Cannot reach OpenCode at /.test(error.message));
+}
+function getOpenRouterFallbackModel(config) {
+    if (config.providerID !== "openrouter")
+        return null;
+    if (!config.modelID)
+        return config.label;
+    if (config.modelID === "free")
+        return "openrouter/free";
+    return config.modelID;
 }
 class OpenCodeLlmClient {
     config;
@@ -383,7 +421,10 @@ class OpenCodeLlmClient {
                 }
             }
         }
-        throw lastParseError || lastTransportError || new LlmProviderError("OpenCode did not return parseable JSON output.");
+        if (lastTransportError) {
+            return await this.generateViaOpenRouterFallback(request, lastTransportError);
+        }
+        throw lastParseError || new LlmProviderError("OpenCode did not return parseable JSON output.");
     }
     async checkConnection() {
         const startedAt = Date.now();
@@ -414,6 +455,70 @@ class OpenCodeLlmClient {
             throw new LlmProviderError("OpenCode did not return a session id.");
         }
         return sessionId;
+    }
+    async generateViaOpenRouterFallback(request, openCodeError) {
+        const model = getOpenRouterFallbackModel(this.config);
+        if (!model || !this.config.openRouterApiKey) {
+            throw openCodeError;
+        }
+        const maxAttempts = Math.min(Math.max((request.retryCount ?? 2) + 1, 1), 3);
+        let lastParseError = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            let response;
+            try {
+                response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                    method: "POST",
+                    headers: {
+                        authorization: `Bearer ${this.config.openRouterApiKey}`,
+                        "content-type": "application/json",
+                        "http-referer": "https://app.claritas.info",
+                        "x-title": "Claritas Daily Briefing",
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [
+                            { role: "system", content: request.system },
+                            { role: "user", content: buildJsonTextPrompt(request, attempt > 1) },
+                        ],
+                        temperature: 0.2,
+                    }),
+                });
+            }
+            catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                throw new LlmProviderError(`OpenCode transport failed, and OpenRouter fallback was unreachable: ${message}`, 502);
+            }
+            const body = await readResponseBody(response);
+            if (!response.ok) {
+                const message = findMessage(tryParseJson(body)) || body || response.statusText;
+                throw new LlmProviderError(`OpenCode transport failed, and OpenRouter fallback failed with HTTP ${response.status}: ${message}`, 502, body || null);
+            }
+            try {
+                const parsed = tryParseJson(body);
+                if (typeof parsed === "undefined") {
+                    throw new LlmProviderError("OpenRouter fallback returned a non-JSON response.", 502, body || null);
+                }
+                const content = collectOpenRouterMessageContent(parsed);
+                return {
+                    output: parseJsonObjectFromText(content),
+                    provider: "openrouter",
+                    model,
+                    metadata: {
+                        fallback_from_provider: "opencode",
+                        fallback_reason: openCodeError.message,
+                        structured_output_mode: "json_text",
+                        attempts: attempt,
+                        opencode_model: this.config.label,
+                    },
+                };
+            }
+            catch (error) {
+                if (!(error instanceof LlmProviderError) || attempt === maxAttempts)
+                    throw error;
+                lastParseError = error;
+            }
+        }
+        throw lastParseError || new LlmProviderError("OpenRouter fallback did not return parseable JSON output.");
     }
     async requestJson(path, init) {
         const headers = {
