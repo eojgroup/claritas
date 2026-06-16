@@ -44,7 +44,10 @@ const OPENCODE_TOOL_NAMES = [
     "websearch",
     "write",
 ];
-const OPENCODE_GENERATION_TRANSPORT_ATTEMPTS = 3;
+const OPENCODE_GENERATION_TRANSPORT_ATTEMPTS = 2;
+const DEFAULT_OPENCODE_SESSION_TIMEOUT_MS = 8_000;
+const DEFAULT_OPENCODE_MESSAGE_TIMEOUT_MS = 12_000;
+const DEFAULT_OPENROUTER_TIMEOUT_MS = 45_000;
 function asRecord(value) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         return null;
@@ -65,6 +68,28 @@ function getBooleanEnv(name, fallback) {
     if (!value)
         return fallback;
     return !["0", "false", "no", "off"].includes(value.toLowerCase());
+}
+function getIntegerEnv(name, fallback, min, max) {
+    const value = getOptionalEnv(name);
+    if (!value)
+        return fallback;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed))
+        return fallback;
+    return Math.min(Math.max(Math.trunc(parsed), min), max);
+}
+async function fetchWithTimeout(url, init, timeoutMs) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, {
+            ...init,
+            signal: controller.signal,
+        });
+    }
+    finally {
+        clearTimeout(timeout);
+    }
 }
 function parseOpenCodeModel() {
     const combined = getOptionalEnv("OPENCODE_MODEL") || getOptionalEnv("LLM_MODEL");
@@ -105,6 +130,9 @@ function buildOpenCodeConfig() {
         password: getOptionalEnv("OPENCODE_SERVER_PASSWORD"),
         toolsDisabled: getBooleanEnv("OPENCODE_DISABLE_TOOLS", true),
         openRouterApiKey: getOptionalEnv("OPENROUTER_API_KEY"),
+        sessionTimeoutMs: getIntegerEnv("OPENCODE_SESSION_TIMEOUT_MS", DEFAULT_OPENCODE_SESSION_TIMEOUT_MS, 1_000, 60_000),
+        messageTimeoutMs: getIntegerEnv("OPENCODE_MESSAGE_TIMEOUT_MS", DEFAULT_OPENCODE_MESSAGE_TIMEOUT_MS, 3_000, 120_000),
+        openRouterTimeoutMs: getIntegerEnv("OPENROUTER_TIMEOUT_MS", DEFAULT_OPENROUTER_TIMEOUT_MS, 5_000, 180_000),
         ...model,
     };
 }
@@ -449,7 +477,7 @@ class OpenCodeLlmClient {
         const session = await this.requestJson("/session", {
             method: "POST",
             body: JSON.stringify({ title }),
-        });
+        }, this.config.sessionTimeoutMs);
         const sessionId = findSessionId(session);
         if (!sessionId) {
             throw new LlmProviderError("OpenCode did not return a session id.");
@@ -466,7 +494,7 @@ class OpenCodeLlmClient {
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             let response;
             try {
-                response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                response = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
                     method: "POST",
                     headers: {
                         authorization: `Bearer ${this.config.openRouterApiKey}`,
@@ -482,7 +510,7 @@ class OpenCodeLlmClient {
                         ],
                         temperature: 0.2,
                     }),
-                });
+                }, this.config.openRouterTimeoutMs);
             }
             catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
@@ -520,7 +548,7 @@ class OpenCodeLlmClient {
         }
         throw lastParseError || new LlmProviderError("OpenRouter fallback did not return parseable JSON output.");
     }
-    async requestJson(path, init) {
+    async requestJson(path, init, timeoutMs = this.config.messageTimeoutMs) {
         const headers = {
             "content-type": "application/json",
         };
@@ -530,13 +558,13 @@ class OpenCodeLlmClient {
         const url = joinUrl(this.config.baseUrl, path);
         let response;
         try {
-            response = await fetch(url, {
+            response = await fetchWithTimeout(url, {
                 ...init,
                 headers: {
                     ...headers,
                     ...(init.headers || {}),
                 },
-            });
+            }, timeoutMs);
         }
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);

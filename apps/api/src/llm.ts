@@ -56,6 +56,9 @@ type OpenCodeClientConfig = OpenCodeModelConfig & {
   password: string | null;
   toolsDisabled: boolean;
   openRouterApiKey: string | null;
+  sessionTimeoutMs: number;
+  messageTimeoutMs: number;
+  openRouterTimeoutMs: number;
 };
 
 const OPENCODE_TOOL_NAMES = [
@@ -81,7 +84,10 @@ const OPENCODE_TOOL_NAMES = [
   "write",
 ] as const;
 
-const OPENCODE_GENERATION_TRANSPORT_ATTEMPTS = 3;
+const OPENCODE_GENERATION_TRANSPORT_ATTEMPTS = 2;
+const DEFAULT_OPENCODE_SESSION_TIMEOUT_MS = 8_000;
+const DEFAULT_OPENCODE_MESSAGE_TIMEOUT_MS = 12_000;
+const DEFAULT_OPENROUTER_TIMEOUT_MS = 45_000;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -105,6 +111,27 @@ function getBooleanEnv(name: string, fallback: boolean): boolean {
   const value = getOptionalEnv(name);
   if (!value) return fallback;
   return !["0", "false", "no", "off"].includes(value.toLowerCase());
+}
+
+function getIntegerEnv(name: string, fallback: number, min: number, max: number): number {
+  const value = getOptionalEnv(name);
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.trunc(parsed), min), max);
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function parseOpenCodeModel(): OpenCodeModelConfig {
@@ -155,6 +182,9 @@ function buildOpenCodeConfig(): OpenCodeClientConfig {
     password: getOptionalEnv("OPENCODE_SERVER_PASSWORD"),
     toolsDisabled: getBooleanEnv("OPENCODE_DISABLE_TOOLS", true),
     openRouterApiKey: getOptionalEnv("OPENROUTER_API_KEY"),
+    sessionTimeoutMs: getIntegerEnv("OPENCODE_SESSION_TIMEOUT_MS", DEFAULT_OPENCODE_SESSION_TIMEOUT_MS, 1_000, 60_000),
+    messageTimeoutMs: getIntegerEnv("OPENCODE_MESSAGE_TIMEOUT_MS", DEFAULT_OPENCODE_MESSAGE_TIMEOUT_MS, 3_000, 120_000),
+    openRouterTimeoutMs: getIntegerEnv("OPENROUTER_TIMEOUT_MS", DEFAULT_OPENROUTER_TIMEOUT_MS, 5_000, 180_000),
     ...model,
   };
 }
@@ -508,10 +538,14 @@ export class OpenCodeLlmClient implements LlmClient {
   }
 
   private async createSession(title: string): Promise<string> {
-    const session = await this.requestJson("/session", {
-      method: "POST",
-      body: JSON.stringify({ title }),
-    });
+    const session = await this.requestJson(
+      "/session",
+      {
+        method: "POST",
+        body: JSON.stringify({ title }),
+      },
+      this.config.sessionTimeoutMs
+    );
     const sessionId = findSessionId(session);
     if (!sessionId) {
       throw new LlmProviderError("OpenCode did not return a session id.");
@@ -534,23 +568,27 @@ export class OpenCodeLlmClient implements LlmClient {
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       let response: Response;
       try {
-        response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            authorization: `Bearer ${this.config.openRouterApiKey}`,
-            "content-type": "application/json",
-            "http-referer": "https://app.claritas.info",
-            "x-title": "Claritas Daily Briefing",
+        response = await fetchWithTimeout(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${this.config.openRouterApiKey}`,
+              "content-type": "application/json",
+              "http-referer": "https://app.claritas.info",
+              "x-title": "Claritas Daily Briefing",
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                { role: "system", content: request.system },
+                { role: "user", content: buildJsonTextPrompt(request, attempt > 1) },
+              ],
+              temperature: 0.2,
+            }),
           },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: "system", content: request.system },
-              { role: "user", content: buildJsonTextPrompt(request, attempt > 1) },
-            ],
-            temperature: 0.2,
-          }),
-        });
+          this.config.openRouterTimeoutMs
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new LlmProviderError(`OpenCode transport failed, and OpenRouter fallback was unreachable: ${message}`, 502);
@@ -593,7 +631,7 @@ export class OpenCodeLlmClient implements LlmClient {
     throw lastParseError || new LlmProviderError("OpenRouter fallback did not return parseable JSON output.");
   }
 
-  private async requestJson(path: string, init: RequestInit): Promise<unknown> {
+  private async requestJson(path: string, init: RequestInit, timeoutMs: number = this.config.messageTimeoutMs): Promise<unknown> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
     };
@@ -604,13 +642,13 @@ export class OpenCodeLlmClient implements LlmClient {
     const url = joinUrl(this.config.baseUrl, path);
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await fetchWithTimeout(url, {
         ...init,
         headers: {
           ...headers,
           ...(init.headers || {}),
         },
-      });
+      }, timeoutMs);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new LlmProviderError(`Cannot reach OpenCode at ${url}: ${message}`, 502);

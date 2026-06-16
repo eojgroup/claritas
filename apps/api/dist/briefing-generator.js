@@ -89,9 +89,9 @@ function getSourceWindow(briefingDate, lookbackHours) {
 }
 async function collectBriefingContext(options) {
     const { start, end } = getSourceWindow(options.briefingDate, options.lookbackHours);
-    const newsLimit = clampInteger(options.maxNewsItems, 36, 5, 80);
-    const marketLimit = clampInteger(options.maxMarketItems, 24, 5, 60);
-    const weatherLimit = clampInteger(options.maxWeatherItems, 24, 5, 80);
+    const newsLimit = clampInteger(options.maxNewsItems, 24, 5, 80);
+    const marketLimit = clampInteger(options.maxMarketItems, 16, 5, 60);
+    const weatherLimit = clampInteger(options.maxWeatherItems, 16, 5, 80);
     const [newsResult, marketResult, weatherResult] = await Promise.all([
         (0, db_1.query)(`SELECT
          i.id,
