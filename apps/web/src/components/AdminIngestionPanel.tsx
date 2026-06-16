@@ -1037,7 +1037,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-xs text-[color:var(--shell-muted)]"
           >
             <Activity className="h-3.5 w-3.5" />
-            {isTestingBriefingConnection ? "Testing…" : "Test model"}
+            {isTestingBriefingConnection ? "Testing…" : "Test service"}
           </button>
         </div>
 
@@ -1086,9 +1086,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 }`}
               >
                 {briefingConnection?.reachable
-                  ? `Model ready ${briefingConnection.latency_ms}ms`
+                  ? `Service ready ${briefingConnection.latency_ms}ms`
                   : briefingConnectionError
-                    ? "Model test failed"
+                    ? "Service test failed"
                     : "Not tested"}
               </span>
               <span

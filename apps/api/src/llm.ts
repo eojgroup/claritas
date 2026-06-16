@@ -417,28 +417,28 @@ export class OpenCodeLlmClient implements LlmClient {
 
   async checkConnection(): Promise<LlmConnectionCheck> {
     const startedAt = Date.now();
-    const response = await this.generateStructured<{ ok?: unknown }>({
-      title: "Claritas OpenCode connectivity check",
-      system: "You are a connectivity test. Return only the requested structured output.",
-      prompt: "Return ok=true.",
-      schema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          ok: { type: "boolean" },
-        },
-        required: ["ok"],
-      },
-      retryCount: 0,
+    const session = await this.requestJson("/session", {
+      method: "POST",
+      body: JSON.stringify({ title: "Claritas OpenCode service check" }),
     });
+    const sessionId = findSessionId(session);
+    if (!sessionId) {
+      throw new LlmProviderError("OpenCode did not return a session id.");
+    }
+
     return {
       provider: "opencode",
       reachable: true,
       model: this.config.label,
       latency_ms: Date.now() - startedAt,
       metadata: {
-        ...response.metadata,
-        structured_generation_tested: true,
+        session_id: sessionId,
+        server_url: this.config.baseUrl,
+        provider_id: this.config.providerID,
+        model_id: this.config.modelID,
+        tools_disabled: this.config.toolsDisabled,
+        check_mode: "opencode_session",
+        provider_generation_tested: false,
       },
     };
   }
