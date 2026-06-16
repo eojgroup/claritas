@@ -148,12 +148,6 @@ function buildOpenCodeConfig(): OpenCodeClientConfig {
       "OPENCODE_MODEL is still set to the placeholder provider-id/model-id. Replace it with a real OpenCode provider/model id."
     );
   }
-  if (model.providerID === "openrouter" && model.modelID === "free") {
-    throw new LlmConfigurationError(
-      "OPENCODE_MODEL=openrouter/free is not a real OpenRouter model. Use a concrete free model id from OpenRouter, for example openrouter/<model-id>:free."
-    );
-  }
-
   return {
     baseUrl,
     username: getOptionalEnv("OPENCODE_SERVER_USERNAME") || "opencode",
