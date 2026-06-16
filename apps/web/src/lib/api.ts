@@ -143,6 +143,23 @@ export type AdminDailyBriefingGenerationSummary = {
   data_quality_notes: string[];
 };
 
+export type AdminDailyBriefingGenerationJobStatus = "queued" | "running" | "success" | "failed";
+
+export type AdminDailyBriefingGenerationJob = {
+  id: string;
+  briefing_date: string;
+  status: AdminDailyBriefingGenerationJobStatus;
+  options: unknown;
+  briefing_id: number | null;
+  briefing: DailySignalBriefing | null;
+  generation: AdminDailyBriefingGenerationSummary | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+};
+
 export type BillingPlanRef = {
   id: number;
   code: string;
@@ -395,7 +412,7 @@ export async function testAdminDailyBriefingGeneratorConnection(): Promise<Admin
   return data.connection as AdminDailyBriefingConnectionCheck;
 }
 
-export async function generateAdminDailySignalBriefing(
+export async function startAdminDailySignalBriefingGeneration(
   date: string,
   payload?: {
     publish?: boolean;
@@ -406,21 +423,28 @@ export async function generateAdminDailySignalBriefing(
     max_weather_items?: number;
     instructions?: string;
   },
-): Promise<{
-  briefing: DailySignalBriefing;
-  generation: AdminDailyBriefingGenerationSummary;
-}> {
+): Promise<AdminDailyBriefingGenerationJob> {
   const resp = await fetch(`${API_BASE}/api/admin/briefings/daily/${encodeURIComponent(date)}/generate`, {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload ?? {}),
   });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to generate daily briefing"));
-  return (await resp.json()) as {
-    briefing: DailySignalBriefing;
-    generation: AdminDailyBriefingGenerationSummary;
-  };
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to start daily briefing generation"));
+  const data = await resp.json();
+  return data.job as AdminDailyBriefingGenerationJob;
+}
+
+export async function fetchAdminDailySignalBriefingGenerationJob(
+  jobId: string,
+): Promise<AdminDailyBriefingGenerationJob> {
+  const resp = await fetch(
+    `${API_BASE}/api/admin/briefings/daily/generation/jobs/${encodeURIComponent(jobId)}`,
+    { credentials: "include" },
+  );
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch daily briefing generation job"));
+  const data = await resp.json();
+  return data.job as AdminDailyBriefingGenerationJob;
 }
 
 export async function logoutAuth(): Promise<void> {

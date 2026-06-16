@@ -18,7 +18,8 @@ import {
   fetchAdminIngestionRun,
   fetchAdminIngestionRuns,
   fetchAdminDailyBriefingGeneratorConfig,
-  generateAdminDailySignalBriefing,
+  fetchAdminDailySignalBriefingGenerationJob,
+  startAdminDailySignalBriefingGeneration,
   testAdminDailyBriefingGeneratorConnection,
   triggerAdminMarketIngestion,
   triggerAdminNewsIngestion,
@@ -33,6 +34,7 @@ import {
   type AdminIngestionMetricsPoint,
   type AdminIngestionMetricsTotal,
   type AdminIngestionRun,
+  type AdminDailyBriefingGenerationJob,
   type DailySignalBriefing,
   type IngestionPipeline,
 } from "../lib/api";
@@ -116,6 +118,10 @@ function sourceLabel(sourceName: string): string {
   if (normalized === "openweather") return "OpenWeather";
   if (normalized === "finnhub") return "Finnhub";
   return sourceName;
+}
+
+function isBriefingGenerationActive(job: AdminDailyBriefingGenerationJob | null): boolean {
+  return job?.status === "queued" || job?.status === "running";
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -289,6 +295,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     "Prioritize globally material changes and be explicit when source data is thin.",
   );
   const [isGeneratingBriefing, setIsGeneratingBriefing] = useState(false);
+  const [briefingGenerationJob, setBriefingGenerationJob] = useState<AdminDailyBriefingGenerationJob | null>(null);
   const [generatedBriefing, setGeneratedBriefing] = useState<DailySignalBriefing | null>(null);
   const [generationSummary, setGenerationSummary] = useState<AdminDailyBriefingGenerationSummary | null>(null);
 
@@ -421,6 +428,41 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     return () => window.clearInterval(id);
   }, [refreshSelectedRun, selectedRun?.status, selectedRunId]);
 
+  useEffect(() => {
+    const jobId = briefingGenerationJob?.id;
+    const status = briefingGenerationJob?.status;
+    if (!jobId || (status !== "queued" && status !== "running")) return;
+
+    const pollJob = async () => {
+      try {
+        const next = await fetchAdminDailySignalBriefingGenerationJob(jobId);
+        setBriefingGenerationJob(next);
+        if (next.status === "success") {
+          setGeneratedBriefing(next.briefing);
+          setGenerationSummary(next.generation);
+          setIsGeneratingBriefing(false);
+          setActionError(null);
+          setActionNotice(
+            next.briefing
+              ? `Daily briefing for ${next.briefing.briefing_date} generated as ${next.briefing.status}.`
+              : "Daily briefing generation completed.",
+          );
+        } else if (next.status === "failed") {
+          setIsGeneratingBriefing(false);
+          setActionError(next.error ? `Daily briefing generation failed: ${next.error}` : "Daily briefing generation failed.");
+        }
+      } catch (error) {
+        setActionError(toErrorMessage(error));
+      }
+    };
+
+    void pollJob();
+    const id = window.setInterval(() => {
+      void pollJob();
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [briefingGenerationJob?.id, briefingGenerationJob?.status]);
+
   const handleTriggerNews = useCallback(async () => {
     if (!runNewsApiProvider && !runTheNewsApiProvider) {
       setActionError("Select at least one news provider.");
@@ -550,22 +592,20 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     setIsGeneratingBriefing(true);
     setActionError(null);
     setActionNotice(null);
+    setBriefingGenerationJob(null);
     setGeneratedBriefing(null);
     setGenerationSummary(null);
     try {
-      const result = await generateAdminDailySignalBriefing(briefingDate, {
+      const job = await startAdminDailySignalBriefingGeneration(briefingDate, {
         publish: briefingPublish,
         lookback_hours: briefingLookbackHours,
         instructions: briefingInstructions.trim() || undefined,
       });
-      setGeneratedBriefing(result.briefing);
-      setGenerationSummary(result.generation);
-      setActionNotice(
-        `Daily briefing for ${result.briefing.briefing_date} generated as ${result.briefing.status}.`,
-      );
+      setBriefingGenerationJob(job);
+      setActionNotice(`Daily briefing generation job ${job.id.slice(0, 8)} queued.`);
+      setIsGeneratingBriefing(isBriefingGenerationActive(job));
     } catch (error) {
       setActionError(toErrorMessage(error));
-    } finally {
       setIsGeneratingBriefing(false);
     }
   }, [briefingDate, briefingInstructions, briefingLookbackHours, briefingPublish]);
@@ -1159,11 +1199,19 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             >
               <Sparkles className="h-3.5 w-3.5" />
               {isGeneratingBriefing
-                ? "Generating…"
+                ? briefingGenerationJob?.status === "queued"
+                  ? "Queued…"
+                  : "Generating…"
                 : briefingPublish
                   ? "Generate + Publish"
                   : "Generate Draft"}
             </button>
+            {briefingGenerationJob && (
+              <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
+                Job {briefingGenerationJob.id.slice(0, 8)} · {briefingGenerationJob.status}
+                {briefingGenerationJob.started_at ? ` · started ${formatDateTime(briefingGenerationJob.started_at)}` : ""}
+              </div>
+            )}
           </div>
 
           <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
@@ -1203,6 +1251,22 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                       <li key={`briefing-note-${idx}`}>• {note}</li>
                     ))}
                   </ul>
+                ) : null}
+              </div>
+            ) : briefingGenerationJob ? (
+              <div className="mt-3 text-sm text-[color:var(--shell-muted)]">
+                <div className="font-semibold text-[color:var(--shell-ink)]">
+                  Generation {briefingGenerationJob.status}
+                </div>
+                <div className="mt-1 text-xs">
+                  {briefingGenerationJob.briefing_date} · job {briefingGenerationJob.id.slice(0, 8)}
+                </div>
+                {isBriefingGenerationActive(briefingGenerationJob) ? (
+                  <p className="mt-3 leading-6">
+                    Running in the background. The panel will update when OpenCode returns.
+                  </p>
+                ) : briefingGenerationJob.error ? (
+                  <p className="mt-3 leading-6 text-rose-700">{briefingGenerationJob.error}</p>
                 ) : null}
               </div>
             ) : (

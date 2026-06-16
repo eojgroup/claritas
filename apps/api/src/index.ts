@@ -1,4 +1,5 @@
 import express from "express";
+import { randomUUID } from "crypto";
 import { ingestNewsApiEverything, ingestNewsApiTopHeadlines } from "./connectors/newsapi";
 import { ingestTheNewsApiNews } from "./connectors/thenewsapi";
 import { getCountryWeatherLatest, ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
@@ -127,6 +128,22 @@ type DailySignalBriefingPayload = {
   generated_by: string | null;
   metadata: Record<string, unknown>;
   published_at: string | null;
+};
+
+type DailyBriefingGenerationJobStatus = "queued" | "running" | "success" | "failed";
+
+type DailyBriefingGenerationJobRow = {
+  id: string;
+  briefing_date: string | Date;
+  status: DailyBriefingGenerationJobStatus;
+  options: unknown;
+  briefing_id: number | null;
+  generation: unknown;
+  error: string | null;
+  created_at: string | Date;
+  started_at: string | Date | null;
+  finished_at: string | Date | null;
+  updated_at: string | Date;
 };
 
 class AdminApiError extends Error {
@@ -453,6 +470,199 @@ async function upsertDailySignalBriefing(
   return toDailySignalBriefing(rows[0]);
 }
 
+function asPlainObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+async function getDailySignalBriefingById(id: number) {
+  const { rows } = await query<DailySignalBriefingRow>(
+    `SELECT
+       id,
+       briefing_date,
+       title,
+       update_text,
+       key_takeaways,
+       status,
+       source_window_start,
+       source_window_end,
+       generated_by,
+       metadata,
+       published_at,
+       created_at,
+       updated_at
+     FROM daily_signal_briefing
+     WHERE id = $1
+     LIMIT 1`,
+    [id]
+  );
+  return rows[0] ? toDailySignalBriefing(rows[0]) : null;
+}
+
+function toDailyBriefingGenerationJob(
+  row: DailyBriefingGenerationJobRow,
+  briefing: ReturnType<typeof toDailySignalBriefing> | null = null
+) {
+  return {
+    id: row.id,
+    briefing_date: dateToApiString(row.briefing_date),
+    status: row.status,
+    options: asPlainObject(row.options),
+    briefing_id: row.briefing_id == null ? null : Number(row.briefing_id),
+    briefing,
+    generation: row.generation && typeof row.generation === "object" ? row.generation : null,
+    error: row.error,
+    created_at: timestampToApiString(row.created_at) || new Date().toISOString(),
+    started_at: timestampToApiString(row.started_at),
+    finished_at: timestampToApiString(row.finished_at),
+    updated_at: timestampToApiString(row.updated_at) || new Date().toISOString(),
+  };
+}
+
+function optionsFromGenerationJob(row: DailyBriefingGenerationJobRow): DailyBriefingGenerationOptions {
+  const options = asPlainObject(row.options);
+  const status = options.status === "draft" ? "draft" : "published";
+  const optionalNumber = (value: unknown): number | undefined => {
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
+  };
+  return {
+    briefingDate: dateToApiString(row.briefing_date),
+    status,
+    instructions: typeof options.instructions === "string" ? options.instructions : null,
+    lookbackHours: optionalNumber(options.lookbackHours),
+    maxNewsItems: optionalNumber(options.maxNewsItems),
+    maxMarketItems: optionalNumber(options.maxMarketItems),
+    maxWeatherItems: optionalNumber(options.maxWeatherItems),
+  };
+}
+
+function describeGenerationError(error: unknown): string {
+  if (
+    error instanceof AdminApiError ||
+    error instanceof BriefingGenerationError ||
+    error instanceof LlmConfigurationError ||
+    error instanceof LlmProviderError
+  ) {
+    return error.message;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function createDailyBriefingGenerationJob(
+  briefingDate: string,
+  options: DailyBriefingGenerationOptions
+) {
+  const id = randomUUID();
+  const { rows } = await query<DailyBriefingGenerationJobRow>(
+    `INSERT INTO daily_signal_briefing_generation_job (
+       id,
+       briefing_date,
+       status,
+       options
+     )
+     VALUES ($1, $2::date, 'queued', $3::jsonb)
+     RETURNING
+       id,
+       briefing_date,
+       status,
+       options,
+       briefing_id,
+       generation,
+       error,
+       created_at,
+       started_at,
+       finished_at,
+       updated_at`,
+    [id, briefingDate, JSON.stringify(options)]
+  );
+  if (!rows[0]) throw new AdminApiError(500, "Failed to queue daily briefing generation.");
+  return toDailyBriefingGenerationJob(rows[0]);
+}
+
+async function getDailyBriefingGenerationJob(jobId: string) {
+  const { rows } = await query<DailyBriefingGenerationJobRow>(
+    `SELECT
+       id,
+       briefing_date,
+       status,
+       options,
+       briefing_id,
+       generation,
+       error,
+       created_at,
+       started_at,
+       finished_at,
+       updated_at
+     FROM daily_signal_briefing_generation_job
+     WHERE id = $1
+     LIMIT 1`,
+    [jobId]
+  );
+  if (!rows[0]) return null;
+  const briefing = rows[0].briefing_id == null ? null : await getDailySignalBriefingById(Number(rows[0].briefing_id));
+  return toDailyBriefingGenerationJob(rows[0], briefing);
+}
+
+async function runDailyBriefingGenerationJob(jobId: string): Promise<void> {
+  const { rows } = await query<DailyBriefingGenerationJobRow>(
+    `UPDATE daily_signal_briefing_generation_job
+     SET status = 'running',
+         started_at = COALESCE(started_at, now()),
+         updated_at = now()
+     WHERE id = $1
+       AND status = 'queued'
+     RETURNING
+       id,
+       briefing_date,
+       status,
+       options,
+       briefing_id,
+       generation,
+       error,
+       created_at,
+       started_at,
+       finished_at,
+       updated_at`,
+    [jobId]
+  );
+  const job = rows[0];
+  if (!job) return;
+
+  try {
+    const options = optionsFromGenerationJob(job);
+    const generated = await generateDailySignalBriefing(options);
+    const briefing = await upsertDailySignalBriefing(options.briefingDate, generated.payload);
+    await query(
+      `UPDATE daily_signal_briefing_generation_job
+       SET status = 'success',
+           briefing_id = $2,
+           generation = $3::jsonb,
+           error = NULL,
+           finished_at = now(),
+           updated_at = now()
+       WHERE id = $1`,
+      [jobId, briefing.id, JSON.stringify(generated.generation)]
+    );
+  } catch (error) {
+    const message = describeGenerationError(error);
+    console.error(`[daily-briefing-generation] job ${jobId} failed: ${message}`);
+    await query(
+      `UPDATE daily_signal_briefing_generation_job
+       SET status = 'failed',
+           error = $2,
+           finished_at = now(),
+           updated_at = now()
+       WHERE id = $1`,
+      [jobId, message]
+    );
+  }
+}
+
+function startDailyBriefingGenerationJob(jobId: string): void {
+  void runDailyBriefingGenerationJob(jobId).catch((error) => {
+    console.error(`[daily-briefing-generation] job ${jobId} crashed:`, error);
+  });
+}
+
 function parseBillingStatus(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim().toLowerCase();
@@ -675,12 +885,28 @@ app.post("/api/admin/briefings/daily/generation/test", requireAdminRole, async (
   }
 });
 
+app.get("/api/admin/briefings/daily/generation/jobs/:jobId", requireAdminRole, async (req, res) => {
+  try {
+    const jobId = String(req.params.jobId || "").trim();
+    if (!jobId) throw new AdminApiError(400, "jobId is required.");
+    const job = await getDailyBriefingGenerationJob(jobId);
+    if (!job) return res.status(404).json({ error: "Daily briefing generation job not found." });
+    if (job.status === "queued") startDailyBriefingGenerationJob(job.id);
+    return res.json({ job });
+  } catch (e: any) {
+    if (e instanceof AdminApiError) return res.status(e.status).json({ error: e.message });
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.post("/api/admin/briefings/daily/:date/generate", requireAdminRole, async (req, res) => {
   try {
     const briefingDate = parseBriefingDate(req.params.date);
-    const generated = await generateDailySignalBriefing(parseBriefingGenerationOptions(briefingDate, req.body));
-    const briefing = await upsertDailySignalBriefing(briefingDate, generated.payload);
-    return res.json({ briefing, generation: generated.generation });
+    const options = parseBriefingGenerationOptions(briefingDate, req.body);
+    const job = await createDailyBriefingGenerationJob(briefingDate, options);
+    startDailyBriefingGenerationJob(job.id);
+    res.setHeader("Location", `/api/admin/briefings/daily/generation/jobs/${encodeURIComponent(job.id)}`);
+    return res.status(202).json({ job });
   } catch (e: any) {
     if (e instanceof AdminApiError) return res.status(e.status).json({ error: e.message });
     if (e instanceof BriefingGenerationError) return res.status(e.status).json({ error: e.message });
