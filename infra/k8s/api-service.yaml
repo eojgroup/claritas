@@ -4,6 +4,8 @@ metadata:
   name: claritas-api
   namespace: claritas
   labels: { app: claritas-api }
+  annotations:
+    cloud.google.com/backend-config: '{"default":"api-backendconfig"}'
 spec:
   selector: { app: claritas-api }
   ports:

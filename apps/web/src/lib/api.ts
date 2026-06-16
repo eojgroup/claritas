@@ -332,11 +332,17 @@ export type AdminIngestionAutomationStatus = {
 const API_BASE = "";
 
 async function readError(resp: Response, fallback: string): Promise<string> {
+  const textResponse = resp.clone();
   try {
     const data = await resp.json();
     if (typeof data?.error === "string" && data.error.trim()) return data.error;
   } catch {
-    // ignore parse errors
+    try {
+      const text = await textResponse.text();
+      if (text.trim()) return `${fallback}: ${resp.status} ${text.trim()}`;
+    } catch {
+      // ignore parse errors
+    }
   }
   return `${fallback}: ${resp.status}`;
 }

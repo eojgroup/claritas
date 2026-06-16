@@ -238,6 +238,7 @@ jobs:
 
       - name: 🛠️ Apply Kubernetes resources (non-workload)
         run: |
+          kubectl apply -f ./infra/k8s/api-backendconfig.yaml
           kubectl apply -f ./infra/k8s/web-service.yaml
           kubectl apply -f ./infra/k8s/api-service.yaml
           kubectl apply -f ./infra/k8s/opencode-service.yaml
