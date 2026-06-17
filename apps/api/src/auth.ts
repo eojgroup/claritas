@@ -29,6 +29,18 @@ type AuthContext = {
   sessionId: number;
 };
 
+type DailyBriefingScheduleRow = {
+  user_id: number;
+  enabled: boolean;
+  scheduled_time: string;
+  schedule_timezone: string;
+  last_scheduled_for: string | Date | null;
+  last_triggered_at: string | Date | null;
+  last_job_id: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+};
+
 const authRouter = express.Router();
 
 const issuerCache = new Map<string, Promise<Issuer>>();
@@ -429,6 +441,168 @@ function clearSessionCookie(res: express.Response) {
   res.setHeader("Set-Cookie", cookieValue);
 }
 
+function scheduleError(status: number, message: string): Error & { status: number } {
+  const error = new Error(message) as Error & { status: number };
+  error.status = status;
+  return error;
+}
+
+function asPlainObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function normalizeScheduleTime(value: unknown): string {
+  if (typeof value !== "string") throw scheduleError(400, "scheduled_time must use HH:mm.");
+  const match = value.trim().match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+  if (!match) throw scheduleError(400, "scheduled_time must use HH:mm.");
+  return `${match[1]}:${match[2]}`;
+}
+
+function normalizeScheduleTimezone(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) throw scheduleError(400, "timezone is required.");
+  const timezone = value.trim();
+  if (timezone.length > 64) throw scheduleError(400, "timezone is too long.");
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+  } catch {
+    throw scheduleError(400, "timezone must be a valid IANA timezone.");
+  }
+  return timezone;
+}
+
+function parseDailyBriefingSchedulePatch(raw: unknown): {
+  enabled?: boolean;
+  scheduled_time?: string;
+  schedule_timezone?: string;
+} {
+  const body = asPlainObject(raw);
+  const patch: {
+    enabled?: boolean;
+    scheduled_time?: string;
+    schedule_timezone?: string;
+  } = {};
+
+  if (Object.prototype.hasOwnProperty.call(body, "enabled")) {
+    if (typeof body.enabled !== "boolean") throw scheduleError(400, "enabled must be a boolean.");
+    patch.enabled = body.enabled;
+  }
+
+  const scheduledTime = body.scheduled_time ?? body.schedule_time;
+  if (typeof scheduledTime !== "undefined") {
+    patch.scheduled_time = normalizeScheduleTime(scheduledTime);
+  }
+
+  const timezone = body.schedule_timezone ?? body.timezone;
+  if (typeof timezone !== "undefined") {
+    patch.schedule_timezone = normalizeScheduleTimezone(timezone);
+  }
+
+  return patch;
+}
+
+function timestampToApiString(value: string | Date | null): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
+function dateToApiString(value: string | Date | null): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return value.slice(0, 10);
+}
+
+function timeToApiString(value: string | Date): string {
+  if (value instanceof Date) return value.toISOString().slice(11, 16);
+  return value.slice(0, 5);
+}
+
+function toDailyBriefingSchedule(row: DailyBriefingScheduleRow) {
+  return {
+    user_id: Number(row.user_id),
+    enabled: !!row.enabled,
+    scheduled_time: timeToApiString(row.scheduled_time),
+    timezone: row.schedule_timezone,
+    last_scheduled_for: dateToApiString(row.last_scheduled_for),
+    last_triggered_at: timestampToApiString(row.last_triggered_at),
+    last_job_id: row.last_job_id,
+    created_at: timestampToApiString(row.created_at) || new Date().toISOString(),
+    updated_at: timestampToApiString(row.updated_at) || new Date().toISOString(),
+  };
+}
+
+async function ensureDailyBriefingSchedule(userId: number): Promise<void> {
+  await query(
+    `INSERT INTO user_daily_briefing_schedule (user_id)
+     VALUES ($1)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [userId]
+  );
+}
+
+async function getDailyBriefingSchedule(userId: number) {
+  await ensureDailyBriefingSchedule(userId);
+  const { rows } = await query<DailyBriefingScheduleRow>(
+    `SELECT
+       user_id,
+       enabled,
+       scheduled_time::text AS scheduled_time,
+       schedule_timezone,
+       last_scheduled_for,
+       last_triggered_at,
+       last_job_id,
+       created_at,
+       updated_at
+     FROM user_daily_briefing_schedule
+     WHERE user_id = $1
+     LIMIT 1`,
+    [userId]
+  );
+  if (!rows[0]) throw scheduleError(500, "Failed to load daily briefing schedule.");
+  return toDailyBriefingSchedule(rows[0]);
+}
+
+async function updateDailyBriefingSchedule(
+  userId: number,
+  patch: ReturnType<typeof parseDailyBriefingSchedulePatch>
+) {
+  await ensureDailyBriefingSchedule(userId);
+  const { rows } = await query<DailyBriefingScheduleRow>(
+    `UPDATE user_daily_briefing_schedule
+     SET enabled = COALESCE($2, enabled),
+         scheduled_time = COALESCE($3::time, scheduled_time),
+         schedule_timezone = COALESCE($4, schedule_timezone),
+         updated_at = now()
+     WHERE user_id = $1
+     RETURNING
+       user_id,
+       enabled,
+       scheduled_time::text AS scheduled_time,
+       schedule_timezone,
+       last_scheduled_for,
+       last_triggered_at,
+       last_job_id,
+       created_at,
+       updated_at`,
+    [
+      userId,
+      typeof patch.enabled === "boolean" ? patch.enabled : null,
+      patch.scheduled_time ?? null,
+      patch.schedule_timezone ?? null,
+    ]
+  );
+  if (!rows[0]) throw scheduleError(500, "Failed to update daily briefing schedule.");
+  return toDailyBriefingSchedule(rows[0]);
+}
+
+async function handleAuthDailyBriefingScheduleError(res: express.Response, err: any) {
+  if (typeof err?.status === "number") return res.status(err.status).json({ error: err.message });
+  return res.status(500).json({ error: err?.message || String(err) });
+}
+
 authRouter.get("/providers", (_req, res) => {
   const enabledProviders = new Set(getEnabledProviders());
   const allProviders: ProviderName[] = ["google", "microsoft", "apple"];
@@ -556,6 +730,29 @@ authRouter.get("/me", async (req, res) => {
     return res.json({ user: auth.user, billing: auth.user.billing });
   } catch (err: any) {
     return res.status(500).json({ error: err.message || String(err) });
+  }
+});
+
+authRouter.get("/me/briefings/daily/schedule", async (req, res) => {
+  try {
+    const auth = await getAuthContext(req);
+    if (!auth) return res.status(401).json({ error: "unauthorized" });
+    const schedule = await getDailyBriefingSchedule(auth.user.id);
+    return res.json({ schedule });
+  } catch (err: any) {
+    return handleAuthDailyBriefingScheduleError(res, err);
+  }
+});
+
+authRouter.put("/me/briefings/daily/schedule", async (req, res) => {
+  try {
+    const auth = await getAuthContext(req);
+    if (!auth) return res.status(401).json({ error: "unauthorized" });
+    const patch = parseDailyBriefingSchedulePatch(req.body);
+    const schedule = await updateDailyBriefingSchedule(auth.user.id, patch);
+    return res.json({ schedule });
+  } catch (err: any) {
+    return handleAuthDailyBriefingScheduleError(res, err);
   }
 });
 

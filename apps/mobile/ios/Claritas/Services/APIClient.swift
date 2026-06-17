@@ -187,7 +187,7 @@ final class APIClient {
     }
 
     func fetchDailyBriefingSchedule() async throws -> DailyBriefingSchedule {
-        let req = URLRequest(url: baseURL.appendingPathComponent("/api/briefings/daily/schedule"))
+        let req = URLRequest(url: baseURL.appendingPathComponent("/api/auth/me/briefings/daily/schedule"))
         return try await request(req, as: DailyBriefingSchedule.self, rootKey: "schedule")
     }
 
@@ -196,7 +196,7 @@ final class APIClient {
         scheduledTime: String,
         timezone: String
     ) async throws -> DailyBriefingSchedule {
-        var req = URLRequest(url: baseURL.appendingPathComponent("/api/briefings/daily/schedule"))
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/auth/me/briefings/daily/schedule"))
         req.httpMethod = "PUT"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(

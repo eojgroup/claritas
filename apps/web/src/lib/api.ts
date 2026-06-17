@@ -406,6 +406,7 @@ export async function fetchDailySignalBriefingLatest(): Promise<DailySignalBrief
 }
 
 const DAILY_BRIEFING_SCHEDULE_PATHS = [
+  "/api/auth/me/briefings/daily/schedule",
   "/api/briefings/daily/schedule",
   "/api/me/briefings/daily/schedule",
 ];
