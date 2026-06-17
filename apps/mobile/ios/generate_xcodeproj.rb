@@ -24,7 +24,7 @@ project.root_object.attributes["LastUpgradeCheck"] = "1600"
 
 ios_target = project.new_target(:application, "Claritas", :ios, ios_deployment_target)
 ipad_target = project.new_target(:application, "Claritas iPad", :ios, ipados_deployment_target)
-watch_target = project.new_target(:watch2_app, "Claritas Watch App", :watchos, watchos_deployment_target)
+watch_target = project.new_target(:application, "Claritas Watch App", :watchos, watchos_deployment_target)
 
 # Swift modules autolink these frameworks. Removing xcodeproj's version-pinned
 # framework references keeps the generated project portable across Xcode SDKs.
@@ -117,6 +117,93 @@ def add_files(group, base_path, relative_paths)
   end
 end
 
+def write_app_scheme(project_path, target)
+  schemes_dir = File.join(project_path, "xcshareddata", "xcschemes")
+  FileUtils.mkdir_p(schemes_dir)
+  scheme_path = File.join(schemes_dir, "#{target.name}.xcscheme")
+  File.write(scheme_path, <<~XML)
+    <?xml version="1.0" encoding="UTF-8"?>
+    <Scheme
+       LastUpgradeVersion = "1600"
+       version = "1.7">
+       <BuildAction
+          parallelizeBuildables = "YES"
+          buildImplicitDependencies = "YES"
+          buildArchitectures = "Automatic">
+          <BuildActionEntries>
+             <BuildActionEntry
+                buildForTesting = "YES"
+                buildForRunning = "YES"
+                buildForProfiling = "YES"
+                buildForArchiving = "YES"
+                buildForAnalyzing = "YES">
+                <BuildableReference
+                   BuildableIdentifier = "primary"
+                   BlueprintIdentifier = "#{target.uuid}"
+                   BuildableName = "#{target.product_reference.path}"
+                   BlueprintName = "#{target.name}"
+                   ReferencedContainer = "container:Claritas.xcodeproj">
+                </BuildableReference>
+             </BuildActionEntry>
+          </BuildActionEntries>
+       </BuildAction>
+       <TestAction
+          buildConfiguration = "Debug"
+          selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+          selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+          shouldUseLaunchSchemeArgsEnv = "YES">
+          <Testables>
+          </Testables>
+       </TestAction>
+       <LaunchAction
+          buildConfiguration = "Debug"
+          selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
+          selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+          launchStyle = "0"
+          useCustomWorkingDirectory = "NO"
+          ignoresPersistentStateOnLaunch = "NO"
+          debugDocumentVersioning = "YES"
+          debugServiceExtension = "internal"
+          allowLocationSimulation = "YES">
+          <BuildableProductRunnable
+             runnableDebuggingMode = "0">
+             <BuildableReference
+                BuildableIdentifier = "primary"
+                BlueprintIdentifier = "#{target.uuid}"
+                BuildableName = "#{target.product_reference.path}"
+                BlueprintName = "#{target.name}"
+                ReferencedContainer = "container:Claritas.xcodeproj">
+             </BuildableReference>
+          </BuildableProductRunnable>
+       </LaunchAction>
+       <ProfileAction
+          buildConfiguration = "Release"
+          shouldUseLaunchSchemeArgsEnv = "YES"
+          savedToolIdentifier = ""
+          useCustomWorkingDirectory = "NO"
+          debugDocumentVersioning = "YES">
+          <BuildableProductRunnable
+             runnableDebuggingMode = "0">
+             <BuildableReference
+                BuildableIdentifier = "primary"
+                BlueprintIdentifier = "#{target.uuid}"
+                BuildableName = "#{target.product_reference.path}"
+                BlueprintName = "#{target.name}"
+                ReferencedContainer = "container:Claritas.xcodeproj">
+             </BuildableReference>
+          </BuildableProductRunnable>
+       </ProfileAction>
+       <AnalyzeAction
+          buildConfiguration = "Debug">
+       </AnalyzeAction>
+       <ArchiveAction
+          buildConfiguration = "Release"
+          revealArchiveInOrganizer = "YES">
+       </ArchiveAction>
+    </Scheme>
+  XML
+end
+
 ios_swift_paths = Dir.chdir(IOS_SOURCE_ROOT) { Dir.glob("**/*.swift").sort }
 ios_resource_paths = ["Assets.xcassets", "Config.plist"]
 ios_refs = add_files(ios_group, IOS_SOURCE_ROOT, ios_swift_paths + ios_resource_paths + ["Info.plist"])
@@ -157,6 +244,7 @@ project.root_object.attributes["TargetAttributes"] = {
 }
 
 project.save
+write_app_scheme(PROJECT_PATH, ios_target)
 puts "Generated #{PROJECT_PATH}"
 puts "iOS target: #{bundle_id}"
 puts "iPadOS target: #{ipad_bundle_id}"

@@ -414,6 +414,66 @@ const getBrowserTimeZone = (): string => {
 const isValidScheduleTime = (value: string): boolean =>
   /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 
+const DAILY_BRIEFING_TIME_OPTIONS = Array.from({ length: 96 }, (_, index) => {
+  const hours = Math.floor(index / 4);
+  const minutes = (index % 4) * 15;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+});
+
+const DAILY_BRIEFING_TIMEZONE_OPTIONS = [
+  "UTC",
+  "Africa/Tunis",
+  "Africa/Cairo",
+  "Africa/Johannesburg",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Toronto",
+  "America/Mexico_City",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/Madrid",
+  "Europe/Rome",
+  "Europe/Amsterdam",
+  "Europe/Zurich",
+  "Europe/Istanbul",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Singapore",
+  "Asia/Hong_Kong",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+];
+
+const getScheduleTimeOptions = (selectedTime?: string): string[] => {
+  const selected = selectedTime?.trim();
+  if (!selected || !isValidScheduleTime(selected)) return DAILY_BRIEFING_TIME_OPTIONS;
+  return Array.from(new Set([...DAILY_BRIEFING_TIME_OPTIONS, selected])).sort();
+};
+
+const getScheduleTimezoneOptions = (selectedTimezone?: string): string[] => {
+  const options = new Set<string>();
+  const addTimezone = (timezone?: string) => {
+    const trimmed = timezone?.trim();
+    if (!trimmed) return;
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: trimmed }).format(new Date());
+      options.add(trimmed);
+    } catch {
+      // Ignore invalid persisted values; the API will still validate before saving.
+    }
+  };
+  addTimezone(selectedTimezone);
+  addTimezone(getBrowserTimeZone());
+  DAILY_BRIEFING_TIMEZONE_OPTIONS.forEach(addTimezone);
+  return Array.from(options);
+};
+
 const OPENWEATHER_ICON_BASE = "https://openweathermap.org/img/wn";
 
 const WEATHER_SYMBOLS: Record<string, string> = {
@@ -738,6 +798,14 @@ export default function ClaritasDashboard() {
   const authProviderMap = useMemo(
     () => new Map(authProviders.map((p) => [p.id, p])),
     [authProviders],
+  );
+  const dailyBriefingTimeOptions = useMemo(
+    () => getScheduleTimeOptions(dailyBriefingScheduleDraft.scheduled_time),
+    [dailyBriefingScheduleDraft.scheduled_time],
+  );
+  const dailyBriefingTimezoneOptions = useMemo(
+    () => getScheduleTimezoneOptions(dailyBriefingScheduleDraft.timezone),
+    [dailyBriefingScheduleDraft.timezone],
   );
 
   useEffect(() => {
@@ -6494,12 +6562,13 @@ export default function ClaritasDashboard() {
                                 <input
                                   type="checkbox"
                                   checked={dailyBriefingScheduleDraft.enabled}
-                                  onChange={(event) =>
+                                  onChange={(event) => {
+                                    const enabled = event.currentTarget.checked;
                                     setDailyBriefingScheduleDraft((current) => ({
                                       ...current,
-                                      enabled: event.currentTarget.checked,
-                                    }))
-                                  }
+                                      enabled,
+                                    }));
+                                  }}
                                   className="h-4 w-4 rounded border-[color:var(--shell-border)]"
                                 />
                                 Enabled
@@ -6508,31 +6577,43 @@ export default function ClaritasDashboard() {
                             <div className="mt-4 grid gap-3 md:grid-cols-[160px_minmax(0,1fr)_auto] md:items-end">
                               <label className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
                                 Time
-                                <input
-                                  type="time"
+                                <select
                                   value={dailyBriefingScheduleDraft.scheduled_time}
-                                  onChange={(event) =>
+                                  onChange={(event) => {
+                                    const scheduledTime = event.currentTarget.value;
                                     setDailyBriefingScheduleDraft((current) => ({
                                       ...current,
-                                      scheduled_time: event.currentTarget.value,
-                                    }))
-                                  }
+                                      scheduled_time: scheduledTime,
+                                    }));
+                                  }}
                                   className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--shell-ink)]"
-                                />
+                                >
+                                  {dailyBriefingTimeOptions.map((time) => (
+                                    <option key={time} value={time}>
+                                      {time}
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                               <label className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
                                 Timezone
-                                <input
-                                  type="text"
+                                <select
                                   value={dailyBriefingScheduleDraft.timezone}
-                                  onChange={(event) =>
+                                  onChange={(event) => {
+                                    const timezone = event.currentTarget.value;
                                     setDailyBriefingScheduleDraft((current) => ({
                                       ...current,
-                                      timezone: event.currentTarget.value,
-                                    }))
-                                  }
+                                      timezone,
+                                    }));
+                                  }}
                                   className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--shell-ink)]"
-                                />
+                                >
+                                  {dailyBriefingTimezoneOptions.map((timezone) => (
+                                    <option key={timezone} value={timezone}>
+                                      {timezone}
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                               <button
                                 type="button"

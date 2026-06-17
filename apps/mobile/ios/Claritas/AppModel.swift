@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published var selectedCountry: String? = nil
     @Published var selectedSymbol: String? = nil
     @Published var dailyBriefing: DailySignalBriefing? = nil
+    @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
     @Published var news: [NewsItem] = []
     @Published var countryStats: [CountryStat] = []
     @Published var weather: [CountryWeather] = []
@@ -37,6 +38,10 @@ final class AppModel: ObservableObject {
     @Published var authProviders: [AuthProvider] = []
     @Published var authError: String? = nil
     @Published var isRefreshingAccess: Bool = false
+    @Published var isLoadingDailyBriefingSchedule: Bool = false
+    @Published var isSavingDailyBriefingSchedule: Bool = false
+    @Published var dailyBriefingScheduleError: String? = nil
+    @Published var dailyBriefingScheduleNotice: String? = nil
 
     let api: APIClient
     private var authToken: String? = nil
@@ -265,6 +270,10 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchLatestDailyBriefing()) }
             catch { return .failure(error) }
         }()
+        async let scheduleResult: Result<DailyBriefingSchedule, Error> = {
+            do { return .success(try await api.fetchDailyBriefingSchedule()) }
+            catch { return .failure(error) }
+        }()
         async let weatherResult: Result<[CountryWeather], Error> = {
             do { return .success(try await api.fetchCountryWeather()) }
             catch { return .failure(error) }
@@ -290,14 +299,17 @@ final class AppModel: ObservableObject {
             catch { return .failure(error) }
         }()
 
-        let (resolvedStats, resolvedBriefing, resolvedWeather, resolvedNews, resolvedMarket, resolvedMarketStatus, resolvedMarketEarnings) =
-            await (statsResult, briefingResult, weatherResult, newsResult, marketResult, marketStatusResult, marketEarningsResult)
+        let (resolvedStats, resolvedBriefing, resolvedSchedule, resolvedWeather, resolvedNews, resolvedMarket, resolvedMarketStatus, resolvedMarketEarnings) =
+            await (statsResult, briefingResult, scheduleResult, weatherResult, newsResult, marketResult, marketStatusResult, marketEarningsResult)
 
         var paymentRequiredDetected = false
         if case .failure(let error) = resolvedStats, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedBriefing, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedSchedule, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedWeather, isPaymentRequired(error) {
@@ -327,6 +339,10 @@ final class AppModel: ObservableObject {
         if case .success(let briefing) = resolvedBriefing {
             dailyBriefing = briefing
         }
+        if case .success(let schedule) = resolvedSchedule {
+            dailyBriefingSchedule = schedule
+            dailyBriefingScheduleError = nil
+        }
         if case .success(let weatherRows) = resolvedWeather {
             weather = weatherRows
         }
@@ -349,6 +365,9 @@ final class AppModel: ObservableObject {
     func clearAppData() {
         clearSelection()
         dailyBriefing = nil
+        dailyBriefingSchedule = nil
+        dailyBriefingScheduleError = nil
+        dailyBriefingScheduleNotice = nil
         countryStats = []
         weather = []
         news = []
@@ -361,6 +380,54 @@ final class AppModel: ObservableObject {
     func clearSelection() {
         selectedCountry = nil
         selectedSymbol = nil
+    }
+
+    func loadDailyBriefingSchedule() async {
+        guard !isLoadingDailyBriefingSchedule else { return }
+        isLoadingDailyBriefingSchedule = true
+        dailyBriefingScheduleError = nil
+        defer { isLoadingDailyBriefingSchedule = false }
+
+        do {
+            dailyBriefingSchedule = try await api.fetchDailyBriefingSchedule()
+        } catch {
+            if let apiError = error as? APIError, apiError.status == 401 {
+                authUser = nil
+                authStatus = .unauthed
+                clearAppData()
+                return
+            }
+            dailyBriefingScheduleError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func updateDailyBriefingSchedule(
+        enabled: Bool,
+        scheduledTime: String,
+        timezone: String
+    ) async {
+        guard !isSavingDailyBriefingSchedule else { return }
+        isSavingDailyBriefingSchedule = true
+        dailyBriefingScheduleError = nil
+        dailyBriefingScheduleNotice = nil
+        defer { isSavingDailyBriefingSchedule = false }
+
+        do {
+            dailyBriefingSchedule = try await api.updateDailyBriefingSchedule(
+                enabled: enabled,
+                scheduledTime: scheduledTime,
+                timezone: timezone
+            )
+            dailyBriefingScheduleNotice = "Daily briefing schedule saved."
+        } catch {
+            if let apiError = error as? APIError, apiError.status == 401 {
+                authUser = nil
+                authStatus = .unauthed
+                clearAppData()
+                return
+            }
+            dailyBriefingScheduleError = (error as? APIError)?.message ?? error.localizedDescription
+        }
     }
 
     func refreshNews(mode: NewsLoadMode = .recent, country: String? = nil) async {

@@ -1187,7 +1187,7 @@ app.get("/api/billing/me", requireSession, async (_req, res) => {
   }
 });
 
-app.get("/api/me/briefings/daily/schedule", requireSession, async (_req, res) => {
+const handleGetDailyBriefingSchedule: express.RequestHandler = async (_req, res) => {
   try {
     const userId = getAuthenticatedUserId(res);
     const schedule = await getUserDailyBriefingSchedule(userId);
@@ -1196,9 +1196,9 @@ app.get("/api/me/briefings/daily/schedule", requireSession, async (_req, res) =>
     if (e instanceof AdminApiError) return res.status(e.status).json({ error: e.message });
     return res.status(500).json({ error: e.message || String(e) });
   }
-});
+};
 
-app.put("/api/me/briefings/daily/schedule", requireSession, async (req, res) => {
+const handleUpdateDailyBriefingSchedule: express.RequestHandler = async (req, res) => {
   try {
     const userId = getAuthenticatedUserId(res);
     const patch = parseBriefingSchedulePatch(req.body);
@@ -1208,7 +1208,12 @@ app.put("/api/me/briefings/daily/schedule", requireSession, async (req, res) => 
     if (e instanceof AdminApiError) return res.status(e.status).json({ error: e.message });
     return res.status(500).json({ error: e.message || String(e) });
   }
-});
+};
+
+app.get("/api/briefings/daily/schedule", requireSession, handleGetDailyBriefingSchedule);
+app.put("/api/briefings/daily/schedule", requireSession, handleUpdateDailyBriefingSchedule);
+app.get("/api/me/briefings/daily/schedule", requireSession, handleGetDailyBriefingSchedule);
+app.put("/api/me/briefings/daily/schedule", requireSession, handleUpdateDailyBriefingSchedule);
 
 app.get("/api/briefings/daily/latest", requireAuthenticated, async (_req, res) => {
   try {

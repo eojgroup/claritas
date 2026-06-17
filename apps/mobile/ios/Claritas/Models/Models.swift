@@ -206,6 +206,102 @@ struct DailySignalBriefing: Codable, Identifiable {
     }
 }
 
+struct DailyBriefingSchedule: Codable, Identifiable {
+    let user_id: Int
+    let enabled: Bool
+    let scheduled_time: String
+    let timezone: String
+    let last_scheduled_for: String?
+    let last_triggered_at: String?
+    let last_job_id: String?
+    let created_at: String
+    let updated_at: String
+
+    var id: Int { user_id }
+    var lastTriggeredDate: Date? {
+        guard let last_triggered_at else { return nil }
+        return APIDateParser.parse(last_triggered_at)
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case user_id
+        case enabled
+        case scheduled_time
+        case timezone
+        case last_scheduled_for
+        case last_triggered_at
+        case last_job_id
+        case created_at
+        case updated_at
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        user_id = try container.decodeFlexibleInt(forKey: .user_id)
+        enabled = try container.decode(Bool.self, forKey: .enabled)
+        scheduled_time = try container.decode(String.self, forKey: .scheduled_time)
+        timezone = try container.decode(String.self, forKey: .timezone)
+        last_scheduled_for = try container.decodeIfPresent(String.self, forKey: .last_scheduled_for)
+        last_triggered_at = try container.decodeIfPresent(String.self, forKey: .last_triggered_at)
+        last_job_id = try container.decodeIfPresent(String.self, forKey: .last_job_id)
+        created_at = try container.decode(String.self, forKey: .created_at)
+        updated_at = try container.decode(String.self, forKey: .updated_at)
+    }
+}
+
+enum DailyBriefingScheduleOptions {
+    static let timezones = [
+        "UTC",
+        "Africa/Tunis",
+        "Africa/Cairo",
+        "Africa/Johannesburg",
+        "America/New_York",
+        "America/Chicago",
+        "America/Denver",
+        "America/Los_Angeles",
+        "America/Toronto",
+        "America/Mexico_City",
+        "America/Sao_Paulo",
+        "Europe/London",
+        "Europe/Paris",
+        "Europe/Berlin",
+        "Europe/Madrid",
+        "Europe/Rome",
+        "Europe/Amsterdam",
+        "Europe/Zurich",
+        "Europe/Istanbul",
+        "Asia/Dubai",
+        "Asia/Kolkata",
+        "Asia/Singapore",
+        "Asia/Hong_Kong",
+        "Asia/Tokyo",
+        "Asia/Seoul",
+        "Australia/Sydney",
+        "Pacific/Auckland"
+    ]
+
+    static func timezoneOptions(including selected: String?) -> [String] {
+        var seen = Set<String>()
+        var options: [String] = []
+
+        func append(_ timezone: String?) {
+            guard let timezone = timezone?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !timezone.isEmpty,
+                  TimeZone(identifier: timezone) != nil,
+                  !seen.contains(timezone) else {
+                return
+            }
+            seen.insert(timezone)
+            options.append(timezone)
+        }
+
+        append(selected)
+        append(TimeZone.current.identifier)
+        timezones.forEach(append)
+        return options
+    }
+}
+
 struct MarketQuote: Codable, Identifiable {
     let symbol: String
     let company_name: String?

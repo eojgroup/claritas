@@ -405,11 +405,30 @@ export async function fetchDailySignalBriefingLatest(): Promise<DailySignalBrief
   return (data.briefing ?? null) as DailySignalBriefing | null;
 }
 
+const DAILY_BRIEFING_SCHEDULE_PATHS = [
+  "/api/briefings/daily/schedule",
+  "/api/me/briefings/daily/schedule",
+];
+
+async function requestDailyBriefingSchedule(
+  init: RequestInit,
+  fallbackMessage: string,
+): Promise<DailyBriefingSchedule> {
+  let lastMessage = fallbackMessage;
+  for (const path of DAILY_BRIEFING_SCHEDULE_PATHS) {
+    const resp = await fetch(`${API_BASE}${path}`, { credentials: "include", ...init });
+    if (resp.ok) {
+      const data = await resp.json();
+      return data.schedule as DailyBriefingSchedule;
+    }
+    lastMessage = await readError(resp, fallbackMessage);
+    if (resp.status !== 401 && resp.status !== 404) break;
+  }
+  throw new Error(lastMessage);
+}
+
 export async function fetchDailyBriefingSchedule(): Promise<DailyBriefingSchedule> {
-  const resp = await fetch(`${API_BASE}/api/me/briefings/daily/schedule`, { credentials: "include" });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch daily briefing schedule"));
-  const data = await resp.json();
-  return data.schedule as DailyBriefingSchedule;
+  return requestDailyBriefingSchedule({}, "Failed to fetch daily briefing schedule");
 }
 
 export async function updateDailyBriefingSchedule(payload: {
@@ -417,15 +436,11 @@ export async function updateDailyBriefingSchedule(payload: {
   scheduled_time?: string;
   timezone?: string;
 }): Promise<DailyBriefingSchedule> {
-  const resp = await fetch(`${API_BASE}/api/me/briefings/daily/schedule`, {
+  return requestDailyBriefingSchedule({
     method: "PUT",
-    credentials: "include",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to update daily briefing schedule"));
-  const data = await resp.json();
-  return data.schedule as DailyBriefingSchedule;
+  }, "Failed to update daily briefing schedule");
 }
 
 export async function fetchAdminDailyBriefingGeneratorConfig(): Promise<AdminDailyBriefingGeneratorConfig> {

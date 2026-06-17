@@ -186,6 +186,30 @@ final class APIClient {
         return try await request(req, as: DailySignalBriefingResponse.self).briefing
     }
 
+    func fetchDailyBriefingSchedule() async throws -> DailyBriefingSchedule {
+        let req = URLRequest(url: baseURL.appendingPathComponent("/api/briefings/daily/schedule"))
+        return try await request(req, as: DailyBriefingSchedule.self, rootKey: "schedule")
+    }
+
+    func updateDailyBriefingSchedule(
+        enabled: Bool,
+        scheduledTime: String,
+        timezone: String
+    ) async throws -> DailyBriefingSchedule {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/briefings/daily/schedule"))
+        req.httpMethod = "PUT"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(
+            withJSONObject: [
+                "enabled": enabled,
+                "scheduled_time": scheduledTime,
+                "timezone": timezone
+            ],
+            options: []
+        )
+        return try await request(req, as: DailyBriefingSchedule.self, rootKey: "schedule")
+    }
+
     func fetchMarketQuotes(refresh: Bool = true, symbols: [String]? = nil) async throws -> [MarketQuote] {
         var comps = URLComponents(url: baseURL.appendingPathComponent("/api/market/quotes"), resolvingAgainstBaseURL: false)!
         var items: [URLQueryItem] = [URLQueryItem(name: "refresh", value: refresh ? "true" : "false")]

@@ -288,7 +288,7 @@
 			name = "Claritas Watch App";
 			productName = "Claritas Watch App";
 			productReference = 8758A1168EADB7188028C020 /* Claritas Watch App.app */;
-			productType = "com.apple.product-type.application.watchapp2";
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 

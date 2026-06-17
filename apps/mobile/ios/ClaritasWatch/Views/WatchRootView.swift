@@ -11,6 +11,7 @@ struct WatchRootView: View {
             } else {
                 TabView {
                     WatchBriefingView()
+                    WatchBriefingScheduleView()
                     WatchNewsView()
                     WatchMarketsView()
                     WatchWeatherView()
@@ -134,6 +135,108 @@ private struct WatchBriefingView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct WatchBriefingScheduleView: View {
+    @EnvironmentObject private var model: WatchAppModel
+    @State private var enabled = true
+    @State private var scheduledTime = WatchBriefingScheduleView.dateFromScheduleTime("07:00")
+    @State private var timezone = TimeZone.current.identifier
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Toggle("Enabled", isOn: $enabled)
+
+                    DatePicker(
+                        "Time",
+                        selection: $scheduledTime,
+                        displayedComponents: .hourAndMinute
+                    )
+
+                    Picker("Timezone", selection: $timezone) {
+                        ForEach(DailyBriefingScheduleOptions.timezoneOptions(including: timezone), id: \.self) { timezone in
+                            Text(timezone).tag(timezone)
+                        }
+                    }
+
+                    if let schedule = model.briefingSchedule {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Current")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("\(schedule.scheduled_time) \(schedule.timezone)")
+                                .font(.caption.weight(.semibold))
+                            Text(schedule.last_triggered_at.map { "Last run \($0)" } ?? "Not run yet")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let error = model.briefingScheduleError {
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundStyle(WatchPalette.negative)
+                    }
+
+                    Button {
+                        save()
+                    } label: {
+                        Label(
+                            model.isSavingBriefingSchedule ? "Saving" : "Save",
+                            systemImage: "clock.badge.checkmark"
+                        )
+                    }
+                    .disabled(model.isSavingBriefingSchedule)
+                } header: {
+                    WatchSectionLabel(title: "Briefing time", icon: "clock")
+                }
+            }
+            .navigationTitle("Schedule")
+            .task {
+                apply(model.briefingSchedule)
+            }
+            .onChange(of: model.briefingSchedule?.updated_at) { _ in
+                apply(model.briefingSchedule)
+            }
+        }
+    }
+
+    private func apply(_ schedule: DailyBriefingSchedule?) {
+        guard let schedule else { return }
+        enabled = schedule.enabled
+        scheduledTime = Self.dateFromScheduleTime(schedule.scheduled_time)
+        timezone = schedule.timezone.isEmpty ? TimeZone.current.identifier : schedule.timezone
+    }
+
+    private func save() {
+        let cleanTimezone = timezone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTimezone.isEmpty else { return }
+        Task {
+            await model.updateDailyBriefingSchedule(
+                enabled: enabled,
+                scheduledTime: Self.scheduleTimeString(from: scheduledTime),
+                timezone: cleanTimezone
+            )
+        }
+    }
+
+    private static func dateFromScheduleTime(_ value: String) -> Date {
+        let parts = value.split(separator: ":")
+        let hour = parts.first.flatMap { Int($0) } ?? 7
+        let minute = parts.dropFirst().first.flatMap { Int($0) } ?? 0
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        components.hour = max(0, min(hour, 23))
+        components.minute = max(0, min(minute, 59))
+        components.second = 0
+        return Calendar.current.date(from: components) ?? Date()
+    }
+
+    private static func scheduleTimeString(from date: Date) -> String {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", components.hour ?? 7, components.minute ?? 0)
     }
 }
 

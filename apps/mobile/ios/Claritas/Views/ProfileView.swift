@@ -28,6 +28,9 @@ struct ProfileView: View {
     @AppStorage("DEFAULT_LIST_MODE") private var defaultListMode: String = "news"
     @State private var isSigningOut: Bool = false
     @State private var section: Section = .overview
+    @State private var briefingScheduleEnabled: Bool = true
+    @State private var briefingScheduleTime: Date = ProfileView.dateFromScheduleTime("07:00")
+    @State private var briefingScheduleTimezone: String = TimeZone.current.identifier
 
     private var displayName: String {
         model.authUser?.display_name ?? model.authUser?.email ?? "Signed in"
@@ -59,6 +62,15 @@ struct ProfileView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 24)
             }
+        }
+        .task {
+            if model.dailyBriefingSchedule == nil {
+                await model.loadDailyBriefingSchedule()
+            }
+            applyScheduleDraft(model.dailyBriefingSchedule)
+        }
+        .onChange(of: model.dailyBriefingSchedule?.updated_at) { _ in
+            applyScheduleDraft(model.dailyBriefingSchedule)
         }
     }
 
@@ -197,21 +209,89 @@ struct ProfileView: View {
 
     private var preferencesCard: some View {
         BrandCard(title: "Preferences", icon: "slider.horizontal.3") {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Theme")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Match your current workspace.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 16) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Theme")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Match your current workspace.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(action: { dark.toggle() }) {
+                        Label(dark ? "Light" : "Dark", systemImage: dark ? "sun.max.fill" : "moon.fill")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ClaritasPalette.shellAccent(for: colorScheme))
                 }
-                Spacer()
-                Button(action: { dark.toggle() }) {
-                    Label(dark ? "Light" : "Dark", systemImage: dark ? "sun.max.fill" : "moon.fill")
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle(isOn: $briefingScheduleEnabled) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Daily briefing")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Scheduled at \(Self.scheduleTimeString(from: briefingScheduleTime)) \(briefingScheduleTimezone)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    DatePicker(
+                        "Time",
+                        selection: $briefingScheduleTime,
+                        displayedComponents: .hourAndMinute
+                    )
+                    .datePickerStyle(.compact)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Timezone")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Picker("Timezone", selection: $briefingScheduleTimezone) {
+                            ForEach(DailyBriefingScheduleOptions.timezoneOptions(including: briefingScheduleTimezone), id: \.self) { timezone in
+                                Text(timezone).tag(timezone)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    if let schedule = model.dailyBriefingSchedule {
+                        ProfileRow(
+                            label: "Last run",
+                            value: schedule.lastTriggeredDate.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "Not yet"
+                        )
+                        if let scheduleDate = schedule.last_scheduled_for {
+                            ProfileRow(label: "Schedule date", value: scheduleDate)
+                        }
+                    }
+
+                    if let notice = model.dailyBriefingScheduleNotice {
+                        Text(notice)
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
+                    }
+
+                    if let error = model.dailyBriefingScheduleError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    Button(action: saveBriefingSchedule) {
+                        Label(
+                            model.isSavingDailyBriefingSchedule ? "Saving…" : "Save schedule",
+                            systemImage: "clock.badge.checkmark"
+                        )
                         .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ClaritasPalette.shellAccent(for: colorScheme))
+                    .disabled(model.isSavingDailyBriefingSchedule || model.isLoadingDailyBriefingSchedule)
                 }
-                .buttonStyle(.bordered)
-                .tint(ClaritasPalette.shellAccent(for: colorScheme))
             }
         }
     }
@@ -318,6 +398,46 @@ struct ProfileView: View {
             await model.logout()
             isSigningOut = false
         }
+    }
+
+    private func applyScheduleDraft(_ schedule: DailyBriefingSchedule?) {
+        guard let schedule else { return }
+        briefingScheduleEnabled = schedule.enabled
+        briefingScheduleTime = Self.dateFromScheduleTime(schedule.scheduled_time)
+        briefingScheduleTimezone = schedule.timezone.isEmpty ? TimeZone.current.identifier : schedule.timezone
+    }
+
+    private func saveBriefingSchedule() {
+        let timezone = briefingScheduleTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !timezone.isEmpty else {
+            model.dailyBriefingScheduleError = "Timezone is required."
+            model.dailyBriefingScheduleNotice = nil
+            return
+        }
+
+        Task {
+            await model.updateDailyBriefingSchedule(
+                enabled: briefingScheduleEnabled,
+                scheduledTime: Self.scheduleTimeString(from: briefingScheduleTime),
+                timezone: timezone
+            )
+        }
+    }
+
+    private static func dateFromScheduleTime(_ value: String) -> Date {
+        let parts = value.split(separator: ":")
+        let hour = parts.first.flatMap { Int($0) } ?? 7
+        let minute = parts.dropFirst().first.flatMap { Int($0) } ?? 0
+        var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        components.hour = max(0, min(hour, 23))
+        components.minute = max(0, min(minute, 59))
+        components.second = 0
+        return Calendar.current.date(from: components) ?? Date()
+    }
+
+    private static func scheduleTimeString(from date: Date) -> String {
+        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02d:%02d", components.hour ?? 7, components.minute ?? 0)
     }
 
     private func providerLabel(_ provider: AuthProvider) -> String {

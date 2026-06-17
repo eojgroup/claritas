@@ -14,6 +14,9 @@ final class WatchAppModel: ObservableObject {
     @Published private(set) var news: [NewsItem] = []
     @Published private(set) var weather: [CountryWeather] = []
     @Published private(set) var markets: [MarketQuote] = []
+    @Published private(set) var briefingSchedule: DailyBriefingSchedule?
+    @Published private(set) var isSavingBriefingSchedule: Bool = false
+    @Published private(set) var briefingScheduleError: String?
     @Published private(set) var connectionState: ConnectionState = .waitingForPhone
     @Published private(set) var lastUpdated: Date?
 
@@ -65,8 +68,9 @@ final class WatchAppModel: ObservableObject {
         async let newsResult = result { try await api.fetchNews(limit: 12) }
         async let weatherResult = result { try await api.fetchCountryWeather() }
         async let marketResult = result { try await api.fetchMarketQuotes(refresh: false) }
+        async let scheduleResult = result { try await api.fetchDailyBriefingSchedule() }
 
-        let results = await (briefingResult, newsResult, weatherResult, marketResult)
+        let results = await (briefingResult, newsResult, weatherResult, marketResult, scheduleResult)
         var errors: [Error] = []
 
         switch results.0 {
@@ -85,6 +89,16 @@ final class WatchAppModel: ObservableObject {
         case .success(let value): markets = Array(value.prefix(20))
         case .failure(let error): errors.append(error)
         }
+        switch results.4 {
+        case .success(let value):
+            briefingSchedule = value
+            briefingScheduleError = nil
+        case .failure(let error):
+            briefingScheduleError = error.localizedDescription
+            if isUnauthorized(error) {
+                errors.append(error)
+            }
+        }
 
         if errors.isEmpty {
             lastUpdated = Date()
@@ -100,6 +114,39 @@ final class WatchAppModel: ObservableObject {
 
     func requestPhoneSync() {
         connectivity.requestContext()
+    }
+
+    func updateDailyBriefingSchedule(enabled: Bool, scheduledTime: String, timezone: String) async {
+        guard !isSavingBriefingSchedule else { return }
+        guard let token = WatchKeychain.authToken else {
+            connectionState = .waitingForPhone
+            connectivity.requestContext()
+            return
+        }
+
+        isSavingBriefingSchedule = true
+        briefingScheduleError = nil
+        api = APIClient()
+        api.setAuthToken(token)
+        defer { isSavingBriefingSchedule = false }
+
+        do {
+            briefingSchedule = try await api.updateDailyBriefingSchedule(
+                enabled: enabled,
+                scheduledTime: scheduledTime,
+                timezone: timezone
+            )
+            lastUpdated = Date()
+            connectionState = .ready
+            saveCache()
+        } catch {
+            if isUnauthorized(error) {
+                WatchKeychain.authToken = nil
+                connectionState = .waitingForPhone
+                return
+            }
+            briefingScheduleError = error.localizedDescription
+        }
     }
 
     private func apply(context: [String: Any]) {
@@ -132,6 +179,7 @@ final class WatchAppModel: ObservableObject {
             news: news,
             weather: weather,
             markets: markets,
+            briefingSchedule: briefingSchedule,
             lastUpdated: lastUpdated
         )
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
@@ -147,6 +195,7 @@ final class WatchAppModel: ObservableObject {
         news = snapshot.news
         weather = snapshot.weather
         markets = snapshot.markets
+        briefingSchedule = snapshot.briefingSchedule
         lastUpdated = snapshot.lastUpdated
     }
 }
@@ -156,5 +205,6 @@ private struct WatchSnapshot: Codable {
     let news: [NewsItem]
     let weather: [CountryWeather]
     let markets: [MarketQuote]
+    let briefingSchedule: DailyBriefingSchedule?
     let lastUpdated: Date?
 }
