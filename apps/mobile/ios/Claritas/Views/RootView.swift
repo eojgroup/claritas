@@ -561,6 +561,7 @@ private struct AdminIngestionPanelView: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var runs: [AdminIngestionRun] = []
     @State private var selectedRunId: Int?
@@ -1022,8 +1023,8 @@ private struct AdminIngestionPanelView: View {
                                                 .font(.caption2.weight(.semibold))
                                                 .padding(.horizontal, 8)
                                                 .padding(.vertical, 4)
-                                                .background(Color(red: 0.06, green: 0.41, blue: 0.33).opacity(0.16), in: Capsule())
-                                                .foregroundStyle(Color(red: 0.06, green: 0.41, blue: 0.33))
+                                                .background(ClaritasPalette.positiveText(for: colorScheme).opacity(0.16), in: Capsule())
+                                                .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
                                         }
                                         Text(formatDateTime(run.started_at))
                                             .font(.caption)

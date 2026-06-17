@@ -1754,12 +1754,12 @@ struct PoliciesWorkspaceView: View {
                             )
 
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
-                                BrandSwatch(name: "Command Navy", hex: "#173342", color: ClaritasPalette.darkBlue)
-                                BrandSwatch(name: "Deep Forest", hex: "#1E493B", color: ClaritasPalette.darkGreen)
-                                BrandSwatch(name: "Strategic Sage", hex: "#8BB99A", color: ClaritasPalette.sage)
-                                BrandSwatch(name: "Signal Orange", hex: "#D97932", color: ClaritasPalette.orange)
-                                BrandSwatch(name: "Warm Surface", hex: "#FFFDF8", color: Color(hex: "#FFFDF8"))
-                                BrandSwatch(name: "Primary Ink", hex: "#132833", color: ClaritasPalette.text)
+                                BrandSwatch(name: "Command Navy", hex: "#172F42", color: ClaritasPalette.darkBlue)
+                                BrandSwatch(name: "Signal Blue", hex: "#3E6A80", color: ClaritasPalette.dataBlue(for: colorScheme))
+                                BrandSwatch(name: "Shell Bronze", hex: "#E6A06A", color: ClaritasPalette.orange)
+                                BrandSwatch(name: "Warm Surface", hex: "#FFFAF1", color: Color(hex: "#FFFAF1"))
+                                BrandSwatch(name: "Muted Text", hex: "#53616A", color: ClaritasPalette.grey)
+                                BrandSwatch(name: "Primary Ink", hex: "#172F42", color: ClaritasPalette.text)
                             }
                         }
                     }
@@ -2378,25 +2378,25 @@ private struct DashboardBackground<Content: View>: View {
         ZStack {
             LinearGradient(
                 colors: [
+                    ClaritasPalette.shellBackgroundElevated(for: colorScheme),
                     ClaritasPalette.shellBackground(for: colorScheme),
                     colorScheme == .dark
-                        ? Color(hex: "#102426")
-                        : Color(hex: "#E8E1D5"),
-                    ClaritasPalette.shellBackground(for: colorScheme)
+                        ? Color(hex: "#0C1720")
+                        : Color(hex: "#EFE1CF")
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .top,
+                endPoint: .bottom
             )
             .ignoresSafeArea()
 
             LinearGradient(
                 colors: [
-                    ClaritasPalette.darkGreen.opacity(colorScheme == .dark ? 0.14 : 0.08),
+                    ClaritasPalette.shellAccentSecondary(for: colorScheme).opacity(colorScheme == .dark ? 0.08 : 0.07),
                     Color.clear,
-                    ClaritasPalette.orange.opacity(colorScheme == .dark ? 0.1 : 0.06)
+                    ClaritasPalette.shellAccent(for: colorScheme).opacity(colorScheme == .dark ? 0.1 : 0.05)
                 ],
-                startPoint: .topTrailing,
-                endPoint: .bottomLeading
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 

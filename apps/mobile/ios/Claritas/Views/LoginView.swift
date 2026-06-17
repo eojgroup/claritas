@@ -9,6 +9,7 @@ struct LoginView: View {
     }
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var mode: Mode = .signin
     @State private var showMethods: Bool = false
 
@@ -48,23 +49,23 @@ struct LoginView: View {
         ZStack {
             LinearGradient(
                 colors: [
-                    Color(hex: "#081416"),
-                    ClaritasPalette.darkBlue,
-                    ClaritasPalette.darkGreen.opacity(0.9)
+                    ClaritasPalette.shellBackgroundElevated(for: colorScheme),
+                    ClaritasPalette.shellBackground(for: colorScheme),
+                    ClaritasPalette.shellSidebar(for: colorScheme)
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .top,
+                endPoint: .bottom
             )
             .ignoresSafeArea()
 
             LinearGradient(
                 colors: [
-                    ClaritasPalette.orange.opacity(0.14),
+                    ClaritasPalette.shellAccent(for: colorScheme).opacity(0.12),
                     Color.clear,
-                    ClaritasPalette.sage.opacity(0.12)
+                    ClaritasPalette.shellAccentSecondary(for: colorScheme).opacity(0.1)
                 ],
-                startPoint: .topTrailing,
-                endPoint: .bottomLeading
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
@@ -87,11 +88,11 @@ struct LoginView: View {
                         .font(.caption2.weight(.semibold))
                         .tracking(2.4)
                         .textCase(.uppercase)
-                        .foregroundStyle(ClaritasPalette.beige)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
 
                     Text(mode == .signin ? "Sign in to Claritas" : "Create a Claritas account")
                         .font(.title2.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.offWhite)
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                 }
 
                 Spacer()
@@ -110,13 +111,13 @@ struct LoginView: View {
             if let error = model.authError, !error.isEmpty {
                 Text(error)
                     .font(.footnote)
-                    .foregroundStyle(Color(red: 0.96, green: 0.72, blue: 0.73))
+                    .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(Color(red: 0.42, green: 0.14, blue: 0.18).opacity(0.55))
+                    .background(ClaritasPalette.negativeText(for: colorScheme).opacity(0.14))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color(red: 0.73, green: 0.27, blue: 0.30).opacity(0.55), lineWidth: 1)
+                            .stroke(ClaritasPalette.negativeText(for: colorScheme).opacity(0.45), lineWidth: 1)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
@@ -125,13 +126,13 @@ struct LoginView: View {
                  ? "Use your trusted identity provider to access the Claritas signal desk."
                  : "Create your Claritas account using the provider you already trust.")
                 .font(.footnote)
-                .foregroundStyle(ClaritasPalette.beige.opacity(0.9))
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(ClaritasPalette.darkBlue.opacity(0.86))
+                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(ClaritasPalette.beige.opacity(0.45), lineWidth: 1)
+                        .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
@@ -144,21 +145,21 @@ struct LoginView: View {
                     .padding(.vertical, 12)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(primaryDisabled ? ClaritasPalette.grey.opacity(0.85) : ClaritasPalette.text)
-            .background(primaryDisabled ? ClaritasPalette.grey.opacity(0.55) : ClaritasPalette.orange)
+            .foregroundStyle(primaryDisabled ? ClaritasPalette.shellMuted(for: colorScheme) : ClaritasPalette.text)
+            .background(primaryDisabled ? ClaritasPalette.shellSurfaceMuted(for: colorScheme) : ClaritasPalette.shellAccent(for: colorScheme))
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .disabled(primaryDisabled)
 
             if enabledProviders.isEmpty && !isChecking {
                 Text("No providers are enabled yet. Configure an identity provider to continue.")
                     .font(.footnote)
-                    .foregroundStyle(ClaritasPalette.beige.opacity(0.9))
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
-                    .background(ClaritasPalette.darkBlue.opacity(0.86))
+                    .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(ClaritasPalette.beige.opacity(0.45), lineWidth: 1)
+                            .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
@@ -167,7 +168,7 @@ struct LoginView: View {
                 Button(action: { showMethods.toggle() }) {
                     Text(showMethods ? "Hide other methods" : "Other methods")
                         .font(.footnote.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.beige)
+                        .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                 }
                 .buttonStyle(.plain)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -194,10 +195,10 @@ struct LoginView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("No account yet?")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.offWhite)
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                     Text("Create your account in seconds with a provider.")
                         .font(.footnote)
-                        .foregroundStyle(ClaritasPalette.beige.opacity(0.9))
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
 
                     Button("Create account") {
                         handleModeChange(.signup)
@@ -208,21 +209,21 @@ struct LoginView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
                     .foregroundStyle(ClaritasPalette.text)
-                    .background(ClaritasPalette.orange)
+                    .background(ClaritasPalette.shellAccent(for: colorScheme))
                     .clipShape(Capsule())
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(ClaritasPalette.darkBlue.opacity(0.86))
+                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(ClaritasPalette.beige.opacity(0.45), lineWidth: 1)
+                        .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
                 Text("Already have access? Sign in.")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(ClaritasPalette.beige)
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .onTapGesture {
                         handleModeChange(.signin)
@@ -233,13 +234,16 @@ struct LoginView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(hex: "#102D38").opacity(0.8))
+                .fill(ClaritasPalette.shellRaised(for: colorScheme))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        colors: [Color.white.opacity(0.32), ClaritasPalette.beige.opacity(0.22)],
+                        colors: [
+                            ClaritasPalette.glassHighlight(for: colorScheme),
+                            ClaritasPalette.shellBorderStrong(for: colorScheme)
+                        ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
@@ -255,10 +259,10 @@ struct LoginView: View {
             modeButton(.signup)
         }
         .padding(6)
-        .background(ClaritasPalette.darkBlue.opacity(0.86))
+        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme))
         .overlay(
             RoundedRectangle(cornerRadius: 999)
-                .stroke(ClaritasPalette.beige.opacity(0.45), lineWidth: 1)
+                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
         )
         .clipShape(Capsule())
     }
@@ -269,8 +273,8 @@ struct LoginView: View {
                 .font(.footnote.weight(.semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
-                .foregroundStyle(mode == target ? ClaritasPalette.text : ClaritasPalette.beige.opacity(0.85))
-                .background(mode == target ? ClaritasPalette.lightGreen : Color.clear)
+                .foregroundStyle(mode == target ? ClaritasPalette.text : ClaritasPalette.shellMuted(for: colorScheme))
+                .background(mode == target ? ClaritasPalette.shellHighlight(for: colorScheme) : Color.clear)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -283,13 +287,13 @@ struct LoginView: View {
                     Text(item.uppercased())
                         .font(.caption2.weight(.semibold))
                         .tracking(2)
-                        .foregroundStyle(ClaritasPalette.beige.opacity(0.9))
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(ClaritasPalette.darkBlue.opacity(0.92))
+                        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme))
                         .overlay(
                             RoundedRectangle(cornerRadius: 999)
-                                .stroke(ClaritasPalette.beige.opacity(0.45), lineWidth: 1)
+                                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                         )
                         .clipShape(Capsule())
                 }
@@ -301,22 +305,22 @@ struct LoginView: View {
 
     private var statusBadgeBackground: Color {
         if isChecking {
-            return Color(red: 0.18, green: 0.23, blue: 0.28)
+            return ClaritasPalette.shellSurfaceMuted(for: colorScheme)
         }
         if enabledProviders.isEmpty {
-            return Color(red: 0.24, green: 0.15, blue: 0.17)
+            return ClaritasPalette.negativeText(for: colorScheme).opacity(0.14)
         }
-        return Color(red: 0.05, green: 0.32, blue: 0.27)
+        return ClaritasPalette.positiveText(for: colorScheme).opacity(0.14)
     }
 
     private var statusBadgeForeground: Color {
         if isChecking {
-            return Color(red: 0.76, green: 0.79, blue: 0.83)
+            return ClaritasPalette.shellMuted(for: colorScheme)
         }
         if enabledProviders.isEmpty {
-            return Color(red: 0.93, green: 0.75, blue: 0.76)
+            return ClaritasPalette.negativeText(for: colorScheme)
         }
-        return Color(red: 0.72, green: 0.90, blue: 0.80)
+        return ClaritasPalette.positiveText(for: colorScheme)
     }
 
     private func handleModeChange(_ nextMode: Mode) {
@@ -384,6 +388,7 @@ private struct ProviderButton: View {
     let enabled: Bool
     let busy: Bool
     let onTap: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     private var canUse: Bool { enabled && !busy }
 
@@ -393,13 +398,15 @@ private struct ProviderButton: View {
     }
 
     private var badgeBackground: Color {
-        if busy { return Color(red: 0.18, green: 0.23, blue: 0.28) }
-        return enabled ? Color(red: 0.05, green: 0.32, blue: 0.27) : Color(red: 0.22, green: 0.24, blue: 0.28)
+        if busy { return ClaritasPalette.shellSurfaceMuted(for: colorScheme) }
+        return enabled
+            ? ClaritasPalette.positiveText(for: colorScheme).opacity(0.14)
+            : ClaritasPalette.shellSurfaceMuted(for: colorScheme)
     }
 
     private var badgeForeground: Color {
-        if busy { return Color(red: 0.76, green: 0.79, blue: 0.83) }
-        return enabled ? Color(red: 0.72, green: 0.90, blue: 0.80) : Color(red: 0.66, green: 0.70, blue: 0.75)
+        if busy { return ClaritasPalette.shellMuted(for: colorScheme) }
+        return enabled ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme)
     }
 
     var body: some View {
@@ -411,10 +418,10 @@ private struct ProviderButton: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(enabled ? Color(red: 0.86, green: 0.91, blue: 0.95) : Color(red: 0.66, green: 0.70, blue: 0.75))
+                        .foregroundStyle(enabled ? ClaritasPalette.shellInk(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(Color(red: 0.56, green: 0.64, blue: 0.70))
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 }
 
                 Spacer()
@@ -428,10 +435,10 @@ private struct ProviderButton: View {
                     .clipShape(Capsule())
             }
             .padding(14)
-            .background(Color(red: 0.05, green: 0.10, blue: 0.15).opacity(enabled ? 1 : 0.92))
+            .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme).opacity(enabled ? 1 : 0.74))
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color(red: 0.16, green: 0.25, blue: 0.33), lineWidth: 1)
+                    .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
