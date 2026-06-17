@@ -355,6 +355,18 @@ function getOpenRouterFallbackModel(config) {
         return "openrouter/free";
     return config.modelID;
 }
+function describeOpenRouterFallbackAvailability(config) {
+    if (config.providerID !== "openrouter") {
+        return `OpenRouter fallback is unavailable because OPENCODE_MODEL uses provider ${config.providerID || "unknown"}.`;
+    }
+    if (!getOpenRouterFallbackModel(config)) {
+        return "OpenRouter fallback is unavailable because OPENCODE_MODEL does not include a model id.";
+    }
+    if (!config.openRouterApiKey) {
+        return "OpenRouter fallback is unavailable because OPENROUTER_API_KEY is not configured in the API deployment.";
+    }
+    return "OpenRouter fallback is available.";
+}
 class OpenCodeLlmClient {
     config;
     constructor(config = buildOpenCodeConfig()) {
@@ -390,9 +402,11 @@ class OpenCodeLlmClient {
                 sessionId = await this.createSession(request.title || "Claritas daily briefing generation");
             }
             catch (error) {
-                if (isOpenCodeTransportError(error) && generationAttempt < OPENCODE_GENERATION_TRANSPORT_ATTEMPTS) {
+                if (isOpenCodeTransportError(error)) {
                     lastTransportError = error;
-                    continue generationAttempts;
+                    if (generationAttempt < OPENCODE_GENERATION_TRANSPORT_ATTEMPTS)
+                        continue generationAttempts;
+                    break generationAttempts;
                 }
                 throw error;
             }
@@ -411,9 +425,11 @@ class OpenCodeLlmClient {
                     });
                 }
                 catch (error) {
-                    if (isOpenCodeTransportError(error) && generationAttempt < OPENCODE_GENERATION_TRANSPORT_ATTEMPTS) {
+                    if (isOpenCodeTransportError(error)) {
                         lastTransportError = error;
-                        continue generationAttempts;
+                        if (generationAttempt < OPENCODE_GENERATION_TRANSPORT_ATTEMPTS)
+                            continue generationAttempts;
+                        break generationAttempts;
                     }
                     throw error;
                 }
@@ -487,7 +503,7 @@ class OpenCodeLlmClient {
     async generateViaOpenRouterFallback(request, openCodeError) {
         const model = getOpenRouterFallbackModel(this.config);
         if (!model || !this.config.openRouterApiKey) {
-            throw openCodeError;
+            throw new LlmProviderError(`${openCodeError.message}. ${describeOpenRouterFallbackAvailability(this.config)}`, openCodeError.status, openCodeError.responseBody);
         }
         const maxAttempts = Math.min(Math.max((request.retryCount ?? 2) + 1, 1), 3);
         let lastParseError = null;
