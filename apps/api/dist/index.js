@@ -51,6 +51,10 @@ const briefing_generator_1 = require("./briefing-generator");
 const llm_1 = require("./llm");
 const app = (0, express_1.default)();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
+const DAILY_BRIEFING_SCHEDULER_LOCK_NAMESPACE = 9433;
+const DAILY_BRIEFING_SCHEDULER_LOCK_KEY = 1;
+const DAILY_BRIEFING_SCHEDULER_POLL_SECONDS = parseBoundedIntEnv(process.env.DAILY_BRIEFING_SCHEDULER_POLL_SECONDS, 30, 3600, 60);
+const DAILY_BRIEFING_SCHEDULER_BATCH_SIZE = parseBoundedIntEnv(process.env.DAILY_BRIEFING_SCHEDULER_BATCH_SIZE, 1, 500, 100);
 app.set("trust proxy", 1);
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 app.use(express_1.default.json());
@@ -60,6 +64,8 @@ app.use("/api/auth", auth_1.default);
 const requireAdminRole = (0, auth_1.requireRole)("admin");
 const requireSession = (0, auth_1.requireAuth)();
 const requireAuthenticated = (0, auth_1.requirePaidAccess)();
+let dailyBriefingSchedulerTimer = null;
+let dailyBriefingSchedulerRunning = false;
 class AdminApiError extends Error {
     status;
     constructor(status, message) {
@@ -191,6 +197,16 @@ function parsePipeline(value) {
         return value;
     return undefined;
 }
+function parseBoundedIntEnv(raw, min, max, fallback) {
+    const parsed = typeof raw === "number" && Number.isFinite(raw)
+        ? Math.trunc(raw)
+        : typeof raw === "string" && raw.trim()
+            ? Number.parseInt(raw, 10)
+            : Number.NaN;
+    if (!Number.isFinite(parsed))
+        return fallback;
+    return Math.min(Math.max(parsed, min), max);
+}
 function timestampToApiString(value) {
     if (value == null)
         return null;
@@ -207,6 +223,12 @@ function dateToApiString(value) {
     if (value instanceof Date)
         return value.toISOString().slice(0, 10);
     return value.slice(0, 10);
+}
+function timeToApiString(value) {
+    if (value instanceof Date)
+        return value.toISOString().slice(11, 16);
+    const match = value.trim().match(/^(\d{2}):(\d{2})/);
+    return match ? `${match[1]}:${match[2]}` : value.trim();
 }
 function parseBriefingDate(value) {
     if (typeof value !== "string" || !value.trim()) {
@@ -521,6 +543,256 @@ function startDailyBriefingGenerationJob(jobId) {
         console.error(`[daily-briefing-generation] job ${jobId} crashed:`, error);
     });
 }
+function normalizeBriefingScheduleTime(value) {
+    if (typeof value !== "string") {
+        throw new AdminApiError(400, "scheduled_time must use HH:mm.");
+    }
+    const trimmed = value.trim();
+    const match = trimmed.match(/^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/);
+    if (!match) {
+        throw new AdminApiError(400, "scheduled_time must use HH:mm.");
+    }
+    return `${match[1]}:${match[2]}`;
+}
+function normalizeBriefingScheduleTimezone(value) {
+    if (typeof value !== "string" || !value.trim()) {
+        throw new AdminApiError(400, "timezone is required.");
+    }
+    const timezone = value.trim();
+    if (timezone.length > 64) {
+        throw new AdminApiError(400, "timezone is too long.");
+    }
+    try {
+        new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+    }
+    catch {
+        throw new AdminApiError(400, "timezone must be a valid IANA timezone.");
+    }
+    return timezone;
+}
+function parseBriefingSchedulePatch(raw) {
+    const body = asPlainObject(raw);
+    const patch = {};
+    if (Object.prototype.hasOwnProperty.call(body, "enabled")) {
+        if (typeof body.enabled !== "boolean") {
+            throw new AdminApiError(400, "enabled must be a boolean.");
+        }
+        patch.enabled = body.enabled;
+    }
+    const scheduledTime = body.scheduled_time ?? body.schedule_time;
+    if (typeof scheduledTime !== "undefined") {
+        patch.scheduled_time = normalizeBriefingScheduleTime(scheduledTime);
+    }
+    const timezone = body.schedule_timezone ?? body.timezone;
+    if (typeof timezone !== "undefined") {
+        patch.schedule_timezone = normalizeBriefingScheduleTimezone(timezone);
+    }
+    return patch;
+}
+function toDailyBriefingSchedule(row) {
+    return {
+        user_id: Number(row.user_id),
+        enabled: !!row.enabled,
+        scheduled_time: timeToApiString(row.scheduled_time),
+        timezone: row.schedule_timezone,
+        last_scheduled_for: row.last_scheduled_for ? dateToApiString(row.last_scheduled_for) : null,
+        last_triggered_at: timestampToApiString(row.last_triggered_at),
+        last_job_id: row.last_job_id,
+        created_at: timestampToApiString(row.created_at) || new Date().toISOString(),
+        updated_at: timestampToApiString(row.updated_at) || new Date().toISOString(),
+    };
+}
+async function ensureUserDailyBriefingSchedule(userId) {
+    await (0, db_1.query)(`INSERT INTO user_daily_briefing_schedule (user_id)
+     VALUES ($1)
+     ON CONFLICT (user_id) DO NOTHING`, [userId]);
+}
+async function getUserDailyBriefingSchedule(userId) {
+    await ensureUserDailyBriefingSchedule(userId);
+    const { rows } = await (0, db_1.query)(`SELECT
+       user_id,
+       enabled,
+       scheduled_time::text AS scheduled_time,
+       schedule_timezone,
+       last_scheduled_for,
+       last_triggered_at,
+       last_job_id,
+       created_at,
+       updated_at
+     FROM user_daily_briefing_schedule
+     WHERE user_id = $1
+     LIMIT 1`, [userId]);
+    if (!rows[0])
+        throw new AdminApiError(500, "Failed to load daily briefing schedule.");
+    return toDailyBriefingSchedule(rows[0]);
+}
+async function updateUserDailyBriefingSchedule(userId, patch) {
+    await ensureUserDailyBriefingSchedule(userId);
+    const { rows } = await (0, db_1.query)(`UPDATE user_daily_briefing_schedule
+     SET enabled = COALESCE($2, enabled),
+         scheduled_time = COALESCE($3::time, scheduled_time),
+         schedule_timezone = COALESCE($4, schedule_timezone),
+         updated_at = now()
+     WHERE user_id = $1
+     RETURNING
+       user_id,
+       enabled,
+       scheduled_time::text AS scheduled_time,
+       schedule_timezone,
+       last_scheduled_for,
+       last_triggered_at,
+       last_job_id,
+       created_at,
+       updated_at`, [
+        userId,
+        typeof patch.enabled === "boolean" ? patch.enabled : null,
+        patch.scheduled_time ?? null,
+        patch.schedule_timezone ?? null,
+    ]);
+    if (!rows[0])
+        throw new AdminApiError(500, "Failed to update daily briefing schedule.");
+    return toDailyBriefingSchedule(rows[0]);
+}
+function getUtcBriefingDateForSchedule(localScheduleDate) {
+    const utcToday = new Date().toISOString().slice(0, 10);
+    return localScheduleDate > utcToday ? utcToday : localScheduleDate;
+}
+async function getDueDailyBriefingSchedules() {
+    const { rows } = await (0, db_1.query)(`SELECT
+       user_id,
+       enabled,
+       scheduled_time::text AS scheduled_time,
+       schedule_timezone,
+       last_scheduled_for,
+       last_triggered_at,
+       last_job_id,
+       created_at,
+       updated_at,
+       timezone(schedule_timezone, now())::date AS local_schedule_date
+     FROM user_daily_briefing_schedule
+     WHERE enabled = true
+       AND timezone(schedule_timezone, now())::time >= scheduled_time
+       AND (
+         last_scheduled_for IS NULL
+         OR last_scheduled_for < timezone(schedule_timezone, now())::date
+       )
+     ORDER BY schedule_timezone ASC, scheduled_time ASC, user_id ASC
+     LIMIT $1`, [DAILY_BRIEFING_SCHEDULER_BATCH_SIZE]);
+    return rows;
+}
+async function getActiveDailyBriefingGenerationJob(briefingDate) {
+    const { rows } = await (0, db_1.query)(`SELECT
+       id,
+       briefing_date,
+       status,
+       options,
+       briefing_id,
+       generation,
+       error,
+       created_at,
+       started_at,
+       finished_at,
+       updated_at
+     FROM daily_signal_briefing_generation_job
+     WHERE briefing_date = $1::date
+       AND status IN ('queued', 'running')
+     ORDER BY created_at DESC
+     LIMIT 1`, [briefingDate]);
+    return rows[0] ?? null;
+}
+async function ensurePublishedDailyBriefingGenerationJob(briefingDate) {
+    const published = await (0, db_1.query)(`SELECT id
+     FROM daily_signal_briefing
+     WHERE briefing_date = $1::date
+       AND status = 'published'
+     LIMIT 1`, [briefingDate]);
+    if (published.rows[0])
+        return null;
+    const activeJob = await getActiveDailyBriefingGenerationJob(briefingDate);
+    if (activeJob) {
+        if (activeJob.status === "queued")
+            startDailyBriefingGenerationJob(activeJob.id);
+        return activeJob.id;
+    }
+    const job = await createDailyBriefingGenerationJob(briefingDate, {
+        briefingDate,
+        status: "published",
+        lookbackHours: 24,
+    });
+    startDailyBriefingGenerationJob(job.id);
+    return job.id;
+}
+async function markDailyBriefingSchedulesTriggered(userIds, localScheduleDate, jobId) {
+    if (userIds.length === 0)
+        return;
+    await (0, db_1.query)(`UPDATE user_daily_briefing_schedule
+     SET last_scheduled_for = $2::date,
+         last_triggered_at = now(),
+         last_job_id = COALESCE($3, last_job_id),
+         updated_at = now()
+     WHERE user_id = ANY($1::bigint[])`, [userIds, localScheduleDate, jobId]);
+}
+async function withDailyBriefingSchedulerLock(task) {
+    await (0, db_1.withTransaction)(async (client) => {
+        const { rows } = await client.query(`SELECT pg_try_advisory_xact_lock($1::int, $2::int) AS locked`, [DAILY_BRIEFING_SCHEDULER_LOCK_NAMESPACE, DAILY_BRIEFING_SCHEDULER_LOCK_KEY]);
+        if (!rows[0]?.locked)
+            return;
+        await task();
+    });
+}
+async function runDailyBriefingSchedulerCycle() {
+    if (dailyBriefingSchedulerRunning)
+        return;
+    dailyBriefingSchedulerRunning = true;
+    try {
+        await withDailyBriefingSchedulerLock(async () => {
+            const dueSchedules = await getDueDailyBriefingSchedules();
+            const scheduleGroups = new Map();
+            for (const row of dueSchedules) {
+                const localScheduleDate = dateToApiString(row.local_schedule_date);
+                const briefingDate = getUtcBriefingDateForSchedule(localScheduleDate);
+                const key = `${localScheduleDate}:${briefingDate}`;
+                const current = scheduleGroups.get(key) ?? {
+                    localScheduleDate,
+                    briefingDate,
+                    userIds: [],
+                };
+                current.userIds.push(Number(row.user_id));
+                scheduleGroups.set(key, current);
+            }
+            for (const group of scheduleGroups.values()) {
+                const jobId = await ensurePublishedDailyBriefingGenerationJob(group.briefingDate);
+                await markDailyBriefingSchedulesTriggered(group.userIds, group.localScheduleDate, jobId);
+            }
+        });
+    }
+    finally {
+        dailyBriefingSchedulerRunning = false;
+    }
+}
+function parseDailyBriefingSchedulerEnabled() {
+    const raw = (process.env.DAILY_BRIEFING_SCHEDULER_ENABLED || "true").trim().toLowerCase();
+    return !["false", "0", "off", "no"].includes(raw);
+}
+function startDailyBriefingSchedulerWorker() {
+    if (!parseDailyBriefingSchedulerEnabled()) {
+        console.log("Daily briefing scheduler disabled via DAILY_BRIEFING_SCHEDULER_ENABLED.");
+        return;
+    }
+    if (dailyBriefingSchedulerTimer)
+        return;
+    console.log(`Daily briefing scheduler started (interval=${DAILY_BRIEFING_SCHEDULER_POLL_SECONDS}s).`);
+    dailyBriefingSchedulerTimer = setInterval(() => {
+        void runDailyBriefingSchedulerCycle().catch((error) => {
+            console.error("Daily briefing scheduler cycle failed:", error);
+        });
+    }, DAILY_BRIEFING_SCHEDULER_POLL_SECONDS * 1000);
+    setTimeout(() => {
+        void runDailyBriefingSchedulerCycle().catch((error) => {
+            console.error("Daily briefing scheduler initial cycle failed:", error);
+        });
+    }, 5_000);
+}
 function parseBillingStatus(value) {
     if (typeof value !== "string")
         return undefined;
@@ -606,6 +878,13 @@ function getRequestActor(res) {
         triggerMode: "admin_ui",
     };
 }
+function getAuthenticatedUserId(res) {
+    const locals = res.locals;
+    const userId = locals.auth?.user?.id;
+    if (typeof userId !== "number")
+        throw new AdminApiError(401, "unauthorized");
+    return userId;
+}
 function requireIngestionAccess(req, res, next) {
     const sharedToken = process.env.INGEST_API_TOKEN;
     if (sharedToken) {
@@ -642,6 +921,31 @@ app.get("/api/billing/me", requireSession, async (_req, res) => {
         });
     }
     catch (e) {
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.get("/api/me/briefings/daily/schedule", requireSession, async (_req, res) => {
+    try {
+        const userId = getAuthenticatedUserId(res);
+        const schedule = await getUserDailyBriefingSchedule(userId);
+        return res.json({ schedule });
+    }
+    catch (e) {
+        if (e instanceof AdminApiError)
+            return res.status(e.status).json({ error: e.message });
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.put("/api/me/briefings/daily/schedule", requireSession, async (req, res) => {
+    try {
+        const userId = getAuthenticatedUserId(res);
+        const patch = parseBriefingSchedulePatch(req.body);
+        const schedule = await updateUserDailyBriefingSchedule(userId, patch);
+        return res.json({ schedule });
+    }
+    catch (e) {
+        if (e instanceof AdminApiError)
+            return res.status(e.status).json({ error: e.message });
         return res.status(500).json({ error: e.message || String(e) });
     }
 });
@@ -1627,6 +1931,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
     }
 });
 (0, ingestion_automation_1.startIngestionAutomationWorker)();
+startDailyBriefingSchedulerWorker();
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`API listening on http://0.0.0.0:${PORT}`);
 });

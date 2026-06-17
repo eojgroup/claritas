@@ -101,6 +101,18 @@ export type DailySignalBriefing = {
   updated_at: string;
 };
 
+export type DailyBriefingSchedule = {
+  user_id: number;
+  enabled: boolean;
+  scheduled_time: string;
+  timezone: string;
+  last_scheduled_for: string | null;
+  last_triggered_at: string | null;
+  last_job_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AdminDailyBriefingGeneratorConfig = {
   prompt_version: string;
   llm: {
@@ -391,6 +403,29 @@ export async function fetchDailySignalBriefingLatest(): Promise<DailySignalBrief
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch daily briefing"));
   const data = await resp.json();
   return (data.briefing ?? null) as DailySignalBriefing | null;
+}
+
+export async function fetchDailyBriefingSchedule(): Promise<DailyBriefingSchedule> {
+  const resp = await fetch(`${API_BASE}/api/me/briefings/daily/schedule`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch daily briefing schedule"));
+  const data = await resp.json();
+  return data.schedule as DailyBriefingSchedule;
+}
+
+export async function updateDailyBriefingSchedule(payload: {
+  enabled?: boolean;
+  scheduled_time?: string;
+  timezone?: string;
+}): Promise<DailyBriefingSchedule> {
+  const resp = await fetch(`${API_BASE}/api/me/briefings/daily/schedule`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to update daily briefing schedule"));
+  const data = await resp.json();
+  return data.schedule as DailyBriefingSchedule;
 }
 
 export async function fetchAdminDailyBriefingGeneratorConfig(): Promise<AdminDailyBriefingGeneratorConfig> {

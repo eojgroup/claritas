@@ -403,6 +403,17 @@ const formatSignedMetric = (
   return `${value >= 0 ? "+" : "-"}${abs}${suffix}`;
 };
 
+const getBrowserTimeZone = (): string => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+};
+
+const isValidScheduleTime = (value: string): boolean =>
+  /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+
 const OPENWEATHER_ICON_BASE = "https://openweathermap.org/img/wn";
 
 const WEATHER_SYMBOLS: Record<string, string> = {
@@ -581,6 +592,7 @@ import {
   fetchAuthProviders,
   fetchCountryStats,
   fetchCountryWeather,
+  fetchDailyBriefingSchedule,
   fetchDailySignalBriefingLatest,
   fetchMarketEarnings,
   fetchMarketQuotes,
@@ -589,12 +601,14 @@ import {
   getAuthStartUrl,
   logoutAuth,
   imageProxy,
+  updateDailyBriefingSchedule,
   type AuthProvider,
   type AuthProviderId,
   type AuthUser,
   type CountryStat,
   type CountryStatsCoverage,
   type CountryWeather,
+  type DailyBriefingSchedule,
   type DailySignalBriefing,
   type EarningsEvent,
   type MarketQuote,
@@ -703,6 +717,16 @@ export default function ClaritasDashboard() {
   const [profileSection, setProfileSection] = useState<
     "overview" | "identity" | "preferences" | "security" | "policies"
   >("overview");
+  const [dailyBriefingSchedule, setDailyBriefingSchedule] = useState<DailyBriefingSchedule | null>(null);
+  const [dailyBriefingScheduleDraft, setDailyBriefingScheduleDraft] = useState({
+    enabled: true,
+    scheduled_time: "07:00",
+    timezone: getBrowserTimeZone(),
+  });
+  const [isLoadingDailyBriefingSchedule, setIsLoadingDailyBriefingSchedule] = useState(false);
+  const [isSavingDailyBriefingSchedule, setIsSavingDailyBriefingSchedule] = useState(false);
+  const [dailyBriefingScheduleError, setDailyBriefingScheduleError] = useState<string | null>(null);
+  const [dailyBriefingScheduleNotice, setDailyBriefingScheduleNotice] = useState<string | null>(null);
   const profileSections = PROFILE_SECTIONS;
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
@@ -924,6 +948,33 @@ export default function ClaritasDashboard() {
       });
     void loadNewsData("recent");
   }, [authStatus, hasPaidAccess, loadNewsData]);
+
+  useEffect(() => {
+    if (authStatus !== "authed") return;
+    let cancelled = false;
+    setIsLoadingDailyBriefingSchedule(true);
+    setDailyBriefingScheduleError(null);
+    fetchDailyBriefingSchedule()
+      .then((schedule) => {
+        if (cancelled) return;
+        setDailyBriefingSchedule(schedule);
+        setDailyBriefingScheduleDraft({
+          enabled: schedule.enabled,
+          scheduled_time: schedule.scheduled_time,
+          timezone: schedule.timezone || getBrowserTimeZone(),
+        });
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDailyBriefingSchedule(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus]);
 
   useEffect(() => {
     if (authStatus !== "authed" || !hasPaidAccess) return;
@@ -2838,6 +2889,39 @@ export default function ClaritasDashboard() {
       });
     } finally {
       setIsRefreshingAccess(false);
+    }
+  };
+
+  const handleSaveDailyBriefingSchedule = async () => {
+    if (isSavingDailyBriefingSchedule) return;
+    const scheduledTime = dailyBriefingScheduleDraft.scheduled_time.trim();
+    const timezone = dailyBriefingScheduleDraft.timezone.trim() || getBrowserTimeZone();
+    if (!isValidScheduleTime(scheduledTime)) {
+      setDailyBriefingScheduleError("Use a valid 24-hour time, for example 07:30.");
+      setDailyBriefingScheduleNotice(null);
+      return;
+    }
+
+    setIsSavingDailyBriefingSchedule(true);
+    setDailyBriefingScheduleError(null);
+    setDailyBriefingScheduleNotice(null);
+    try {
+      const schedule = await updateDailyBriefingSchedule({
+        enabled: dailyBriefingScheduleDraft.enabled,
+        scheduled_time: scheduledTime,
+        timezone,
+      });
+      setDailyBriefingSchedule(schedule);
+      setDailyBriefingScheduleDraft({
+        enabled: schedule.enabled,
+        scheduled_time: schedule.scheduled_time,
+        timezone: schedule.timezone || timezone,
+      });
+      setDailyBriefingScheduleNotice("Daily briefing schedule saved.");
+    } catch (err) {
+      setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSavingDailyBriefingSchedule(false);
     }
   };
 
@@ -6394,6 +6478,92 @@ export default function ClaritasDashboard() {
                               )}
                               {dark ? "Light" : "Dark"}
                             </button>
+                          </div>
+                          <div className="rounded-xl border border-[color:var(--shell-border)] px-4 py-3">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                              <div>
+                                <div className="font-semibold text-[color:var(--shell-ink)]">
+                                  Daily briefing
+                                </div>
+                                <div className="text-xs text-[color:var(--shell-muted)]">
+                                  Scheduled at {dailyBriefingScheduleDraft.scheduled_time}{" "}
+                                  {dailyBriefingScheduleDraft.timezone}
+                                </div>
+                              </div>
+                              <label className="inline-flex items-center gap-2 text-xs font-semibold text-[color:var(--shell-ink)]">
+                                <input
+                                  type="checkbox"
+                                  checked={dailyBriefingScheduleDraft.enabled}
+                                  onChange={(event) =>
+                                    setDailyBriefingScheduleDraft((current) => ({
+                                      ...current,
+                                      enabled: event.currentTarget.checked,
+                                    }))
+                                  }
+                                  className="h-4 w-4 rounded border-[color:var(--shell-border)]"
+                                />
+                                Enabled
+                              </label>
+                            </div>
+                            <div className="mt-4 grid gap-3 md:grid-cols-[160px_minmax(0,1fr)_auto] md:items-end">
+                              <label className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                                Time
+                                <input
+                                  type="time"
+                                  value={dailyBriefingScheduleDraft.scheduled_time}
+                                  onChange={(event) =>
+                                    setDailyBriefingScheduleDraft((current) => ({
+                                      ...current,
+                                      scheduled_time: event.currentTarget.value,
+                                    }))
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--shell-ink)]"
+                                />
+                              </label>
+                              <label className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                                Timezone
+                                <input
+                                  type="text"
+                                  value={dailyBriefingScheduleDraft.timezone}
+                                  onChange={(event) =>
+                                    setDailyBriefingScheduleDraft((current) => ({
+                                      ...current,
+                                      timezone: event.currentTarget.value,
+                                    }))
+                                  }
+                                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--shell-ink)]"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => void handleSaveDailyBriefingSchedule()}
+                                disabled={isSavingDailyBriefingSchedule || isLoadingDailyBriefingSchedule}
+                                className="inline-flex items-center justify-center rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-4 py-2 text-sm font-semibold text-[color:var(--shell-on-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {isSavingDailyBriefingSchedule ? "Saving…" : "Save"}
+                              </button>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[color:var(--shell-muted)]">
+                              <span>
+                                Last run:{" "}
+                                {dailyBriefingSchedule?.last_triggered_at
+                                  ? new Date(dailyBriefingSchedule.last_triggered_at).toLocaleString()
+                                  : "Not yet"}
+                              </span>
+                              {dailyBriefingSchedule?.last_scheduled_for && (
+                                <span>Schedule date: {dailyBriefingSchedule.last_scheduled_for}</span>
+                              )}
+                            </div>
+                            {dailyBriefingScheduleNotice && (
+                              <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                                {dailyBriefingScheduleNotice}
+                              </div>
+                            )}
+                            {dailyBriefingScheduleError && (
+                              <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                                {dailyBriefingScheduleError}
+                              </div>
+                            )}
                           </div>
                           <div className="rounded-xl border border-[color:var(--shell-border)] px-4 py-3">
                             <div className="font-semibold text-[color:var(--shell-ink)]">
