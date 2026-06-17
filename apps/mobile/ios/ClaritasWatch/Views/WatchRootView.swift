@@ -195,6 +195,7 @@ private struct WatchBriefingScheduleView: View {
                 }
             }
             .navigationTitle("Schedule")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
             .task {
                 apply(model.briefingSchedule)
             }
@@ -268,6 +269,7 @@ private struct WatchNewsView: View {
                 }
             }
             .navigationTitle("News")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
     }
 }
@@ -304,6 +306,7 @@ private struct WatchMarketsView: View {
                 }
             }
             .navigationTitle("Markets")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
     }
 
@@ -343,6 +346,7 @@ private struct WatchWeatherView: View {
                 }
             }
             .navigationTitle("Weather")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
     }
 

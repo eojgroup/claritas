@@ -56,7 +56,7 @@ configure_target(
     "PRODUCT_BUNDLE_IDENTIFIER" => bundle_id,
     "SDKROOT" => "iphoneos",
     "SWIFT_VERSION" => "5.0",
-    "TARGETED_DEVICE_FAMILY" => "1"
+    "TARGETED_DEVICE_FAMILY" => "1,2"
   }
 )
 

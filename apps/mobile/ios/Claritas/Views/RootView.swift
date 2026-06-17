@@ -10,10 +10,38 @@ struct RootView: View {
         case admin
         case profile
         case policies
+
+        var title: String {
+            switch self {
+            case .dashboard: return "Dashboard"
+            case .news: return "News"
+            case .weather: return "Weather"
+            case .markets: return "Markets"
+            case .admin: return "Admin"
+            case .profile: return "Profile"
+            case .policies: return "Policies"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .dashboard: return "square.grid.2x2"
+            case .news: return "newspaper"
+            case .weather: return "cloud.sun"
+            case .markets: return "chart.line.uptrend.xyaxis"
+            case .admin: return "shield.lefthalf.filled"
+            case .profile: return "person.crop.circle"
+            case .policies: return "doc.text"
+            }
+        }
     }
 
     @EnvironmentObject private var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.colorScheme) private var colorScheme
     @State private var tab: Tab = .dashboard
+    @State private var sidebarSelection: Tab? = .dashboard
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @AppStorage("THEME_DARK") private var dark: Bool = false
 
     var body: some View {
@@ -21,72 +49,10 @@ struct RootView: View {
             if model.authStatus == .authed {
                 if !model.hasPaidAccess, model.authUser != nil {
                     PaywallView()
+                } else if horizontalSizeClass == .regular {
+                    regularWidthShell
                 } else {
-                    TabView(selection: $tab) {
-                        NavigationStack {
-                            DashboardView()
-                                .navigationTitle("Claritas")
-                                .modifier(ShellNavigationChrome())
-                        }
-                        .tabItem { Label("Dashboard", systemImage: "square.grid.2x2") }
-                        .tag(Tab.dashboard)
-
-                        NavigationStack {
-                            NewsWorkspaceView()
-                                .navigationTitle("News")
-                                .modifier(ShellNavigationChrome())
-                        }
-                        .tabItem { Label("News", systemImage: "newspaper") }
-                        .tag(Tab.news)
-
-                        NavigationStack {
-                            WeatherWorkspaceView()
-                                .navigationTitle("Weather")
-                                .modifier(ShellNavigationChrome())
-                        }
-                        .tabItem { Label("Weather", systemImage: "cloud.sun") }
-                        .tag(Tab.weather)
-
-                        NavigationStack {
-                            MarketsWorkspaceView()
-                                .navigationTitle("Markets")
-                                .modifier(ShellNavigationChrome())
-                        }
-                        .tabItem { Label("Markets", systemImage: "chart.line.uptrend.xyaxis") }
-                        .tag(Tab.markets)
-
-                        if model.isAdmin {
-                            NavigationStack {
-                                AdminWorkspaceView()
-                                    .navigationTitle("Admin")
-                                    .modifier(ShellNavigationChrome())
-                            }
-                            .tabItem { Label("Admin", systemImage: "shield.lefthalf.filled") }
-                            .tag(Tab.admin)
-                        }
-
-                        NavigationStack {
-                            ProfileView()
-                                .navigationTitle("Profile")
-                                .modifier(ShellNavigationChrome())
-                        }
-                        .tabItem { Label("Profile", systemImage: "person.crop.circle") }
-                        .tag(Tab.profile)
-
-                        NavigationStack {
-                            PoliciesWorkspaceView()
-                                .navigationTitle("Policies")
-                                .modifier(ShellNavigationChrome())
-                        }
-                        .tabItem { Label("Policies", systemImage: "doc.text") }
-                        .tag(Tab.policies)
-                    }
-                    .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
-                    .onChange(of: model.isAdmin) { isAdmin in
-                        if !isAdmin && tab == .admin {
-                            tab = .dashboard
-                        }
-                    }
+                    compactShell
                 }
             } else {
                 LoginView()
@@ -109,6 +75,151 @@ struct RootView: View {
                 await model.refreshMarketStatus(forceRefresh: true)
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
             }
+        }
+    }
+
+    private var compactShell: some View {
+        TabView(selection: $tab) {
+            compactTab(.dashboard)
+            compactTab(.news)
+            compactTab(.weather)
+            compactTab(.markets)
+
+            if model.isAdmin {
+                compactTab(.admin)
+            }
+
+            compactTab(.profile)
+            compactTab(.policies)
+        }
+        .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
+        .onChange(of: model.isAdmin) { isAdmin in
+            if !isAdmin && tab == .admin {
+                tab = .dashboard
+            }
+        }
+    }
+
+    private func compactTab(_ item: Tab) -> some View {
+        NavigationStack {
+            destinationView(for: item)
+                .navigationTitle(item == .dashboard ? "Claritas" : item.title)
+                .modifier(ShellNavigationChrome())
+        }
+        .tabItem { Label(item.title, systemImage: item.icon) }
+        .tag(item)
+    }
+
+    private var regularWidthShell: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+        } detail: {
+            NavigationStack {
+                destinationView(for: resolvedSidebarSelection)
+                    .navigationTitle(resolvedSidebarSelection.title)
+                    .modifier(ShellNavigationChrome())
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .tint(ClaritasPalette.shellAccent(for: colorScheme))
+        .onChange(of: model.isAdmin) { isAdmin in
+            if !isAdmin && sidebarSelection == .admin {
+                sidebarSelection = .dashboard
+            }
+        }
+    }
+
+    private var resolvedSidebarSelection: Tab {
+        if let sidebarSelection, sidebarItems.contains(sidebarSelection) {
+            return sidebarSelection
+        }
+        return .dashboard
+    }
+
+    private var sidebarItems: [Tab] {
+        model.isAdmin
+            ? [.dashboard, .news, .weather, .markets, .admin, .profile, .policies]
+            : [.dashboard, .news, .weather, .markets, .profile, .policies]
+    }
+
+    private var sidebar: some View {
+        List(selection: $sidebarSelection) {
+            Section("Workspace") {
+                sidebarLink(.dashboard)
+            }
+            Section("Signals") {
+                sidebarLink(.news)
+                sidebarLink(.weather)
+                sidebarLink(.markets)
+            }
+            if model.isAdmin {
+                Section("Operations") {
+                    sidebarLink(.admin)
+                }
+            }
+            Section("Account") {
+                sidebarLink(.profile)
+                sidebarLink(.policies)
+            }
+        }
+        .navigationTitle("Claritas")
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(ClaritasPalette.shellSidebar(for: colorScheme))
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                ThemeToggle()
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            sidebarStatus
+        }
+    }
+
+    private func sidebarLink(_ item: Tab) -> some View {
+        Label(item.title, systemImage: item.icon)
+            .tag(item)
+    }
+
+    private var sidebarStatus: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(ClaritasPalette.positiveText(for: colorScheme))
+                    .frame(width: 7, height: 7)
+                Text("Live workspace")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                ThemeToggle()
+                    .buttonStyle(.plain)
+            }
+            Text(model.authUser?.display_name ?? model.authUser?.email ?? "Signed in")
+                .font(.caption2)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                .lineLimit(1)
+        }
+        .padding(14)
+        .background(.ultraThinMaterial)
+    }
+
+    @ViewBuilder
+    private func destinationView(for item: Tab) -> some View {
+        switch item {
+        case .dashboard:
+            DashboardView()
+        case .news:
+            NewsWorkspaceView()
+        case .weather:
+            WeatherWorkspaceView()
+        case .markets:
+            MarketsWorkspaceView()
+        case .admin:
+            AdminWorkspaceView()
+        case .profile:
+            ProfileView()
+        case .policies:
+            PoliciesWorkspaceView()
         }
     }
 

@@ -1,13 +1,31 @@
 import SwiftUI
 
 enum WatchPalette {
-    static let navy = Color(red: 0.09, green: 0.20, blue: 0.26)
-    static let forest = Color(red: 0.12, green: 0.29, blue: 0.23)
-    static let sage = Color(red: 0.55, green: 0.73, blue: 0.60)
-    static let orange = Color(red: 0.85, green: 0.47, blue: 0.20)
-    static let beige = Color(red: 0.82, green: 0.77, blue: 0.69)
-    static let cream = Color(red: 1.00, green: 0.99, blue: 0.97)
-    static let negative = Color(red: 0.85, green: 0.36, blue: 0.32)
+    static let navy = Color(hex: "#0C1720")
+    static let forest = Color(hex: "#122432")
+    static let sage = Color(hex: "#7FA6B8")
+    static let orange = Color(hex: "#EAA36C")
+    static let beige = Color(hex: "#C9BBA9")
+    static let cream = Color(hex: "#F6EBDD")
+    static let negative = Color(hex: "#D96B62")
+}
+
+private extension Color {
+    init(hex: String) {
+        var raw = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("#") {
+            raw.removeFirst()
+        }
+        guard raw.count == 6, let value = Int(raw, radix: 16) else {
+            self = .clear
+            return
+        }
+        self = Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
 }
 
 struct WatchCard<Content: View>: View {
