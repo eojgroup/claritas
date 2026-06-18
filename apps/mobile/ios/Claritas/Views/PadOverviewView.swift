@@ -4,7 +4,7 @@ import SwiftUI
 struct PadOverviewView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
-    @Binding var destination: PadRootView.Destination?
+    @Binding var destination: RootView.Tab?
 
     private var marketAverage: Double {
         let moves = model.marketQuotes.compactMap(\.percent_change)

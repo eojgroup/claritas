@@ -93,6 +93,8 @@ private struct WatchBriefingView: View {
                         }
                     }
 
+                    scheduleCard
+
                     WatchCard {
                         HStack {
                             metric(value: "\(model.news.count)", label: "News")
@@ -115,8 +117,41 @@ private struct WatchBriefingView: View {
                 }
                 .padding(.horizontal, 3)
             }
+            .navigationTitle("Briefing")
             .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
+    }
+
+    private var scheduleCard: some View {
+        WatchCard {
+            VStack(alignment: .leading, spacing: 8) {
+                WatchSectionLabel(title: "Schedule", icon: "clock")
+                Text(scheduleSummary)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WatchPalette.cream)
+                Text(lastRunSummary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                NavigationLink {
+                    WatchBriefingScheduleContent()
+                } label: {
+                    Label("Edit schedule", systemImage: "clock.badge.checkmark")
+                        .font(.caption.weight(.semibold))
+                }
+            }
+        }
+    }
+
+    private var scheduleSummary: String {
+        guard let schedule = model.briefingSchedule else { return "Schedule not loaded" }
+        guard schedule.enabled else { return "Paused" }
+        return "\(schedule.scheduled_time) \(schedule.timezone)"
+    }
+
+    private var lastRunSummary: String {
+        guard let schedule = model.briefingSchedule else { return "Refresh to load schedule" }
+        return schedule.last_triggered_at.map { "Last run \($0)" } ?? "Not run yet"
     }
 
     private var isRefreshing: Bool {
@@ -139,69 +174,75 @@ private struct WatchBriefingView: View {
 }
 
 private struct WatchBriefingScheduleView: View {
+    var body: some View {
+        NavigationStack {
+            WatchBriefingScheduleContent()
+        }
+    }
+}
+
+private struct WatchBriefingScheduleContent: View {
     @EnvironmentObject private var model: WatchAppModel
     @State private var enabled = true
-    @State private var scheduledTime = WatchBriefingScheduleView.dateFromScheduleTime("07:00")
+    @State private var scheduledTime = WatchBriefingScheduleContent.dateFromScheduleTime("07:00")
     @State private var timezone = TimeZone.current.identifier
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Toggle("Enabled", isOn: $enabled)
+        List {
+            Section {
+                Toggle("Enabled", isOn: $enabled)
 
-                    DatePicker(
-                        "Time",
-                        selection: $scheduledTime,
-                        displayedComponents: .hourAndMinute
-                    )
+                DatePicker(
+                    "Time",
+                    selection: $scheduledTime,
+                    displayedComponents: .hourAndMinute
+                )
 
-                    Picker("Timezone", selection: $timezone) {
-                        ForEach(DailyBriefingScheduleOptions.timezoneOptions(including: timezone), id: \.self) { timezone in
-                            Text(timezone).tag(timezone)
-                        }
+                Picker("Timezone", selection: $timezone) {
+                    ForEach(DailyBriefingScheduleOptions.timezoneOptions(including: timezone), id: \.self) { timezone in
+                        Text(timezone).tag(timezone)
                     }
-
-                    if let schedule = model.briefingSchedule {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Current")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            Text("\(schedule.scheduled_time) \(schedule.timezone)")
-                                .font(.caption.weight(.semibold))
-                            Text(schedule.last_triggered_at.map { "Last run \($0)" } ?? "Not run yet")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if let error = model.briefingScheduleError {
-                        Text(error)
-                            .font(.caption2)
-                            .foregroundStyle(WatchPalette.negative)
-                    }
-
-                    Button {
-                        save()
-                    } label: {
-                        Label(
-                            model.isSavingBriefingSchedule ? "Saving" : "Save",
-                            systemImage: "clock.badge.checkmark"
-                        )
-                    }
-                    .disabled(model.isSavingBriefingSchedule)
-                } header: {
-                    WatchSectionLabel(title: "Briefing time", icon: "clock")
                 }
+
+                if let schedule = model.briefingSchedule {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Current")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("\(schedule.scheduled_time) \(schedule.timezone)")
+                            .font(.caption.weight(.semibold))
+                        Text(schedule.last_triggered_at.map { "Last run \($0)" } ?? "Not run yet")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let error = model.briefingScheduleError {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(WatchPalette.negative)
+                }
+
+                Button {
+                    save()
+                } label: {
+                    Label(
+                        model.isSavingBriefingSchedule ? "Saving" : "Save",
+                        systemImage: "clock.badge.checkmark"
+                    )
+                }
+                .disabled(model.isSavingBriefingSchedule)
+            } header: {
+                WatchSectionLabel(title: "Briefing time", icon: "clock")
             }
-            .navigationTitle("Schedule")
-            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
-            .task {
-                apply(model.briefingSchedule)
-            }
-            .onChange(of: model.briefingSchedule?.updated_at) { _ in
-                apply(model.briefingSchedule)
-            }
+        }
+        .navigationTitle("Schedule")
+        .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+        .task {
+            apply(model.briefingSchedule)
+        }
+        .onChange(of: model.briefingSchedule?.updated_at) { _ in
+            apply(model.briefingSchedule)
         }
     }
 

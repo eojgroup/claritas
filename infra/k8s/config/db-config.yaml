@@ -11,7 +11,7 @@ data:
   AUTH_SUCCESS_REDIRECT_URL: "https://app.example.com/auth/success"
   AUTH_FAILURE_REDIRECT_URL: "https://app.example.com/auth/error"
   AUTH_ALLOWED_REDIRECTS: "https://app.example.com"
-  AUTH_ALLOWED_REDIRECT_SCHEMES: "claritas,claritaspad"
+  AUTH_ALLOWED_REDIRECT_SCHEMES: "claritas"
   AUTH_PROVIDERS: "google,microsoft,apple"
   AUTH_ISSUER_URL: "https://auth.example.com/realms/claritas"
   AUTH_KEYCLOAK_CLIENT_ID: "claritas-api"

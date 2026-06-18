@@ -3,7 +3,9 @@ import SwiftUI
 
 struct RootView: View {
     enum Tab: Hashable {
+        case overview
         case dashboard
+        case briefing
         case news
         case weather
         case markets
@@ -13,7 +15,9 @@ struct RootView: View {
 
         var title: String {
             switch self {
+            case .overview: return "Signal desk"
             case .dashboard: return "Dashboard"
+            case .briefing: return "Briefing"
             case .news: return "News"
             case .weather: return "Weather"
             case .markets: return "Markets"
@@ -25,7 +29,9 @@ struct RootView: View {
 
         var icon: String {
             switch self {
+            case .overview: return "rectangle.3.group.fill"
             case .dashboard: return "square.grid.2x2"
+            case .briefing: return "sparkles"
             case .news: return "newspaper"
             case .weather: return "cloud.sun"
             case .markets: return "chart.line.uptrend.xyaxis"
@@ -40,7 +46,7 @@ struct RootView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.colorScheme) private var colorScheme
     @State private var tab: Tab = .dashboard
-    @State private var sidebarSelection: Tab? = .dashboard
+    @State private var sidebarSelection: Tab? = .overview
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @AppStorage("THEME_DARK") private var dark: Bool = false
 
@@ -81,6 +87,7 @@ struct RootView: View {
     private var compactShell: some View {
         TabView(selection: $tab) {
             compactTab(.dashboard)
+            compactTab(.briefing)
             compactTab(.news)
             compactTab(.weather)
             compactTab(.markets)
@@ -133,19 +140,21 @@ struct RootView: View {
         if let sidebarSelection, sidebarItems.contains(sidebarSelection) {
             return sidebarSelection
         }
-        return .dashboard
+        return .overview
     }
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.dashboard, .news, .weather, .markets, .admin, .profile, .policies]
-            : [.dashboard, .news, .weather, .markets, .profile, .policies]
+            ? [.overview, .dashboard, .briefing, .news, .weather, .markets, .admin, .profile, .policies]
+            : [.overview, .dashboard, .briefing, .news, .weather, .markets, .profile, .policies]
     }
 
     private var sidebar: some View {
         List(selection: $sidebarSelection) {
             Section("Workspace") {
+                sidebarLink(.overview)
                 sidebarLink(.dashboard)
+                sidebarLink(.briefing)
             }
             Section("Signals") {
                 sidebarLink(.news)
@@ -206,8 +215,12 @@ struct RootView: View {
     @ViewBuilder
     private func destinationView(for item: Tab) -> some View {
         switch item {
+        case .overview:
+            PadOverviewView(destination: $sidebarSelection)
         case .dashboard:
             DashboardView()
+        case .briefing:
+            DailyBriefingWorkspaceView()
         case .news:
             NewsWorkspaceView()
         case .weather:
@@ -238,6 +251,284 @@ struct ThemeToggle: View {
     var body: some View {
         Button(action: { dark.toggle() }) {
             Image(systemName: dark ? "sun.max" : "moon")
+        }
+    }
+}
+
+struct DailyBriefingWorkspaceView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var briefingScheduleEnabled: Bool = true
+    @State private var briefingScheduleTime: String = "07:00"
+    @State private var briefingScheduleTimezone: String = TimeZone.current.identifier
+
+    private static let baseScheduleTimeOptions: [String] = stride(from: 0, to: 24 * 60, by: 30).map { minutes in
+        String(format: "%02d:%02d", minutes / 60, minutes % 60)
+    }
+
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(spacing: 16) {
+                    briefingCard
+                    scheduleCard
+                    signalSummary
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+            }
+            .refreshable {
+                await refreshBriefingData()
+            }
+        }
+        .task {
+            if model.dailyBriefingSchedule == nil {
+                await model.loadDailyBriefingSchedule()
+            }
+            applyScheduleDraft(model.dailyBriefingSchedule)
+        }
+        .onChange(of: model.dailyBriefingSchedule?.updated_at) { _ in
+            applyScheduleDraft(model.dailyBriefingSchedule)
+        }
+    }
+
+    private var briefingCard: some View {
+        BrandCard(title: "Daily briefing", icon: "sparkles") {
+            if let briefing = model.dailyBriefing {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(briefing.title)
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                            Text("Updated \(briefing.updatedDate?.formatted(date: .abbreviated, time: .shortened) ?? briefing.briefing_date)")
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        }
+                        Spacer()
+                        Text(briefing.status.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .tracking(1.6)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(ClaritasPalette.positiveText(for: colorScheme).opacity(0.16), in: Capsule())
+                            .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
+                    }
+
+                    Text(briefing.update_text)
+                        .font(.body)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !briefing.key_takeaways.isEmpty {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(Array(briefing.key_takeaways.prefix(6).enumerated()), id: \.offset) { _, takeaway in
+                                HStack(alignment: .top, spacing: 9) {
+                                    Circle()
+                                        .fill(ClaritasPalette.shellAccent(for: colorScheme))
+                                        .frame(width: 6, height: 6)
+                                        .padding(.top, 6)
+                                    Text(takeaway)
+                                        .font(.subheadline)
+                                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+
+                    Button {
+                        Task { await refreshBriefingData() }
+                    } label: {
+                        Label("Refresh briefing", systemImage: "arrow.clockwise")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(ClaritasPalette.shellAccent(for: colorScheme))
+                }
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.largeTitle)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    Text("No published briefing")
+                        .font(.headline)
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    Button {
+                        Task { await refreshBriefingData() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(ClaritasPalette.shellAccent(for: colorScheme))
+                }
+                .frame(maxWidth: .infinity, minHeight: 180)
+            }
+        }
+    }
+
+    private var scheduleCard: some View {
+        BrandCard(title: "Schedule", icon: "clock.badge.checkmark") {
+            VStack(alignment: .leading, spacing: 14) {
+                Toggle(isOn: $briefingScheduleEnabled) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Daily briefing")
+                            .font(.subheadline.weight(.semibold))
+                        Text(scheduleSummary)
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Time")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        Picker("Time", selection: $briefingScheduleTime) {
+                            ForEach(scheduleTimeOptions, id: \.self) { time in
+                                Text(time).tag(time)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Timezone")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        Picker("Timezone", selection: $briefingScheduleTimezone) {
+                            ForEach(DailyBriefingScheduleOptions.timezoneOptions(including: briefingScheduleTimezone), id: \.self) { timezone in
+                                Text(timezone).tag(timezone)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+                .padding(12)
+                .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+                )
+
+                if let schedule = model.dailyBriefingSchedule {
+                    VStack(spacing: 8) {
+                        BriefingInfoRow(label: "Last run", value: schedule.lastTriggeredDate.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "Not yet")
+                        BriefingInfoRow(label: "Schedule date", value: schedule.last_scheduled_for ?? "—")
+                    }
+                } else if model.isLoadingDailyBriefingSchedule {
+                    ProgressView("Loading schedule")
+                        .font(.caption)
+                }
+
+                if let notice = model.dailyBriefingScheduleNotice {
+                    Text(notice)
+                        .font(.caption)
+                        .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
+                }
+
+                if let error = model.dailyBriefingScheduleError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(ClaritasPalette.negativeText(for: colorScheme).opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                }
+
+                Button {
+                    saveBriefingSchedule()
+                } label: {
+                    Label(
+                        model.isSavingDailyBriefingSchedule ? "Saving" : "Save schedule",
+                        systemImage: "clock.badge.checkmark"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ClaritasPalette.shellAccent(for: colorScheme))
+                .disabled(model.isSavingDailyBriefingSchedule || model.isLoadingDailyBriefingSchedule)
+            }
+        }
+    }
+
+    private var signalSummary: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
+            BrandMetricCard(title: "News", value: "\(model.news.count)", detail: "Signals in scope", tone: ClaritasPalette.dataBlue(for: colorScheme))
+            BrandMetricCard(title: "Weather", value: "\(model.weather.count)", detail: "Current observations", tone: ClaritasPalette.shellAccent(for: colorScheme))
+            BrandMetricCard(title: "Markets", value: "\(model.marketQuotes.count)", detail: "Tracked symbols", tone: ClaritasPalette.positiveText(for: colorScheme))
+        }
+    }
+
+    private var scheduleSummary: String {
+        guard briefingScheduleEnabled else { return "Paused" }
+        return "Scheduled at \(briefingScheduleTime) \(briefingScheduleTimezone)"
+    }
+
+    private var scheduleTimeOptions: [String] {
+        if Self.baseScheduleTimeOptions.contains(briefingScheduleTime) {
+            return Self.baseScheduleTimeOptions
+        }
+        return ([briefingScheduleTime] + Self.baseScheduleTimeOptions)
+            .reduce(into: [String]()) { options, value in
+                if !options.contains(value) {
+                    options.append(value)
+                }
+            }
+    }
+
+    private func applyScheduleDraft(_ schedule: DailyBriefingSchedule?) {
+        guard let schedule else { return }
+        briefingScheduleEnabled = schedule.enabled
+        briefingScheduleTime = normalizedScheduleTime(schedule.scheduled_time)
+        briefingScheduleTimezone = schedule.timezone.isEmpty ? TimeZone.current.identifier : schedule.timezone
+    }
+
+    private func saveBriefingSchedule() {
+        let timezone = briefingScheduleTimezone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !timezone.isEmpty else {
+            model.dailyBriefingScheduleError = "Timezone is required."
+            model.dailyBriefingScheduleNotice = nil
+            return
+        }
+
+        Task {
+            await model.updateDailyBriefingSchedule(
+                enabled: briefingScheduleEnabled,
+                scheduledTime: briefingScheduleTime,
+                timezone: timezone
+            )
+        }
+    }
+
+    private func refreshBriefingData() async {
+        await model.loadInitial()
+        applyScheduleDraft(model.dailyBriefingSchedule)
+    }
+
+    private func normalizedScheduleTime(_ value: String) -> String {
+        let parts = value.split(separator: ":")
+        let hour = parts.first.flatMap { Int($0) } ?? 7
+        let minute = parts.dropFirst().first.flatMap { Int($0) } ?? 0
+        return String(format: "%02d:%02d", max(0, min(hour, 23)), max(0, min(minute, 59)))
+    }
+}
+
+private struct BriefingInfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.trailing)
         }
     }
 }

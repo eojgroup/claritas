@@ -1703,6 +1703,8 @@ struct MarketsWorkspaceView: View {
 }
 
 struct PoliciesWorkspaceView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         BrandBackground {
             ScrollView {

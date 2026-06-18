@@ -211,9 +211,9 @@ jobs:
             base="https://${base}"
           fi
           if [ -n "${base}" ]; then
-            allowed_redirects="${base},claritas://,claritaspad://,http://localhost:5173,http://localhost:8080"
+            allowed_redirects="${base},claritas://,http://localhost:5173,http://localhost:8080"
             api_redirects="${base}/api/auth/google/callback,${base}/api/auth/microsoft/callback,${base}/api/auth/apple/callback,http://localhost:8080/api/auth/google/callback,http://localhost:8080/api/auth/microsoft/callback,http://localhost:8080/api/auth/apple/callback"
-            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${allowed_redirects}\",\"AUTH_ALLOWED_REDIRECT_SCHEMES\":\"claritas,claritaspad\",\"KEYCLOAK_API_REDIRECT_URIS\":\"${api_redirects}\"}}"
+            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${allowed_redirects}\",\"AUTH_ALLOWED_REDIRECT_SCHEMES\":\"claritas\",\"KEYCLOAK_API_REDIRECT_URIS\":\"${api_redirects}\"}}"
           fi
           node <<'NODE'
           const fs = require("fs");
