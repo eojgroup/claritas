@@ -3,10 +3,11 @@
 Project path: `apps/mobile/ios/Claritas/Claritas.xcodeproj`
 Generator source: `apps/mobile/ios/generate_xcodeproj.rb`
 
-The project contains two native targets:
+The project contains one App Store product with three Xcode targets:
 
 - `Claritas`: universal iPhone/iPad app and Apple Watch companion authority.
-- `Claritas Watch App`: watchOS 10+ glanceable briefing and signal app.
+- `Claritas Watch App`: embedded watchOS app container.
+- `Claritas Watch App Extension`: WatchKit extension containing the watch SwiftUI app code.
 
 ## Quick Start
 
@@ -37,7 +38,7 @@ The project contains two native targets:
 ## Watch Authentication
 
 - Authentication remains on iPhone.
-- The watch app is an embedded SwiftUI companion app inside the `Claritas` universal app, using a watchOS application target embedded through `Embed Watch Content`.
+- The watch app is an embedded companion inside the `Claritas` universal app: iOS embeds `Claritas Watch App`, and the watch app embeds `Claritas Watch App Extension`.
 - The watch target keeps its child bundle identifier, `com.eojgroup.claritas.watchkitapp`, and declares `WKCompanionAppBundleIdentifier` for the iOS app bundle.
 - The iPhone sends the API URL and active session through Apple WatchConnectivity.
 - The watch stores the session token in its device-only Keychain and calls the same authenticated Claritas API.
