@@ -13,6 +13,21 @@ watch_bundle_id = ENV.fetch("WATCH_BUNDLE_ID", "#{bundle_id}.watchkitapp")
 development_team = ENV.fetch("DEVELOPMENT_TEAM", "VTBJTFDTQY")
 ios_deployment_target = ENV.fetch("IOS_DEPLOYMENT_TARGET", "16.0")
 watchos_deployment_target = ENV.fetch("WATCHOS_DEPLOYMENT_TARGET", "10.0")
+version_file = File.join(ROOT, "VERSION")
+version_settings = if File.file?(version_file)
+  File
+    .readlines(version_file, chomp: true)
+    .filter_map do |line|
+      key, value = line.split("=", 2)
+      next if key.nil? || value.nil?
+      [key.strip, value.strip]
+    end
+    .to_h
+else
+  {}
+end
+marketing_version = ENV.fetch("MARKETING_VERSION", version_settings.fetch("MARKETING_VERSION", "1.0"))
+build_number = ENV.fetch("BUILD_NUMBER", ENV.fetch("GITHUB_RUN_NUMBER", version_settings.fetch("BUILD_NUMBER", "1")))
 
 FileUtils.rm_rf(PROJECT_PATH)
 project = Xcodeproj::Project.new(PROJECT_PATH)
@@ -41,14 +56,14 @@ configure_target(
     "ASSETCATALOG_COMPILER_APPICON_NAME" => "AppIcon",
     "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME" => "AccentColor",
     "CODE_SIGN_STYLE" => "Automatic",
-    "CURRENT_PROJECT_VERSION" => "1",
+    "CURRENT_PROJECT_VERSION" => build_number,
     "DEVELOPMENT_TEAM" => development_team,
     "GENERATE_INFOPLIST_FILE" => "NO",
     "INFOPLIST_FILE" => "Info.plist",
     "INFOPLIST_KEY_CFBundleDisplayName" => "Claritas",
     "INFOPLIST_KEY_LSApplicationCategoryType" => "public.app-category.news",
     "IPHONEOS_DEPLOYMENT_TARGET" => ios_deployment_target,
-    "MARKETING_VERSION" => "1.0",
+    "MARKETING_VERSION" => marketing_version,
     "PRODUCT_BUNDLE_IDENTIFIER" => bundle_id,
     "SDKROOT" => "iphoneos",
     "SWIFT_VERSION" => "5.0",
@@ -63,12 +78,12 @@ configure_target(
     "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME" => "AccentColor",
     "CLARITAS_IOS_BUNDLE_IDENTIFIER" => bundle_id,
     "CODE_SIGN_STYLE" => "Automatic",
-    "CURRENT_PROJECT_VERSION" => "1",
+    "CURRENT_PROJECT_VERSION" => build_number,
     "DEVELOPMENT_TEAM" => development_team,
     "GENERATE_INFOPLIST_FILE" => "NO",
     "INFOPLIST_FILE" => "../ClaritasWatch/Info.plist",
     "INFOPLIST_KEY_CFBundleDisplayName" => "Claritas",
-    "MARKETING_VERSION" => "1.0",
+    "MARKETING_VERSION" => marketing_version,
     "PRODUCT_BUNDLE_IDENTIFIER" => watch_bundle_id,
     "SDKROOT" => "watchos",
     "SKIP_INSTALL" => "YES",
@@ -210,3 +225,4 @@ write_app_scheme(PROJECT_PATH, ios_target)
 puts "Generated #{PROJECT_PATH}"
 puts "Universal iOS/iPadOS target: #{bundle_id}"
 puts "watchOS target: #{watch_bundle_id}"
+puts "Version: #{marketing_version} (#{build_number})"

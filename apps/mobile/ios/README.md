@@ -50,7 +50,7 @@ The project contains two native targets:
 
 ## Regenerate the Xcode Project
 
-The Xcode project was generated with Ruby `xcodeproj`. If you add/move files, you can regenerate it:
+The Xcode project was generated with Ruby `xcodeproj`. Version values are read from `apps/mobile/ios/VERSION`, unless overridden by environment variables.
 
 ```bash
 gem install xcodeproj --no-document
@@ -63,6 +63,22 @@ ruby generate_xcodeproj.rb
 ```
 
 Then re-open the `.xcodeproj` in Xcode.
+
+## Versioning
+
+`apps/mobile/ios/VERSION` is the committed source of truth for Apple app versions:
+
+```text
+MARKETING_VERSION=1.0
+BUILD_NUMBER=2
+```
+
+When the project is regenerated, the same `MARKETING_VERSION` and `BUILD_NUMBER` are applied to both native targets:
+
+- `Claritas` universal iPhone/iPad app.
+- `Claritas Watch App` embedded watchOS companion.
+
+For CI builds that regenerate the project, `MARKETING_VERSION`, `BUILD_NUMBER`, or `GITHUB_RUN_NUMBER` can override the file values.
 
 ## Keep Project In Sync
 
