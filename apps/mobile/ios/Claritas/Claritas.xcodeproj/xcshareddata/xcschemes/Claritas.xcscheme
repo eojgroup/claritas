@@ -15,7 +15,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "582135D6660A78F8724CBC1F"
+               BlueprintIdentifier = "F5E11401C1B493AFDFBFDBAD"
                BuildableName = "Claritas.app"
                BlueprintName = "Claritas"
                ReferencedContainer = "container:Claritas.xcodeproj">
@@ -45,7 +45,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "582135D6660A78F8724CBC1F"
+            BlueprintIdentifier = "F5E11401C1B493AFDFBFDBAD"
             BuildableName = "Claritas.app"
             BlueprintName = "Claritas"
             ReferencedContainer = "container:Claritas.xcodeproj">
@@ -62,7 +62,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "582135D6660A78F8724CBC1F"
+            BlueprintIdentifier = "F5E11401C1B493AFDFBFDBAD"
             BuildableName = "Claritas.app"
             BlueprintName = "Claritas"
             ReferencedContainer = "container:Claritas.xcodeproj">

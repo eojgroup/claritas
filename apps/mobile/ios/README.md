@@ -37,7 +37,7 @@ The project contains two native targets:
 ## Watch Authentication
 
 - Authentication remains on iPhone.
-- The watch app is an embedded companion app inside the `Claritas` universal app, using the watch app product type `com.apple.product-type.application.watchapp2`.
+- The watch app is an embedded SwiftUI companion app inside the `Claritas` universal app, using a watchOS application target embedded through `Embed Watch Content`.
 - The watch target keeps its child bundle identifier, `com.eojgroup.claritas.watchkitapp`, and declares `WKCompanionAppBundleIdentifier` for the iOS app bundle.
 - The iPhone sends the API URL and active session through Apple WatchConnectivity.
 - The watch stores the session token in its device-only Keychain and calls the same authenticated Claritas API.
