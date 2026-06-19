@@ -34,6 +34,11 @@ claritas/
 
 Claritas targets an enterprise architecture on Google Cloud Platform with a shared API layer for web + mobile, federated identity, and a controlled data-ingestion path. We also want an explicit open source strategy, with Keycloak as the primary self-hosted IAM option.
 
+Architecture and product design references:
+
+- [Cross-device architecture and design](docs/architecture/cross-device-design.md): shared information architecture, design tokens, and intended layouts for web, iPhone, iPad, and Apple Watch.
+- [Business capabilities](docs/architecture/capabilities.md): platform capability map.
+
 ### 1) Identity and Access
 
 - Federated authentication providers to support:
