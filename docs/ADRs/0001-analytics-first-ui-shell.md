@@ -20,7 +20,7 @@ Adopt an **analytics-first operational workspace** shell:
 - dense table/feed rows for monitoring;
 - separate control-room, settings, and document archetypes.
 
-Daily briefing is the cross-domain synthesis entry point. On the dashboard it precedes, rather than replaces, the spatial map and detailed trend analysis. Podcast evidence and country leadership are exposed as actionable context beside the map: podcast signals route to timestamped evidence, while leadership routes to the officeholder map layer. Bubble maps and charts are retained only where they answer spatial, time, comparison, correlation, mix, or ranking questions.
+Daily briefing is the cross-domain synthesis entry point. On the dashboard it precedes, rather than replaces, the spatial map and detailed trend analysis. Podcast evidence and country leadership are exposed as actionable context beside the map: podcast signals route to timestamped evidence, while leadership routes to the officeholder map layer. Selecting a map polygon or bubble replaces that global context with a cross-domain country profile and links the primary trend to the same country. Bubble maps and charts are retained only where they answer spatial, time, comparison, correlation, mix, or ranking questions.
 
 ## Consequences
 

@@ -17,6 +17,7 @@ import {
   Sun,
   LogOut,
   ChevronLeft,
+  ChevronDown,
   Menu,
   LayoutGrid,
   FileText,
@@ -772,6 +773,9 @@ export default function ClaritasDashboard() {
   const [marketEarningsWindowDays, setMarketEarningsWindowDays] = useState<7 | 14 | 30>(14);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [selectedDashboardNewsId, setSelectedDashboardNewsId] = useState<
+    number | null
+  >(null);
   const [podcasts, setPodcasts] = useState<PodcastEpisode[]>([]);
   const [isLoadingPodcasts, setIsLoadingPodcasts] = useState(false);
   const [podcastLoadError, setPodcastLoadError] = useState<string | null>(null);
@@ -2553,6 +2557,58 @@ export default function ClaritasDashboard() {
     };
   }, [leadershipStats, selectedCountry]);
 
+  const selectedCountryContext = useMemo(() => {
+    if (!selectedCountry) return null;
+    const iso = selectedCountry.toUpperCase();
+    const newsRow = mapBubbleData.find(
+      (row) => row.country.toUpperCase() === iso,
+    );
+    const mappedNews = mapCountryStats.get(iso);
+    const maxNews = Math.max(
+      1,
+      ...mapBubbleData.map((row) => Number(row.count) || 0),
+    );
+    const temperature =
+      typeof relatedWeather?.temp_c === "number"
+        ? relatedWeather.temp_c
+        : null;
+
+    return {
+      iso,
+      meta: countryMeta.get(iso),
+      newsCount: newsRow?.count ?? mappedNews?.count ?? relatedNews.length,
+      newsIntensity:
+        ((newsRow?.count ?? mappedNews?.count ?? 0) / maxNews) * 100,
+      topSource:
+        mappedNews && mappedNews.sources.size > 0
+          ? [...mappedNews.sources.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+          : null,
+      temperature,
+      temperaturePosition:
+        temperature == null
+          ? 0
+          : Math.max(0, Math.min(100, ((temperature + 30) / 80) * 100)),
+      humidity:
+        typeof relatedWeather?.humidity === "number"
+          ? relatedWeather.humidity
+          : null,
+      maxMarketMove: Math.max(
+        1,
+        ...relatedMarkets.map((quote) =>
+          Math.abs(quote.percent_change ?? quote.change ?? 0),
+        ),
+      ),
+    };
+  }, [
+    countryMeta,
+    mapBubbleData,
+    mapCountryStats,
+    relatedMarkets,
+    relatedNews.length,
+    relatedWeather,
+    selectedCountry,
+  ]);
+
   const activeRegions = useMemo(() => {
     const regions = new Set<string>();
     filteredNews.forEach(
@@ -4282,12 +4338,13 @@ export default function ClaritasDashboard() {
                             primaryCountry={selectedCountry}
                             secondaryCountry={comparisonCountry}
                             pinnedCountry={pinnedCountry}
-                            showLabels={false}
+                            scale={mapMode === "news" ? "log" : "linear"}
+                            showLabels
                             legendLabel={activeMapLegendLabel}
                           />
                         </div>
                         {pinnedCountry && (
-                          <div className="app-card-muted absolute left-3 top-3 w-56 rounded-lg p-3 text-xs">
+                          <div className="app-card-muted absolute bottom-3 right-3 w-56 rounded-lg p-3 text-xs">
                             <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               Pinned
                             </div>
@@ -4517,106 +4574,356 @@ export default function ClaritasDashboard() {
                       className={`${dashboardPanelClass} context-intelligence-band xl:col-span-5`}
                       style={{ animationDelay: "40ms" }}
                     >
-                      <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          Source intelligence
-                        </div>
-                        <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                          Evidence and decision-makers
-                        </div>
-                        <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">
-                          Connect the headline picture to spoken-source evidence and
-                          the people shaping national decisions.
-                        </p>
-                      </div>
-                      <div className="context-signal-grid flex-1">
-                        <button
-                          type="button"
-                          onClick={() => setActiveView("podcasts")}
-                          className="context-signal"
-                          aria-label="Open podcast evidence workspace"
-                        >
-                          <span className="context-signal-icon">
-                            <Podcast className="h-4 w-4" />
-                          </span>
-                          <span className="min-w-0">
-                            <span className="context-signal-label">
-                              Podcast intelligence
-                            </span>
-                            <strong>
-                              {podcastSummary.prioritySignal?.signal.title ??
-                                podcastSummary.latestEpisode?.title ??
-                                "No extracted podcast signals yet"}
-                            </strong>
-                            <small>
-                              {podcastSummary.prioritySignal
-                                ? `${podcastSummary.prioritySignal.episode.feed_title} · ${podcastSummary.risks} risk signals`
-                                : `${podcastSummary.episodes} monitored episodes`}
-                            </small>
-                          </span>
-                          <span className="context-signal-stat">
-                            <strong>{podcastSummary.signals}</strong>
-                            <small>
-                              signals · {podcastSummary.evidence} evidence
-                            </small>
-                            <span>
-                              Open evidence
-                              <ArrowUpRight className="h-3.5 w-3.5" />
-                            </span>
-                          </span>
-                        </button>
+                      {selectedCountryContext ? (
+                        <>
+                          <div className="flex items-start gap-3 border-b border-[color:var(--shell-border)] px-4 py-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                                Country profile · {selectedCountryContext.iso}
+                              </div>
+                              <div className="mt-0.5 text-lg font-semibold text-[color:var(--shell-ink)]">
+                                {selectedCountryContext.meta?.name ??
+                                  selectedCountryContext.iso}
+                              </div>
+                              <div className="text-xs text-[color:var(--shell-muted)]">
+                                {[
+                                  selectedCountryContext.meta?.region,
+                                  selectedCountryContext.meta?.subregion,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ") || "Global country context"}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCountry(null)}
+                              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
+                              aria-label="Close country profile"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setMapMode("leadership");
-                            requestAnimationFrame(() => {
-                              document
-                                .getElementById("signal-map-feed")
-                                ?.scrollIntoView({
-                                  behavior: "smooth",
-                                  block: "start",
-                                });
-                            });
-                          }}
-                          className="context-signal"
-                          aria-label="Show country leadership on the world map"
-                        >
-                          <span className="context-signal-icon context-signal-icon-secondary">
-                            <User className="h-4 w-4" />
-                          </span>
-                          <span className="min-w-0">
-                            <span className="context-signal-label">
-                              Leadership context
-                            </span>
-                            <strong>
-                              {leadershipSummary.selectedProfile
-                                ? `${leadershipSummary.selectedProfile.country_name} · ${
-                                    leadershipSummary.selectedProfile.government_type ??
-                                    "Current government"
-                                  }`
-                                : "Current heads of state and government"}
-                            </strong>
-                            <small>
-                              {leadershipSummary.selectedProfile
-                                ? leadershipSummary.selectedProfile.roles
-                                    .map((role) => role.person_name)
-                                    .join(" · ") || "Officeholder details pending"
-                                : `${leadershipSummary.completeProfiles} profiles include both leadership roles`}
-                            </small>
-                          </span>
-                          <span className="context-signal-stat">
-                            <strong>{leadershipSummary.countries}</strong>
-                            <small>
-                              countries · {leadershipSummary.roles} officeholders
-                            </small>
-                            <span>
-                              Explore map
+                          <div className="country-profile-scroll app-scroll-panel min-h-0 flex-1 overflow-y-auto">
+                            <div className="country-profile-metrics">
+                              <div>
+                                <span>News</span>
+                                <strong>{selectedCountryContext.newsCount}</strong>
+                                <small>mapped stories</small>
+                              </div>
+                              <div>
+                                <span>Weather</span>
+                                <strong>
+                                  {selectedCountryContext.temperature == null
+                                    ? "—"
+                                    : `${formatMetricNumber(
+                                        selectedCountryContext.temperature,
+                                      )}°`}
+                                </strong>
+                                <small>
+                                  {relatedWeather?.weather_main ??
+                                    "No observation"}
+                                </small>
+                              </div>
+                              <div>
+                                <span>Leadership</span>
+                                <strong>
+                                  {leadershipSummary.selectedProfile?.roles
+                                    .length ?? 0}
+                                </strong>
+                                <small>current officeholders</small>
+                              </div>
+                              <div>
+                                <span>Markets</span>
+                                <strong>{relatedMarkets.length}</strong>
+                                <small>linked instruments</small>
+                              </div>
+                            </div>
+
+                            <section className="country-profile-section">
+                              <div className="country-profile-section-heading">
+                                <Newspaper className="h-4 w-4" />
+                                <span>News concentration</span>
+                                <small>
+                                  {selectedCountryContext.topSource ??
+                                    "Source mix unavailable"}
+                                </small>
+                              </div>
+                              <div className="country-profile-bar">
+                                <span
+                                  style={{
+                                    width: `${Math.max(
+                                      2,
+                                      selectedCountryContext.newsIntensity,
+                                    )}%`,
+                                  }}
+                                />
+                              </div>
+                              <div className="country-profile-scale">
+                                <span>Relative to highest-volume country</span>
+                                <strong>
+                                  {formatMetricNumber(
+                                    selectedCountryContext.newsIntensity,
+                                  )}
+                                  %
+                                </strong>
+                              </div>
+                            </section>
+
+                            <section className="country-profile-section">
+                              <div className="country-profile-section-heading">
+                                <CloudSun className="h-4 w-4" />
+                                <span>Weather now</span>
+                                <small>
+                                  {relatedWeather?.observed_at
+                                    ? new Date(
+                                        relatedWeather.observed_at,
+                                      ).toLocaleString()
+                                    : "No current observation"}
+                                </small>
+                              </div>
+                              <div className="country-weather-visual">
+                                <div>
+                                  <span>Temperature</span>
+                                  <div className="temperature-track">
+                                    <span
+                                      style={{
+                                        left: `${selectedCountryContext.temperaturePosition}%`,
+                                      }}
+                                    />
+                                  </div>
+                                  <small>−30°C</small>
+                                  <small>50°C</small>
+                                </div>
+                                <div>
+                                  <span>Humidity</span>
+                                  <div className="humidity-track">
+                                    <span
+                                      style={{
+                                        width: `${
+                                          selectedCountryContext.humidity ?? 0
+                                        }%`,
+                                      }}
+                                    />
+                                  </div>
+                                  <strong>
+                                    {selectedCountryContext.humidity == null
+                                      ? "—"
+                                      : `${formatMetricNumber(
+                                          selectedCountryContext.humidity,
+                                        )}%`}
+                                  </strong>
+                                </div>
+                              </div>
+                            </section>
+
+                            <section className="country-profile-section">
+                              <div className="country-profile-section-heading">
+                                <User className="h-4 w-4" />
+                                <span>Current leadership</span>
+                                <small>
+                                  {leadershipSummary.selectedProfile
+                                    ?.government_type ??
+                                    "Government type unavailable"}
+                                </small>
+                              </div>
+                              <div className="country-leadership-list">
+                                {leadershipSummary.selectedProfile?.roles.map(
+                                  (role) => (
+                                    <div
+                                      key={`${role.role_type}-${role.person_wikidata_id}`}
+                                    >
+                                      <span>
+                                        {role.role_type === "head_of_state"
+                                          ? "Head of state"
+                                          : "Head of government"}
+                                      </span>
+                                      <strong>{role.person_name}</strong>
+                                      <small>
+                                        {role.started_at
+                                          ? `In office since ${new Date(
+                                              role.started_at,
+                                            ).toLocaleDateString()}`
+                                          : "Term start unavailable"}
+                                      </small>
+                                    </div>
+                                  ),
+                                )}
+                                {!leadershipSummary.selectedProfile?.roles
+                                  .length && (
+                                  <div className="product-state">
+                                    Current leadership has not been retrieved for
+                                    this country.
+                                  </div>
+                                )}
+                              </div>
+                            </section>
+
+                            {relatedMarkets.length > 0 && (
+                              <section className="country-profile-section">
+                                <div className="country-profile-section-heading">
+                                  <ChartNoAxesCombined className="h-4 w-4" />
+                                  <span>Market movement</span>
+                                  <small>Linked country instruments</small>
+                                </div>
+                                <div className="country-market-list">
+                                  {relatedMarkets.slice(0, 3).map((quote) => {
+                                    const move =
+                                      quote.percent_change ??
+                                      quote.change ??
+                                      0;
+                                    return (
+                                      <button
+                                        key={`country-profile-${quote.symbol}`}
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedSymbol(quote.symbol);
+                                          setActiveView("markets");
+                                        }}
+                                      >
+                                        <span>{quote.symbol}</span>
+                                        <i>
+                                          <span
+                                            className={
+                                              move < 0 ? "is-negative" : ""
+                                            }
+                                            style={{
+                                              width: `${Math.max(
+                                                4,
+                                                (Math.abs(move) /
+                                                  selectedCountryContext.maxMarketMove) *
+                                                  100,
+                                              )}%`,
+                                            }}
+                                          />
+                                        </i>
+                                        <strong>
+                                          {formatSignedMetric(move, 2, "%")}
+                                        </strong>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </section>
+                            )}
+                          </div>
+
+                          <div className="country-profile-actions">
+                            <button
+                              type="button"
+                              onClick={() => setActiveView("news")}
+                            >
+                              Open country news
                               <ArrowUpRight className="h-3.5 w-3.5" />
-                            </span>
-                          </span>
-                        </button>
-                      </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMapMode("leadership");
+                                setPinnedCountry(selectedCountryContext.iso);
+                              }}
+                            >
+                              Pin leadership
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Source intelligence
+                            </div>
+                            <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                              Evidence and decision-makers
+                            </div>
+                            <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">
+                              Connect the headline picture to spoken-source
+                              evidence and the people shaping national decisions.
+                            </p>
+                          </div>
+                          <div className="context-signal-grid flex-1">
+                            <button
+                              type="button"
+                              onClick={() => setActiveView("podcasts")}
+                              className="context-signal"
+                              aria-label="Open podcast evidence workspace"
+                            >
+                              <span className="context-signal-icon">
+                                <Podcast className="h-4 w-4" />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="context-signal-label">
+                                  Podcast intelligence
+                                </span>
+                                <strong>
+                                  {podcastSummary.prioritySignal?.signal.title ??
+                                    podcastSummary.latestEpisode?.title ??
+                                    "No extracted podcast signals yet"}
+                                </strong>
+                                <small>
+                                  {podcastSummary.prioritySignal
+                                    ? `${podcastSummary.prioritySignal.episode.feed_title} · ${podcastSummary.risks} risk signals`
+                                    : `${podcastSummary.episodes} monitored episodes`}
+                                </small>
+                              </span>
+                              <span className="context-signal-stat">
+                                <strong>{podcastSummary.signals}</strong>
+                                <small>
+                                  signals · {podcastSummary.evidence} evidence
+                                </small>
+                                <span>
+                                  Open evidence
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </span>
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setMapMode("leadership");
+                                requestAnimationFrame(() => {
+                                  document
+                                    .getElementById("signal-map-feed")
+                                    ?.scrollIntoView({
+                                      behavior: "smooth",
+                                      block: "start",
+                                    });
+                                });
+                              }}
+                              className="context-signal"
+                              aria-label="Show country leadership on the world map"
+                            >
+                              <span className="context-signal-icon context-signal-icon-secondary">
+                                <User className="h-4 w-4" />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="context-signal-label">
+                                  Leadership context
+                                </span>
+                                <strong>
+                                  Current heads of state and government
+                                </strong>
+                                <small>
+                                  {leadershipSummary.completeProfiles} profiles
+                                  include both leadership roles
+                                </small>
+                              </span>
+                              <span className="context-signal-stat">
+                                <strong>{leadershipSummary.countries}</strong>
+                                <small>
+                                  countries · {leadershipSummary.roles}{" "}
+                                  officeholders
+                                </small>
+                                <span>
+                                  Explore map
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </span>
+                              </span>
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </section>
 
                     <div
@@ -4666,6 +4973,22 @@ export default function ClaritasDashboard() {
                           >
                             Markets
                           </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveView(
+                                listMode === "news"
+                                  ? "news"
+                                  : listMode === "weather"
+                                    ? "weather"
+                                    : "markets",
+                              )
+                            }
+                            className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
+                          >
+                            Open {listMode} workspace
+                            <ArrowUpRight className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       </div>
 
@@ -4673,8 +4996,21 @@ export default function ClaritasDashboard() {
                         {listMode === "news" ? (
                           <div
                             ref={feedRef}
-                            className="app-scroll-panel h-full overflow-y-auto p-4 space-y-3"
+                            className="dashboard-news-stream app-scroll-panel h-full overflow-y-auto"
                           >
+                            {filteredNews.length > 0 && (
+                              <div
+                                className="dashboard-news-columns"
+                                aria-hidden="true"
+                              >
+                                <span>Priority</span>
+                                <span>Time</span>
+                                <span>Place</span>
+                                <span>Headline</span>
+                                <span>Source</span>
+                                <span />
+                              </div>
+                            )}
                             {filteredNews.length === 0 && (
                               <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
                                 <div>No news items for the current filters.</div>
@@ -4704,10 +5040,12 @@ export default function ClaritasDashboard() {
                                 </div>
                               </div>
                             )}
-                            {filteredNews.map((n) => {
+                            {filteredNews.map((n, index) => {
                               const img = imageProxy(getNewsImageUrl(n));
                               const sourceLabel = getSourceLabel(n);
                               const iso = n.country_iso2?.toUpperCase();
+                              const selectedStory =
+                                selectedDashboardNewsId === n.id;
                               const isPrimary =
                                 !!selectedCountry &&
                                 iso === selectedCountry.toUpperCase();
@@ -4717,76 +5055,147 @@ export default function ClaritasDashboard() {
                               return (
                                 <article
                                   key={n.id}
-                                  className={`rounded-xl border p-4 transition hover:border-[color:var(--shell-border-strong)] ${
+                                  className={`dashboard-news-item ${
+                                    selectedStory ? "is-selected" : ""
+                                  } ${
                                     isPrimary
-                                      ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
+                                      ? "is-primary"
                                       : isSecondary
-                                        ? "border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)]"
-                                        : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
+                                        ? "is-secondary"
+                                        : ""
                                   }`}
                                 >
-                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                                    <div className="relative h-24 w-36 rounded-lg overflow-hidden border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)] flex-none shrink-0">
-                                      {img ? (
-                                        <img
-                                          src={img}
-                                          alt={n.title ?? "thumbnail"}
-                                          loading="lazy"
-                                          decoding="async"
-                                          referrerPolicy="no-referrer"
-                                          className="w-full h-full object-cover"
-                                          onError={(e) =>
-                                            (e.currentTarget.style.display =
-                                              "none")
-                                          }
-                                        />
-                                      ) : null}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <a
-                                        href={n.url ?? "#"}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-base font-semibold leading-6 text-[color:var(--shell-ink)] hover:underline"
-                                      >
-                                        {n.title || n.url || "Untitled"}
-                                      </a>
-                                      <div className="text-xs text-[color:var(--shell-muted)] mt-2 flex items-center gap-2 flex-wrap">
-                                        {sourceLabel && (
-                                          <span className="rounded-full border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
-                                            {sourceLabel}
-                                          </span>
-                                        )}
-                                        {n.country_iso2 && (
-                                          <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-muted)]">
-                                            {n.country_iso2}
-                                          </span>
-                                        )}
-                                        {isPrimary && (
-                                          <span className="rounded-full border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
-                                            Primary
-                                          </span>
-                                        )}
-                                        {isSecondary && (
-                                          <span className="rounded-full border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
-                                            Compare
-                                          </span>
-                                        )}
-                                        {n.event_time && (
-                                          <span>
-                                            {new Date(
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextId = selectedStory ? null : n.id;
+                                      setSelectedDashboardNewsId(nextId);
+                                      if (nextId && iso) {
+                                        setSelectedCountry(iso);
+                                      }
+                                    }}
+                                    className="dashboard-news-summary"
+                                    aria-expanded={selectedStory}
+                                  >
+                                    <span
+                                      className={`news-priority-marker ${
+                                        index < 3 ? "is-high" : ""
+                                      }`}
+                                    >
+                                      {String(index + 1).padStart(2, "0")}
+                                    </span>
+                                    <span className="dashboard-news-time">
+                                      <strong>
+                                        {n.event_time
+                                          ? new Date(
                                               n.event_time,
-                                            ).toLocaleString()}
-                                          </span>
-                                        )}
-                                      </div>
-                                      {n.summary && (
-                                        <p className="mt-2 line-clamp-3 text-sm leading-6 text-[color:var(--shell-muted)]">
-                                          {n.summary}
-                                        </p>
+                                            ).toLocaleTimeString([], {
+                                              hour: "2-digit",
+                                              minute: "2-digit",
+                                            })
+                                          : "—"}
+                                      </strong>
+                                      <small>
+                                        {n.event_time
+                                          ? new Date(
+                                              n.event_time,
+                                            ).toLocaleDateString([], {
+                                              month: "short",
+                                              day: "numeric",
+                                            })
+                                          : "No time"}
+                                      </small>
+                                    </span>
+                                    <span className="dashboard-news-country">
+                                      {iso ?? "—"}
+                                    </span>
+                                    <span className="dashboard-news-headline">
+                                      <strong>
+                                        {n.title || n.url || "Untitled"}
+                                      </strong>
+                                      <small>
+                                        {n.summary ??
+                                          "Select for source and country context."}
+                                      </small>
+                                    </span>
+                                    <span className="dashboard-news-source">
+                                      {sourceLabel ?? "Unknown"}
+                                    </span>
+                                    <ChevronDown
+                                      className={`h-4 w-4 ${
+                                        selectedStory ? "rotate-180" : ""
+                                      }`}
+                                    />
+                                  </button>
+
+                                  {selectedStory && (
+                                    <div className="dashboard-news-detail">
+                                      {img && (
+                                        <figure>
+                                          <img
+                                            src={img}
+                                            alt=""
+                                            loading="lazy"
+                                            decoding="async"
+                                            referrerPolicy="no-referrer"
+                                            onError={(e) =>
+                                              (e.currentTarget.style.display =
+                                                "none")
+                                            }
+                                          />
+                                        </figure>
                                       )}
+                                      <div>
+                                        <div className="dashboard-news-detail-meta">
+                                          <span>{sourceLabel ?? "Unknown source"}</span>
+                                          <span>
+                                            {iso
+                                              ? `${
+                                                  countryMeta.get(iso)?.name ??
+                                                  iso
+                                                } · ${iso}`
+                                              : "Unmapped geography"}
+                                          </span>
+                                          <span>
+                                            {n.event_time
+                                              ? new Date(
+                                                  n.event_time,
+                                                ).toLocaleString()
+                                              : "Timestamp unavailable"}
+                                          </span>
+                                        </div>
+                                        <p>
+                                          {n.summary ??
+                                            "No publisher summary is available. Open the source or the News workspace for the full story."}
+                                        </p>
+                                        {iso && isPrimary && (
+                                          <div className="dashboard-news-link-state">
+                                            <span className="live-dot" />
+                                            Map, country profile, and trend are
+                                            linked to {iso}.
+                                          </div>
+                                        )}
+                                        <div className="dashboard-news-actions">
+                                          {n.url && (
+                                            <a
+                                              href={n.url}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                            >
+                                              Open source
+                                              <ArrowUpRight className="h-3.5 w-3.5" />
+                                            </a>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() => setActiveView("news")}
+                                          >
+                                            Analyze in News
+                                          </button>
+                                        </div>
+                                      </div>
                                     </div>
-                                  </div>
+                                  )}
                                 </article>
                               );
                             })}
@@ -5237,6 +5646,7 @@ export default function ClaritasDashboard() {
                             primaryCountry={selectedCountry}
                             secondaryCountry={comparisonCountry}
                             pinnedCountry={pinnedCountry}
+                            scale={mapMode === "news" ? "log" : "linear"}
                             legendLabel={activeMapLegendLabel}
                           />
                         </div>
@@ -5416,6 +5826,7 @@ export default function ClaritasDashboard() {
                           primaryCountry={selectedCountry}
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
+                          scale="log"
                           legendLabel="Story concentration"
                         />
                       </div>

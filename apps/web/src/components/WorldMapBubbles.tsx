@@ -1,7 +1,22 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import MapView, { Marker, NavigationControl, type MapRef } from "react-map-gl/maplibre";
+import MapView, {
+  Layer,
+  Marker,
+  NavigationControl,
+  Source,
+  type LayerProps,
+  type MapRef,
+} from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { feature } from "topojson-client";
+import worldAtlas from "world-atlas/countries-110m.json";
 import worldCountries from "world-countries";
+import type { FeatureCollection, Geometry } from "geojson";
+import type {
+  GeometryCollection,
+  Properties,
+  Topology,
+} from "topojson-specification";
 
 export type BubbleDatum = {
   country: string;
@@ -36,8 +51,10 @@ export type WorldMapBubblesProps = {
 
 type WorldCountryReference = {
   cca2?: string;
+  ccn3?: string;
   properties?: { cca2?: string };
   latlng?: [number, number];
+  name?: { common?: string };
 };
 
 type BubbleMarker = {
@@ -56,6 +73,62 @@ const INITIAL_VIEW_STATE = {
   longitude: 8,
   zoom: 0.9,
 };
+
+type CountryFeatureProperties = {
+  iso2: string;
+  name: string;
+  value: number;
+  intensity: number;
+  hasData: boolean;
+};
+
+const COUNTRY_FILL_LAYER_ID = "claritas-country-fill";
+
+const WORLD_COUNTRY_GEOMETRY = (() => {
+  const references = worldCountries as WorldCountryReference[];
+  const isoByNumeric = new globalThis.Map(
+    references
+      .filter((country) => country.ccn3 && country.cca2)
+      .map((country) => [country.ccn3!, country.cca2!.toUpperCase()]),
+  );
+  const nameByIso = new globalThis.Map(
+    references
+      .filter((country) => country.cca2)
+      .map((country) => [
+        country.cca2!.toUpperCase(),
+        country.name?.common ?? country.cca2!.toUpperCase(),
+      ]),
+  );
+  const topology = worldAtlas as unknown as Topology<{
+    countries: GeometryCollection<Properties>;
+    land: GeometryCollection<Properties>;
+  }>;
+  const collection = feature(
+    topology,
+    topology.objects.countries,
+  ) as FeatureCollection<Geometry, Properties>;
+
+  return {
+    nameByIso,
+    features: collection.features.flatMap((countryFeature) => {
+      const numericId = String(countryFeature.id ?? "").padStart(3, "0");
+      const iso2 = isoByNumeric.get(numericId);
+      if (!iso2) return [];
+      return [
+        {
+          ...countryFeature,
+          properties: {
+            iso2,
+            name: nameByIso.get(iso2) ?? iso2,
+            value: 0,
+            intensity: 0,
+            hasData: false,
+          },
+        },
+      ];
+    }),
+  };
+})();
 
 const getEnvValue = (key: string): string | undefined => {
   const env = (import.meta as { env?: Record<string, string | undefined> }).env;
@@ -117,9 +190,11 @@ export default memo(function WorldMapBubbles({
     y: number;
     country: string;
     value: number;
+    rank: number;
     meta?: BubbleDatum["meta"];
   } | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
 
   const centroids = useMemo(() => {
     const map = new globalThis.Map<string, [number, number]>();
@@ -163,6 +238,47 @@ export default memo(function WorldMapBubbles({
   const isCompact = variant === "compact";
   const labelColor = isDark ? "#f6efe6" : "#28231e";
   const legendPalette = markerPalette(markers[markers.length - 1]?.tone, isDark);
+  const markerByCountry = useMemo(
+    () =>
+      new globalThis.Map(
+        markers.map((marker) => [marker.country, marker] as const),
+      ),
+    [markers],
+  );
+  const rankByCountry = useMemo(
+    () =>
+      new globalThis.Map(
+        [...markers]
+          .sort((a, b) => b.count - a.count)
+          .map((marker, index) => [marker.country, index + 1] as const),
+      ),
+    [markers],
+  );
+  const countryGeoJson = useMemo<
+    FeatureCollection<Geometry, CountryFeatureProperties>
+  >(
+    () => ({
+      type: "FeatureCollection",
+      features: WORLD_COUNTRY_GEOMETRY.features.map((countryFeature) => {
+        const iso2 = countryFeature.properties.iso2;
+        const marker = markerByCountry.get(iso2);
+        return {
+          ...countryFeature,
+          properties: {
+            ...countryFeature.properties,
+            value: marker?.count ?? 0,
+            intensity: marker
+              ? scale === "log"
+                ? Math.log10(marker.count + 1) / Math.log10(max + 1)
+                : marker.count / max
+              : 0,
+            hasData: Boolean(marker),
+          },
+        };
+      }),
+    }),
+    [markerByCountry, max, scale],
+  );
 
   const mapStyle = useMemo(() => {
     const custom = getEnvValue(isDark ? "VITE_MAP_STYLE_DARK_URL" : "VITE_MAP_STYLE_URL");
@@ -218,6 +334,83 @@ export default memo(function WorldMapBubbles({
   const primaryIso = primaryCountry?.toUpperCase();
   const secondaryIso = secondaryCountry?.toUpperCase();
   const pinnedIso = pinnedCountry?.toUpperCase();
+  const hoveredMarker = hoveredCountry
+    ? markerByCountry.get(hoveredCountry)
+    : undefined;
+  const countryFillLayer = useMemo<LayerProps>(
+    () => ({
+      id: COUNTRY_FILL_LAYER_ID,
+      type: "fill",
+      paint: {
+        "fill-color": [
+          "case",
+          ["==", ["get", "iso2"], primaryIso ?? "__none__"],
+          isDark ? "#eaa36c" : "#b9632d",
+          ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
+          isDark ? "#77a8ba" : "#3e6a80",
+          ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
+          isDark ? "#8ab6c5" : "#4e7d90",
+          ["get", "hasData"],
+          isDark ? "#5f8495" : "#6f8f9d",
+          isDark ? "#172732" : "#d7d9d7",
+        ],
+        "fill-opacity": [
+          "case",
+          ["==", ["get", "iso2"], primaryIso ?? "__none__"],
+          0.42,
+          ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
+          0.34,
+          ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
+          0.28,
+          ["get", "hasData"],
+          ["interpolate", ["linear"], ["get", "intensity"], 0, 0.08, 1, 0.3],
+          isDark ? 0.05 : 0.12,
+        ],
+      },
+    }),
+    [hoveredCountry, isDark, primaryIso, secondaryIso],
+  );
+  const countryLineLayer = useMemo<LayerProps>(
+    () => ({
+      id: "claritas-country-line",
+      type: "line",
+      paint: {
+        "line-color": [
+          "case",
+          ["==", ["get", "iso2"], primaryIso ?? "__none__"],
+          isDark ? "#ffd7b5" : "#7c3613",
+          ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
+          isDark ? "#c8e1e9" : "#244a5c",
+          ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
+          isDark ? "#d7edf4" : "#385f70",
+          isDark ? "#48606e" : "#9fa8aa",
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            ["==", ["get", "iso2"], primaryIso ?? "__none__"],
+            ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
+            ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
+          ],
+          0.95,
+          0.48,
+        ],
+        "line-width": [
+          "case",
+          [
+            "any",
+            ["==", ["get", "iso2"], primaryIso ?? "__none__"],
+            ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
+            ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
+          ],
+          1.5,
+          0.55,
+        ],
+      },
+    }),
+    [hoveredCountry, isDark, primaryIso, secondaryIso],
+  );
 
   return (
     <div
@@ -233,6 +426,17 @@ export default memo(function WorldMapBubbles({
         touchZoomRotate={false}
         projection="mercator"
         reuseMaps
+        interactiveLayerIds={[COUNTRY_FILL_LAYER_ID]}
+        cursor={hoveredCountry ? "pointer" : "grab"}
+        onMouseMove={(event) => {
+          const iso2 = event.features?.[0]?.properties?.iso2;
+          setHoveredCountry(typeof iso2 === "string" ? iso2 : null);
+        }}
+        onMouseLeave={() => setHoveredCountry(null)}
+        onClick={(event) => {
+          const iso2 = event.features?.[0]?.properties?.iso2;
+          if (typeof iso2 === "string") onSelect?.(iso2);
+        }}
         onError={(event) => {
           const reason =
             event?.error && event.error instanceof Error
@@ -242,6 +446,11 @@ export default memo(function WorldMapBubbles({
         }}
         style={{ width: "100%", height: "100%" }}
       >
+        <Source id="claritas-countries" type="geojson" data={countryGeoJson}>
+          <Layer {...countryFillLayer} />
+          <Layer {...countryLineLayer} />
+        </Source>
+
         <NavigationControl position="top-right" showCompass={false} visualizePitch={false} />
 
         {markers.map((marker) => {
@@ -277,12 +486,14 @@ export default memo(function WorldMapBubbles({
           const updateTip = (event: React.MouseEvent<HTMLButtonElement>) => {
             const rect = containerRef.current?.getBoundingClientRect();
             if (!rect) return;
+            setHoveredCountry(marker.country);
             setTip({
               show: true,
               x: event.clientX - rect.left + 8,
               y: event.clientY - rect.top + 8,
               country: marker.country,
               value: marker.count,
+              rank: rankByCountry.get(marker.country) ?? markers.length,
               meta: marker.meta,
             });
           };
@@ -296,11 +507,16 @@ export default memo(function WorldMapBubbles({
             >
               <button
                 type="button"
-                aria-label={`${marker.country}: ${marker.count}`}
-                className="relative border-0 bg-transparent p-0"
+                aria-label={`${WORLD_COUNTRY_GEOMETRY.nameByIso.get(marker.country) ?? marker.country}: ${marker.count}`}
+                className={`map-bubble-marker relative border-0 bg-transparent p-0 ${
+                  isPrimary || isSecondary || isPinned ? "is-selected" : ""
+                }`}
                 onMouseEnter={updateTip}
                 onMouseMove={updateTip}
-                onMouseLeave={() => setTip(null)}
+                onMouseLeave={() => {
+                  setTip(null);
+                  setHoveredCountry(null);
+                }}
                 onClick={() => onSelect?.(marker.country)}
                 style={{ cursor: "pointer" }}
               >
@@ -312,7 +528,7 @@ export default memo(function WorldMapBubbles({
                     border: `1.5px solid ${stroke}`,
                     background: fill,
                     display: "block",
-                    boxShadow: `0 0 0 4px ${halo}, 0 6px 16px rgba(47,41,35,0.18)`,
+                    boxShadow: `0 0 0 4px ${halo}, 0 4px 12px rgba(4,12,18,0.32)`,
                   }}
                 />
                 <span
@@ -335,8 +551,15 @@ export default memo(function WorldMapBubbles({
                     }}
                   />
                 )}
-                {showLabels && (
+                {(showLabels &&
+                  (rankByCountry.get(marker.country) ?? Infinity) <=
+                    (isCompact ? 10 : 16)) ||
+                isPrimary ||
+                isSecondary ||
+                isPinned ||
+                hoveredCountry === marker.country ? (
                   <span
+                    className="map-bubble-label"
                     style={{
                       position: "absolute",
                       left: "50%",
@@ -352,16 +575,32 @@ export default memo(function WorldMapBubbles({
                   >
                     {marker.country}
                   </span>
-                )}
+                ) : null}
               </button>
             </Marker>
           );
         })}
       </MapView>
 
+      {hoveredCountry && !tip && (
+        <div className="map-country-readout pointer-events-none absolute left-3 top-3">
+          <span>
+            {WORLD_COUNTRY_GEOMETRY.nameByIso.get(hoveredCountry) ??
+              hoveredCountry}
+          </span>
+          <strong>
+            {hoveredMarker
+              ? hoveredMarker.meta?.subtitle ??
+                `${hoveredMarker.count} mapped items`
+              : "No mapped signal in this view"}
+          </strong>
+          <small>Click the country to open its cross-domain profile</small>
+        </div>
+      )}
+
       {legend && (
         <div
-          className="absolute bottom-3 left-3 rounded-2xl border px-3 py-2 text-[11px] shadow-sm"
+          className="map-data-legend absolute bottom-3 left-3 rounded-xl border px-3 py-2 text-[11px] shadow-sm"
           style={{
             background: isDark ? "rgba(13,23,36,0.88)" : "rgba(255,255,255,0.9)",
             color: labelColor,
@@ -391,11 +630,14 @@ export default memo(function WorldMapBubbles({
                 );
               })}
             </svg>
-            <span>{scale === "log" ? "Log size" : "Relative size"}</span>
+            <span>{scale === "log" ? "Log-scaled bubbles" : "Relative bubbles"}</span>
           </div>
-          <div className="mt-0.5 flex justify-between text-[10px]">
+          <div className="mt-0.5 flex justify-between gap-4 text-[10px]">
             <span>Min {min}</span>
             <span>Max {max}</span>
+          </div>
+          <div className="mt-1 border-t border-current/15 pt-1 text-[10px] opacity-75">
+            {markers.length} countries mapped · click any country for profile
           </div>
         </div>
       )}
@@ -413,8 +655,19 @@ export default memo(function WorldMapBubbles({
             backdropFilter: "blur(14px)",
           }}
         >
-          <div className="font-semibold">{tip.country}</div>
-          <div>{tip.meta?.subtitle ?? `${tip.value} ${tip.value === 1 ? "item" : "items"}`}</div>
+          <div className="font-semibold">
+            {WORLD_COUNTRY_GEOMETRY.nameByIso.get(tip.country) ?? tip.country}
+            <span className="ml-1 opacity-60">· {tip.country}</span>
+          </div>
+          <div>
+            {tip.meta?.subtitle ??
+              `${tip.value} ${tip.value === 1 ? "item" : "items"}`}
+          </div>
+          <div
+            style={{ color: isDark ? "#cfc2b4" : "#746a61" }}
+          >
+            Rank {tip.rank} of {markers.length} in this view
+          </div>
           {tip.meta?.lines?.map((line, index) => (
             <div
               key={`${tip.country}-${index}`}

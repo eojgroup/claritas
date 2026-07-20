@@ -168,7 +168,8 @@ Light mode preserves the same roles. It is supported, but the default unconfigur
 | Control bar | Grouped filters, explicit time/scope, sort, reset, compare/export where relevant |
 | KPI strip | Value, context, optional delta/trend; separators instead of four floating cards |
 | Primary chart | Largest analytical surface, labeled axes/legend, range/compare tools, useful empty state |
-| Map | Spatial distribution or country context; never an unlabelled decorative globe |
+| Map | GeoJSON country layer plus scaled bubble overlay; intensity, rank, hover, polygon selection, legend, and readable country labels turn spatial data into an analytical control rather than a decorative globe |
+| Country profile | Selection-driven cross-domain panel combining news concentration, weather and freshness, current leadership, linked markets, and routes to detailed workspaces |
 | Context band | Podcast evidence and current leadership coverage; exposes the strongest available signal and routes directly to evidence or the leadership map layer |
 | Table/feed | Compact rows with aligned metadata, selected state, dense scanning, expandable/drill-in detail |
 | Insights rail | Exceptions, anomalies, AI/briefing cues, and action destination |
@@ -196,6 +197,8 @@ Shared web implementations live primarily in `apps/web/src/index.css` and `apps/
 ### Drilldown and selection
 
 - Selecting a country updates news, weather, market context, map state, and country leadership where data exists.
+- Country polygons and bubble markers share the same selection model. Hover reveals mapped value and rank; selection opens the country profile and adds the country series to the primary trend.
+- Selecting a dashboard headline expands only that row, reveals imagery and publisher context, and links its country to the map, profile, and trend. Unselected headlines remain compact monitoring rows.
 - Selecting a symbol opens the market symbol workspace with price movement, session range, weather/geography context, related stories, and peer instruments.
 - A watch handoff opens the corresponding iPhone destination.
 
@@ -246,10 +249,10 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 
 - KPI strip establishes cross-domain posture.
 - Daily briefing is the first synthesis surface because it answers what changed and why it matters across domains.
-- The world bubble map is the first visual analysis surface and remains visible without requiring a drilldown on web.
-- A paired context band beside the desktop map promotes the highest-priority podcast signal and current leadership coverage. Podcast opens timestamped evidence; leadership changes the map to its officeholder layer.
+- The world map is the first visual analysis surface and remains visible without requiring a drilldown on web. It uses country geometry for hit areas and intensity, with log-scaled news bubbles to preserve differences without letting outliers obscure smaller countries.
+- The panel beside the desktop map shows podcast/leadership context until a country is selected, then becomes a cross-domain country profile. Clearing selection restores the global context band.
 - The primary trend and attention queue follow the overview stage, preserving analytical depth without displacing synthesis and spatial orientation.
-- The live feed is a full-width monitoring surface after the overview and trend stages.
+- The live feed is a full-width monitoring surface after the overview and trend stages. News defaults to dense rows with time, geography, headline, and source; image and long summary appear only for the selected row.
 
 ### News
 
