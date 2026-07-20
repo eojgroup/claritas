@@ -383,7 +383,6 @@ export default memo(function WorldMapBubbles({
 
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.button !== 0) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -392,7 +391,6 @@ export default memo(function WorldMapBubbles({
       originY: view.y,
       moved: false,
     };
-    setIsDragging(true);
   };
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -400,7 +398,12 @@ export default memo(function WorldMapBubbles({
     if (!drag || drag.pointerId !== event.pointerId) return;
     const dx = event.clientX - drag.startX;
     const dy = event.clientY - drag.startY;
-    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 4) {
+      drag.moved = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setIsDragging(true);
+    }
+    if (!drag.moved) return;
     setView((current) => ({
       ...current,
       x: drag.originX + dx,
@@ -412,6 +415,11 @@ export default memo(function WorldMapBubbles({
     const drag = dragRef.current;
     if (drag?.pointerId === event.pointerId) {
       suppressClickRef.current = drag.moved;
+      if (drag.moved) {
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }
       dragRef.current = null;
     }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {

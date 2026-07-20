@@ -2609,18 +2609,6 @@ export default function ClaritasDashboard() {
     selectedCountry,
   ]);
 
-  const activeRegions = useMemo(() => {
-    const regions = new Set<string>();
-    filteredNews.forEach(
-      (item) =>
-        item.country_iso2 && regions.add(item.country_iso2.toUpperCase()),
-    );
-    filteredWeather.forEach(
-      (item) => item.country && regions.add(item.country.toUpperCase()),
-    );
-    return regions.size;
-  }, [filteredNews, filteredWeather]);
-
   const latestEventLabel = useMemo(() => {
     const times: number[] = [];
     filteredNews.forEach((item) => {
@@ -2822,7 +2810,7 @@ export default function ClaritasDashboard() {
         description: `${latestAnomaly.count} stories were recorded on ${latestAnomaly.label}.`,
         timeLabel: latestAnomaly.label,
         tone: "attention",
-        view: "dashboard",
+        view: "news",
         dateKey: latestAnomaly.dateKey,
       });
     }
@@ -5354,254 +5342,6 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
 
-                    <div
-                      className={`${dashboardPanelClass} insights-rail xl:col-span-3`}
-                      style={{ animationDelay: "160ms" }}
-                    >
-                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Attention queue
-                          </div>
-                          <div className="text-sm font-semibold">
-                            Highest-priority signals
-                          </div>
-                        </div>
-                        <div className="text-xs text-[color:var(--shell-muted)]">
-                          {todayLabel}
-                        </div>
-                      </div>
-                      <div className="relative flex-1 min-h-0 p-3">
-                        <div className="insight-list">
-                          {signalNotifications.slice(0, 4).map((notification) => (
-                            <button
-                              key={`dashboard-insight-${notification.id}`}
-                              type="button"
-                              onClick={() => handleNotificationClick(notification)}
-                              className="insight-row"
-                            >
-                              <span
-                                className={`signal-dot signal-dot-${notification.tone}`}
-                                aria-hidden="true"
-                              />
-                              <span className="min-w-0">
-                                <strong>{notification.title}</strong>
-                                <small>{notification.description}</small>
-                              </span>
-                              <span className="insight-time">{notification.timeLabel}</span>
-                            </button>
-                          ))}
-                          {signalNotifications.length === 0 && (
-                            <div className="product-state product-state-success">
-                              <CheckCheck className="h-5 w-5" />
-                              <strong>No active exceptions</strong>
-                              <span>All monitored signals are within current thresholds.</span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="insights-focus">
-                          <span>Current focus</span>
-                          <strong>{focusLabel}</strong>
-                          <small>{activeRegions} regions · {filteredMarket.length} quotes</small>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      className={`${dashboardPanelClass} primary-analytics-panel xl:col-span-9`}
-                      style={{ animationDelay: "240ms" }}
-                    >
-                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            News volume
-                          </div>
-                          <div className="text-sm font-semibold">
-                            Articles over {trendWindowLabel}
-                          </div>
-                          <div className="text-xs text-[color:var(--shell-muted)]">
-                            {activeRangeLabel}
-                          </div>
-                        </div>
-                        <div className="text-xs text-[color:var(--shell-muted)]">
-                          {newsRangeTotal} stories
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-4 py-2 text-xs">
-                        <button
-                          onClick={() => setChartView("daily")}
-                          className={`rounded-full border px-3 py-1 ${
-                            chartView === "daily"
-                              ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
-                              : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
-                          }`}
-                        >
-                          Daily
-                        </button>
-                        <button
-                          onClick={() => setChartView("rolling")}
-                          className={`rounded-full border px-3 py-1 ${
-                            chartView === "rolling"
-                              ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
-                              : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
-                          }`}
-                        >
-                          7d Avg
-                        </button>
-                        <button
-                          onClick={() => setChartRange({})}
-                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                        >
-                          Reset range
-                        </button>
-                        <button
-                          onClick={handleExportCsv}
-                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                        >
-                          Export CSV
-                        </button>
-                        <button
-                          onClick={handleExportPng}
-                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                        >
-                          Export PNG
-                        </button>
-                      </div>
-                      <div ref={chartRef} className="min-h-[18rem] flex-1 p-4">
-                        {newsTrendTotal === 0 ? (
-                          <div className="h-full grid place-items-center text-sm text-[color:var(--shell-muted)]">
-                            No timestamped articles yet.
-                          </div>
-                        ) : (
-                          <>
-                            <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
-                              <span className="inline-flex items-center gap-2">
-                                <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
-                                {regionLabel}
-                              </span>
-                              {selectedCountry && (
-                                <span className="inline-flex items-center gap-2">
-                                  <span className="h-2 w-2 rounded-full bg-[color:var(--signal-sky)]" />
-                                  {selectedCountry.toUpperCase()}
-                                </span>
-                              )}
-                              {comparisonCountry && (
-                                <span className="inline-flex items-center gap-2">
-                                  <span className="h-2 w-2 rounded-full bg-[color:var(--signal-amber)]" />
-                                  {comparisonCountry.toUpperCase()}
-                                </span>
-                              )}
-                            </div>
-                            <ResponsiveContainer width="100%" height="100%">
-                              <AreaChart
-                                data={newsTrend}
-                                margin={{ top: 10, right: 16, left: -8, bottom: 0 }}
-                              >
-                              <defs>
-                                <linearGradient
-                                  id="newsVolumeGradient"
-                                  x1="0"
-                                  y1="0"
-                                  x2="0"
-                                  y2="1"
-                                >
-                                  <stop
-                                    offset="5%"
-                                    stopColor="var(--signal-emerald)"
-                                    stopOpacity={0.4}
-                                  />
-                                  <stop
-                                    offset="95%"
-                                    stopColor="var(--signal-emerald)"
-                                    stopOpacity={0.05}
-                                  />
-                                </linearGradient>
-                              </defs>
-                              <CartesianGrid
-                                stroke={chartGridColor}
-                                strokeDasharray="3 3"
-                              />
-                              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                              <YAxis
-                                allowDecimals={false}
-                                domain={[0, (max: number) => Math.max(2, max + 1)]}
-                                tick={{ fontSize: 12 }}
-                              />
-                              <Tooltip content={<ChartTooltip />} cursor={{ strokeDasharray: "3 3" }} />
-                              {chartView === "daily" && (
-                                <Area
-                                  type="monotone"
-                                  dataKey="count"
-                                  stroke="var(--signal-emerald)"
-                                  strokeWidth={2}
-                                  fill="url(#newsVolumeGradient)"
-                                />
-                              )}
-                              {chartView === "rolling" && (
-                                <Line
-                                  type="monotone"
-                                  dataKey="rollingAvg"
-                                  stroke="var(--signal-emerald)"
-                                  strokeWidth={2}
-                                  dot={false}
-                                />
-                              )}
-                              {selectedCountry && (
-                                <Line
-                                  type="monotone"
-                                  dataKey={
-                                    chartView === "rolling"
-                                      ? "selectedRollingAvg"
-                                      : "selectedCount"
-                                  }
-                                  stroke="var(--signal-sky)"
-                                  strokeWidth={2}
-                                  dot={false}
-                                />
-                              )}
-                              {comparisonCountry && (
-                                <Line
-                                  type="monotone"
-                                  dataKey={
-                                    chartView === "rolling"
-                                      ? "comparisonRollingAvg"
-                                      : "comparisonCount"
-                                  }
-                                  stroke="var(--signal-amber)"
-                                  strokeWidth={2}
-                                  dot={false}
-                                />
-                              )}
-                              {trendAnomalies.map((point) => (
-                                <ReferenceDot
-                                  key={point.dateKey}
-                                  x={point.label}
-                                  y={point.count}
-                                  r={5}
-                                  fill="var(--signal-rose)"
-                                  stroke="var(--viz-negative)"
-                                  onClick={() => handleAnomalyClick(point.dateKey)}
-                                />
-                              ))}
-                              <Brush
-                                dataKey="label"
-                                height={24}
-                                stroke="var(--shell-muted)"
-                                startIndex={chartRange.startIndex}
-                                endIndex={chartRange.endIndex}
-                                onChange={(range) =>
-                                  setChartRange({
-                                    startIndex: range?.startIndex,
-                                    endIndex: range?.endIndex,
-                                  })
-                                }
-                              />
-                              </AreaChart>
-                            </ResponsiveContainer>
-                          </>
-                        )}
-                      </div>
-                    </div>
                   </section>
                 </div>
 
@@ -5842,7 +5582,10 @@ export default function ClaritasDashboard() {
                         Filtered story stream
                       </div>
                     </div>
-                    <div className="app-scroll-panel h-[min(64vh,680px)] min-h-[24rem] overflow-y-auto p-3 space-y-3">
+                    <div
+                      ref={feedRef}
+                      className="app-scroll-panel h-[min(64vh,680px)] min-h-[24rem] overflow-y-auto p-3 space-y-3"
+                    >
                       {newsPageItems.length === 0 && (
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
                           No stories match the current filters.
@@ -5918,53 +5661,299 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="secondary-analytics-grid grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
-                  <div className={`${cardBase} min-w-0 p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      News analytics
+                <section className="news-analysis-grid grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,0.9fr)]">
+                  <div
+                    className={`${cardBase} news-volume-panel primary-analytics-panel flex min-h-0 flex-col overflow-hidden`}
+                  >
+                    <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          News volume
+                        </div>
+                        <div className="text-sm font-semibold">
+                          Articles over {trendWindowLabel}
+                        </div>
+                        <div className="text-xs text-[color:var(--shell-muted)]">
+                          {activeRangeLabel}
+                        </div>
+                      </div>
+                      <div className="text-xs text-[color:var(--shell-muted)]">
+                        {newsRangeTotal} stories
+                      </div>
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                      Story volume by day
+                    <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-4 py-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setChartView("daily")}
+                        className={`rounded-full border px-3 py-1 ${
+                          chartView === "daily"
+                            ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
+                            : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
+                        }`}
+                      >
+                        Daily
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChartView("rolling")}
+                        className={`rounded-full border px-3 py-1 ${
+                          chartView === "rolling"
+                            ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
+                            : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
+                        }`}
+                      >
+                        7d Avg
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setChartRange({})}
+                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                      >
+                        Reset range
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExportCsv}
+                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                      >
+                        Export CSV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExportPng}
+                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                      >
+                        Export PNG
+                      </button>
                     </div>
-                    <div className="mt-3 h-60">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={newsPageTimelineData}>
-                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
-                          <XAxis dataKey="date" />
-                          <YAxis allowDecimals={false} />
-                          <Tooltip />
-                          <Area
-                            type="monotone"
-                            dataKey="stories"
-                            stroke={ANALYTICS_COLORS[0]}
-                            fill={ANALYTICS_COLORS[0]}
-                            fillOpacity={0.25}
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
+                    <div ref={chartRef} className="h-[22rem] min-h-[18rem] p-4">
+                      {newsTrendTotal === 0 ? (
+                        <div className="grid h-full place-items-center text-sm text-[color:var(--shell-muted)]">
+                          No timestamped articles yet.
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
+                            <span className="inline-flex items-center gap-2">
+                              <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
+                              {regionLabel}
+                            </span>
+                            {selectedCountry && (
+                              <span className="inline-flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full bg-[color:var(--signal-sky)]" />
+                                {selectedCountry.toUpperCase()}
+                              </span>
+                            )}
+                            {comparisonCountry && (
+                              <span className="inline-flex items-center gap-2">
+                                <span className="h-2 w-2 rounded-full bg-[color:var(--signal-amber)]" />
+                                {comparisonCountry.toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart
+                              data={newsTrend}
+                              margin={{ top: 10, right: 16, left: -8, bottom: 0 }}
+                            >
+                              <defs>
+                                <linearGradient
+                                  id="newsWorkspaceVolumeGradient"
+                                  x1="0"
+                                  y1="0"
+                                  x2="0"
+                                  y2="1"
+                                >
+                                  <stop
+                                    offset="5%"
+                                    stopColor="var(--signal-emerald)"
+                                    stopOpacity={0.4}
+                                  />
+                                  <stop
+                                    offset="95%"
+                                    stopColor="var(--signal-emerald)"
+                                    stopOpacity={0.05}
+                                  />
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid
+                                stroke={chartGridColor}
+                                strokeDasharray="3 3"
+                              />
+                              <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                              <YAxis
+                                allowDecimals={false}
+                                domain={[0, (max: number) => Math.max(2, max + 1)]}
+                                tick={{ fontSize: 12 }}
+                              />
+                              <Tooltip
+                                content={<ChartTooltip />}
+                                cursor={{ strokeDasharray: "3 3" }}
+                              />
+                              {chartView === "daily" && (
+                                <Area
+                                  type="monotone"
+                                  dataKey="count"
+                                  stroke="var(--signal-emerald)"
+                                  strokeWidth={2}
+                                  fill="url(#newsWorkspaceVolumeGradient)"
+                                />
+                              )}
+                              {chartView === "rolling" && (
+                                <Line
+                                  type="monotone"
+                                  dataKey="rollingAvg"
+                                  stroke="var(--signal-emerald)"
+                                  strokeWidth={2}
+                                  dot={false}
+                                />
+                              )}
+                              {selectedCountry && (
+                                <Line
+                                  type="monotone"
+                                  dataKey={
+                                    chartView === "rolling"
+                                      ? "selectedRollingAvg"
+                                      : "selectedCount"
+                                  }
+                                  stroke="var(--signal-sky)"
+                                  strokeWidth={2}
+                                  dot={false}
+                                />
+                              )}
+                              {comparisonCountry && (
+                                <Line
+                                  type="monotone"
+                                  dataKey={
+                                    chartView === "rolling"
+                                      ? "comparisonRollingAvg"
+                                      : "comparisonCount"
+                                  }
+                                  stroke="var(--signal-amber)"
+                                  strokeWidth={2}
+                                  dot={false}
+                                />
+                              )}
+                              {trendAnomalies.map((point) => (
+                                <ReferenceDot
+                                  key={point.dateKey}
+                                  x={point.label}
+                                  y={point.count}
+                                  r={5}
+                                  fill="var(--signal-rose)"
+                                  stroke="var(--viz-negative)"
+                                  onClick={() => handleAnomalyClick(point.dateKey)}
+                                />
+                              ))}
+                              <Brush
+                                dataKey="label"
+                                height={24}
+                                stroke="var(--shell-muted)"
+                                startIndex={chartRange.startIndex}
+                                endIndex={chartRange.endIndex}
+                                onChange={(range) =>
+                                  setChartRange({
+                                    startIndex: range?.startIndex,
+                                    endIndex: range?.endIndex,
+                                  })
+                                }
+                              />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className={`${cardBase} min-w-0 p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Source mix
+
+                  <div className="grid min-w-0 gap-4">
+                    <div className={`${cardBase} insights-rail overflow-hidden`}>
+                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div>
+                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                            Attention queue
+                          </div>
+                          <div className="text-sm font-semibold">
+                            Highest-priority signals
+                          </div>
+                        </div>
+                        <div className="text-xs text-[color:var(--shell-muted)]">
+                          {todayLabel}
+                        </div>
+                      </div>
+                      <div className="relative min-h-0 p-3">
+                        <div className="insight-list">
+                          {signalNotifications.slice(0, 4).map((notification) => (
+                            <button
+                              key={`news-insight-${notification.id}`}
+                              type="button"
+                              onClick={() => handleNotificationClick(notification)}
+                              className="insight-row"
+                            >
+                              <span
+                                className={`signal-dot signal-dot-${notification.tone}`}
+                                aria-hidden="true"
+                              />
+                              <span className="min-w-0">
+                                <strong>{notification.title}</strong>
+                                <small>{notification.description}</small>
+                              </span>
+                              <span className="insight-time">
+                                {notification.timeLabel}
+                              </span>
+                            </button>
+                          ))}
+                          {signalNotifications.length === 0 && (
+                            <div className="product-state product-state-success">
+                              <CheckCheck className="h-5 w-5" />
+                              <strong>No active exceptions</strong>
+                              <span>
+                                All monitored signals are within current thresholds.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="insights-focus">
+                          <span>Current news scope</span>
+                          <strong>{focusLabel}</strong>
+                          <small>
+                            {newsSummary.countries} countries · {newsSummary.stories} stories
+                          </small>
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                      Top publishers in current scope
-                    </div>
-                    <div className="mt-3 h-60">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={newsPageSourceData}>
-                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
-                          <XAxis dataKey="source" tick={{ fontSize: 11 }} />
-                          <YAxis allowDecimals={false} />
-                          <Tooltip />
-                          <Bar dataKey="stories" radius={[6, 6, 0, 0]}>
-                            {newsPageSourceData.map((entry, index) => (
-                              <Cell key={`news-source-${entry.source}`} fill={ANALYTICS_COLORS[index % ANALYTICS_COLORS.length]} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+
+                    <div className={`${cardBase} news-source-panel min-w-0 p-4`}>
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Source mix
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Top publishers in current scope
+                      </div>
+                      <div className="mt-3 h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={newsPageSourceData}>
+                            <CartesianGrid
+                              stroke={chartGridColor}
+                              strokeDasharray="3 3"
+                            />
+                            <XAxis dataKey="source" tick={{ fontSize: 11 }} />
+                            <YAxis allowDecimals={false} />
+                            <Tooltip />
+                            <Bar dataKey="stories" radius={[6, 6, 0, 0]}>
+                              {newsPageSourceData.map((entry, index) => (
+                                <Cell
+                                  key={`news-source-${entry.source}`}
+                                  fill={
+                                    ANALYTICS_COLORS[
+                                      index % ANALYTICS_COLORS.length
+                                    ]
+                                  }
+                                />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                   </div>
                 </section>

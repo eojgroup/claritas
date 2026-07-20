@@ -251,15 +251,17 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 - Daily briefing is the first synthesis surface because it answers what changed and why it matters across domains.
 - The world map is the first visual analysis surface and remains visible without requiring a drilldown on web. It uses country geometry for hit areas and intensity, with log-scaled news bubbles to preserve differences without letting outliers obscure smaller countries.
 - The panel beside the desktop map shows podcast/leadership context until a country is selected, then becomes a cross-domain country profile. Clearing selection restores the global context band.
-- The primary trend and attention queue follow the overview stage, preserving analytical depth without displacing synthesis and spatial orientation.
-- The live feed is a full-width monitoring surface after the overview and trend stages. News defaults to dense rows with time, geography, headline, and source; image and long summary appear only for the selected row.
+- The live feed is the final full-width Dashboard stage. News defaults to dense rows with time, geography, headline, and source; image and long summary appear only for the selected row.
+- News volume analysis and the attention queue belong to the News analyst workspace. They are intentionally omitted from Dashboard so the overview ends after current cross-domain evidence rather than turning into a second News page.
 
 ### News
 
 - Story stream is the primary task.
 - Rows expose source, country, time, summary, and selection state.
 - The map is a spatial coverage tool and is secondary to the stream.
-- Timeline, source mix, and country/market context support the stream.
+- The full timeline workspace, anomaly markers, compare lines, exports, and attention queue follow the primary map/stream stage.
+- Source mix and country/market context support the stream without competing with the primary timeline.
+- On mobile, the story stream precedes the map, the attention queue remains available for triage, and the dense volume/source charts are omitted. Tablet retains them as stacked touch-first stages.
 
 ### Weather
 

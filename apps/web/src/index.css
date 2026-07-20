@@ -2163,7 +2163,8 @@ body {
     display: none;
   }
 
-  .secondary-analytics-grid,
+  .news-volume-panel,
+  .news-source-panel,
   .weather-workspace > section:nth-last-of-type(2),
   .markets-workspace > section:last-child {
     display: none;
@@ -2361,6 +2362,19 @@ body {
 
   .news-row .row-thumbnail {
     display: none;
+  }
+
+  .news-primary-grid {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .news-stream-panel {
+    order: 1;
+  }
+
+  .news-map-panel {
+    order: 2;
   }
 
   .news-stream-panel .app-scroll-panel,
