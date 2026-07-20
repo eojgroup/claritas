@@ -38,6 +38,7 @@ Architecture and product design references:
 
 - [UI architecture and cross-device design](docs/architecture/cross-device-design.md): analytics-first hierarchy, data-domain roles, design tokens, page archetypes, and adaptive rules for web, iPhone, iPad, and Apple Watch.
 - [Business capabilities](docs/architecture/capabilities.md): platform capability map.
+- [Personalised briefing email](docs/personalised-briefing-email.md): preference matching, durable generation/delivery queues, Mailpit development setup, and production SMTP requirements.
 
 ### 1) Identity and Access
 

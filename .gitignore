@@ -9,3 +9,6 @@
 # Xcode user state
 **/xcuserdata/
 **/*.xcuserstate
+
+# JavaScript dependencies and build caches
+**/node_modules/

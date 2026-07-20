@@ -692,15 +692,19 @@ import {
   fetchCountryStats,
   fetchCountryWeather,
   fetchDailyBriefingSchedule,
+  fetchDailyBriefingEmailStatus,
+  fetchDailyBriefingPreferenceOptions,
   fetchDailySignalBriefingLatest,
   fetchMarketEarnings,
   fetchMarketQuotes,
   fetchMarketStatus,
   fetchNews,
   fetchPodcasts,
+  fetchPersonalBriefingJob,
   getAuthStartUrl,
   logoutAuth,
   imageProxy,
+  sendPersonalBriefingPreview,
   updateDailyBriefingSchedule,
   type AuthProvider,
   type AuthProviderId,
@@ -710,6 +714,8 @@ import {
   type CountryLeadership,
   type CountryWeather,
   type DailyBriefingSchedule,
+  type DailyBriefingEmailStatus,
+  type DailyBriefingPreferenceOptions,
   type DailySignalBriefing,
   type EarningsEvent,
   type MarketQuote,
@@ -851,13 +857,34 @@ export default function ClaritasDashboard() {
     "overview" | "identity" | "preferences" | "security" | "policies"
   >("overview");
   const [dailyBriefingSchedule, setDailyBriefingSchedule] = useState<DailyBriefingSchedule | null>(null);
-  const [dailyBriefingScheduleDraft, setDailyBriefingScheduleDraft] = useState({
+  const [dailyBriefingScheduleDraft, setDailyBriefingScheduleDraft] = useState<{
+    enabled: boolean;
+    email_enabled: boolean;
+    scheduled_time: string;
+    timezone: string;
+    industries: string[];
+    company_symbols: string[];
+    country_iso2s: string[];
+    regions: string[];
+    max_items: number;
+  }>({
     enabled: true,
+    email_enabled: false,
     scheduled_time: "07:00",
     timezone: getBrowserTimeZone(),
+    industries: [],
+    company_symbols: [],
+    country_iso2s: [],
+    regions: [],
+    max_items: 10,
   });
+  const [dailyBriefingPreferenceOptions, setDailyBriefingPreferenceOptions] =
+    useState<DailyBriefingPreferenceOptions | null>(null);
+  const [dailyBriefingEmailStatus, setDailyBriefingEmailStatus] =
+    useState<DailyBriefingEmailStatus | null>(null);
   const [isLoadingDailyBriefingSchedule, setIsLoadingDailyBriefingSchedule] = useState(false);
   const [isSavingDailyBriefingSchedule, setIsSavingDailyBriefingSchedule] = useState(false);
+  const [isSendingDailyBriefingPreview, setIsSendingDailyBriefingPreview] = useState(false);
   const [dailyBriefingScheduleError, setDailyBriefingScheduleError] = useState<string | null>(null);
   const [dailyBriefingScheduleNotice, setDailyBriefingScheduleNotice] = useState<string | null>(null);
   const profileSections = PROFILE_SECTIONS;
@@ -1126,8 +1153,14 @@ export default function ClaritasDashboard() {
         setDailyBriefingSchedule(schedule);
         setDailyBriefingScheduleDraft({
           enabled: schedule.enabled,
+          email_enabled: schedule.email_enabled,
           scheduled_time: schedule.scheduled_time,
           timezone: schedule.timezone || getBrowserTimeZone(),
+          industries: schedule.industries || [],
+          company_symbols: schedule.company_symbols || [],
+          country_iso2s: schedule.country_iso2s || [],
+          regions: schedule.regions || [],
+          max_items: schedule.max_items || 10,
         });
       })
       .catch((err) => {
@@ -1136,6 +1169,24 @@ export default function ClaritasDashboard() {
       })
       .finally(() => {
         if (!cancelled) setIsLoadingDailyBriefingSchedule(false);
+      });
+    fetchDailyBriefingPreferenceOptions()
+      .then((options) => {
+        if (!cancelled) setDailyBriefingPreferenceOptions(options);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
+        }
+      });
+    fetchDailyBriefingEmailStatus()
+      .then((status) => {
+        if (!cancelled) setDailyBriefingEmailStatus(status);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
+        }
       });
     return () => {
       cancelled = true;
@@ -3600,20 +3651,95 @@ export default function ClaritasDashboard() {
     try {
       const schedule = await updateDailyBriefingSchedule({
         enabled: dailyBriefingScheduleDraft.enabled,
+        email_enabled: dailyBriefingScheduleDraft.email_enabled,
         scheduled_time: scheduledTime,
         timezone,
+        industries: dailyBriefingScheduleDraft.industries,
+        company_symbols: dailyBriefingScheduleDraft.company_symbols,
+        country_iso2s: dailyBriefingScheduleDraft.country_iso2s,
+        regions: dailyBriefingScheduleDraft.regions,
+        max_items: dailyBriefingScheduleDraft.max_items,
       });
       setDailyBriefingSchedule(schedule);
       setDailyBriefingScheduleDraft({
         enabled: schedule.enabled,
+        email_enabled: schedule.email_enabled,
         scheduled_time: schedule.scheduled_time,
         timezone: schedule.timezone || timezone,
+        industries: schedule.industries || [],
+        company_symbols: schedule.company_symbols || [],
+        country_iso2s: schedule.country_iso2s || [],
+        regions: schedule.regions || [],
+        max_items: schedule.max_items || 10,
       });
-      setDailyBriefingScheduleNotice("Daily briefing schedule saved.");
+      setDailyBriefingScheduleNotice("Personal briefing preferences saved.");
     } catch (err) {
       setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSavingDailyBriefingSchedule(false);
+    }
+  };
+
+  const handleSendDailyBriefingPreview = async () => {
+    if (isSendingDailyBriefingPreview) return;
+    const scheduledTime = dailyBriefingScheduleDraft.scheduled_time.trim();
+    const timezone = dailyBriefingScheduleDraft.timezone.trim() || getBrowserTimeZone();
+    if (!isValidScheduleTime(scheduledTime)) {
+      setDailyBriefingScheduleError("Use a valid 24-hour time, for example 07:30.");
+      setDailyBriefingScheduleNotice(null);
+      return;
+    }
+    setIsSendingDailyBriefingPreview(true);
+    setDailyBriefingScheduleError(null);
+    setDailyBriefingScheduleNotice("Saving preferences and generating your preview…");
+    try {
+      const schedule = await updateDailyBriefingSchedule({
+        enabled: dailyBriefingScheduleDraft.enabled,
+        email_enabled: dailyBriefingScheduleDraft.email_enabled,
+        scheduled_time: scheduledTime,
+        timezone,
+        industries: dailyBriefingScheduleDraft.industries,
+        company_symbols: dailyBriefingScheduleDraft.company_symbols,
+        country_iso2s: dailyBriefingScheduleDraft.country_iso2s,
+        regions: dailyBriefingScheduleDraft.regions,
+        max_items: dailyBriefingScheduleDraft.max_items,
+      });
+      setDailyBriefingSchedule(schedule);
+      let job = await sendPersonalBriefingPreview();
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (
+          job.status === "failed" ||
+          (job.status === "success" &&
+            ["sent", "failed", "suppressed"].includes(job.delivery_status || ""))
+        ) {
+          break;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+        job = await fetchPersonalBriefingJob(job.id);
+      }
+      if (job.status === "failed") {
+        throw new Error(job.error || "Preview generation failed.");
+      }
+      if (job.delivery_status === "sent") {
+        setDailyBriefingScheduleNotice(
+          `Preview sent to ${dailyBriefingEmailStatus?.recipient || "your account email"}.`,
+        );
+      } else if (job.delivery_status === "suppressed") {
+        throw new Error(
+          "The preview was generated but email delivery was suppressed. Check that SMTP is configured and your account email is verified.",
+        );
+      } else if (job.delivery_status === "failed") {
+        throw new Error("The preview was generated, but SMTP delivery failed and will be retried.");
+      } else {
+        setDailyBriefingScheduleNotice(
+          "Preview generation is still running. It will be emailed when ready.",
+        );
+      }
+    } catch (err) {
+      setDailyBriefingScheduleNotice(null);
+      setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSendingDailyBriefingPreview(false);
     }
   };
 
@@ -8036,7 +8162,159 @@ export default function ClaritasDashboard() {
                                 Enabled
                               </label>
                             </div>
-                            <div className="mt-4 grid gap-3 md:grid-cols-[160px_minmax(0,1fr)_auto] md:items-end">
+                            <div className="mt-4 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-soft)] px-3 py-3">
+                              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <label className="inline-flex items-center gap-2 text-sm font-semibold text-[color:var(--shell-ink)]">
+                                  <input
+                                    type="checkbox"
+                                    checked={dailyBriefingScheduleDraft.email_enabled}
+                                    onChange={(event) => {
+                                      const emailEnabled = event.currentTarget.checked;
+                                      setDailyBriefingScheduleDraft((current) => ({
+                                        ...current,
+                                        email_enabled: emailEnabled,
+                                      }));
+                                    }}
+                                    className="h-4 w-4 rounded border-[color:var(--shell-border)]"
+                                  />
+                                  Email this briefing to me
+                                </label>
+                                <div className="text-xs text-[color:var(--shell-muted)]">
+                                  {dailyBriefingEmailStatus?.recipient || "No account email"} ·{" "}
+                                  {dailyBriefingEmailStatus?.recipient_verified
+                                    ? "verified"
+                                    : "not verified"}
+                                  {" · "}
+                                  {dailyBriefingEmailStatus?.configured
+                                    ? "SMTP ready"
+                                    : "SMTP setup required"}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-4">
+                              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                                Personalise the briefing
+                              </div>
+                              <p className="mt-1 text-xs text-[color:var(--shell-muted)]">
+                                Followed companies always qualify. Industry and geography selections
+                                narrow the remaining signals. Leave every field empty for a general
+                                briefing. Use Ctrl/Cmd to select more than one item.
+                              </p>
+                              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                <label className="text-xs font-semibold text-[color:var(--shell-ink)]">
+                                  Industries
+                                  <select
+                                    multiple
+                                    size={5}
+                                    value={dailyBriefingScheduleDraft.industries}
+                                    disabled={!dailyBriefingPreferenceOptions}
+                                    onChange={(event) => {
+                                      const industries = Array.from(
+                                        event.currentTarget.selectedOptions,
+                                        (option) => option.value,
+                                      );
+                                      setDailyBriefingScheduleDraft((current) => ({
+                                        ...current,
+                                        industries,
+                                      }));
+                                    }}
+                                    className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-sm font-normal text-[color:var(--shell-ink)]"
+                                  >
+                                    {(dailyBriefingPreferenceOptions?.industries || []).map(
+                                      (industry) => (
+                                        <option key={industry} value={industry}>
+                                          {industry}
+                                        </option>
+                                      ),
+                                    )}
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-[color:var(--shell-ink)]">
+                                  Companies
+                                  <select
+                                    multiple
+                                    size={5}
+                                    value={dailyBriefingScheduleDraft.company_symbols}
+                                    disabled={!dailyBriefingPreferenceOptions}
+                                    onChange={(event) => {
+                                      const companySymbols = Array.from(
+                                        event.currentTarget.selectedOptions,
+                                        (option) => option.value,
+                                      );
+                                      setDailyBriefingScheduleDraft((current) => ({
+                                        ...current,
+                                        company_symbols: companySymbols,
+                                      }));
+                                    }}
+                                    className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-sm font-normal text-[color:var(--shell-ink)]"
+                                  >
+                                    {(dailyBriefingPreferenceOptions?.companies || []).map(
+                                      (company) => (
+                                        <option key={company.symbol} value={company.symbol}>
+                                          {company.symbol}
+                                          {company.company_name ? ` — ${company.company_name}` : ""}
+                                        </option>
+                                      ),
+                                    )}
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-[color:var(--shell-ink)]">
+                                  Countries
+                                  <select
+                                    multiple
+                                    size={5}
+                                    value={dailyBriefingScheduleDraft.country_iso2s}
+                                    disabled={!dailyBriefingPreferenceOptions}
+                                    onChange={(event) => {
+                                      const countryIso2s = Array.from(
+                                        event.currentTarget.selectedOptions,
+                                        (option) => option.value,
+                                      );
+                                      setDailyBriefingScheduleDraft((current) => ({
+                                        ...current,
+                                        country_iso2s: countryIso2s,
+                                      }));
+                                    }}
+                                    className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-sm font-normal text-[color:var(--shell-ink)]"
+                                  >
+                                    {(dailyBriefingPreferenceOptions?.countries || []).map(
+                                      (country) => (
+                                        <option key={country.iso2} value={country.iso2}>
+                                          {country.name} ({country.iso2})
+                                        </option>
+                                      ),
+                                    )}
+                                  </select>
+                                </label>
+                                <label className="text-xs font-semibold text-[color:var(--shell-ink)]">
+                                  Regions
+                                  <select
+                                    multiple
+                                    size={5}
+                                    value={dailyBriefingScheduleDraft.regions}
+                                    disabled={!dailyBriefingPreferenceOptions}
+                                    onChange={(event) => {
+                                      const regions = Array.from(
+                                        event.currentTarget.selectedOptions,
+                                        (option) => option.value,
+                                      );
+                                      setDailyBriefingScheduleDraft((current) => ({
+                                        ...current,
+                                        regions,
+                                      }));
+                                    }}
+                                    className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-sm font-normal text-[color:var(--shell-ink)]"
+                                  >
+                                    {(dailyBriefingPreferenceOptions?.regions || []).map((region) => (
+                                      <option key={region} value={region}>
+                                        {region}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                              </div>
+                            </div>
+                            <div className="mt-4 grid gap-3 md:grid-cols-[160px_minmax(0,1fr)_130px_auto] md:items-end">
                               <label className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
                                 Time
                                 <select
@@ -8077,14 +8355,44 @@ export default function ClaritasDashboard() {
                                   ))}
                                 </select>
                               </label>
-                              <button
-                                type="button"
-                                onClick={() => void handleSaveDailyBriefingSchedule()}
-                                disabled={isSavingDailyBriefingSchedule || isLoadingDailyBriefingSchedule}
-                                className="inline-flex items-center justify-center rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-4 py-2 text-sm font-semibold text-[color:var(--shell-on-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {isSavingDailyBriefingSchedule ? "Saving…" : "Save"}
-                              </button>
+                              <label className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                                Max signals
+                                <select
+                                  value={dailyBriefingScheduleDraft.max_items}
+                                  onChange={(event) => {
+                                    const maxItems = Number(event.currentTarget.value);
+                                    setDailyBriefingScheduleDraft((current) => ({
+                                      ...current,
+                                      max_items: maxItems,
+                                    }));
+                                  }}
+                                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--shell-ink)]"
+                                >
+                                  {[3, 5, 10, 15, 20, 25].map((count) => (
+                                    <option key={count} value={count}>
+                                      {count}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSaveDailyBriefingSchedule()}
+                                  disabled={isSavingDailyBriefingSchedule || isLoadingDailyBriefingSchedule}
+                                  className="inline-flex items-center justify-center rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-4 py-2 text-sm font-semibold text-[color:var(--shell-on-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isSavingDailyBriefingSchedule ? "Saving…" : "Save"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSendDailyBriefingPreview()}
+                                  disabled={isSendingDailyBriefingPreview || isSavingDailyBriefingSchedule}
+                                  className="inline-flex items-center justify-center rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-2 text-sm font-semibold text-[color:var(--shell-ink)] disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {isSendingDailyBriefingPreview ? "Sending…" : "Send preview"}
+                                </button>
+                              </div>
                             </div>
                             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[color:var(--shell-muted)]">
                               <span>

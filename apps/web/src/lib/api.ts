@@ -180,13 +180,60 @@ export type DailySignalBriefing = {
 export type DailyBriefingSchedule = {
   user_id: number;
   enabled: boolean;
+  email_enabled: boolean;
   scheduled_time: string;
   timezone: string;
+  industries: string[];
+  company_symbols: string[];
+  country_iso2s: string[];
+  regions: string[];
+  max_items: number;
   last_scheduled_for: string | null;
   last_triggered_at: string | null;
   last_job_id: string | null;
+  last_personal_job_id: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type DailyBriefingPreferenceOptions = {
+  industries: string[];
+  companies: Array<{
+    symbol: string;
+    company_name: string | null;
+    exchange: string | null;
+    country: string | null;
+    industry: string | null;
+  }>;
+  countries: Array<{
+    iso2: string;
+    name: string;
+    region: string | null;
+  }>;
+  regions: string[];
+};
+
+export type DailyBriefingEmailStatus = {
+  configured: boolean;
+  from: string;
+  recipient: string | null;
+  recipient_verified: boolean;
+};
+
+export type PersonalBriefingJob = {
+  id: string;
+  user_id: number;
+  briefing_date: string;
+  status: "queued" | "running" | "success" | "failed";
+  delivery_requested: boolean;
+  delivery_status: "queued" | "sending" | "sent" | "failed" | "suppressed" | null;
+  briefing_id: number | null;
+  attempt_count: number;
+  error: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string | null;
 };
 
 export type AdminDailyBriefingGeneratorConfig = {
@@ -512,14 +559,58 @@ export async function fetchDailyBriefingSchedule(): Promise<DailyBriefingSchedul
 
 export async function updateDailyBriefingSchedule(payload: {
   enabled?: boolean;
+  email_enabled?: boolean;
   scheduled_time?: string;
   timezone?: string;
+  industries?: string[];
+  company_symbols?: string[];
+  country_iso2s?: string[];
+  regions?: string[];
+  max_items?: number;
 }): Promise<DailyBriefingSchedule> {
   return requestDailyBriefingSchedule({
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   }, "Failed to update daily briefing schedule");
+}
+
+export async function fetchDailyBriefingPreferenceOptions(): Promise<DailyBriefingPreferenceOptions> {
+  const resp = await fetch(`${API_BASE}/api/briefings/daily/preferences/options`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch briefing preference options"));
+  const data = await resp.json();
+  return data.options as DailyBriefingPreferenceOptions;
+}
+
+export async function fetchDailyBriefingEmailStatus(): Promise<DailyBriefingEmailStatus> {
+  const resp = await fetch(`${API_BASE}/api/briefings/daily/email/status`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch briefing email status"));
+  const data = await resp.json();
+  return data.email as DailyBriefingEmailStatus;
+}
+
+export async function sendPersonalBriefingPreview(): Promise<PersonalBriefingJob> {
+  const resp = await fetch(`${API_BASE}/api/briefings/daily/personal/preview`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to queue briefing preview"));
+  const data = await resp.json();
+  return data.job as PersonalBriefingJob;
+}
+
+export async function fetchPersonalBriefingJob(jobId: string): Promise<PersonalBriefingJob> {
+  const resp = await fetch(
+    `${API_BASE}/api/briefings/daily/personal/jobs/${encodeURIComponent(jobId)}`,
+    { credentials: "include" },
+  );
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch briefing preview status"));
+  const data = await resp.json();
+  return data.job as PersonalBriefingJob;
 }
 
 export async function fetchAdminDailyBriefingGeneratorConfig(): Promise<AdminDailyBriefingGeneratorConfig> {

@@ -59,6 +59,16 @@ import {
   type GeneratedBriefingStatus,
 } from "./briefing-generator";
 import { checkLlmConnectionFromEnv, LlmConfigurationError, LlmProviderError } from "./llm";
+import { getEmailRuntimeConfig } from "./email";
+import {
+  enqueueDuePersonalBriefingJobs,
+  enqueuePersonalBriefingJob,
+  getLatestPersonalBriefing,
+  getPersonalBriefingJob,
+  getPersonalBriefingReferenceOptions,
+  processPersonalBriefingJob,
+  startPersonalBriefingWorker,
+} from "./personal-briefing";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -189,17 +199,20 @@ type DailyBriefingGenerationJobRow = {
 type DailyBriefingScheduleRow = {
   user_id: number;
   enabled: boolean;
+  email_enabled: boolean;
   scheduled_time: string;
   schedule_timezone: string;
+  industries: string[];
+  company_symbols: string[];
+  country_iso2s: string[];
+  regions: string[];
+  max_items: number;
   last_scheduled_for: string | Date | null;
   last_triggered_at: string | Date | null;
   last_job_id: string | null;
+  last_personal_job_id: string | null;
   created_at: string | Date;
   updated_at: string | Date;
-};
-
-type DueDailyBriefingScheduleRow = DailyBriefingScheduleRow & {
-  local_schedule_date: string | Date;
 };
 
 class AdminApiError extends Error {
@@ -805,16 +818,64 @@ function normalizeBriefingScheduleTimezone(value: unknown): string {
   return timezone;
 }
 
+function normalizeBriefingSelectionList(
+  value: unknown,
+  fieldName: string,
+  options: {
+    maxItems: number;
+    maxLength: number;
+    uppercase?: boolean;
+    pattern?: RegExp;
+  }
+): string[] {
+  if (!Array.isArray(value)) {
+    throw new AdminApiError(400, `${fieldName} must be an array of strings.`);
+  }
+  if (value.length > options.maxItems) {
+    throw new AdminApiError(400, `${fieldName} supports at most ${options.maxItems} selections.`);
+  }
+  const values = value.map((entry) => {
+    if (typeof entry !== "string") {
+      throw new AdminApiError(400, `${fieldName} must contain only strings.`);
+    }
+    const trimmed = entry.replace(/\s+/g, " ").trim();
+    if (!trimmed || trimmed.length > options.maxLength) {
+      throw new AdminApiError(
+        400,
+        `${fieldName} values must be between 1 and ${options.maxLength} characters.`
+      );
+    }
+    const normalized = options.uppercase ? trimmed.toUpperCase() : trimmed;
+    if (options.pattern && !options.pattern.test(normalized)) {
+      throw new AdminApiError(400, `${fieldName} contains an invalid value: ${trimmed}.`);
+    }
+    return normalized;
+  });
+  return Array.from(new Set(values));
+}
+
 function parseBriefingSchedulePatch(raw: unknown): {
   enabled?: boolean;
+  email_enabled?: boolean;
   scheduled_time?: string;
   schedule_timezone?: string;
+  industries?: string[];
+  company_symbols?: string[];
+  country_iso2s?: string[];
+  regions?: string[];
+  max_items?: number;
 } {
   const body = asPlainObject(raw);
   const patch: {
     enabled?: boolean;
+    email_enabled?: boolean;
     scheduled_time?: string;
     schedule_timezone?: string;
+    industries?: string[];
+    company_symbols?: string[];
+    country_iso2s?: string[];
+    regions?: string[];
+    max_items?: number;
   } = {};
 
   if (Object.prototype.hasOwnProperty.call(body, "enabled")) {
@@ -822,6 +883,13 @@ function parseBriefingSchedulePatch(raw: unknown): {
       throw new AdminApiError(400, "enabled must be a boolean.");
     }
     patch.enabled = body.enabled;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "email_enabled")) {
+    if (typeof body.email_enabled !== "boolean") {
+      throw new AdminApiError(400, "email_enabled must be a boolean.");
+    }
+    patch.email_enabled = body.email_enabled;
   }
 
   const scheduledTime = body.scheduled_time ?? body.schedule_time;
@@ -834,6 +902,50 @@ function parseBriefingSchedulePatch(raw: unknown): {
     patch.schedule_timezone = normalizeBriefingScheduleTimezone(timezone);
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, "industries")) {
+    patch.industries = normalizeBriefingSelectionList(body.industries, "industries", {
+      maxItems: 20,
+      maxLength: 80,
+    });
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "company_symbols")) {
+    patch.company_symbols = normalizeBriefingSelectionList(
+      body.company_symbols,
+      "company_symbols",
+      {
+        maxItems: 50,
+        maxLength: 16,
+        uppercase: true,
+        pattern: /^[A-Z0-9][A-Z0-9._-]*$/,
+      }
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "country_iso2s")) {
+    patch.country_iso2s = normalizeBriefingSelectionList(body.country_iso2s, "country_iso2s", {
+      maxItems: 50,
+      maxLength: 2,
+      uppercase: true,
+      pattern: /^[A-Z]{2}$/,
+    });
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "regions")) {
+    patch.regions = normalizeBriefingSelectionList(body.regions, "regions", {
+      maxItems: 20,
+      maxLength: 80,
+    });
+  }
+  if (Object.prototype.hasOwnProperty.call(body, "max_items")) {
+    if (
+      typeof body.max_items !== "number" ||
+      !Number.isInteger(body.max_items) ||
+      body.max_items < 3 ||
+      body.max_items > 25
+    ) {
+      throw new AdminApiError(400, "max_items must be an integer between 3 and 25.");
+    }
+    patch.max_items = body.max_items;
+  }
+
   return patch;
 }
 
@@ -841,11 +953,18 @@ function toDailyBriefingSchedule(row: DailyBriefingScheduleRow) {
   return {
     user_id: Number(row.user_id),
     enabled: !!row.enabled,
+    email_enabled: !!row.email_enabled,
     scheduled_time: timeToApiString(row.scheduled_time),
     timezone: row.schedule_timezone,
+    industries: Array.isArray(row.industries) ? row.industries : [],
+    company_symbols: Array.isArray(row.company_symbols) ? row.company_symbols : [],
+    country_iso2s: Array.isArray(row.country_iso2s) ? row.country_iso2s : [],
+    regions: Array.isArray(row.regions) ? row.regions : [],
+    max_items: Number(row.max_items) || 10,
     last_scheduled_for: row.last_scheduled_for ? dateToApiString(row.last_scheduled_for) : null,
     last_triggered_at: timestampToApiString(row.last_triggered_at),
     last_job_id: row.last_job_id,
+    last_personal_job_id: row.last_personal_job_id,
     created_at: timestampToApiString(row.created_at) || new Date().toISOString(),
     updated_at: timestampToApiString(row.updated_at) || new Date().toISOString(),
   };
@@ -866,11 +985,18 @@ async function getUserDailyBriefingSchedule(userId: number) {
     `SELECT
        user_id,
        enabled,
+       email_enabled,
        scheduled_time::text AS scheduled_time,
        schedule_timezone,
+       industries,
+       company_symbols,
+       country_iso2s,
+       regions,
+       max_items,
        last_scheduled_for,
        last_triggered_at,
        last_job_id,
+       last_personal_job_id,
        created_at,
        updated_at
      FROM user_daily_briefing_schedule
@@ -892,16 +1018,29 @@ async function updateUserDailyBriefingSchedule(
      SET enabled = COALESCE($2, enabled),
          scheduled_time = COALESCE($3::time, scheduled_time),
          schedule_timezone = COALESCE($4, schedule_timezone),
+         email_enabled = COALESCE($5, email_enabled),
+         industries = COALESCE($6::text[], industries),
+         company_symbols = COALESCE($7::text[], company_symbols),
+         country_iso2s = COALESCE($8::text[], country_iso2s),
+         regions = COALESCE($9::text[], regions),
+         max_items = COALESCE($10::int, max_items),
          updated_at = now()
      WHERE user_id = $1
      RETURNING
        user_id,
        enabled,
+       email_enabled,
        scheduled_time::text AS scheduled_time,
        schedule_timezone,
+       industries,
+       company_symbols,
+       country_iso2s,
+       regions,
+       max_items,
        last_scheduled_for,
        last_triggered_at,
        last_job_id,
+       last_personal_job_id,
        created_at,
        updated_at`,
     [
@@ -909,111 +1048,16 @@ async function updateUserDailyBriefingSchedule(
       typeof patch.enabled === "boolean" ? patch.enabled : null,
       patch.scheduled_time ?? null,
       patch.schedule_timezone ?? null,
+      typeof patch.email_enabled === "boolean" ? patch.email_enabled : null,
+      patch.industries ?? null,
+      patch.company_symbols ?? null,
+      patch.country_iso2s ?? null,
+      patch.regions ?? null,
+      patch.max_items ?? null,
     ]
   );
   if (!rows[0]) throw new AdminApiError(500, "Failed to update daily briefing schedule.");
   return toDailyBriefingSchedule(rows[0]);
-}
-
-function getUtcBriefingDateForSchedule(localScheduleDate: string): string {
-  const utcToday = new Date().toISOString().slice(0, 10);
-  return localScheduleDate > utcToday ? utcToday : localScheduleDate;
-}
-
-async function getDueDailyBriefingSchedules(): Promise<DueDailyBriefingScheduleRow[]> {
-  const { rows } = await query<DueDailyBriefingScheduleRow>(
-    `SELECT
-       user_id,
-       enabled,
-       scheduled_time::text AS scheduled_time,
-       schedule_timezone,
-       last_scheduled_for,
-       last_triggered_at,
-       last_job_id,
-       created_at,
-       updated_at,
-       timezone(schedule_timezone, now())::date AS local_schedule_date
-     FROM user_daily_briefing_schedule
-     WHERE enabled = true
-       AND timezone(schedule_timezone, now())::time >= scheduled_time
-       AND (
-         last_scheduled_for IS NULL
-         OR last_scheduled_for < timezone(schedule_timezone, now())::date
-       )
-     ORDER BY schedule_timezone ASC, scheduled_time ASC, user_id ASC
-     LIMIT $1`,
-    [DAILY_BRIEFING_SCHEDULER_BATCH_SIZE]
-  );
-  return rows;
-}
-
-async function getActiveDailyBriefingGenerationJob(
-  briefingDate: string
-): Promise<DailyBriefingGenerationJobRow | null> {
-  const { rows } = await query<DailyBriefingGenerationJobRow>(
-    `SELECT
-       id,
-       briefing_date,
-       status,
-       options,
-       briefing_id,
-       generation,
-       error,
-       created_at,
-       started_at,
-       finished_at,
-       updated_at
-     FROM daily_signal_briefing_generation_job
-     WHERE briefing_date = $1::date
-       AND status IN ('queued', 'running')
-     ORDER BY created_at DESC
-     LIMIT 1`,
-    [briefingDate]
-  );
-  return rows[0] ?? null;
-}
-
-async function ensurePublishedDailyBriefingGenerationJob(briefingDate: string): Promise<string | null> {
-  const published = await query<{ id: number }>(
-    `SELECT id
-     FROM daily_signal_briefing
-     WHERE briefing_date = $1::date
-       AND status = 'published'
-     LIMIT 1`,
-    [briefingDate]
-  );
-  if (published.rows[0]) return null;
-
-  const activeJob = await getActiveDailyBriefingGenerationJob(briefingDate);
-  if (activeJob) {
-    if (activeJob.status === "queued") startDailyBriefingGenerationJob(activeJob.id);
-    return activeJob.id;
-  }
-
-  const job = await createDailyBriefingGenerationJob(briefingDate, {
-    briefingDate,
-    status: "published",
-    lookbackHours: 24,
-  });
-  startDailyBriefingGenerationJob(job.id);
-  return job.id;
-}
-
-async function markDailyBriefingSchedulesTriggered(
-  userIds: number[],
-  localScheduleDate: string,
-  jobId: string | null
-): Promise<void> {
-  if (userIds.length === 0) return;
-  await query(
-    `UPDATE user_daily_briefing_schedule
-     SET last_scheduled_for = $2::date,
-         last_triggered_at = now(),
-         last_job_id = COALESCE($3, last_job_id),
-         updated_at = now()
-     WHERE user_id = ANY($1::bigint[])`,
-    [userIds, localScheduleDate, jobId]
-  );
 }
 
 async function withDailyBriefingSchedulerLock(task: () => Promise<void>): Promise<void> {
@@ -1033,33 +1077,7 @@ async function runDailyBriefingSchedulerCycle(): Promise<void> {
 
   try {
     await withDailyBriefingSchedulerLock(async () => {
-      const dueSchedules = await getDueDailyBriefingSchedules();
-      const scheduleGroups = new Map<
-        string,
-        {
-          localScheduleDate: string;
-          briefingDate: string;
-          userIds: number[];
-        }
-      >();
-
-      for (const row of dueSchedules) {
-        const localScheduleDate = dateToApiString(row.local_schedule_date);
-        const briefingDate = getUtcBriefingDateForSchedule(localScheduleDate);
-        const key = `${localScheduleDate}:${briefingDate}`;
-        const current = scheduleGroups.get(key) ?? {
-          localScheduleDate,
-          briefingDate,
-          userIds: [],
-        };
-        current.userIds.push(Number(row.user_id));
-        scheduleGroups.set(key, current);
-      }
-
-      for (const group of scheduleGroups.values()) {
-        const jobId = await ensurePublishedDailyBriefingGenerationJob(group.briefingDate);
-        await markDailyBriefingSchedulesTriggered(group.userIds, group.localScheduleDate, jobId);
-      }
+      await enqueueDuePersonalBriefingJobs(DAILY_BRIEFING_SCHEDULER_BATCH_SIZE);
     });
   } finally {
     dailyBriefingSchedulerRunning = false;
@@ -1284,6 +1302,84 @@ app.get("/api/briefings/daily/schedule", requireSession, handleGetDailyBriefingS
 app.put("/api/briefings/daily/schedule", requireSession, handleUpdateDailyBriefingSchedule);
 app.get("/api/me/briefings/daily/schedule", requireSession, handleGetDailyBriefingSchedule);
 app.put("/api/me/briefings/daily/schedule", requireSession, handleUpdateDailyBriefingSchedule);
+app.get("/api/auth/me/briefings/daily/schedule", requireSession, handleGetDailyBriefingSchedule);
+app.put("/api/auth/me/briefings/daily/schedule", requireSession, handleUpdateDailyBriefingSchedule);
+
+app.get("/api/briefings/daily/preferences/options", requireSession, async (_req, res) => {
+  try {
+    const options = await getPersonalBriefingReferenceOptions();
+    return res.json({ options });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/briefings/daily/email/status", requireSession, async (_req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(res);
+    const { rows } = await query<{ email: string | null; email_verified: boolean }>(
+      `SELECT email, email_verified FROM app_user WHERE id = $1 LIMIT 1`,
+      [userId]
+    );
+    const emailConfig = getEmailRuntimeConfig();
+    return res.json({
+      email: {
+        configured: emailConfig.configured,
+        from: emailConfig.from,
+        recipient: rows[0]?.email ?? null,
+        recipient_verified: !!rows[0]?.email_verified,
+      },
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/briefings/daily/personal/latest", requireSession, async (_req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(res);
+    const briefing = await getLatestPersonalBriefing(userId);
+    return res.json({ briefing });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.post("/api/briefings/daily/personal/preview", requireAuthenticated, async (_req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(res);
+    await ensureUserDailyBriefingSchedule(userId);
+    const { rows } = await query<{ briefing_date: string | Date }>(
+      `SELECT timezone(schedule_timezone, now())::date AS briefing_date
+       FROM user_daily_briefing_schedule
+       WHERE user_id = $1
+       LIMIT 1`,
+      [userId]
+    );
+    const briefingDate = dateToApiString(rows[0]?.briefing_date ?? new Date());
+    const job = await enqueuePersonalBriefingJob(userId, briefingDate, {
+      deliveryRequested: true,
+      force: true,
+    });
+    void processPersonalBriefingJob(job.id).catch((error) => {
+      console.error(`Personal briefing preview job ${job.id} failed to start:`, error);
+    });
+    return res.status(202).json({ job });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/briefings/daily/personal/jobs/:id", requireSession, async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(res);
+    const job = await getPersonalBriefingJob(userId, req.params.id);
+    if (!job) return res.status(404).json({ error: "Personal briefing job not found." });
+    return res.json({ job });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
 
 app.get("/api/briefings/daily/latest", requireAuthenticated, async (_req, res) => {
   try {
@@ -2554,6 +2650,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
 
 startIngestionAutomationWorker();
 startDailyBriefingSchedulerWorker();
+startPersonalBriefingWorker();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API listening on http://0.0.0.0:${PORT}`);
