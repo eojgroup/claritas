@@ -12,6 +12,7 @@ import { feature } from "topojson-client";
 import worldAtlas from "world-atlas/countries-110m.json";
 import worldCountries from "world-countries";
 import type { FeatureCollection, Geometry } from "geojson";
+import type { StyleSpecification } from "maplibre-gl";
 import type {
   GeometryCollection,
   Properties,
@@ -65,9 +66,6 @@ type BubbleMarker = {
   meta?: BubbleDatum["meta"];
 };
 
-const DEFAULT_STYLE_URL = "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json";
-const DEFAULT_DARK_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
-
 const INITIAL_VIEW_STATE = {
   latitude: 14,
   longitude: 8,
@@ -113,7 +111,7 @@ const WORLD_COUNTRY_GEOMETRY = (() => {
     features: collection.features.flatMap((countryFeature) => {
       const numericId = String(countryFeature.id ?? "").padStart(3, "0");
       const iso2 = isoByNumeric.get(numericId);
-      if (!iso2) return [];
+      if (!iso2 || iso2 === "AQ") return [];
       return [
         {
           ...countryFeature,
@@ -285,7 +283,20 @@ export default memo(function WorldMapBubbles({
     if (custom) return custom;
     const shared = getEnvValue("VITE_MAP_STYLE_URL");
     if (shared) return shared;
-    return isDark ? DEFAULT_DARK_STYLE_URL : DEFAULT_STYLE_URL;
+    return {
+      version: 8,
+      name: "Claritas analytical base",
+      sources: {},
+      layers: [
+        {
+          id: "claritas-ocean",
+          type: "background",
+          paint: {
+            "background-color": isDark ? "#07121a" : "#e7edf0",
+          },
+        },
+      ],
+    } satisfies StyleSpecification;
   }, [isDark]);
 
   const rScale = (value: number) => {
@@ -357,14 +368,14 @@ export default memo(function WorldMapBubbles({
         "fill-opacity": [
           "case",
           ["==", ["get", "iso2"], primaryIso ?? "__none__"],
-          0.42,
+          0.9,
           ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
-          0.34,
+          0.82,
           ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
-          0.28,
+          0.78,
           ["get", "hasData"],
-          ["interpolate", ["linear"], ["get", "intensity"], 0, 0.08, 1, 0.3],
-          isDark ? 0.05 : 0.12,
+          ["interpolate", ["linear"], ["get", "intensity"], 0, 0.46, 1, 0.78],
+          isDark ? 0.62 : 0.76,
         ],
       },
     }),
@@ -422,9 +433,17 @@ export default memo(function WorldMapBubbles({
         mapLib={import("maplibre-gl")}
         initialViewState={INITIAL_VIEW_STATE}
         mapStyle={mapStyle}
+        attributionControl={false}
         dragRotate={false}
         touchZoomRotate={false}
         projection="mercator"
+        renderWorldCopies={false}
+        minZoom={0.35}
+        maxZoom={7}
+        maxBounds={[
+          [-179.5, -62],
+          [179.5, 84],
+        ]}
         reuseMaps
         interactiveLayerIds={[COUNTRY_FILL_LAYER_ID]}
         cursor={hoveredCountry ? "pointer" : "grab"}
@@ -444,6 +463,7 @@ export default memo(function WorldMapBubbles({
               : "Map style failed to load.";
           setMapError(reason);
         }}
+        onLoad={() => setMapError(null)}
         style={{ width: "100%", height: "100%" }}
       >
         <Source id="claritas-countries" type="geojson" data={countryGeoJson}>
@@ -582,6 +602,10 @@ export default memo(function WorldMapBubbles({
         })}
       </MapView>
 
+      <div className="map-geometry-attribution pointer-events-none absolute bottom-2 right-2">
+        Natural Earth geometry · MapLibre
+      </div>
+
       {hoveredCountry && !tip && (
         <div className="map-country-readout pointer-events-none absolute left-3 top-3">
           <span>
@@ -608,7 +632,7 @@ export default memo(function WorldMapBubbles({
             backdropFilter: "blur(14px)",
           }}
         >
-          <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.22em]">
+          <div className="map-legend-title mb-1 text-[10px] font-semibold uppercase tracking-[0.22em]">
             {legendLabel}
           </div>
           <div className="flex items-center gap-2">
@@ -636,8 +660,8 @@ export default memo(function WorldMapBubbles({
             <span>Min {min}</span>
             <span>Max {max}</span>
           </div>
-          <div className="mt-1 border-t border-current/15 pt-1 text-[10px] opacity-75">
-            {markers.length} countries mapped · click any country for profile
+          <div className="map-legend-coverage mt-1 border-t border-current/15 pt-1 text-[10px] opacity-75">
+            {markers.length} mapped · select country for profile
           </div>
         </div>
       )}

@@ -461,7 +461,7 @@ a {
 }
 
 .world-map .maplibregl-canvas {
-  filter: saturate(0.68) contrast(1.08) brightness(0.94);
+  filter: none;
 }
 
 .map-bubble-marker {
@@ -523,7 +523,24 @@ a {
 }
 
 .map-data-legend {
-  max-width: min(19rem, calc(100% - 1.5rem));
+  max-width: min(15rem, calc(100% - 1.5rem));
+}
+
+.map-data-legend svg {
+  width: 3.5rem;
+}
+
+.map-legend-coverage {
+  white-space: nowrap;
+}
+
+.map-geometry-attribution {
+  padding: 0.18rem 0.35rem;
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--shell-bg) 72%, transparent);
+  color: color-mix(in srgb, var(--shell-muted) 78%, transparent);
+  font-size: 0.52rem;
+  backdrop-filter: blur(6px);
 }
 
 .app-safe-top {
@@ -903,6 +920,15 @@ body {
 
 .analytics-workspace-grid .feed-panel {
   order: 5;
+}
+
+.dashboard-map-panel {
+  min-height: 34rem;
+}
+
+.dashboard-map-frame {
+  height: clamp(22rem, 38vh, 27rem) !important;
+  min-height: 22rem !important;
 }
 
 .context-intelligence-band {
@@ -2233,6 +2259,20 @@ body {
     height: 18rem !important;
     min-height: 18rem !important;
     max-height: 18rem !important;
+  }
+
+  .dashboard-map-panel {
+    min-height: 0;
+  }
+
+  .map-data-legend {
+    max-width: 10.5rem;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .map-data-legend svg,
+  .map-legend-coverage {
+    display: none;
   }
 
   .dashboard-news-columns {
