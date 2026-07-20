@@ -20,6 +20,24 @@
               valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
             - name: FINNHUB_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-finnhub, key: FINNHUB_API_KEY, optional: true } }
+            - name: PODCASTINDEX_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_KEY, optional: true } }
+            - name: PODCASTINDEX_API_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_SECRET, optional: true } }
+            - name: PODCAST_DISCOVERY_TERMS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_DISCOVERY_TERMS, optional: true } }
+            - name: PODCAST_FEED_IDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_FEED_IDS, optional: true } }
+            - name: PODCAST_MAX_FEEDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_MAX_FEEDS, optional: true } }
+            - name: PODCAST_MAX_EPISODES_PER_FEED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_MAX_EPISODES_PER_FEED, optional: true } }
+            - name: PODCAST_INTELLIGENCE_EXTRACTION_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_INTELLIGENCE_EXTRACTION_ENABLED, optional: true } }
+            - name: PODCASTINDEX_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCASTINDEX_USER_AGENT, optional: true } }
+            - name: WIKIDATA_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: WIKIDATA_USER_AGENT, optional: true } }
             - name: BRIEFING_LLM_PROVIDER
               valueFrom: { configMapKeyRef: { name: claritas-config, key: BRIEFING_LLM_PROVIDER, optional: true } }
             - name: OPENCODE_SERVER_URL

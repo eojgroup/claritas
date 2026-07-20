@@ -306,6 +306,7 @@ struct ProfileView: View {
                         Text("News").tag("news")
                         Text("Weather").tag("weather")
                         Text("Markets").tag("market")
+                        Text("Leaders").tag("leadership")
                     }
                     .pickerStyle(.segmented)
                 }

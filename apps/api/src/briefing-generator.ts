@@ -21,6 +21,7 @@ export type DailyBriefingGenerationOptions = {
   instructions?: string | null;
   lookbackHours?: number | null;
   maxNewsItems?: number;
+  maxPodcastItems?: number;
   maxMarketItems?: number;
   maxWeatherItems?: number;
 };
@@ -47,6 +48,18 @@ type MarketContextRow = {
   observed_at: string | Date;
 };
 
+type PodcastContextRow = {
+  id: number;
+  title: string;
+  summary: string | null;
+  event_time: string | Date | null;
+  feed_title: string;
+  publisher_url: string | null;
+  external_links: unknown;
+  evidence: unknown;
+  signals: unknown;
+};
+
 type WeatherContextRow = {
   country_iso2: string;
   country_name: string | null;
@@ -66,10 +79,12 @@ type BriefingContext = {
   generated_at: string;
   counts: {
     news: number;
+    podcasts: number;
     markets: number;
     weather: number;
   };
   news: Array<Record<string, unknown>>;
+  podcasts: Array<Record<string, unknown>>;
   markets: Array<Record<string, unknown>>;
   weather: Array<Record<string, unknown>>;
 };
@@ -103,7 +118,7 @@ const BRIEFING_OUTPUT_SCHEMA: Record<string, unknown> = {
     },
     update_text: {
       type: "string",
-      description: "One concise briefing paragraph covering news, markets, and weather using only supplied evidence.",
+      description: "One concise briefing paragraph covering material news, podcast intelligence, markets, and weather using only supplied evidence.",
     },
     key_takeaways: {
       type: "array",
@@ -175,10 +190,11 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
   Omit<DailyBriefingGenerationOptions, "briefingDate">): Promise<BriefingContext> {
   const { start, end } = getSourceWindow(options.briefingDate, options.lookbackHours);
   const newsLimit = clampInteger(options.maxNewsItems, 24, 5, 80);
+  const podcastLimit = clampInteger(options.maxPodcastItems, 12, 1, 40);
   const marketLimit = clampInteger(options.maxMarketItems, 16, 5, 60);
   const weatherLimit = clampInteger(options.maxWeatherItems, 16, 5, 80);
 
-  const [newsResult, marketResult, weatherResult] = await Promise.all([
+  const [newsResult, podcastResult, marketResult, weatherResult] = await Promise.all([
     query<NewsContextRow>(
       `SELECT
          i.id,
@@ -190,11 +206,58 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
          COALESCE(i.event_time, i.created_at) AS event_time
        FROM item i
        JOIN source s ON s.id = i.source_id
-       WHERE COALESCE(i.event_time, i.created_at) >= $1::timestamptz
+       WHERE i.kind <> 'podcast_episode'
+         AND COALESCE(i.event_time, i.created_at) >= $1::timestamptz
          AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
        ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
        LIMIT $3`,
       [start, end, newsLimit]
+    ),
+    query<PodcastContextRow>(
+      `SELECT
+         i.id,
+         i.title,
+         i.summary,
+         COALESCE(i.event_time, i.created_at) AS event_time,
+         pf.title AS feed_title,
+         i.url AS publisher_url,
+         pe.external_links,
+         COALESCE((
+           SELECT jsonb_agg(jsonb_build_object(
+             'start_ms', evidence.start_ms,
+             'end_ms', evidence.end_ms,
+             'speaker', evidence.speaker,
+             'text', evidence.text
+           ) ORDER BY evidence.start_ms)
+           FROM (
+             SELECT start_ms, end_ms, speaker, text
+             FROM evidence_segment
+             WHERE episode_id = pe.id
+             ORDER BY segment_index
+             LIMIT 8
+           ) evidence
+         ), '[]'::jsonb) AS evidence,
+         COALESCE((
+           SELECT jsonb_agg(jsonb_build_object(
+             'kind', signal.signal_type,
+             'title', signal.title,
+             'summary', signal.summary,
+             'entities', signal.entities,
+             'topics', signal.topics,
+             'risk_level', signal.risk_level,
+             'confidence', signal.confidence
+           ) ORDER BY signal.confidence DESC NULLS LAST)
+           FROM intelligence_signal signal
+           WHERE signal.episode_id = pe.id
+         ), '[]'::jsonb) AS signals
+       FROM item i
+       JOIN podcast_episode pe ON pe.item_id = i.id
+       JOIN podcast_feed pf ON pf.id = pe.feed_id
+       WHERE COALESCE(i.event_time, i.created_at) >= $1::timestamptz
+         AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
+       ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
+       LIMIT $3`,
+      [start, end, podcastLimit]
     ),
     query<MarketContextRow>(
       `SELECT
@@ -243,6 +306,18 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     url: row.url,
   }));
 
+  const podcasts = podcastResult.rows.map((row) => ({
+    id: Number(row.id),
+    podcast: row.feed_title,
+    publisher_url: row.publisher_url,
+    episode: row.title,
+    publisher_summary: row.summary,
+    event_time: timestampToIso(row.event_time),
+    findings: Array.isArray(row.signals) ? row.signals : [],
+    timestamped_evidence: Array.isArray(row.evidence) ? row.evidence : [],
+    external_links: row.external_links && typeof row.external_links === "object" ? row.external_links : {},
+  }));
+
   const markets = marketResult.rows.map((row) => ({
     symbol: row.symbol,
     company_name: row.company_name,
@@ -276,10 +351,12 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     generated_at: new Date().toISOString(),
     counts: {
       news: news.length,
+      podcasts: podcasts.length,
       markets: markets.length,
       weather: weather.length,
     },
     news,
+    podcasts,
     markets,
     weather,
   };
@@ -289,7 +366,8 @@ function buildSystemPrompt(): string {
   return [
     "You generate Claritas daily signal briefings from supplied JSON evidence.",
     "Use only the supplied evidence. Do not invent facts, numbers, sources, causal links, or forecasts.",
-    "Cover News, Markets, and Weather. If a category has thin, stale, or missing data, say that plainly.",
+    "Cover News, Podcast Intelligence, Markets, and Weather when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
+    "Treat podcast claims as attributed speaker statements, not independently verified facts. Retain uncertainty and attribution.",
     "Markets content is informational only. Do not give investment advice or tell users to buy, sell, or hold.",
     "Keep the result concise, executive, and neutral.",
     "Return JSON only, matching the requested schema.",
@@ -369,6 +447,7 @@ export async function generateDailySignalBriefing(
       options: {
         lookback_hours: options.lookbackHours ?? null,
         max_news_items: options.maxNewsItems ?? null,
+        max_podcast_items: options.maxPodcastItems ?? null,
         max_market_items: options.maxMarketItems ?? null,
         max_weather_items: options.maxWeatherItems ?? null,
       },

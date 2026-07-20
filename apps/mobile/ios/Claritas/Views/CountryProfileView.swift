@@ -28,6 +28,11 @@ struct CountryProfileView: View {
             .first
     }
 
+    private var leadership: CountryLeadership? {
+        guard let iso else { return nil }
+        return model.leadership.first { $0.country.uppercased() == iso }
+    }
+
     private var marketQuotes: [MarketQuote] {
         guard let iso else { return [] }
         return model.marketQuotes
@@ -80,6 +85,61 @@ struct CountryProfileView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
+
+                    Divider()
+
+                    if let leadership {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("Leadership")
+                                    .font(.headline)
+                                Spacer()
+                                Text("Wikidata · \(leadership.source_license)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            if let governmentType = leadership.government_type {
+                                Text(governmentType)
+                                    .font(.subheadline.weight(.semibold))
+                            }
+
+                            ForEach(leadership.roles) { role in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(role.roleLabel.uppercased())
+                                        .font(.caption2.weight(.semibold))
+                                        .tracking(1.5)
+                                        .foregroundStyle(.secondary)
+                                    Text(role.person_name)
+                                        .font(.subheadline)
+                                    if let startedDate = role.startedDate {
+                                        Text("In office since \(startedDate.formatted(date: .abbreviated, time: .omitted))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+
+                            Text(leadership.summary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Text(
+                                "Wikidata updated \(formatDate(leadership.sourceUpdatedDate)) · Claritas retrieved \(formatDate(leadership.retrievedDate))"
+                            )
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                            if let sourceURL = URL(string: leadership.source_url) {
+                                Link("View Wikidata record", destination: sourceURL)
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                    } else {
+                        Text("Leadership data has not been ingested for this country yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } else {
                 Text("Select a country from the map, a news tag, or a market symbol to see a live country profile.")
@@ -99,6 +159,10 @@ struct CountryProfileView: View {
         guard let value else { return "—" }
         let text = value.formatted(.number.precision(.fractionLength(2)))
         return value >= 0 ? "+\(text)%" : "\(text)%"
+    }
+
+    private func formatDate(_ date: Date?) -> String {
+        date?.formatted(date: .abbreviated, time: .shortened) ?? "not provided"
     }
 }
 

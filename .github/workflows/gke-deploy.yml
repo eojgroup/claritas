@@ -203,6 +203,12 @@ jobs:
           OPENCODE_MODEL: ${{ secrets.OPENCODE_MODEL }}
           OPENCODE_PROVIDER_ID: ${{ secrets.OPENCODE_PROVIDER_ID }}
           OPENCODE_MODEL_ID: ${{ secrets.OPENCODE_MODEL_ID }}
+          PODCAST_DISCOVERY_TERMS: ${{ vars.PODCAST_DISCOVERY_TERMS }}
+          PODCAST_FEED_IDS: ${{ vars.PODCAST_FEED_IDS }}
+          PODCAST_MAX_FEEDS: ${{ vars.PODCAST_MAX_FEEDS }}
+          PODCAST_MAX_EPISODES_PER_FEED: ${{ vars.PODCAST_MAX_EPISODES_PER_FEED }}
+          PODCAST_INTELLIGENCE_EXTRACTION_ENABLED: ${{ vars.PODCAST_INTELLIGENCE_EXTRACTION_ENABLED }}
+          PODCASTINDEX_USER_AGENT: ${{ vars.PODCASTINDEX_USER_AGENT }}
         run: |
           # Ensure claritas-config (DB + auth settings) exists
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
@@ -224,6 +230,12 @@ jobs:
             "OPENCODE_MODEL",
             "OPENCODE_PROVIDER_ID",
             "OPENCODE_MODEL_ID",
+            "PODCAST_DISCOVERY_TERMS",
+            "PODCAST_FEED_IDS",
+            "PODCAST_MAX_FEEDS",
+            "PODCAST_MAX_EPISODES_PER_FEED",
+            "PODCAST_INTELLIGENCE_EXTRACTION_ENABLED",
+            "PODCASTINDEX_USER_AGENT",
           ]) {
             const value = process.env[key];
             if (value && value.trim()) data[key] = value.trim();
@@ -302,6 +314,8 @@ jobs:
           THENEWSAPI_API_TOKEN: ${{ secrets.THENEWSAPI_API_TOKEN }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
+          PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
         run: |
           set -euo pipefail
           # Upsert NewsAPI secret if provided
@@ -338,6 +352,16 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::FINNHUB_API_KEY secret not provided; skipping claritas-finnhub upsert"
+          fi
+
+          # PodcastIndex uses a key and secret to sign each API request.
+          if [ -n "${PODCASTINDEX_API_KEY:-}" ] && [ -n "${PODCASTINDEX_API_SECRET:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-podcastindex \
+              --from-literal=PODCASTINDEX_API_KEY="$PODCASTINDEX_API_KEY" \
+              --from-literal=PODCASTINDEX_API_SECRET="$PODCASTINDEX_API_SECRET" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::PodcastIndex credentials not provided; podcast automation remains disabled"
           fi
 
       - name: 🔐 Ensure OpenCode briefing secrets exist

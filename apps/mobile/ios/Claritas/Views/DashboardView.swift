@@ -15,7 +15,7 @@ struct DashboardView: View {
     @State private var marketEarningsWindowDays: Int = 14
     @State private var hasAppliedStoredModes: Bool = false
 
-    enum ListMode: String, CaseIterable { case news, weather, market }
+    enum ListMode: String, CaseIterable { case news, weather, market, leadership }
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
 
     var body: some View {
@@ -97,11 +97,14 @@ struct DashboardView: View {
                                         Text("News").tag(ListMode.news)
                                         Text("Weather").tag(ListMode.weather)
                                         Text("Markets").tag(ListMode.market)
+                                        Text("Leaders").tag(ListMode.leadership)
                                     }
                                     .pickerStyle(.segmented)
                                     .frame(maxWidth: 300)
                                     .onChange(of: mapMode) { newValue in
-                                        listMode = newValue
+                                        if newValue != .leadership {
+                                            listMode = newValue
+                                        }
                                     }
                                 }
 
@@ -111,6 +114,7 @@ struct DashboardView: View {
                                         countryStats: model.countryStats,
                                         weather: model.weather,
                                         marketQuotes: model.marketQuotes,
+                                        leadership: model.leadership,
                                         selectedCountry: model.selectedCountry,
                                         onSelectCountry: { iso in
                                             let normalized = iso.uppercased()
@@ -681,6 +685,8 @@ struct DashboardView: View {
             return "Weather per country"
         case .market:
             return "Index volatility by country"
+        case .leadership:
+            return "Current leadership by country"
         }
     }
 }
@@ -2555,6 +2561,7 @@ private struct InteractiveCountryBubbleMap: View {
     let countryStats: [CountryStat]
     let weather: [CountryWeather]
     let marketQuotes: [MarketQuote]
+    let leadership: [CountryLeadership]
     let selectedCountry: String?
     let onSelectCountry: (String) -> Void
 
@@ -2629,6 +2636,20 @@ private struct InteractiveCountryBubbleMap: View {
                 )
             }
             return mapped.sorted { $0.magnitude > $1.magnitude }
+        case .leadership:
+            return leadership.compactMap { row in
+                let iso = row.country.uppercased()
+                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { return nil }
+                let names = row.roles.map(\.person_name)
+                return CountryBubblePoint(
+                    id: "leadership-\(iso)",
+                    iso: iso,
+                    valueLabel: "\(max(row.roles.count, 1))",
+                    detail: names.isEmpty ? "Leadership record" : names.joined(separator: ", "),
+                    magnitude: Double(max(row.roles.count, 1)),
+                    coordinate: coordinate
+                )
+            }
         }
     }
 
@@ -2650,7 +2671,9 @@ private struct InteractiveCountryBubbleMap: View {
                         ? "No mapped news stats yet."
                         : mode == .weather
                             ? "No mapped weather stats yet."
-                            : "No mapped market stats yet."
+                            : mode == .market
+                                ? "No mapped market stats yet."
+                                : "No mapped leadership records yet."
                 )
                     .font(.footnote)
                     .padding(.horizontal, 12)
@@ -2690,6 +2713,10 @@ private struct InteractiveCountryBubbleMap: View {
             fillColor = selected
                 ? ClaritasPalette.darkBlue
                 : ClaritasPalette.darkBlue.opacity(0.72)
+        case .leadership:
+            fillColor = selected
+                ? ClaritasPalette.darkGreen
+                : ClaritasPalette.grey.opacity(0.82)
         }
 
         return Button(action: { onSelectCountry(point.iso) }) {

@@ -21,18 +21,22 @@ final class AppModel: ObservableObject {
     @Published var dailyBriefing: DailySignalBriefing? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
     @Published var news: [NewsItem] = []
+    @Published var podcasts: [PodcastEpisode] = []
     @Published var countryStats: [CountryStat] = []
     @Published var weather: [CountryWeather] = []
+    @Published var leadership: [CountryLeadership] = []
     @Published var marketQuotes: [MarketQuote] = []
     @Published var marketStatus: [MarketStatus] = []
     @Published var marketEarnings: [EarningsEvent] = []
     @Published var isRefreshingNews: Bool = false
+    @Published var isRefreshingPodcasts: Bool = false
     @Published var isRefreshingWeather: Bool = false
     @Published var isRefreshingMarketQuotes: Bool = false
     @Published var isRefreshingMarketStatus: Bool = false
     @Published var isRefreshingMarketEarnings: Bool = false
     @Published var newsLoadMode: NewsLoadMode = .recent
     @Published var newsLoadError: String? = nil
+    @Published var podcastLoadError: String? = nil
     @Published var authStatus: AuthStatus = .checking
     @Published var authUser: AuthUser? = nil
     @Published var authProviders: [AuthProvider] = []
@@ -278,8 +282,16 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchCountryWeather()) }
             catch { return .failure(error) }
         }()
+        async let leadershipResult: Result<[CountryLeadership], Error> = {
+            do { return .success(try await api.fetchCountryLeadership()) }
+            catch { return .failure(error) }
+        }()
         async let newsResult: Result<[NewsItem], Error> = {
             do { return .success(try await fetchNewsBatch(mode: .recent, country: nil)) }
+            catch { return .failure(error) }
+        }()
+        async let podcastResult: Result<[PodcastEpisode], Error> = {
+            do { return .success(try await api.fetchPodcasts(limit: 40)) }
             catch { return .failure(error) }
         }()
         async let marketResult: Result<[MarketQuote], Error> = {
@@ -299,8 +311,29 @@ final class AppModel: ObservableObject {
             catch { return .failure(error) }
         }()
 
-        let (resolvedStats, resolvedBriefing, resolvedSchedule, resolvedWeather, resolvedNews, resolvedMarket, resolvedMarketStatus, resolvedMarketEarnings) =
-            await (statsResult, briefingResult, scheduleResult, weatherResult, newsResult, marketResult, marketStatusResult, marketEarningsResult)
+        let (
+            resolvedStats,
+            resolvedBriefing,
+            resolvedSchedule,
+            resolvedWeather,
+            resolvedLeadership,
+            resolvedNews,
+            resolvedPodcasts,
+            resolvedMarket,
+            resolvedMarketStatus,
+            resolvedMarketEarnings
+        ) = await (
+            statsResult,
+            briefingResult,
+            scheduleResult,
+            weatherResult,
+            leadershipResult,
+            newsResult,
+            podcastResult,
+            marketResult,
+            marketStatusResult,
+            marketEarningsResult
+        )
 
         var paymentRequiredDetected = false
         if case .failure(let error) = resolvedStats, isPaymentRequired(error) {
@@ -315,7 +348,13 @@ final class AppModel: ObservableObject {
         if case .failure(let error) = resolvedWeather, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
+        if case .failure(let error) = resolvedLeadership, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
         if case .failure(let error) = resolvedNews, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedPodcasts, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedMarket, isPaymentRequired(error) {
@@ -346,10 +385,20 @@ final class AppModel: ObservableObject {
         if case .success(let weatherRows) = resolvedWeather {
             weather = weatherRows
         }
+        if case .success(let leadershipRows) = resolvedLeadership {
+            leadership = leadershipRows
+        }
         if case .success(let newsItems) = resolvedNews {
             news = newsItems
             newsLoadMode = .recent
             newsLoadError = nil
+        }
+        if case .success(let podcastItems) = resolvedPodcasts {
+            podcasts = podcastItems
+            podcastLoadError = nil
+        }
+        if case .failure(let error) = resolvedPodcasts {
+            podcastLoadError = (error as? APIError)?.message ?? error.localizedDescription
         }
         if case .success(let quotes) = resolvedMarket {
             marketQuotes = quotes
@@ -370,11 +419,14 @@ final class AppModel: ObservableObject {
         dailyBriefingScheduleNotice = nil
         countryStats = []
         weather = []
+        leadership = []
         news = []
+        podcasts = []
         marketQuotes = []
         marketStatus = []
         marketEarnings = []
         newsLoadError = nil
+        podcastLoadError = nil
     }
 
     func clearSelection() {
@@ -451,6 +503,33 @@ final class AppModel: ObservableObject {
                 return
             }
             newsLoadError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func refreshPodcasts(query: String? = nil, signalType: String? = nil) async {
+        guard !isRefreshingPodcasts else { return }
+        guard hasPaidAccess else {
+            clearAppData()
+            return
+        }
+
+        isRefreshingPodcasts = true
+        podcastLoadError = nil
+        defer { isRefreshingPodcasts = false }
+
+        do {
+            podcasts = try await api.fetchPodcasts(
+                limit: 60,
+                q: query,
+                signalType: signalType
+            )
+        } catch {
+            if isPaymentRequired(error) {
+                clearAppData()
+                await refreshAccess()
+                return
+            }
+            podcastLoadError = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 

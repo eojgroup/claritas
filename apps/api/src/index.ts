@@ -2,7 +2,17 @@ import express from "express";
 import { randomUUID } from "crypto";
 import { ingestNewsApiEverything, ingestNewsApiTopHeadlines } from "./connectors/newsapi";
 import { ingestTheNewsApiNews } from "./connectors/thenewsapi";
+import {
+  discoverPodcastFeeds,
+  ingestPodcastIndex,
+  podcastParamsFromEnv,
+  type PodcastIngestParams,
+} from "./connectors/podcastindex";
 import { getCountryWeatherLatest, ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
+import {
+  getCountryLeadershipLatest,
+  ingestWikidataLeadership,
+} from "./connectors/wikidata-leadership";
 import {
   getFinnhubEarningsCalendar,
   getFinnhubMarketStatus,
@@ -18,6 +28,8 @@ import {
   IngestionValidationError,
   buildMarketRunPlan,
   buildNewsRunPlan,
+  buildLeadershipRunPlan,
+  buildPodcastRunPlan,
   buildWeatherRunPlan,
   getMetrics,
   getRunDetail,
@@ -25,6 +37,8 @@ import {
   listRuns,
   triggerMarketRun,
   triggerNewsRun,
+  triggerLeadershipRun,
+  triggerPodcastRun,
   triggerWeatherRun,
   type IngestionPipeline,
 } from "./ingestion-admin";
@@ -318,7 +332,15 @@ async function getActiveAdminCountTx(client: import("pg").PoolClient): Promise<n
 }
 
 function parsePipeline(value: unknown): IngestionPipeline | undefined {
-  if (value === "news" || value === "weather" || value === "market") return value;
+  if (
+    value === "news" ||
+    value === "weather" ||
+    value === "market" ||
+    value === "podcasts" ||
+    value === "leadership"
+  ) {
+    return value;
+  }
   return undefined;
 }
 
@@ -331,6 +353,38 @@ function parseBoundedIntEnv(raw: unknown, min: number, max: number, fallback: nu
         : Number.NaN;
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(parsed, min), max);
+}
+
+function parsePodcastIngestParams(raw: unknown): PodcastIngestParams {
+  const body = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : {};
+  const list = (value: unknown): unknown[] => Array.isArray(value) ? value : value == null ? [] : [value];
+  const feedIds = list(body.feed_ids ?? body.feedIds)
+    .map(Number)
+    .filter((value) => Number.isSafeInteger(value) && value > 0)
+    .slice(0, 50);
+  const searchTerms = list(body.queries ?? body.search_terms ?? body.searchTerms)
+    .map((value) => typeof value === "string" ? value.trim() : "")
+    .filter(Boolean)
+    .slice(0, 20);
+  const booleanValue = (value: unknown, fallback: boolean) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
+    return fallback;
+  };
+  return podcastParamsFromEnv({
+    feedIds,
+    searchTerms,
+    maxFeeds: parseBoundedIntEnv(body.max_feeds_per_query ?? body.maxFeedsPerQuery ?? body.max_feeds ?? body.maxFeeds, 1, 50, 10),
+    maxEpisodesPerFeed: parseBoundedIntEnv(body.max_episodes_per_feed ?? body.maxEpisodesPerFeed, 1, 100, 10),
+    fetchTranscripts: booleanValue(body.fetch_transcripts ?? body.fetchTranscripts, true),
+    extractIntelligence: booleanValue(body.process_intelligence ?? body.processIntelligence ?? body.extract_intelligence ?? body.extractIntelligence, true),
+  });
+}
+
+function podcastErrorStatus(message: string): number {
+  return message.includes("PODCASTINDEX_") || message.startsWith("Provide") ? 400 : 502;
 }
 
 function timestampToApiString(value: string | Date | null): string | null {
@@ -580,6 +634,7 @@ function optionsFromGenerationJob(row: DailyBriefingGenerationJobRow): DailyBrie
     instructions: typeof options.instructions === "string" ? options.instructions : null,
     lookbackHours: optionalNumber(options.lookbackHours),
     maxNewsItems: optionalNumber(options.maxNewsItems),
+    maxPodcastItems: optionalNumber(options.maxPodcastItems),
     maxMarketItems: optionalNumber(options.maxMarketItems),
     maxWeatherItems: optionalNumber(options.maxWeatherItems),
   };
@@ -1101,6 +1156,7 @@ function parseBriefingGenerationOptions(
     instructions,
     lookbackHours: parseOptionalPositiveInt(body.lookback_hours ?? body.lookbackHours, "lookback_hours", 168),
     maxNewsItems: parseOptionalPositiveInt(body.max_news_items ?? body.maxNewsItems, "max_news_items", 80),
+    maxPodcastItems: parseOptionalPositiveInt(body.max_podcast_items ?? body.maxPodcastItems, "max_podcast_items", 40),
     maxMarketItems: parseOptionalPositiveInt(body.max_market_items ?? body.maxMarketItems, "max_market_items", 60),
     maxWeatherItems: parseOptionalPositiveInt(body.max_weather_items ?? body.maxWeatherItems, "max_weather_items", 80),
   };
@@ -1371,7 +1427,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
 
     const params: any[] = [];
-    const where: string[] = [];
+    const where: string[] = ["i.kind <> 'podcast_episode'"];
     if (q) {
       const i1 = params.push(`%${q}%`); // returns new length as index
       const i2 = params.push(`%${q}%`);
@@ -1399,6 +1455,177 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
   }
 });
 
+// Podcast episodes are intelligence sources. Audio remains external; Claritas returns evidence and outbound links.
+app.get("/api/podcasts", requireAuthenticated, async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 300) : "";
+    const signalType = typeof req.query.signal_type === "string" ? req.query.signal_type.trim().toLowerCase() : "";
+    if (signalType && !["entity", "topic", "claim", "event", "risk"].includes(signalType)) {
+      return res.status(400).json({ error: "signal_type must be entity, topic, claim, event, or risk." });
+    }
+    trackDemandSignal("podcasts");
+    const { rows } = await query(
+      `SELECT
+         i.id, pe.id AS episode_id, pe.podcast_index_id, i.kind, i.title, i.summary,
+         i.url, i.event_time, i.payload, pf.id AS feed_id,
+         pf.podcast_index_id AS podcast_index_feed_id, pf.title AS feed_title,
+         pf.author AS feed_author, pf.image_url AS feed_image_url, pf.site_url AS feed_site_url,
+         pe.duration_seconds, pe.image_url, pe.transcript_status,
+         CASE
+           WHEN jsonb_typeof(pe.external_links) = 'array' THEN pe.external_links
+           ELSE '[]'::jsonb
+         END AS external_links,
+         COALESCE((
+           SELECT jsonb_agg(jsonb_build_object(
+             'id', sr.id, 'type', sr.signal_type, 'title', sr.title, 'summary', sr.summary,
+             'entities', sr.entities, 'topics', sr.topics, 'risk_level', sr.risk_level,
+             'confidence', sr.confidence
+           ) ORDER BY sr.id)
+           FROM (
+             SELECT s.* FROM intelligence_signal s
+             WHERE s.episode_id = pe.id AND ($4::text = '' OR s.signal_type = $4::text)
+             ORDER BY CASE s.signal_type WHEN 'risk' THEN 0 WHEN 'event' THEN 1 WHEN 'claim' THEN 2 ELSE 3 END, s.id
+             LIMIT 12
+           ) sr
+         ), '[]'::jsonb) AS signals,
+         COALESCE((
+           SELECT jsonb_agg(jsonb_build_object(
+             'id', er.id, 'segment_index', er.segment_index, 'start_ms', er.start_ms,
+             'end_ms', er.end_ms, 'speaker', er.speaker, 'text', er.text,
+             'timing_method', er.timing_method, 'source_url', er.source_url
+           ) ORDER BY er.segment_index)
+           FROM (
+             SELECT es.* FROM evidence_segment es
+             WHERE es.episode_id = pe.id
+               AND ($3::text = '' OR es.search_vector @@ websearch_to_tsquery('simple', $3::text))
+             ORDER BY es.segment_index LIMIT 6
+           ) er
+         ), '[]'::jsonb) AS evidence
+       FROM podcast_episode pe
+       JOIN item i ON i.id = pe.item_id
+       JOIN podcast_feed pf ON pf.id = pe.feed_id
+       WHERE ($3::text = '' OR i.title ILIKE '%' || $3::text || '%' OR
+              i.summary ILIKE '%' || $3::text || '%' OR pf.title ILIKE '%' || $3::text || '%' OR
+              EXISTS (SELECT 1 FROM evidence_segment es WHERE es.episode_id = pe.id AND es.search_vector @@ websearch_to_tsquery('simple', $3::text)) OR
+              EXISTS (SELECT 1 FROM intelligence_signal s WHERE s.episode_id = pe.id AND (s.title ILIKE '%' || $3::text || '%' OR s.summary ILIKE '%' || $3::text || '%')))
+         AND ($4::text = '' OR EXISTS (SELECT 1 FROM intelligence_signal s WHERE s.episode_id = pe.id AND s.signal_type = $4::text))
+       ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset, q, signalType]
+    );
+    return res.json({ items: rows, limit, offset, query: q || null });
+  } catch (error) {
+    console.error("Failed to list podcast intelligence:", error);
+    return res.status(500).json({ error: "Failed to list podcast intelligence." });
+  }
+});
+
+app.get("/api/podcasts/:itemId/evidence", requireAuthenticated, async (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    if (!Number.isSafeInteger(itemId) || itemId <= 0) return res.status(400).json({ error: "Invalid podcast item id." });
+    const { rows } = await query(
+      `SELECT es.id, es.segment_index, es.start_ms, es.end_ms, es.speaker, es.text,
+              es.source_url, es.mime_type, es.timing_method,
+              COALESCE(jsonb_agg(jsonb_build_object(
+                'id', s.id, 'type', s.signal_type, 'title', s.title,
+                'risk_level', s.risk_level, 'confidence', s.confidence
+              )) FILTER (WHERE s.id IS NOT NULL), '[]'::jsonb) AS signals
+       FROM podcast_episode pe
+       JOIN evidence_segment es ON es.episode_id = pe.id
+       LEFT JOIN intelligence_signal_evidence se ON se.evidence_segment_id = es.id
+       LEFT JOIN intelligence_signal s ON s.id = se.signal_id
+       WHERE pe.item_id = $1
+       GROUP BY es.id
+       ORDER BY es.segment_index`,
+      [itemId]
+    );
+    return res.json({ item_id: itemId, evidence: rows });
+  } catch (error) {
+    console.error("Failed to load podcast evidence:", error);
+    return res.status(500).json({ error: "Failed to load podcast evidence." });
+  }
+});
+
+app.get("/api/intelligence/entities/:name/evidence", requireAuthenticated, async (req, res) => {
+  try {
+    const name = req.params.name.trim().slice(0, 200);
+    if (!name) return res.status(400).json({ error: "Entity name is required." });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const { rows } = await query(
+      `SELECT i.id AS item_id, i.title AS episode_title, i.event_time,
+              pf.title AS feed_title, pe.external_links,
+              s.id AS signal_id, s.signal_type, s.title AS signal_title, s.summary,
+              s.entities, s.topics, s.risk_level, s.confidence,
+              es.id AS evidence_id, es.start_ms, es.end_ms, es.speaker, es.text, es.source_url
+       FROM intelligence_signal s
+       JOIN podcast_episode pe ON pe.id = s.episode_id
+       JOIN podcast_feed pf ON pf.id = pe.feed_id
+       JOIN item i ON i.id = pe.item_id
+       LEFT JOIN intelligence_signal_evidence se ON se.signal_id = s.id
+       LEFT JOIN evidence_segment es ON es.id = se.evidence_segment_id
+       WHERE EXISTS (SELECT 1 FROM jsonb_array_elements_text(s.entities) entity WHERE lower(entity) = lower($1))
+          OR lower(s.title) = lower($1)
+       ORDER BY COALESCE(i.event_time, i.created_at) DESC, es.start_ms ASC NULLS LAST
+       LIMIT $2`,
+      [name, limit]
+    );
+    return res.json({ entity: name, evidence: rows });
+  } catch (error) {
+    console.error("Failed to load entity podcast evidence:", error);
+    return res.status(500).json({ error: "Failed to load entity evidence." });
+  }
+});
+
+app.get("/api/podcasts/discover", requireAdminRole, async (req, res) => {
+  try {
+    const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 200) : "";
+    if (!q) return res.status(400).json({ error: "q is required." });
+    const feeds = await discoverPodcastFeeds(q, Math.min(Math.max(Number(req.query.limit) || 20, 1), 50));
+    return res.json({ feeds, query: q });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(podcastErrorStatus(message)).json({ error: message });
+  }
+});
+
+app.post("/api/ingest/podcastindex/episodes", requireIngestionAccess, async (req, res) => {
+  try {
+    return res.json(await ingestPodcastIndex(parsePodcastIngestParams(req.body)));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(podcastErrorStatus(message)).json({ error: message });
+  }
+});
+
+app.post("/api/admin/ingestion/podcasts/run", requireAdminRole, async (req, res) => {
+  try {
+    const plan = buildPodcastRunPlan(req.body);
+    const { runId } = await triggerPodcastRun({ actor: getRequestActor(res), plan });
+    const detail = await getRunDetail(runId, 150);
+    if (!detail) return res.status(500).json({ error: "Failed to load created run." });
+    return res.status(202).json(detail);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(error instanceof IngestionValidationError ? 400 : 500).json({ error: message });
+  }
+});
+
+app.post("/api/admin/ingestion/leadership/run", requireAdminRole, async (req, res) => {
+  try {
+    const plan = buildLeadershipRunPlan(req.body);
+    const { runId } = await triggerLeadershipRun({ actor: getRequestActor(res), plan });
+    const detail = await getRunDetail(runId, 150);
+    if (!detail) return res.status(500).json({ error: "Failed to load created run." });
+    return res.status(202).json(detail);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(error instanceof IngestionValidationError ? 400 : 500).json({ error: message });
+  }
+});
+
 // Aggregate counts by country (for map bubbles)
 app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
   try {
@@ -1410,6 +1637,7 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
         `SELECT upper(country_iso2) AS country, COUNT(*)::int AS count
          FROM item
          WHERE country_iso2 IS NOT NULL
+           AND kind <> 'podcast_episode'
            AND COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval
          GROUP BY upper(country_iso2)
          ORDER BY count DESC`,
@@ -1420,7 +1648,8 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
            COUNT(*)::int AS total,
            COUNT(*) FILTER (WHERE country_iso2 IS NOT NULL)::int AS mapped
          FROM item
-         WHERE COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval`,
+         WHERE kind <> 'podcast_episode'
+           AND COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval`,
         params
       ),
     ]);
@@ -1905,7 +2134,9 @@ app.patch("/api/admin/ingestion/automation/:pipeline", requireAdminRole, async (
   try {
     const pipeline = parsePipeline(req.params.pipeline?.trim().toLowerCase());
     if (!pipeline) {
-      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market." });
+      return res.status(400).json({
+        error: "Invalid pipeline. Expected one of: news, weather, market, podcasts, leadership.",
+      });
     }
 
     const patchInput: Record<string, unknown> = { ...(req.body || {}) };
@@ -1983,7 +2214,9 @@ app.get("/api/admin/ingestion/runs", requireAdminRole, async (req, res) => {
     const pipelineRaw = typeof req.query.pipeline === "string" ? req.query.pipeline.trim().toLowerCase() : undefined;
     const pipeline = parsePipeline(pipelineRaw);
     if (pipelineRaw && !pipeline) {
-      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market." });
+      return res.status(400).json({
+        error: "Invalid pipeline. Expected one of: news, weather, market, podcasts, leadership.",
+      });
     }
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10) || 50, 1), 200);
     const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
@@ -2030,7 +2263,7 @@ app.get("/api/admin/ingestion/metrics", requireAdminRole, async (req, res) => {
     const pipelineRaw = typeof req.query.pipeline === "string" ? req.query.pipeline.trim().toLowerCase() : undefined;
     const pipeline = parsePipeline(pipelineRaw);
     if (pipelineRaw && !pipeline) {
-      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market." });
+      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market, podcasts." });
     }
     const metrics = await getMetrics({ days, pipeline });
     return res.json(metrics);
@@ -2050,6 +2283,24 @@ app.post("/api/ingest/newsapi/everything", requireIngestionAccess, async (req, r
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.post("/api/ingest/podcastindex", requireIngestionAccess, async (req, res) => {
+  try {
+    return res.json(await ingestPodcastIndex(parsePodcastIngestParams(req.body)));
+  } catch (e: any) {
+    const message = e.message || String(e);
+    return res.status(podcastErrorStatus(message)).json({ error: message });
+  }
+});
+
+app.post("/api/ingest/wikidata/leadership", requireIngestionAccess, async (_req, res) => {
+  try {
+    return res.json(await ingestWikidataLeadership());
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(502).json({ error: message });
   }
 });
 
@@ -2168,6 +2419,16 @@ app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) =
     trackDemandSignal("weather");
     const rows = await getCountryWeatherLatest();
     res.json({ stats: rows });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/leadership/countries", requireAuthenticated, async (_req, res) => {
+  try {
+    trackDemandSignal("leadership");
+    const countries = await getCountryLeadershipLatest();
+    res.json({ countries });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
   }

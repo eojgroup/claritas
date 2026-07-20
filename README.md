@@ -201,12 +201,34 @@ npm install
 npm run dev
 ```
 
-### 3. Provider API Keys (News/Weather)
+### 3. Provider API Keys and Open Data
 
 - API runtime environment variable names:
   - `NEWSAPI_API_KEY`
   - `THENEWSAPI_API_TOKEN`
   - `OPENWEATHER_API_KEY`
+  - `PODCASTINDEX_API_KEY`
+  - `PODCASTINDEX_API_SECRET`
+- Podcast discovery and intelligence:
+  - Create a free developer account at `https://api.podcastindex.org` and generate an API key
+    and secret. Keep both server-side.
+  - Configure at least one discovery target with `PODCAST_DISCOVERY_TERMS` (comma-separated)
+    or `PODCAST_FEED_IDS` (comma-separated PodcastIndex feed IDs).
+  - Optional limits: `PODCAST_MAX_FEEDS` and `PODCAST_MAX_EPISODES_PER_FEED`.
+  - Optional LLM extraction toggle: `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`. Metadata
+    entity/topic signals remain available when LLM extraction is off.
+  - Optional identification: `PODCASTINDEX_USER_AGENT`, for example
+    `Claritas/1.0 (+https://app.claritas.info; engineering@claritas.info)`.
+  - Podcast automation is disabled by default. Enable it in the admin ingestion panel only
+    after credentials and discovery targets are configured.
+  - The core Podcast Index is described by its operator as free for any use. Podcast metadata,
+    artwork, audio, and transcripts remain third-party content; commercial deployments must
+    follow the Podcast Index terms and the applicable publisher content rights.
+- Country leadership uses the public Wikidata Query Service and requires no API key.
+  - Optional: set `WIKIDATA_USER_AGENT` to identify your production deployment with a
+    product URL and monitored contact address.
+  - Example: `Claritas/1.0 (https://claritas.info; engineering@claritas.info)`
+  - Structured Wikidata content is consumed under CC0.
 - TheNewsAPI integration notes:
   - Base API URL: `https://api.thenewsapi.com/v1`
   - `publishedAfter` (when provided in admin ingestion payload) must be `YYYY-MM-DD`
@@ -216,8 +238,13 @@ npm run dev
   - `claritas-newsapi` / `NEWSAPI_API_KEY`
   - `claritas-thenewsapi` / `THENEWSAPI_API_TOKEN`
   - `claritas-openweather` / `OPENWEATHER_API_KEY`
+  - `claritas-podcastindex` / `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`
 - Production secret source (recommended):
-  - GitHub repository secret: `THENEWSAPI_API_TOKEN`
+  - GitHub repository secrets: `THENEWSAPI_API_TOKEN`, `PODCASTINDEX_API_KEY`,
+    `PODCASTINDEX_API_SECRET`
+  - GitHub repository variables: `PODCAST_DISCOVERY_TERMS`, `PODCAST_FEED_IDS`,
+    `PODCAST_MAX_FEEDS`, `PODCAST_MAX_EPISODES_PER_FEED`,
+    `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`, `PODCASTINDEX_USER_AGENT`
   - Used by deploy workflow: `.github/workflows/gke-deploy.yml` (`Ensure API provider secrets exist`)
 
 ### 4. Daily Briefing AI Backend

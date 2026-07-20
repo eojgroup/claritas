@@ -2,9 +2,13 @@ import {
   IngestionValidationError,
   buildMarketRunPlan,
   buildNewsRunPlan,
+  buildLeadershipRunPlan,
+  buildPodcastRunPlan,
   buildWeatherRunPlan,
   triggerMarketRun,
   triggerNewsRun,
+  triggerLeadershipRun,
+  triggerPodcastRun,
   triggerWeatherRun,
   type IngestionPipeline,
 } from "./ingestion-admin";
@@ -205,6 +209,37 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
       newsMaxItems: 50,
     },
   },
+  podcasts: {
+    pipeline: "podcasts",
+    enabled: false,
+    schedule_enabled: false,
+    schedule_interval_minutes: 360,
+    intelligent_enabled: true,
+    min_spacing_minutes: 60,
+    freshness_sla_minutes: 720,
+    demand_window_minutes: 60,
+    demand_threshold: 5,
+    failure_backoff_minutes: 60,
+    default_payload: {
+      maxFeeds: 10,
+      maxEpisodesPerFeed: 10,
+      fetchTranscripts: true,
+      extractIntelligence: true,
+    },
+  },
+  leadership: {
+    pipeline: "leadership",
+    enabled: true,
+    schedule_enabled: true,
+    schedule_interval_minutes: 1440,
+    intelligent_enabled: true,
+    min_spacing_minutes: 360,
+    freshness_sla_minutes: 2880,
+    demand_window_minutes: 120,
+    demand_threshold: 10,
+    failure_backoff_minutes: 180,
+    default_payload: {},
+  },
 };
 
 let automationWorkerTimer: NodeJS.Timeout | null = null;
@@ -240,7 +275,15 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function parsePipeline(value: string): IngestionPipeline {
-  if (value === "news" || value === "weather" || value === "market") return value;
+  if (
+    value === "news" ||
+    value === "weather" ||
+    value === "market" ||
+    value === "podcasts" ||
+    value === "leadership"
+  ) {
+    return value;
+  }
   throw new AutomationValidationError(`Unsupported ingestion pipeline: ${value}`);
 }
 
@@ -268,7 +311,7 @@ function toAutomationRule(row: AutomationRuleRow): IngestionAutomationRule {
 }
 
 async function ensureAutomationRulesExist(): Promise<void> {
-  for (const pipeline of ["news", "weather", "market"] as IngestionPipeline[]) {
+  for (const pipeline of ["news", "weather", "market", "podcasts", "leadership"] as IngestionPipeline[]) {
     const defaults = RULE_DEFAULTS[pipeline];
     await query(
       `INSERT INTO ingestion_automation_rule (
@@ -575,6 +618,18 @@ async function getLatestDataTimestamp(pipeline: IngestionPipeline): Promise<stri
     return timestampToString(rows[0]?.latest_data_at ?? null);
   }
 
+  if (pipeline === "podcasts") {
+    const { rows } = await query<LatestDataRow>(`SELECT MAX(last_synced_at) AS latest_data_at FROM podcast_feed`);
+    return timestampToString(rows[0]?.latest_data_at ?? null);
+  }
+
+  if (pipeline === "leadership") {
+    const { rows } = await query<LatestDataRow>(
+      `SELECT MAX(retrieved_at) AS latest_data_at FROM country_leadership`
+    );
+    return timestampToString(rows[0]?.latest_data_at ?? null);
+  }
+
   const { rows } = await query<LatestDataRow>(`SELECT MAX(observed_at) AS latest_data_at FROM market_snapshot`);
   return timestampToString(rows[0]?.latest_data_at ?? null);
 }
@@ -733,6 +788,18 @@ async function triggerAutomationRun(rule: IngestionAutomationRule, reason: AutoT
   if (rule.pipeline === "weather") {
     const plan = buildWeatherRunPlan(payload);
     await triggerWeatherRun({ actor, plan });
+    return;
+  }
+
+  if (rule.pipeline === "podcasts") {
+    const plan = buildPodcastRunPlan(payload);
+    await triggerPodcastRun({ actor, plan });
+    return;
+  }
+
+  if (rule.pipeline === "leadership") {
+    const plan = buildLeadershipRunPlan(payload);
+    await triggerLeadershipRun({ actor, plan });
     return;
   }
 

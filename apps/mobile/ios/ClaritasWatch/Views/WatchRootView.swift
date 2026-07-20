@@ -13,8 +13,10 @@ struct WatchRootView: View {
                     WatchBriefingView()
                     WatchBriefingScheduleView()
                     WatchNewsView()
+                    WatchPodcastsView()
                     WatchMarketsView()
                     WatchWeatherView()
+                    WatchLeadershipView()
                 }
                 .tabViewStyle(.verticalPage)
             }
@@ -315,6 +317,117 @@ private struct WatchNewsView: View {
     }
 }
 
+private struct WatchPodcastsView: View {
+    @EnvironmentObject private var model: WatchAppModel
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if model.podcasts.isEmpty {
+                        Text("No podcast intelligence")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(model.podcasts.prefix(8)) { episode in
+                        NavigationLink {
+                            WatchPodcastDetailView(episode: episode)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(episode.title)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(3)
+                                HStack {
+                                    Text(episode.feed_title)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("\(episode.signals.count)")
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(WatchPalette.sage)
+                            }
+                        }
+                    }
+                } header: {
+                    WatchSectionLabel(title: "Podcasts", icon: "mic.fill")
+                }
+            }
+            .navigationTitle("Podcasts")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+        }
+    }
+}
+
+private struct WatchPodcastDetailView: View {
+    let episode: PodcastEpisode
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(episode.feed_title)
+                    .font(.caption2)
+                    .foregroundStyle(WatchPalette.sage)
+                Text(episode.title)
+                    .font(.headline)
+                    .foregroundStyle(WatchPalette.cream)
+
+                if let summary = episode.summary {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(6)
+                }
+
+                ForEach(episode.signals.prefix(3)) { signal in
+                    WatchCard {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(signal.type.uppercased())
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(signal.type == "risk" ? WatchPalette.negative : WatchPalette.orange)
+                            Text(signal.title)
+                                .font(.caption.weight(.semibold))
+                            if let summary = signal.summary {
+                                Text(summary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(4)
+                            }
+                        }
+                    }
+                }
+
+                ForEach(episode.evidence.prefix(2)) { evidence in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(
+                            [evidence.timestampLabel, evidence.speaker]
+                                .compactMap { $0 }
+                                .joined(separator: " · ")
+                        )
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(WatchPalette.sage)
+                        Text(evidence.text)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(5)
+                    }
+                }
+
+                ForEach(episode.external_links.prefix(2)) { link in
+                    if let url = link.resolvedURL {
+                        Link(destination: url) {
+                            Label(link.label, systemImage: "arrow.up.right")
+                                .font(.caption.weight(.semibold))
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 3)
+        }
+        .navigationTitle("Evidence")
+        .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+    }
+}
+
 private struct WatchMarketsView: View {
     @EnvironmentObject private var model: WatchAppModel
 
@@ -399,5 +512,62 @@ private struct WatchWeatherView: View {
         case let value? where value.contains("storm"): return "cloud.bolt.rain.fill"
         default: return "sun.max.fill"
         }
+    }
+}
+
+private struct WatchLeadershipView: View {
+    @EnvironmentObject private var model: WatchAppModel
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(model.leadership.prefix(20)) { country in
+                        NavigationLink {
+                            List {
+                                if let governmentType = country.government_type {
+                                    Text(governmentType)
+                                        .font(.caption)
+                                }
+                                ForEach(country.roles) { role in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(role.roleLabel)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        Text(role.person_name)
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                }
+                                Text("Wikidata updated \(freshness(country.sourceUpdatedDate))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Retrieved \(freshness(country.retrievedDate))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .navigationTitle(country.country)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(country.country_name)
+                                    .font(.caption.weight(.bold))
+                                    .lineLimit(1)
+                                Text(country.roles.map(\.person_name).joined(separator: ", "))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+                } header: {
+                    WatchSectionLabel(title: "Leadership", icon: "person.2")
+                }
+            }
+            .navigationTitle("Leaders")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+        }
+    }
+
+    private func freshness(_ date: Date?) -> String {
+        date?.formatted(date: .abbreviated, time: .omitted) ?? "not provided"
     }
 }

@@ -22,6 +22,8 @@ import {
   startAdminDailySignalBriefingGeneration,
   testAdminDailyBriefingGeneratorConnection,
   triggerAdminMarketIngestion,
+  triggerAdminPodcastIngestion,
+  triggerAdminLeadershipIngestion,
   triggerAdminNewsIngestion,
   triggerAdminWeatherIngestion,
   updateAdminIngestionAutomationRule,
@@ -108,7 +110,9 @@ function statusClasses(status: AdminIngestionRun["status"]): string {
 function pipelineLabel(pipeline: IngestionPipeline): string {
   if (pipeline === "news") return "News";
   if (pipeline === "weather") return "Weather";
-  return "Market";
+  if (pipeline === "market") return "Market";
+  if (pipeline === "podcasts") return "Podcasts";
+  return "Leadership";
 }
 
 function sourceLabel(sourceName: string): string {
@@ -117,6 +121,8 @@ function sourceLabel(sourceName: string): string {
   if (normalized === "thenewsapi") return "TheNewsAPI";
   if (normalized === "openweather") return "OpenWeather";
   if (normalized === "finnhub") return "Finnhub";
+  if (normalized === "podcastindex") return "PodcastIndex";
+  if (normalized === "wikidata") return "Wikidata";
   return sourceName;
 }
 
@@ -163,8 +169,16 @@ type AutomationDraft = {
   dirty: boolean;
 };
 
-type AutomationDraftMap = Record<IngestionPipeline, AutomationDraft | null>;
-type AutomationPendingMap = Record<IngestionPipeline, boolean>;
+type AutomationDraftMap = Partial<Record<IngestionPipeline, AutomationDraft | null>>;
+type AutomationPendingMap = Partial<Record<IngestionPipeline, boolean>>;
+
+const automationPipelines: IngestionPipeline[] = [
+  "news",
+  "weather",
+  "market",
+  "podcasts",
+  "leadership",
+];
 
 function toAutomationPayloadText(payload: Record<string, unknown>): string {
   try {
@@ -247,11 +261,15 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     news: null,
     weather: null,
     market: null,
+    podcasts: null,
+    leadership: null,
   });
   const [pendingAutomationSave, setPendingAutomationSave] = useState<AutomationPendingMap>({
     news: false,
     weather: false,
     market: false,
+    podcasts: false,
+    leadership: false,
   });
   const [isLoadingOverview, setIsLoadingOverview] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -261,6 +279,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [isTriggeringNews, setIsTriggeringNews] = useState(false);
   const [isTriggeringWeather, setIsTriggeringWeather] = useState(false);
   const [isTriggeringMarket, setIsTriggeringMarket] = useState(false);
+  const [isTriggeringPodcasts, setIsTriggeringPodcasts] = useState(false);
+  const [isTriggeringLeadership, setIsTriggeringLeadership] = useState(false);
   const [metricsDays, setMetricsDays] = useState<7 | 30 | 90>(30);
   const [pipelineFilter, setPipelineFilter] = useState<"all" | IngestionPipeline>("all");
 
@@ -282,6 +302,14 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [marketNewsCategory, setMarketNewsCategory] = useState<"general" | "forex" | "crypto" | "merger">(
     "general",
   );
+  const [podcastSearchTerms, setPodcastSearchTerms] = useState(
+    "geopolitics,security,technology,markets",
+  );
+  const [podcastFeedIds, setPodcastFeedIds] = useState("");
+  const [podcastMaxFeeds, setPodcastMaxFeeds] = useState(3);
+  const [podcastMaxEpisodes, setPodcastMaxEpisodes] = useState(5);
+  const [podcastFetchTranscripts, setPodcastFetchTranscripts] = useState(true);
+  const [podcastExtractIntelligence, setPodcastExtractIntelligence] = useState(true);
   const [briefingConfig, setBriefingConfig] = useState<AdminDailyBriefingGeneratorConfig | null>(null);
   const [briefingConfigError, setBriefingConfigError] = useState<string | null>(null);
   const [isLoadingBriefingConfig, setIsLoadingBriefingConfig] = useState(false);
@@ -588,6 +616,70 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     }
   }, [marketIncludeNews, marketNewsCategory, marketSymbols, refreshOverview]);
 
+  const handleTriggerPodcasts = useCallback(async () => {
+    const searchTerms = podcastSearchTerms
+      .split(",")
+      .map((term) => term.trim())
+      .filter(Boolean);
+    const feedIds = podcastFeedIds
+      .split(/[,\s]+/)
+      .map((value) => Number(value))
+      .filter((value) => Number.isSafeInteger(value) && value > 0);
+    if (searchTerms.length === 0 && feedIds.length === 0) {
+      setActionError("Provide at least one podcast search term or PodcastIndex feed ID.");
+      return;
+    }
+
+    setIsTriggeringPodcasts(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const created = await triggerAdminPodcastIngestion({
+        searchTerms,
+        feedIds,
+        maxFeeds: podcastMaxFeeds,
+        maxEpisodesPerFeed: podcastMaxEpisodes,
+        fetchTranscripts: podcastFetchTranscripts,
+        extractIntelligence: podcastExtractIntelligence,
+      });
+      setActionNotice(`Podcast ingestion run #${created.run.id} was queued.`);
+      setSelectedRunId(created.run.id);
+      setSelectedRun(created.run);
+      setLogs(created.logs);
+      await refreshOverview(true);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setIsTriggeringPodcasts(false);
+    }
+  }, [
+    podcastExtractIntelligence,
+    podcastFeedIds,
+    podcastFetchTranscripts,
+    podcastMaxEpisodes,
+    podcastMaxFeeds,
+    podcastSearchTerms,
+    refreshOverview,
+  ]);
+
+  const handleTriggerLeadership = useCallback(async () => {
+    setIsTriggeringLeadership(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const created = await triggerAdminLeadershipIngestion();
+      setActionNotice(`Leadership ingestion run #${created.run.id} was queued.`);
+      setSelectedRunId(created.run.id);
+      setSelectedRun(created.run);
+      setLogs(created.logs);
+      await refreshOverview(true);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setIsTriggeringLeadership(false);
+    }
+  }, [refreshOverview]);
+
   const handleGenerateBriefing = useCallback(async () => {
     setIsGeneratingBriefing(true);
     setActionError(null);
@@ -723,7 +815,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         row.weather_inserted = point.inserted;
         row.weather_runs = point.run_count;
         row.weather_failed = point.failed_count;
-      } else {
+      } else if (point.pipeline === "market") {
         row.market_inserted = point.inserted;
         row.market_runs = point.run_count;
         row.market_failed = point.failed_count;
@@ -763,7 +855,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               Admin ingestion
             </div>
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-              Trigger and observe News + Weather + Market pipelines
+              Trigger and observe ingestion pipelines
             </div>
           </div>
           <div className="ml-auto flex w-full flex-wrap items-center gap-2 text-sm sm:w-auto sm:text-xs">
@@ -778,39 +870,20 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             >
               All
             </button>
-            <button
-              type="button"
-              onClick={() => setPipelineFilter("news")}
-              className={`rounded-full border px-3 py-1 transition ${
-                pipelineFilter === "news"
-                  ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
-              }`}
-            >
-              News
-            </button>
-            <button
-              type="button"
-              onClick={() => setPipelineFilter("weather")}
-              className={`rounded-full border px-3 py-1 transition ${
-                pipelineFilter === "weather"
-                  ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
-              }`}
-            >
-              Weather
-            </button>
-            <button
-              type="button"
-              onClick={() => setPipelineFilter("market")}
-              className={`rounded-full border px-3 py-1 transition ${
-                pipelineFilter === "market"
-                  ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
-              }`}
-            >
-              Market
-            </button>
+            {automationPipelines.map((pipeline) => (
+              <button
+                key={pipeline}
+                type="button"
+                onClick={() => setPipelineFilter(pipeline)}
+                className={`rounded-full border px-3 py-1 transition ${
+                  pipelineFilter === pipeline
+                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
+                    : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)]"
+                }`}
+              >
+                {pipelineLabel(pipeline)}
+              </button>
+            ))}
             <button
               type="button"
               onClick={() => void refreshOverview(false)}
@@ -838,7 +911,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         )}
 
-        <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-3">
+        <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               News run
@@ -1049,6 +1122,99 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               {isTriggeringMarket ? "Starting…" : "Run Market"}
             </button>
           </div>
+
+          <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+              Podcast run
+            </div>
+            <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
+              Discovery terms (CSV)
+              <input
+                value={podcastSearchTerms}
+                onChange={(event) => setPodcastSearchTerms(event.currentTarget.value)}
+                placeholder="geopolitics,security,technology"
+                className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+              />
+            </label>
+            <label className="mt-2 block text-xs text-[color:var(--shell-muted)]">
+              PodcastIndex feed IDs (optional CSV)
+              <input
+                value={podcastFeedIds}
+                onChange={(event) => setPodcastFeedIds(event.currentTarget.value)}
+                placeholder="e.g. 75075,920666"
+                className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+              />
+            </label>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="text-xs text-[color:var(--shell-muted)]">
+                Feeds per term
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={podcastMaxFeeds}
+                  onChange={(event) => setPodcastMaxFeeds(Number(event.currentTarget.value) || 1)}
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                />
+              </label>
+              <label className="text-xs text-[color:var(--shell-muted)]">
+                Episodes per feed
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={podcastMaxEpisodes}
+                  onChange={(event) => setPodcastMaxEpisodes(Number(event.currentTarget.value) || 1)}
+                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-[color:var(--shell-muted)]">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={podcastFetchTranscripts}
+                  onChange={(event) => setPodcastFetchTranscripts(event.currentTarget.checked)}
+                />
+                Fetch transcripts
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={podcastExtractIntelligence}
+                  onChange={(event) => setPodcastExtractIntelligence(event.currentTarget.checked)}
+                />
+                Extract signals
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleTriggerPodcasts()}
+              disabled={isTriggeringPodcasts}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-on-strong)] disabled:opacity-50 sm:w-auto sm:text-xs"
+            >
+              <Play className="h-3.5 w-3.5" />
+              {isTriggeringPodcasts ? "Starting…" : "Run Podcasts"}
+            </button>
+          </div>
+
+          <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+              Leadership run
+            </div>
+            <div className="mt-3 text-xs leading-5 text-[color:var(--shell-muted)]">
+              Refresh current heads of state and government from Wikidata. No API key is required.
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleTriggerLeadership()}
+              disabled={isTriggeringLeadership}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-on-strong)] disabled:opacity-50 sm:w-auto sm:text-xs"
+            >
+              <Play className="h-3.5 w-3.5" />
+              {isTriggeringLeadership ? "Starting…" : "Run Leadership"}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -1236,6 +1402,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                     </div>
                     <div>
                       Sources: {generationSummary.source_counts.news} news ·{" "}
+                      {generationSummary.source_counts.podcasts ?? 0} podcasts ·{" "}
                       {generationSummary.source_counts.markets} markets ·{" "}
                       {generationSummary.source_counts.weather} weather
                     </div>
@@ -1293,8 +1460,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
         </div>
 
-        <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
-          {(["news", "weather", "market"] as IngestionPipeline[]).map((pipeline) => {
+        <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-3">
+          {automationPipelines.map((pipeline) => {
             const rule = automationRuleByPipeline.get(pipeline);
             const draft = automationDrafts[pipeline];
             const status = automationStatusByPipeline.get(pipeline);
@@ -1518,7 +1685,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         </div>
       </section>
 
-      <section className="grid min-w-0 gap-3 sm:gap-4 lg:grid-cols-4">
+      <section className="grid min-w-0 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
           <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
             News totals ({metricsDays}d)
@@ -1550,6 +1717,30 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
           <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
             rows inserted · {summaryByPipeline.get("market")?.run_count ?? 0} runs
+          </div>
+        </div>
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+          <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
+            Podcast totals ({metricsDays}d)
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+            {(summaryByPipeline.get("podcasts")?.inserted ?? 0) +
+              (summaryByPipeline.get("podcasts")?.updated ?? 0)}
+          </div>
+          <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+            episodes processed · {summaryByPipeline.get("podcasts")?.run_count ?? 0} runs
+          </div>
+        </div>
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+          <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
+            Leadership totals ({metricsDays}d)
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+            {(summaryByPipeline.get("leadership")?.inserted ?? 0) +
+              (summaryByPipeline.get("leadership")?.updated ?? 0)}
+          </div>
+          <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+            country snapshots · {summaryByPipeline.get("leadership")?.run_count ?? 0} runs
           </div>
         </div>
         <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">

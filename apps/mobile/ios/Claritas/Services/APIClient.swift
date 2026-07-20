@@ -168,6 +168,27 @@ final class APIClient {
         return try await request(req, as: [NewsItem].self, rootKey: "items")
     }
 
+    func fetchPodcasts(
+        limit: Int = 40,
+        offset: Int = 0,
+        q: String? = nil,
+        signalType: String? = nil
+    ) async throws -> [PodcastEpisode] {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("/api/podcasts"), resolvingAgainstBaseURL: false)!
+        var items = [
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset))
+        ]
+        if let q, !q.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            items.append(URLQueryItem(name: "q", value: q))
+        }
+        if let signalType, signalType != "all" {
+            items.append(URLQueryItem(name: "signal_type", value: signalType))
+        }
+        comps.queryItems = items
+        return try await request(URLRequest(url: comps.url!), as: [PodcastEpisode].self, rootKey: "items")
+    }
+
     func fetchCountryStats(days: Int = 30) async throws -> [CountryStat] {
         var comps = URLComponents(url: baseURL.appendingPathComponent("/api/news/country-stats"), resolvingAgainstBaseURL: false)!
         comps.queryItems = [URLQueryItem(name: "days", value: String(days))]
@@ -179,6 +200,12 @@ final class APIClient {
         let url = baseURL.appendingPathComponent("/api/weather/country-latest")
         let req = URLRequest(url: url)
         return try await request(req, as: [CountryWeather].self, rootKey: "stats")
+    }
+
+    func fetchCountryLeadership() async throws -> [CountryLeadership] {
+        let url = baseURL.appendingPathComponent("/api/leadership/countries")
+        let req = URLRequest(url: url)
+        return try await request(req, as: [CountryLeadership].self, rootKey: "countries")
     }
 
     func fetchLatestDailyBriefing() async throws -> DailySignalBriefing? {

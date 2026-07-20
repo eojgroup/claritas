@@ -7,6 +7,7 @@ struct RootView: View {
         case dashboard
         case briefing
         case news
+        case podcasts
         case weather
         case markets
         case admin
@@ -19,6 +20,7 @@ struct RootView: View {
             case .dashboard: return "Dashboard"
             case .briefing: return "Briefing"
             case .news: return "News"
+            case .podcasts: return "Podcasts"
             case .weather: return "Weather"
             case .markets: return "Markets"
             case .admin: return "Admin"
@@ -33,6 +35,7 @@ struct RootView: View {
             case .dashboard: return "square.grid.2x2"
             case .briefing: return "sparkles"
             case .news: return "newspaper"
+            case .podcasts: return "mic.fill"
             case .weather: return "cloud.sun"
             case .markets: return "chart.line.uptrend.xyaxis"
             case .admin: return "shield.lefthalf.filled"
@@ -89,6 +92,7 @@ struct RootView: View {
             compactTab(.dashboard)
             compactTab(.briefing)
             compactTab(.news)
+            compactTab(.podcasts)
             compactTab(.weather)
             compactTab(.markets)
 
@@ -145,8 +149,8 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .dashboard, .briefing, .news, .weather, .markets, .admin, .profile, .policies]
-            : [.overview, .dashboard, .briefing, .news, .weather, .markets, .profile, .policies]
+            ? [.overview, .dashboard, .briefing, .news, .podcasts, .weather, .markets, .admin, .profile, .policies]
+            : [.overview, .dashboard, .briefing, .news, .podcasts, .weather, .markets, .profile, .policies]
     }
 
     private var sidebar: some View {
@@ -158,6 +162,7 @@ struct RootView: View {
             }
             Section("Signals") {
                 sidebarLink(.news)
+                sidebarLink(.podcasts)
                 sidebarLink(.weather)
                 sidebarLink(.markets)
             }
@@ -223,6 +228,8 @@ struct RootView: View {
             DailyBriefingWorkspaceView()
         case .news:
             NewsWorkspaceView()
+        case .podcasts:
+            PodcastWorkspaceView()
         case .weather:
             WeatherWorkspaceView()
         case .markets:
@@ -457,6 +464,7 @@ struct DailyBriefingWorkspaceView: View {
     private var signalSummary: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
             BrandMetricCard(title: "News", value: "\(model.news.count)", detail: "Signals in scope", tone: ClaritasPalette.dataBlue(for: colorScheme))
+            BrandMetricCard(title: "Podcasts", value: "\(model.podcasts.count)", detail: "Evidence sources", tone: ClaritasPalette.shellAccentSecondary(for: colorScheme))
             BrandMetricCard(title: "Weather", value: "\(model.weather.count)", detail: "Current observations", tone: ClaritasPalette.shellAccent(for: colorScheme))
             BrandMetricCard(title: "Markets", value: "\(model.marketQuotes.count)", detail: "Tracked symbols", tone: ClaritasPalette.positiveText(for: colorScheme))
         }
@@ -513,6 +521,289 @@ struct DailyBriefingWorkspaceView: View {
         let hour = parts.first.flatMap { Int($0) } ?? 7
         let minute = parts.dropFirst().first.flatMap { Int($0) } ?? 0
         return String(format: "%02d:%02d", max(0, min(hour, 23)), max(0, min(minute, 59)))
+    }
+}
+
+struct PodcastWorkspaceView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var query = ""
+    @State private var signalType = "all"
+
+    private let signalTypes = ["all", "entity", "topic", "claim", "event", "risk"]
+
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                LazyVStack(spacing: 16) {
+                    controls
+                    metrics
+
+                    if let error = model.podcastLoadError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                ClaritasPalette.negativeText(for: colorScheme).opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 10)
+                            )
+                    }
+
+                    if model.podcasts.isEmpty && !model.isRefreshingPodcasts {
+                        BrandCard(title: "No podcast intelligence", icon: "mic.slash") {
+                            Text("No episodes match the current filters.")
+                                .font(.subheadline)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                .frame(maxWidth: .infinity, minHeight: 100)
+                        }
+                    }
+
+                    ForEach(model.podcasts) { episode in
+                        episodeCard(episode)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+            }
+            .refreshable {
+                await refresh()
+            }
+        }
+        .task {
+            if model.podcasts.isEmpty {
+                await refresh()
+            }
+        }
+    }
+
+    private var controls: some View {
+        BrandCard(title: "Podcast evidence", icon: "waveform") {
+            VStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    TextField("Episode, entity, claim, event, or risk", text: $query)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit {
+                            Task { await refresh() }
+                        }
+                    if !query.isEmpty {
+                        Button {
+                            query = ""
+                            Task { await refresh() }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear podcast search")
+                    }
+                }
+                .padding(10)
+                .background(
+                    ClaritasPalette.shellSurface(for: colorScheme),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+                )
+
+                HStack {
+                    Picker("Signal type", selection: $signalType) {
+                        ForEach(signalTypes, id: \.self) { option in
+                            Text(signalTypeLabel(option)).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: signalType) { _ in
+                        Task { await refresh() }
+                    }
+
+                    Spacer()
+
+                    Button {
+                        Task { await refresh() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.isRefreshingPodcasts)
+                    .accessibilityLabel("Refresh podcast intelligence")
+                }
+            }
+        }
+    }
+
+    private var metrics: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 12)], spacing: 12) {
+            BrandMetricCard(
+                title: "Episodes",
+                value: "\(model.podcasts.count)",
+                detail: "Current scope",
+                tone: ClaritasPalette.dataBlue(for: colorScheme)
+            )
+            BrandMetricCard(
+                title: "Transcripts",
+                value: "\(model.podcasts.filter { $0.transcript_status == "available" }.count)",
+                detail: "Evidence ready",
+                tone: ClaritasPalette.positiveText(for: colorScheme)
+            )
+            BrandMetricCard(
+                title: "Signals",
+                value: "\(model.podcasts.reduce(0) { $0 + $1.signals.count })",
+                detail: "Extracted findings",
+                tone: ClaritasPalette.shellAccentSecondary(for: colorScheme)
+            )
+        }
+    }
+
+    private func episodeCard(_ episode: PodcastEpisode) -> some View {
+        BrandCard(title: episode.feed_title, icon: "mic.fill") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    AsyncImage(url: URL(string: episode.image_url ?? episode.feed_image_url ?? "")) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Image(systemName: "waveform")
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    }
+                    .frame(width: 72, height: 72)
+                    .background(ClaritasPalette.shellSurface(for: colorScheme))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(episode.title)
+                            .font(.headline)
+                            .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(
+                            [
+                                episode.eventDate?.formatted(date: .abbreviated, time: .shortened),
+                                episode.durationLabel,
+                                "Transcript \(episode.transcript_status)"
+                            ]
+                            .compactMap { $0 }
+                            .joined(separator: " · ")
+                        )
+                        .font(.caption)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    }
+                }
+
+                if let summary = episode.summary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.subheadline)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .lineLimit(4)
+                }
+
+                if !episode.external_links.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(episode.external_links) { link in
+                                if let url = link.resolvedURL {
+                                    Link(destination: url) {
+                                        Label(link.label, systemImage: "arrow.up.right")
+                                            .font(.caption.weight(.semibold))
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !episode.signals.isEmpty {
+                    Divider()
+                    Text("Extracted signals")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    ForEach(episode.signals.prefix(5)) { signal in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 7) {
+                                Text(signal.type.uppercased())
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(signalTone(signal))
+                                if let risk = signal.risk_level {
+                                    Text(risk.uppercased())
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                                }
+                            }
+                            Text(signal.title)
+                                .font(.subheadline.weight(.semibold))
+                            if let summary = signal.summary {
+                                Text(summary)
+                                    .font(.caption)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+
+                if !episode.evidence.isEmpty {
+                    Divider()
+                    Text("Timestamped evidence")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    ForEach(episode.evidence.prefix(4)) { evidence in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(evidence.timestampLabel)
+                                    .font(.caption.monospacedDigit())
+                                if let speaker = evidence.speaker {
+                                    Text(speaker)
+                                        .font(.caption.weight(.semibold))
+                                }
+                                Spacer()
+                                if let source = evidence.source_url, let url = URL(string: source) {
+                                    Link(destination: url) {
+                                        Image(systemName: "arrow.up.right")
+                                    }
+                                    .accessibilityLabel("Open transcript source")
+                                }
+                            }
+                            Text(evidence.text)
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                .lineLimit(4)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func signalTone(_ signal: PodcastSignal) -> Color {
+        switch signal.type {
+        case "risk": return ClaritasPalette.negativeText(for: colorScheme)
+        case "event": return ClaritasPalette.shellAccentSecondary(for: colorScheme)
+        case "claim": return ClaritasPalette.dataBlue(for: colorScheme)
+        default: return ClaritasPalette.positiveText(for: colorScheme)
+        }
+    }
+
+    private func signalTypeLabel(_ value: String) -> String {
+        switch value {
+        case "entity": return "Entities"
+        case "topic": return "Topics"
+        case "claim": return "Claims"
+        case "event": return "Events"
+        case "risk": return "Risks"
+        default: return "All signals"
+        }
+    }
+
+    private func refresh() async {
+        let cleanQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        await model.refreshPodcasts(
+            query: cleanQuery.isEmpty ? nil : cleanQuery,
+            signalType: signalType == "all" ? nil : signalType
+        )
     }
 }
 
@@ -799,6 +1090,8 @@ private struct AdminIngestionPanelView: View {
         case news
         case weather
         case market
+        case podcasts
+        case leadership
 
         var id: String { rawValue }
         var label: String { rawValue.capitalized }
@@ -808,6 +1101,8 @@ private struct AdminIngestionPanelView: View {
             case .news: return .news
             case .weather: return .weather
             case .market: return .market
+            case .podcasts: return .podcasts
+            case .leadership: return .leadership
             }
         }
     }
@@ -2399,6 +2694,8 @@ private extension IngestionPipeline {
         case .news: return "News"
         case .weather: return "Weather"
         case .market: return "Market"
+        case .podcasts: return "Podcasts"
+        case .leadership: return "Leadership"
         }
     }
 }

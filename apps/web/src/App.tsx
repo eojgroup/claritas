@@ -24,6 +24,8 @@ import {
   X,
   ArrowUpRight,
   CheckCheck,
+  Podcast,
+  RefreshCw,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -112,10 +114,11 @@ const SPLIT_VIEW_MIN_WIDTH = 700;
 const SPLIT_VIEW_MIN_HEIGHT = 620;
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
-type SearchTopic = "all" | "news" | "weather" | "markets";
+type SearchTopic = "all" | "news" | "podcasts" | "weather" | "markets";
 type AppView =
   | "dashboard"
   | "news"
+  | "podcasts"
   | "weather"
   | "markets"
   | "admin"
@@ -156,6 +159,7 @@ const REGION_OPTIONS = [
 const SEARCH_TOPIC_OPTIONS: Array<{ id: SearchTopic; label: string }> = [
   { id: "all", label: "All" },
   { id: "news", label: "News" },
+  { id: "podcasts", label: "Podcasts" },
   { id: "weather", label: "Weather" },
   { id: "markets", label: "Markets" },
 ];
@@ -163,6 +167,9 @@ const SEARCH_TOPIC_OPTIONS: Array<{ id: SearchTopic; label: string }> = [
 const SEARCH_TOPIC_ALIASES: Record<string, SearchTopic> = {
   all: "all",
   news: "news",
+  podcast: "podcasts",
+  podcasts: "podcasts",
+  audio: "podcasts",
   weather: "weather",
   market: "markets",
   markets: "markets",
@@ -650,6 +657,7 @@ import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePrevie
 import {
   fetchAuthMe,
   fetchAuthProviders,
+  fetchCountryLeadership,
   fetchCountryStats,
   fetchCountryWeather,
   fetchDailyBriefingSchedule,
@@ -658,6 +666,7 @@ import {
   fetchMarketQuotes,
   fetchMarketStatus,
   fetchNews,
+  fetchPodcasts,
   getAuthStartUrl,
   logoutAuth,
   imageProxy,
@@ -667,6 +676,7 @@ import {
   type AuthUser,
   type CountryStat,
   type CountryStatsCoverage,
+  type CountryLeadership,
   type CountryWeather,
   type DailyBriefingSchedule,
   type DailySignalBriefing,
@@ -674,7 +684,36 @@ import {
   type MarketQuote,
   type MarketStatus,
   type NewsItem,
+  type PodcastEpisode,
+  type PodcastExternalLink,
+  type PodcastSignal,
 } from "./lib/api";
+
+function getPodcastExternalLinks(episode: PodcastEpisode): PodcastExternalLink[] {
+  if (!Array.isArray(episode.external_links)) return [];
+  return episode.external_links.filter(
+    (link): link is PodcastExternalLink =>
+      Boolean(link && typeof link.url === "string" && typeof link.label === "string"),
+  );
+}
+
+function formatPodcastDuration(seconds: number | null | undefined): string | null {
+  if (!Number.isFinite(seconds) || !seconds || seconds <= 0) return null;
+  const rounded = Math.round(seconds);
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${Math.max(minutes, 1)}m`;
+}
+
+function formatEvidenceTimestamp(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
@@ -729,12 +768,18 @@ export default function ClaritasDashboard() {
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [countryStatsCoverage, setCountryStatsCoverage] = useState<CountryStatsCoverage | null>(null);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
+  const [leadershipStats, setLeadershipStats] = useState<CountryLeadership[]>([]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [marketStatusRows, setMarketStatusRows] = useState<MarketStatus[]>([]);
   const [marketEarnings, setMarketEarnings] = useState<EarningsEvent[]>([]);
   const [marketEarningsWindowDays, setMarketEarningsWindowDays] = useState<7 | 14 | 30>(14);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [podcasts, setPodcasts] = useState<PodcastEpisode[]>([]);
+  const [isLoadingPodcasts, setIsLoadingPodcasts] = useState(false);
+  const [podcastLoadError, setPodcastLoadError] = useState<string | null>(null);
+  const [podcastQuery, setPodcastQuery] = useState("");
+  const [podcastSignalFilter, setPodcastSignalFilter] = useState<PodcastSignal["type"] | "all">("all");
   const [newsLoadMode, setNewsLoadMode] = useState<"recent" | "archive">(
     "recent",
   );
@@ -744,7 +789,7 @@ export default function ClaritasDashboard() {
   const [dailyBriefingError, setDailyBriefingError] = useState<string | null>(null);
   const [dataWindowPreset, setDataWindowPreset] =
     useState<DataWindowPreset>("30d");
-  const [mapMode, setMapMode] = useState<"news" | "weather">("news");
+  const [mapMode, setMapMode] = useState<"news" | "weather" | "leadership">("news");
   const [listMode, setListMode] = useState<"news" | "weather" | "market">("news");
   const [mapDayMode, setMapDayMode] = useState(false);
   const [mapWindowDays, setMapWindowDays] = useState(NEWS_TREND_WINDOW_DAYS);
@@ -791,6 +836,7 @@ export default function ClaritasDashboard() {
   const feedRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const newsRequestIdRef = useRef(0);
+  const podcastRequestIdRef = useRef(0);
   const [viewportSize, setViewportSize] = useState(() => ({
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
     height: typeof window !== "undefined" ? window.innerHeight : 800,
@@ -996,12 +1042,35 @@ export default function ClaritasDashboard() {
     }
   }, []);
 
+  const loadPodcastData = useCallback(async (q = "", signalType: PodcastSignal["type"] | "all" = "all") => {
+    const requestId = podcastRequestIdRef.current + 1;
+    podcastRequestIdRef.current = requestId;
+    setIsLoadingPodcasts(true);
+    setPodcastLoadError(null);
+    try {
+      const items = await fetchPodcasts({ limit: 80, q: q.trim() || undefined, signalType });
+      if (podcastRequestIdRef.current !== requestId) return;
+      setPodcasts(items);
+    } catch (err) {
+      if (podcastRequestIdRef.current !== requestId) return;
+      setPodcasts([]);
+      setPodcastLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (podcastRequestIdRef.current === requestId) {
+        setIsLoadingPodcasts(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     // Load initial data
     if (authStatus !== "authed" || !hasPaidAccess) return;
     fetchCountryWeather()
       .then(setWeatherStats)
       .catch(() => setWeatherStats([]));
+    fetchCountryLeadership()
+      .then(setLeadershipStats)
+      .catch(() => setLeadershipStats([]));
     fetchMarketQuotes({ refresh: true })
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
@@ -1015,7 +1084,8 @@ export default function ClaritasDashboard() {
         setDailyBriefingError(err instanceof Error ? err.message : String(err));
       });
     void loadNewsData("recent");
-  }, [authStatus, hasPaidAccess, loadNewsData]);
+    void loadPodcastData();
+  }, [authStatus, hasPaidAccess, loadNewsData, loadPodcastData]);
 
   useEffect(() => {
     if (authStatus !== "authed") return;
@@ -1219,6 +1289,8 @@ export default function ClaritasDashboard() {
   const hasSearchQuery = searchTerms.length > 0;
   const searchAppliesToNews =
     effectiveSearchTopic === "all" || effectiveSearchTopic === "news";
+  const searchAppliesToPodcasts =
+    effectiveSearchTopic === "all" || effectiveSearchTopic === "podcasts";
   const searchAppliesToWeather =
     effectiveSearchTopic === "all" || effectiveSearchTopic === "weather";
   const searchAppliesToMarkets =
@@ -1228,6 +1300,8 @@ export default function ClaritasDashboard() {
       ? "Search weather topics (e.g. storm, humidity, US)"
       : effectiveSearchTopic === "news"
         ? "Search news topics (e.g. market, regulation, AI)"
+        : effectiveSearchTopic === "podcasts"
+          ? "Search podcast evidence, entities, claims, events, or risks"
         : effectiveSearchTopic === "markets"
           ? "Search market symbols (e.g. QQQ, CAC40, DAX30)"
         : "Search by topic or keyword (try topic:news OpenAI)";
@@ -1268,6 +1342,22 @@ export default function ClaritasDashboard() {
       ]
         .join(" ")
         .toLowerCase();
+      return searchTerms.every((term) => haystack.includes(term));
+    },
+    [searchTerms],
+  );
+
+  const matchesPodcastSearch = useCallback(
+    (episode: PodcastEpisode) => {
+      if (searchTerms.length === 0) return true;
+      const haystack = [
+        episode.title,
+        episode.summary ?? "",
+        episode.feed_title,
+        episode.feed_author ?? "",
+        ...episode.signals.flatMap((signal) => [signal.type, signal.title, signal.summary ?? "", ...signal.entities, ...signal.topics]),
+        ...episode.evidence.map((evidence) => `${evidence.speaker ?? ""} ${evidence.text}`),
+      ].join(" ").toLowerCase();
       return searchTerms.every((term) => haystack.includes(term));
     },
     [searchTerms],
@@ -1326,6 +1416,11 @@ export default function ClaritasDashboard() {
     searchAppliesToWeather,
     searchTerms.length,
   ]);
+
+  const podcastSearchScope = useMemo(() => {
+    if (!searchAppliesToPodcasts || searchTerms.length === 0) return podcasts;
+    return podcasts.filter(matchesPodcastSearch);
+  }, [matchesPodcastSearch, podcasts, searchAppliesToPodcasts, searchTerms.length]);
 
   const marketSearchScope = useMemo(() => {
     if (!searchAppliesToMarkets || searchTerms.length === 0) {
@@ -1734,6 +1829,53 @@ export default function ClaritasDashboard() {
     }));
   }, [mapWeatherScope]);
 
+  const mapLeadershipScope = useMemo(() => {
+    if (!regionCountries) return leadershipStats;
+    return leadershipStats.filter((row) => regionCountries.has(row.country.toUpperCase()));
+  }, [leadershipStats, regionCountries]);
+
+  const mapLeadershipData = useMemo(() => {
+    return mapLeadershipScope.map((row) => {
+      const stateLeaders = row.roles
+        .filter((role) => role.role_type === "head_of_state")
+        .map((role) => role.person_name);
+      const governmentLeaders = row.roles
+        .filter((role) => role.role_type === "head_of_government")
+        .map((role) => role.person_name);
+      return {
+        country: row.country.toUpperCase(),
+        count: Math.max(row.roles.length, 1),
+        tone: "neutral" as const,
+        meta: {
+          subtitle: row.government_type ?? "Current national leadership",
+          lines: [
+            stateLeaders.length > 0 ? `Head of state: ${stateLeaders.join(", ")}` : "Head of state: —",
+            governmentLeaders.length > 0
+              ? `Head of government: ${governmentLeaders.join(", ")}`
+              : "Head of government: —",
+            row.source_updated_at
+              ? `Wikidata updated: ${new Date(row.source_updated_at).toLocaleString()}`
+              : "Wikidata updated: not provided",
+            `Claritas retrieved: ${new Date(row.retrieved_at).toLocaleString()}`,
+          ],
+        },
+      };
+    });
+  }, [mapLeadershipScope]);
+
+  const activeMapData =
+    mapMode === "news"
+      ? mapBubbleData
+      : mapMode === "weather"
+        ? mapWeatherData
+        : mapLeadershipData;
+  const activeMapLegendLabel =
+    mapMode === "news"
+      ? "Story concentration"
+      : mapMode === "weather"
+        ? "Relative temperature"
+        : "Leadership records";
+
   const pinnedNewsSummary = useMemo(() => {
     if (!pinnedCountry) return null;
     return mapCountryStats.get(pinnedCountry.toUpperCase()) ?? null;
@@ -1754,6 +1896,15 @@ export default function ClaritasDashboard() {
       ) ?? null
     );
   }, [pinnedCountry, mapWeatherScope]);
+
+  const pinnedLeadershipSummary = useMemo(() => {
+    if (!pinnedCountry) return null;
+    return (
+      leadershipStats.find(
+        (row) => row.country.toUpperCase() === pinnedCountry.toUpperCase(),
+      ) ?? null
+    );
+  }, [leadershipStats, pinnedCountry]);
 
   const pinnedMeta = useMemo(() => {
     if (!pinnedCountry) return null;
@@ -2416,6 +2567,23 @@ export default function ClaritasDashboard() {
       country: row.country?.toUpperCase() ?? null,
       symbol: null,
     }));
+    const podcastRows = podcastSearchScope.slice(0, 8).map((episode) => ({
+      key: `podcast-${episode.id}`,
+      kind: "Podcast evidence",
+      view: "podcasts" as const,
+      title: episode.title,
+      subtitle: [
+        episode.feed_title,
+        episode.signals.length ? `${episode.signals.length} intelligence signals` : null,
+        episode.event_time ? new Date(episode.event_time).toLocaleString() : null,
+      ].filter(Boolean).join(" · "),
+      href:
+        getPodcastExternalLinks(episode).find((link) => link.platform === "publisher")?.url ??
+        getPodcastExternalLinks(episode)[0]?.url ??
+        null,
+      country: null,
+      symbol: null,
+    }));
     const markets = marketSearchScope.slice(0, 8).map((quote, idx) => ({
       key: `market-${quote.symbol}-${quote.observed_at}-${idx}`,
       kind: "Market",
@@ -2440,11 +2608,14 @@ export default function ClaritasDashboard() {
     if (effectiveSearchTopic === "weather") {
       return weather;
     }
+    if (effectiveSearchTopic === "podcasts") {
+      return podcastRows;
+    }
     if (effectiveSearchTopic === "markets") {
       return markets;
     }
-    return [...news.slice(0, 4), ...weather.slice(0, 2), ...markets.slice(0, 2)];
-  }, [effectiveSearchTopic, marketSearchScope, newsSearchScope, weatherSearchScope]);
+    return [...news.slice(0, 3), ...podcastRows.slice(0, 3), ...weather.slice(0, 1), ...markets.slice(0, 1)];
+  }, [effectiveSearchTopic, marketSearchScope, newsSearchScope, podcastSearchScope, weatherSearchScope]);
 
   const signalNotifications = useMemo<SignalNotification[]>(() => {
     const items: SignalNotification[] = [];
@@ -2478,6 +2649,31 @@ export default function ClaritasDashboard() {
         timeLabel: "Current",
         tone: "critical",
         view: "dashboard",
+      });
+    }
+    if (podcastLoadError) {
+      items.push({
+        id: `podcast-error-${podcastLoadError}`,
+        title: "Podcast intelligence refresh needs attention",
+        description: podcastLoadError,
+        timeLabel: "Current",
+        tone: "critical",
+        view: "podcasts",
+      });
+    }
+    const podcastRisk = podcasts.flatMap((episode) =>
+      episode.signals
+        .filter((signal) => signal.type === "risk" && (signal.risk_level === "high" || signal.risk_level === "critical"))
+        .map((signal) => ({ episode, signal })),
+    )[0];
+    if (podcastRisk) {
+      items.push({
+        id: `podcast-risk-${podcastRisk.signal.id}`,
+        title: podcastRisk.signal.title,
+        description: `${podcastRisk.episode.feed_title} · ${podcastRisk.signal.summary ?? "Risk signal extracted from timestamped podcast evidence."}`,
+        timeLabel: formatTime(podcastRisk.episode.event_time),
+        tone: podcastRisk.signal.risk_level === "critical" ? "critical" : "attention",
+        view: "podcasts",
       });
     }
     if (dailyBriefing?.published_at) {
@@ -2546,6 +2742,8 @@ export default function ClaritasDashboard() {
     marketEarningsRows,
     marketQuotes,
     newsLoadError,
+    podcastLoadError,
+    podcasts,
     trendAnomalies,
   ]);
 
@@ -2607,7 +2805,7 @@ export default function ClaritasDashboard() {
   }, [mapDayMode]);
 
   useEffect(() => {
-    if (mapMode === "weather") {
+    if (mapMode !== "news") {
       setMapDayMode(false);
       setMapPlaying(false);
     }
@@ -2869,6 +3067,12 @@ export default function ClaritasDashboard() {
       icon: Newspaper,
     },
     {
+      id: "podcasts",
+      label: "Podcasts",
+      view: "podcasts" as const,
+      icon: Podcast,
+    },
+    {
       id: "weather",
       label: "Weather",
       view: "weather" as const,
@@ -2890,6 +3094,7 @@ export default function ClaritasDashboard() {
   const viewMeta = {
     dashboard: { kicker: "Dashboard", title: "Signal desk overview" },
     news: { kicker: "News", title: "Global news signal stream" },
+    podcasts: { kicker: "Podcast intelligence", title: "Extracted claims, events, risks, and evidence" },
     weather: { kicker: "Weather", title: "Weather signal operations" },
     markets: { kicker: "Markets", title: "Market watch and correlations" },
     admin: { kicker: "Admin", title: "Data ingestion control" },
@@ -3350,6 +3555,7 @@ export default function ClaritasDashboard() {
                   })}
                   <div className="ml-auto flex flex-wrap gap-3 text-xs text-[color:var(--shell-muted)]">
                     <span>{newsSearchScope.length} news</span>
+                    <span>{podcastSearchScope.length} podcasts</span>
                     <span>{weatherSearchScope.length} weather</span>
                     <span>{marketSearchScope.length} markets</span>
                   </div>
@@ -3824,7 +4030,9 @@ export default function ClaritasDashboard() {
                             Map:{" "}
                             {mapMode === "news"
                               ? "#News per country"
-                              : "Weather (temperature) per country"}
+                              : mapMode === "weather"
+                                ? "Weather (temperature) per country"
+                                : "Country leadership"}
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -3853,6 +4061,16 @@ export default function ClaritasDashboard() {
                             }}
                           >
                             Weather
+                          </button>
+                          <button
+                            className={`rounded-full border px-3 py-1 transition ${
+                              mapMode === "leadership"
+                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                            onClick={() => setMapMode("leadership")}
+                          >
+                            Leadership
                           </button>
                           <button
                             type="button"
@@ -3940,20 +4158,14 @@ export default function ClaritasDashboard() {
                         >
                           <WorldMapBubbles
                             variant="compact"
-                            data={
-                              mapMode === "news" ? mapBubbleData : mapWeatherData
-                            }
+                            data={activeMapData}
                             onSelect={handleMapSelect}
                             dark={dark}
                             primaryCountry={selectedCountry}
                             secondaryCountry={comparisonCountry}
                             pinnedCountry={pinnedCountry}
                             showLabels={false}
-                            legendLabel={
-                              mapMode === "news"
-                                ? "Story concentration"
-                                : "Relative temperature"
-                            }
+                            legendLabel={activeMapLegendLabel}
                           />
                         </div>
                         {pinnedCountry && (
@@ -3985,7 +4197,7 @@ export default function ClaritasDashboard() {
                                   Top source: {pinnedTopSource ?? "—"}
                                 </div>
                               </>
-                            ) : (
+                            ) : mapMode === "weather" ? (
                               <>
                                 <div className="mt-2 text-[color:var(--shell-muted)]">
                                   Temp: {pinnedWeatherSummary?.temp_c ?? "—"}°C
@@ -3999,6 +4211,40 @@ export default function ClaritasDashboard() {
                                   {pinnedWeatherSummary?.observed_at
                                     ? new Date(
                                         pinnedWeatherSummary.observed_at,
+                                      ).toLocaleString()
+                                    : "—"}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="mt-2 font-medium text-[color:var(--shell-ink)]">
+                                  {pinnedLeadershipSummary?.government_type ??
+                                    "Government type not listed"}
+                                </div>
+                                {pinnedLeadershipSummary?.roles.map((role) => (
+                                  <div
+                                    key={`${role.role_type}-${role.person_wikidata_id}`}
+                                    className="mt-1 text-[color:var(--shell-muted)]"
+                                  >
+                                    {role.role_type === "head_of_state"
+                                      ? "Head of state"
+                                      : "Head of government"}
+                                    : {role.person_name}
+                                  </div>
+                                ))}
+                                <div className="mt-2 text-[color:var(--shell-muted)]">
+                                  Wikidata updated:{" "}
+                                  {pinnedLeadershipSummary?.source_updated_at
+                                    ? new Date(
+                                        pinnedLeadershipSummary.source_updated_at,
+                                      ).toLocaleString()
+                                    : "Not provided"}
+                                </div>
+                                <div className="text-[color:var(--shell-muted)]">
+                                  Claritas retrieved:{" "}
+                                  {pinnedLeadershipSummary?.retrieved_at
+                                    ? new Date(
+                                        pinnedLeadershipSummary.retrieved_at,
                                       ).toLocaleString()
                                     : "—"}
                                 </div>
@@ -4028,6 +4274,20 @@ export default function ClaritasDashboard() {
                               ) : (
                                 <span>Admin ingestion required.</span>
                               )}
+                            </div>
+                          )}
+                        {mapMode === "leadership" &&
+                          mapLeadershipScope.length === 0 && (
+                            <div className="absolute bottom-4 right-4 flex items-center gap-2 rounded border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs text-[color:var(--shell-muted)]">
+                              <span>No leadership records yet.</span>
+                              {isAdmin ? (
+                                <button
+                                  onClick={() => setActiveView("admin")}
+                                  className="rounded border border-[color:var(--shell-border)] px-2 py-0.5 hover:bg-[color:var(--signal-sky-soft)]"
+                                >
+                                  Open admin ingest
+                                </button>
+                              ) : null}
                             </div>
                           )}
                       </div>
@@ -4121,10 +4381,15 @@ export default function ClaritasDashboard() {
                               </div>
                             )}
                           </>
-                        ) : (
+                        ) : mapMode === "weather" ? (
                           <div className="text-[color:var(--shell-muted)]">
                             Time controls apply to news view. Switch to News to
                             animate.
+                          </div>
+                        ) : (
+                          <div className="text-[color:var(--shell-muted)]">
+                            Country details show when Wikidata last changed the record and when
+                            Claritas retrieved it.
                           </div>
                         )}
                       </div>
@@ -4755,7 +5020,9 @@ export default function ClaritasDashboard() {
                           <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
                             {mapMode === "news"
                               ? "News coverage by country"
-                              : "Weather observations by country"}
+                              : mapMode === "weather"
+                                ? "Weather observations by country"
+                                : "Current country leadership"}
                           </div>
                         </div>
                         <button
@@ -4771,19 +5038,13 @@ export default function ClaritasDashboard() {
                         <div className="app-map-frame h-[min(74vh,760px)] min-h-[20rem]">
                           <WorldMapBubbles
                             variant="default"
-                            data={
-                              mapMode === "news" ? mapBubbleData : mapWeatherData
-                            }
+                            data={activeMapData}
                             onSelect={handleMapSelect}
                             dark={dark}
                             primaryCountry={selectedCountry}
                             secondaryCountry={comparisonCountry}
                             pinnedCountry={pinnedCountry}
-                            legendLabel={
-                              mapMode === "news"
-                                ? "Story concentration"
-                                : "Relative temperature"
-                            }
+                            legendLabel={activeMapLegendLabel}
                           />
                         </div>
                       </div>
@@ -4794,9 +5055,7 @@ export default function ClaritasDashboard() {
                         </span>
                         <span>
                           Countries shown:{" "}
-                          {mapMode === "news"
-                            ? mapBubbleData.length
-                            : mapWeatherData.length}
+                          {activeMapData.length}
                         </span>
                         <span className="ml-auto">
                           Search topic: {activeSearchTopicLabel}
@@ -5299,6 +5558,281 @@ export default function ClaritasDashboard() {
                       Pick a country on the map or choose a market symbol to unlock related weather/news context.
                     </p>
                   )}
+                </section>
+              </div>
+            )}
+            {activeView === "podcasts" && (
+              <div className="space-y-4">
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void loadPodcastData(podcastQuery, podcastSignalFilter);
+                  }}
+                  className="app-card-muted flex flex-wrap items-end gap-3 rounded-[1.45rem] px-4 py-3"
+                >
+                  <label className="min-w-[14rem] flex-1 text-xs text-[color:var(--shell-muted)]">
+                    Search podcast evidence
+                    <div className="mt-1 flex items-center gap-2 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2">
+                      <Search className="h-4 w-4 shrink-0" />
+                      <input
+                        value={podcastQuery}
+                        onChange={(event) => setPodcastQuery(event.currentTarget.value)}
+                        placeholder="Episode, entity, claim, event, or risk"
+                        className="min-w-0 flex-1 bg-transparent py-2 text-sm text-[color:var(--shell-ink)] outline-none"
+                      />
+                      {podcastQuery && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPodcastQuery("");
+                            void loadPodcastData("", podcastSignalFilter);
+                          }}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[color:var(--shell-muted)] hover:bg-[color:var(--shell-surface-muted)]"
+                          aria-label="Clear podcast search"
+                          title="Clear search"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </label>
+                  <label className="w-full text-xs text-[color:var(--shell-muted)] sm:w-48">
+                    Signal type
+                    <select
+                      value={podcastSignalFilter}
+                      onChange={(event) => {
+                        const next = event.currentTarget.value as PodcastSignal["type"] | "all";
+                        setPodcastSignalFilter(next);
+                        void loadPodcastData(podcastQuery, next);
+                      }}
+                      className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-sm text-[color:var(--shell-ink)]"
+                    >
+                      <option value="all">All signals</option>
+                      <option value="entity">Entities</option>
+                      <option value="topic">Topics</option>
+                      <option value="claim">Claims</option>
+                      <option value="event">Events</option>
+                      <option value="risk">Risks</option>
+                    </select>
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={isLoadingPodcasts}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-4 text-sm font-semibold text-[color:var(--shell-on-strong)] disabled:opacity-50"
+                  >
+                    <Search className="h-4 w-4" />
+                    Search
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadPodcastData(podcastQuery, podcastSignalFilter)}
+                    disabled={isLoadingPodcasts}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] disabled:opacity-50"
+                    aria-label="Refresh podcast intelligence"
+                    title="Refresh podcast intelligence"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isLoadingPodcasts ? "animate-spin" : ""}`} />
+                  </button>
+                </form>
+
+                <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Episodes
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {podcasts.length}
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Transcripts
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {podcasts.filter((episode) => episode.transcript_status === "available").length}
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Signals
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {podcasts.reduce((total, episode) => total + episode.signals.length, 0)}
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Evidence
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {podcasts.reduce((total, episode) => total + episode.evidence.length, 0)}
+                    </div>
+                  </div>
+                </section>
+
+                {podcastLoadError && (
+                  <section className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                    {podcastLoadError}
+                  </section>
+                )}
+
+                <section className="space-y-3">
+                  {!isLoadingPodcasts && podcasts.length === 0 && !podcastLoadError && (
+                    <div className={`${cardBase} px-4 py-10 text-center text-sm text-[color:var(--shell-muted)]`}>
+                      No podcast intelligence matches the current filters.
+                    </div>
+                  )}
+                  {podcasts.map((episode) => {
+                    const links = getPodcastExternalLinks(episode);
+                    const image = imageProxy(episode.image_url || episode.feed_image_url || null);
+                    const duration = formatPodcastDuration(episode.duration_seconds);
+                    return (
+                      <article key={episode.id} className={`${cardBase} overflow-hidden`}>
+                        <div className="grid gap-4 p-4 md:grid-cols-[8rem_minmax(0,1fr)]">
+                          <div className="aspect-square w-full max-w-32 overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)]">
+                            {image ? (
+                              <img
+                                src={image}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                referrerPolicy="no-referrer"
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <div className="grid h-full place-items-center">
+                                <Podcast className="h-8 w-8 text-[color:var(--shell-muted)]" />
+                              </div>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                              <span className="font-semibold text-[color:var(--shell-ink)]">
+                                {episode.feed_title}
+                              </span>
+                              {episode.feed_author && <span>{episode.feed_author}</span>}
+                              {episode.event_time && (
+                                <span>{new Date(episode.event_time).toLocaleString()}</span>
+                              )}
+                              {duration && <span>{duration}</span>}
+                              <span className="rounded-full border border-[color:var(--shell-border)] px-2 py-0.5">
+                                Transcript {episode.transcript_status}
+                              </span>
+                            </div>
+                            <h2 className="mt-2 text-lg font-semibold leading-6 text-[color:var(--shell-ink)]">
+                              {episode.title}
+                            </h2>
+                            {episode.summary && (
+                              <p className="mt-2 line-clamp-3 text-sm leading-6 text-[color:var(--shell-muted)]">
+                                {episode.summary}
+                              </p>
+                            )}
+                            {links.length > 0 && (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {links.map((link) => (
+                                  <a
+                                    key={`${link.platform}-${link.url}`}
+                                    href={link.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2.5 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                                  >
+                                    {link.label}
+                                    <ArrowUpRight className="h-3.5 w-3.5" />
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {(episode.signals.length > 0 || episode.evidence.length > 0) && (
+                          <div className="grid border-t border-[color:var(--shell-border)] lg:grid-cols-2">
+                            <div className="min-w-0 p-4 lg:border-r lg:border-[color:var(--shell-border)]">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
+                                Extracted signals
+                              </div>
+                              <div className="mt-3 space-y-3">
+                                {episode.signals.map((signal) => (
+                                  <div key={signal.id} className="border-l-2 border-[color:var(--signal-sky)] pl-3">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="text-xs font-semibold uppercase text-[color:var(--shell-muted)]">
+                                        {signal.type}
+                                      </span>
+                                      {signal.risk_level && (
+                                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">
+                                          {signal.risk_level}
+                                        </span>
+                                      )}
+                                      {signal.confidence != null && (
+                                        <span className="text-[10px] text-[color:var(--shell-muted)]">
+                                          {Math.round(signal.confidence * 100)}% confidence
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                                      {signal.title}
+                                    </div>
+                                    {signal.summary && (
+                                      <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">
+                                        {signal.summary}
+                                      </p>
+                                    )}
+                                  </div>
+                                ))}
+                                {episode.signals.length === 0 && (
+                                  <div className="text-xs text-[color:var(--shell-muted)]">
+                                    No extracted signals for this episode.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="min-w-0 border-t border-[color:var(--shell-border)] p-4 lg:border-t-0">
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
+                                Timestamped evidence
+                              </div>
+                              <div className="mt-3 space-y-3">
+                                {episode.evidence.map((evidence) => (
+                                  <div key={evidence.id}>
+                                    <div className="flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                                      <span className="font-mono">
+                                        {formatEvidenceTimestamp(evidence.start_ms)}
+                                      </span>
+                                      {evidence.speaker && (
+                                        <span className="font-semibold text-[color:var(--shell-ink)]">
+                                          {evidence.speaker}
+                                        </span>
+                                      )}
+                                      {evidence.source_url && (
+                                        <a
+                                          href={evidence.source_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-[color:var(--shell-border)]"
+                                          aria-label={`Open evidence source at ${formatEvidenceTimestamp(evidence.start_ms)}`}
+                                          title="Open transcript source"
+                                        >
+                                          <ArrowUpRight className="h-3.5 w-3.5" />
+                                        </a>
+                                      )}
+                                    </div>
+                                    <p className="mt-1 line-clamp-4 text-xs leading-5 text-[color:var(--shell-muted)]">
+                                      {evidence.text}
+                                    </p>
+                                  </div>
+                                ))}
+                                {episode.evidence.length === 0 && (
+                                  <div className="text-xs text-[color:var(--shell-muted)]">
+                                    No timestamped evidence is available for this episode.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
                 </section>
               </div>
             )}
@@ -6678,6 +7212,17 @@ export default function ClaritasDashboard() {
                                 }`}
                               >
                                 Weather
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setMapMode("leadership")}
+                                className={`rounded-full border px-3 py-1 ${
+                                  mapMode === "leadership"
+                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
+                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
+                                }`}
+                              >
+                                Leadership
                               </button>
                             </div>
                           </div>

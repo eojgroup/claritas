@@ -10,6 +10,59 @@ export type NewsItem = {
   payload?: unknown;
 };
 
+export type PodcastSignal = {
+  id: number;
+  type: "entity" | "topic" | "claim" | "event" | "risk";
+  title: string;
+  summary?: string | null;
+  entities: string[];
+  topics: string[];
+  risk_level?: "low" | "medium" | "high" | "critical" | null;
+  confidence?: number | null;
+};
+
+export type PodcastEvidence = {
+  id: number;
+  segment_index: number;
+  start_ms: number;
+  end_ms?: number | null;
+  speaker?: string | null;
+  text: string;
+  timing_method: "source" | "inferred" | "unknown";
+  source_url?: string | null;
+  signals?: PodcastSignal[];
+};
+
+export type PodcastExternalLink = {
+  platform: "publisher" | "apple" | "spotify" | "youtube" | "podcastindex";
+  label: string;
+  url: string;
+};
+
+export type PodcastEpisode = {
+  id: number;
+  episode_id: number;
+  podcast_index_id: number;
+  kind: "podcast_episode";
+  title: string;
+  summary?: string | null;
+  url?: string | null;
+  event_time?: string | null;
+  payload?: Record<string, unknown> | null;
+  feed_id: number;
+  podcast_index_feed_id: number;
+  feed_title: string;
+  feed_author?: string | null;
+  feed_image_url?: string | null;
+  feed_site_url?: string | null;
+  duration_seconds?: number | null;
+  image_url?: string | null;
+  transcript_status: "pending" | "available" | "missing" | "failed";
+  external_links: PodcastExternalLink[];
+  signals: PodcastSignal[];
+  evidence: PodcastEvidence[];
+};
+
 export type CountryStat = { country: string; count: number };
 export type CountryStatsCoverage = {
   window_days: number;
@@ -31,6 +84,28 @@ export type CountryWeather = {
   wind_speed?: number | null;
   source_name?: string | null;
   icon_code?: string | null;
+};
+
+export type CountryLeadershipRole = {
+  role_type: "head_of_state" | "head_of_government";
+  person_name: string;
+  person_wikidata_id: string;
+  started_at: string | null;
+  source_url: string;
+};
+
+export type CountryLeadership = {
+  country: string;
+  country_name: string;
+  wikidata_country_id: string;
+  government_type: string | null;
+  summary: string;
+  roles: CountryLeadershipRole[];
+  source_name: "wikidata";
+  source_url: string;
+  source_license: "CC0";
+  source_updated_at: string | null;
+  retrieved_at: string;
 };
 
 export type MarketQuote = {
@@ -81,7 +156,7 @@ export type EarningsEvent = {
 };
 
 export type AuthProviderId = "google" | "microsoft" | "apple";
-export type IngestionPipeline = "news" | "weather" | "market";
+export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
 export type DailySignalBriefingStatus = "draft" | "published" | "archived";
 
@@ -147,6 +222,7 @@ export type AdminDailyBriefingGenerationSummary = {
   model: string | null;
   source_counts: {
     news: number;
+    podcasts: number;
     markets: number;
     weather: number;
   };
@@ -470,6 +546,7 @@ export async function startAdminDailySignalBriefingGeneration(
     status?: "draft" | "published";
     lookback_hours?: number;
     max_news_items?: number;
+    max_podcast_items?: number;
     max_market_items?: number;
     max_weather_items?: number;
     instructions?: string;
@@ -525,6 +602,30 @@ export async function fetchNews(params?: { limit?: number; offset?: number; q?: 
   return (data.items ?? []) as NewsItem[];
 }
 
+export async function fetchPodcasts(params?: {
+  limit?: number;
+  offset?: number;
+  q?: string;
+  signalType?: PodcastSignal["type"] | "all";
+}): Promise<PodcastEpisode[]> {
+  const sp = new URLSearchParams();
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.offset) sp.set("offset", String(params.offset));
+  if (params?.q) sp.set("q", params.q);
+  if (params?.signalType && params.signalType !== "all") sp.set("signal_type", params.signalType);
+  const resp = await fetch(`${API_BASE}/api/podcasts?${sp.toString()}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch podcast intelligence"));
+  const data = await resp.json();
+  return (data.items ?? []) as PodcastEpisode[];
+}
+
+export async function fetchPodcastEvidence(itemId: number): Promise<PodcastEvidence[]> {
+  const resp = await fetch(`${API_BASE}/api/podcasts/${encodeURIComponent(itemId)}/evidence`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch podcast evidence"));
+  const data = await resp.json();
+  return (data.evidence ?? []) as PodcastEvidence[];
+}
+
 export async function fetchCountryStats(params?: { days?: number }): Promise<CountryStatsResult> {
   const sp = new URLSearchParams();
   if (params?.days) sp.set("days", String(params.days));
@@ -549,6 +650,13 @@ export async function fetchCountryWeather() {
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country weather"));
   const data = await resp.json();
   return (data.stats ?? []) as CountryWeather[];
+}
+
+export async function fetchCountryLeadership() {
+  const resp = await fetch(`${API_BASE}/api/leadership/countries`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country leadership"));
+  const data = await resp.json();
+  return (data.countries ?? []) as CountryLeadership[];
 }
 
 export async function fetchMarketQuotes(params?: { refresh?: boolean; symbols?: string[] }) {
@@ -673,6 +781,38 @@ export async function triggerAdminMarketIngestion(payload?: {
     body: JSON.stringify(payload ?? {}),
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger market ingestion"));
+  return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
+}
+
+export async function triggerAdminPodcastIngestion(payload: {
+  feedIds?: number[];
+  searchTerms?: string[];
+  maxFeeds?: number;
+  maxEpisodesPerFeed?: number;
+  fetchTranscripts?: boolean;
+  extractIntelligence?: boolean;
+}): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
+  const resp = await fetch(`${API_BASE}/api/admin/ingestion/podcasts/run`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger podcast ingestion"));
+  return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
+}
+
+export async function triggerAdminLeadershipIngestion(): Promise<{
+  run: AdminIngestionRun;
+  logs: AdminIngestionLog[];
+}> {
+  const resp = await fetch(`${API_BASE}/api/admin/ingestion/leadership/run`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger leadership ingestion"));
   return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
 }
 

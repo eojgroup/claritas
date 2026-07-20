@@ -135,6 +135,182 @@ struct NewsItem: Codable, Identifiable {
     }
 }
 
+struct PodcastSignal: Codable, Identifiable {
+    let id: Int
+    let type: String
+    let title: String
+    let summary: String?
+    let entities: [String]
+    let topics: [String]
+    let risk_level: String?
+    let confidence: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case type
+        case title
+        case summary
+        case entities
+        case topics
+        case risk_level
+        case confidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        type = try container.decode(String.self, forKey: .type)
+        title = try container.decode(String.self, forKey: .title)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        entities = (try? container.decode([String].self, forKey: .entities)) ?? []
+        topics = (try? container.decode([String].self, forKey: .topics)) ?? []
+        risk_level = try container.decodeIfPresent(String.self, forKey: .risk_level)
+        if let value = try? container.decode(Double.self, forKey: .confidence) {
+            confidence = value
+        } else if let text = try? container.decode(String.self, forKey: .confidence) {
+            confidence = Double(text)
+        } else {
+            confidence = nil
+        }
+    }
+}
+
+struct PodcastEvidence: Codable, Identifiable {
+    let id: Int
+    let segment_index: Int
+    let start_ms: Int
+    let end_ms: Int?
+    let speaker: String?
+    let text: String
+    let timing_method: String
+    let source_url: String?
+    let signals: [PodcastSignal]?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case segment_index
+        case start_ms
+        case end_ms
+        case speaker
+        case text
+        case timing_method
+        case source_url
+        case signals
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        segment_index = try container.decodeFlexibleInt(forKey: .segment_index)
+        start_ms = try container.decodeFlexibleInt(forKey: .start_ms)
+        end_ms = try? container.decodeFlexibleInt(forKey: .end_ms)
+        speaker = try container.decodeIfPresent(String.self, forKey: .speaker)
+        text = try container.decode(String.self, forKey: .text)
+        timing_method = (try? container.decode(String.self, forKey: .timing_method)) ?? "unknown"
+        source_url = try container.decodeIfPresent(String.self, forKey: .source_url)
+        signals = try container.decodeIfPresent([PodcastSignal].self, forKey: .signals)
+    }
+
+    var timestampLabel: String {
+        let totalSeconds = max(0, start_ms / 1000)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+struct PodcastExternalLink: Codable, Identifiable {
+    let platform: String
+    let label: String
+    let url: String
+
+    var id: String { "\(platform)-\(url)" }
+    var resolvedURL: URL? { URL(string: url) }
+}
+
+struct PodcastEpisode: Codable, Identifiable {
+    let id: Int
+    let episode_id: Int
+    let podcast_index_id: Int
+    let title: String
+    let summary: String?
+    let url: String?
+    let event_time: String?
+    let feed_id: Int
+    let podcast_index_feed_id: Int
+    let feed_title: String
+    let feed_author: String?
+    let feed_image_url: String?
+    let feed_site_url: String?
+    let duration_seconds: Int?
+    let image_url: String?
+    let transcript_status: String
+    let external_links: [PodcastExternalLink]
+    let signals: [PodcastSignal]
+    let evidence: [PodcastEvidence]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case episode_id
+        case podcast_index_id
+        case title
+        case summary
+        case url
+        case event_time
+        case feed_id
+        case podcast_index_feed_id
+        case feed_title
+        case feed_author
+        case feed_image_url
+        case feed_site_url
+        case duration_seconds
+        case image_url
+        case transcript_status
+        case external_links
+        case signals
+        case evidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        episode_id = try container.decodeFlexibleInt(forKey: .episode_id)
+        podcast_index_id = try container.decodeFlexibleInt(forKey: .podcast_index_id)
+        title = try container.decode(String.self, forKey: .title)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        event_time = try container.decodeIfPresent(String.self, forKey: .event_time)
+        feed_id = try container.decodeFlexibleInt(forKey: .feed_id)
+        podcast_index_feed_id = try container.decodeFlexibleInt(forKey: .podcast_index_feed_id)
+        feed_title = try container.decode(String.self, forKey: .feed_title)
+        feed_author = try container.decodeIfPresent(String.self, forKey: .feed_author)
+        feed_image_url = try container.decodeIfPresent(String.self, forKey: .feed_image_url)
+        feed_site_url = try container.decodeIfPresent(String.self, forKey: .feed_site_url)
+        duration_seconds = try? container.decodeFlexibleInt(forKey: .duration_seconds)
+        image_url = try container.decodeIfPresent(String.self, forKey: .image_url)
+        transcript_status = try container.decode(String.self, forKey: .transcript_status)
+        external_links = (try? container.decode([PodcastExternalLink].self, forKey: .external_links)) ?? []
+        signals = (try? container.decode([PodcastSignal].self, forKey: .signals)) ?? []
+        evidence = (try? container.decode([PodcastEvidence].self, forKey: .evidence)) ?? []
+    }
+
+    var eventDate: Date? {
+        guard let event_time else { return nil }
+        return APIDateParser.parse(event_time)
+    }
+
+    var durationLabel: String? {
+        guard let duration_seconds, duration_seconds > 0 else { return nil }
+        let hours = duration_seconds / 3600
+        let minutes = (duration_seconds % 3600) / 60
+        return hours > 0 ? "\(hours)h \(minutes)m" : "\(max(minutes, 1))m"
+    }
+}
+
 struct CountryStat: Codable, Identifiable {
     let country: String
     let count: Int
@@ -153,6 +329,45 @@ struct CountryWeather: Codable, Identifiable {
     let icon_code: String?
     var id: String { country + observed_at }
     var observedDate: Date? { APIDateParser.parse(observed_at) }
+}
+
+struct CountryLeadershipRole: Codable, Identifiable {
+    let role_type: String
+    let person_name: String
+    let person_wikidata_id: String
+    let started_at: String?
+    let source_url: String
+
+    var id: String { "\(role_type)-\(person_wikidata_id)" }
+    var startedDate: Date? {
+        guard let started_at else { return nil }
+        return APIDateParser.parse(started_at)
+    }
+
+    var roleLabel: String {
+        role_type == "head_of_state" ? "Head of state" : "Head of government"
+    }
+}
+
+struct CountryLeadership: Codable, Identifiable {
+    let country: String
+    let country_name: String
+    let wikidata_country_id: String
+    let government_type: String?
+    let summary: String
+    let roles: [CountryLeadershipRole]
+    let source_name: String
+    let source_url: String
+    let source_license: String
+    let source_updated_at: String?
+    let retrieved_at: String
+
+    var id: String { country }
+    var sourceUpdatedDate: Date? {
+        guard let source_updated_at else { return nil }
+        return APIDateParser.parse(source_updated_at)
+    }
+    var retrievedDate: Date? { APIDateParser.parse(retrieved_at) }
 }
 
 struct DailySignalBriefing: Codable, Identifiable {
@@ -384,6 +599,8 @@ enum IngestionPipeline: String, Codable, CaseIterable, Identifiable {
     case news
     case weather
     case market
+    case podcasts
+    case leadership
 
     var id: String { rawValue }
 }

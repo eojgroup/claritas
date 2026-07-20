@@ -4,9 +4,13 @@ exports.IngestionValidationError = void 0;
 exports.buildNewsRunPlan = buildNewsRunPlan;
 exports.buildWeatherRunPlan = buildWeatherRunPlan;
 exports.buildMarketRunPlan = buildMarketRunPlan;
+exports.buildPodcastRunPlan = buildPodcastRunPlan;
+exports.buildLeadershipRunPlan = buildLeadershipRunPlan;
 exports.triggerNewsRun = triggerNewsRun;
 exports.triggerWeatherRun = triggerWeatherRun;
 exports.triggerMarketRun = triggerMarketRun;
+exports.triggerPodcastRun = triggerPodcastRun;
+exports.triggerLeadershipRun = triggerLeadershipRun;
 exports.listRuns = listRuns;
 exports.getRunDetail = getRunDetail;
 exports.getRunLogs = getRunLogs;
@@ -15,27 +19,45 @@ const newsapi_1 = require("./connectors/newsapi");
 const thenewsapi_1 = require("./connectors/thenewsapi");
 const openweather_1 = require("./connectors/openweather");
 const finnhub_1 = require("./connectors/finnhub");
+const podcastindex_1 = require("./connectors/podcastindex");
+const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
 const db_1 = require("./db");
 const SOURCE_CONFIG = {
     newsapi: {
         sourceName: "newsapi",
         apiBaseUrl: "https://newsapi.org/v2",
         provider: "newsapi",
+        authType: "api_key",
     },
     thenewsapi: {
         sourceName: "thenewsapi",
         apiBaseUrl: "https://api.thenewsapi.com/v1",
         provider: "thenewsapi",
+        authType: "api_key",
     },
     openweather: {
         sourceName: "openweather",
         apiBaseUrl: "https://api.openweathermap.org",
         provider: "openweather",
+        authType: "api_key",
     },
     finnhub: {
         sourceName: "finnhub",
         apiBaseUrl: "https://api.finnhub.io/api/v1",
         provider: "finnhub",
+        authType: "api_key",
+    },
+    podcastindex: {
+        sourceName: "podcastindex",
+        apiBaseUrl: "https://api.podcastindex.org/api/1.0",
+        provider: "podcastindex",
+        authType: "api_key",
+    },
+    wikidata: {
+        sourceName: "wikidata",
+        apiBaseUrl: "https://query.wikidata.org",
+        provider: "wikidata",
+        authType: "none",
     },
 };
 const PIPELINE_SOURCE_DEFAULT = {
@@ -43,6 +65,8 @@ const PIPELINE_SOURCE_DEFAULT = {
     news: "newsapi",
     weather: "openweather",
     market: "finnhub",
+    podcasts: "podcastindex",
+    leadership: "wikidata",
 };
 const DEFAULT_NEWS_EVERYTHING = {
     q: "OpenAI",
@@ -220,8 +244,13 @@ function mergeTotals(target, delta) {
     target.db_errors += delta.db_errors;
 }
 function resolvePipeline(pipeline, sourceName) {
-    if (pipeline === "news" || pipeline === "weather" || pipeline === "market")
+    if (pipeline === "news" ||
+        pipeline === "weather" ||
+        pipeline === "market" ||
+        pipeline === "podcasts" ||
+        pipeline === "leadership") {
         return pipeline;
+    }
     if (sourceName === "newsapi")
         return "news";
     if (sourceName === "thenewsapi")
@@ -230,6 +259,10 @@ function resolvePipeline(pipeline, sourceName) {
         return "weather";
     if (sourceName === "finnhub")
         return "market";
+    if (sourceName === "podcastindex")
+        return "podcasts";
+    if (sourceName === "wikidata")
+        return "leadership";
     return "news";
 }
 function normalizeStatus(status) {
@@ -273,12 +306,13 @@ async function ensureSource(pipeline, sourceNameOverride) {
     const sourceName = sourceNameOverride ?? PIPELINE_SOURCE_DEFAULT[pipeline];
     const cfg = SOURCE_CONFIG[sourceName];
     const { rows } = await (0, db_1.query)(`INSERT INTO source (name, api_base_url, auth_type, metadata)
-     VALUES ($1, $2, 'api_key', jsonb_build_object('provider', $3::text))
+     VALUES ($1, $2, $4, jsonb_build_object('provider', $3::text))
      ON CONFLICT (name)
      DO UPDATE SET
        api_base_url = EXCLUDED.api_base_url,
+       auth_type = EXCLUDED.auth_type,
        metadata = COALESCE(source.metadata, '{}'::jsonb) || jsonb_build_object('provider', $3::text)
-     RETURNING id, name`, [cfg.sourceName, cfg.apiBaseUrl, cfg.provider]);
+     RETURNING id, name`, [cfg.sourceName, cfg.apiBaseUrl, cfg.provider, cfg.authType]);
     return rows[0];
 }
 async function createRun(input) {
@@ -480,6 +514,48 @@ function buildMarketRunPlan(rawBody) {
             ...(newsMaxItems ? { newsMaxItems } : {}),
         },
     };
+}
+function buildPodcastRunPlan(rawBody) {
+    if (!process.env.PODCASTINDEX_API_KEY?.trim() || !process.env.PODCASTINDEX_API_SECRET?.trim()) {
+        throw new IngestionValidationError("PODCASTINDEX_API_KEY and PODCASTINDEX_API_SECRET must be configured.");
+    }
+    const body = asRecord(rawBody);
+    const toList = (value) => Array.isArray(value) ? value : value == null ? [] : [value];
+    const feedIds = toList(body.feedIds ?? body.feed_ids)
+        .map(Number)
+        .filter((value) => Number.isSafeInteger(value) && value > 0)
+        .slice(0, 50);
+    const searchTerms = toList(body.searchTerms ?? body.search_terms)
+        .map(asString)
+        .filter((value) => Boolean(value))
+        .slice(0, 20);
+    const params = (0, podcastindex_1.podcastParamsFromEnv)({
+        feedIds,
+        searchTerms,
+        maxFeeds: clampInt(body.maxFeeds ?? body.max_feeds, 1, 50, 10),
+        maxEpisodesPerFeed: clampInt(body.maxEpisodesPerFeed ?? body.max_episodes_per_feed, 1, 100, 10),
+        since: toFiniteNumber(body.since) ?? undefined,
+        fetchTranscripts: asBoolean(body.fetchTranscripts ?? body.fetch_transcripts, true),
+        extractIntelligence: asBoolean(body.extractIntelligence ?? body.extract_intelligence, true),
+    });
+    if (!params.feedIds?.length && !params.searchTerms?.length) {
+        throw new IngestionValidationError("Provide feedIds/searchTerms or configure PODCAST_FEED_IDS/PODCAST_DISCOVERY_TERMS.");
+    }
+    return {
+        ...params,
+        requestPayload: {
+            feedIds: params.feedIds,
+            searchTerms: params.searchTerms,
+            maxFeeds: params.maxFeeds,
+            maxEpisodesPerFeed: params.maxEpisodesPerFeed,
+            since: params.since,
+            fetchTranscripts: params.fetchTranscripts,
+            extractIntelligence: params.extractIntelligence,
+        },
+    };
+}
+function buildLeadershipRunPlan(_rawBody) {
+    return { requestPayload: {} };
 }
 async function executeNewsRun(runId, plan) {
     const runStartedAt = Date.now();
@@ -849,6 +925,81 @@ async function executeMarketRun(runId, plan) {
         });
     }
 }
+async function executePodcastRun(runId, plan) {
+    const startedAt = Date.now();
+    const totals = emptyTotals();
+    try {
+        await updateRunStatus(runId, "running");
+        await safeAppendRunLog(runId, "info", "PodcastIndex ingestion run started.", { request: plan.requestPayload });
+        const result = await (0, podcastindex_1.ingestPodcastIndex)(plan);
+        totals.inserted = result.inserted;
+        totals.updated = result.updated;
+        totals.skipped = result.skipped;
+        const stats = {
+            pipeline: "podcasts",
+            duration_ms: Date.now() - startedAt,
+            totals,
+            podcast: result,
+        };
+        await updateRunStatus(runId, "success", { stats, finished: true });
+        await safeAppendRunLog(runId, "info", "PodcastIndex ingestion run finished successfully.", {
+            totals,
+            feeds: result.feeds,
+            episodes: result.episodes,
+            evidence_segments: result.evidence_segments,
+            intelligence_signals: result.intelligence_signals,
+        });
+    }
+    catch (err) {
+        const errorMessage = toErrorMessage(err);
+        await updateRunStatus(runId, "failed", {
+            error: errorMessage,
+            stats: { pipeline: "podcasts", duration_ms: Date.now() - startedAt, totals },
+            finished: true,
+        });
+        await safeAppendRunLog(runId, "error", "PodcastIndex ingestion run failed.", { error: errorMessage, totals });
+    }
+}
+async function executeLeadershipRun(runId, plan) {
+    const startedAt = Date.now();
+    const totals = emptyTotals();
+    try {
+        await updateRunStatus(runId, "running");
+        await safeAppendRunLog(runId, "info", "Wikidata leadership ingestion run started.", {
+            request: plan.requestPayload,
+        });
+        const result = await (0, wikidata_leadership_1.ingestWikidataLeadership)();
+        totals.inserted = result.inserted;
+        totals.updated = result.updated;
+        totals.skipped = result.skipped;
+        const stats = {
+            pipeline: "leadership",
+            duration_ms: Date.now() - startedAt,
+            totals,
+            leadership: result,
+        };
+        await updateRunStatus(runId, "success", { stats, finished: true });
+        await safeAppendRunLog(runId, "info", "Wikidata leadership ingestion run finished successfully.", {
+            totals,
+            countries: result.countries,
+            roles: result.roles,
+            source_updated_at: result.source_updated_at,
+            retrieved_at: result.retrieved_at,
+        });
+    }
+    catch (err) {
+        const errorMessage = toErrorMessage(err);
+        await updateRunStatus(runId, "failed", {
+            error: errorMessage,
+            stats: { pipeline: "leadership", duration_ms: Date.now() - startedAt, totals },
+            finished: true,
+        });
+        await safeAppendRunLog(runId, "error", "Wikidata leadership ingestion run failed.", {
+            error: errorMessage,
+            totals,
+        });
+    }
+}
 async function triggerNewsRun(input) {
     const sourceNameOverride = input.plan.providers.thenewsapi && !input.plan.providers.newsapi ? "thenewsapi" : "newsapi";
     const run = await createRun({
@@ -889,18 +1040,48 @@ async function triggerMarketRun(input) {
     startRunTask(run.id, () => executeMarketRun(run.id, input.plan));
     return { runId: run.id };
 }
+async function triggerPodcastRun(input) {
+    const run = await createRun({
+        pipeline: "podcasts",
+        actor: input.actor,
+        requestPayload: input.plan.requestPayload,
+        sourceNameOverride: "podcastindex",
+    });
+    await safeAppendRunLog(run.id, "info", "PodcastIndex ingestion run queued.", {
+        requested_by: input.actor.email || input.actor.userId,
+    });
+    startRunTask(run.id, () => executePodcastRun(run.id, input.plan));
+    return { runId: run.id };
+}
+async function triggerLeadershipRun(input) {
+    const run = await createRun({
+        pipeline: "leadership",
+        actor: input.actor,
+        requestPayload: input.plan.requestPayload,
+        sourceNameOverride: "wikidata",
+    });
+    await safeAppendRunLog(run.id, "info", "Wikidata leadership ingestion run queued.", {
+        requested_by: input.actor.email || input.actor.userId,
+    });
+    startRunTask(run.id, () => executeLeadershipRun(run.id, input.plan));
+    return { runId: run.id };
+}
 async function listRuns(options) {
     const limit = Math.min(Math.max(options.limit ?? 50, 1), 200);
     const offset = Math.max(options.offset ?? 0, 0);
     const params = [];
-    const where = ["s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub')"];
+    const where = [
+        "s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub', 'podcastindex', 'wikidata')",
+    ];
     if (options.pipeline) {
         const pipelineIdx = params.push(options.pipeline);
         where.push(`(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
-        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub'))`);
+        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub')
+        OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
+        OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`);
     }
     const limitIdx = params.push(limit);
     const offsetIdx = params.push(offset);
@@ -949,7 +1130,7 @@ async function getRunDetail(runId, logLimit = 200) {
      FROM ingestion_run r
      JOIN source s ON s.id = r.source_id
      WHERE r.id = $1
-       AND s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub')
+       AND s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub', 'podcastindex', 'wikidata')
      LIMIT 1`, [runId]);
     if (!rows[0])
         return null;
@@ -972,7 +1153,7 @@ async function getMetrics(options) {
     const params = [days];
     const where = [
         "r.started_at >= now() - make_interval(days => $1::int)",
-        "s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub')",
+        "s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub', 'podcastindex', 'wikidata')",
     ];
     if (options?.pipeline) {
         const pipelineIdx = params.push(options.pipeline);
@@ -980,7 +1161,9 @@ async function getMetrics(options) {
         OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
-        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub'))`);
+        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub')
+        OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
+        OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`);
     }
     const { rows } = await (0, db_1.query)(`SELECT
        r.pipeline,

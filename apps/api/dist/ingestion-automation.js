@@ -90,6 +90,37 @@ const RULE_DEFAULTS = {
             newsMaxItems: 50,
         },
     },
+    podcasts: {
+        pipeline: "podcasts",
+        enabled: false,
+        schedule_enabled: false,
+        schedule_interval_minutes: 360,
+        intelligent_enabled: true,
+        min_spacing_minutes: 60,
+        freshness_sla_minutes: 720,
+        demand_window_minutes: 60,
+        demand_threshold: 5,
+        failure_backoff_minutes: 60,
+        default_payload: {
+            maxFeeds: 10,
+            maxEpisodesPerFeed: 10,
+            fetchTranscripts: true,
+            extractIntelligence: true,
+        },
+    },
+    leadership: {
+        pipeline: "leadership",
+        enabled: true,
+        schedule_enabled: true,
+        schedule_interval_minutes: 1440,
+        intelligent_enabled: true,
+        min_spacing_minutes: 360,
+        freshness_sla_minutes: 2880,
+        demand_window_minutes: 120,
+        demand_threshold: 10,
+        failure_backoff_minutes: 180,
+        default_payload: {},
+    },
 };
 let automationWorkerTimer = null;
 let automationWorkerRunning = false;
@@ -121,8 +152,13 @@ function asRecord(value) {
     return {};
 }
 function parsePipeline(value) {
-    if (value === "news" || value === "weather" || value === "market")
+    if (value === "news" ||
+        value === "weather" ||
+        value === "market" ||
+        value === "podcasts" ||
+        value === "leadership") {
         return value;
+    }
     throw new AutomationValidationError(`Unsupported ingestion pipeline: ${value}`);
 }
 function toAutomationRule(row) {
@@ -148,7 +184,7 @@ function toAutomationRule(row) {
     };
 }
 async function ensureAutomationRulesExist() {
-    for (const pipeline of ["news", "weather", "market"]) {
+    for (const pipeline of ["news", "weather", "market", "podcasts", "leadership"]) {
         const defaults = RULE_DEFAULTS[pipeline];
         await (0, db_1.query)(`INSERT INTO ingestion_automation_rule (
          pipeline,
@@ -418,6 +454,14 @@ async function getLatestDataTimestamp(pipeline) {
         const { rows } = await (0, db_1.query)(`SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot`);
         return timestampToString(rows[0]?.latest_data_at ?? null);
     }
+    if (pipeline === "podcasts") {
+        const { rows } = await (0, db_1.query)(`SELECT MAX(last_synced_at) AS latest_data_at FROM podcast_feed`);
+        return timestampToString(rows[0]?.latest_data_at ?? null);
+    }
+    if (pipeline === "leadership") {
+        const { rows } = await (0, db_1.query)(`SELECT MAX(retrieved_at) AS latest_data_at FROM country_leadership`);
+        return timestampToString(rows[0]?.latest_data_at ?? null);
+    }
     const { rows } = await (0, db_1.query)(`SELECT MAX(observed_at) AS latest_data_at FROM market_snapshot`);
     return timestampToString(rows[0]?.latest_data_at ?? null);
 }
@@ -538,6 +582,16 @@ async function triggerAutomationRun(rule, reason) {
     if (rule.pipeline === "weather") {
         const plan = (0, ingestion_admin_1.buildWeatherRunPlan)(payload);
         await (0, ingestion_admin_1.triggerWeatherRun)({ actor, plan });
+        return;
+    }
+    if (rule.pipeline === "podcasts") {
+        const plan = (0, ingestion_admin_1.buildPodcastRunPlan)(payload);
+        await (0, ingestion_admin_1.triggerPodcastRun)({ actor, plan });
+        return;
+    }
+    if (rule.pipeline === "leadership") {
+        const plan = (0, ingestion_admin_1.buildLeadershipRunPlan)(payload);
+        await (0, ingestion_admin_1.triggerLeadershipRun)({ actor, plan });
         return;
     }
     const plan = (0, ingestion_admin_1.buildMarketRunPlan)(payload);
