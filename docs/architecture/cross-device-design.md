@@ -169,6 +169,7 @@ Light mode preserves the same roles. It is supported, but the default unconfigur
 | KPI strip | Value, context, optional delta/trend; separators instead of four floating cards |
 | Primary chart | Largest analytical surface, labeled axes/legend, range/compare tools, useful empty state |
 | Map | Spatial distribution or country context; never an unlabelled decorative globe |
+| Context band | Podcast evidence and current leadership coverage; exposes the strongest available signal and routes directly to evidence or the leadership map layer |
 | Table/feed | Compact rows with aligned metadata, selected state, dense scanning, expandable/drill-in detail |
 | Insights rail | Exceptions, anomalies, AI/briefing cues, and action destination |
 | Form section | Related controls grouped under one operational intent with clear feedback |
@@ -218,9 +219,9 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 
 | Class | Width | Workspace level | Adaptation |
 | --- | --- | --- | --- |
-| Desktop | `>= 1280px` | Full workspace | Persistent sidebar; 12-column analysis grid; chart + insights rail; map + feed; full compare/export |
-| Tablet web / iPad-like | `768–1279px` | Reduced workspace | One or two major panels; chart first; full-width insights; stacked map/feed; large touch controls; simplified simultaneous density |
-| Mobile web / iPhone | `< 768px` | Triage workspace | KPI subset; compact briefing; anomaly queue; live feed; map and secondary charts omitted or moved to drill-in; bottom monitoring nav |
+| Desktop | `>= 1280px` | Full workspace | Persistent sidebar; overview briefing; map + evidence/leadership context; chart + insights rail; full compare/export |
+| Tablet web / iPad-like | `768–1279px` | Reduced workspace | One major stage at a time; briefing then map/context; full-width trend and insights; large touch controls; simplified simultaneous density |
+| Mobile web / iPhone-like | `< 768px` | Triage workspace | KPI subset; compact briefing; podcast/leadership context; reduced-control map preview; anomaly queue and live feed; bottom monitoring nav |
 | Narrow phone | `320–389px` | Triage workspace | Same content priority with shorter labels, horizontal filter/TOC scrolling, no wide charts/tables |
 | Apple Watch | watchOS layout system | Companion only | Signal glance, freshness, briefing excerpt, top mover, affected weather, headline alerts, phone handoff |
 
@@ -229,9 +230,10 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 | Content | Desktop | Tablet | Mobile | Watch |
 | --- | --- | --- | --- | --- |
 | KPI summary | Full strip | 2-column strip | Top subset | One threshold count |
-| Daily briefing | Compact secondary synthesis | Primary review panel | Two-line/two-takeaway compact synthesis | Short excerpt |
+| Daily briefing | Prominent overview synthesis | Primary review panel | Two-line/two-takeaway compact synthesis | Short excerpt |
 | Primary chart | Full, interactive | Full-width, touch-friendly | One useful chart without brush | Omitted |
-| Map bubbles | Main analytical module | Full-width staged panel | On-demand native drill-in; omitted from mobile web stream | Omitted |
+| Map bubbles | First-row spatial overview | Full-width staged panel | Compact reduced-control preview on mobile web; on-demand drill-in in the native app | Omitted |
+| Podcast and leadership context | Two-lane evidence/context band beside the map | Full-width staged band | Compact actionable rows before the map preview | Omitted |
 | Dense feed/table | Side-by-side | Full-width stage | Compact rows | Top six only |
 | Compare/export | Full | Reduced | Drill-in only | Omitted |
 | Admin mutation | Full | Full touch forms | Status/refresh only | Omitted |
@@ -243,10 +245,11 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 ### Dashboard
 
 - KPI strip establishes cross-domain posture.
-- The primary chart and attention rail are the first analytical row on desktop.
-- The world bubble map and live feed are main modules below the hero analysis.
-- Daily briefing is a compact synthesis rather than the largest surface.
-- Podcast evidence count and leadership coverage make those domains visible without pretending they use the same visualization as time-series data.
+- Daily briefing is the first synthesis surface because it answers what changed and why it matters across domains.
+- The world bubble map is the first visual analysis surface and remains visible without requiring a drilldown on web.
+- A paired context band beside the desktop map promotes the highest-priority podcast signal and current leadership coverage. Podcast opens timestamped evidence; leadership changes the map to its officeholder layer.
+- The primary trend and attention queue follow the overview stage, preserving analytical depth without displacing synthesis and spatial orientation.
+- The live feed is a full-width monitoring surface after the overview and trend stages.
 
 ### News
 
@@ -330,12 +333,12 @@ The previous UI relied on repeated rounded, bordered, glass-like cards with simi
 The current system:
 
 - flattens standard panels and reduces borders, shadows, and radius;
-- moves KPI, primary analysis, and exception cues ahead of secondary narrative;
+- moves KPI, briefing synthesis, spatial orientation, and evidence context ahead of detailed trend/feed analysis;
 - consolidates controls into consistent bars;
 - converts news, weather, market, and run history content into denser rows;
 - gives market symbols a real contextual drilldown;
 - gives weather explicit thresholds;
-- preserves the daily briefing, map bubbles, and useful charts with clearer roles;
+- preserves the daily briefing, map bubbles, and useful charts with clearer roles, while promoting podcast evidence and leadership context into the dashboard overview;
 - gives Admin, Profile, and Policies separate archetypes;
 - treats tablet as a staged two-column review workspace;
 - treats mobile as triage and drill-in;

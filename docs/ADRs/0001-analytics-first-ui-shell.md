@@ -14,12 +14,13 @@ Adopt an **analytics-first operational workspace** shell:
 - persistent grouped navigation and a shared page header;
 - title, scope summary, freshness/live state, and global actions in the header;
 - grouped sticky page controls on desktop/tablet;
-- KPI strip followed by one dominant analytical surface;
+- KPI strip followed by a deliberate overview stage: briefing synthesis, spatial map, and podcast/leadership context;
+- one dominant detailed analytical surface after the overview stage;
 - exception/insight rail as secondary context;
 - dense table/feed rows for monitoring;
 - separate control-room, settings, and document archetypes.
 
-Daily briefing remains a cross-domain synthesis, but it does not displace primary comparison and monitoring surfaces. Bubble maps and charts are retained only where they answer spatial, time, comparison, correlation, mix, or ranking questions.
+Daily briefing is the cross-domain synthesis entry point. On the dashboard it precedes, rather than replaces, the spatial map and detailed trend analysis. Podcast evidence and country leadership are exposed as actionable context beside the map: podcast signals route to timestamped evidence, while leadership routes to the officeholder map layer. Bubble maps and charts are retained only where they answer spatial, time, comparison, correlation, mix, or ranking questions.
 
 ## Consequences
 

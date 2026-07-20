@@ -18,7 +18,7 @@ Define device roles:
 | Mobile web/iPhone (`<768px` or compact size class) | Triage and drill-in workspace |
 | Apple Watch | Companion-only signal glance |
 
-Desktop keeps comparison, charts, maps, dense feeds, and full admin configuration. Tablet shows at most one or two major panels and uses 44-point touch targets. Mobile prioritizes KPI subset, compact briefing, alerts, live rows, saved/current scope, and drill-in; maps and secondary analytics move behind disclosure or are omitted. Watch shows freshness, threshold count, top mover, affected weather, headline alerts, a short briefing, and phone handoff.
+Desktop keeps comparison, charts, maps, dense feeds, and full admin configuration. Its dashboard overview pairs the map with podcast and leadership context after the briefing synthesis. Tablet shows one major stage at a time and uses 44-point touch targets. Mobile prioritizes KPI subset, compact briefing, evidence/context rows, alerts, live rows, saved/current scope, and drill-in. Mobile web retains a reduced-control map preview; the native iPhone map remains behind intentional disclosure. Watch shows freshness, threshold count, top mover, affected weather, headline alerts, a short briefing, and phone handoff.
 
 Maps, full charts, configuration-heavy forms, admin mutations, profile editing, policies, podcast evidence exploration, and leadership exploration are unavailable on watch.
 

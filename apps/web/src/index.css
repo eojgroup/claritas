@@ -815,28 +815,152 @@ body {
 }
 
 .analytics-workspace-grid {
-  order: 3;
+  order: 4;
 }
 
 .briefing-rail {
-  order: 4;
+  order: 3;
   border-left: 3px solid var(--shell-accent-2);
 }
 
-.analytics-workspace-grid .primary-analytics-panel {
+.analytics-workspace-grid .geo-panel {
   order: 1;
 }
 
-.analytics-workspace-grid .insights-rail {
+.analytics-workspace-grid .context-intelligence-band {
   order: 2;
 }
 
-.analytics-workspace-grid .geo-panel {
+.analytics-workspace-grid .primary-analytics-panel {
   order: 3;
 }
 
-.analytics-workspace-grid .feed-panel {
+.analytics-workspace-grid .insights-rail {
   order: 4;
+}
+
+.analytics-workspace-grid .feed-panel {
+  order: 5;
+}
+
+.context-intelligence-band {
+  background:
+    linear-gradient(
+      150deg,
+      color-mix(in srgb, var(--shell-accent) 5%, transparent),
+      transparent 42%
+    ),
+    var(--shell-bg-elevated);
+}
+
+.context-signal-grid {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.context-signal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: start;
+  width: 100%;
+  min-height: 0;
+  padding: 1rem;
+  border: 0;
+  background: transparent;
+  color: var(--shell-ink);
+  text-align: left;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.context-signal + .context-signal {
+  border-top: 1px solid var(--shell-border);
+}
+
+.context-signal:hover,
+.context-signal:focus-visible {
+  background: color-mix(in srgb, var(--shell-accent-2) 8%, transparent);
+}
+
+.context-signal:focus-visible {
+  outline: 2px solid var(--shell-accent-2);
+  outline-offset: -2px;
+}
+
+.context-signal-icon {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 0.65rem;
+  background: var(--signal-amber-soft);
+  color: var(--shell-accent);
+}
+
+.context-signal-icon-secondary {
+  background: var(--signal-sky-soft);
+  color: var(--signal-sky);
+}
+
+.context-signal-label,
+.context-signal strong,
+.context-signal small,
+.context-signal-stat > span {
+  display: block;
+}
+
+.context-signal-label {
+  margin-bottom: 0.28rem;
+  color: var(--shell-muted);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.context-signal strong {
+  font-size: 0.82rem;
+  line-height: 1.25rem;
+}
+
+.context-signal small {
+  display: -webkit-box;
+  margin-top: 0.28rem;
+  overflow: hidden;
+  color: var(--shell-muted);
+  font-size: 0.7rem;
+  line-height: 1.05rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.context-signal-stat {
+  min-width: 7.5rem;
+  text-align: right;
+}
+
+.context-signal-stat > strong {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.04em;
+}
+
+.context-signal-stat > small {
+  margin-top: 0;
+  white-space: nowrap;
+}
+
+.context-signal-stat > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  margin-top: 0.7rem;
+  color: var(--shell-accent-2);
+  font-size: 0.7rem;
+  font-weight: 700;
 }
 
 .primary-analytics-panel {
@@ -1263,6 +1387,14 @@ body {
     grid-template-columns: repeat(12, minmax(0, 1fr));
   }
 
+  .analytics-workspace-grid .geo-panel {
+    grid-column: span 7 / span 7;
+  }
+
+  .analytics-workspace-grid .context-intelligence-band {
+    grid-column: span 5 / span 5;
+  }
+
   .analytics-workspace-grid .primary-analytics-panel {
     grid-column: span 9 / span 9;
   }
@@ -1271,12 +1403,8 @@ body {
     grid-column: span 3 / span 3;
   }
 
-  .analytics-workspace-grid .geo-panel {
-    grid-column: span 5 / span 5;
-  }
-
   .analytics-workspace-grid .feed-panel {
-    grid-column: span 7 / span 7;
+    grid-column: 1 / -1;
   }
 }
 
@@ -1304,7 +1432,8 @@ body {
 
   .primary-analytics-panel,
   .feed-panel,
-  .geo-panel {
+  .geo-panel,
+  .context-intelligence-band {
     grid-column: 1 / -1;
   }
 
@@ -1429,7 +1558,6 @@ body {
     display: none;
   }
 
-  .geo-panel,
   .secondary-analytics-grid,
   .weather-workspace > section:nth-last-of-type(2),
   .markets-workspace > section:last-child {
@@ -1456,11 +1584,84 @@ body {
 
   .analytics-workspace-grid {
     order: 4;
-  }
-
-  .analytics-workspace-grid {
     display: flex;
     flex-direction: column;
+  }
+
+  .context-intelligence-band {
+    order: 1 !important;
+  }
+
+  .geo-panel {
+    order: 2 !important;
+  }
+
+  .insights-rail {
+    order: 3 !important;
+  }
+
+  .primary-analytics-panel {
+    order: 4 !important;
+  }
+
+  .feed-panel {
+    order: 5 !important;
+  }
+
+  .context-signal-grid {
+    grid-template-rows: none;
+  }
+
+  .context-signal {
+    grid-template-columns: auto minmax(0, 1fr);
+    min-height: 7.5rem;
+    padding: 0.85rem;
+  }
+
+  .context-signal-stat {
+    grid-column: 2;
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    text-align: left;
+  }
+
+  .context-signal-stat > strong {
+    display: none;
+  }
+
+  .context-signal-stat > small {
+    margin: 0;
+    white-space: normal;
+  }
+
+  .context-signal-stat > span {
+    flex: none;
+    margin: 0;
+  }
+
+  .map-mode-tabs {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.1rem;
+  }
+
+  .map-mode-tabs > button {
+    flex: none;
+  }
+
+  .map-analysis-controls,
+  .dashboard-map-footer {
+    display: none;
+  }
+
+  .dashboard-map-frame {
+    height: 18rem !important;
+    min-height: 18rem !important;
+    max-height: 18rem !important;
   }
 
   .primary-analytics-panel {
@@ -1469,10 +1670,6 @@ body {
 
   .primary-analytics-panel .recharts-brush {
     display: none;
-  }
-
-  .insights-rail {
-    order: -1 !important;
   }
 
   .insights-focus {

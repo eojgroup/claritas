@@ -2492,6 +2492,67 @@ export default function ClaritasDashboard() {
     };
   }, [marketIndexPerfData, marketPageRows]);
 
+  const podcastSummary = useMemo(() => {
+    const signalRows = podcasts.flatMap((episode) =>
+      episode.signals.map((signal) => ({ episode, signal })),
+    );
+    const riskRank: Record<string, number> = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1,
+    };
+    const prioritySignal = [...signalRows].sort((a, b) => {
+      const riskDelta =
+        (riskRank[b.signal.risk_level ?? ""] ?? 0) -
+        (riskRank[a.signal.risk_level ?? ""] ?? 0);
+      if (riskDelta !== 0) return riskDelta;
+      return (b.episode.event_time ?? "").localeCompare(
+        a.episode.event_time ?? "",
+      );
+    })[0];
+    const latestEpisode = [...podcasts].sort((a, b) =>
+      (b.event_time ?? "").localeCompare(a.event_time ?? ""),
+    )[0];
+
+    return {
+      episodes: podcasts.length,
+      signals: signalRows.length,
+      evidence: podcasts.reduce(
+        (total, episode) => total + episode.evidence.length,
+        0,
+      ),
+      risks: signalRows.filter(({ signal }) => signal.type === "risk").length,
+      prioritySignal,
+      latestEpisode,
+    };
+  }, [podcasts]);
+
+  const leadershipSummary = useMemo(() => {
+    const roles = leadershipStats.reduce(
+      (total, country) => total + country.roles.length,
+      0,
+    );
+    const completeProfiles = leadershipStats.filter(
+      (country) =>
+        country.roles.some((role) => role.role_type === "head_of_state") &&
+        country.roles.some((role) => role.role_type === "head_of_government"),
+    ).length;
+    const selectedProfile = selectedCountry
+      ? leadershipStats.find(
+          (country) =>
+            country.country.toUpperCase() === selectedCountry.toUpperCase(),
+        )
+      : null;
+
+    return {
+      countries: leadershipStats.length,
+      roles,
+      completeProfiles,
+      selectedProfile,
+    };
+  }, [leadershipStats, selectedCountry]);
+
   const activeRegions = useMemo(() => {
     const regions = new Set<string>();
     filteredNews.forEach(
@@ -3903,10 +3964,10 @@ export default function ClaritasDashboard() {
                           Podcast evidence
                         </div>
                         <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
-                          {podcasts.reduce((total, episode) => total + episode.signals.length, 0)}
+                          {podcastSummary.signals}
                         </div>
                         <div className="text-[11px] text-[color:var(--shell-muted)]">
-                          Across {podcasts.length} episodes
+                          Across {podcastSummary.episodes} episodes
                         </div>
                       </div>
                     </div>
@@ -4070,7 +4131,7 @@ export default function ClaritasDashboard() {
                   >
                     <div
                       id="signal-map-feed"
-                      className={`${dashboardPanelClass} geo-panel xl:col-span-5`}
+                      className={`${dashboardPanelClass} geo-panel dashboard-map-panel xl:col-span-7`}
                       style={{ animationDelay: "0ms" }}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
@@ -4087,7 +4148,7 @@ export default function ClaritasDashboard() {
                                 : "Country leadership"}
                           </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <div className="map-mode-tabs flex flex-wrap items-center gap-2 text-xs">
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
                               mapMode === "news"
@@ -4123,6 +4184,11 @@ export default function ClaritasDashboard() {
                             onClick={() => setMapMode("leadership")}
                           >
                             Leadership
+                            {leadershipStats.length > 0 && (
+                              <span className="ml-1 opacity-70">
+                                {leadershipStats.length}
+                              </span>
+                            )}
                           </button>
                           <button
                             type="button"
@@ -4134,7 +4200,7 @@ export default function ClaritasDashboard() {
                           </button>
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-3 py-2 text-xs">
+                      <div className="map-analysis-controls flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-3 py-2 text-xs">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {REGION_OPTIONS.map((region) => {
                             const active = regionFilter === region.id;
@@ -4202,7 +4268,7 @@ export default function ClaritasDashboard() {
                       )}
                       <div className="relative flex-1 min-h-0 p-3">
                         <div
-                          className={`app-map-frame relative min-h-0 ${
+                          className={`app-map-frame dashboard-map-frame relative min-h-0 ${
                             splitViewEnabled
                               ? "h-[clamp(18rem,38vh,28rem)]"
                               : "h-[58vh] max-h-[30rem] min-h-[20rem]"
@@ -4343,7 +4409,7 @@ export default function ClaritasDashboard() {
                             </div>
                           )}
                       </div>
-                      <div className="border-t border-[color:var(--shell-border)] px-3 py-2 text-xs">
+                      <div className="dashboard-map-footer border-t border-[color:var(--shell-border)] px-3 py-2 text-xs">
                         {mapMode === "news" ? (
                           <>
                             <div className="flex flex-wrap items-center gap-3">
@@ -4447,8 +4513,114 @@ export default function ClaritasDashboard() {
                       </div>
                     </div>
 
+                    <section
+                      className={`${dashboardPanelClass} context-intelligence-band xl:col-span-5`}
+                      style={{ animationDelay: "40ms" }}
+                    >
+                      <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Source intelligence
+                        </div>
+                        <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                          Evidence and decision-makers
+                        </div>
+                        <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">
+                          Connect the headline picture to spoken-source evidence and
+                          the people shaping national decisions.
+                        </p>
+                      </div>
+                      <div className="context-signal-grid flex-1">
+                        <button
+                          type="button"
+                          onClick={() => setActiveView("podcasts")}
+                          className="context-signal"
+                          aria-label="Open podcast evidence workspace"
+                        >
+                          <span className="context-signal-icon">
+                            <Podcast className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="context-signal-label">
+                              Podcast intelligence
+                            </span>
+                            <strong>
+                              {podcastSummary.prioritySignal?.signal.title ??
+                                podcastSummary.latestEpisode?.title ??
+                                "No extracted podcast signals yet"}
+                            </strong>
+                            <small>
+                              {podcastSummary.prioritySignal
+                                ? `${podcastSummary.prioritySignal.episode.feed_title} · ${podcastSummary.risks} risk signals`
+                                : `${podcastSummary.episodes} monitored episodes`}
+                            </small>
+                          </span>
+                          <span className="context-signal-stat">
+                            <strong>{podcastSummary.signals}</strong>
+                            <small>
+                              signals · {podcastSummary.evidence} evidence
+                            </small>
+                            <span>
+                              Open evidence
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </span>
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMapMode("leadership");
+                            requestAnimationFrame(() => {
+                              document
+                                .getElementById("signal-map-feed")
+                                ?.scrollIntoView({
+                                  behavior: "smooth",
+                                  block: "start",
+                                });
+                            });
+                          }}
+                          className="context-signal"
+                          aria-label="Show country leadership on the world map"
+                        >
+                          <span className="context-signal-icon context-signal-icon-secondary">
+                            <User className="h-4 w-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="context-signal-label">
+                              Leadership context
+                            </span>
+                            <strong>
+                              {leadershipSummary.selectedProfile
+                                ? `${leadershipSummary.selectedProfile.country_name} · ${
+                                    leadershipSummary.selectedProfile.government_type ??
+                                    "Current government"
+                                  }`
+                                : "Current heads of state and government"}
+                            </strong>
+                            <small>
+                              {leadershipSummary.selectedProfile
+                                ? leadershipSummary.selectedProfile.roles
+                                    .map((role) => role.person_name)
+                                    .join(" · ") || "Officeholder details pending"
+                                : `${leadershipSummary.completeProfiles} profiles include both leadership roles`}
+                            </small>
+                          </span>
+                          <span className="context-signal-stat">
+                            <strong>{leadershipSummary.countries}</strong>
+                            <small>
+                              countries · {leadershipSummary.roles} officeholders
+                            </small>
+                            <span>
+                              Explore map
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </span>
+                          </span>
+                        </button>
+                      </div>
+                    </section>
+
                     <div
-                      className={`${dashboardPanelClass} feed-panel xl:col-span-7`}
+                      className={`${dashboardPanelClass} feed-panel xl:col-span-12`}
                       style={{ animationDelay: "80ms" }}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
