@@ -108,9 +108,17 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_STATE_TTL_MINUTES } }
           ports: [{ name: http, containerPort: 8080 }]
           readinessProbe:
-            httpGet: { path: /healthz, port: http }
-            initialDelaySeconds: 10
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 3
             periodSeconds: 5
+            timeoutSeconds: 4
+            failureThreshold: 2
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
           args:

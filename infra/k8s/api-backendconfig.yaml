@@ -11,5 +11,5 @@ spec:
     healthyThreshold: 2
     unhealthyThreshold: 3
     type: HTTP
-    requestPath: /healthz
+    requestPath: /readyz
     port: 8080

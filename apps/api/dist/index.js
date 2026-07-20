@@ -59,6 +59,16 @@ const DAILY_BRIEFING_SCHEDULER_POLL_SECONDS = parseBoundedIntEnv(process.env.DAI
 const DAILY_BRIEFING_SCHEDULER_BATCH_SIZE = parseBoundedIntEnv(process.env.DAILY_BRIEFING_SCHEDULER_BATCH_SIZE, 1, 500, 100);
 app.set("trust proxy", 1);
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
+app.get("/readyz", async (_req, res) => {
+    try {
+        await db_1.pool.query("SELECT 1");
+        return res.status(200).send("ready");
+    }
+    catch (error) {
+        console.warn("Readiness check failed: database unavailable.");
+        return res.status(503).send("not ready");
+    }
+});
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: false }));
 app.get("/api/hello", (_req, res) => res.json({ hello: "world" }));
@@ -1782,6 +1792,10 @@ app.get("/api/admin/ingestion/automation", requireAdminRole, async (_req, res) =
         return res.json(overview);
     }
     catch (e) {
+        if ((0, db_1.isDatabaseUnavailableError)(e)) {
+            res.setHeader("Retry-After", "5");
+            return res.status(503).json({ error: "Data service is reconnecting. Retry shortly." });
+        }
         return res.status(500).json({ error: e.message || String(e) });
     }
 });

@@ -635,6 +635,10 @@ function requireAuth() {
             return next();
         }
         catch (err) {
+            if ((0, db_1.isDatabaseUnavailableError)(err)) {
+                res.setHeader("Retry-After", "5");
+                return res.status(503).json({ error: "Data service is reconnecting. Retry shortly." });
+            }
             return res.status(500).json({ error: err.message || String(err) });
         }
     };
@@ -651,6 +655,10 @@ function requireRole(role) {
             return next();
         }
         catch (err) {
+            if ((0, db_1.isDatabaseUnavailableError)(err)) {
+                res.setHeader("Retry-After", "5");
+                return res.status(503).json({ error: "Data service is reconnecting. Retry shortly." });
+            }
             return res.status(500).json({ error: err.message || String(err) });
         }
     };
@@ -671,6 +679,10 @@ function requirePaidAccess() {
             return next();
         }
         catch (err) {
+            if ((0, db_1.isDatabaseUnavailableError)(err)) {
+                res.setHeader("Retry-After", "5");
+                return res.status(503).json({ error: "Data service is reconnecting. Retry shortly." });
+            }
             return res.status(500).json({ error: err.message || String(err) });
         }
     };

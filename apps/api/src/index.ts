@@ -22,7 +22,7 @@ import {
   parseMarketSymbolsInput,
   refreshMarketQuotesRealtime,
 } from "./connectors/finnhub";
-import { pool, query, withTransaction } from "./db";
+import { isDatabaseUnavailableError, pool, query, withTransaction } from "./db";
 import authRouter, { requireAuth, requirePaidAccess, requireRole } from "./auth";
 import {
   IngestionValidationError,
@@ -79,6 +79,15 @@ const DAILY_BRIEFING_SCHEDULER_BATCH_SIZE = parseBoundedIntEnv(
 
 app.set("trust proxy", 1);
 app.get("/healthz", (_req, res) => res.status(200).send("ok"));
+app.get("/readyz", async (_req, res) => {
+  try {
+    await pool.query("SELECT 1");
+    return res.status(200).send("ready");
+  } catch (error) {
+    console.warn("Readiness check failed: database unavailable.");
+    return res.status(503).send("not ready");
+  }
+});
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.get("/api/hello", (_req, res) => res.json({ hello: "world" }));
@@ -2135,6 +2144,10 @@ app.get("/api/admin/ingestion/automation", requireAdminRole, async (_req, res) =
     const overview = await getAutomationOverview();
     return res.json(overview);
   } catch (e: any) {
+    if (isDatabaseUnavailableError(e)) {
+      res.setHeader("Retry-After", "5");
+      return res.status(503).json({ error: "Data service is reconnecting. Retry shortly." });
+    }
     return res.status(500).json({ error: e.message || String(e) });
   }
 });

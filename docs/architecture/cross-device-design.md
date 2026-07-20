@@ -193,7 +193,7 @@ Light mode preserves the same roles. It is supported, but the default unconfigur
 | Control bar | Grouped filters, explicit time/scope, sort, reset, compare/export where relevant |
 | KPI strip | Value, context, optional delta/trend; separators instead of four floating cards |
 | Primary chart | Largest analytical surface, labeled axes/legend, range/compare tools, useful empty state |
-| Map | GeoJSON country layer plus scaled bubble overlay; raw domain layers and a cross-source relevance layer; intensity, rank, hover, polygon selection, legend, and a visible #1 recommendation turn spatial data into an analytical control |
+| Map | GeoJSON country layer plus scaled bubble overlay; raw domain layers and a cross-source relevance layer; intensity, rank, hover, polygon selection, legend, one aggregate coverage window, and a visible #1 recommendation turn spatial data into an analytical control |
 | Country profile | Selection-driven cross-domain panel combining relevance drivers, news concentration, weather and freshness, attributed podcast evidence, current leadership, linked markets, and routes to detailed workspaces |
 | Context band | Podcast evidence and current leadership coverage; exposes the strongest available signal and routes directly to evidence or the leadership map layer |
 | Priority news stream | Shared compact rows with priority band/rank, aligned time/place/headline/source metadata, selected state, and imagery only in expanded detail; used on Dashboard and News |
@@ -210,6 +210,7 @@ Shared web implementations live primarily in `apps/web/src/index.css` and `apps/
 
 - Filters are grouped at the top of each analytics workspace.
 - The current region, time window, selected country, comparison country, and symbol remain visible in the header/control or selection bar.
+- News-map time is an aggregate coverage window. The map does not use day-by-day playback: movement without a comparable baseline obscures relevance, while the trend workspace already explains change over time.
 - Reset clears page-specific selection without silently changing unrelated saved preferences.
 - Mobile control bars are compact and scrollable; advanced simultaneous controls are reduced.
 
@@ -342,6 +343,7 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 | Success | Confirm mutation near the affected control without replacing the whole workspace |
 
 Watch explicitly distinguishes ready, refreshing, phone-required, and cached/failed state.
+The API exposes process liveness separately from database-backed readiness. Kubernetes and the external API health check use readiness, so a pod whose Cloud SQL proxy is starting or unavailable is removed from traffic. A request caught during dependency recovery returns a retryable `503` with product-facing language rather than an internal socket address.
 
 ## Why Layouts Differ
 
@@ -376,6 +378,7 @@ The current system:
 - preserves the daily briefing, map bubbles, and useful charts with clearer roles, while promoting podcast evidence and leadership context into the dashboard overview;
 - replaces separate Dashboard and News story treatments with one expandable priority-stream contract;
 - adds an explainable cross-source signal-relevance map, a visible highest-priority country, and driver-level country context;
+- simplifies map time interaction to a single aggregate coverage window and removes low-context playback;
 - carries podcast country provenance and leadership records into daily briefing generation, and prevents unresolved Wikidata entity IDs from appearing as names;
 - gives Admin, Profile, and Policies separate archetypes;
 - treats tablet as a staged two-column review workspace;

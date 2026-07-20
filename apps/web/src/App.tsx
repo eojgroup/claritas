@@ -822,10 +822,7 @@ export default function ClaritasDashboard() {
     useState<DataWindowPreset>("30d");
   const [mapMode, setMapMode] = useState<MapMode>("signals");
   const [listMode, setListMode] = useState<"news" | "weather" | "market">("news");
-  const [mapDayMode, setMapDayMode] = useState(false);
   const [mapWindowDays, setMapWindowDays] = useState(NEWS_TREND_WINDOW_DAYS);
-  const [mapDayIndex, setMapDayIndex] = useState(0);
-  const [mapPlaying, setMapPlaying] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [chartView, setChartView] = useState<"daily" | "rolling">("daily");
   const [chartRange, setChartRange] = useState<{
@@ -1692,20 +1689,6 @@ export default function ClaritasDashboard() {
     return { start, end };
   }, [activeRange, mapWindowDays, newsDateBounds?.end]);
 
-  const mapDates = useMemo(() => {
-    if (!mapRange) return [] as string[];
-    const dates: string[] = [];
-    const start = new Date(mapRange.start);
-    const end = new Date(mapRange.end);
-    const current = new Date(start);
-    while (current <= end) {
-      const key = getDateKey(current);
-      if (key) dates.push(key);
-      current.setDate(current.getDate() + 1);
-    }
-    return dates;
-  }, [mapRange]);
-
   const mapRangeLabel = useMemo(() => {
     if (!mapRange) return "No range";
     const formatter = new Intl.DateTimeFormat("en-US", {
@@ -1717,15 +1700,6 @@ export default function ClaritasDashboard() {
     return `${startLabel} – ${endLabel}`;
   }, [mapRange]);
 
-  const mapDayLabel = useMemo(() => {
-    if (mapDates.length === 0) return "—";
-    const key = mapDates[Math.min(mapDayIndex, mapDates.length - 1)];
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-    }).format(new Date(key));
-  }, [mapDates, mapDayIndex]);
-
   const mapNews = useMemo(() => {
     let items = newsSearchScope;
     if (mapRange) {
@@ -1735,18 +1709,8 @@ export default function ClaritasDashboard() {
         return key >= mapRange.start && key <= mapRange.end;
       });
     }
-    if (mapDayMode && mapDates.length > 0) {
-      const dayKey = mapDates[Math.min(mapDayIndex, mapDates.length - 1)];
-      items = items.filter((item) => getDateKey(item.event_time ?? "") === dayKey);
-    }
     return items;
-  }, [
-    newsSearchScope,
-    mapRange,
-    mapDayMode,
-    mapDayIndex,
-    mapDates,
-  ]);
+  }, [newsSearchScope, mapRange]);
 
   const mapCountryStats = useMemo(() => {
     const stats = new Map<
@@ -1778,7 +1742,6 @@ export default function ClaritasDashboard() {
 
   const useDatabaseCountryStats =
     !activeRange &&
-    !mapDayMode &&
     (!searchAppliesToNews || searchTerms.length === 0) &&
     countryStatsCoverage?.window_days === mapWindowDays;
 
@@ -3229,25 +3192,6 @@ export default function ClaritasDashboard() {
   }, [dataWindowPreset, newsDateBounds]);
 
   useEffect(() => {
-    if (mapDates.length > 0) {
-      setMapDayIndex(mapDates.length - 1);
-    }
-  }, [mapDates]);
-
-  useEffect(() => {
-    if (!mapDayMode) {
-      setMapPlaying(false);
-    }
-  }, [mapDayMode]);
-
-  useEffect(() => {
-    if (mapMode !== "news") {
-      setMapDayMode(false);
-      setMapPlaying(false);
-    }
-  }, [mapMode]);
-
-  useEffect(() => {
     if (activeView !== "dashboard" && mapExpanded) {
       setMapExpanded(false);
     }
@@ -3276,14 +3220,6 @@ export default function ClaritasDashboard() {
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
-
-  useEffect(() => {
-    if (!mapPlaying || mapDates.length === 0) return;
-    const id = window.setInterval(() => {
-      setMapDayIndex((idx) => (idx + 1) % mapDates.length);
-    }, 1200);
-    return () => window.clearInterval(id);
-  }, [mapPlaying, mapDates.length]);
 
   useEffect(() => {
     if (
@@ -4887,98 +4823,49 @@ export default function ClaritasDashboard() {
                             )}
                           </div>
                         ) : mapMode === "news" ? (
-                          <>
-                            <div className="flex flex-wrap items-center gap-3">
-                              <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                                Time
-                              </span>
-                              <button
-                                onClick={() => setMapDayMode(false)}
-                                className={`rounded-full border px-3 py-1 ${
-                                  !mapDayMode
-                                    ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
-                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
-                                }`}
-                              >
-                                Aggregate
-                              </button>
-                              <button
-                                onClick={() => setMapDayMode(true)}
-                                className={`rounded-full border px-3 py-1 ${
-                                  mapDayMode
-                                    ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)] border-[color:var(--shell-strong)]"
-                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
-                                }`}
-                              >
-                                Day
-                              </button>
-                              {!activeRange && (
-                                <>
-                                  <span className="text-[color:var(--shell-muted)]">
-                                    Window: {mapWindowDays}d
-                                  </span>
-                                  <input
-                                    type="range"
-                                    min={MAP_WINDOW_MIN}
-                                    max={MAP_WINDOW_MAX}
-                                    value={mapWindowDays}
-                                    onChange={(e) =>
-                                      setMapWindowDays(
-                                        Number(e.currentTarget.value),
-                                      )
-                                    }
-                                    className="w-32"
-                                  />
-                                </>
-                              )}
-                              {activeRange && (
+                          <div className="flex flex-wrap items-center gap-3">
+                            <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              Coverage window
+                            </span>
+                            {!activeRange && (
+                              <>
                                 <span className="text-[color:var(--shell-muted)]">
-                                  Using graph range ({activeRangeLabel})
+                                  {mapWindowDays}d
                                 </span>
-                              )}
-                              <span className="ml-auto text-[color:var(--shell-muted)]">
-                                {mapRangeLabel}
-                              </span>
-                              {useDatabaseCountryStats && countryStatsCoverage && (
-                                <span className="text-[color:var(--shell-muted)]">
-                                  {countryStatsCoverage.mapped.toLocaleString()} /{" "}
-                                  {countryStatsCoverage.total.toLocaleString()} stories mapped
-                                </span>
-                              )}
-                            </div>
-                            {mapDayMode && mapDates.length > 0 && (
-                              <div className="mt-2 flex flex-wrap items-center gap-3">
-                                <button
-                                  onClick={() => setMapPlaying((v) => !v)}
-                                  className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                                >
-                                  {mapPlaying ? "Pause" : "Play"}
-                                </button>
                                 <input
                                   type="range"
-                                  min={0}
-                                  max={Math.max(0, mapDates.length - 1)}
-                                  value={Math.min(
-                                    mapDayIndex,
-                                    mapDates.length - 1,
-                                  )}
+                                  min={MAP_WINDOW_MIN}
+                                  max={MAP_WINDOW_MAX}
+                                  value={mapWindowDays}
+                                  aria-label="News map coverage window in days"
                                   onChange={(e) =>
-                                    setMapDayIndex(
+                                    setMapWindowDays(
                                       Number(e.currentTarget.value),
                                     )
                                   }
-                                  className="flex-1 min-w-[120px]"
+                                  className="w-32"
                                 />
-                                <span className="text-[color:var(--shell-muted)]">
-                                  {mapDayLabel}
-                                </span>
-                              </div>
+                              </>
                             )}
-                          </>
+                            {activeRange && (
+                              <span className="text-[color:var(--shell-muted)]">
+                                Using graph range ({activeRangeLabel})
+                              </span>
+                            )}
+                            <span className="ml-auto text-[color:var(--shell-muted)]">
+                              {mapRangeLabel}
+                            </span>
+                            {useDatabaseCountryStats && countryStatsCoverage && (
+                              <span className="text-[color:var(--shell-muted)]">
+                                {countryStatsCoverage.mapped.toLocaleString()} /{" "}
+                                {countryStatsCoverage.total.toLocaleString()} stories mapped
+                              </span>
+                            )}
+                          </div>
                         ) : mapMode === "weather" ? (
                           <div className="text-[color:var(--shell-muted)]">
-                            Time controls apply to news view. Switch to News to
-                            animate.
+                            Coverage windows apply to the news layer. Weather uses
+                            the latest observation for each country.
                           </div>
                         ) : (
                           <div className="text-[color:var(--shell-muted)]">
@@ -5774,7 +5661,6 @@ export default function ClaritasDashboard() {
                       <div className="flex flex-wrap items-center gap-3 border-t border-[color:var(--shell-border)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
                         <span>
                           Window: {mapRangeLabel}
-                          {mapDayMode && mapMode === "news" ? ` · ${mapDayLabel}` : ""}
                         </span>
                         <span>
                           Countries shown:{" "}

@@ -397,7 +397,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           return next;
         });
       } else {
-        errors.push(`Automation: ${toErrorMessage(automationRes.reason)}`);
+        errors.push(`Automation controls: ${toErrorMessage(automationRes.reason)}`);
       }
 
       setOverviewError(errors.length > 0 ? errors.join(" | ") : null);

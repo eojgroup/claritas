@@ -3,7 +3,7 @@ import express from "express";
 import cookie from "cookie";
 import { Issuer, generators, type Client } from "openid-client";
 import type { Request } from "express";
-import { query, withTransaction } from "./db";
+import { isDatabaseUnavailableError, query, withTransaction } from "./db";
 import { resolveBillingAccessState, type BillingAccessState } from "./billing";
 
 type ProviderName = "google" | "microsoft" | "apple";
@@ -784,6 +784,10 @@ export function requireAuth() {
       res.locals.auth = auth;
       return next();
     } catch (err: any) {
+      if (isDatabaseUnavailableError(err)) {
+        res.setHeader("Retry-After", "5");
+        return res.status(503).json({ error: "Data service is reconnecting. Retry shortly." });
+      }
       return res.status(500).json({ error: err.message || String(err) });
     }
   };
@@ -798,6 +802,10 @@ export function requireRole(role: string) {
       res.locals.auth = auth;
       return next();
     } catch (err: any) {
+      if (isDatabaseUnavailableError(err)) {
+        res.setHeader("Retry-After", "5");
+        return res.status(503).json({ error: "Data service is reconnecting. Retry shortly." });
+      }
       return res.status(500).json({ error: err.message || String(err) });
     }
   };
@@ -817,6 +825,10 @@ export function requirePaidAccess() {
       res.locals.auth = auth;
       return next();
     } catch (err: any) {
+      if (isDatabaseUnavailableError(err)) {
+        res.setHeader("Retry-After", "5");
+        return res.status(503).json({ error: "Data service is reconnecting. Retry shortly." });
+      }
       return res.status(500).json({ error: err.message || String(err) });
     }
   };
