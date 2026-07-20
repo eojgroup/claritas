@@ -1,18 +1,23 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import MapView, {
-  Layer,
-  Marker,
-  NavigationControl,
-  Source,
-  type LayerProps,
-  type MapRef,
-} from "react-map-gl/maplibre";
-import "maplibre-gl/dist/maplibre-gl.css";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
+import { geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import worldAtlas from "world-atlas/countries-110m.json";
 import worldCountries from "world-countries";
-import type { FeatureCollection, Geometry } from "geojson";
-import type { StyleSpecification } from "maplibre-gl";
+import type {
+  Feature,
+  FeatureCollection,
+  Geometry,
+} from "geojson";
 import type {
   GeometryCollection,
   Properties,
@@ -58,6 +63,11 @@ type WorldCountryReference = {
   name?: { common?: string };
 };
 
+type CountryProperties = {
+  iso2: string;
+  name: string;
+};
+
 type BubbleMarker = {
   country: string;
   count: number;
@@ -66,23 +76,15 @@ type BubbleMarker = {
   meta?: BubbleDatum["meta"];
 };
 
-const INITIAL_VIEW_STATE = {
-  latitude: 14,
-  longitude: 8,
-  zoom: 0.9,
+type ViewTransform = {
+  scale: number;
+  x: number;
+  y: number;
 };
 
-type CountryFeatureProperties = {
-  iso2: string;
-  name: string;
-  value: number;
-  intensity: number;
-  hasData: boolean;
-};
+const INITIAL_SIZE = { width: 960, height: 480 };
 
-const COUNTRY_FILL_LAYER_ID = "claritas-country-fill";
-
-const WORLD_COUNTRY_GEOMETRY = (() => {
+const WORLD_GEOMETRY = (() => {
   const references = worldCountries as WorldCountryReference[];
   const isoByNumeric = new globalThis.Map(
     references
@@ -97,44 +99,59 @@ const WORLD_COUNTRY_GEOMETRY = (() => {
         country.name?.common ?? country.cca2!.toUpperCase(),
       ]),
   );
+  const centroidByIso = new globalThis.Map<string, [number, number]>();
+  references.forEach((country) => {
+    const iso = (country.cca2 ?? country.properties?.cca2 ?? "").toUpperCase();
+    const [lat, lng] = country.latlng ?? [];
+    if (
+      !iso ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      iso === "AQ"
+    ) {
+      return;
+    }
+    centroidByIso.set(iso, [Number(lng), Number(lat)]);
+  });
+  if (centroidByIso.has("GB")) {
+    centroidByIso.set("UK", centroidByIso.get("GB")!);
+  }
+  if (nameByIso.has("GB")) {
+    nameByIso.set("UK", nameByIso.get("GB")!);
+  }
+
   const topology = worldAtlas as unknown as Topology<{
     countries: GeometryCollection<Properties>;
     land: GeometryCollection<Properties>;
   }>;
-  const collection = feature(
+  const raw = feature(
     topology,
     topology.objects.countries,
   ) as FeatureCollection<Geometry, Properties>;
+  const features = raw.features.flatMap((countryFeature) => {
+    const numericId = String(countryFeature.id ?? "").padStart(3, "0");
+    const iso2 = isoByNumeric.get(numericId);
+    if (!iso2 || iso2 === "AQ") return [];
+    return [
+      {
+        ...countryFeature,
+        properties: {
+          iso2,
+          name: nameByIso.get(iso2) ?? iso2,
+        },
+      } satisfies Feature<Geometry, CountryProperties>,
+    ];
+  });
 
   return {
     nameByIso,
-    features: collection.features.flatMap((countryFeature) => {
-      const numericId = String(countryFeature.id ?? "").padStart(3, "0");
-      const iso2 = isoByNumeric.get(numericId);
-      if (!iso2 || iso2 === "AQ") return [];
-      return [
-        {
-          ...countryFeature,
-          properties: {
-            iso2,
-            name: nameByIso.get(iso2) ?? iso2,
-            value: 0,
-            intensity: 0,
-            hasData: false,
-          },
-        },
-      ];
-    }),
+    centroidByIso,
+    collection: {
+      type: "FeatureCollection",
+      features,
+    } satisfies FeatureCollection<Geometry, CountryProperties>,
   };
 })();
-
-const getEnvValue = (key: string): string | undefined => {
-  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
-  const value = env?.[key];
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  return trimmed || undefined;
-};
 
 function markerPalette(
   tone: BubbleDatum["tone"],
@@ -142,29 +159,32 @@ function markerPalette(
 ): { fill: string; stroke: string; halo: string } {
   const paletteMap = {
     news: isDark
-      ? { fill: "#eaa36c", stroke: "#f1c49e", halo: "rgba(234,163,108,0.22)" }
-      : { fill: "#e6a06a", stroke: "#934719", halo: "rgba(230,160,106,0.18)" },
+      ? { fill: "#eaa36c", stroke: "#ffd6b3", halo: "rgba(234,163,108,0.22)" }
+      : { fill: "#df8f55", stroke: "#7c3613", halo: "rgba(223,143,85,0.2)" },
     "weather-cold": isDark
-      ? { fill: "#7fa6b8", stroke: "#c6dce5", halo: "rgba(127,166,184,0.2)" }
-      : { fill: "#3e6a80", stroke: "#172f42", halo: "rgba(62,106,128,0.16)" },
+      ? { fill: "#77a8ba", stroke: "#d1e9f1", halo: "rgba(119,168,186,0.22)" }
+      : { fill: "#3e6a80", stroke: "#172f42", halo: "rgba(62,106,128,0.18)" },
     "weather-mild": isDark
-      ? { fill: "#c99b74", stroke: "#f1c49e", halo: "rgba(201,155,116,0.2)" }
-      : { fill: "#b9855b", stroke: "#76452a", halo: "rgba(185,133,91,0.16)" },
+      ? { fill: "#c99b74", stroke: "#f3d4ba", halo: "rgba(201,155,116,0.2)" }
+      : { fill: "#b9855b", stroke: "#704225", halo: "rgba(185,133,91,0.17)" },
     "weather-hot": isDark
-      ? { fill: "#f0b888", stroke: "#ffe0c5", halo: "rgba(240,184,136,0.22)" }
-      : { fill: "#934719", stroke: "#612e12", halo: "rgba(147,71,25,0.18)" },
+      ? { fill: "#ef9a67", stroke: "#ffe0c5", halo: "rgba(239,154,103,0.22)" }
+      : { fill: "#a94c24", stroke: "#612e12", halo: "rgba(169,76,36,0.18)" },
     positive: isDark
-      ? { fill: "#7fa6b8", stroke: "#c6dce5", halo: "rgba(127,166,184,0.21)" }
-      : { fill: "#2a5268", stroke: "#172f42", halo: "rgba(42,82,104,0.16)" },
+      ? { fill: "#73b6aa", stroke: "#d2f0ea", halo: "rgba(115,182,170,0.2)" }
+      : { fill: "#317d70", stroke: "#17473f", halo: "rgba(49,125,112,0.17)" },
     negative: isDark
-      ? { fill: "#d96b62", stroke: "#f4b4ae", halo: "rgba(217,107,98,0.2)" }
-      : { fill: "#a73b32", stroke: "#702721", halo: "rgba(167,59,50,0.14)" },
+      ? { fill: "#d96b62", stroke: "#ffd0cc", halo: "rgba(217,107,98,0.2)" }
+      : { fill: "#a73b32", stroke: "#702721", halo: "rgba(167,59,50,0.16)" },
     neutral: isDark
-      ? { fill: "#aea08e", stroke: "#e8d9c2", halo: "rgba(174,160,142,0.18)" }
-      : { fill: "#687780", stroke: "#344b59", halo: "rgba(104,119,128,0.14)" },
+      ? { fill: "#a99d8c", stroke: "#eee0cb", halo: "rgba(169,157,140,0.18)" }
+      : { fill: "#687780", stroke: "#344b59", halo: "rgba(104,119,128,0.15)" },
   } as const;
-
   return paletteMap[tone ?? "news"] ?? paletteMap.news;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 export default memo(function WorldMapBubbles({
@@ -180,10 +200,26 @@ export default memo(function WorldMapBubbles({
   showLabels = true,
   legendLabel = "Relative intensity",
 }: WorldMapBubblesProps) {
-  const mapRef = useRef<MapRef | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+  const [size, setSize] = useState(INITIAL_SIZE);
+  const [view, setView] = useState<ViewTransform>({
+    scale: 1,
+    x: 0,
+    y: 0,
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
   const [tip, setTip] = useState<{
-    show: boolean;
     x: number;
     y: number;
     country: string;
@@ -191,29 +227,47 @@ export default memo(function WorldMapBubbles({
     rank: number;
     meta?: BubbleDatum["meta"];
   } | null>(null);
-  const [mapError, setMapError] = useState<string | null>(null);
-  const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
 
-  const centroids = useMemo(() => {
-    const map = new globalThis.Map<string, [number, number]>();
-    for (const item of worldCountries as WorldCountryReference[]) {
-      const iso = (item.cca2 || item.properties?.cca2 || "").toUpperCase();
-      const latlng = item.latlng;
-      if (!iso || !latlng || latlng.length < 2) continue;
-      const [lat, lng] = latlng;
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        map.set(iso, [lng, lat]);
-      }
-    }
-    if (map.has("GB")) map.set("UK", map.get("GB")!);
-    return map;
+  const isDark = Boolean(dark);
+  const isCompact = variant === "compact";
+  const primaryIso = primaryCountry?.toUpperCase();
+  const secondaryIso = secondaryCountry?.toUpperCase();
+  const pinnedIso = pinnedCountry?.toUpperCase();
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const updateSize = () => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) return;
+      setSize({ width: rect.width, height: rect.height });
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    return () => observer.disconnect();
   }, []);
+
+  const projection = useMemo(
+    () =>
+      geoNaturalEarth1().fitExtent(
+        [
+          [18, 18],
+          [Math.max(19, size.width - 18), Math.max(19, size.height - 18)],
+        ],
+        WORLD_GEOMETRY.collection,
+      ),
+    [size.height, size.width],
+  );
+  const path = useMemo(() => geoPath(projection), [projection]);
 
   const markers = useMemo(() => {
     const next: BubbleMarker[] = [];
     data.forEach((datum) => {
       const iso = datum.country.toUpperCase();
-      const coordinate = centroids.get(iso) || centroids.get(iso === "UK" ? "GB" : iso);
+      const coordinate =
+        WORLD_GEOMETRY.centroidByIso.get(iso) ??
+        WORLD_GEOMETRY.centroidByIso.get(iso === "UK" ? "GB" : iso);
       if (!coordinate) return;
       next.push({
         country: iso,
@@ -224,18 +278,8 @@ export default memo(function WorldMapBubbles({
       });
     });
     return next.sort((a, b) => a.count - b.count);
-  }, [centroids, data]);
+  }, [data]);
 
-  const max = useMemo(() => markers.reduce((m, d) => Math.max(m, d.count), 0) || 1, [markers]);
-  const min = useMemo(() => {
-    const value = markers.reduce((m, d) => Math.min(m, d.count), Infinity);
-    return Number.isFinite(value) ? value : 0;
-  }, [markers]);
-
-  const isDark = !!dark;
-  const isCompact = variant === "compact";
-  const labelColor = isDark ? "#f6efe6" : "#28231e";
-  const legendPalette = markerPalette(markers[markers.length - 1]?.tone, isDark);
   const markerByCountry = useMemo(
     () =>
       new globalThis.Map(
@@ -252,175 +296,162 @@ export default memo(function WorldMapBubbles({
       ),
     [markers],
   );
-  const countryGeoJson = useMemo<
-    FeatureCollection<Geometry, CountryFeatureProperties>
-  >(
-    () => ({
-      type: "FeatureCollection",
-      features: WORLD_COUNTRY_GEOMETRY.features.map((countryFeature) => {
-        const iso2 = countryFeature.properties.iso2;
-        const marker = markerByCountry.get(iso2);
-        return {
-          ...countryFeature,
-          properties: {
-            ...countryFeature.properties,
-            value: marker?.count ?? 0,
-            intensity: marker
-              ? scale === "log"
-                ? Math.log10(marker.count + 1) / Math.log10(max + 1)
-                : marker.count / max
-              : 0,
-            hasData: Boolean(marker),
-          },
-        };
-      }),
-    }),
-    [markerByCountry, max, scale],
+  const max = useMemo(
+    () => markers.reduce((value, marker) => Math.max(value, marker.count), 0) || 1,
+    [markers],
   );
+  const min = useMemo(() => {
+    const value = markers.reduce(
+      (current, marker) => Math.min(current, marker.count),
+      Infinity,
+    );
+    return Number.isFinite(value) ? value : 0;
+  }, [markers]);
 
-  const mapStyle = useMemo(() => {
-    const custom = getEnvValue(isDark ? "VITE_MAP_STYLE_DARK_URL" : "VITE_MAP_STYLE_URL");
-    if (custom) return custom;
-    const shared = getEnvValue("VITE_MAP_STYLE_URL");
-    if (shared) return shared;
-    return {
-      version: 8,
-      name: "Claritas analytical base",
-      sources: {},
-      layers: [
-        {
-          id: "claritas-ocean",
-          type: "background",
-          paint: {
-            "background-color": isDark ? "#07121a" : "#e7edf0",
-          },
-        },
-      ],
-    } satisfies StyleSpecification;
-  }, [isDark]);
-
-  const rScale = (value: number) => {
-    const ratio =
+  const intensityFor = useCallback(
+    (value: number) =>
       scale === "log"
         ? Math.log10(value + 1) / Math.log10(max + 1)
-        : value / max;
-    return (isCompact ? 3.5 : 5) + (isCompact ? 8 : 12) * Math.sqrt(Math.max(0, ratio));
-  };
+        : value / max,
+    [max, scale],
+  );
+  const radiusFor = useCallback(
+    (value: number) => {
+      const ratio = Math.sqrt(Math.max(0, intensityFor(value)));
+      return (isCompact ? 4 : 5) + (isCompact ? 8 : 12) * ratio;
+    },
+    [intensityFor, isCompact],
+  );
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || markers.length === 0) return;
-    const [firstLng, firstLat] = markers[0].coordinate;
-    let minLng = firstLng;
-    let maxLng = firstLng;
-    let minLat = firstLat;
-    let maxLat = firstLat;
-
-    for (const marker of markers) {
-      const [lng, lat] = marker.coordinate;
-      minLng = Math.min(minLng, lng);
-      maxLng = Math.max(maxLng, lng);
-      minLat = Math.min(minLat, lat);
-      maxLat = Math.max(maxLat, lat);
-    }
-
-    if (minLng === maxLng && minLat === maxLat) {
-      map.flyTo({ center: [minLng, minLat], zoom: 3, duration: 450 });
+    const points = markers
+      .map((marker) => projection(marker.coordinate))
+      .filter((point): point is [number, number] => Boolean(point));
+    if (points.length < 2) {
+      setView({ scale: 1, x: 0, y: 0 });
       return;
     }
-
-    map.fitBounds(
-      [
-        [minLng, minLat],
-        [maxLng, maxLat],
-      ],
-      {
-        padding: isCompact ? 42 : 84,
-        duration: 600,
-        maxZoom: isCompact ? 3.8 : 4.8,
-      },
+    const xs = points.map((point) => point[0]);
+    const ys = points.map((point) => point[1]);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const contentWidth = Math.max(1, maxX - minX);
+    const contentHeight = Math.max(1, maxY - minY);
+    const fittedScale = clamp(
+      Math.min(
+        (size.width - (isCompact ? 70 : 110)) / contentWidth,
+        (size.height - (isCompact ? 60 : 100)) / contentHeight,
+      ),
+      1,
+      isCompact ? 3.2 : 4,
     );
-  }, [isCompact, markers]);
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    setView({
+      scale: fittedScale,
+      x: size.width / 2 - centerX * fittedScale,
+      y: size.height / 2 - centerY * fittedScale,
+    });
+  }, [isCompact, markers, projection, size.height, size.width]);
 
-  const primaryIso = primaryCountry?.toUpperCase();
-  const secondaryIso = secondaryCountry?.toUpperCase();
-  const pinnedIso = pinnedCountry?.toUpperCase();
+  const zoomAt = useCallback(
+    (nextScale: number, anchorX: number, anchorY: number) => {
+      setView((current) => {
+        const scaleValue = clamp(nextScale, 1, 5);
+        const ratio = scaleValue / current.scale;
+        return {
+          scale: scaleValue,
+          x: anchorX - (anchorX - current.x) * ratio,
+          y: anchorY - (anchorY - current.y) * ratio,
+        };
+      });
+    },
+    [],
+  );
+
+  const handleWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
+    event.preventDefault();
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const anchorX = event.clientX - rect.left;
+    const anchorY = event.clientY - rect.top;
+    const factor = event.deltaY < 0 ? 1.18 : 0.84;
+    zoomAt(view.scale * factor, anchorX, anchorY);
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: view.x,
+      originY: view.y,
+      moved: false,
+    };
+    setIsDragging(true);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
+    setView((current) => ({
+      ...current,
+      x: drag.originX + dx,
+      y: drag.originY + dy,
+    }));
+  };
+
+  const handlePointerUp = (event: ReactPointerEvent<SVGSVGElement>) => {
+    const drag = dragRef.current;
+    if (drag?.pointerId === event.pointerId) {
+      suppressClickRef.current = drag.moved;
+      dragRef.current = null;
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setIsDragging(false);
+  };
+
+  const handleCountrySelect = (iso: string) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    onSelect?.(iso);
+  };
+
+  const updateTip = (
+    event: ReactPointerEvent<SVGGElement>,
+    marker: BubbleMarker,
+  ) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setHoveredCountry(marker.country);
+    setTip({
+      x: clamp(event.clientX - rect.left + 10, 8, rect.width - 250),
+      y: clamp(event.clientY - rect.top + 10, 8, rect.height - 118),
+      country: marker.country,
+      value: marker.count,
+      rank: rankByCountry.get(marker.country) ?? markers.length,
+      meta: marker.meta,
+    });
+  };
+
   const hoveredMarker = hoveredCountry
     ? markerByCountry.get(hoveredCountry)
     : undefined;
-  const countryFillLayer = useMemo<LayerProps>(
-    () => ({
-      id: COUNTRY_FILL_LAYER_ID,
-      type: "fill",
-      paint: {
-        "fill-color": [
-          "case",
-          ["==", ["get", "iso2"], primaryIso ?? "__none__"],
-          isDark ? "#eaa36c" : "#b9632d",
-          ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
-          isDark ? "#77a8ba" : "#3e6a80",
-          ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
-          isDark ? "#8ab6c5" : "#4e7d90",
-          ["get", "hasData"],
-          isDark ? "#5f8495" : "#6f8f9d",
-          isDark ? "#172732" : "#d7d9d7",
-        ],
-        "fill-opacity": [
-          "case",
-          ["==", ["get", "iso2"], primaryIso ?? "__none__"],
-          0.9,
-          ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
-          0.82,
-          ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
-          0.78,
-          ["get", "hasData"],
-          ["interpolate", ["linear"], ["get", "intensity"], 0, 0.46, 1, 0.78],
-          isDark ? 0.62 : 0.76,
-        ],
-      },
-    }),
-    [hoveredCountry, isDark, primaryIso, secondaryIso],
-  );
-  const countryLineLayer = useMemo<LayerProps>(
-    () => ({
-      id: "claritas-country-line",
-      type: "line",
-      paint: {
-        "line-color": [
-          "case",
-          ["==", ["get", "iso2"], primaryIso ?? "__none__"],
-          isDark ? "#ffd7b5" : "#7c3613",
-          ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
-          isDark ? "#c8e1e9" : "#244a5c",
-          ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
-          isDark ? "#d7edf4" : "#385f70",
-          isDark ? "#48606e" : "#9fa8aa",
-        ],
-        "line-opacity": [
-          "case",
-          [
-            "any",
-            ["==", ["get", "iso2"], primaryIso ?? "__none__"],
-            ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
-            ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
-          ],
-          0.95,
-          0.48,
-        ],
-        "line-width": [
-          "case",
-          [
-            "any",
-            ["==", ["get", "iso2"], primaryIso ?? "__none__"],
-            ["==", ["get", "iso2"], secondaryIso ?? "__none__"],
-            ["==", ["get", "iso2"], hoveredCountry ?? "__none__"],
-          ],
-          1.5,
-          0.55,
-        ],
-      },
-    }),
-    [hoveredCountry, isDark, primaryIso, secondaryIso],
+  const labelColor = isDark ? "#f4eee6" : "#1d2b33";
+  const legendPalette = markerPalette(
+    markers[markers.length - 1]?.tone,
+    isDark,
   );
 
   return (
@@ -428,189 +459,221 @@ export default memo(function WorldMapBubbles({
       ref={containerRef}
       className="world-map relative h-full w-full overflow-hidden rounded-[0.85rem]"
     >
-      <MapView
-        ref={mapRef}
-        mapLib={import("maplibre-gl")}
-        initialViewState={INITIAL_VIEW_STATE}
-        mapStyle={mapStyle}
-        attributionControl={false}
-        dragRotate={false}
-        touchZoomRotate={false}
-        projection="mercator"
-        renderWorldCopies={false}
-        minZoom={0.35}
-        maxZoom={7}
-        maxBounds={[
-          [-179.5, -62],
-          [179.5, 84],
-        ]}
-        reuseMaps
-        interactiveLayerIds={[COUNTRY_FILL_LAYER_ID]}
-        cursor={hoveredCountry ? "pointer" : "grab"}
-        onMouseMove={(event) => {
-          const iso2 = event.features?.[0]?.properties?.iso2;
-          setHoveredCountry(typeof iso2 === "string" ? iso2 : null);
-        }}
-        onMouseLeave={() => setHoveredCountry(null)}
-        onClick={(event) => {
-          const iso2 = event.features?.[0]?.properties?.iso2;
-          if (typeof iso2 === "string") onSelect?.(iso2);
-        }}
-        onError={(event) => {
-          const reason =
-            event?.error && event.error instanceof Error
-              ? event.error.message
-              : "Map style failed to load.";
-          setMapError(reason);
-        }}
-        onLoad={() => setMapError(null)}
-        style={{ width: "100%", height: "100%" }}
+      <svg
+        ref={svgRef}
+        className={`world-map-svg h-full w-full ${
+          isDragging ? "is-dragging" : ""
+        }`}
+        viewBox={`0 0 ${size.width} ${size.height}`}
+        role="application"
+        aria-label="Interactive world signal map. Use the controls or mouse wheel to zoom and drag to pan."
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
       >
-        <Source id="claritas-countries" type="geojson" data={countryGeoJson}>
-          <Layer {...countryFillLayer} />
-          <Layer {...countryLineLayer} />
-        </Source>
-
-        <NavigationControl position="top-right" showCompass={false} visualizePitch={false} />
-
-        {markers.map((marker) => {
-          const isPrimary = primaryIso === marker.country;
-          const isSecondary = secondaryIso === marker.country;
-          const isPinned = pinnedIso === marker.country;
-          const palette = markerPalette(marker.tone, isDark);
-          const fill = isPrimary
-            ? isDark
-              ? "#f0b888"
-              : "#e6a06a"
-            : isSecondary
+        <rect
+          width={size.width}
+          height={size.height}
+          fill={isDark ? "#07121a" : "#e7edf0"}
+        />
+        <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
+          {WORLD_GEOMETRY.collection.features.map((countryFeature) => {
+            const iso = countryFeature.properties.iso2;
+            const marker = markerByCountry.get(iso);
+            const intensity = marker ? intensityFor(marker.count) : 0;
+            const isPrimary = primaryIso === iso;
+            const isSecondary = secondaryIso === iso;
+            const isHovered = hoveredCountry === iso;
+            const fill = isPrimary
               ? isDark
-                ? "#7fa6b8"
-                : "#3e6a80"
-              : palette.fill;
-          const stroke = isPrimary
-            ? isDark
-              ? "#ffe0c5"
-              : "#934719"
-            : isSecondary
-              ? isDark
-                ? "#c6dce5"
-                : "#172f42"
-              : palette.stroke;
-          const halo = isPrimary
-            ? "rgba(181,113,54,0.18)"
-            : isSecondary
-              ? "rgba(115,106,96,0.18)"
-              : palette.halo;
-          const size = rScale(marker.count) * 2;
-
-          const updateTip = (event: React.MouseEvent<HTMLButtonElement>) => {
-            const rect = containerRef.current?.getBoundingClientRect();
-            if (!rect) return;
-            setHoveredCountry(marker.country);
-            setTip({
-              show: true,
-              x: event.clientX - rect.left + 8,
-              y: event.clientY - rect.top + 8,
-              country: marker.country,
-              value: marker.count,
-              rank: rankByCountry.get(marker.country) ?? markers.length,
-              meta: marker.meta,
-            });
-          };
-
-          return (
-            <Marker
-              key={marker.country}
-              longitude={marker.coordinate[0]}
-              latitude={marker.coordinate[1]}
-              anchor="center"
-            >
-              <button
-                type="button"
-                aria-label={`${WORLD_COUNTRY_GEOMETRY.nameByIso.get(marker.country) ?? marker.country}: ${marker.count}`}
-                className={`map-bubble-marker relative border-0 bg-transparent p-0 ${
-                  isPrimary || isSecondary || isPinned ? "is-selected" : ""
+                ? "#b96f3d"
+                : "#d9824b"
+              : isSecondary
+                ? isDark
+                  ? "#3f7588"
+                  : "#77a8ba"
+                : marker
+                  ? isDark
+                    ? "#355d6d"
+                    : "#86a6b2"
+                  : isDark
+                    ? "#1b2d38"
+                    : "#cbd6da";
+            const opacity = isPrimary
+              ? 0.95
+              : isSecondary
+                ? 0.9
+                : isHovered
+                  ? 0.88
+                  : marker
+                    ? 0.56 + intensity * 0.34
+                    : 0.82;
+            const stroke =
+              isPrimary || isSecondary || isHovered
+                ? isDark
+                  ? "#e6f2f5"
+                  : "#284b5a"
+                : isDark
+                  ? "#48616e"
+                  : "#94a5ab";
+            return (
+              <path
+                key={iso}
+                d={path(countryFeature) ?? undefined}
+                fill={fill}
+                fillOpacity={opacity}
+                stroke={stroke}
+                strokeWidth={isPrimary || isSecondary || isHovered ? 1.4 : 0.55}
+                vectorEffect="non-scaling-stroke"
+                role="button"
+                tabIndex={marker || isPrimary || isSecondary ? 0 : -1}
+                aria-label={`${countryFeature.properties.name}${
+                  marker ? `: ${marker.count}` : ": no mapped signal"
                 }`}
-                onMouseEnter={updateTip}
-                onMouseMove={updateTip}
-                onMouseLeave={() => {
+                className="world-map-country"
+                onPointerEnter={() => setHoveredCountry(iso)}
+                onPointerLeave={() => setHoveredCountry(null)}
+                onClick={() => handleCountrySelect(iso)}
+                onKeyDown={(
+                  event: ReactKeyboardEvent<SVGPathElement>,
+                ) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelect?.(iso);
+                  }
+                }}
+              />
+            );
+          })}
+
+          {markers.map((marker) => {
+            const point = projection(marker.coordinate);
+            if (!point) return null;
+            const isPrimary = primaryIso === marker.country;
+            const isSecondary = secondaryIso === marker.country;
+            const isPinned = pinnedIso === marker.country;
+            const palette = markerPalette(marker.tone, isDark);
+            const radius = radiusFor(marker.count) / view.scale;
+            const showMarkerLabel =
+              (showLabels &&
+                (rankByCountry.get(marker.country) ?? Infinity) <=
+                  (isCompact ? 10 : 16)) ||
+              isPrimary ||
+              isSecondary ||
+              isPinned ||
+              hoveredCountry === marker.country;
+            return (
+              <g
+                key={marker.country}
+                transform={`translate(${point[0]} ${point[1]})`}
+                className="world-map-bubble"
+                role="button"
+                tabIndex={0}
+                aria-label={`${WORLD_GEOMETRY.nameByIso.get(marker.country) ?? marker.country}: ${marker.count}`}
+                onPointerEnter={(event) => updateTip(event, marker)}
+                onPointerMove={(event) => updateTip(event, marker)}
+                onPointerLeave={() => {
                   setTip(null);
                   setHoveredCountry(null);
                 }}
-                onClick={() => onSelect?.(marker.country)}
-                style={{ cursor: "pointer" }}
+                onClick={() => handleCountrySelect(marker.country)}
+                onKeyDown={(event: ReactKeyboardEvent<SVGGElement>) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelect?.(marker.country);
+                  }
+                }}
               >
-                <span
-                  style={{
-                    width: size,
-                    height: size,
-                    borderRadius: 999,
-                    border: `1.5px solid ${stroke}`,
-                    background: fill,
-                    display: "block",
-                    boxShadow: `0 0 0 4px ${halo}, 0 4px 12px rgba(4,12,18,0.32)`,
-                  }}
+                <circle
+                  r={radius + 5 / view.scale}
+                  fill={palette.halo}
+                  className="world-map-bubble-halo"
                 />
-                <span
-                  style={{
-                    position: "absolute",
-                      inset: size * 0.23,
-                      borderRadius: 999,
-                      border: `1px solid rgba(255,255,255,0.42)`,
-                      opacity: 0.55,
-                  }}
-                />
-                {isPinned && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      inset: -6,
-                      borderRadius: 999,
-                      border: `1.5px solid ${isDark ? "#ffe0c5" : "#e6a06a"}`,
-                      boxShadow: `0 0 0 5px ${isDark ? "rgba(234,163,108,0.16)" : "rgba(230,160,106,0.14)"}`,
-                    }}
+                {(isPrimary || isSecondary || isPinned) && (
+                  <circle
+                    r={radius + 4 / view.scale}
+                    fill="none"
+                    stroke={
+                      isSecondary
+                        ? isDark
+                          ? "#d1e9f1"
+                          : "#244a5c"
+                        : isDark
+                          ? "#ffe0c5"
+                          : "#7c3613"
+                    }
+                    strokeWidth={2 / view.scale}
                   />
                 )}
-                {(showLabels &&
-                  (rankByCountry.get(marker.country) ?? Infinity) <=
-                    (isCompact ? 10 : 16)) ||
-                isPrimary ||
-                isSecondary ||
-                isPinned ||
-                hoveredCountry === marker.country ? (
-                  <span
-                    className="map-bubble-label"
-                    style={{
-                      position: "absolute",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      top: -19,
-                      fontSize: isCompact ? 9 : 10,
-                      color: labelColor,
-                      textShadow: "0 1px 2px rgba(0,0,0,0.5)",
-                      fontWeight: 600,
-                      letterSpacing: "0.06em",
-                      pointerEvents: "none",
-                    }}
+                <circle
+                  r={radius}
+                  fill={palette.fill}
+                  stroke={palette.stroke}
+                  strokeWidth={1.5 / view.scale}
+                />
+                <circle
+                  r={radius * 0.52}
+                  fill="none"
+                  stroke="rgba(255,255,255,0.48)"
+                  strokeWidth={1 / view.scale}
+                />
+                {showMarkerLabel && (
+                  <text
+                    y={-(radius + 6 / view.scale)}
+                    textAnchor="middle"
+                    fill={labelColor}
+                    stroke={isDark ? "#07121a" : "#eef2f3"}
+                    strokeWidth={3 / view.scale}
+                    paintOrder="stroke"
+                    fontSize={(isCompact ? 10 : 11) / view.scale}
+                    fontWeight={700}
+                    letterSpacing={0.5 / view.scale}
+                    className="world-map-label"
                   >
                     {marker.country}
-                  </span>
-                ) : null}
-              </button>
-            </Marker>
-          );
-        })}
-      </MapView>
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </g>
+      </svg>
 
-      <div className="map-geometry-attribution pointer-events-none absolute bottom-2 right-2">
-        Natural Earth geometry · MapLibre
+      <div className="world-map-controls absolute right-3 top-3">
+        <button
+          type="button"
+          onClick={() =>
+            zoomAt(view.scale * 1.35, size.width / 2, size.height / 2)
+          }
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            zoomAt(view.scale / 1.35, size.width / 2, size.height / 2)
+          }
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={() => setView({ scale: 1, x: 0, y: 0 })}
+          aria-label="Reset map view"
+          title="Reset map view"
+        >
+          ↺
+        </button>
       </div>
 
       {hoveredCountry && !tip && (
         <div className="map-country-readout pointer-events-none absolute left-3 top-3">
           <span>
-            {WORLD_COUNTRY_GEOMETRY.nameByIso.get(hoveredCountry) ??
-              hoveredCountry}
+            {WORLD_GEOMETRY.nameByIso.get(hoveredCountry) ?? hoveredCountry}
           </span>
           <strong>
             {hoveredMarker
@@ -618,7 +681,7 @@ export default memo(function WorldMapBubbles({
                 `${hoveredMarker.count} mapped items`
               : "No mapped signal in this view"}
           </strong>
-          <small>Click the country to open its cross-domain profile</small>
+          <small>Select the country to open its cross-domain profile</small>
         </div>
       )}
 
@@ -626,9 +689,11 @@ export default memo(function WorldMapBubbles({
         <div
           className="map-data-legend absolute bottom-3 left-3 rounded-xl border px-3 py-2 text-[11px] shadow-sm"
           style={{
-            background: isDark ? "rgba(13,23,36,0.88)" : "rgba(255,255,255,0.9)",
+            background: isDark
+              ? "rgba(10,22,31,0.9)"
+              : "rgba(255,255,255,0.92)",
             color: labelColor,
-            borderColor: isDark ? "#3a3028" : "#ded5c9",
+            borderColor: isDark ? "#3b4f5a" : "#bac6ca",
             backdropFilter: "blur(14px)",
           }}
         >
@@ -636,25 +701,22 @@ export default memo(function WorldMapBubbles({
             {legendLabel}
           </div>
           <div className="flex items-center gap-2">
-            <svg width={isCompact ? 66 : 82} height={isCompact ? 24 : 28}>
-              {[0.2, 0.5, 1].map((factor, index) => {
-                const radius = rScale(Math.max(1, max * factor));
-                const cx = (isCompact ? 10 : 12) + index * (isCompact ? 21 : 25);
-                const cy = isCompact ? 14 : 16;
-                return (
-                  <circle
-                    key={factor}
-                    cx={cx}
-                    cy={cy}
-                    r={radius}
-                    fill={legendPalette.fill}
-                    stroke={legendPalette.stroke}
-                    strokeWidth={1.2}
-                  />
-                );
-              })}
+            <svg width={58} height={24} aria-hidden="true">
+              {[0.2, 0.5, 1].map((factor, index) => (
+                <circle
+                  key={factor}
+                  cx={9 + index * 19}
+                  cy={13}
+                  r={Math.min(9, radiusFor(Math.max(1, max * factor)) * 0.55)}
+                  fill={legendPalette.fill}
+                  stroke={legendPalette.stroke}
+                  strokeWidth={1}
+                />
+              ))}
             </svg>
-            <span>{scale === "log" ? "Log-scaled bubbles" : "Relative bubbles"}</span>
+            <span>
+              {scale === "log" ? "Log-scaled bubbles" : "Relative bubbles"}
+            </span>
           </div>
           <div className="mt-0.5 flex justify-between gap-4 text-[10px]">
             <span>Min {min}</span>
@@ -666,46 +728,44 @@ export default memo(function WorldMapBubbles({
         </div>
       )}
 
-      {tip && tip.show && (
+      <div className="map-geometry-attribution pointer-events-none absolute bottom-2 right-2">
+        Natural Earth geometry · Claritas SVG
+      </div>
+
+      {tip && (
         <div
-          className="pointer-events-none absolute rounded-2xl border px-3 py-2 text-xs shadow-lg"
+          className="pointer-events-none absolute rounded-xl border px-3 py-2 text-xs shadow-lg"
           style={{
             left: tip.x,
             top: tip.y,
-            background: isDark ? "rgba(13,23,36,0.94)" : "rgba(255,255,255,0.96)",
+            background: isDark
+              ? "rgba(10,22,31,0.96)"
+              : "rgba(255,255,255,0.97)",
             color: labelColor,
-            borderColor: isDark ? "#3a3028" : "#ded5c9",
+            borderColor: isDark ? "#3b4f5a" : "#bac6ca",
             maxWidth: 240,
             backdropFilter: "blur(14px)",
           }}
         >
           <div className="font-semibold">
-            {WORLD_COUNTRY_GEOMETRY.nameByIso.get(tip.country) ?? tip.country}
+            {WORLD_GEOMETRY.nameByIso.get(tip.country) ?? tip.country}
             <span className="ml-1 opacity-60">· {tip.country}</span>
           </div>
           <div>
             {tip.meta?.subtitle ??
               `${tip.value} ${tip.value === 1 ? "item" : "items"}`}
           </div>
-          <div
-            style={{ color: isDark ? "#cfc2b4" : "#746a61" }}
-          >
+          <div style={{ color: isDark ? "#b4c1c6" : "#65747a" }}>
             Rank {tip.rank} of {markers.length} in this view
           </div>
           {tip.meta?.lines?.map((line, index) => (
             <div
               key={`${tip.country}-${index}`}
-              style={{ color: isDark ? "#cfc2b4" : "#746a61" }}
+              style={{ color: isDark ? "#b4c1c6" : "#65747a" }}
             >
               {line}
             </div>
           ))}
-        </div>
-      )}
-
-      {mapError && (
-        <div className="pointer-events-none absolute inset-x-3 bottom-3 rounded-lg border border-amber-300 bg-amber-50/90 px-3 py-2 text-xs text-amber-800">
-          Map provider error: {mapError}
         </div>
       )}
     </div>

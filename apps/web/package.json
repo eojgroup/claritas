@@ -12,10 +12,8 @@
   "dependencies": {
     "d3-geo": "^3.1.0",
     "lucide-react": "^0.541.0",
-    "maplibre-gl": "^5.19.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-map-gl": "^8.1.0",
     "recharts": "^3.1.2",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2",

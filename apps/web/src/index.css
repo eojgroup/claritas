@@ -430,12 +430,52 @@ a {
   background: transparent;
 }
 
-.world-map .maplibregl-ctrl-top-right {
-  top: 0.75rem;
-  right: 0.75rem;
+.world-map-svg {
+  display: block;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
-.world-map .maplibregl-ctrl-group {
+.world-map-svg.is-dragging {
+  cursor: grabbing;
+}
+
+.world-map-country {
+  cursor: pointer;
+  transition:
+    fill 140ms ease,
+    fill-opacity 140ms ease;
+}
+
+.world-map-country:hover,
+.world-map-country:focus-visible {
+  filter: brightness(1.12);
+  outline: none;
+}
+
+.world-map-bubble {
+  cursor: pointer;
+  outline: none;
+}
+
+.world-map-bubble-halo {
+  opacity: 0.72;
+  transition: opacity 140ms ease;
+}
+
+.world-map-bubble:hover .world-map-bubble-halo,
+.world-map-bubble:focus-visible .world-map-bubble-halo {
+  opacity: 1;
+}
+
+.world-map-label {
+  pointer-events: none;
+}
+
+.world-map-controls {
+  z-index: 3;
+  display: grid;
   overflow: hidden;
   border: 1px solid var(--shell-border);
   border-radius: 0.65rem;
@@ -445,23 +485,23 @@ a {
   -webkit-backdrop-filter: blur(12px) saturate(1.2);
 }
 
-.world-map .maplibregl-ctrl-group button {
+.world-map-controls button {
   width: 2rem;
   height: 2rem;
+  min-height: 0;
+  border: 0;
   color: var(--shell-ink);
   background: transparent;
+  font-size: 1rem;
+  line-height: 1;
 }
 
-.world-map .maplibregl-ctrl-group button + button {
+.world-map-controls button + button {
   border-top: 1px solid var(--shell-border);
 }
 
-.world-map .maplibregl-ctrl button:not(:disabled):hover {
+.world-map-controls button:not(:disabled):hover {
   background: color-mix(in srgb, var(--shell-accent) 12%, transparent);
-}
-
-.world-map .maplibregl-canvas {
-  filter: none;
 }
 
 .map-bubble-marker {
