@@ -1,5 +1,6 @@
 import { query } from "./db";
 import { createLlmClientFromEnv, getLlmRuntimeConfig, type LlmClient } from "./llm";
+import { getCountryLeadershipLatest } from "./connectors/wikidata-leadership";
 
 export type GeneratedBriefingStatus = "draft" | "published";
 
@@ -71,16 +72,6 @@ type WeatherContextRow = {
   weather_main: string | null;
   weather_desc: string | null;
   observed_at: string | Date;
-};
-
-type LeadershipContextRow = {
-  country_iso2: string;
-  country_name: string;
-  government_type: string | null;
-  summary: string;
-  source_updated_at: string | Date | null;
-  retrieved_at: string | Date;
-  roles: unknown;
 };
 
 type BriefingContext = {
@@ -312,31 +303,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        LIMIT $2`,
       [end, weatherLimit]
     ),
-    query<LeadershipContextRow>(
-      `SELECT
-         upper(cl.country_iso2) AS country_iso2,
-         cl.country_name,
-         cl.government_type,
-         cl.summary,
-         cl.source_updated_at,
-         cl.retrieved_at,
-         COALESCE(jsonb_agg(jsonb_build_object(
-           'role', clr.role_type,
-           'person', clr.person_name,
-           'wikidata_id', clr.person_wikidata_id,
-           'started_at', clr.started_at,
-           'source_url', clr.source_url
-         ) ORDER BY clr.role_type, clr.person_name)
-           FILTER (WHERE clr.id IS NOT NULL), '[]'::jsonb) AS roles
-       FROM country_leadership cl
-       LEFT JOIN country_leadership_role clr
-         ON clr.country_iso2 = cl.country_iso2
-       GROUP BY cl.country_iso2, cl.country_name, cl.government_type, cl.summary,
-                cl.source_updated_at, cl.retrieved_at
-       ORDER BY cl.country_name
-       LIMIT $1`,
-      [leadershipLimit]
-    ),
+    getCountryLeadershipLatest(),
   ]);
 
   const news = newsResult.rows.map((row) => ({
@@ -387,15 +354,21 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     stale_for_window: new Date(row.observed_at).getTime() < new Date(start).getTime(),
   }));
 
-  const leadership = leadershipResult.rows.map((row) => ({
-    country: row.country_iso2,
+  const leadership = leadershipResult.slice(0, leadershipLimit).map((row) => ({
+    country: row.country,
     country_name: row.country_name,
     government_type: row.government_type,
     summary: row.summary,
-    current_officeholders: Array.isArray(row.roles) ? row.roles : [],
+    current_officeholders: row.roles.map((role) => ({
+      role: role.role_type,
+      person: role.person_name,
+      wikidata_id: role.person_wikidata_id,
+      started_at: role.started_at,
+      source_url: role.source_url,
+    })),
     source: "Wikidata",
-    source_updated_at: timestampToIso(row.source_updated_at),
-    retrieved_at: timestampToIso(row.retrieved_at),
+    source_updated_at: row.source_updated_at,
+    retrieved_at: row.retrieved_at,
   }));
 
   return {

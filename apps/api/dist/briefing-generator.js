@@ -5,6 +5,7 @@ exports.generateDailySignalBriefing = generateDailySignalBriefing;
 exports.getDailyBriefingGeneratorConfig = getDailyBriefingGeneratorConfig;
 const db_1 = require("./db");
 const llm_1 = require("./llm");
+const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
 class BriefingGenerationError extends Error {
     status;
     constructor(status, message) {
@@ -186,28 +187,7 @@ async function collectBriefingContext(options) {
        WHERE ws.observed_at <= $1::timestamptz
        ORDER BY ws.observed_at DESC, ws.country_iso2 ASC
        LIMIT $2`, [end, weatherLimit]),
-        (0, db_1.query)(`SELECT
-         upper(cl.country_iso2) AS country_iso2,
-         cl.country_name,
-         cl.government_type,
-         cl.summary,
-         cl.source_updated_at,
-         cl.retrieved_at,
-         COALESCE(jsonb_agg(jsonb_build_object(
-           'role', clr.role_type,
-           'person', clr.person_name,
-           'wikidata_id', clr.person_wikidata_id,
-           'started_at', clr.started_at,
-           'source_url', clr.source_url
-         ) ORDER BY clr.role_type, clr.person_name)
-           FILTER (WHERE clr.id IS NOT NULL), '[]'::jsonb) AS roles
-       FROM country_leadership cl
-       LEFT JOIN country_leadership_role clr
-         ON clr.country_iso2 = cl.country_iso2
-       GROUP BY cl.country_iso2, cl.country_name, cl.government_type, cl.summary,
-                cl.source_updated_at, cl.retrieved_at
-       ORDER BY cl.country_name
-       LIMIT $1`, [leadershipLimit]),
+        (0, wikidata_leadership_1.getCountryLeadershipLatest)(),
     ]);
     const news = newsResult.rows.map((row) => ({
         id: Number(row.id),
@@ -253,15 +233,21 @@ async function collectBriefingContext(options) {
         observed_at: timestampToIso(row.observed_at),
         stale_for_window: new Date(row.observed_at).getTime() < new Date(start).getTime(),
     }));
-    const leadership = leadershipResult.rows.map((row) => ({
-        country: row.country_iso2,
+    const leadership = leadershipResult.slice(0, leadershipLimit).map((row) => ({
+        country: row.country,
         country_name: row.country_name,
         government_type: row.government_type,
         summary: row.summary,
-        current_officeholders: Array.isArray(row.roles) ? row.roles : [],
+        current_officeholders: row.roles.map((role) => ({
+            role: role.role_type,
+            person: role.person_name,
+            wikidata_id: role.person_wikidata_id,
+            started_at: role.started_at,
+            source_url: role.source_url,
+        })),
         source: "Wikidata",
-        source_updated_at: timestampToIso(row.source_updated_at),
-        retrieved_at: timestampToIso(row.retrieved_at),
+        source_updated_at: row.source_updated_at,
+        retrieved_at: row.retrieved_at,
     }));
     return {
         briefing_date: options.briefingDate,
