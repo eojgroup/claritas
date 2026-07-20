@@ -28,6 +28,7 @@ export type BubbleDatum = {
   country: string;
   count: number;
   tone?:
+    | "signal"
     | "news"
     | "weather-cold"
     | "weather-mild"
@@ -50,6 +51,8 @@ export type WorldMapBubblesProps = {
   primaryCountry?: string | null;
   secondaryCountry?: string | null;
   pinnedCountry?: string | null;
+  featuredCountry?: string | null;
+  featuredLabel?: string;
   scale?: "linear" | "log";
   showLabels?: boolean;
   legendLabel?: string;
@@ -158,6 +161,9 @@ function markerPalette(
   isDark: boolean,
 ): { fill: string; stroke: string; halo: string } {
   const paletteMap = {
+    signal: isDark
+      ? { fill: "#f0a66f", stroke: "#fff0d9", halo: "rgba(240,166,111,0.3)" }
+      : { fill: "#c96d35", stroke: "#672f12", halo: "rgba(201,109,53,0.24)" },
     news: isDark
       ? { fill: "#eaa36c", stroke: "#ffd6b3", halo: "rgba(234,163,108,0.22)" }
       : { fill: "#df8f55", stroke: "#7c3613", halo: "rgba(223,143,85,0.2)" },
@@ -196,6 +202,8 @@ export default memo(function WorldMapBubbles({
   primaryCountry,
   secondaryCountry,
   pinnedCountry,
+  featuredCountry,
+  featuredLabel = "Highest relevance",
   scale = "linear",
   showLabels = true,
   legendLabel = "Relative intensity",
@@ -233,6 +241,7 @@ export default memo(function WorldMapBubbles({
   const primaryIso = primaryCountry?.toUpperCase();
   const secondaryIso = secondaryCountry?.toUpperCase();
   const pinnedIso = pinnedCountry?.toUpperCase();
+  const featuredIso = featuredCountry?.toUpperCase();
 
   useEffect(() => {
     const container = containerRef.current;
@@ -456,6 +465,9 @@ export default memo(function WorldMapBubbles({
   const hoveredMarker = hoveredCountry
     ? markerByCountry.get(hoveredCountry)
     : undefined;
+  const featuredMarker = featuredIso
+    ? markerByCountry.get(featuredIso)
+    : undefined;
   const labelColor = isDark ? "#f4eee6" : "#1d2b33";
   const legendPalette = markerPalette(
     markers[markers.length - 1]?.tone,
@@ -493,6 +505,7 @@ export default memo(function WorldMapBubbles({
             const intensity = marker ? intensityFor(marker.count) : 0;
             const isPrimary = primaryIso === iso;
             const isSecondary = secondaryIso === iso;
+            const isFeatured = featuredIso === iso;
             const isHovered = hoveredCountry === iso;
             const fill = isPrimary
               ? isDark
@@ -502,13 +515,17 @@ export default memo(function WorldMapBubbles({
                 ? isDark
                   ? "#3f7588"
                   : "#77a8ba"
-                : marker
+                : isFeatured
                   ? isDark
-                    ? "#355d6d"
-                    : "#86a6b2"
-                  : isDark
-                    ? "#1b2d38"
-                    : "#cbd6da";
+                    ? "#7d5435"
+                    : "#d69a70"
+                  : marker
+                    ? isDark
+                      ? "#355d6d"
+                      : "#86a6b2"
+                    : isDark
+                      ? "#1b2d38"
+                      : "#cbd6da";
             const opacity = isPrimary
               ? 0.95
               : isSecondary
@@ -519,7 +536,7 @@ export default memo(function WorldMapBubbles({
                     ? 0.56 + intensity * 0.34
                     : 0.82;
             const stroke =
-              isPrimary || isSecondary || isHovered
+              isPrimary || isSecondary || isFeatured || isHovered
                 ? isDark
                   ? "#e6f2f5"
                   : "#284b5a"
@@ -533,7 +550,9 @@ export default memo(function WorldMapBubbles({
                 fill={fill}
                 fillOpacity={opacity}
                 stroke={stroke}
-                strokeWidth={isPrimary || isSecondary || isHovered ? 1.4 : 0.55}
+                strokeWidth={
+                  isPrimary || isSecondary || isFeatured || isHovered ? 1.4 : 0.55
+                }
                 vectorEffect="non-scaling-stroke"
                 role="button"
                 tabIndex={marker || isPrimary || isSecondary ? 0 : -1}
@@ -562,6 +581,7 @@ export default memo(function WorldMapBubbles({
             const isPrimary = primaryIso === marker.country;
             const isSecondary = secondaryIso === marker.country;
             const isPinned = pinnedIso === marker.country;
+            const isFeatured = featuredIso === marker.country;
             const palette = markerPalette(marker.tone, isDark);
             const radius = radiusFor(marker.count) / view.scale;
             const showMarkerLabel =
@@ -571,6 +591,7 @@ export default memo(function WorldMapBubbles({
               isPrimary ||
               isSecondary ||
               isPinned ||
+              isFeatured ||
               hoveredCountry === marker.country;
             return (
               <g
@@ -599,6 +620,16 @@ export default memo(function WorldMapBubbles({
                   fill={palette.halo}
                   className="world-map-bubble-halo"
                 />
+                {isFeatured && (
+                  <circle
+                    r={radius + 8 / view.scale}
+                    fill="none"
+                    stroke={isDark ? "#ffd7b5" : "#8a431e"}
+                    strokeDasharray={`${3 / view.scale} ${2 / view.scale}`}
+                    strokeWidth={2.25 / view.scale}
+                    className="world-map-featured-ring"
+                  />
+                )}
                 {(isPrimary || isSecondary || isPinned) && (
                   <circle
                     r={radius + 4 / view.scale}
@@ -641,6 +672,21 @@ export default memo(function WorldMapBubbles({
                     className="world-map-label"
                   >
                     {marker.country}
+                  </text>
+                )}
+                {isFeatured && (
+                  <text
+                    x={radius + 5 / view.scale}
+                    y={radius + 7 / view.scale}
+                    fill={labelColor}
+                    stroke={isDark ? "#07121a" : "#eef2f3"}
+                    strokeWidth={3 / view.scale}
+                    paintOrder="stroke"
+                    fontSize={9 / view.scale}
+                    fontWeight={800}
+                    className="world-map-featured-rank"
+                  >
+                    #1
                   </text>
                 )}
               </g>
@@ -691,6 +737,26 @@ export default memo(function WorldMapBubbles({
           </strong>
           <small>Select the country to open its cross-domain profile</small>
         </div>
+      )}
+
+      {featuredMarker && !hoveredCountry && !tip && (
+        <button
+          type="button"
+          className="map-featured-country absolute left-3 top-3"
+          onClick={() => handleCountrySelect(featuredMarker.country)}
+        >
+          <span>{featuredLabel}</span>
+          <strong>
+            {WORLD_GEOMETRY.nameByIso.get(featuredMarker.country) ??
+              featuredMarker.country}
+            <small> · {featuredMarker.country}</small>
+          </strong>
+          <em>
+            {featuredMarker.meta?.subtitle ??
+              `${featuredMarker.count} mapped signals`}
+          </em>
+          <small>Select to inspect the drivers</small>
+        </button>
       )}
 
       {legend && (

@@ -25,11 +25,16 @@ const OUTPUT_SCHEMA = {
                     summary: { type: "string" },
                     entities: { type: "array", items: { type: "string" } },
                     topics: { type: "array", items: { type: "string" } },
+                    countries: {
+                        type: "array",
+                        items: { type: "string", pattern: "^[A-Z]{2}$" },
+                        maxItems: 8,
+                    },
                     risk_level: { type: ["string", "null"], enum: ["low", "medium", "high", "critical", null] },
                     confidence: { type: "number", minimum: 0, maximum: 1 },
                     evidence_segment_indexes: { type: "array", items: { type: "integer", minimum: 0 }, maxItems: 6 },
                 },
-                required: ["type", "title", "summary", "entities", "topics", "risk_level", "confidence", "evidence_segment_indexes"],
+                required: ["type", "title", "summary", "entities", "topics", "countries", "risk_level", "confidence", "evidence_segment_indexes"],
             },
         },
     },
@@ -45,6 +50,13 @@ function cleanList(value, maxItems = 20) {
     if (!Array.isArray(value))
         return [];
     return Array.from(new Set(value.map((item) => clean(item, 160)).filter((item) => Boolean(item)))).slice(0, maxItems);
+}
+function cleanCountryList(value) {
+    if (!Array.isArray(value))
+        return [];
+    return Array.from(new Set(value
+        .map((item) => clean(item, 2)?.toUpperCase())
+        .filter((item) => Boolean(item && /^[A-Z]{2}$/.test(item))))).slice(0, 8);
 }
 function canonicalKey(value) {
     const normalized = value.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 160);
@@ -73,6 +85,7 @@ function normalizeSignal(raw) {
         summary: clean(raw.summary, 1200),
         entities: cleanList(raw.entities),
         topics: cleanList(raw.topics),
+        countries: cleanCountryList(raw.countries),
         risk_level: risk && RISK_LEVELS.has(risk) ? risk : null,
         confidence: Number.isFinite(numericConfidence) ? Math.min(Math.max(numericConfidence, 0), 1) : null,
         evidence,
@@ -122,6 +135,7 @@ async function runLlmExtraction(episode, segments) {
             "Use only supplied evidence. Do not infer unsupported facts or copy promotional claims as fact.",
             "Claims are attributed statements; events are concrete occurrences; risks are potential adverse outcomes.",
             "Return evidence segment indexes that directly support every claim, event, or risk.",
+            "Return ISO alpha-2 countries only when the transcript explicitly links the finding to that country, its government, or a named national leader.",
             "Keep titles and summaries neutral, concise, and useful for entity dossiers, alerts, briefs, and search.",
         ].join(" "),
         prompt: JSON.stringify({ episode, evidence }),
@@ -164,6 +178,7 @@ async function extractPodcastIntelligence(episodeId, persons, categories) {
                 continue;
             const entities = cleanList(raw.entities);
             const topics = cleanList(raw.topics);
+            const countries = cleanCountryList(raw.countries);
             const risk = clean(raw.risk_level, 20)?.toLowerCase() || null;
             const confidenceValue = Number(raw.confidence);
             const confidence = Number.isFinite(confidenceValue) ? Math.min(Math.max(confidenceValue, 0), 1) : null;
@@ -181,7 +196,13 @@ async function extractPodcastIntelligence(episodeId, persons, categories) {
                 episodeId, type, title, clean(raw.summary, 1200), canonicalKey(title),
                 JSON.stringify(entities), JSON.stringify(topics),
                 risk && RISK_LEVELS.has(risk) ? risk : null, confidence,
-                clean(raw.method, 80) || "metadata", JSON.stringify(raw.metadata || {}),
+                clean(raw.method, 80) || "metadata",
+                JSON.stringify({
+                    ...(raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata)
+                        ? raw.metadata
+                        : {}),
+                    countries,
+                }),
             ]);
             stored += 1;
             const evidenceIndexes = Array.isArray(raw.evidence) ? raw.evidence.map(Number) : [];

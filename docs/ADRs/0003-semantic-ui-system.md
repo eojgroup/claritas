@@ -17,6 +17,7 @@ Use semantic tokens for shell planes, text, borders, accents, and signal states.
 - chart panel;
 - map panel;
 - table/feed;
+- priority news stream;
 - insights rail;
 - form section;
 - document section;

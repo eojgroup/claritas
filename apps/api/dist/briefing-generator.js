@@ -14,7 +14,7 @@ class BriefingGenerationError extends Error {
     }
 }
 exports.BriefingGenerationError = BriefingGenerationError;
-const PROMPT_VERSION = "daily-signal-briefing.v1";
+const PROMPT_VERSION = "daily-signal-briefing.v2";
 const BRIEFING_OUTPUT_SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -25,7 +25,7 @@ const BRIEFING_OUTPUT_SCHEMA = {
         },
         update_text: {
             type: "string",
-            description: "One concise briefing paragraph covering material news, podcast intelligence, markets, and weather using only supplied evidence.",
+            description: "One concise briefing paragraph covering material news, attributed podcast intelligence, markets, weather, and relevant national leadership using only supplied evidence.",
         },
         key_takeaways: {
             type: "array",
@@ -93,7 +93,8 @@ async function collectBriefingContext(options) {
     const podcastLimit = clampInteger(options.maxPodcastItems, 12, 1, 40);
     const marketLimit = clampInteger(options.maxMarketItems, 16, 5, 60);
     const weatherLimit = clampInteger(options.maxWeatherItems, 16, 5, 80);
-    const [newsResult, podcastResult, marketResult, weatherResult] = await Promise.all([
+    const leadershipLimit = clampInteger(options.maxLeadershipItems, 200, 1, 250);
+    const [newsResult, podcastResult, marketResult, weatherResult, leadershipResult] = await Promise.all([
         (0, db_1.query)(`SELECT
          i.id,
          s.name AS source_name,
@@ -139,6 +140,10 @@ async function collectBriefingContext(options) {
              'summary', signal.summary,
              'entities', signal.entities,
              'topics', signal.topics,
+             'countries', CASE
+               WHEN jsonb_typeof(signal.metadata->'countries') = 'array' THEN signal.metadata->'countries'
+               ELSE '[]'::jsonb
+             END,
              'risk_level', signal.risk_level,
              'confidence', signal.confidence
            ) ORDER BY signal.confidence DESC NULLS LAST)
@@ -181,6 +186,28 @@ async function collectBriefingContext(options) {
        WHERE ws.observed_at <= $1::timestamptz
        ORDER BY ws.observed_at DESC, ws.country_iso2 ASC
        LIMIT $2`, [end, weatherLimit]),
+        (0, db_1.query)(`SELECT
+         upper(cl.country_iso2) AS country_iso2,
+         cl.country_name,
+         cl.government_type,
+         cl.summary,
+         cl.source_updated_at,
+         cl.retrieved_at,
+         COALESCE(jsonb_agg(jsonb_build_object(
+           'role', clr.role_type,
+           'person', clr.person_name,
+           'wikidata_id', clr.person_wikidata_id,
+           'started_at', clr.started_at,
+           'source_url', clr.source_url
+         ) ORDER BY clr.role_type, clr.person_name)
+           FILTER (WHERE clr.id IS NOT NULL), '[]'::jsonb) AS roles
+       FROM country_leadership cl
+       LEFT JOIN country_leadership_role clr
+         ON clr.country_iso2 = cl.country_iso2
+       GROUP BY cl.country_iso2, cl.country_name, cl.government_type, cl.summary,
+                cl.source_updated_at, cl.retrieved_at
+       ORDER BY cl.country_name
+       LIMIT $1`, [leadershipLimit]),
     ]);
     const news = newsResult.rows.map((row) => ({
         id: Number(row.id),
@@ -226,6 +253,16 @@ async function collectBriefingContext(options) {
         observed_at: timestampToIso(row.observed_at),
         stale_for_window: new Date(row.observed_at).getTime() < new Date(start).getTime(),
     }));
+    const leadership = leadershipResult.rows.map((row) => ({
+        country: row.country_iso2,
+        country_name: row.country_name,
+        government_type: row.government_type,
+        summary: row.summary,
+        current_officeholders: Array.isArray(row.roles) ? row.roles : [],
+        source: "Wikidata",
+        source_updated_at: timestampToIso(row.source_updated_at),
+        retrieved_at: timestampToIso(row.retrieved_at),
+    }));
     return {
         briefing_date: options.briefingDate,
         source_window_start: start,
@@ -236,19 +273,22 @@ async function collectBriefingContext(options) {
             podcasts: podcasts.length,
             markets: markets.length,
             weather: weather.length,
+            leadership: leadership.length,
         },
         news,
         podcasts,
         markets,
         weather,
+        leadership,
     };
 }
 function buildSystemPrompt() {
     return [
         "You generate Claritas daily signal briefings from supplied JSON evidence.",
         "Use only the supplied evidence. Do not invent facts, numbers, sources, causal links, or forecasts.",
-        "Cover News, Podcast Intelligence, Markets, and Weather when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
+        "Cover News, Podcast Intelligence, Markets, Weather, and relevant national Leadership when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
         "Treat podcast claims as attributed speaker statements, not independently verified facts. Retain uncertainty and attribution.",
+        "Connect named leaders and countries only when the supplied evidence supports the relationship. Leadership records are context, not proof of involvement.",
         "Markets content is informational only. Do not give investment advice or tell users to buy, sell, or hold.",
         "Keep the result concise, executive, and neutral.",
         "Return JSON only, matching the requested schema.",
@@ -271,7 +311,7 @@ function buildUserPrompt(context, instructions) {
 function normalizeModelOutput(output, context) {
     const title = sanitizeText(output.title, 120) || "Daily signal brief";
     const updateText = sanitizeText(output.update_text, 1800) ||
-        "No reliable briefing could be generated from the available news, market, and weather data.";
+        "No reliable briefing could be generated from the available cross-source data.";
     const takeaways = sanitizeTextList(output.key_takeaways, 8, 220);
     const dataQualityNotes = sanitizeTextList(output.data_quality_notes, 8, 240);
     return {
@@ -320,6 +360,7 @@ async function generateDailySignalBriefing(options, llmClient = (0, llm_1.create
                 max_podcast_items: options.maxPodcastItems ?? null,
                 max_market_items: options.maxMarketItems ?? null,
                 max_weather_items: options.maxWeatherItems ?? null,
+                max_leadership_items: options.maxLeadershipItems ?? null,
             },
         },
         published_at: status === "published" ? generatedAt : null,

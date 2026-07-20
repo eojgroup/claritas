@@ -52,6 +52,31 @@ Each domain has a distinct analytical responsibility:
 
 Maps and graphs are not decoration. Bubble maps answer spatial distribution questions. Graphs answer change, comparison, mix, correlation, and ranking questions. A visual is omitted when the available data cannot support a useful analytical statement.
 
+### Cross-source linkage and provenance
+
+Claritas links domains through country, named-entity, and source provenance rather than presenting six unrelated feeds:
+
+```mermaid
+flowchart LR
+  Story[News story] -->|country + publisher| Country[Country context]
+  Weather[Weather observation] -->|ISO country| Country
+  Market[Market instrument] -->|listing/country| Country
+  Leader[Leadership record] -->|ISO country + Wikidata entity| Country
+  Podcast[Podcast finding] -->|explicit ISO or country/leader mention| Country
+  Podcast -->|episode + timestamp| Evidence[Attributed evidence]
+  Country --> Score[Cross-source relevance score]
+  Score --> Map[Signal relevance map]
+  Score --> Queue[Attention signal]
+  Evidence --> Brief[Daily briefing]
+  Leader --> Brief
+```
+
+- News retains publisher, time, and mapped-country provenance.
+- Podcast claims remain attributed to the feed, episode, and timestamped evidence. They are not treated as verified facts.
+- New podcast extraction records explicitly supported ISO alpha-2 countries with each finding. Existing findings receive deterministic UI linkage when their text mentions a country name or a current leader.
+- Leadership is contextual evidence, not an urgency signal and not proof that an officeholder is involved in an event.
+- Wikidata entity identifiers are never presented as person names. Missing English labels use Wikidata language fallback; an unresolved entity displays “Name unavailable” while retaining its source link.
+
 ## Information Architecture and Page Archetypes
 
 ```text
@@ -168,10 +193,10 @@ Light mode preserves the same roles. It is supported, but the default unconfigur
 | Control bar | Grouped filters, explicit time/scope, sort, reset, compare/export where relevant |
 | KPI strip | Value, context, optional delta/trend; separators instead of four floating cards |
 | Primary chart | Largest analytical surface, labeled axes/legend, range/compare tools, useful empty state |
-| Map | GeoJSON country layer plus scaled bubble overlay; intensity, rank, hover, polygon selection, legend, and readable country labels turn spatial data into an analytical control rather than a decorative globe |
-| Country profile | Selection-driven cross-domain panel combining news concentration, weather and freshness, current leadership, linked markets, and routes to detailed workspaces |
+| Map | GeoJSON country layer plus scaled bubble overlay; raw domain layers and a cross-source relevance layer; intensity, rank, hover, polygon selection, legend, and a visible #1 recommendation turn spatial data into an analytical control |
+| Country profile | Selection-driven cross-domain panel combining relevance drivers, news concentration, weather and freshness, attributed podcast evidence, current leadership, linked markets, and routes to detailed workspaces |
 | Context band | Podcast evidence and current leadership coverage; exposes the strongest available signal and routes directly to evidence or the leadership map layer |
-| Table/feed | Compact rows with aligned metadata, selected state, dense scanning, expandable/drill-in detail |
+| Priority news stream | Shared compact rows with priority band/rank, aligned time/place/headline/source metadata, selected state, and imagery only in expanded detail; used on Dashboard and News |
 | Insights rail | Exceptions, anomalies, AI/briefing cues, and action destination |
 | Form section | Related controls grouped under one operational intent with clear feedback |
 | Document section | Number, heading, readable text rhythm, note treatment, stable anchor |
@@ -196,9 +221,10 @@ Shared web implementations live primarily in `apps/web/src/index.css` and `apps/
 
 ### Drilldown and selection
 
-- Selecting a country updates news, weather, market context, map state, and country leadership where data exists.
+- Selecting a country updates news, weather, market, attributed podcast, map relevance, and country leadership context where data exists.
 - Country polygons and bubble markers share the same selection model. Hover reveals mapped value and rank; selection opens the country profile and adds the country series to the primary trend.
-- Selecting a dashboard headline expands only that row, reveals imagery and publisher context, and links its country to the map, profile, and trend. Unselected headlines remain compact monitoring rows.
+- Selecting a headline expands only that row, reveals imagery and publisher context, and links its country to the map, profile, and trend. Dashboard and News use the same row contract; unselected headlines remain compact monitoring rows.
+- Selecting the highlighted #1 country opens the score drivers. Selecting a podcast-linked country opens the same shared country state rather than a disconnected podcast-only filter.
 - Selecting a symbol opens the market symbol workspace with price movement, session range, weather/geography context, related stories, and peer instruments.
 - A watch handoff opens the corresponding iPhone destination.
 
@@ -249,16 +275,20 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 
 - KPI strip establishes cross-domain posture.
 - Daily briefing is the first synthesis surface because it answers what changed and why it matters across domains.
-- The world map is the first visual analysis surface and remains visible without requiring a drilldown on web. It uses country geometry for hit areas and intensity, with log-scaled news bubbles to preserve differences without letting outliers obscure smaller countries.
+- The world map is the first visual analysis surface and remains visible without requiring a drilldown on web. Its default Signals layer ranks cross-source relevance; News, Weather, and Leadership remain inspectable raw layers.
+- Signal relevance is explainable: news concentration contributes 40%, attributed podcast relevance 25%, weather anomaly 15%, market movement 15%, with a small cross-domain confirmation bonus and a 100-point cap. Leadership appears as decision-maker context but does not inflate urgency.
+- The highest-relevance country receives a distinct ring, a `#1` marker, and a persistent recommendation. Its tooltip and country profile list the contributing domains and sources.
 - The panel beside the desktop map shows podcast/leadership context until a country is selected, then becomes a cross-domain country profile. Clearing selection restores the global context band.
-- The live feed is the final full-width Dashboard stage. News defaults to dense rows with time, geography, headline, and source; image and long summary appear only for the selected row.
+- The live feed is the final full-width Dashboard stage. News defaults to shared priority rows with band/rank, time, geography, headline, and source; image and long summary appear only for the selected row.
+- The daily briefing exposes direct Podcast and Leadership evidence routes. Briefing generation version 2 supplies podcast country linkage and current leadership records to the synthesis prompt while preserving podcast attribution and uncertainty.
 - News volume analysis and the attention queue belong to the News analyst workspace. They are intentionally omitted from Dashboard so the overview ends after current cross-domain evidence rather than turning into a second News page.
 
 ### News
 
-- Story stream is the primary task.
-- Rows expose source, country, time, summary, and selection state.
+- Story stream is the primary task and uses the same priority-row component as Dashboard.
+- Rows expose priority band/rank, source, country, time, summary, and selection state. Images remain hidden until row expansion.
 - The map is a spatial coverage tool and is secondary to the stream.
+- The highest-volume country is explicitly highlighted on the News map as an exploration suggestion.
 - The full timeline workspace, anomaly markers, compare lines, exports, and attention queue follow the primary map/stream stage.
 - Source mix and country/market context support the stream without competing with the primary timeline.
 - On mobile, the story stream precedes the map, the attention queue remains available for triage, and the dense volume/source charts are omitted. Tablet retains them as stacked touch-first stages.
@@ -344,6 +374,9 @@ The current system:
 - gives market symbols a real contextual drilldown;
 - gives weather explicit thresholds;
 - preserves the daily briefing, map bubbles, and useful charts with clearer roles, while promoting podcast evidence and leadership context into the dashboard overview;
+- replaces separate Dashboard and News story treatments with one expandable priority-stream contract;
+- adds an explainable cross-source signal-relevance map, a visible highest-priority country, and driver-level country context;
+- carries podcast country provenance and leadership records into daily briefing generation, and prevents unresolved Wikidata entity IDs from appearing as names;
 - gives Admin, Profile, and Policies separate archetypes;
 - treats tablet as a staged two-column review workspace;
 - treats mobile as triage and drill-in;

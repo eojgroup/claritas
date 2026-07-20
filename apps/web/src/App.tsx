@@ -17,7 +17,6 @@ import {
   Sun,
   LogOut,
   ChevronLeft,
-  ChevronDown,
   Menu,
   LayoutGrid,
   FileText,
@@ -49,6 +48,7 @@ import {
   Line,
 } from "recharts";
 import worldCountries from "world-countries";
+import PriorityNewsList from "./components/PriorityNewsList";
 
 const legalPolicies = [
   {
@@ -116,6 +116,7 @@ const SPLIT_VIEW_MIN_HEIGHT = 620;
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
 type SearchTopic = "all" | "news" | "podcasts" | "weather" | "markets";
+type MapMode = "signals" | "news" | "weather" | "leadership";
 type AppView =
   | "dashboard"
   | "news"
@@ -134,6 +135,7 @@ type SignalNotification = {
   view: AppView;
   symbol?: string;
   dateKey?: string;
+  country?: string;
 };
 
 const DATA_WINDOW_OPTIONS: Array<{
@@ -181,6 +183,16 @@ const SEARCH_TOPIC_ALIASES: Record<string, SearchTopic> = {
   wx: "weather",
 };
 
+const COUNTRY_LINK_ALIASES: Record<string, string[]> = {
+  AE: ["uae", "united arab emirates"],
+  CN: ["china", "prc"],
+  GB: ["united kingdom", "britain", "great britain", "uk"],
+  KR: ["south korea", "republic of korea"],
+  KP: ["north korea", "dprk"],
+  RU: ["russia", "russian federation"],
+  US: ["united states", "united states of america", "usa"],
+};
+
 const PROFILE_SECTIONS = [
   { id: "overview", label: "Overview", description: "Identity snapshot" },
   { id: "identity", label: "Identity", description: "Account and providers" },
@@ -220,6 +232,24 @@ const asTrimmedString = (value: unknown): string | undefined => {
   const trimmed = value.trim();
   return trimmed || undefined;
 };
+
+const normalizeLinkageText = (value: unknown): string => {
+  if (typeof value !== "string") return "";
+  return ` ${value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()} `;
+};
+
+const includesLinkageTerm = (haystack: string, value: string): boolean => {
+  const normalized = normalizeLinkageText(value).trim();
+  return normalized.length >= 3 && haystack.includes(` ${normalized} `);
+};
+
+const getLeadershipDisplayName = (value: string | null | undefined): string =>
+  value && !/^Q\d+$/i.test(value.trim()) ? value.trim() : "Name unavailable";
 
 const prettySourceName = (value: string): string => {
   const normalized = value.trim().toLowerCase();
@@ -790,7 +820,7 @@ export default function ClaritasDashboard() {
   const [dailyBriefingError, setDailyBriefingError] = useState<string | null>(null);
   const [dataWindowPreset, setDataWindowPreset] =
     useState<DataWindowPreset>("30d");
-  const [mapMode, setMapMode] = useState<"news" | "weather" | "leadership">("news");
+  const [mapMode, setMapMode] = useState<MapMode>("signals");
   const [listMode, setListMode] = useState<"news" | "weather" | "market">("news");
   const [mapDayMode, setMapDayMode] = useState(false);
   const [mapWindowDays, setMapWindowDays] = useState(NEWS_TREND_WINDOW_DAYS);
@@ -1839,10 +1869,10 @@ export default function ClaritasDashboard() {
     return mapLeadershipScope.map((row) => {
       const stateLeaders = row.roles
         .filter((role) => role.role_type === "head_of_state")
-        .map((role) => role.person_name);
+        .map((role) => getLeadershipDisplayName(role.person_name));
       const governmentLeaders = row.roles
         .filter((role) => role.role_type === "head_of_government")
-        .map((role) => role.person_name);
+        .map((role) => getLeadershipDisplayName(role.person_name));
       return {
         country: row.country.toUpperCase(),
         count: Math.max(row.roles.length, 1),
@@ -1864,18 +1894,278 @@ export default function ClaritasDashboard() {
     });
   }, [mapLeadershipScope]);
 
+  const podcastCountryLinks = useMemo(() => {
+    type CountryPodcastLink = {
+      signalCount: number;
+      episodeIds: Set<number>;
+      evidenceIds: Set<number>;
+      maxScore: number;
+      topSignal: PodcastSignal | null;
+      topEpisode: PodcastEpisode | null;
+      sources: Set<string>;
+    };
+    const links = new Map<string, CountryPodcastLink>();
+    const termsByCountry = Array.from(countryMeta.entries()).map(([iso, meta]) => {
+      const leadership = leadershipStats.find(
+        (country) => country.country.toUpperCase() === iso,
+      );
+      return {
+        iso,
+        terms: Array.from(
+          new Set(
+            [
+              meta.name,
+              leadership?.country_name,
+              ...(COUNTRY_LINK_ALIASES[iso] ?? []),
+              ...(leadership?.roles.map((role) =>
+                getLeadershipDisplayName(role.person_name),
+              ) ?? []),
+            ].filter(
+              (value): value is string =>
+                Boolean(value && value !== "Name unavailable"),
+            ),
+          ),
+        ),
+      };
+    });
+    const riskScore: Record<string, number> = {
+      critical: 100,
+      high: 82,
+      medium: 60,
+      low: 38,
+    };
+    const typeScore: Record<PodcastSignal["type"], number> = {
+      risk: 70,
+      event: 62,
+      claim: 48,
+      topic: 32,
+      entity: 24,
+    };
+
+    podcasts.forEach((episode) => {
+      episode.signals.forEach((signal) => {
+        const explicitCountries = new Set(
+          (signal.countries ?? [])
+            .map((country) => normalizeIso2(country))
+            .filter((country): country is string => Boolean(country)),
+        );
+        const signalText = normalizeLinkageText(
+          [
+            episode.title,
+            episode.summary,
+            signal.title,
+            signal.summary,
+            ...signal.entities,
+            ...signal.topics,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+        termsByCountry.forEach(({ iso, terms }) => {
+          if (terms.some((term) => includesLinkageTerm(signalText, term))) {
+            explicitCountries.add(iso);
+          }
+        });
+
+        const base =
+          riskScore[signal.risk_level ?? ""] ?? typeScore[signal.type] ?? 20;
+        const confidence =
+          typeof signal.confidence === "number" ? signal.confidence : 0.55;
+        const score = Math.round(base * (0.65 + confidence * 0.35));
+        explicitCountries.forEach((iso) => {
+          const current = links.get(iso) ?? {
+            signalCount: 0,
+            episodeIds: new Set<number>(),
+            evidenceIds: new Set<number>(),
+            maxScore: 0,
+            topSignal: null,
+            topEpisode: null,
+            sources: new Set<string>(),
+          };
+          current.signalCount += 1;
+          current.episodeIds.add(episode.id);
+          episode.evidence.forEach((evidence) =>
+            current.evidenceIds.add(evidence.id),
+          );
+          current.sources.add(episode.feed_title);
+          if (score > current.maxScore) {
+            current.maxScore = score;
+            current.topSignal = signal;
+            current.topEpisode = episode;
+          }
+          links.set(iso, current);
+        });
+      });
+    });
+
+    return links;
+  }, [countryMeta, leadershipStats, podcasts]);
+
+  const crossSourceMapData = useMemo(() => {
+    const newsByCountry = new Map(
+      mapBubbleData.map((row) => [row.country.toUpperCase(), row] as const),
+    );
+    const weatherByIso = new Map(
+      weatherStats.map((row) => [row.country.toUpperCase(), row] as const),
+    );
+    const leadershipByIso = new Map(
+      leadershipStats.map((row) => [row.country.toUpperCase(), row] as const),
+    );
+    const marketByIso = new Map<string, MarketQuote>();
+    marketQuotes.forEach((quote) => {
+      const iso = normalizeIso2(quote.country);
+      if (!iso) return;
+      const current = marketByIso.get(iso);
+      if (
+        !current ||
+        Math.abs(quote.percent_change ?? quote.change ?? 0) >
+          Math.abs(current.percent_change ?? current.change ?? 0)
+      ) {
+        marketByIso.set(iso, quote);
+      }
+    });
+    const countries = new Set<string>([
+      ...newsByCountry.keys(),
+      ...weatherByIso.keys(),
+      ...marketByIso.keys(),
+      ...podcastCountryLinks.keys(),
+    ]);
+    const maxNews = Math.max(
+      1,
+      ...Array.from(newsByCountry.values()).map((row) => row.count),
+    );
+    const maxMarketMove = Math.max(
+      1,
+      ...Array.from(marketByIso.values()).map((quote) =>
+        Math.abs(quote.percent_change ?? quote.change ?? 0),
+      ),
+    );
+
+    return Array.from(countries)
+      .flatMap((iso) => {
+        if (regionCountries && !regionCountries.has(iso)) return [];
+        const newsRow = newsByCountry.get(iso);
+        const weather = weatherByIso.get(iso);
+        const market = marketByIso.get(iso);
+        const podcast = podcastCountryLinks.get(iso);
+        const leadership = leadershipByIso.get(iso);
+        const newsRelevance = newsRow
+          ? Math.log1p(newsRow.count) / Math.log1p(maxNews)
+          : 0;
+        const temperatureSeverity =
+          typeof weather?.temp_c === "number"
+            ? Math.min(1, Math.max(0, (Math.abs(weather.temp_c - 20) - 8) / 24))
+            : 0;
+        const humiditySeverity =
+          typeof weather?.humidity === "number"
+            ? Math.min(1, Math.max(0, (weather.humidity - 75) / 25))
+            : 0;
+        const windSeverity =
+          typeof weather?.wind_speed === "number"
+            ? Math.min(1, weather.wind_speed / 25)
+            : 0;
+        const weatherRelevance = Math.max(
+          temperatureSeverity,
+          humiditySeverity,
+          windSeverity,
+        );
+        const marketMove = Math.abs(
+          market?.percent_change ?? market?.change ?? 0,
+        );
+        const marketRelevance = market ? marketMove / maxMarketMove : 0;
+        const podcastRelevance = podcast
+          ? Math.min(1, (podcast.maxScore + Math.min(18, podcast.signalCount * 3)) / 100)
+          : 0;
+        const domains = [
+          newsRelevance > 0 ? "news" : null,
+          weatherRelevance > 0 ? "weather" : null,
+          marketRelevance > 0 ? "markets" : null,
+          podcastRelevance > 0 ? "podcast" : null,
+        ].filter((domain): domain is string => Boolean(domain));
+        const breadthBonus = Math.max(0, domains.length - 1) * 2;
+        const relevance = Math.min(
+          100,
+          Math.round(
+            newsRelevance * 40 +
+              weatherRelevance * 15 +
+              marketRelevance * 15 +
+              podcastRelevance * 25 +
+              breadthBonus,
+          ),
+        );
+        if (relevance <= 0) return [];
+
+        const lines = [
+          newsRow ? `News: ${newsRow.count} mapped stories` : null,
+          podcast
+            ? `Podcast: ${podcast.signalCount} attributed signals · ${podcast.sources.values().next().value ?? "source"}`
+            : null,
+          weather && weatherRelevance > 0
+            ? `Weather: ${weather.temp_c ?? "—"}°C · ${weather.weather_main ?? "condition"}`
+            : null,
+          market
+            ? `Markets: ${market.symbol} ${formatSignedMetric(
+                market.percent_change ?? market.change,
+                2,
+                "%",
+              )}`
+            : null,
+          leadership?.roles[0]
+            ? `Context: ${getLeadershipDisplayName(leadership.roles[0].person_name)}`
+            : null,
+        ].filter((line): line is string => Boolean(line));
+
+        return [
+          {
+            country: iso,
+            count: relevance,
+            tone: "signal" as const,
+            meta: {
+              subtitle: `Relevance ${relevance}/100 · ${domains.length} linked ${
+                domains.length === 1 ? "domain" : "domains"
+              }`,
+              lines: lines.slice(0, 5),
+            },
+          },
+        ];
+      })
+      .sort((a, b) => b.count - a.count);
+  }, [
+    leadershipStats,
+    mapBubbleData,
+    marketQuotes,
+    podcastCountryLinks,
+    regionCountries,
+    weatherStats,
+  ]);
+
+  const highestSignalCountry = crossSourceMapData[0] ?? null;
+
   const activeMapData =
-    mapMode === "news"
-      ? mapBubbleData
-      : mapMode === "weather"
-        ? mapWeatherData
-        : mapLeadershipData;
+    mapMode === "signals"
+      ? crossSourceMapData
+      : mapMode === "news"
+        ? mapBubbleData
+        : mapMode === "weather"
+          ? mapWeatherData
+          : mapLeadershipData;
   const activeMapLegendLabel =
-    mapMode === "news"
-      ? "Story concentration"
-      : mapMode === "weather"
-        ? "Relative temperature"
-        : "Leadership records";
+    mapMode === "signals"
+      ? "Signal relevance"
+      : mapMode === "news"
+        ? "Story concentration"
+        : mapMode === "weather"
+          ? "Relative temperature"
+          : "Leadership records";
+
+  const pinnedSignalSummary = useMemo(() => {
+    if (!pinnedCountry) return null;
+    return (
+      crossSourceMapData.find(
+        (row) => row.country === pinnedCountry.toUpperCase(),
+      ) ?? null
+    );
+  }, [crossSourceMapData, pinnedCountry]);
 
   const pinnedNewsSummary = useMemo(() => {
     if (!pinnedCountry) return null;
@@ -2025,6 +2315,12 @@ export default function ClaritasDashboard() {
       };
     });
   }, [newsPageCountryStats]);
+
+  const highestNewsCountry = useMemo(
+    () =>
+      [...newsPageMapData].sort((a, b) => b.count - a.count)[0] ?? null,
+    [newsPageMapData],
+  );
 
   const weatherConditionOptions = useMemo(() => {
     const values = new Set<string>();
@@ -2413,6 +2709,11 @@ export default function ClaritasDashboard() {
       .slice(0, 6);
   }, [news, relationCountry]);
 
+  const relatedPodcastLink = useMemo(() => {
+    if (!relationCountry) return null;
+    return podcastCountryLinks.get(relationCountry) ?? null;
+  }, [podcastCountryLinks, relationCountry]);
+
   const newsSummary = useMemo(() => {
     const timelineDays = newsPageTimelineData.length;
     const withImages = newsPageItems.filter((item) => Boolean(getNewsImageUrl(item))).length;
@@ -2572,6 +2873,7 @@ export default function ClaritasDashboard() {
       typeof relatedWeather?.temp_c === "number"
         ? relatedWeather.temp_c
         : null;
+    const relevance = crossSourceMapData.find((row) => row.country === iso);
 
     return {
       iso,
@@ -2592,6 +2894,8 @@ export default function ClaritasDashboard() {
         typeof relatedWeather?.humidity === "number"
           ? relatedWeather.humidity
           : null,
+      relevanceScore: relevance?.count ?? 0,
+      relevanceDrivers: relevance?.meta?.lines ?? [],
       maxMarketMove: Math.max(
         1,
         ...relatedMarkets.map((quote) =>
@@ -2601,6 +2905,7 @@ export default function ClaritasDashboard() {
     };
   }, [
     countryMeta,
+    crossSourceMapData,
     mapBubbleData,
     mapCountryStats,
     relatedMarkets,
@@ -2789,6 +3094,22 @@ export default function ClaritasDashboard() {
         view: "podcasts",
       });
     }
+    if (highestSignalCountry && highestSignalCountry.count >= 55) {
+      items.push({
+        id: `country-relevance-${highestSignalCountry.country}-${highestSignalCountry.count}`,
+        title: `${
+          countryMeta.get(highestSignalCountry.country)?.name ??
+          highestSignalCountry.country
+        } has the highest linked relevance`,
+        description:
+          highestSignalCountry.meta?.lines?.slice(0, 2).join(" · ") ??
+          "Multiple signal domains converge in the current scope.",
+        timeLabel: `${highestSignalCountry.count}/100`,
+        tone: "attention",
+        view: "dashboard",
+        country: highestSignalCountry.country,
+      });
+    }
     if (dailyBriefing?.published_at) {
       items.push({
         id: `briefing-${dailyBriefing.id}-${dailyBriefing.published_at}`,
@@ -2852,6 +3173,8 @@ export default function ClaritasDashboard() {
   }, [
     dailyBriefing,
     dailyBriefingError,
+    countryMeta,
+    highestSignalCountry,
     marketEarningsRows,
     marketQuotes,
     newsLoadError,
@@ -3046,6 +3369,16 @@ export default function ClaritasDashboard() {
     }
     if (notification.dateKey) {
       handleAnomalyClick(notification.dateKey);
+    }
+    if (notification.country) {
+      setSelectedCountry(notification.country);
+      setMapMode("signals");
+      requestAnimationFrame(() =>
+        document.getElementById("signal-map-feed")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        }),
+      );
     }
     setNotificationsOpen(false);
   };
@@ -4140,6 +4473,40 @@ export default function ClaritasDashboard() {
                           {dailyBriefing?.update_text ||
                             (dailyBriefingError ? "Briefing unavailable." : "Awaiting briefing.")}
                         </p>
+                        <div className="briefing-source-links mt-3">
+                          <span>Linked evidence</span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveView("podcasts")}
+                          >
+                            <Podcast className="h-3.5 w-3.5" />
+                            <strong>Podcast</strong>
+                            <small>
+                              {podcastSummary.signals} signals ·{" "}
+                              {podcastSummary.evidence} excerpts
+                            </small>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMapMode("leadership");
+                              requestAnimationFrame(() =>
+                                document
+                                  .getElementById("signal-map-feed")
+                                  ?.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "start",
+                                  }),
+                              );
+                            }}
+                          >
+                            <User className="h-3.5 w-3.5" />
+                            <strong>Leadership</strong>
+                            <small>
+                              {leadershipSummary.roles} officeholders · Wikidata
+                            </small>
+                          </button>
+                        </div>
                       </div>
                       <div className="w-full rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 lg:max-w-md">
                         <div className="text-[11px] uppercase tracking-[0.25em] text-[color:var(--shell-muted)]">
@@ -4185,14 +4552,26 @@ export default function ClaritasDashboard() {
                           </div>
                           <div className="text-sm font-semibold">
                             Map:{" "}
-                            {mapMode === "news"
-                              ? "#News per country"
-                              : mapMode === "weather"
-                                ? "Weather (temperature) per country"
-                                : "Country leadership"}
+                            {mapMode === "signals"
+                              ? "Cross-source signal relevance"
+                              : mapMode === "news"
+                                ? "#News per country"
+                                : mapMode === "weather"
+                                  ? "Weather (temperature) per country"
+                                  : "Country leadership"}
                           </div>
                         </div>
                         <div className="map-mode-tabs flex flex-wrap items-center gap-2 text-xs">
+                          <button
+                            className={`rounded-full border px-3 py-1 transition ${
+                              mapMode === "signals"
+                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
+                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                            }`}
+                            onClick={() => setMapMode("signals")}
+                          >
+                            Signals
+                          </button>
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
                               mapMode === "news"
@@ -4326,7 +4705,17 @@ export default function ClaritasDashboard() {
                             primaryCountry={selectedCountry}
                             secondaryCountry={comparisonCountry}
                             pinnedCountry={pinnedCountry}
-                            scale={mapMode === "news" ? "log" : "linear"}
+                            featuredCountry={
+                              mapMode === "signals"
+                                ? highestSignalCountry?.country
+                                : null
+                            }
+                            featuredLabel="Highest signal relevance"
+                            scale={
+                              mapMode === "news" || mapMode === "signals"
+                                ? "log"
+                                : "linear"
+                            }
                             showLabels
                             legendLabel={activeMapLegendLabel}
                           />
@@ -4341,7 +4730,21 @@ export default function ClaritasDashboard() {
                                 ? `${pinnedMeta.name} (${pinnedCountry.toUpperCase()})`
                                 : pinnedCountry.toUpperCase()}
                             </div>
-                            {mapMode === "news" ? (
+                            {mapMode === "signals" ? (
+                              <>
+                                <div className="mt-2 text-[color:var(--shell-muted)]">
+                                  Relevance: {pinnedSignalSummary?.count ?? 0}/100
+                                </div>
+                                {pinnedSignalSummary?.meta?.lines?.map((line) => (
+                                  <div
+                                    key={`pinned-signal-${line}`}
+                                    className="text-[color:var(--shell-muted)]"
+                                  >
+                                    {line}
+                                  </div>
+                                ))}
+                              </>
+                            ) : mapMode === "news" ? (
                               <>
                                 <div className="mt-2 text-[color:var(--shell-muted)]">
                                   {pinnedNewsSummary
@@ -4392,7 +4795,7 @@ export default function ClaritasDashboard() {
                                     {role.role_type === "head_of_state"
                                       ? "Head of state"
                                       : "Head of government"}
-                                    : {role.person_name}
+                                    : {getLeadershipDisplayName(role.person_name)}
                                   </div>
                                 ))}
                                 <div className="mt-2 text-[color:var(--shell-muted)]">
@@ -4415,6 +4818,12 @@ export default function ClaritasDashboard() {
                             )}
                           </div>
                         )}
+                        {mapMode === "signals" &&
+                          crossSourceMapData.length === 0 && (
+                            <div className="absolute bottom-4 right-4 rounded border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs text-[color:var(--shell-muted)]">
+                              No linked cross-source signals in this scope.
+                            </div>
+                          )}
                         {mapMode === "news" &&
                           mapBubbleData.length === 0 && (
                             <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-[color:var(--shell-surface)] px-2 py-1 rounded border border-[color:var(--shell-border)]">
@@ -4455,7 +4864,29 @@ export default function ClaritasDashboard() {
                           )}
                       </div>
                       <div className="dashboard-map-footer border-t border-[color:var(--shell-border)] px-3 py-2 text-xs">
-                        {mapMode === "news" ? (
+                        {mapMode === "signals" ? (
+                          <div className="flex flex-wrap items-center gap-2 text-[color:var(--shell-muted)]">
+                            <span className="font-semibold text-[color:var(--shell-ink)]">
+                              Relevance model
+                            </span>
+                            <span>
+                              News 40% · podcast evidence 25% · weather 15% ·
+                              markets 15% · cross-domain confirmation bonus
+                            </span>
+                            {highestSignalCountry && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedCountry(highestSignalCountry.country)
+                                }
+                                className="ml-auto font-semibold text-[color:var(--shell-accent-2)]"
+                              >
+                                Explore #1 {highestSignalCountry.country} ·{" "}
+                                {highestSignalCountry.count}/100
+                              </button>
+                            )}
+                          </div>
+                        ) : mapMode === "news" ? (
                           <>
                             <div className="flex flex-wrap items-center gap-3">
                               <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -4595,6 +5026,13 @@ export default function ClaritasDashboard() {
                           <div className="country-profile-scroll app-scroll-panel min-h-0 flex-1 overflow-y-auto">
                             <div className="country-profile-metrics">
                               <div>
+                                <span>Relevance</span>
+                                <strong>
+                                  {selectedCountryContext.relevanceScore}/100
+                                </strong>
+                                <small>cross-source rank</small>
+                              </div>
+                              <div>
                                 <span>News</span>
                                 <strong>{selectedCountryContext.newsCount}</strong>
                                 <small>mapped stories</small>
@@ -4614,6 +5052,13 @@ export default function ClaritasDashboard() {
                                 </small>
                               </div>
                               <div>
+                                <span>Podcast</span>
+                                <strong>
+                                  {relatedPodcastLink?.signalCount ?? 0}
+                                </strong>
+                                <small>attributed signals</small>
+                              </div>
+                              <div>
                                 <span>Leadership</span>
                                 <strong>
                                   {leadershipSummary.selectedProfile?.roles
@@ -4627,6 +5072,34 @@ export default function ClaritasDashboard() {
                                 <small>linked instruments</small>
                               </div>
                             </div>
+
+                            <section className="country-profile-section">
+                              <div className="country-profile-section-heading">
+                                <ChartNoAxesCombined className="h-4 w-4" />
+                                <span>Why this country is relevant</span>
+                                <small>
+                                  {selectedCountryContext.relevanceScore > 0
+                                    ? "weighted cross-source evidence"
+                                    : "no active linked drivers"}
+                                </small>
+                              </div>
+                              <div className="country-relevance-drivers">
+                                {selectedCountryContext.relevanceDrivers.map(
+                                  (driver) => (
+                                    <span key={`country-driver-${driver}`}>
+                                      {driver}
+                                    </span>
+                                  ),
+                                )}
+                                {selectedCountryContext.relevanceDrivers.length ===
+                                  0 && (
+                                  <div className="product-state">
+                                    No active cross-source drivers for this
+                                    country in the selected scope.
+                                  </div>
+                                )}
+                              </div>
+                            </section>
 
                             <section className="country-profile-section">
                               <div className="country-profile-section-heading">
@@ -4657,6 +5130,42 @@ export default function ClaritasDashboard() {
                                 </strong>
                               </div>
                             </section>
+
+                            {relatedPodcastLink && (
+                              <section className="country-profile-section">
+                                <div className="country-profile-section-heading">
+                                  <Podcast className="h-4 w-4" />
+                                  <span>Podcast evidence</span>
+                                  <small>
+                                    {relatedPodcastLink.episodeIds.size}{" "}
+                                    {relatedPodcastLink.episodeIds.size === 1
+                                      ? "episode"
+                                      : "episodes"}{" "}
+                                    · {relatedPodcastLink.evidenceIds.size} evidence
+                                  </small>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="country-podcast-link"
+                                  onClick={() => setActiveView("podcasts")}
+                                >
+                                  <span>
+                                    <strong>
+                                      {relatedPodcastLink.topSignal?.title ??
+                                        "Linked podcast finding"}
+                                    </strong>
+                                    <small>
+                                      Attributed to{" "}
+                                      {relatedPodcastLink.topEpisode?.feed_title ??
+                                        "podcast source"}
+                                      . Review the transcript evidence before
+                                      treating a claim as verified.
+                                    </small>
+                                  </span>
+                                  <ArrowUpRight className="h-4 w-4" />
+                                </button>
+                              </section>
+                            )}
 
                             <section className="country-profile-section">
                               <div className="country-profile-section-heading">
@@ -4726,7 +5235,9 @@ export default function ClaritasDashboard() {
                                           ? "Head of state"
                                           : "Head of government"}
                                       </span>
-                                      <strong>{role.person_name}</strong>
+                                      <strong>
+                                        {getLeadershipDisplayName(role.person_name)}
+                                      </strong>
                                       <small>
                                         {role.started_at
                                           ? `In office since ${new Date(
@@ -4813,6 +5324,14 @@ export default function ClaritasDashboard() {
                             >
                               Pin leadership
                             </button>
+                            {relatedPodcastLink && (
+                              <button
+                                type="button"
+                                onClick={() => setActiveView("podcasts")}
+                              >
+                                Open podcast evidence
+                              </button>
+                            )}
                           </div>
                         </>
                       ) : (
@@ -4986,207 +5505,56 @@ export default function ClaritasDashboard() {
                             ref={feedRef}
                             className="dashboard-news-stream app-scroll-panel h-full overflow-y-auto"
                           >
-                            {filteredNews.length > 0 && (
-                              <div
-                                className="dashboard-news-columns"
-                                aria-hidden="true"
-                              >
-                                <span>Priority</span>
-                                <span>Time</span>
-                                <span>Place</span>
-                                <span>Headline</span>
-                                <span>Source</span>
-                                <span />
-                              </div>
-                            )}
-                            {filteredNews.length === 0 && (
-                              <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
-                                <div>No news items for the current filters.</div>
-                                <div className="flex flex-wrap items-center gap-2 text-xs">
-                                  {dataWindowPreset !== "all" && (
-                                    <button
-                                      onClick={() => {
-                                        setDataWindowPreset("all");
-                                        setChartRange({});
-                                      }}
-                                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                                    >
-                                      Show all dates
-                                    </button>
-                                  )}
-                                  {newsLoadMode !== "archive" && (
-                                    <button
-                                      onClick={() => void loadNewsData("archive")}
-                                      disabled={isLoadingNews}
-                                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
-                                    >
-                                      {isLoadingNews
-                                        ? "Loading…"
-                                        : "Load all data"}
-                                    </button>
-                                  )}
+                            <PriorityNewsList
+                              items={filteredNews}
+                              selectedId={selectedDashboardNewsId}
+                              primaryCountry={selectedCountry}
+                              secondaryCountry={comparisonCountry}
+                              getImageUrl={(item) =>
+                                imageProxy(getNewsImageUrl(item))
+                              }
+                              getSourceLabel={getSourceLabel}
+                              getCountryName={(iso) =>
+                                countryMeta.get(iso)?.name ?? iso
+                              }
+                              onToggle={(item, iso) => {
+                                const nextId =
+                                  selectedDashboardNewsId === item.id
+                                    ? null
+                                    : item.id;
+                                setSelectedDashboardNewsId(nextId);
+                                if (nextId && iso) setSelectedCountry(iso);
+                              }}
+                              onSelectCountry={setSelectedCountry}
+                              onOpenWorkspace={() => setActiveView("news")}
+                              emptyState={
+                                <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
+                                  <div>No news items for the current filters.</div>
+                                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                                    {dataWindowPreset !== "all" && (
+                                      <button
+                                        onClick={() => {
+                                          setDataWindowPreset("all");
+                                          setChartRange({});
+                                        }}
+                                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                      >
+                                        Show all dates
+                                      </button>
+                                    )}
+                                    {newsLoadMode !== "archive" && (
+                                      <button
+                                        onClick={() => void loadNewsData("archive")}
+                                        disabled={isLoadingNews}
+                                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
+                                      >
+                                        {isLoadingNews ? "Loading…" : "Load all data"}
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
-                            {filteredNews.map((n, index) => {
-                              const img = imageProxy(getNewsImageUrl(n));
-                              const sourceLabel = getSourceLabel(n);
-                              const iso = n.country_iso2?.toUpperCase();
-                              const selectedStory =
-                                selectedDashboardNewsId === n.id;
-                              const isPrimary =
-                                !!selectedCountry &&
-                                iso === selectedCountry.toUpperCase();
-                              const isSecondary =
-                                !!comparisonCountry &&
-                                iso === comparisonCountry.toUpperCase();
-                              return (
-                                <article
-                                  key={n.id}
-                                  className={`dashboard-news-item ${
-                                    selectedStory ? "is-selected" : ""
-                                  } ${
-                                    isPrimary
-                                      ? "is-primary"
-                                      : isSecondary
-                                        ? "is-secondary"
-                                        : ""
-                                  }`}
-                                >
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const nextId = selectedStory ? null : n.id;
-                                      setSelectedDashboardNewsId(nextId);
-                                      if (nextId && iso) {
-                                        setSelectedCountry(iso);
-                                      }
-                                    }}
-                                    className="dashboard-news-summary"
-                                    aria-expanded={selectedStory}
-                                  >
-                                    <span
-                                      className={`news-priority-marker ${
-                                        index < 3 ? "is-high" : ""
-                                      }`}
-                                    >
-                                      {String(index + 1).padStart(2, "0")}
-                                    </span>
-                                    <span className="dashboard-news-time">
-                                      <strong>
-                                        {n.event_time
-                                          ? new Date(
-                                              n.event_time,
-                                            ).toLocaleTimeString([], {
-                                              hour: "2-digit",
-                                              minute: "2-digit",
-                                            })
-                                          : "—"}
-                                      </strong>
-                                      <small>
-                                        {n.event_time
-                                          ? new Date(
-                                              n.event_time,
-                                            ).toLocaleDateString([], {
-                                              month: "short",
-                                              day: "numeric",
-                                            })
-                                          : "No time"}
-                                      </small>
-                                    </span>
-                                    <span className="dashboard-news-country">
-                                      {iso ?? "—"}
-                                    </span>
-                                    <span className="dashboard-news-headline">
-                                      <strong>
-                                        {n.title || n.url || "Untitled"}
-                                      </strong>
-                                      <small>
-                                        {n.summary ??
-                                          "Select for source and country context."}
-                                      </small>
-                                    </span>
-                                    <span className="dashboard-news-source">
-                                      {sourceLabel ?? "Unknown"}
-                                    </span>
-                                    <ChevronDown
-                                      className={`h-4 w-4 ${
-                                        selectedStory ? "rotate-180" : ""
-                                      }`}
-                                    />
-                                  </button>
-
-                                  {selectedStory && (
-                                    <div className="dashboard-news-detail">
-                                      {img && (
-                                        <figure>
-                                          <img
-                                            src={img}
-                                            alt=""
-                                            loading="lazy"
-                                            decoding="async"
-                                            referrerPolicy="no-referrer"
-                                            onError={(e) =>
-                                              (e.currentTarget.style.display =
-                                                "none")
-                                            }
-                                          />
-                                        </figure>
-                                      )}
-                                      <div>
-                                        <div className="dashboard-news-detail-meta">
-                                          <span>{sourceLabel ?? "Unknown source"}</span>
-                                          <span>
-                                            {iso
-                                              ? `${
-                                                  countryMeta.get(iso)?.name ??
-                                                  iso
-                                                } · ${iso}`
-                                              : "Unmapped geography"}
-                                          </span>
-                                          <span>
-                                            {n.event_time
-                                              ? new Date(
-                                                  n.event_time,
-                                                ).toLocaleString()
-                                              : "Timestamp unavailable"}
-                                          </span>
-                                        </div>
-                                        <p>
-                                          {n.summary ??
-                                            "No publisher summary is available. Open the source or the News workspace for the full story."}
-                                        </p>
-                                        {iso && isPrimary && (
-                                          <div className="dashboard-news-link-state">
-                                            <span className="live-dot" />
-                                            Map, country profile, and trend are
-                                            linked to {iso}.
-                                          </div>
-                                        )}
-                                        <div className="dashboard-news-actions">
-                                          {n.url && (
-                                            <a
-                                              href={n.url}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                            >
-                                              Open source
-                                              <ArrowUpRight className="h-3.5 w-3.5" />
-                                            </a>
-                                          )}
-                                          <button
-                                            type="button"
-                                            onClick={() => setActiveView("news")}
-                                          >
-                                            Analyze in News
-                                          </button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </article>
-                              );
-                            })}
+                              }
+                            />
                           </div>
                         ) : listMode === "weather" ? (
                           <div className="app-scroll-panel h-full overflow-y-auto p-4 space-y-4">
@@ -5360,11 +5728,13 @@ export default function ClaritasDashboard() {
                             Expanded map
                           </div>
                           <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                            {mapMode === "news"
-                              ? "News coverage by country"
-                              : mapMode === "weather"
-                                ? "Weather observations by country"
-                                : "Current country leadership"}
+                            {mapMode === "signals"
+                              ? "Cross-source signal relevance"
+                              : mapMode === "news"
+                                ? "News coverage by country"
+                                : mapMode === "weather"
+                                  ? "Weather observations by country"
+                                  : "Current country leadership"}
                           </div>
                         </div>
                         <button
@@ -5386,7 +5756,17 @@ export default function ClaritasDashboard() {
                             primaryCountry={selectedCountry}
                             secondaryCountry={comparisonCountry}
                             pinnedCountry={pinnedCountry}
-                            scale={mapMode === "news" ? "log" : "linear"}
+                            featuredCountry={
+                              mapMode === "signals"
+                                ? highestSignalCountry?.country
+                                : null
+                            }
+                            featuredLabel="Highest signal relevance"
+                            scale={
+                              mapMode === "news" || mapMode === "signals"
+                                ? "log"
+                                : "linear"
+                            }
                             legendLabel={activeMapLegendLabel}
                           />
                         </div>
@@ -5566,6 +5946,8 @@ export default function ClaritasDashboard() {
                           primaryCountry={selectedCountry}
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
+                          featuredCountry={highestNewsCountry?.country}
+                          featuredLabel="Highest story concentration"
                           scale="log"
                           legendLabel="Story concentration"
                         />
@@ -5584,79 +5966,37 @@ export default function ClaritasDashboard() {
                     </div>
                     <div
                       ref={feedRef}
-                      className="app-scroll-panel h-[min(64vh,680px)] min-h-[24rem] overflow-y-auto p-3 space-y-3"
+                      className="app-scroll-panel h-[min(64vh,680px)] min-h-[24rem] overflow-y-auto"
                     >
-                      {newsPageItems.length === 0 && (
-                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
-                          No stories match the current filters.
-                        </div>
-                      )}
-                      {newsPageItems.map((item) => {
-                        const img = imageProxy(getNewsImageUrl(item));
-                        const sourceLabel = getSourceLabel(item);
-                        const iso = item.country_iso2?.toUpperCase();
-                        const selected = iso && selectedCountry?.toUpperCase() === iso;
-                        const storyUrl = item.url ?? "#";
-                        return (
-                          <article
-                            key={item.id}
-                            className={`analytics-row news-row w-full rounded-lg px-3 py-3 text-left transition ${
-                              selected
-                                ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                          >
-                            <div className="flex gap-3 sm:items-start">
-                              <div className="row-thumbnail relative h-14 w-16 overflow-hidden rounded-md bg-[color:var(--shell-bg-elevated)] flex-none">
-                                {img && (
-                                  <img
-                                    src={img}
-                                    alt={item.title ?? "news thumbnail"}
-                                    loading="lazy"
-                                    decoding="async"
-                                    referrerPolicy="no-referrer"
-                                    className="h-full w-full object-cover"
-                                  />
-                                )}
-                              </div>
-                              <div className="min-w-0">
-                                <a
-                                  href={storyUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-base font-semibold leading-6 text-[color:var(--shell-ink)] hover:underline"
-                                >
-                                  {item.title || item.url || "Untitled"}
-                                </a>
-                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
-                                  {sourceLabel && (
-                                    <span className="rounded-full border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] px-2 py-0.5 text-[color:var(--shell-ink)]">
-                                      {sourceLabel}
-                                    </span>
-                                  )}
-                                  {iso && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setSelectedCountry(iso)}
-                                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
-                                    >
-                                      {iso}
-                                    </button>
-                                  )}
-                                  {item.event_time && (
-                                    <span>{new Date(item.event_time).toLocaleString()}</span>
-                                  )}
-                                </div>
-                                {item.summary && (
-                                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-[color:var(--shell-muted)]">
-                                    {item.summary}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </article>
-                        );
-                      })}
+                      <PriorityNewsList
+                        items={newsPageItems}
+                        selectedId={selectedDashboardNewsId}
+                        primaryCountry={selectedCountry}
+                        secondaryCountry={comparisonCountry}
+                        getImageUrl={(item) =>
+                          imageProxy(getNewsImageUrl(item))
+                        }
+                        getSourceLabel={getSourceLabel}
+                        getCountryName={(iso) =>
+                          countryMeta.get(iso)?.name ?? iso
+                        }
+                        onToggle={(item, iso) => {
+                          const nextId =
+                            selectedDashboardNewsId === item.id ? null : item.id;
+                          setSelectedDashboardNewsId(nextId);
+                          if (nextId && iso) setSelectedCountry(iso);
+                        }}
+                        onSelectCountry={(iso) => {
+                          setSelectedCountry(iso);
+                          setMapMode("signals");
+                          setActiveView("dashboard");
+                        }}
+                        emptyState={
+                          <div className="m-3 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
+                            No stories match the current filters.
+                          </div>
+                        }
+                      />
                     </div>
                   </div>
                 </section>
@@ -6279,6 +6619,14 @@ export default function ClaritasDashboard() {
                     const links = getPodcastExternalLinks(episode);
                     const image = imageProxy(episode.image_url || episode.feed_image_url || null);
                     const duration = formatPodcastDuration(episode.duration_seconds);
+                    const linkedCountries = Array.from(
+                      podcastCountryLinks.entries(),
+                    )
+                      .filter(([, linkage]) =>
+                        linkage.episodeIds.has(episode.id),
+                      )
+                      .map(([iso]) => iso)
+                      .sort();
                     return (
                       <article key={episode.id} className={`${cardBase} overflow-hidden`}>
                         <div className="grid gap-4 p-4 md:grid-cols-[8rem_minmax(0,1fr)]">
@@ -6311,6 +6659,21 @@ export default function ClaritasDashboard() {
                               <span className="rounded-full border border-[color:var(--shell-border)] px-2 py-0.5">
                                 Transcript {episode.transcript_status}
                               </span>
+                              {linkedCountries.map((iso) => (
+                                <button
+                                  key={`podcast-${episode.id}-${iso}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedCountry(iso);
+                                    setMapMode("signals");
+                                    setActiveView("dashboard");
+                                  }}
+                                  className="rounded-full border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] px-2 py-0.5 font-semibold text-[color:var(--shell-ink)]"
+                                  title="Open this podcast-to-country linkage on the signal map"
+                                >
+                                  Linked {iso}
+                                </button>
+                              ))}
                             </div>
                             <h2 className="mt-2 text-lg font-semibold leading-6 text-[color:var(--shell-ink)]">
                               {episode.title}
@@ -7864,6 +8227,17 @@ export default function ClaritasDashboard() {
                               Default map view
                             </div>
                             <div className="mt-2 flex items-center gap-2 text-xs">
+                              <button
+                                type="button"
+                                onClick={() => setMapMode("signals")}
+                                className={`rounded-full border px-3 py-1 ${
+                                  mapMode === "signals"
+                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
+                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
+                                }`}
+                              >
+                                Signals
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => {

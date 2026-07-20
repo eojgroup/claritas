@@ -17,6 +17,7 @@ export type PodcastSignal = {
   summary?: string | null;
   entities: string[];
   topics: string[];
+  countries?: string[];
   risk_level?: "low" | "medium" | "high" | "critical" | null;
   confidence?: number | null;
 };
@@ -225,6 +226,7 @@ export type AdminDailyBriefingGenerationSummary = {
     podcasts: number;
     markets: number;
     weather: number;
+    leadership: number;
   };
   source_window_start: string;
   source_window_end: string;

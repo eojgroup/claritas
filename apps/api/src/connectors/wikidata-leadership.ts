@@ -2,7 +2,9 @@ import { query, withTransaction } from "../db";
 
 const WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql";
 const WIKIDATA_ENTITY_URL = "https://www.wikidata.org/wiki";
+const WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php";
 const MIN_EXPECTED_COUNTRIES = 150;
+const entityLabelCache = new Map<string, string>();
 
 const LEADERSHIP_QUERY = `
 PREFIX schema: <http://schema.org/>
@@ -119,6 +121,17 @@ type SparqlResponse = {
   };
 };
 
+type WikidataEntityResponse = {
+  entities?: Record<
+    string,
+    {
+      labels?: {
+        en?: { value?: string };
+      };
+    }
+  >;
+};
+
 type MutableCountryLeadership = {
   country: string;
   country_name: string;
@@ -150,6 +163,59 @@ function entityId(value: string | undefined): string | null {
   if (!value) return null;
   const match = value.match(/\/(Q\d+)$/);
   return match?.[1] ?? null;
+}
+
+function isEntityIdLabel(value: string | null | undefined): boolean {
+  return !value || /^Q\d+$/i.test(value.trim());
+}
+
+async function resolveEntityLabels(ids: string[]): Promise<Map<string, string>> {
+  const uniqueIds = Array.from(new Set(ids.filter((id) => /^Q\d+$/.test(id))));
+  const resolved = new Map<string, string>();
+  uniqueIds.forEach((id) => {
+    const cached = entityLabelCache.get(id);
+    if (cached) resolved.set(id, cached);
+  });
+  const missing = uniqueIds.filter((id) => !resolved.has(id));
+
+  for (let offset = 0; offset < missing.length; offset += 50) {
+    const batch = missing.slice(offset, offset + 50);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const url = new URL(WIKIDATA_API_URL);
+      url.searchParams.set("action", "wbgetentities");
+      url.searchParams.set("format", "json");
+      url.searchParams.set("props", "labels");
+      url.searchParams.set("languages", "en|mul|es");
+      url.searchParams.set("languagefallback", "1");
+      url.searchParams.set("ids", batch.join("|"));
+      const response = await fetch(url, {
+        headers: {
+          accept: "application/json",
+          "user-agent":
+            process.env.WIKIDATA_USER_AGENT?.trim() ||
+            "Claritas/0.1 (https://claritas.info; engineering@claritas.info)",
+        },
+        signal: controller.signal,
+      });
+      if (!response.ok) continue;
+      const payload = (await response.json()) as WikidataEntityResponse;
+      batch.forEach((id) => {
+        const label = payload.entities?.[id]?.labels?.en?.value?.trim();
+        if (!isEntityIdLabel(label)) {
+          entityLabelCache.set(id, label!);
+          resolved.set(id, label!);
+        }
+      });
+    } catch {
+      // The leadership response retains a safe unavailable-name fallback.
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return resolved;
 }
 
 function validIsoTimestamp(value: string | undefined): string | null {
@@ -231,7 +297,23 @@ async function fetchLeadershipBindings(): Promise<LeadershipBinding[]> {
       throw new Error(`Wikidata query failed (${response.status}): ${details}`);
     }
     const payload = (await response.json()) as SparqlResponse;
-    return payload.results?.bindings ?? [];
+    const bindings = payload.results?.bindings ?? [];
+    const unresolvedIds = bindings.flatMap((binding) => {
+      const id = entityId(binding.leader?.value);
+      return id && isEntityIdLabel(binding.leaderLabel?.value) ? [id] : [];
+    });
+    if (unresolvedIds.length === 0) return bindings;
+    const labels = await resolveEntityLabels(unresolvedIds);
+    return bindings.map((binding) => {
+      const id = entityId(binding.leader?.value);
+      const resolvedLabel = id ? labels.get(id) : undefined;
+      return resolvedLabel
+        ? {
+            ...binding,
+            leaderLabel: { type: "literal", value: resolvedLabel, "xml:lang": "en" },
+          }
+        : binding;
+    });
   } finally {
     clearTimeout(timeout);
   }
@@ -245,8 +327,11 @@ function normalizeBindings(bindings: LeadershipBinding[]): CountryLeadership[] {
     const countryName = binding.countryLabel?.value.trim();
     const countryId = entityId(binding.country?.value);
     const roleType = binding.role?.value as LeadershipRoleType | undefined;
-    const personName = binding.leaderLabel?.value.trim();
+    const rawPersonName = binding.leaderLabel?.value.trim();
     const personId = entityId(binding.leader?.value);
+    const personName = isEntityIdLabel(rawPersonName)
+      ? "Name unavailable"
+      : rawPersonName;
 
     if (
       !country ||
@@ -453,6 +538,26 @@ export async function getCountryLeadershipLatest(): Promise<CountryLeadership[]>
      ORDER BY cl.country_name, clr.role_type, clr.person_name`
   );
 
+  const unresolvedLabels = await resolveEntityLabels(
+    rows.flatMap((row) =>
+      row.person_wikidata_id && isEntityIdLabel(row.person_name)
+        ? [row.person_wikidata_id]
+        : []
+    )
+  );
+  if (unresolvedLabels.size > 0) {
+    await Promise.all(
+      Array.from(unresolvedLabels.entries()).map(([personId, personName]) =>
+        query(
+          `UPDATE country_leadership_role
+           SET person_name = $2, updated_at = now()
+           WHERE person_wikidata_id = $1
+             AND person_name ~ '^Q[0-9]+$'`,
+          [personId, personName]
+        )
+      )
+    );
+  }
   const countries = new Map<string, CountryLeadership>();
   for (const row of rows) {
     const country = row.country.trim().toUpperCase();
@@ -477,7 +582,9 @@ export async function getCountryLeadershipLatest(): Promise<CountryLeadership[]>
     ) {
       current.roles.push({
         role_type: row.role_type,
-        person_name: row.person_name,
+        person_name: isEntityIdLabel(row.person_name)
+          ? unresolvedLabels.get(row.person_wikidata_id) ?? "Name unavailable"
+          : row.person_name,
         person_wikidata_id: row.person_wikidata_id,
         started_at: timestampToString(row.started_at),
         source_url: row.role_source_url,
@@ -485,5 +592,8 @@ export async function getCountryLeadershipLatest(): Promise<CountryLeadership[]>
     }
     countries.set(country, current);
   }
-  return Array.from(countries.values());
+  return Array.from(countries.values()).map((country) => ({
+    ...country,
+    summary: buildSummary(country.country_name, country.government_type, country.roles),
+  }));
 }

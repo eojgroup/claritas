@@ -900,6 +900,7 @@ function parseBriefingGenerationOptions(briefingDate, raw) {
         maxPodcastItems: parseOptionalPositiveInt(body.max_podcast_items ?? body.maxPodcastItems, "max_podcast_items", 40),
         maxMarketItems: parseOptionalPositiveInt(body.max_market_items ?? body.maxMarketItems, "max_market_items", 60),
         maxWeatherItems: parseOptionalPositiveInt(body.max_weather_items ?? body.maxWeatherItems, "max_weather_items", 80),
+        maxLeadershipItems: parseOptionalPositiveInt(body.max_leadership_items ?? body.maxLeadershipItems, "max_leadership_items", 250),
     };
 }
 function sanitizeAutomationPayload(value) {
@@ -1212,7 +1213,11 @@ app.get("/api/podcasts", requireAuthenticated, async (req, res) => {
            SELECT jsonb_agg(jsonb_build_object(
              'id', sr.id, 'type', sr.signal_type, 'title', sr.title, 'summary', sr.summary,
              'entities', sr.entities, 'topics', sr.topics, 'risk_level', sr.risk_level,
-             'confidence', sr.confidence
+             'confidence', sr.confidence,
+             'countries', CASE
+               WHEN jsonb_typeof(sr.metadata->'countries') = 'array' THEN sr.metadata->'countries'
+               ELSE '[]'::jsonb
+             END
            ) ORDER BY sr.id)
            FROM (
              SELECT s.* FROM intelligence_signal s

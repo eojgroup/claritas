@@ -1404,7 +1404,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                       Sources: {generationSummary.source_counts.news} news ·{" "}
                       {generationSummary.source_counts.podcasts ?? 0} podcasts ·{" "}
                       {generationSummary.source_counts.markets} markets ·{" "}
-                      {generationSummary.source_counts.weather} weather
+                      {generationSummary.source_counts.weather} weather ·{" "}
+                      {generationSummary.source_counts.leadership ?? 0} leadership profiles
                     </div>
                     <div>
                       LLM: {generationSummary.provider}
