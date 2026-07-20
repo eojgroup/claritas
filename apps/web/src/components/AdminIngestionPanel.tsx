@@ -847,8 +847,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const chartGridColor = dark ? "#334155" : "#e2e8f0";
 
   return (
-    <div className="admin-panel grid w-full min-w-0 max-w-full gap-3 sm:gap-4">
-      <section className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+    <div className="admin-panel ingestion-control-room grid w-full min-w-0 max-w-full gap-3 sm:gap-4">
+      <section className="admin-section admin-manual-runs min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div>
             <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">

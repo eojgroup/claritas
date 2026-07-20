@@ -14,6 +14,7 @@ struct DashboardView: View {
     @State private var minTemp: String = ""
     @State private var marketEarningsWindowDays: Int = 14
     @State private var hasAppliedStoredModes: Bool = false
+    @State private var showMap: Bool = false
 
     enum ListMode: String, CaseIterable { case news, weather, market, leadership }
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
@@ -87,20 +88,15 @@ struct DashboardView: View {
 
                     if section == .overview {
                         DashboardCard {
-                            VStack(alignment: .leading, spacing: 12) {
-                                HStack {
-                                    Text("Map: \(mapTitle)")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Picker("Mode", selection: $mapMode) {
+                            DisclosureGroup(isExpanded: $showMap) {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Picker("Map mode", selection: $mapMode) {
                                         Text("News").tag(ListMode.news)
                                         Text("Weather").tag(ListMode.weather)
                                         Text("Markets").tag(ListMode.market)
                                         Text("Leaders").tag(ListMode.leadership)
                                     }
                                     .pickerStyle(.segmented)
-                                    .frame(maxWidth: 300)
                                     .onChange(of: mapMode) { newValue in
                                         if newValue != .leadership {
                                             listMode = newValue
@@ -141,6 +137,16 @@ struct DashboardView: View {
                                         .padding(10)
                                         .background(.ultraThinMaterial, in: Capsule())
                                     }
+                                }
+                                .padding(.top, 12)
+                            } label: {
+                                HStack {
+                                    Label("Geospatial view", systemImage: "globe.europe.africa")
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    Text(showMap ? mapTitle : "Open on demand")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -753,6 +759,7 @@ struct NewsWorkspaceView: View {
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var query: String = ""
     @State private var sourceFilter: String = "all"
     @State private var countryFilter: String = ""
@@ -928,6 +935,10 @@ struct NewsWorkspaceView: View {
                         }
                     }
 
+                    if horizontalSizeClass == .compact {
+                        storyPanel
+                    }
+
                     if !timelineData.isEmpty || !sourceData.isEmpty {
                         VStack(spacing: 12) {
                             BrandCard {
@@ -962,14 +973,8 @@ struct NewsWorkspaceView: View {
                         }
                     }
 
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Stories")
-                                .font(.headline)
-                            NewsListView(items: rows) { iso in
-                                model.selectedCountry = iso
-                            }
-                        }
+                    if horizontalSizeClass != .compact {
+                        storyPanel
                     }
                 }
                 .padding(.horizontal, 20)
@@ -984,6 +989,18 @@ struct NewsWorkspaceView: View {
         }
         .onChange(of: loadMode) { next in
             Task { await model.refreshNews(mode: next) }
+        }
+    }
+
+    private var storyPanel: some View {
+        BrandCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Stories")
+                    .font(.headline)
+                NewsListView(items: rows) { iso in
+                    model.selectedCountry = iso
+                }
+            }
         }
     }
 }
@@ -1001,6 +1018,7 @@ struct WeatherWorkspaceView: View {
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var query: String = ""
     @State private var conditionFilter: String = "all"
     @State private var countryFilter: String = ""
@@ -1165,6 +1183,10 @@ struct WeatherWorkspaceView: View {
                         }
                     }
 
+                    if horizontalSizeClass == .compact {
+                        snapshotsPanel
+                    }
+
                     if !temperatureLeaders.isEmpty || !scatterRows.isEmpty {
                         VStack(spacing: 12) {
                             BrandCard {
@@ -1199,23 +1221,29 @@ struct WeatherWorkspaceView: View {
                         }
                     }
 
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Snapshots")
-                                .font(.headline)
-                            WeatherListView(
-                                items: rows,
-                                minTemp: $minTempText,
-                                isRefreshing: model.isRefreshingWeather,
-                                onRefresh: { Task { await model.refreshWeatherNow() } },
-                                onSelectCountry: { iso in model.selectedCountry = iso },
-                                showsControls: false
-                            )
-                        }
+                    if horizontalSizeClass != .compact {
+                        snapshotsPanel
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 24)
+            }
+        }
+    }
+
+    private var snapshotsPanel: some View {
+        BrandCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Snapshots")
+                    .font(.headline)
+                WeatherListView(
+                    items: rows,
+                    minTemp: $minTempText,
+                    isRefreshing: model.isRefreshingWeather,
+                    onRefresh: { Task { await model.refreshWeatherNow() } },
+                    onSelectCountry: { iso in model.selectedCountry = iso },
+                    showsControls: false
+                )
             }
         }
     }
@@ -1233,6 +1261,7 @@ struct MarketsWorkspaceView: View {
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var query: String = ""
     @State private var exchangeFilter: String = "all"
     @State private var countryFilter: String = "all"
@@ -1450,6 +1479,10 @@ struct MarketsWorkspaceView: View {
                         }
                     }
 
+                    if horizontalSizeClass == .compact {
+                        marketTriagePanel
+                    }
+
                     BrandCard {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Filters")
@@ -1540,8 +1573,9 @@ struct MarketsWorkspaceView: View {
                         )
                     }
 
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 12) {
+                    if horizontalSizeClass != .compact {
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 12) {
                             Text("Watchlist")
                                 .font(.headline)
                             MarketQuoteListView(
@@ -1556,11 +1590,11 @@ struct MarketsWorkspaceView: View {
                                     }
                                 }
                             )
+                            }
                         }
-                    }
 
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 12) {
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 12) {
                             Text("Symbol correlation")
                                 .font(.headline)
                             if let selectedQuote {
@@ -1605,6 +1639,7 @@ struct MarketsWorkspaceView: View {
                                 Text("Select a symbol to relate market movement with country weather and recent stories.")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
+                            }
                             }
                         }
                     }
@@ -1696,6 +1731,66 @@ struct MarketsWorkspaceView: View {
         }
     }
 
+    private var marketTriagePanel: some View {
+        BrandCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(model.selectedSymbol == nil ? "Watchlist" : "Selected symbol")
+                    .font(.headline)
+
+                if let selectedQuote {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(selectedQuote.symbol)
+                                .font(.title2.weight(.semibold))
+                            Text(selectedQuote.company_name ?? selectedQuote.exchange ?? "Market")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(selectedQuote.price.map { String(format: "%.2f", $0) } ?? "—")
+                                .font(.title3.weight(.semibold))
+                                .monospacedDigit()
+                            Text(changeText(for: selectedQuote))
+                                .font(.subheadline.weight(.semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(changeColor(for: selectedQuote))
+                        }
+                    }
+
+                    ProfileFactRow(
+                        label: "Context",
+                        value: "\(selectedQuote.country?.uppercased() ?? "—") · \(relatedWeather.map { "\(compactNumber($0.temp_c))°C \($0.weather_main ?? "")" } ?? "No weather")"
+                    )
+
+                    if let headline = relatedNews.first?.title {
+                        Text(headline)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Divider()
+                }
+
+                MarketQuoteListView(
+                    quotes: Array(rows.prefix(8)),
+                    selectedSymbol: model.selectedSymbol,
+                    isRefreshing: model.isRefreshingMarketQuotes,
+                    onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
+                    onSelectSymbol: { symbol in
+                        model.selectedSymbol = symbol
+                        if let country = model.marketQuotes.first(where: {
+                            $0.symbol.uppercased() == symbol.uppercased()
+                        })?.country {
+                            model.selectedCountry = country.uppercased()
+                        }
+                    }
+                )
+            }
+        }
+    }
+
     private func changeText(for quote: MarketQuote) -> String {
         let value = quote.percent_change ?? quote.change ?? 0
         return "\(value >= 0 ? "+" : "")\(value.formatted(.number.precision(.fractionLength(2))))%"
@@ -1714,66 +1809,93 @@ struct PoliciesWorkspaceView: View {
     var body: some View {
         BrandBackground {
             ScrollView {
-                VStack(spacing: 18) {
-                    BrandCard {
-                        BrandSectionHeader(
-                            kicker: "Policies",
-                            title: "Policies and usage guidelines",
-                            detail: "Review the same policy summaries and brand palette guidance available on web."
-                        )
-                    }
+                VStack(alignment: .leading, spacing: 0) {
+                    BrandSectionHeader(
+                        kicker: "Reference",
+                        title: "Policies and usage guidelines",
+                        detail: "Privacy, terms, data handling, and product governance in a reading-first format."
+                    )
+                    .padding(.bottom, 20)
 
-                    ForEach(legalPolicies) { policy in
-                        BrandCard {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text(policy.title)
-                                    .font(.title3.weight(.semibold))
-                                Text(policy.intro)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-
-                                VStack(alignment: .leading, spacing: 10) {
-                                    ForEach(policy.items, id: \.self) { item in
-                                        HStack(alignment: .top, spacing: 10) {
-                                            Circle()
-                                                .fill(ClaritasPalette.darkBlue.opacity(0.75))
-                                                .frame(width: 7, height: 7)
-                                                .padding(.top, 5)
-                                            Text(item)
-                                                .font(.footnote)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(legalPolicies) { policy in
+                                NavigationLink {
+                                    PolicyDetailView(policy: policy)
+                                } label: {
+                                    Text(policy.title)
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 12)
+                                        .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                                        .background(
+                                            ClaritasPalette.shellSurface(for: colorScheme),
+                                            in: Capsule()
+                                        )
                                 }
-
-                                Text(policy.note)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                .buttonStyle(.plain)
                             }
                         }
                     }
+                    .padding(.bottom, 20)
 
-                    BrandCard {
+                    ForEach(Array(legalPolicies.enumerated()), id: \.element.id) { index, policy in
                         VStack(alignment: .leading, spacing: 14) {
-                            BrandSectionHeader(
-                                kicker: "Palette",
-                                title: "Claritas colour reference",
-                                detail: "The native app now uses the same shell colours and accents as the web product."
-                            )
+                            Text(String(format: "%02d", index + 1))
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                            Text(policy.title)
+                                .font(.title2.weight(.semibold))
+                            Text(policy.intro)
+                                .font(.body)
+                                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
 
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
-                                BrandSwatch(name: "Command Navy", hex: "#172F42", color: ClaritasPalette.darkBlue)
-                                BrandSwatch(name: "Signal Blue", hex: "#3E6A80", color: ClaritasPalette.dataBlue(for: colorScheme))
-                                BrandSwatch(name: "Shell Bronze", hex: "#E6A06A", color: ClaritasPalette.orange)
-                                BrandSwatch(name: "Warm Surface", hex: "#FFFAF1", color: Color(hex: "#FFFAF1"))
-                                BrandSwatch(name: "Muted Text", hex: "#53616A", color: ClaritasPalette.grey)
-                                BrandSwatch(name: "Primary Ink", hex: "#172F42", color: ClaritasPalette.text)
+                            ForEach(policy.items, id: \.self) { item in
+                                HStack(alignment: .top, spacing: 10) {
+                                    Circle()
+                                        .fill(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                                        .frame(width: 6, height: 6)
+                                        .padding(.top, 7)
+                                    Text(item)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
+
+                            Text(policy.note)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    ClaritasPalette.shellAccent(for: colorScheme).opacity(0.08),
+                                    in: RoundedRectangle(cornerRadius: ClaritasLayout.controlRadius)
+                                )
+                        }
+                        .padding(.vertical, 24)
+                        .overlay(alignment: .top) {
+                            Divider()
                         }
                     }
+
+                    DisclosureGroup("Claritas colour reference") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
+                            BrandSwatch(name: "Command Navy", hex: "#172F42", color: ClaritasPalette.darkBlue)
+                            BrandSwatch(name: "Signal Blue", hex: "#3E6A80", color: ClaritasPalette.dataBlue(for: colorScheme))
+                            BrandSwatch(name: "Shell Bronze", hex: "#E6A06A", color: ClaritasPalette.orange)
+                            BrandSwatch(name: "Warm Surface", hex: "#FFFAF1", color: Color(hex: "#FFFAF1"))
+                            BrandSwatch(name: "Muted Text", hex: "#53616A", color: ClaritasPalette.grey)
+                            BrandSwatch(name: "Primary Ink", hex: "#172F42", color: ClaritasPalette.text)
+                        }
+                        .padding(.top, 14)
+                    }
+                    .font(.headline)
+                    .padding(.vertical, 20)
                 }
-                .padding(.horizontal, 20)
+                .frame(maxWidth: 760, alignment: .leading)
+                .padding(.horizontal, 24)
                 .padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
             }
         }
     }

@@ -39,10 +39,10 @@ struct WatchCard<Content: View>: View {
         content
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(WatchPalette.forest, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 0.5)
             )
     }
 }
@@ -52,7 +52,7 @@ struct WatchSectionLabel: View {
     let icon: String
 
     var body: some View {
-        Label(title.uppercased(), systemImage: icon)
+        Label(title, systemImage: icon)
             .font(.caption2.weight(.semibold))
             .foregroundStyle(WatchPalette.sage)
     }

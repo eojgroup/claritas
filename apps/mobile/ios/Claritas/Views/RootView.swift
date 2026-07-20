@@ -51,7 +51,7 @@ struct RootView: View {
     @State private var tab: Tab = .dashboard
     @State private var sidebarSelection: Tab? = .overview
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @AppStorage("THEME_DARK") private var dark: Bool = false
+    @AppStorage("THEME_DARK") private var dark: Bool = true
 
     var body: some View {
         Group {
@@ -84,6 +84,19 @@ struct RootView: View {
                 await model.refreshMarketStatus(forceRefresh: true)
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
+            guard let destination = note.object as? String else { return }
+            let next: Tab
+            switch destination {
+            case "news": next = .news
+            case "weather": next = .weather
+            case "markets": next = .markets
+            case "briefing": next = .briefing
+            default: next = .dashboard
+            }
+            tab = next
+            sidebarSelection = next
         }
     }
 
@@ -253,7 +266,7 @@ struct RootView: View {
 }
 
 struct ThemeToggle: View {
-    @AppStorage("THEME_DARK") private var dark: Bool = false
+    @AppStorage("THEME_DARK") private var dark: Bool = true
 
     var body: some View {
         Button(action: { dark.toggle() }) {
@@ -1148,6 +1161,7 @@ private struct AdminIngestionPanelView: View {
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var runs: [AdminIngestionRun] = []
     @State private var selectedRunId: Int?
@@ -1242,7 +1256,8 @@ private struct AdminIngestionPanelView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            AdminCard {
+            if horizontalSizeClass == .regular {
+                AdminCard {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Trigger runs")
                         .font(.headline)
@@ -1351,10 +1366,30 @@ private struct AdminIngestionPanelView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                AdminCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Status-only mobile controls", systemImage: "lock.shield")
+                            .font(.headline)
+                        Text("Manual triggers, automation rules, and raw payload editing are available on iPad and desktop.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            Task { await refreshOverview(silent: false) }
+                        } label: {
+                            Label("Refresh service health", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isLoadingOverview)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
-            AdminCard {
-                VStack(alignment: .leading, spacing: 12) {
+            if horizontalSizeClass == .regular {
+                AdminCard {
+                    VStack(alignment: .leading, spacing: 12) {
                     Text("Pipeline automation")
                         .font(.headline)
                     Text("Scheduler + intelligent trigger controls")
@@ -1541,8 +1576,9 @@ private struct AdminIngestionPanelView: View {
                                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             AdminCard {

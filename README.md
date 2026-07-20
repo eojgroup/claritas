@@ -36,7 +36,7 @@ Claritas targets an enterprise architecture on Google Cloud Platform with a shar
 
 Architecture and product design references:
 
-- [Cross-device architecture and design](docs/architecture/cross-device-design.md): shared information architecture, design tokens, and intended layouts for web, iPhone, iPad, and Apple Watch.
+- [UI architecture and cross-device design](docs/architecture/cross-device-design.md): analytics-first hierarchy, data-domain roles, design tokens, page archetypes, and adaptive rules for web, iPhone, iPad, and Apple Watch.
 - [Business capabilities](docs/architecture/capabilities.md): platform capability map.
 
 ### 1) Identity and Access

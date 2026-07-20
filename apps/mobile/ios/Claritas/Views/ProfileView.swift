@@ -23,7 +23,7 @@ struct ProfileView: View {
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("THEME_DARK") private var dark: Bool = false
+    @AppStorage("THEME_DARK") private var dark: Bool = true
     @AppStorage("DEFAULT_MAP_MODE") private var defaultMapMode: String = "news"
     @AppStorage("DEFAULT_LIST_MODE") private var defaultListMode: String = "news"
     @State private var isSigningOut: Bool = false
