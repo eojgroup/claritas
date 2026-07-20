@@ -37,20 +37,21 @@ struct PadOverviewView: View {
                     commandHeader
                     metrics
 
-                    Grid(horizontalSpacing: 16, verticalSpacing: 16) {
-                        GridRow {
-                            briefingPanel
-                                .gridCellColumns(2)
-                            focusPanel
+                    HStack(alignment: .top, spacing: 16) {
+                        briefingPanel
+                            .frame(maxWidth: .infinity, alignment: .top)
+                        focusPanel
+                            .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
+                    }
+
+                    HStack(alignment: .top, spacing: 16) {
+                        newsPanel
+                            .frame(maxWidth: .infinity, alignment: .top)
+                        VStack(spacing: 16) {
+                            marketPanel
+                            weatherPanel
                         }
-                        GridRow {
-                            newsPanel
-                                .gridCellColumns(2)
-                            VStack(spacing: 16) {
-                                marketPanel
-                                weatherPanel
-                            }
-                        }
+                        .frame(minWidth: 290, idealWidth: 320, maxWidth: 360)
                     }
                 }
                 .padding(22)
@@ -61,13 +62,12 @@ struct PadOverviewView: View {
     private var commandHeader: some View {
         HStack(alignment: .center, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("STRATEGIC INTELLIGENCE")
-                    .font(.caption2.weight(.semibold))
-                    .tracking(3)
+                Text("Tablet review workspace")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                Text("Global signal desk")
+                Text("Operational signal review")
                     .font(.largeTitle.weight(.semibold))
-                Text("A tablet command center for briefings, live intelligence, markets, and weather.")
+                Text("Two-stage review across briefing, news, podcast evidence, markets, weather, and country leadership.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -87,9 +87,10 @@ struct PadOverviewView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
+            .controlSize(.large)
         }
         .padding(20)
-        .brandGlass(cornerRadius: 18, elevated: true)
+        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
     }
 
     private var metrics: some View {

@@ -1,367 +1,348 @@
-# Claritas Cross-Device Architecture and Design
+# Claritas UI Architecture and Cross-Device Design
 
-This document is the source of truth for Claritas product layout across web, iPhone, iPad, and Apple Watch. It is intentionally written in Markdown so design decisions can be reviewed, versioned, and changed with the application code.
+This document is the source of truth for the Claritas product interface across web, iPhone, iPad, and Apple Watch. It describes the system implemented in `apps/web` and `apps/mobile/ios`, not a screenshot-specific layout.
 
-## Goals
+## Objective
 
-- Keep one product model across every device: briefing, signals, markets, weather, account, and operations.
-- Use platform-native navigation on each device while preserving the same information architecture.
-- Keep the visual language aligned through shared color roles, spacing roles, and screen responsibilities.
-- Make iPad a native regular-width experience inside the universal iOS app, not a separate product.
-- Treat Apple Watch as a companion surface embedded with the iOS app, focused on fast glanceable workflows.
+Claritas is an **analytics-first operational workspace**. The interface helps an operator answer four questions in order:
 
-## Product Architecture
+1. What changed?
+2. Where did it change?
+3. Why does it matter?
+4. What needs attention?
+
+The system is dense where comparison benefits from density and quiet where reading, configuration, or account management benefits from focus. It deliberately avoids using an equally weighted card grid for every job.
+
+## Product and Data Model
+
+The clients share one API and one selection model. A selected country or symbol should carry into relevant views until the user clears it.
 
 ```mermaid
 flowchart LR
-  API[Claritas API] --> Web[Web app]
-  API --> IOS[Universal iOS app]
-  IOS --> Phone[iPhone compact UI]
-  IOS --> Pad[iPad regular-width UI]
-  IOS --> Watch[Embedded watchOS companion]
-  API --> Watch
+  API[Claritas API] --> Brief[Daily briefing synthesis]
+  API --> News[News events]
+  API --> Podcasts[Podcast evidence]
+  API --> Weather[Weather conditions]
+  API --> Markets[Market movement]
+  API --> Leadership[Country leadership]
+
+  Brief --> Desk[Signal desk]
+  News --> Desk
+  Podcasts --> Desk
+  Weather --> Desk
+  Markets --> Desk
+  Leadership --> Desk
+
+  Desk --> Web[Desktop workspace]
+  Desk --> Pad[Tablet review workspace]
+  Desk --> Phone[Mobile triage]
+  Desk --> Watch[Watch companion]
 ```
 
-The iOS distribution model is one universal iOS app target with an embedded watchOS companion target.
+Each domain has a distinct analytical responsibility:
+
+| Domain | Primary question | Primary representation |
+| --- | --- | --- |
+| Daily briefing | What is the cross-domain situation? | Compact synthesis with key takeaways and freshness |
+| News | What events are occurring and how significant is coverage? | Dense story stream, timeline, source mix, country coverage |
+| Podcast intelligence | What claims, risks, and evidence support the signal? | Episode evidence, extracted signals, timestamps |
+| Weather | Which conditions exceed operating thresholds and where? | Threshold queue, observation feed, map, distribution charts |
+| Markets | Which instruments moved and what context may explain it? | Watchlist, symbol drilldown, session range, movers, benchmark regime |
+| Leadership | Who provides the current country/government context? | Leadership map layer and country detail |
+
+Maps and graphs are not decoration. Bubble maps answer spatial distribution questions. Graphs answer change, comparison, mix, correlation, and ranking questions. A visual is omitted when the available data cannot support a useful analytical statement.
+
+## Information Architecture and Page Archetypes
 
 ```text
-Claritas.app
-  iPhone compact layout
-  iPad regular-width layout
-  Watch/
-    Claritas Watch App.app
+Claritas
+├── Analyze
+│   ├── Dashboard / signal desk
+│   ├── News
+│   ├── Podcasts
+│   ├── Weather
+│   └── Markets
+├── Operate
+│   └── Admin
+└── Account and reference
+    ├── Profile
+    └── Policies
 ```
 
-The Apple Watch app appears as a separate target/product in Xcode because it is built for watchOS, but it is distributed as companion content inside the same App Store app.
+Claritas uses four page archetypes:
 
-## Information Architecture
+### Analytics workspace
 
-The same primary destinations exist across web, iPhone, and iPad. Watch keeps a smaller subset optimized for quick review and schedule editing.
+Dashboard, News, Podcasts, Weather, and Markets use a compact page header, a control bar, a KPI strip, one dominant analytical surface, and explicitly secondary context. Desktop may show a comparison rail beside the hero surface. Tablet shows one or two major panels at a time. Mobile prioritizes triage and drill-in.
 
-| Area | Web | iPhone | iPad | Watch |
-| --- | --- | --- | --- | --- |
-| Signal desk / overview | Primary landing workspace | Dashboard summary | Primary sidebar destination | Briefing summary cards |
-| Dashboard | Full workspace | First tab | Detail workspace | Metrics only |
-| Daily briefing | Preferences / workspace | Tab | Sidebar destination | Page and schedule editor |
-| News | Workspace | Tab | Sidebar destination | Recent headlines |
-| Weather | Workspace | Tab | Sidebar destination | Current observations |
-| Markets | Workspace | Tab | Sidebar destination | Market summary |
-| Admin | Admin panel for admins | Admin tab for admins | Sidebar operations section | Not available |
-| Profile / settings | Account menu and preferences | Profile tab | Sidebar account section | Pairing/session state only |
-| Policies | Footer / account | Policies tab | Sidebar account section | Not available |
+### Control room
 
-## Navigation Model
+Admin separates service health, manual triggers, automation, recent runs, user access, and raw logs. Status and run history come before mutation-heavy configuration. Raw JSON and logs are secondary diagnostic material.
 
-| Device class | Navigation pattern | Rationale |
-| --- | --- | --- |
-| Web desktop | Persistent left sidebar, sticky topbar, content workspace | Highest information density and best for repeated analysis. |
-| Web mobile | Topbar with drawer, single-column content | Keeps web usable without duplicating native iOS patterns exactly. |
-| iPhone | Native `TabView` with `NavigationStack` per tab | Matches expected iOS compact navigation. |
-| iPad | Native `NavigationSplitView` sidebar plus detail pane | Uses the iPad regular-width idiom and avoids a stretched phone UI. |
-| Watch | Vertical page `TabView` plus `NavigationStack` for detail | Fast glances, short interactions, and crown-friendly vertical movement. |
+### Settings
 
-## Shared Design Tokens
+Profile uses section navigation and grouped settings rows. It does not inherit dashboard metrics or chart treatments. Identity and session trust are visually distinct from editable preferences.
 
-All clients should use these semantic roles rather than inventing per-screen colors. Hex values come from the current web CSS and SwiftUI palette.
+### Document
 
-### Light Theme
+Policies uses a table of contents, numbered sections, a constrained reading width, and reference notes. It does not use a policy-card grid.
 
-| Role | Hex | Usage |
-| --- | --- | --- |
-| `shell.bg` | `#F3E9D7` | App background. |
-| `shell.bgElevated` | `#E8D9C2` | Background elevation and large panels. |
-| `shell.sidebar` | `#10293A` | Desktop/sidebar chrome. |
-| `shell.surface` | `#FFFAF1` at 76% | Cards and low elevation surfaces. |
-| `shell.surfaceStrong` | `#FFFAF1` at 94% | Raised cards, menus, dialogs. |
-| `shell.surfaceMuted` | `#E9DCC8` at 78% | Secondary controls and muted panels. |
-| `shell.border` | `#172F42` at 17% | Default border. |
-| `shell.borderStrong` | `#172F42` at 32% | Active or high-emphasis border. |
-| `shell.ink` | `#172F42` | Primary text. |
-| `shell.muted` | `#53616A` | Secondary text. |
-| `shell.accent` | `#E6A06A` | Primary accent and call-to-action tone. |
-| `shell.accentSecondary` | `#3E6A80` | Secondary action and data tone. |
-| `shell.selected` | `#F3CDAA` | Selected nav state. |
-| `signal.positive` | `#2A5268` | Positive status. |
-| `signal.negative` | `#A73B32` | Negative status. |
+Watch is a fifth, companion-only archetype: compact signal cards with freshness, threshold counts, a headline, a top mover, affected weather scope, and phone handoff.
 
-### Dark Theme
+## Shared App Shell and Navigation
 
-| Role | Hex | Usage |
-| --- | --- | --- |
-| `shell.bg` | `#0C1720` | App background. |
-| `shell.bgElevated` | `#122432` | Background elevation and large panels. |
-| `shell.sidebar` | `#09141D` | Desktop/sidebar chrome. |
-| `shell.surface` | `#142735` at 76% | Cards and low elevation surfaces. |
-| `shell.surfaceStrong` | `#1B3445` at 92% | Raised cards, menus, dialogs. |
-| `shell.surfaceMuted` | `#1F394A` at 72% | Secondary controls and muted panels. |
-| `shell.border` | `#C9BBA9` at 20% | Default border. |
-| `shell.borderStrong` | `#C9BBA9` at 36% | Active or high-emphasis border. |
-| `shell.ink` | `#F6EBDD` | Primary text. |
-| `shell.muted` | `#C9BBA9` | Secondary text. |
-| `shell.accent` | `#EAA36C` | Primary accent and call-to-action tone. |
-| `shell.accentSecondary` | `#7FA6B8` | Secondary action and data tone. |
-| `shell.selected` | `#6F4932` | Selected nav state. |
-| `signal.positive` | `#7FA6B8` | Positive status. |
-| `signal.negative` | `#D96B62` | Negative status. |
+### Web
 
-## Device Layouts
-
-### Web Desktop
-
-Target width: `1024px` and above.
-
-```text
-+---------------------------------------------------------------------+
-| Sidebar                 | Topbar: section, search, alerts, theme     |
-|                         +--------------------------------------------+
-| Brand                   | Workspace content                          |
-| - Signal desk           | +------------+ +------------+ +---------+ |
-| - Dashboard             | | Metric     | | Metric     | | Metric  | |
-| - Briefing              | +------------+ +------------+ +---------+ |
-| - News                  | +-------------------+ +----------------+ |
-| - Weather               | | Primary analysis  | | Related panel  | |
-| - Markets               | +-------------------+ +----------------+ |
-| - Admin                 | Footer / policy links                       |
-+---------------------------------------------------------------------+
-```
-
-Rules:
-
-- Sidebar remains visible and owns primary navigation.
-- Topbar owns global actions: search, alerts, theme, account.
-- Content uses a dense grid for dashboard, markets, and admin workflows.
-- Cards are for individual items or panels, not for whole page sections.
-- Tables and lists should keep scan-first density on desktop.
-
-### Web Mobile
-
-Target width: below `768px`.
-
-```text
-+------------------------------+
-| Topbar: menu, brand, actions |
-+------------------------------+
-| Drawer navigation when open  |
-+------------------------------+
-| Single-column workspace      |
-| +--------------------------+ |
-| | Primary card / summary   | |
-| +--------------------------+ |
-| +--------------------------+ |
-| | List row                 | |
-| +--------------------------+ |
-+------------------------------+
-```
-
-Rules:
-
-- Use a drawer for primary navigation.
-- Keep one task per viewport: summary, list, detail, or form.
-- Preserve the same color tokens as desktop web.
-- Respect safe-area insets for browser UI and installed PWA usage.
+- A persistent left navigation groups analysis, operations, and account destinations.
+- A sticky top bar always shows page title, scope summary, live/freshness state, search, notifications, theme, and account state.
+- The active page owns filtering and comparison controls.
+- At mobile width, global navigation becomes a drawer plus a five-item monitoring bar: Dashboard, News, Weather, Markets, and Profile.
+- Search is global and keyboard accessible with `Command/Ctrl+K` and `/`.
 
 ### iPhone
 
-Target: compact horizontal size class.
-
-```text
-+------------------------------+
-| Native navigation title      |
-+------------------------------+
-| Selected tab content         |
-| Dashboard / Briefing / News  |
-| Weather / Markets / Profile |
-+------------------------------+
-| Native tab bar               |
-+------------------------------+
-```
-
-Rules:
-
-- Use native `TabView` with `NavigationStack` per tab.
-- Keep the first five everyday destinations visible: Dashboard, Briefing, News, Weather, Markets.
-- Admin, Profile, and Policies may sit after primary tabs.
-- Prefer native controls for forms: `Picker`, `DatePicker`, `Toggle`, `Button`.
-- Avoid custom desktop-style sidebars or floating browser-like chrome on iPhone.
+- `TabView` and `NavigationStack` preserve platform-native navigation.
+- The dashboard is triage-first. The map is an on-demand disclosure, not the first full-height surface.
+- Full data-domain workspaces remain available as drill-ins.
+- Profile uses native settings controls and Policies uses a reading layout.
 
 ### iPad
 
-Target: regular horizontal size class inside the universal iOS app.
-
-```text
-+---------------------------------------------------------------------+
-| Native sidebar       | Native detail navigation title + toolbar      |
-|                      +-----------------------------------------------+
-| Workspace            | Detail workspace                              |
-| - Signal desk        | +------------+ +------------+ +------------+ |
-| - Dashboard          | | Metric     | | Briefing   | | Status     | |
-| - Briefing           | +------------+ +------------+ +------------+ |
-| Signals              | +----------------------+ +----------------+ |
-| - News               | | Primary visualization| | Latest signals | |
-| - Weather            | +----------------------+ +----------------+ |
-| - Markets            |                                               |
-| Operations           |                                               |
-| Account              |                                               |
-+---------------------------------------------------------------------+
-```
-
-Rules:
-
-- Use `NavigationSplitView`; never present iPad as an enlarged iPhone screen.
-- Sidebar groups destinations into Workspace, Signals, Operations, and Account.
-- Detail content should use wider grids and side-by-side panels.
-- Use native toolbar placement for theme and account controls.
-- Keep colors identical to iPhone because both use the SwiftUI `ClaritasPalette`.
+- `NavigationSplitView` groups Workspace, Signals, Operations, and Account.
+- The overview uses a deliberate two-column review layout: a dominant briefing or stream and a narrower focus/context column.
+- Touch targets remain at least 44 points. Controls use native menus, segmented controls, and toolbars.
 
 ### Apple Watch
 
-Target: watchOS companion app embedded in the universal iOS app.
+- The first page is a signal glance, not a briefing editor or mini-dashboard.
+- Secondary pages are Daily Briefing, headline alerts, movers/breaches, and affected weather scope.
+- Podcast evidence, leadership exploration, maps, charts, admin, profile editing, and policy reading are intentionally unavailable.
+- “Open on iPhone” sends a destination through `WatchConnectivity`; the iPhone opens the matching workspace.
 
-```text
-Vertical pages
+## Visual System and Tokens
 
-+------------------+
-| Briefing         |
-| key takeaways    |
-| schedule summary |
-+------------------+
-        |
-        v
-+------------------+
-| Schedule editor  |
-| enabled, time, TZ|
-+------------------+
-        |
-        v
-+------------------+
-| News             |
-| compact rows     |
-+------------------+
-        |
-        v
-+------------------+
-| Markets          |
-| compact summary  |
-+------------------+
-        |
-        v
-+------------------+
-| Weather          |
-| compact summary  |
-+------------------+
-```
+Semantic tokens are the contract. Components must not infer meaning from a raw hue.
 
-Rules:
+### Color roles
 
-- Keep interactions under a few taps.
-- Use short labels and one-column cards.
-- Daily briefing and schedule editing are first-class watch workflows.
-- Watch receives auth/session and cached data from iPhone where appropriate.
-- Avoid admin operations, long policy pages, and dense analysis views.
+| Token | Dark value | Meaning |
+| --- | --- | --- |
+| `shell.bg` | `#081119` | Lowest workspace plane |
+| `shell.bgElevated` | `#0C1822` | Control bars, rails, grouped settings |
+| `shell.sidebar` | `#071018` | Navigation chrome |
+| `shell.surface` | `#11222E` at 90% | Standard panel |
+| `shell.surfaceStrong` | `#152A38` at 96% | Hero and selected workspace |
+| `shell.ink` | `#F2EEE6` | Primary text and key values |
+| `shell.muted` | `#A9B5BA` | Metadata and supporting copy |
+| `shell.accent` | `#EDA36A` | Primary action and attention |
+| `shell.accentSecondary` | `#77A8BA` | Selection, comparison, contextual data |
+| `signal.positive` | semantic blue/teal | Healthy or positive state |
+| `signal.negative` | semantic red | Negative movement or failure |
+| `signal.warning` | semantic bronze | Threshold attention |
 
-## Screen Specifications
+Light mode preserves the same roles. It is supported, but the default unconfigured web experience uses the dark high-trust base.
 
-### Authentication
+### Spacing and shape
 
-| Device | Layout |
+- Spacing steps: 4, 8, 12, 16, 20, and 24 px.
+- Control radius: 8–10 px.
+- Panel radius: 12–14 px.
+- Overlay radius: 16 px.
+- Borders are separators, not decoration. Repeated nested outlines are avoided.
+- Standard panels use no large shadow. Overlays may use a strong elevation shadow.
+
+### Typography
+
+- Body/UI: Work Sans on web and the system font on Apple platforms.
+- Large numerical values use tabular, lining numerals.
+- Display serif is limited to brand/auth contexts; it is not the default analytical heading.
+- Section titles use sentence case.
+- All-caps labels are reserved for very small metadata and are not used as the primary hierarchy.
+- Reading content targets roughly 65–74 characters per line.
+
+## Component Taxonomy
+
+| Component | Contract |
 | --- | --- |
-| Web desktop | Centered login panel with provider buttons and brand context. |
-| Web mobile | Single-column login with large provider buttons. |
-| iPhone | Native sign-in screen with provider buttons. |
-| iPad | Same auth flow as iPhone, centered within regular-width content. |
-| Watch | Pairing/connect state only; sign-in happens on iPhone. |
+| Page header | Title, scope summary, live/freshness state, top-level actions |
+| Control bar | Grouped filters, explicit time/scope, sort, reset, compare/export where relevant |
+| KPI strip | Value, context, optional delta/trend; separators instead of four floating cards |
+| Primary chart | Largest analytical surface, labeled axes/legend, range/compare tools, useful empty state |
+| Map | Spatial distribution or country context; never an unlabelled decorative globe |
+| Table/feed | Compact rows with aligned metadata, selected state, dense scanning, expandable/drill-in detail |
+| Insights rail | Exceptions, anomalies, AI/briefing cues, and action destination |
+| Form section | Related controls grouped under one operational intent with clear feedback |
+| Document section | Number, heading, readable text rhythm, note treatment, stable anchor |
+| Compact watch card | One signal, freshness/context, and at most one simple action |
 
-### Signal Desk / Dashboard
+Shared web implementations live primarily in `apps/web/src/index.css` and `apps/web/src/App.tsx`. Shared native tokens and surface behavior live in `BrandComponents.swift` and `WatchBrand.swift`.
 
-| Device | Layout |
-| --- | --- |
-| Web desktop | Metrics row, map or visual analysis, latest signals, related profile panels. |
-| Web mobile | Metrics stack, latest signal list, simplified visualizations. |
-| iPhone | Dashboard tab with compact segmented sections. |
-| iPad | Signal desk landing with metrics, daily briefing, market pulse, weather extremes, and latest news. |
-| Watch | Briefing page includes small counts for news, weather, and markets. |
+## Interaction Model
 
-### Daily Briefing
+### Filtering and scope
 
-| Device | Layout |
-| --- | --- |
-| Web desktop | Preferences/workspace card with enabled toggle, time picker, timezone picker, last run, status. |
-| Web mobile | Same fields in one column. |
-| iPhone | Briefing tab with published briefing and schedule editor. |
-| iPad | Sidebar destination with briefing status, schedule form, and preview. |
-| Watch | First page summary plus dedicated schedule editor page. |
+- Filters are grouped at the top of each analytics workspace.
+- The current region, time window, selected country, comparison country, and symbol remain visible in the header/control or selection bar.
+- Reset clears page-specific selection without silently changing unrelated saved preferences.
+- Mobile control bars are compact and scrollable; advanced simultaneous controls are reduced.
 
-Daily briefing form rules:
+### Compare mode
 
-- Time must be selected from a constrained time control or dropdown, not free text.
-- Timezone must be selected from known timezone options.
-- Save errors should explain auth, validation, or server failures separately.
-- Last run should be visible wherever the schedule is editable.
+- Compare is available only where two visible datasets can be interpreted together.
+- Selected and comparison values use stable semantic colors across map, chart, legend, and tooltip.
+- Compare tools remain full-workspace features; watch omits them.
+
+### Drilldown and selection
+
+- Selecting a country updates news, weather, market context, map state, and country leadership where data exists.
+- Selecting a symbol opens the market symbol workspace with price movement, session range, weather/geography context, related stories, and peer instruments.
+- A watch handoff opens the corresponding iPhone destination.
+
+### Sticky behavior
+
+- The global web header is sticky.
+- Desktop and tablet analytical control bars are sticky beneath it.
+- Settings section navigation and document table of contents are sticky only when enough viewport width exists.
+- Mobile does not stack multiple sticky bars; it uses a fixed primary monitoring bar and in-flow filter controls.
+
+### Density
+
+- Desktop rows target high information throughput.
+- Tablet shows at most two major panels per stage and preserves 44-point touch targets.
+- Mobile tables become analytical rows; images are omitted when they do not add interpretation.
+- Watch limits lists to roughly six urgent/relevant items.
+
+## Breakpoints and Adaptation Rules
+
+Web breakpoints are device-role boundaries, not just CSS conveniences.
+
+| Class | Width | Workspace level | Adaptation |
+| --- | --- | --- | --- |
+| Desktop | `>= 1280px` | Full workspace | Persistent sidebar; 12-column analysis grid; chart + insights rail; map + feed; full compare/export |
+| Tablet web / iPad-like | `768–1279px` | Reduced workspace | One or two major panels; chart first; full-width insights; stacked map/feed; large touch controls; simplified simultaneous density |
+| Mobile web / iPhone | `< 768px` | Triage workspace | KPI subset; compact briefing; anomaly queue; live feed; map and secondary charts omitted or moved to drill-in; bottom monitoring nav |
+| Narrow phone | `320–389px` | Triage workspace | Same content priority with shorter labels, horizontal filter/TOC scrolling, no wide charts/tables |
+| Apple Watch | watchOS layout system | Companion only | Signal glance, freshness, briefing excerpt, top mover, affected weather, headline alerts, phone handoff |
+
+### Content priority by device
+
+| Content | Desktop | Tablet | Mobile | Watch |
+| --- | --- | --- | --- | --- |
+| KPI summary | Full strip | 2-column strip | Top subset | One threshold count |
+| Daily briefing | Compact secondary synthesis | Primary review panel | Two-line/two-takeaway compact synthesis | Short excerpt |
+| Primary chart | Full, interactive | Full-width, touch-friendly | One useful chart without brush | Omitted |
+| Map bubbles | Main analytical module | Full-width staged panel | On-demand native drill-in; omitted from mobile web stream | Omitted |
+| Dense feed/table | Side-by-side | Full-width stage | Compact rows | Top six only |
+| Compare/export | Full | Reduced | Drill-in only | Omitted |
+| Admin mutation | Full | Full touch forms | Status/refresh only | Omitted |
+| Settings | Full section layout | Two-pane/native | Native settings flow | Omitted |
+| Policies | TOC + reading column | Reading column | Horizontal section nav | Omitted |
+
+## Page Rules
+
+### Dashboard
+
+- KPI strip establishes cross-domain posture.
+- The primary chart and attention rail are the first analytical row on desktop.
+- The world bubble map and live feed are main modules below the hero analysis.
+- Daily briefing is a compact synthesis rather than the largest surface.
+- Podcast evidence count and leadership coverage make those domains visible without pretending they use the same visualization as time-series data.
 
 ### News
 
-| Device | Layout |
-| --- | --- |
-| Web desktop | Search/filter tools, provider/source tags, list/detail density. |
-| Web mobile | List-first with compact filters. |
-| iPhone | News tab with recent/archive controls and rows. |
-| iPad | Sidebar destination with list and analysis cards. |
-| Watch | Recent compact headlines only. |
+- Story stream is the primary task.
+- Rows expose source, country, time, summary, and selection state.
+- The map is a spatial coverage tool and is secondary to the stream.
+- Timeline, source mix, and country/market context support the stream.
 
 ### Weather
 
-| Device | Layout |
-| --- | --- |
-| Web desktop | Country observations, map/bubbles, refresh controls. |
-| Web mobile | Current observations list and refresh. |
-| iPhone | Weather tab with country rows and refresh. |
-| iPad | Weather workspace with larger charts and observation panels. |
-| Watch | Compact weather observations. |
+- Thresholds are explicit: heat `>= 35°C`, freeze `<= 0°C`, humidity `>= 85%`, and wind `>= 15 m/s`.
+- The alert summary identifies affected locations.
+- Map and observation feed show distribution and current state.
+- Scatter, condition mix, and temperature ranking remain supporting analytics.
 
 ### Markets
 
-| Device | Layout |
-| --- | --- |
-| Web desktop | Market status, quotes, earnings/news relation, detail panels. |
-| Web mobile | Quote list and compact market status. |
-| iPhone | Markets tab with quote list and selected market profile. |
-| iPad | Market workspace with side-by-side market profile and related signals. |
-| Watch | Compact market direction and quote summary. |
+- Watchlist rows are compact and selectable.
+- The selected symbol workspace is larger than the list on desktop.
+- Symbol detail includes last price, session move, range position, primary market, industry/market cap where available, related weather, stories, and peers.
+- Exchange status and earnings remain compact operational panels.
 
 ### Admin
 
-| Device | Layout |
+- Service/run scope and refresh come first.
+- Manual trigger, automation, metrics, history, and logs are distinct sections.
+- Raw payloads/logs use a deliberate diagnostic treatment.
+- Mobile is status-only with refresh; mutation-heavy controls require tablet or desktop.
+
+### Profile and Policies
+
+- Profile uses settings hierarchy, section navigation, native controls, and clear identity/security state.
+- Policies uses stable anchors, a table of contents, numbered document sections, reading width, and optional reference material.
+
+## Accessibility and Responsive Principles
+
+- Text and state are never differentiated by color alone.
+- Interactive controls have visible hover, focus, selected, disabled, loading, and error states.
+- Web controls use `:focus-visible`; native controls retain system focus and accessibility behavior.
+- Touch targets are at least 44 by 44 points on touch-oriented surfaces.
+- Charts provide labels, legends, and tooltips; key conclusions also appear in text/KPIs.
+- Reduced-motion preferences disable entrance animation and nonessential transitions.
+- Safe-area insets are respected on web/PWA, iPhone, iPad, and watch.
+- Content remains usable from 320 px; horizontal scrolling is limited to intentional control, document-nav, and table regions.
+
+## State Handling
+
+| State | Rule |
 | --- | --- |
-| Web desktop | Full admin workspace for ingestion and user management. |
-| Web mobile | Available only if forms remain usable in one column. |
-| iPhone | Admin tab for admins, native forms. |
-| iPad | Operations section in sidebar. |
-| Watch | Not available. |
+| Loading | Keep the panel title/scope stable; show progress in the action or content region |
+| Empty | Explain what is empty, preserve filters, and provide the next valid action |
+| Error | State the affected source/action; do not imply unrelated domains failed |
+| Stale | Keep cached data visible, label freshness, and offer refresh/handoff |
+| Live | Show a semantic live indicator plus a human-readable updated time |
+| Success | Confirm mutation near the affected control without replacing the whole workspace |
 
-## Implementation Mapping
+Watch explicitly distinguishes ready, refreshing, phone-required, and cached/failed state.
 
-| Area | Web | iOS/iPad | Watch |
+## Why Layouts Differ
+
+Analytics pages benefit from simultaneous comparison and therefore use dominant charts/maps plus supporting rails and feeds. Settings pages benefit from predictable grouping and short edit paths. Policy pages benefit from reading rhythm and stable references. Admin pages benefit from operational safeguards and separation between observation and mutation. Watch benefits from urgency, freshness, and handoff; reproducing maps, charts, forms, or document pages would reduce usefulness.
+
+Shared tokens and component contracts create one product identity. Shared geometry is not required when the device role or task is different.
+
+## Implementation Map
+
+| Concern | Web | iPhone/iPad | Watch |
 | --- | --- | --- | --- |
-| Shell and navigation | `apps/web/src/App.tsx`, `apps/web/src/index.css` | `apps/mobile/ios/Claritas/Views/RootView.swift` | `apps/mobile/ios/ClaritasWatch/Views/WatchRootView.swift` |
-| Shared native palette | CSS variables in `apps/web/src/index.css` | `ClaritasPalette` in `BrandComponents.swift` | `WatchPalette` in `WatchBrand.swift` |
-| Dashboard and signal views | `App.tsx` workspace sections | `DashboardView.swift`, `PadOverviewView.swift` | `WatchRootView.swift` summary pages |
-| Daily briefing | Web preferences/workspace components | `DailyBriefingWorkspaceView` in `RootView.swift` | `WatchBriefingView`, `WatchBriefingScheduleContent` |
-| Auth | `LoginPage.tsx` | `LoginView.swift` | `WatchPairingView` |
+| Shell/navigation | `apps/web/src/App.tsx`, `index.css` | `RootView.swift` | `WatchRootView.swift` |
+| Tokens/surfaces | `index.css` | `BrandComponents.swift` | `WatchBrand.swift` |
+| Dashboard | `App.tsx` | `DashboardView.swift`, `PadOverviewView.swift` | `WatchSignalGlanceView`, `WatchBriefingView` |
+| Maps | `WorldMapBubbles.tsx` | `InteractiveCountryBubbleMap` | Intentionally unavailable |
+| Admin | `AdminIngestionPanel.tsx`, `AdminUserManagementPanel.tsx` | `AdminWorkspaceView` | Intentionally unavailable |
+| Settings/documents | `App.tsx` | `ProfileView.swift`, `PoliciesWorkspaceView` | Phone handoff only |
+| Handoff | N/A | `WatchSyncCoordinator.swift` | `WatchConnectivityClient.swift` |
 
-## Change Checklist
+## Migration Note
 
-Use this checklist for any UI change that affects shared product behavior.
+The previous UI relied on repeated rounded, bordered, glass-like cards with similar visual weight. Narrative briefing content often preceded stronger analytical surfaces, feeds used oversized rows, filters were spread across panels, and settings/documents inherited dashboard styling.
 
-- Does the change preserve the same information architecture on web, iPhone, and iPad?
-- Does the watch app expose only glanceable companion workflows?
-- Are colors expressed through semantic tokens/palette functions?
-- Does iPad use a regular-width layout instead of stretched compact UI?
-- Are daily briefing schedule controls present on web, iPhone/iPad, and watch where expected?
-- Are admin-only screens hidden for non-admin users?
-- Does the change respect native controls and safe areas on Apple platforms?
+The current system:
 
-## Open Design Decisions
+- flattens standard panels and reduces borders, shadows, and radius;
+- moves KPI, primary analysis, and exception cues ahead of secondary narrative;
+- consolidates controls into consistent bars;
+- converts news, weather, market, and run history content into denser rows;
+- gives market symbols a real contextual drilldown;
+- gives weather explicit thresholds;
+- preserves the daily briefing, map bubbles, and useful charts with clearer roles;
+- gives Admin, Profile, and Policies separate archetypes;
+- treats tablet as a staged two-column review workspace;
+- treats mobile as triage and drill-in;
+- treats watch as companion-only with phone handoff.
 
-- Decide whether web mobile should show Daily Briefing in primary navigation or keep it in preferences once native mobile is the primary mobile surface.
-- Decide whether watch should support manual briefing generation or only schedule editing and reading.
-- Decide whether iPad dashboard should prioritize the map view or signal desk overview as the default landing content.
+Related decisions are recorded in:
+
+- [ADR-0001: Analytics-first UI shell and hierarchy](../ADRs/0001-analytics-first-ui-shell.md)
+- [ADR-0002: Multi-device adaptive strategy](../ADRs/0002-multi-device-adaptive-strategy.md)
+- [ADR-0003: Semantic tokens and component taxonomy](../ADRs/0003-semantic-ui-system.md)

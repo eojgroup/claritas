@@ -1,6 +1,10 @@
 import Foundation
 import WatchConnectivity
 
+extension Notification.Name {
+    static let claritasWatchOpenDestination = Notification.Name("claritasWatchOpenDestination")
+}
+
 final class WatchSyncCoordinator: NSObject, WCSessionDelegate {
     static let shared = WatchSyncCoordinator()
 
@@ -46,6 +50,17 @@ final class WatchSyncCoordinator: NSObject, WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
+        if let destination = message["openOnPhone"] as? String {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .claritasWatchOpenDestination,
+                    object: destination
+                )
+            }
+            replyHandler(["status": "opened"])
+            return
+        }
+
         lock.lock()
         let nextContext = context
         lock.unlock()

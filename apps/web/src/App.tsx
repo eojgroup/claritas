@@ -749,12 +749,9 @@ export default function ClaritasDashboard() {
       const v = localStorage.getItem("theme");
       if (v === "dark") return true;
       if (v === "light") return false;
-      return (
-        window.matchMedia &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches
-      );
+      return true;
     } catch {
-      return false;
+      return true;
     }
   });
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
@@ -1195,7 +1192,7 @@ export default function ClaritasDashboard() {
     };
   }, [authStatus, hasPaidAccess, marketEarningsWindowDays]);
 
-  const cardBase = "app-card rounded-[1.4rem]";
+  const cardBase = "app-card operational-panel rounded-xl";
   const chartGridColor = "var(--viz-grid)";
 
   const todayLabel = useMemo(
@@ -2065,6 +2062,17 @@ export default function ClaritasDashboard() {
     weatherHumidityFloor,
     weatherSortBy,
   ]);
+
+  const weatherAlerts = useMemo(
+    () =>
+      weatherPageRows.filter(
+        (row) =>
+          (typeof row.temp_c === "number" && (row.temp_c >= 35 || row.temp_c <= 0)) ||
+          (typeof row.humidity === "number" && row.humidity >= 85) ||
+          (typeof row.wind_speed === "number" && row.wind_speed >= 15),
+      ),
+    [weatherPageRows],
+  );
 
   const weatherConditionChartData = useMemo(() => {
     const counts = new Map<string, number>();
@@ -3059,47 +3067,84 @@ export default function ClaritasDashboard() {
       label: "Dashboard",
       view: "dashboard" as const,
       icon: LayoutGrid,
+      group: "analysis",
     },
     {
       id: "news",
       label: "News",
       view: "news" as const,
       icon: Newspaper,
+      group: "analysis",
     },
     {
       id: "podcasts",
       label: "Podcasts",
       view: "podcasts" as const,
       icon: Podcast,
+      group: "analysis",
     },
     {
       id: "weather",
       label: "Weather",
       view: "weather" as const,
       icon: CloudSun,
+      group: "analysis",
     },
     {
       id: "markets",
       label: "Markets",
       view: "markets" as const,
       icon: ChartNoAxesCombined,
+      group: "analysis",
     },
     ...(isAdmin
-      ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings }]
+      ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings, group: "operations" }]
       : []),
-    { id: "profile", label: "Profile", view: "profile" as const, icon: User },
-    { id: "legal", label: "Policies", view: "legal" as const, icon: FileText },
+    { id: "profile", label: "Profile", view: "profile" as const, icon: User, group: "account" },
+    { id: "legal", label: "Policies", view: "legal" as const, icon: FileText, group: "account" },
   ];
 
   const viewMeta = {
-    dashboard: { kicker: "Dashboard", title: "Signal desk overview" },
-    news: { kicker: "News", title: "Global news signal stream" },
-    podcasts: { kicker: "Podcast intelligence", title: "Extracted claims, events, risks, and evidence" },
-    weather: { kicker: "Weather", title: "Weather signal operations" },
-    markets: { kicker: "Markets", title: "Market watch and correlations" },
-    admin: { kicker: "Admin", title: "Data ingestion control" },
-    profile: { kicker: "Account", title: "Profile & access" },
-    legal: { kicker: "Legal", title: "Policies & usage" },
+    dashboard: {
+      kicker: "Signal desk",
+      title: "Operational overview",
+      summary: "What changed, where it changed, and what needs attention",
+    },
+    news: {
+      kicker: "Analyst workspace",
+      title: "Global news signals",
+      summary: "Source, geography, significance, and recency in one stream",
+    },
+    podcasts: {
+      kicker: "Analyst workspace",
+      title: "Podcast intelligence",
+      summary: "Extracted claims, events, risks, and timestamped evidence",
+    },
+    weather: {
+      kicker: "Operations",
+      title: "Weather conditions",
+      summary: "Threshold breaches, affected locations, and distribution",
+    },
+    markets: {
+      kicker: "Market desk",
+      title: "Watchlist & correlations",
+      summary: "Movement, volatility, and linked contextual signals",
+    },
+    admin: {
+      kicker: "Control room",
+      title: "Data operations",
+      summary: "Service health, automation, manual runs, and audit history",
+    },
+    profile: {
+      kicker: "Settings",
+      title: "Profile & access",
+      summary: "Identity, preferences, security, and connected providers",
+    },
+    legal: {
+      kicker: "Reference",
+      title: "Policies & usage",
+      summary: "Product governance, privacy, terms, and data handling",
+    },
   } as const;
 
   const handleSignIn = (provider: AuthProviderId) => {
@@ -3277,6 +3322,7 @@ export default function ClaritasDashboard() {
                         setMobileNavOpen(false);
                       }}
                       aria-current={active ? "page" : undefined}
+                      data-group={item.group}
                       className={`app-nav-item flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium ${
                         active ? "" : "text-white/70 hover:bg-white/10 hover:text-white"
                       }`}
@@ -3350,6 +3396,7 @@ export default function ClaritasDashboard() {
                   type="button"
                   onClick={() => setActiveView(item.view)}
                   aria-current={active ? "page" : undefined}
+                  data-group={item.group}
                   className={`app-nav-item flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium ${
                     active ? "" : "text-white/70 hover:bg-white/10 hover:text-white"
                   }`}
@@ -3412,22 +3459,25 @@ export default function ClaritasDashboard() {
                 </span>
               </div>
 
-              <div className="min-w-0">
-                <div className="text-xs uppercase tracking-[0.32em] text-[color:var(--shell-muted)]">
+              <div className="page-header-copy min-w-0">
+                <div className="page-kicker text-xs uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">
                   {currentViewMeta.kicker}
                 </div>
-                <div className="text-lg font-semibold text-[color:var(--shell-ink)]">
+                <div className="page-title text-lg font-semibold text-[color:var(--shell-ink)]">
                   {currentViewMeta.title}
+                </div>
+                <div className="page-scope hidden text-xs text-[color:var(--shell-muted)] sm:block">
+                  {currentViewMeta.summary}
                 </div>
               </div>
 
               <div className="ml-auto flex items-center gap-3">
-                <div className="hidden lg:flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                <div className="live-state hidden lg:flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
                   <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
-                  <span className="font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)]">
+                  <span className="font-semibold text-[color:var(--shell-ink)]">
                     Live
                   </span>
-                  <span>{todayLabel}</span>
+                  <span>Updated {latestEventLabel}</span>
                 </div>
                 <button
                   type="button"
@@ -3739,7 +3789,10 @@ export default function ClaritasDashboard() {
             </div>
           )}
 
-          <main className="app-safe-bottom mx-auto w-full max-w-[1720px] flex-1 min-h-0 flex flex-col px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
+          <main
+            data-view={activeView}
+            className="app-workspace app-safe-bottom mx-auto w-full max-w-[1720px] flex-1 min-h-0 flex flex-col px-4 py-4 sm:px-6 xl:px-8 2xl:px-10"
+          >
             {sessionNotice && (
               <div className="mb-6">
                 <div
@@ -3758,7 +3811,7 @@ export default function ClaritasDashboard() {
 
             {hasActiveSelection && (
               <div className="mb-4">
-                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
+                <div className="selection-bar flex flex-wrap items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
                   <span className="uppercase tracking-[0.3em]">Selection</span>
                   {selectedCountry && (
                     <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1 text-[color:var(--shell-ink)]">
@@ -3792,32 +3845,31 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div className="relative flex flex-col gap-4">
+              <div className="workspace-page dashboard-workspace relative flex flex-col gap-4">
                 <div className="relative flex flex-col gap-4">
                   <div
-                    className="app-card-hero dashboard-panel rounded-xl px-4 py-3"
+                    className="kpi-strip dashboard-kpis app-card-hero dashboard-panel rounded-xl px-4 py-3"
                     style={{ animationDelay: "0ms" }}
                   >
                     <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1fr)_repeat(4,minmax(7.25rem,0.5fr))] lg:items-center">
                       <div className="min-w-0">
-                        <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
-                          Global signal desk
+                        <div className="text-[11px] font-semibold text-[color:var(--shell-muted)]">
+                          Global operations · {regionLabel}
                         </div>
                         <div
-                          className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)] sm:text-xl"
-                          style={{ fontFamily: "var(--font-display)" }}
+                          className="mt-1 text-base font-semibold text-[color:var(--shell-ink)]"
                         >
-                          News, weather, and market pressure in one workspace.
+                          {signalNotifications.length} active signals require review
                         </div>
                         <p className="mt-1 max-w-2xl text-xs text-[color:var(--shell-muted)] sm:text-sm">
-                          {regionLabel} · {activeRangeLabel} · {latestEventLabel}
+                          {activeRangeLabel} · {leadershipStats.length} leadership profiles · {latestEventLabel}
                         </p>
                       </div>
                       <div className="app-stat-card rounded-lg px-3 py-2">
                         <div className="text-[10px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
                           News pace
                         </div>
-                        <div className="mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
+                        <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
                           {formatMetricNumber(newsSummary.avgPerDay)}
                         </div>
                         <div className="text-[11px] text-[color:var(--shell-muted)]">
@@ -3828,7 +3880,7 @@ export default function ClaritasDashboard() {
                         <div className="text-[10px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
                           Weather mean
                         </div>
-                        <div className="mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
+                        <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
                           {formatMetricNumber(weatherSummary.avgTemp)}°C
                         </div>
                         <div className="text-[11px] text-[color:var(--shell-muted)]">
@@ -3839,7 +3891,7 @@ export default function ClaritasDashboard() {
                         <div className="text-[10px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
                           Market breadth
                         </div>
-                        <div className="mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
+                        <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
                           {marketSummary.gainers}/{marketSummary.losers}
                         </div>
                         <div className="text-[11px] text-[color:var(--shell-muted)]">
@@ -3848,20 +3900,20 @@ export default function ClaritasDashboard() {
                       </div>
                       <div className="app-stat-card rounded-lg px-3 py-2">
                         <div className="text-[10px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
-                          Live signals
+                          Podcast evidence
                         </div>
-                        <div className="mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
-                          {filteredNews.length}
+                        <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
+                          {podcasts.reduce((total, episode) => total + episode.signals.length, 0)}
                         </div>
                         <div className="text-[11px] text-[color:var(--shell-muted)]">
-                          After filters
+                          Across {podcasts.length} episodes
                         </div>
                       </div>
                     </div>
                   </div>
 
                   <div
-                    className="app-card-muted dashboard-panel rounded-xl px-4 py-3"
+                    className="operational-control-bar dashboard-panel rounded-xl px-4 py-3"
                     style={{ animationDelay: "40ms" }}
                   >
                     <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -3951,7 +4003,7 @@ export default function ClaritasDashboard() {
                   </div>
 
                   <section
-                    className={`${cardBase} dashboard-panel p-4`}
+                    className={`${cardBase} briefing-rail dashboard-panel p-4`}
                     style={{ animationDelay: "80ms" }}
                   >
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -4010,7 +4062,7 @@ export default function ClaritasDashboard() {
                   </section>
 
                   <section
-                    className={`relative grid gap-4 ${
+                    className={`analytics-workspace-grid relative grid gap-4 ${
                       splitViewEnabled
                         ? "xl:grid-cols-12 xl:items-stretch"
                         : "grid-cols-1"
@@ -4018,7 +4070,7 @@ export default function ClaritasDashboard() {
                   >
                     <div
                       id="signal-map-feed"
-                      className={`${dashboardPanelClass} xl:col-span-5`}
+                      className={`${dashboardPanelClass} geo-panel xl:col-span-5`}
                       style={{ animationDelay: "0ms" }}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
@@ -4396,7 +4448,7 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${dashboardPanelClass} xl:col-span-7`}
+                      className={`${dashboardPanelClass} feed-panel xl:col-span-7`}
                       style={{ animationDelay: "80ms" }}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
@@ -4722,91 +4774,60 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <div
-                      className={`${dashboardPanelClass} xl:col-span-4`}
+                      className={`${dashboardPanelClass} insights-rail xl:col-span-3`}
                       style={{ animationDelay: "160ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Metrics
+                            Attention queue
                           </div>
                           <div className="text-sm font-semibold">
-                            Operational snapshot
+                            Highest-priority signals
                           </div>
                         </div>
                         <div className="text-xs text-[color:var(--shell-muted)]">
                           {todayLabel}
                         </div>
                       </div>
-                      <div className="relative flex-1 min-h-0 p-4">
-                        <div className="relative grid grid-cols-2 gap-3">
-                          <div className="app-stat-card rounded-lg p-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Live signals
+                      <div className="relative flex-1 min-h-0 p-3">
+                        <div className="insight-list">
+                          {signalNotifications.slice(0, 4).map((notification) => (
+                            <button
+                              key={`dashboard-insight-${notification.id}`}
+                              type="button"
+                              onClick={() => handleNotificationClick(notification)}
+                              className="insight-row"
+                            >
+                              <span
+                                className={`signal-dot signal-dot-${notification.tone}`}
+                                aria-hidden="true"
+                              />
+                              <span className="min-w-0">
+                                <strong>{notification.title}</strong>
+                                <small>{notification.description}</small>
+                              </span>
+                              <span className="insight-time">{notification.timeLabel}</span>
+                            </button>
+                          ))}
+                          {signalNotifications.length === 0 && (
+                            <div className="product-state product-state-success">
+                              <CheckCheck className="h-5 w-5" />
+                              <strong>No active exceptions</strong>
+                              <span>All monitored signals are within current thresholds.</span>
                             </div>
-                            <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                              {filteredNews.length}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Stories & alerts
-                            </div>
-                          </div>
-                          <div className="app-stat-card rounded-lg p-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Active regions
-                            </div>
-                            <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                              {activeRegions}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Countries tracked
-                            </div>
-                          </div>
-                          <div className="app-stat-card rounded-lg p-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Market quotes
-                            </div>
-                            <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                              {filteredMarket.length}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Realtime snapshots
-                            </div>
-                          </div>
-                          <div className="app-stat-card rounded-lg p-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Last sync
-                            </div>
-                            <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
-                              {latestEventLabel}
-                            </div>
-                            <div className="text-xs text-[color:var(--shell-muted)]">
-                              Combined feeds
-                            </div>
-                          </div>
-                          <div className="col-span-2 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-3 flex items-center justify-between">
-                            <div>
-                              <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                                Focus
-                              </div>
-                              <div className="text-base font-semibold text-[color:var(--shell-ink)]">
-                                {focusLabel}
-                              </div>
-                            </div>
-                            <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
-                              {selectedCountry || comparisonCountry
-                                ? "Filtered"
-                                : regionFilter === "global"
-                                  ? "Global"
-                                  : "Region"}
-                            </span>
-                          </div>
+                          )}
+                        </div>
+                        <div className="insights-focus">
+                          <span>Current focus</span>
+                          <strong>{focusLabel}</strong>
+                          <small>{activeRegions} regions · {filteredMarket.length} quotes</small>
                         </div>
                       </div>
                     </div>
 
                     <div
-                      className={`${dashboardPanelClass} xl:col-span-8`}
+                      className={`${dashboardPanelClass} primary-analytics-panel xl:col-span-9`}
                       style={{ animationDelay: "240ms" }}
                     >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -5068,9 +5089,9 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "news" && (
-              <div className="space-y-4">
+              <div className="workspace-page news-workspace space-y-4">
                 <section
-                  className="app-card-muted flex flex-wrap items-center gap-3 rounded-[1.45rem] px-4 py-3"
+                  className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3"
                 >
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -5153,7 +5174,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-4">
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Stories
@@ -5200,8 +5221,8 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(20rem,0.72fr)_minmax(32rem,1.28fr)]">
-                  <div className={`${cardBase} overflow-hidden`}>
+                <section className="news-primary-grid grid grid-cols-1 gap-4 xl:grid-cols-[minmax(20rem,0.72fr)_minmax(32rem,1.28fr)]">
+                  <div className={`${cardBase} geo-panel news-map-panel overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                         News map
@@ -5229,7 +5250,7 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
 
-                  <div className={`${cardBase} overflow-hidden`}>
+                  <div className={`${cardBase} feed-panel news-stream-panel overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                         Headlines
@@ -5253,14 +5274,14 @@ export default function ClaritasDashboard() {
                         return (
                           <article
                             key={item.id}
-                            className={`w-full rounded-xl border px-4 py-4 text-left transition ${
+                            className={`analytics-row news-row w-full rounded-lg px-3 py-3 text-left transition ${
                               selected
                                 ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
                             }`}
                           >
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                              <div className="relative h-24 w-36 overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)] flex-none">
+                            <div className="flex gap-3 sm:items-start">
+                              <div className="row-thumbnail relative h-14 w-16 overflow-hidden rounded-md bg-[color:var(--shell-bg-elevated)] flex-none">
                                 {img && (
                                   <img
                                     src={img}
@@ -5301,7 +5322,7 @@ export default function ClaritasDashboard() {
                                   )}
                                 </div>
                                 {item.summary && (
-                                  <p className="mt-2 line-clamp-3 text-sm leading-6 text-[color:var(--shell-muted)]">
+                                  <p className="mt-1 line-clamp-2 text-xs leading-5 text-[color:var(--shell-muted)]">
                                     {item.summary}
                                   </p>
                                 )}
@@ -5314,7 +5335,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
+                <section className="secondary-analytics-grid grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
                   <div className={`${cardBase} min-w-0 p-4`}>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       News analytics
@@ -5837,8 +5858,8 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "weather" && (
-              <div className="space-y-4">
-                <section className="app-card-muted flex flex-wrap items-center gap-3 rounded-[1.45rem] px-4 py-3">
+              <div className="workspace-page weather-workspace space-y-4">
+                <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Weather workspace
@@ -5923,16 +5944,16 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-4">
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Observations
+                      Threshold breaches
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {weatherSummary.observations}
+                      {weatherAlerts.length}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      Current weather rows
+                      Locations outside operating range
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
@@ -5970,8 +5991,35 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-                  <div className={`${cardBase} overflow-hidden`}>
+                <section className={`threshold-summary ${weatherAlerts.length > 0 ? "has-alerts" : ""}`}>
+                  <div>
+                    <span className="status-label">Operational thresholds</span>
+                    <strong>
+                      {weatherAlerts.length > 0
+                        ? `${weatherAlerts.length} locations require review`
+                        : "All observed locations within thresholds"}
+                    </strong>
+                  </div>
+                  <div className="threshold-rules">
+                    <span>Heat ≥ 35°C</span>
+                    <span>Freeze ≤ 0°C</span>
+                    <span>Humidity ≥ 85%</span>
+                    <span>Wind ≥ 15 m/s</span>
+                  </div>
+                  {weatherAlerts.slice(0, 4).map((alert) => (
+                    <button
+                      key={`weather-alert-${alert.country}-${alert.observed_at}`}
+                      type="button"
+                      onClick={() => setSelectedCountry(alert.country.toUpperCase())}
+                    >
+                      <b>{alert.country.toUpperCase()}</b>
+                      <span>{alert.temp_c ?? "—"}° · {alert.humidity ?? "—"}% · {alert.wind_speed ?? "—"} m/s</span>
+                    </button>
+                  ))}
+                </section>
+
+                <section className="weather-primary-grid grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                  <div className={`${cardBase} geo-panel weather-map-panel overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                         Weather map
@@ -5997,7 +6045,7 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
 
-                  <div className={`${cardBase} overflow-hidden`}>
+                  <div className={`${cardBase} feed-panel weather-feed-panel overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                         Weather feed
@@ -6016,7 +6064,7 @@ export default function ClaritasDashboard() {
                         return (
                           <article
                             key={`${entry.country}-${entry.observed_at}-${index}`}
-                            className={`w-full rounded-xl border px-3 py-2 text-left text-xs transition ${
+                            className={`analytics-row weather-row w-full rounded-lg px-3 py-2 text-left text-xs transition ${
                               selected
                                 ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
@@ -6207,8 +6255,8 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "markets" && (
-              <div className="space-y-4">
-                <section className="app-card-muted flex flex-wrap items-center gap-3 rounded-[1.45rem] px-4 py-3">
+              <div className="workspace-page markets-workspace space-y-4">
+                <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Market workspace
@@ -6307,7 +6355,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-4">
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Quotes
@@ -6471,8 +6519,8 @@ export default function ClaritasDashboard() {
                   </section>
                 </section>
 
-                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-                  <div className={`${cardBase} overflow-hidden`}>
+                <section className="market-primary-grid grid grid-cols-1 gap-4 xl:grid-cols-[0.82fr_1.18fr]">
+                  <div className={`${cardBase} watchlist-panel overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                         Watchlist
@@ -6498,7 +6546,7 @@ export default function ClaritasDashboard() {
                               setSelectedSymbol(quote.symbol);
                               if (quote.country) setSelectedCountry(quote.country.toUpperCase());
                             }}
-                            className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+                            className={`analytics-row market-row w-full rounded-lg px-3 py-2 text-left transition ${
                               selected
                                 ? "border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)]"
                                 : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:border-[color:var(--shell-ink)]"
@@ -6577,7 +6625,7 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
 
-                  <div className={`${cardBase} p-4`}>
+                  <div className={`${cardBase} symbol-workspace p-4`}>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Symbol correlation
                     </div>
@@ -6588,6 +6636,54 @@ export default function ClaritasDashboard() {
                     </div>
                     {selectedSymbolQuote ? (
                       <div className="mt-3 space-y-3">
+                        <div className="symbol-performance">
+                          <div>
+                            <span>Last price</span>
+                            <strong>
+                              {selectedSymbolQuote.price ?? "—"} {selectedSymbolQuote.currency ?? ""}
+                            </strong>
+                          </div>
+                          <div>
+                            <span>Session move</span>
+                            <strong
+                              className={
+                                (selectedSymbolQuote.percent_change ?? 0) >= 0
+                                  ? "positive"
+                                  : "negative"
+                              }
+                            >
+                              {selectedSymbolQuote.percent_change != null
+                                ? `${selectedSymbolQuote.percent_change >= 0 ? "+" : ""}${selectedSymbolQuote.percent_change.toFixed(2)}%`
+                                : "—"}
+                            </strong>
+                          </div>
+                          <div>
+                            <span>Session range</span>
+                            <strong>
+                              {selectedSymbolQuote.low_price ?? "—"}–{selectedSymbolQuote.high_price ?? "—"}
+                            </strong>
+                          </div>
+                          <div className="session-range" aria-label="Price position within the session range">
+                            <span
+                              style={{
+                                width: `${Math.max(
+                                  4,
+                                  Math.min(
+                                    100,
+                                    (((selectedSymbolQuote.price ?? selectedSymbolQuote.low_price ?? 0) -
+                                      (selectedSymbolQuote.low_price ?? 0)) /
+                                      Math.max(
+                                        0.0001,
+                                        (selectedSymbolQuote.high_price ?? 0) -
+                                          (selectedSymbolQuote.low_price ?? 0),
+                                      )) *
+                                      100,
+                                  ),
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
                           <div className="font-semibold text-[color:var(--shell-ink)]">Primary market</div>
                           <div className="mt-1 text-[color:var(--shell-muted)]">
@@ -6787,27 +6883,38 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "admin" && isAdmin && (
-              <div className="min-w-0 space-y-4">
+              <div className="workspace-page control-room-page min-w-0 space-y-4">
+                <section className="control-room-intro">
+                  <div>
+                    <span>Operator safeguards</span>
+                    <strong>Health and run history stay primary; mutations remain deliberate.</strong>
+                  </div>
+                  <div className="control-room-state">
+                    <span className="live-dot" />
+                    Authenticated administrator
+                  </div>
+                </section>
                 <AdminIngestionPanel dark={dark} />
                 <AdminUserManagementPanel />
               </div>
             )}
             {activeView === "profile" && (
-              <div className="space-y-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="settings-page space-y-6">
+                <div className="settings-intro flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.35em] text-[color:var(--shell-muted)]">
-                      Account
+                    <div className="text-xs font-semibold text-[color:var(--shell-muted)]">
+                      Signed-in account
                     </div>
                     <h1
                       className="mt-2 text-3xl font-semibold text-[color:var(--shell-ink)]"
-                      style={{ fontFamily: "var(--font-display)" }}
                     >
-                      Profile & access
+                      {userLabel}
                     </h1>
                     <p className="mt-2 max-w-2xl text-sm text-[color:var(--shell-muted)]">
-                      Review identity details, provider status, and session
-                      preferences across devices.
+                      {authUser?.email ?? "Email not provided"} ·{" "}
+                      {authUser?.roles?.length
+                        ? authUser.roles.join(", ")
+                        : "Standard access"}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
@@ -7300,14 +7407,13 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "legal" && (
-              <div className="space-y-6">
-                <div>
-                  <div className="text-xs uppercase tracking-[0.4em] text-[color:var(--shell-muted)]">
-                    Legal
+              <div className="document-page space-y-6">
+                <div className="document-intro">
+                  <div className="text-xs font-semibold text-[color:var(--shell-muted)]">
+                    Claritas product governance
                   </div>
                   <h1
                     className="mt-2 text-3xl font-semibold text-[color:var(--shell-ink)]"
-                    style={{ fontFamily: "var(--font-display)" }}
                   >
                     Policies and usage guidelines
                   </h1>
@@ -7318,40 +7424,38 @@ export default function ClaritasDashboard() {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                  {legalPolicies.map((policy) => (
-                    <article
-                      key={policy.id}
-                      id={policy.id}
-                      className="scroll-mt-24 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-6 shadow-sm"
-                    >
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-[color:var(--shell-ink)]">
-                          {policy.title}
-                        </h3>
-                        <span className="text-xs uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          Claritas
-                        </span>
-                      </div>
-                      <p className="mt-3 text-sm text-[color:var(--shell-muted)]">
-                        {policy.intro}
-                      </p>
-                      <ul className="mt-4 space-y-2 text-sm text-[color:var(--shell-muted)]">
-                        {policy.items.map((item) => (
-                          <li key={item} className="flex gap-2">
-                            <span className="mt-1 h-1.5 w-1.5 flex-none rounded-full bg-slate-500" />
-                            <span>{item}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      <p className="mt-4 text-sm text-[color:var(--shell-muted)]">
-                        {policy.note}
-                      </p>
-                    </article>
-                  ))}
+                <div className="document-layout">
+                  <aside className="document-toc" aria-label="Policy sections">
+                    <span>On this page</span>
+                    {legalPolicies.map((policy, index) => (
+                      <a key={`toc-${policy.id}`} href={`#${policy.id}`}>
+                        <small>{String(index + 1).padStart(2, "0")}</small>
+                        {policy.title}
+                      </a>
+                    ))}
+                  </aside>
+                  <div className="document-content">
+                    {legalPolicies.map((policy, index) => (
+                      <article
+                        key={policy.id}
+                        id={policy.id}
+                        className="policy-section scroll-mt-24"
+                      >
+                        <div className="policy-number">{String(index + 1).padStart(2, "0")}</div>
+                        <h2>{policy.title}</h2>
+                        <p className="policy-lead">{policy.intro}</p>
+                        <ul>
+                          {policy.items.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                        <p className="policy-note">{policy.note}</p>
+                      </article>
+                    ))}
+                  </div>
                 </div>
 
-                <details className="rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4">
+                <details className="document-reference rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4">
                   <summary className="cursor-pointer text-sm font-semibold text-[color:var(--shell-ink)]">
                     Brand colour guideline reference
                   </summary>
@@ -7394,6 +7498,25 @@ export default function ClaritasDashboard() {
           </main>
         </div>
       </div>
+      <nav className="mobile-ops-nav app-safe-bottom" aria-label="Primary mobile navigation">
+        {navItems
+          .filter((item) => ["dashboard", "news", "weather", "markets", "profile"].includes(item.id))
+          .map((item) => {
+            const Icon = item.icon;
+            const active = activeView === item.view;
+            return (
+              <button
+                key={`mobile-ops-${item.id}`}
+                type="button"
+                aria-current={active ? "page" : undefined}
+                onClick={() => setActiveView(item.view)}
+              >
+                <Icon aria-hidden="true" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+      </nav>
     </div>
   );
 }

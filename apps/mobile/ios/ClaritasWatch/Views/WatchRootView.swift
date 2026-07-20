@@ -10,13 +10,11 @@ struct WatchRootView: View {
                 WatchPairingView()
             } else {
                 TabView {
+                    WatchSignalGlanceView()
                     WatchBriefingView()
-                    WatchBriefingScheduleView()
                     WatchNewsView()
-                    WatchPodcastsView()
                     WatchMarketsView()
                     WatchWeatherView()
-                    WatchLeadershipView()
                 }
                 .tabViewStyle(.verticalPage)
             }
@@ -24,6 +22,126 @@ struct WatchRootView: View {
         .tint(WatchPalette.orange)
         .task {
             await model.bootstrap()
+        }
+    }
+}
+
+private struct WatchSignalGlanceView: View {
+    @EnvironmentObject private var model: WatchAppModel
+
+    private var topMover: MarketQuote? {
+        model.markets.max { abs($0.percent_change ?? 0) < abs($1.percent_change ?? 0) }
+    }
+
+    private var topWeather: CountryWeather? {
+        model.weatherAlerts.first ?? model.weather.first
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        WatchSectionLabel(title: "Signal glance", icon: "waveform.path.ecg")
+                        Spacer()
+                        WatchRefreshStatus()
+                    }
+
+                    WatchCard {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(model.criticalSignalCount)")
+                                    .font(.title.weight(.semibold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(
+                                        model.criticalSignalCount > 0
+                                            ? WatchPalette.orange
+                                            : WatchPalette.sage
+                                    )
+                                Text("Threshold signals")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(
+                                systemName: model.criticalSignalCount > 0
+                                    ? "exclamationmark.triangle.fill"
+                                    : "checkmark.circle.fill"
+                            )
+                            .foregroundStyle(
+                                model.criticalSignalCount > 0
+                                    ? WatchPalette.orange
+                                    : WatchPalette.sage
+                            )
+                        }
+                    }
+
+                    if let mover = topMover {
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 3) {
+                                WatchSectionLabel(title: "Top market move", icon: "chart.line.uptrend.xyaxis")
+                                HStack {
+                                    Text(mover.symbol)
+                                        .font(.headline)
+                                    Spacer()
+                                    Text(mover.percent_change.map { String(format: "%+.2f%%", $0) } ?? "—")
+                                        .font(.headline.monospacedDigit())
+                                        .foregroundStyle((mover.percent_change ?? 0) >= 0 ? WatchPalette.sage : WatchPalette.negative)
+                                }
+                            }
+                        }
+                    }
+
+                    if let weather = topWeather {
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 3) {
+                                WatchSectionLabel(title: "Weather scope", icon: "cloud.sun.fill")
+                                HStack {
+                                    Text(weather.country.uppercased())
+                                        .font(.headline)
+                                    Spacer()
+                                    Text(weather.temp_c.map { String(format: "%.0f°", $0) } ?? "—")
+                                        .font(.headline.monospacedDigit())
+                                }
+                                Text(weather.weather_desc ?? weather.weather_main ?? "Current conditions")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+
+                    if let story = model.news.first {
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 3) {
+                                WatchSectionLabel(title: "Latest headline", icon: "newspaper")
+                                Text(story.title ?? "Untitled")
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(2)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Button {
+                            model.openOnPhone("dashboard")
+                        } label: {
+                            Label("iPhone", systemImage: "iphone")
+                        }
+
+                        Button {
+                            Task { await model.refresh() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .accessibilityLabel("Refresh signals")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 3)
+            }
+            .navigationTitle("Claritas")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
     }
 }
@@ -76,8 +194,9 @@ private struct WatchBriefingView: View {
                         Text(briefing.update_text)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(3)
 
-                        ForEach(Array(briefing.key_takeaways.prefix(4).enumerated()), id: \.offset) { _, takeaway in
+                        ForEach(Array(briefing.key_takeaways.prefix(2).enumerated()), id: \.offset) { _, takeaway in
                             HStack(alignment: .top, spacing: 6) {
                                 Circle()
                                     .fill(WatchPalette.orange)
@@ -95,8 +214,6 @@ private struct WatchBriefingView: View {
                         }
                     }
 
-                    scheduleCard
-
                     WatchCard {
                         HStack {
                             metric(value: "\(model.news.count)", label: "News")
@@ -111,11 +228,10 @@ private struct WatchBriefingView: View {
                     }
 
                     Button {
-                        Task { await model.refresh() }
+                        model.openOnPhone("briefing")
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Label("Open on iPhone", systemImage: "iphone")
                     }
-                    .disabled(isRefreshing)
                 }
                 .padding(.horizontal, 3)
             }
@@ -291,7 +407,7 @@ private struct WatchNewsView: View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(model.news.prefix(10)) { item in
+                    ForEach(model.news.prefix(6)) { item in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(item.title ?? "Untitled")
                                 .font(.caption.weight(.semibold))
@@ -308,7 +424,7 @@ private struct WatchNewsView: View {
                         }
                     }
                 } header: {
-                    WatchSectionLabel(title: "News", icon: "newspaper")
+                    WatchSectionLabel(title: "Headline alerts", icon: "newspaper")
                 }
             }
             .navigationTitle("News")
@@ -435,7 +551,11 @@ private struct WatchMarketsView: View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(model.markets.prefix(12)) { quote in
+                    ForEach(
+                        model.markets
+                            .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
+                            .prefix(6)
+                    ) { quote in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(quote.symbol)
@@ -456,7 +576,7 @@ private struct WatchMarketsView: View {
                         }
                     }
                 } header: {
-                    WatchSectionLabel(title: "Markets", icon: "chart.line.uptrend.xyaxis")
+                    WatchSectionLabel(title: "Movers & breaches", icon: "chart.line.uptrend.xyaxis")
                 }
             }
             .navigationTitle("Markets")
@@ -477,7 +597,7 @@ private struct WatchWeatherView: View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(model.weather.prefix(12)) { item in
+                    ForEach((model.weatherAlerts.isEmpty ? model.weather : model.weatherAlerts).prefix(6)) { item in
                         HStack(spacing: 8) {
                             Image(systemName: weatherIcon(item.weather_main))
                                 .foregroundStyle(WatchPalette.orange)
@@ -496,7 +616,7 @@ private struct WatchWeatherView: View {
                         }
                     }
                 } header: {
-                    WatchSectionLabel(title: "Weather", icon: "cloud.sun")
+                    WatchSectionLabel(title: "Affected scope", icon: "cloud.sun")
                 }
             }
             .navigationTitle("Weather")

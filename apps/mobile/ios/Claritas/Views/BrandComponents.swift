@@ -85,6 +85,13 @@ enum ClaritasPalette {
     }
 }
 
+enum ClaritasLayout {
+    static let minimumTouchTarget: CGFloat = 44
+    static let controlRadius: CGFloat = 10
+    static let panelRadius: CGFloat = 14
+    static let sectionSpacing: CGFloat = 16
+}
+
 extension Color {
     init(hex: String) {
         var raw = hex.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -164,16 +171,15 @@ struct BrandCard<Content: View>: View {
                         Image(systemName: icon)
                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                     }
-                    Text(title.uppercased())
-                        .font(.caption2.weight(.semibold))
-                        .tracking(3)
+                    Text(title)
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 }
             }
             content
         }
         .padding(16)
-        .brandGlass(cornerRadius: 18, elevated: true)
+        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
     }
 }
 
@@ -185,9 +191,8 @@ struct BrandSectionHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(kicker.uppercased())
-                .font(.caption2.weight(.semibold))
-                .tracking(3)
+            Text(kicker)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             Text(title)
                 .font(.title3.weight(.semibold))
@@ -210,12 +215,12 @@ struct BrandMetricCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.semibold))
-                .tracking(2.6)
+            Text(title)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             Text(value)
                 .font(.title3.weight(.semibold))
+                .monospacedDigit()
                 .foregroundStyle(tone ?? ClaritasPalette.shellInk(for: colorScheme))
             if let detail, !detail.isEmpty {
                 Text(detail)
@@ -257,7 +262,6 @@ struct BrandGlassModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(elevated
@@ -267,23 +271,17 @@ struct BrandGlassModifier: ViewModifier {
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .stroke(
-                        LinearGradient(
-                            colors: [
-                                ClaritasPalette.glassHighlight(for: colorScheme),
-                                ClaritasPalette.shellBorder(for: colorScheme),
-                                ClaritasPalette.shellBorderStrong(for: colorScheme)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
+                        elevated
+                            ? ClaritasPalette.shellBorderStrong(for: colorScheme)
+                            : ClaritasPalette.shellBorder(for: colorScheme),
+                        lineWidth: 0.5
                     )
             )
             .shadow(
-                color: Color.black.opacity(colorScheme == .dark ? 0.24 : 0.08),
-                radius: elevated ? 20 : 12,
+                color: Color.black.opacity(colorScheme == .dark ? 0.16 : 0.05),
+                radius: elevated ? 8 : 3,
                 x: 0,
-                y: elevated ? 12 : 7
+                y: elevated ? 4 : 1
             )
     }
 }

@@ -4,8 +4,14 @@ This directory contains architecture and product design references that should e
 
 ## Documents
 
-- [Cross-Device Architecture and Design](cross-device-design.md): product architecture, shared design tokens, navigation models, and intended layouts for web, iPhone, iPad, and Apple Watch.
+- [UI Architecture and Cross-Device Design](cross-device-design.md): the analytics-first operational workspace, page archetypes, component contracts, adaptive rules, and implemented layouts for web, iPhone, iPad, and Apple Watch.
 - [Business Capabilities](capabilities.md): business capability map for the Claritas platform.
+
+## UI Architecture Decisions
+
+- [ADR-0001: Analytics-first UI shell and hierarchy](../ADRs/0001-analytics-first-ui-shell.md)
+- [ADR-0002: Multi-device adaptive strategy](../ADRs/0002-multi-device-adaptive-strategy.md)
+- [ADR-0003: Semantic tokens and component taxonomy](../ADRs/0003-semantic-ui-system.md)
 
 ## Documentation Rules
 

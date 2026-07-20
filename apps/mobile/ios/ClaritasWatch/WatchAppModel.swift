@@ -36,6 +36,22 @@ final class WatchAppModel: ObservableObject {
         return changes.reduce(0, +) / Double(changes.count)
     }
 
+    var weatherAlerts: [CountryWeather] {
+        weather.filter {
+            ($0.temp_c.map { $0 >= 35 || $0 <= 0 } ?? false) ||
+            ($0.humidity.map { $0 >= 85 } ?? false) ||
+            ($0.wind_speed.map { $0 >= 15 } ?? false)
+        }
+    }
+
+    var marketBreaches: [MarketQuote] {
+        markets.filter { abs($0.percent_change ?? 0) >= 2 }
+    }
+
+    var criticalSignalCount: Int {
+        weatherAlerts.count + marketBreaches.count
+    }
+
     init() {
         loadCache()
         connectivity.onContext = { [weak self] context in
@@ -134,6 +150,10 @@ final class WatchAppModel: ObservableObject {
 
     func requestPhoneSync() {
         connectivity.requestContext()
+    }
+
+    func openOnPhone(_ destination: String) {
+        connectivity.openOnPhone(destination)
     }
 
     func updateDailyBriefingSchedule(enabled: Bool, scheduledTime: String, timezone: String) async {
