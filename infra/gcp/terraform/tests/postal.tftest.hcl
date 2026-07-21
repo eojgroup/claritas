@@ -47,4 +47,9 @@ run "postal_resources_can_be_planned" {
     condition     = output.postal_web_url == "https://postal.briefings.claritas.info"
     error_message = "Postal should use the isolated delegated briefing domain."
   }
+
+  assert {
+    condition     = google_project_iam_member.postal_runner_dns[0].role == "roles/dns.admin"
+    error_message = "The deployment identity needs Cloud DNS administration before it can create Postal's delegated zone."
+  }
 }
