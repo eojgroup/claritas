@@ -215,6 +215,10 @@ type DailyBriefingScheduleRow = {
   updated_at: string | Date;
 };
 
+type DueDailyBriefingScheduleRow = DailyBriefingScheduleRow & {
+  local_schedule_date: string | Date;
+};
+
 class AdminApiError extends Error {
   status: number;
 
@@ -1060,6 +1064,93 @@ async function updateUserDailyBriefingSchedule(
   return toDailyBriefingSchedule(rows[0]);
 }
 
+function getUtcBriefingDateForSchedule(localScheduleDate: string): string {
+  const utcToday = new Date().toISOString().slice(0, 10);
+  return localScheduleDate > utcToday ? utcToday : localScheduleDate;
+}
+
+async function getDueDailyBriefingSchedules(): Promise<DueDailyBriefingScheduleRow[]> {
+  const { rows } = await query<DueDailyBriefingScheduleRow>(
+    `SELECT
+       user_id,
+       enabled,
+       scheduled_time::text AS scheduled_time,
+       schedule_timezone,
+       last_scheduled_for,
+       last_triggered_at,
+       last_job_id,
+       timezone(schedule_timezone, now())::date AS local_schedule_date
+     FROM user_daily_briefing_schedule
+     WHERE enabled = true
+       AND timezone(schedule_timezone, now())::time >= scheduled_time
+       AND (
+         last_scheduled_for IS NULL
+         OR last_scheduled_for < timezone(schedule_timezone, now())::date
+       )
+     ORDER BY schedule_timezone ASC, scheduled_time ASC, user_id ASC
+     LIMIT $1`,
+    [DAILY_BRIEFING_SCHEDULER_BATCH_SIZE]
+  );
+  return rows;
+}
+
+async function getActiveDailyBriefingGenerationJob(
+  briefingDate: string
+): Promise<DailyBriefingGenerationJobRow | null> {
+  const { rows } = await query<DailyBriefingGenerationJobRow>(
+    `SELECT id, briefing_date, status, options, briefing_id, generation, error,
+            created_at, started_at, finished_at, updated_at
+     FROM daily_signal_briefing_generation_job
+     WHERE briefing_date = $1::date
+       AND status IN ('queued', 'running')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [briefingDate]
+  );
+  return rows[0] ?? null;
+}
+
+async function ensurePublishedDailyBriefingGenerationJob(briefingDate: string): Promise<string | null> {
+  const published = await query<{ id: number }>(
+    `SELECT id FROM daily_signal_briefing
+     WHERE briefing_date = $1::date AND status = 'published'
+     LIMIT 1`,
+    [briefingDate]
+  );
+  if (published.rows[0]) return null;
+
+  const activeJob = await getActiveDailyBriefingGenerationJob(briefingDate);
+  if (activeJob) {
+    if (activeJob.status === "queued") startDailyBriefingGenerationJob(activeJob.id);
+    return activeJob.id;
+  }
+
+  const job = await createDailyBriefingGenerationJob(briefingDate, {
+    briefingDate,
+    status: "published",
+    lookbackHours: 24,
+  });
+  startDailyBriefingGenerationJob(job.id);
+  return job.id;
+}
+
+async function markDailyBriefingSchedulesTriggered(
+  userIds: number[],
+  localScheduleDate: string,
+  jobId: string | null
+): Promise<void> {
+  if (userIds.length === 0) return;
+  await query(
+    `UPDATE user_daily_briefing_schedule
+     SET last_scheduled_for = $2::date,
+         last_triggered_at = now(),
+         last_job_id = COALESCE($3, last_job_id),
+         updated_at = now()
+     WHERE user_id = ANY($1::bigint[])`,
+    [userIds, localScheduleDate, jobId]
+  );
+}
+
 async function withDailyBriefingSchedulerLock(task: () => Promise<void>): Promise<void> {
   await withTransaction(async (client) => {
     const { rows } = await client.query<{ locked: boolean }>(
@@ -1077,6 +1168,27 @@ async function runDailyBriefingSchedulerCycle(): Promise<void> {
 
   try {
     await withDailyBriefingSchedulerLock(async () => {
+      const dueSchedules = await getDueDailyBriefingSchedules();
+      const scheduleGroups = new Map<string, {
+        localScheduleDate: string;
+        briefingDate: string;
+        userIds: number[];
+      }>();
+
+      for (const row of dueSchedules) {
+        const localScheduleDate = dateToApiString(row.local_schedule_date);
+        const briefingDate = getUtcBriefingDateForSchedule(localScheduleDate);
+        const key = `${localScheduleDate}:${briefingDate}`;
+        const group = scheduleGroups.get(key) ?? { localScheduleDate, briefingDate, userIds: [] };
+        group.userIds.push(Number(row.user_id));
+        scheduleGroups.set(key, group);
+      }
+
+      for (const group of scheduleGroups.values()) {
+        const jobId = await ensurePublishedDailyBriefingGenerationJob(group.briefingDate);
+        await markDailyBriefingSchedulesTriggered(group.userIds, group.localScheduleDate, jobId);
+      }
+
       await enqueueDuePersonalBriefingJobs(DAILY_BRIEFING_SCHEDULER_BATCH_SIZE);
     });
   } finally {
