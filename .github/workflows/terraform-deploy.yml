@@ -72,6 +72,12 @@ jobs:
         run: |
           terraform fmt -check -recursive
           terraform validate
+
+          # Repository variables configure the production plan/apply, but must not
+          # override the explicit/default values exercised by isolated module tests.
+          for variable in "${!TF_VAR_postal_@}"; do
+            unset "$variable"
+          done
           terraform test -test-directory=tests
 
       - name: 🛠️ Terraform Import (existing resources)
