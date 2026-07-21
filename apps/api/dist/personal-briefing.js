@@ -811,8 +811,8 @@ async function enqueueDuePersonalBriefingJobs(limit) {
        WHERE enabled = true
          AND timezone(schedule_timezone, now())::time >= scheduled_time
          AND (
-           last_scheduled_for IS NULL
-           OR last_scheduled_for < timezone(schedule_timezone, now())::date
+           last_personal_scheduled_for IS NULL
+           OR last_personal_scheduled_for < timezone(schedule_timezone, now())::date
          )
        ORDER BY schedule_timezone ASC, scheduled_time ASC, user_id ASC
        FOR UPDATE SKIP LOCKED
@@ -832,7 +832,7 @@ async function enqueueDuePersonalBriefingJobs(limit) {
          DO UPDATE SET updated_at = personal_daily_briefing_job.updated_at
          RETURNING id`, [jobId, row.user_id, briefingDate, row.email_enabled, JSON.stringify(preferences)]);
             await client.query(`UPDATE user_daily_briefing_schedule
-         SET last_scheduled_for = $2::date,
+         SET last_personal_scheduled_for = $2::date,
              last_triggered_at = now(),
              last_personal_job_id = $3,
              updated_at = now()
