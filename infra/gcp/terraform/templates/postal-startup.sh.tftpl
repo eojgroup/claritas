@@ -378,7 +378,11 @@ for service in mariadb web smtp submission worker caddy; do
   fi
 done
 
-curl --fail --silent --show-error http://127.0.0.1:5000/ >/dev/null
+# Postal's Rails host authorization rejects the loopback host header. Probe
+# the local listener while supplying the configured public Postal hostname.
+curl --fail --silent --show-error \
+  --header 'Host: ${web_hostname}' \
+  http://127.0.0.1:5000/ >/dev/null
 curl --fail --silent --show-error http://127.0.0.1:9090/health >/dev/null
 curl --fail --silent --show-error http://127.0.0.1:9091/health >/dev/null
 curl --fail --silent --show-error http://127.0.0.1:9092/health >/dev/null
