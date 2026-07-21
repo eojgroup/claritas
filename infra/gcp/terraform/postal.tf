@@ -592,29 +592,9 @@ resource "terraform_data" "postal_startup_script_update" {
   triggers_replace = [sha256(local.postal_startup_script)]
 
   provisioner "local-exec" {
-    command = <<-EOT
-      # Keep this POSIX-shell compatible because Terraform invokes local-exec
-      # with /bin/sh by default on the deployment runner.
-      set -eu
-      startup_script=$(mktemp)
-      encoded_startup_script=$(mktemp)
-      trap 'rm -f "$startup_script" "$encoded_startup_script"' EXIT HUP INT TERM
-      printf '%s' "$POSTAL_STARTUP_SCRIPT_B64" > "$encoded_startup_script"
-      base64 --decode "$encoded_startup_script" > "$startup_script"
-      set -Eeuo pipefail
-      startup_script=$(mktemp)
-      trap 'rm -f "$startup_script"' EXIT
-      printf '%s' "$POSTAL_STARTUP_SCRIPT_B64" | base64 --decode > "$startup_script"
-      gcloud compute instances add-metadata "$POSTAL_INSTANCE" \
-        --project "$POSTAL_PROJECT" \
-        --zone "$POSTAL_ZONE" \
-        --metadata-from-file startup-script="$startup_script" \
-        --quiet
-      gcloud compute instances reset "$POSTAL_INSTANCE" \
-        --project "$POSTAL_PROJECT" \
-        --zone "$POSTAL_ZONE" \
-        --quiet
-    EOT
+    # Keep the deployment hook in a single POSIX-shell file. This prevents
+    # conflict resolution from accidentally concatenating two heredocs.
+    command = file("${path.module}/scripts/update-postal-startup-script.sh")
 
     environment = {
       POSTAL_INSTANCE           = google_compute_instance.postal[0].name
