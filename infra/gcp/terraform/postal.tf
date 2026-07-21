@@ -593,6 +593,14 @@ resource "terraform_data" "postal_startup_script_update" {
 
   provisioner "local-exec" {
     command = <<-EOT
+      # Keep this POSIX-shell compatible because Terraform invokes local-exec
+      # with /bin/sh by default on the deployment runner.
+      set -eu
+      startup_script=$(mktemp)
+      encoded_startup_script=$(mktemp)
+      trap 'rm -f "$startup_script" "$encoded_startup_script"' EXIT HUP INT TERM
+      printf '%s' "$POSTAL_STARTUP_SCRIPT_B64" > "$encoded_startup_script"
+      base64 --decode "$encoded_startup_script" > "$startup_script"
       set -Eeuo pipefail
       startup_script=$(mktemp)
       trap 'rm -f "$startup_script"' EXIT
