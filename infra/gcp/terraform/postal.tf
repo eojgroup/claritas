@@ -17,6 +17,29 @@ locals {
   postal_sender_dkim_rrdata = var.postal_enabled ? "\"${join("\" \"", regexall(".{1,200}", local.postal_sender_dkim_value))}\"" : ""
 
   postal_smtp_credential_effective = var.postal_enabled && trimspace(var.postal_smtp_credential) == "" ? random_password.postal_smtp_credential[0].result : var.postal_smtp_credential
+
+  postal_startup_script = var.postal_enabled ? templatefile("${path.module}/templates/postal-startup.sh.tftpl", {
+    project_id                = var.project_id
+    postal_domain             = var.postal_domain
+    web_hostname              = local.postal_web_hostname
+    smtp_hostname             = local.postal_smtp_hostname
+    spf_hostname              = local.postal_spf_hostname
+    return_path_hostname      = local.postal_return_path_hostname
+    route_hostname            = local.postal_route_hostname
+    track_hostname            = local.postal_track_hostname
+    postal_image_version      = var.postal_image_version
+    mariadb_image_version     = var.postal_mariadb_image_version
+    caddy_image_version       = var.postal_caddy_image_version
+    mariadb_secret_id         = google_secret_manager_secret.postal_mariadb[0].secret_id
+    rails_secret_id           = google_secret_manager_secret.postal_rails[0].secret_id
+    signing_secret_id         = google_secret_manager_secret.postal_signing[0].secret_id
+    domain_dkim_secret_id     = google_secret_manager_secret.postal_domain_dkim[0].secret_id
+    admin_secret_id           = google_secret_manager_secret.postal_admin[0].secret_id
+    smtp_credential_secret_id = google_secret_manager_secret.postal_smtp_credential[0].secret_id
+    admin_email               = var.postal_admin_email
+    admin_first_name          = var.postal_admin_first_name
+    admin_last_name           = var.postal_admin_last_name
+  }) : ""
 }
 
 resource "random_password" "postal_mariadb" {
@@ -254,6 +277,18 @@ resource "google_service_account_iam_member" "postal_runner_act_as" {
   member             = "serviceAccount:${local.terraform_runner_sa}"
 }
 
+# The deployment identity creates and maintains the delegated Postal DNS zone.
+# Keep this grant scoped to the opt-in Postal implementation so the standard
+# application deployment does not receive additional DNS permissions.
+resource "google_project_iam_member" "postal_runner_dns" {
+  count   = var.postal_enabled ? 1 : 0
+  project = var.project_id
+  role    = "roles/dns.admin"
+  member  = "serviceAccount:${local.terraform_runner_sa}"
+
+  depends_on = [google_project_service.enabled_services["dns.googleapis.com"]]
+}
+
 resource "google_compute_address" "postal" {
   count        = var.postal_enabled ? 1 : 0
   project      = var.project_id
@@ -281,7 +316,10 @@ resource "google_dns_managed_zone" "postal" {
     state = "off"
   }
 
-  depends_on = [google_project_service.enabled_services["dns.googleapis.com"]]
+  depends_on = [
+    google_project_service.enabled_services["dns.googleapis.com"],
+    google_project_iam_member.postal_runner_dns,
+  ]
 }
 
 resource "google_dns_record_set" "postal_a" {
@@ -507,28 +545,14 @@ resource "google_compute_instance" "postal" {
     serial-port-enable     = "FALSE"
   }
 
-  metadata_startup_script = templatefile("${path.module}/templates/postal-startup.sh.tftpl", {
-    project_id                = var.project_id
-    postal_domain             = var.postal_domain
-    web_hostname              = local.postal_web_hostname
-    smtp_hostname             = local.postal_smtp_hostname
-    spf_hostname              = local.postal_spf_hostname
-    return_path_hostname      = local.postal_return_path_hostname
-    route_hostname            = local.postal_route_hostname
-    track_hostname            = local.postal_track_hostname
-    postal_image_version      = var.postal_image_version
-    mariadb_image_version     = var.postal_mariadb_image_version
-    caddy_image_version       = var.postal_caddy_image_version
-    mariadb_secret_id         = google_secret_manager_secret.postal_mariadb[0].secret_id
-    rails_secret_id           = google_secret_manager_secret.postal_rails[0].secret_id
-    signing_secret_id         = google_secret_manager_secret.postal_signing[0].secret_id
-    domain_dkim_secret_id     = google_secret_manager_secret.postal_domain_dkim[0].secret_id
-    admin_secret_id           = google_secret_manager_secret.postal_admin[0].secret_id
-    smtp_credential_secret_id = google_secret_manager_secret.postal_smtp_credential[0].secret_id
-    admin_email               = var.postal_admin_email
-    admin_first_name          = var.postal_admin_first_name
-    admin_last_name           = var.postal_admin_last_name
-  })
+  metadata_startup_script = local.postal_startup_script
+
+  # Startup-script changes are applied by postal_startup_script_update below.
+  # Without this, the Google provider recreates the VM for every script change,
+  # which conflicts with the protected, persistent Postal data disk.
+  lifecycle {
+    ignore_changes = [metadata_startup_script]
+  }
 
   shielded_instance_config {
     enable_secure_boot          = true
@@ -557,6 +581,42 @@ resource "google_compute_instance" "postal" {
     google_secret_manager_secret_iam_member.postal_admin,
     google_secret_manager_secret_iam_member.postal_smtp_credential,
   ]
+}
+
+# Apply a changed startup script to the existing VM and reset it so the GCE
+# guest agent executes the new bootstrap. This makes later Postal bootstrap
+# changes part of Terraform deployment rather than a manual operator reboot.
+resource "terraform_data" "postal_startup_script_update" {
+  count = var.postal_enabled ? 1 : 0
+
+  triggers_replace = [sha256(local.postal_startup_script)]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -Eeuo pipefail
+      startup_script=$(mktemp)
+      trap 'rm -f "$startup_script"' EXIT
+      printf '%s' "$POSTAL_STARTUP_SCRIPT_B64" | base64 --decode > "$startup_script"
+      gcloud compute instances add-metadata "$POSTAL_INSTANCE" \
+        --project "$POSTAL_PROJECT" \
+        --zone "$POSTAL_ZONE" \
+        --metadata-from-file startup-script="$startup_script" \
+        --quiet
+      gcloud compute instances reset "$POSTAL_INSTANCE" \
+        --project "$POSTAL_PROJECT" \
+        --zone "$POSTAL_ZONE" \
+        --quiet
+    EOT
+
+    environment = {
+      POSTAL_INSTANCE           = google_compute_instance.postal[0].name
+      POSTAL_PROJECT            = var.project_id
+      POSTAL_ZONE               = var.zone
+      POSTAL_STARTUP_SCRIPT_B64 = base64encode(local.postal_startup_script)
+    }
+  }
+
+  depends_on = [google_compute_instance.postal]
 }
 
 ############################################

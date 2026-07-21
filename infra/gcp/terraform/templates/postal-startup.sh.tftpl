@@ -241,14 +241,17 @@ services:
     secrets:
       - mariadb_root_password
     healthcheck:
-      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 --silent"]
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 --password=\"$$(cat /run/secrets/mariadb_root_password)\" --silent"]
       interval: 5s
       timeout: 5s
       retries: 24
 
   web:
     image: ghcr.io/postalserver/postal:${postal_image_version}
-    command: postal web-server
+    # The Postal image entrypoint executes its argv directly. Use the list
+    # form so `postal` and its subcommand are separate argv values rather
+    # than one non-existent executable named "postal web-server".
+    command: ["postal", "web-server"]
     network_mode: host
     restart: unless-stopped
     environment:
@@ -262,7 +265,7 @@ services:
 
   smtp:
     image: ghcr.io/postalserver/postal:${postal_image_version}
-    command: postal smtp-server
+    command: ["postal", "smtp-server"]
     network_mode: host
     restart: unless-stopped
     cap_add:
@@ -278,12 +281,14 @@ services:
 
   submission:
     image: ghcr.io/postalserver/postal:${postal_image_version}
-    command: postal smtp-server
+    command: ["postal", "smtp-server"]
     network_mode: host
     restart: unless-stopped
     environment:
       PORT: "2525"
-      HEALTH_SERVER_PORT: "9092"
+      # SMTP health server settings come from Postal's configuration schema;
+      # HEALTH_SERVER_PORT alone is not read by Postal.
+      SMTP_SERVER_DEFAULT_HEALTH_SERVER_PORT: "9092"
       WAIT_FOR_TARGETS: 127.0.0.1:3306
       WAIT_FOR_TIMEOUT: "120"
     volumes:
@@ -294,7 +299,7 @@ services:
 
   worker:
     image: ghcr.io/postalserver/postal:${postal_image_version}
-    command: postal worker
+    command: ["postal", "worker"]
     network_mode: host
     restart: unless-stopped
     environment:
@@ -309,7 +314,7 @@ services:
   runner:
     profiles: ["tools"]
     image: ghcr.io/postalserver/postal:${postal_image_version}
-    command: postal
+    command: ["postal"]
     network_mode: host
     environment:
       WAIT_FOR_TARGETS: 127.0.0.1:3306
@@ -350,7 +355,7 @@ RemainAfterExit=yes
 WorkingDirectory=/opt/postal
 ExecStart=/usr/bin/docker compose up -d mariadb web smtp submission worker caddy
 ExecReload=/usr/bin/docker compose pull
-ExecReload=/usr/bin/docker compose --profile tools run --rm runner upgrade
+ExecReload=/usr/bin/docker compose --profile tools run --rm runner postal upgrade
 ExecReload=/usr/bin/docker compose up -d mariadb web smtp submission worker caddy
 ExecStop=/usr/bin/docker compose stop
 TimeoutStartSec=600
@@ -408,7 +413,10 @@ for attempt in $(seq 1 60); do
   fi
   sleep 5
 done
-docker compose --profile tools run --rm runner initialize
+# `docker compose run` replaces the service command. The Postal image's
+# entrypoint expects the executable name as its first argument, so preserve
+# `postal` before the requested subcommand.
+docker compose --profile tools run --rm runner postal initialize
 docker compose --profile tools run --rm runner bundle exec rails runner /config/bootstrap.rb
 
 systemctl daemon-reload
