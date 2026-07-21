@@ -31,8 +31,8 @@ locals {
   k8s_auth_data = merge(
     local.k8s_auth_optional_data,
     {
-      KEYCLOAK_DB_PASSWORD     = random_password.keycloak_db_password.result
-      KEYCLOAK_ADMIN_PASSWORD  = local.keycloak_admin_password_effective
+      KEYCLOAK_DB_PASSWORD    = random_password.keycloak_db_password.result
+      KEYCLOAK_ADMIN_PASSWORD = local.keycloak_admin_password_effective
     }
   )
 }
@@ -44,7 +44,7 @@ resource "kubernetes_secret" "claritas_auth" {
     name      = "claritas-auth"
     namespace = var.k8s_namespace
   }
-  data = local.k8s_auth_data
-  type = "Opaque"
+  data       = local.k8s_auth_data
+  type       = "Opaque"
   depends_on = [google_container_cluster.primary]
 }

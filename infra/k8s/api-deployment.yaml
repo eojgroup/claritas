@@ -61,21 +61,21 @@ spec:
             - name: OPENROUTER_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENROUTER_API_KEY, optional: true } }
             - name: SMTP_HOST
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: SMTP_HOST, optional: true } }
+              valueFrom: { configMapKeyRef: { name: claritas-smtp, key: SMTP_HOST, optional: true } }
             - name: SMTP_PORT
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: SMTP_PORT, optional: true } }
+              valueFrom: { configMapKeyRef: { name: claritas-smtp, key: SMTP_PORT, optional: true } }
             - name: SMTP_SECURE
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: SMTP_SECURE, optional: true } }
+              valueFrom: { configMapKeyRef: { name: claritas-smtp, key: SMTP_SECURE, optional: true } }
             - name: SMTP_FROM
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: SMTP_FROM, optional: true } }
+              valueFrom: { configMapKeyRef: { name: claritas-smtp, key: SMTP_FROM, optional: true } }
             - name: SMTP_FROM_NAME
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: SMTP_FROM_NAME, optional: true } }
+              valueFrom: { configMapKeyRef: { name: claritas-smtp, key: SMTP_FROM_NAME, optional: true } }
             - name: SMTP_REPLY_TO
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: SMTP_REPLY_TO, optional: true } }
+              valueFrom: { configMapKeyRef: { name: claritas-smtp, key: SMTP_REPLY_TO, optional: true } }
             - name: EMAIL_PUBLIC_BASE_URL
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: EMAIL_PUBLIC_BASE_URL, optional: true } }
+              valueFrom: { configMapKeyRef: { name: claritas-smtp, key: EMAIL_PUBLIC_BASE_URL, optional: true } }
             - name: PERSONAL_BRIEFING_WORKER_ENABLED
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: PERSONAL_BRIEFING_WORKER_ENABLED, optional: true } }
+              valueFrom: { configMapKeyRef: { name: claritas-smtp, key: PERSONAL_BRIEFING_WORKER_ENABLED, optional: true } }
             - name: SMTP_USER
               valueFrom: { secretKeyRef: { name: claritas-smtp, key: SMTP_USER, optional: true } }
             - name: SMTP_PASSWORD

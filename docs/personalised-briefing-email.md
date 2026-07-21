@@ -64,46 +64,43 @@ intentionally unauthenticated and must not be exposed through production ingress
 
 ## Production SMTP configuration
 
-Set these `claritas-config` keys:
+Production uses the Terraform-managed `claritas-smtp` ConfigMap and Secret. The API manifest reads
+all SMTP settings from those resources; do not patch them with `kubectl` because the next Terraform
+apply will reconcile them.
+
+The default Postal values are:
 
 | Variable | Required | Example | Purpose |
 | --- | --- | --- | --- |
-| `SMTP_HOST` | Yes | `postal.example.com` | SMTP relay hostname |
-| `SMTP_PORT` | Yes | `587` | Submission port; use 587 or 465 on Google Cloud |
-| `SMTP_SECURE` | Yes | `false` | `true` for implicit TLS on port 465; `false` for STARTTLS on 587 |
-| `SMTP_FROM` | Yes | `briefings@example.com` | Envelope/from mailbox |
+| `SMTP_HOST` | Yes | Postal VM private IP | SMTP relay address inside the VPC |
+| `SMTP_PORT` | Yes | `2525` | Private authenticated submission listener |
+| `SMTP_SECURE` | Yes | `false` | Submission remains inside the VPC; Postal authentication is still required |
+| `SMTP_FROM` | Yes | `daily@briefings.claritas.info` | Envelope/from mailbox |
 | `SMTP_FROM_NAME` | No | `Claritas` | Display name |
 | `SMTP_REPLY_TO` | No | `support@example.com` | Reply mailbox |
 | `EMAIL_PUBLIC_BASE_URL` | Recommended | `https://app.example.com` | Preferences link in email |
 | `PERSONAL_BRIEFING_WORKER_ENABLED` | No | `true` | Disable only for maintenance |
 
-Store credentials in the `claritas-smtp` secret:
+Terraform generates the Postal SMTP credential, stores it in Secret Manager and Terraform state,
+bootstraps the same value in Postal, and writes it to the Kubernetes Secret. Set
+`POSTAL_EMAIL_DELIVERY_ENABLED=true` only after the delivery gates pass. See the
+[Postal architecture and runbook](architecture/postal-email-delivery.md).
 
-```bash
-kubectl -n claritas create secret generic claritas-smtp \
-  --from-literal=SMTP_USER='replace-me' \
-  --from-literal=SMTP_PASSWORD='replace-me' \
-  --dry-run=client -o yaml | kubectl apply -f -
-```
-
-`SMTP_USER` and `SMTP_PASSWORD` can both be omitted for a trusted internal relay. If `SMTP_USER` is
-set, the password is mandatory.
-
-Google Cloud normally blocks external SMTP on port 25, while ports 587 and 465 are available for
-submission. Use one of those TLS-capable ports for an external relay.
+The API-to-Postal hop is not the same as Postal-to-recipient delivery. The first uses private VPC
+port 2525. Direct delivery to recipient MX servers still requires external destination port 25,
+which Google Cloud commonly blocks and Terraform cannot unblock. Ports 587/465 work only when an
+upstream relay is used.
 
 ## Production deliverability actions
 
 Before sending to real users:
 
-1. Choose and operate an SMTP relay. Postal is the self-hosted open-source option, but a managed
-   SMTP relay can be substituted without code changes.
-2. Configure a sending subdomain and publish SPF, DKIM, and DMARC DNS records supplied by that
-   relay.
-3. Configure reverse DNS and a stable outbound IP if self-hosting internet delivery.
-4. Add SMTP values/secrets above and deploy the API plus migration `V16`.
+1. Enable the Terraform-managed Postal infrastructure and delegate its Cloud DNS subdomain.
+2. Verify Google Cloud external TCP/25 egress, then enable the Terraform-managed PTR record.
+3. Confirm forward/reverse DNS, SPF, DKIM, and DMARC alignment.
+4. Enable the email worker through the repository variable and deploy the API plus migration `V16`.
 5. Send a profile preview to a verified account and confirm the delivery record becomes `sent`.
-6. Monitor bounce/complaint handling before increasing volume. The MVP queue records SMTP failures,
+6. Monitor bounce/complaint handling and IP reputation before increasing volume. The MVP queue records SMTP failures,
    but automated bounce ingestion is a follow-up capability.
 
 Email defaults to off for every account. The recipient must explicitly enable it, and Claritas

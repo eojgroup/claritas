@@ -39,6 +39,7 @@ Architecture and product design references:
 - [UI architecture and cross-device design](docs/architecture/cross-device-design.md): analytics-first hierarchy, data-domain roles, design tokens, page archetypes, and adaptive rules for web, iPhone, iPad, and Apple Watch.
 - [Business capabilities](docs/architecture/capabilities.md): platform capability map.
 - [Personalised briefing email](docs/personalised-briefing-email.md): preference matching, durable generation/delivery queues, Mailpit development setup, and production SMTP requirements.
+- [Postal email delivery architecture](docs/architecture/postal-email-delivery.md): dedicated Compute Engine mail delivery, delegated DNS, Terraform/GitHub Actions automation, and operational gates.
 
 ### 1) Identity and Access
 
@@ -86,6 +87,7 @@ Architecture and product design references:
 - Workload Identity for pod-to-GCP access without static long-lived keys.
 - Terraform as infrastructure-as-code.
 - GitHub Actions with OIDC for CI/CD.
+- Postal on a dedicated Compute Engine VM for self-hosted briefing email delivery, with its own persistent disk, static IP, reverse DNS, and delegated Cloud DNS zone.
 
 ### 5) Enterprise Non-Functional Requirements
 

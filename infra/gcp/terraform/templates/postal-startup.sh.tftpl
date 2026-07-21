@@ -1,0 +1,428 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+exec > >(tee -a /var/log/claritas-postal-bootstrap.log | logger -t claritas-postal-bootstrap) 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
+  ca-certificates \
+  curl \
+  dnsutils \
+  docker.io \
+  docker-compose-v2 \
+  jq \
+  netcat-openbsd
+
+install -d -m 0755 /etc/docker
+if [ ! -s /etc/docker/daemon.json ]; then
+  install -m 0644 /dev/null /etc/docker/daemon.json
+  echo '{"log-driver":"json-file","log-opts":{"max-size":"20m","max-file":"5"}}' > /etc/docker/daemon.json
+fi
+systemctl enable --now docker
+
+DATA_DEVICE=/dev/disk/by-id/google-postal-data
+for attempt in $(seq 1 60); do
+  if [ -e "$DATA_DEVICE" ]; then
+    break
+  fi
+  sleep 2
+done
+if [ ! -e "$DATA_DEVICE" ]; then
+  echo "Postal data disk was not attached" >&2
+  exit 1
+fi
+
+if ! blkid "$DATA_DEVICE" >/dev/null 2>&1; then
+  mkfs.ext4 -F -m 1 -L postal-data "$DATA_DEVICE"
+fi
+
+install -d -m 0755 /var/lib/postal
+DATA_UUID=$(blkid -s UUID -o value "$DATA_DEVICE")
+if ! grep -q "UUID=$DATA_UUID" /etc/fstab; then
+  echo "UUID=$DATA_UUID /var/lib/postal ext4 defaults,nofail,discard 0 2" >> /etc/fstab
+fi
+mountpoint -q /var/lib/postal || mount /var/lib/postal
+
+if systemctl list-unit-files claritas-postal.service >/dev/null 2>&1; then
+  systemctl stop claritas-postal.service || true
+fi
+
+install -d -m 0755 \
+  /opt/postal \
+  /opt/postal/config \
+  /opt/postal/secrets \
+  /var/lib/postal/caddy-config \
+  /var/lib/postal/caddy-data \
+  /var/lib/postal/mariadb
+
+metadata_token() {
+  curl --fail --silent --show-error \
+    -H 'Metadata-Flavor: Google' \
+    'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token' \
+    | jq -r '.access_token'
+}
+
+read_secret() {
+  local secret_id="$1"
+  local token
+  token=$(metadata_token)
+  curl --fail --silent --show-error \
+    -H "Authorization: Bearer $token" \
+    "https://secretmanager.googleapis.com/v1/projects/${project_id}/secrets/$secret_id/versions/latest:access" \
+    | jq -r '.payload.data' \
+    | base64 --decode
+}
+
+MARIADB_ROOT_PASSWORD=$(read_secret '${mariadb_secret_id}')
+RAILS_SECRET_KEY=$(read_secret '${rails_secret_id}')
+POSTAL_ADMIN_PASSWORD=$(read_secret '${admin_secret_id}')
+POSTAL_SMTP_CREDENTIAL=$(read_secret '${smtp_credential_secret_id}')
+read_secret '${signing_secret_id}' > /opt/postal/config/signing.key
+read_secret '${domain_dkim_secret_id}' > /opt/postal/config/domain-dkim.key
+
+cat > /opt/postal/config/postal.yml <<EOF
+version: 2
+
+postal:
+  web_hostname: ${web_hostname}
+  web_protocol: https
+  smtp_hostname: ${smtp_hostname}
+  use_ip_pools: false
+  signing_key_path: /config/signing.key
+
+web_server:
+  default_port: 5000
+  default_bind_address: 127.0.0.1
+
+worker:
+  default_health_server_port: 9090
+  default_health_server_bind_address: 127.0.0.1
+
+main_db:
+  host: 127.0.0.1
+  port: 3306
+  username: root
+  password: $MARIADB_ROOT_PASSWORD
+  database: postal
+
+message_db:
+  host: 127.0.0.1
+  port: 3306
+  username: root
+  password: $MARIADB_ROOT_PASSWORD
+  database_name_prefix: postal
+
+logging:
+  rails_log_enabled: true
+  enabled: true
+  highlighting_enabled: false
+
+smtp_server:
+  default_port: 25
+  default_bind_address: "::"
+  default_health_server_port: 9091
+  default_health_server_bind_address: 127.0.0.1
+  tls_enabled: false
+  log_connections: true
+  max_message_size: 14
+
+dns:
+  mx_records:
+    - ${smtp_hostname}
+  spf_include: ${spf_hostname}
+  return_path_domain: ${return_path_hostname}
+  route_domain: ${route_hostname}
+  track_domain: ${track_hostname}
+  helo_hostname: ${smtp_hostname}
+  dkim_identifier: postal
+
+smtp:
+  host: 127.0.0.1
+  port: 2525
+  from_name: Postal
+  from_address: postal@${postal_domain}
+
+rails:
+  environment: production
+  secret_key: $RAILS_SECRET_KEY
+
+migration_waiter:
+  enabled: true
+  attempts: 120
+  sleep_time: 2
+EOF
+
+cat > /opt/postal/config/Caddyfile <<'EOF'
+${web_hostname} {
+  encode zstd gzip
+  reverse_proxy 127.0.0.1:5000
+}
+
+${track_hostname} {
+  encode zstd gzip
+  reverse_proxy 127.0.0.1:5000
+}
+EOF
+
+printf '%s' "$MARIADB_ROOT_PASSWORD" > /opt/postal/secrets/mariadb-root-password
+cat > /opt/postal/secrets/bootstrap.env <<EOF
+POSTAL_ADMIN_EMAIL=${admin_email}
+POSTAL_ADMIN_FIRST_NAME=${admin_first_name}
+POSTAL_ADMIN_LAST_NAME=${admin_last_name}
+POSTAL_ADMIN_PASSWORD=$POSTAL_ADMIN_PASSWORD
+POSTAL_SENDING_DOMAIN=${postal_domain}
+POSTAL_SMTP_CREDENTIAL=$POSTAL_SMTP_CREDENTIAL
+EOF
+
+cat > /opt/postal/config/bootstrap.rb <<'RUBY'
+admin = User.find_or_initialize_by(email_address: ENV.fetch("POSTAL_ADMIN_EMAIL"))
+admin.first_name = ENV.fetch("POSTAL_ADMIN_FIRST_NAME")
+admin.last_name = ENV.fetch("POSTAL_ADMIN_LAST_NAME")
+admin.password = ENV.fetch("POSTAL_ADMIN_PASSWORD")
+admin.admin = true
+admin.email_verified_at ||= Time.current
+admin.save!
+
+organization = Organization.find_or_initialize_by(permalink: "claritas")
+organization.name = "Claritas"
+organization.owner = admin
+organization.time_zone ||= "UTC"
+organization.save!
+
+membership = OrganizationUser.find_or_initialize_by(organization: organization, user: admin)
+membership.admin = true
+membership.all_servers = true
+membership.save!
+
+server = organization.servers.find_or_initialize_by(permalink: "briefings")
+server.name = "Claritas Briefings"
+server.mode = "Live"
+server.save!
+
+domain = server.domains.find_or_initialize_by(name: ENV.fetch("POSTAL_SENDING_DOMAIN"))
+domain.verification_method = "DNS"
+domain.verified_at ||= Time.current
+domain.save!
+domain.update_columns(
+  dkim_identifier_string: "claritas",
+  dkim_private_key: File.read("/config/domain-dkim.key")
+)
+
+credential = server.credentials.find_or_initialize_by(name: "Claritas SMTP")
+credential.type = "SMTP"
+credential.save!
+credential.update_column(:key, ENV.fetch("POSTAL_SMTP_CREDENTIAL")) if credential.key != ENV.fetch("POSTAL_SMTP_CREDENTIAL")
+
+puts "Postal administrator, organization, briefing server, sending domain, and SMTP credential are configured."
+RUBY
+
+chown -R 999:999 /opt/postal/config
+chmod 0750 /opt/postal/config /opt/postal/secrets
+chmod 0640 /opt/postal/config/postal.yml /opt/postal/config/Caddyfile /opt/postal/config/signing.key /opt/postal/config/domain-dkim.key /opt/postal/config/bootstrap.rb
+chmod 0600 /opt/postal/secrets/mariadb-root-password /opt/postal/secrets/bootstrap.env
+
+cat > /opt/postal/docker-compose.yml <<'EOF'
+services:
+  mariadb:
+    image: mariadb:${mariadb_image_version}
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: postal
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/mariadb_root_password
+      MARIADB_AUTO_UPGRADE: "1"
+    command:
+      - --bind-address=127.0.0.1
+      - --innodb-log-file-size=256M
+      - --max-allowed-packet=32M
+    volumes:
+      - /var/lib/postal/mariadb:/var/lib/mysql
+    secrets:
+      - mariadb_root_password
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  web:
+    image: ghcr.io/postalserver/postal:${postal_image_version}
+    command: postal web-server
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      WAIT_FOR_TARGETS: 127.0.0.1:3306
+      WAIT_FOR_TIMEOUT: "120"
+    volumes:
+      - /opt/postal/config:/config:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  smtp:
+    image: ghcr.io/postalserver/postal:${postal_image_version}
+    command: postal smtp-server
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - NET_BIND_SERVICE
+    environment:
+      WAIT_FOR_TARGETS: 127.0.0.1:3306
+      WAIT_FOR_TIMEOUT: "120"
+    volumes:
+      - /opt/postal/config:/config:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  submission:
+    image: ghcr.io/postalserver/postal:${postal_image_version}
+    command: postal smtp-server
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      PORT: "2525"
+      HEALTH_SERVER_PORT: "9092"
+      WAIT_FOR_TARGETS: 127.0.0.1:3306
+      WAIT_FOR_TIMEOUT: "120"
+    volumes:
+      - /opt/postal/config:/config:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  worker:
+    image: ghcr.io/postalserver/postal:${postal_image_version}
+    command: postal worker
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      WAIT_FOR_TARGETS: 127.0.0.1:3306
+      WAIT_FOR_TIMEOUT: "120"
+    volumes:
+      - /opt/postal/config:/config:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  runner:
+    profiles: ["tools"]
+    image: ghcr.io/postalserver/postal:${postal_image_version}
+    command: postal
+    network_mode: host
+    environment:
+      WAIT_FOR_TARGETS: 127.0.0.1:3306
+      WAIT_FOR_TIMEOUT: "120"
+    env_file:
+      - /opt/postal/secrets/bootstrap.env
+    volumes:
+      - /opt/postal/config:/config:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:${caddy_image_version}
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /opt/postal/config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /var/lib/postal/caddy-config:/config
+      - /var/lib/postal/caddy-data:/data
+
+secrets:
+  mariadb_root_password:
+    file: /opt/postal/secrets/mariadb-root-password
+EOF
+
+cat > /etc/systemd/system/claritas-postal.service <<'EOF'
+[Unit]
+Description=Claritas Postal containers
+Requires=docker.service
+RequiresMountsFor=/var/lib/postal
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/postal
+ExecStart=/usr/bin/docker compose up -d mariadb web smtp submission worker caddy
+ExecReload=/usr/bin/docker compose pull
+ExecReload=/usr/bin/docker compose --profile tools run --rm runner upgrade
+ExecReload=/usr/bin/docker compose up -d mariadb web smtp submission worker caddy
+ExecStop=/usr/bin/docker compose stop
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /usr/local/bin/postal-healthcheck <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+cd /opt/postal
+
+for service in mariadb web smtp submission worker caddy; do
+  container_id=$(docker compose ps -q "$service")
+  if [ -z "$container_id" ] || [ "$(docker inspect -f '{{.State.Status}}' "$container_id")" != "running" ]; then
+    echo "Postal service is not running: $service" >&2
+    docker compose ps
+    exit 1
+  fi
+done
+
+curl --fail --silent --show-error http://127.0.0.1:5000/ >/dev/null
+curl --fail --silent --show-error http://127.0.0.1:9090/health >/dev/null
+curl --fail --silent --show-error http://127.0.0.1:9091/health >/dev/null
+curl --fail --silent --show-error http://127.0.0.1:9092/health >/dev/null
+nc -z -w 5 127.0.0.1 25
+nc -z -w 5 127.0.0.1 2525
+
+echo "Postal web, SMTP, submission, worker, MariaDB, and Caddy services are healthy."
+EOF
+chmod 0755 /usr/local/bin/postal-healthcheck
+
+cat > /usr/local/bin/postal-port25-check <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+target=$${1:-gmail-smtp-in.l.google.com}
+if timeout 15 nc -z -w 10 "$target" 25; then
+  echo "External TCP/25 egress is available via $target."
+  exit 0
+fi
+
+echo "External TCP/25 egress is blocked or unavailable via $target. Postal cannot deliver directly to internet MX servers." >&2
+exit 1
+EOF
+chmod 0755 /usr/local/bin/postal-port25-check
+
+cd /opt/postal
+docker compose pull
+docker compose up -d mariadb
+for attempt in $(seq 1 60); do
+  if [ "$(docker inspect -f '{{.State.Health.Status}}' "$(docker compose ps -q mariadb)")" = "healthy" ]; then
+    break
+  fi
+  sleep 5
+done
+docker compose --profile tools run --rm runner initialize
+docker compose --profile tools run --rm runner bundle exec rails runner /config/bootstrap.rb
+
+systemctl daemon-reload
+systemctl enable claritas-postal.service
+systemctl restart claritas-postal.service
+
+for attempt in $(seq 1 60); do
+  if /usr/local/bin/postal-healthcheck; then
+    touch /var/lib/postal/.bootstrap-complete
+    exit 0
+  fi
+  sleep 5
+done
+
+docker compose ps
+docker compose logs --tail=200
+exit 1

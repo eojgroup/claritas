@@ -1,0 +1,86 @@
+name: Postal Health and Deliverability Checks
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: postal-health
+  cancel-in-progress: true
+
+jobs:
+  health:
+    if: ${{ vars.POSTAL_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: claritas-457808
+      ZONE: europe-west2-b
+      POSTAL_DOMAIN: ${{ vars.POSTAL_DOMAIN || 'briefings.claritas.info' }}
+      POSTAL_ENABLE_PUBLIC_PTR: ${{ vars.POSTAL_ENABLE_PUBLIC_PTR || 'false' }}
+      POSTAL_ENFORCE_PORT25_EGRESS: ${{ vars.POSTAL_ENFORCE_PORT25_EGRESS || 'true' }}
+
+    steps:
+      - name: 🔐 Authenticate to Google Cloud via OIDC
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider"
+          service_account: "terraform-github-oidc@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
+
+      - name: ☁️ Install gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: 🩺 Check Postal process health
+        run: |
+          set -euo pipefail
+          gcloud compute ssh claritas-postal \
+            --project "$PROJECT_ID" \
+            --zone "$ZONE" \
+            --tunnel-through-iap \
+            --quiet \
+            --command "sudo /usr/local/bin/postal-healthcheck"
+
+      - name: 🌐 Check public DNS and HTTPS
+        run: |
+          set -euo pipefail
+          external_ip=$(gcloud compute addresses describe claritas-postal-ip \
+            --project "$PROJECT_ID" \
+            --region europe-west2 \
+            --format='value(address)')
+
+          test "$(dig +short "postal.${POSTAL_DOMAIN}" A | tail -n 1)" = "$external_ip"
+          test "$(dig +short "smtp.${POSTAL_DOMAIN}" A | tail -n 1)" = "$external_ip"
+          dig +short "$POSTAL_DOMAIN" TXT | grep -F 'v=spf1'
+          dig +short "postal-claritas._domainkey.${POSTAL_DOMAIN}" TXT | grep -F 'v=DKIM1'
+          dig +short "_dmarc.${POSTAL_DOMAIN}" TXT | grep -F 'v=DMARC1'
+          curl --fail --silent --show-error --location --max-time 20 "https://postal.${POSTAL_DOMAIN}/" >/dev/null
+
+          if [ "$POSTAL_ENABLE_PUBLIC_PTR" = "true" ]; then
+            ptr=$(dig +short -x "$external_ip" | sed 's/\.$//' | tail -n 1)
+            test "$ptr" = "smtp.${POSTAL_DOMAIN}"
+          else
+            echo "::warning::PTR validation is disabled until POSTAL_ENABLE_PUBLIC_PTR=true."
+          fi
+
+      - name: ✉️ Check direct-delivery egress
+        run: |
+          set -euo pipefail
+          if gcloud compute ssh claritas-postal \
+            --project "$PROJECT_ID" \
+            --zone "$ZONE" \
+            --tunnel-through-iap \
+            --quiet \
+            --command "sudo /usr/local/bin/postal-port25-check"; then
+            exit 0
+          fi
+
+          if [ "$POSTAL_ENFORCE_PORT25_EGRESS" = "true" ]; then
+            exit 1
+          fi
+          echo "::warning::External TCP/25 remains unavailable."

@@ -22,6 +22,7 @@ graph TB
         DB[(Cloud SQL PostgreSQL)]
         OBS[Logging / Monitoring / Audit]
         SEC[Secret + IAM Controls]
+        POSTAL[Postal Email Delivery (Dedicated Compute VM)]
     end
 
     subgraph External Data Providers
@@ -50,10 +51,16 @@ graph TB
     JOBS --> OBS
     API --> SEC
     JOBS --> SEC
+    API -->|Personalised briefing SMTP| POSTAL
+    POSTAL --> OBS
+    POSTAL --> SEC
 
     EXT1 --> JOBS
     EXT2 --> JOBS
     EXT3 --> JOBS
+
+    POSTAL -->|SMTP| U1
+    POSTAL -->|SMTP| U2
 
     U3 --> OBS
     U3 --> SEC

@@ -7,10 +7,14 @@ resource "google_project_service" "enabled_services" {
     "artifactregistry.googleapis.com",
     "servicenetworking.googleapis.com",
     "sqladmin.googleapis.com",
-    "pubsub.googleapis.com",        
+    "pubsub.googleapis.com",
     "secretmanager.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
+    "compute.googleapis.com",
+    "dns.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
   ])
   project            = var.project_id
   service            = each.value
@@ -60,19 +64,19 @@ resource "google_artifact_registry_repository" "claritas_app" {
 ############################################
 locals {
   auth_secrets = {
-    "claritas-auth-google-client-id"       = var.auth_google_client_id
-    "claritas-auth-google-client-secret"   = var.auth_google_client_secret
-    "claritas-auth-microsoft-client-id"    = var.auth_microsoft_client_id
+    "claritas-auth-google-client-id"        = var.auth_google_client_id
+    "claritas-auth-google-client-secret"    = var.auth_google_client_secret
+    "claritas-auth-microsoft-client-id"     = var.auth_microsoft_client_id
     "claritas-auth-microsoft-client-secret" = var.auth_microsoft_client_secret
-    "claritas-auth-microsoft-tenant-id"    = var.auth_microsoft_tenant_id
-    "claritas-auth-apple-client-id"        = var.auth_apple_client_id
-    "claritas-auth-apple-team-id"          = var.auth_apple_team_id
-    "claritas-auth-apple-key-id"           = var.auth_apple_key_id
-    "claritas-auth-apple-private-key"      = var.auth_apple_private_key
-    "claritas-auth-keycloak-client-secret" = var.auth_keycloak_client_secret
-    "claritas-ingest-api-token"            = var.ingest_api_token
-    "claritas-finnhub-api-key"             = var.finnhub_api_key
-    "claritas-keycloak-admin-password"     = var.keycloak_admin_password
+    "claritas-auth-microsoft-tenant-id"     = var.auth_microsoft_tenant_id
+    "claritas-auth-apple-client-id"         = var.auth_apple_client_id
+    "claritas-auth-apple-team-id"           = var.auth_apple_team_id
+    "claritas-auth-apple-key-id"            = var.auth_apple_key_id
+    "claritas-auth-apple-private-key"       = var.auth_apple_private_key
+    "claritas-auth-keycloak-client-secret"  = var.auth_keycloak_client_secret
+    "claritas-ingest-api-token"             = var.ingest_api_token
+    "claritas-finnhub-api-key"              = var.finnhub_api_key
+    "claritas-keycloak-admin-password"      = var.keycloak_admin_password
   }
 
   auth_secret_names = toset(keys(local.auth_secrets))

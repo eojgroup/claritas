@@ -10,6 +10,10 @@ flowchart TD
   TF --> AR[Artifact Registry]
   TF --> IAM[IAM + Workload Identity Bindings]
   TF --> INFR[Ingress + Managed Certificate]
+  TF --> PDNS[Cloud DNS: briefings.claritas.info]
+  TF --> PVM[Dedicated Postal Compute VM]
+  TF --> PDISK[Postal Persistent Disk + Snapshots]
+  TF --> PSEC[Postal Secret Manager Secrets]
 
   subgraph Runtime on GKE
     WEB[Web Deployment]
@@ -36,3 +40,10 @@ flowchart TD
   KC --> SEC
   SEC --> KBOOT
   KBOOT --> KC
+
+  API -->|Authenticated SMTP :2525 over VPC| PVM
+  PVM -->|Direct SMTP :25| RMX[Recipient MX Servers]
+  RMX -->|Bounces :25| PVM
+  PDNS --> PVM
+  PDISK --> PVM
+  PSEC --> PVM
