@@ -254,6 +254,18 @@ resource "google_service_account_iam_member" "postal_runner_act_as" {
   member             = "serviceAccount:${local.terraform_runner_sa}"
 }
 
+# The deployment identity creates and maintains the delegated Postal DNS zone.
+# Keep this grant scoped to the opt-in Postal implementation so the standard
+# application deployment does not receive additional DNS permissions.
+resource "google_project_iam_member" "postal_runner_dns" {
+  count   = var.postal_enabled ? 1 : 0
+  project = var.project_id
+  role    = "roles/dns.admin"
+  member  = "serviceAccount:${local.terraform_runner_sa}"
+
+  depends_on = [google_project_service.enabled_services["dns.googleapis.com"]]
+}
+
 resource "google_compute_address" "postal" {
   count        = var.postal_enabled ? 1 : 0
   project      = var.project_id
@@ -281,7 +293,10 @@ resource "google_dns_managed_zone" "postal" {
     state = "off"
   }
 
-  depends_on = [google_project_service.enabled_services["dns.googleapis.com"]]
+  depends_on = [
+    google_project_service.enabled_services["dns.googleapis.com"],
+    google_project_iam_member.postal_runner_dns,
+  ]
 }
 
 resource "google_dns_record_set" "postal_a" {
