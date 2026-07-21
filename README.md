@@ -40,6 +40,7 @@ Architecture and product design references:
 - [Business capabilities](docs/architecture/capabilities.md): platform capability map.
 - [Personalised briefing email](docs/personalised-briefing-email.md): preference matching, durable generation/delivery queues, Mailpit development setup, and production SMTP requirements.
 - [Postal email delivery architecture](docs/architecture/postal-email-delivery.md): dedicated Compute Engine mail delivery, delegated DNS, Terraform/GitHub Actions automation, and operational gates.
+- [Postal activation guide](docs/configuration/postal-activation-guide.md): step-by-step repository settings, deployment, DNS delegation, PTR verification, readiness checks, and controlled activation.
 
 ### 1) Identity and Access
 

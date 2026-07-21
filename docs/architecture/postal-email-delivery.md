@@ -116,6 +116,9 @@ cannot be activated in this design; the fallback is an upstream SMTP relay on po
 
 ## Deployment sequence and repository configuration
 
+For the complete operator procedure, see the
+[Postal activation guide](../configuration/postal-activation-guide.md).
+
 The Terraform workflow reads Postal settings from GitHub Actions repository variables. Use this
 two-phase sequence so infrastructure can be checked before user email is enabled.
 
@@ -136,8 +139,10 @@ credential. Leave it unset to use Terraform's generated credential.
 1. Set the initial variables above and run **Terraform Infrastructure Deployment** manually.
 2. Copy `postal_dns_delegation.nameservers` from the workflow summary into an NS record for
    `briefings.claritas.info` at the parent DNS provider.
-3. Verify domain ownership in Google Search Console, set `POSTAL_ENABLE_PUBLIC_PTR=true`, and rerun
-   the workflow. Check that forward and reverse DNS both resolve to the same hostname/IP.
+3. Verify that `smtp.briefings.claritas.info` resolves to the reserved Postal IP (Google's
+   DNS-based ownership path), optionally verify the domain in Search Console, set
+   `POSTAL_ENABLE_PUBLIC_PTR=true`, and rerun the workflow. Check that forward and reverse DNS both
+   resolve to the same hostname/IP.
 4. Confirm the workflow's external TCP/25 check passes. If it fails, resolve Google project
    eligibility or choose the upstream-relay fallback before continuing.
 5. Retrieve the generated admin password with the command in the workflow summary and inspect
