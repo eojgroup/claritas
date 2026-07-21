@@ -350,7 +350,7 @@ RemainAfterExit=yes
 WorkingDirectory=/opt/postal
 ExecStart=/usr/bin/docker compose up -d mariadb web smtp submission worker caddy
 ExecReload=/usr/bin/docker compose pull
-ExecReload=/usr/bin/docker compose --profile tools run --rm runner upgrade
+ExecReload=/usr/bin/docker compose --profile tools run --rm runner postal upgrade
 ExecReload=/usr/bin/docker compose up -d mariadb web smtp submission worker caddy
 ExecStop=/usr/bin/docker compose stop
 TimeoutStartSec=600
@@ -408,7 +408,10 @@ for attempt in $(seq 1 60); do
   fi
   sleep 5
 done
-docker compose --profile tools run --rm runner initialize
+# `docker compose run` replaces the service command. The Postal image's
+# entrypoint expects the executable name as its first argument, so preserve
+# `postal` before the requested subcommand.
+docker compose --profile tools run --rm runner postal initialize
 docker compose --profile tools run --rm runner bundle exec rails runner /config/bootstrap.rb
 
 systemctl daemon-reload
