@@ -601,6 +601,10 @@ resource "terraform_data" "postal_startup_script_update" {
       trap 'rm -f "$startup_script" "$encoded_startup_script"' EXIT HUP INT TERM
       printf '%s' "$POSTAL_STARTUP_SCRIPT_B64" > "$encoded_startup_script"
       base64 --decode "$encoded_startup_script" > "$startup_script"
+      set -Eeuo pipefail
+      startup_script=$(mktemp)
+      trap 'rm -f "$startup_script"' EXIT
+      printf '%s' "$POSTAL_STARTUP_SCRIPT_B64" | base64 --decode > "$startup_script"
       gcloud compute instances add-metadata "$POSTAL_INSTANCE" \
         --project "$POSTAL_PROJECT" \
         --zone "$POSTAL_ZONE" \
