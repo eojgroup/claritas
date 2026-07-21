@@ -592,10 +592,6 @@ resource "terraform_data" "postal_startup_script_update" {
   triggers_replace = [sha256(local.postal_startup_script)]
 
   provisioner "local-exec" {
-    # local-exec defaults to /bin/sh, which is dash on the GitHub Actions
-    # runner and does not implement `set -o pipefail`.
-    interpreter = ["/bin/bash", "-c"]
-
     command = <<-EOT
       set -Eeuo pipefail
       startup_script=$(mktemp)
