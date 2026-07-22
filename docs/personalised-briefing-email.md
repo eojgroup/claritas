@@ -27,7 +27,7 @@ the worker produces a deterministic extractive briefing so email delivery can co
 
 Email uses the open-source [Nodemailer SMTP transport](https://nodemailer.com/smtp). The application
 is not coupled to an email API: local development can use Mailpit, and production can use a
-self-hosted relay such as [Postal](https://docs.postalserver.io/) or any authenticated SMTP relay.
+an authenticated SMTP provider or relay.
 
 ## Local MVP testing with Mailpit
 
@@ -68,40 +68,34 @@ Production uses the Terraform-managed `claritas-smtp` ConfigMap and Secret. The 
 all SMTP settings from those resources; do not patch them with `kubectl` because the next Terraform
 apply will reconcile them.
 
-The default Postal values are:
+Configure the provider through GitHub Actions repository variables and secrets:
 
-| Variable | Required | Example | Purpose |
+| GitHub setting | Required | Example | Purpose |
 | --- | --- | --- | --- |
-| `SMTP_HOST` | Yes | Postal VM private IP | SMTP relay address inside the VPC |
-| `SMTP_PORT` | Yes | `2525` | Private authenticated submission listener |
-| `SMTP_SECURE` | Yes | `false` | Submission remains inside the VPC; Postal authentication is still required |
-| `SMTP_FROM` | Yes | `daily@briefings.claritas.info` | Envelope/from mailbox |
+| `SMTP_HOST` | Yes | `smtp.provider.example` | Authenticated SMTP provider hostname |
+| `SMTP_PORT` | Yes | `587` | STARTTLS SMTP port |
+| `SMTP_SECURE` | Yes | `false` | Use `false` for STARTTLS on 587; use `true` for implicit TLS on 465 |
+| `SMTP_FROM` | Yes | `daily@example.com` | Provider-verified From mailbox |
 | `SMTP_FROM_NAME` | No | `Claritas` | Display name |
-| `SMTP_REPLY_TO` | No | `support@example.com` | Reply mailbox |
-| `EMAIL_PUBLIC_BASE_URL` | Recommended | `https://app.example.com` | Preferences link in email |
-| `PERSONAL_BRIEFING_WORKER_ENABLED` | No | `true` | Disable only for maintenance |
+| `SMTP_REPLY_TO` | No | `support@example.com` | Monitored reply mailbox |
+| `SMTP_USERNAME` | Provider-dependent | provider username | GitHub Actions secret |
+| `SMTP_PASSWORD` | Provider-dependent | provider password/token | GitHub Actions secret |
+| `EMAIL_PUBLIC_BASE_URL` | Recommended | `https://app.claritas.info` | Preferences link in email |
+| `PERSONAL_BRIEFING_EMAIL_ENABLED` | No | `true` | Enables the delivery worker only after provider verification |
 
-Terraform generates the Postal SMTP credential, stores it in Secret Manager and Terraform state,
-bootstraps the same value in Postal, and writes it to the Kubernetes Secret. Set
-`POSTAL_EMAIL_DELIVERY_ENABLED=true` only after the delivery gates pass. See the
-[Postal architecture and runbook](architecture/postal-email-delivery.md).
-
-The API-to-Postal hop is not the same as Postal-to-recipient delivery. The first uses private VPC
-port 2525. Direct delivery to recipient MX servers still requires external destination port 25,
-which Google Cloud commonly blocks and Terraform cannot unblock. Ports 587/465 work only when an
-upstream relay is used.
+The provider must verify the sending domain and supply its required SPF, DKIM, and DMARC records.
+Use TLS SMTP submission on port 587 or 465; this avoids Google Cloud's external TCP/25 restriction.
 
 ## Production deliverability actions
 
 Before sending to real users:
 
-1. Enable the Terraform-managed Postal infrastructure and delegate its Cloud DNS subdomain.
-2. Verify Google Cloud external TCP/25 egress, then enable the Terraform-managed PTR record.
-3. Confirm forward/reverse DNS, SPF, DKIM, and DMARC alignment.
-4. Enable the email worker through the repository variable and deploy the API plus migration `V16`.
+1. Create and verify the sender domain with the chosen SMTP provider.
+2. Add the provider-issued SPF, DKIM, and DMARC DNS records.
+3. Set the repository SMTP variables and secrets above, keeping `PERSONAL_BRIEFING_EMAIL_ENABLED=false`.
+4. Run the Terraform deployment so it reconciles the API SMTP ConfigMap and Secret.
 5. Send a profile preview to a verified account and confirm the delivery record becomes `sent`.
-6. Monitor bounce/complaint handling and IP reputation before increasing volume. The MVP queue records SMTP failures,
-   but automated bounce ingestion is a follow-up capability.
+6. Enable `PERSONAL_BRIEFING_EMAIL_ENABLED=true` only after provider delivery and bounce handling are verified.
 
 Email defaults to off for every account. The recipient must explicitly enable it, and Claritas
 suppresses delivery if the authenticated account email is absent or unverified.

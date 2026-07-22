@@ -27,17 +27,16 @@ jobs:
       NETWORK: default
       DOMAIN: app.claritas.info
       TF_VAR_finnhub_api_key: ${{ secrets.FINNHUB_API_KEY }}
-      TF_VAR_postal_enabled: ${{ vars.POSTAL_ENABLED || 'false' }}
-      TF_VAR_postal_domain: ${{ vars.POSTAL_DOMAIN || 'briefings.claritas.info' }}
-      TF_VAR_postal_enable_public_ptr: ${{ vars.POSTAL_ENABLE_PUBLIC_PTR || 'false' }}
-      TF_VAR_postal_email_delivery_enabled: ${{ vars.POSTAL_EMAIL_DELIVERY_ENABLED || 'false' }}
-      TF_VAR_postal_sender_address: ${{ vars.POSTAL_SENDER_ADDRESS || 'daily@briefings.claritas.info' }}
-      TF_VAR_postal_sender_name: ${{ vars.POSTAL_SENDER_NAME || 'Claritas' }}
-      TF_VAR_postal_reply_to: ${{ vars.POSTAL_REPLY_TO || '' }}
-      TF_VAR_postal_smtp_username: ${{ vars.POSTAL_SMTP_USERNAME || 'claritas' }}
-      TF_VAR_postal_smtp_credential: ${{ secrets.POSTAL_SMTP_CREDENTIAL || '' }}
-      TF_VAR_postal_admin_email: ${{ vars.POSTAL_ADMIN_EMAIL || 'admin@claritas.info' }}
-      POSTAL_ENFORCE_PORT25_EGRESS: ${{ vars.POSTAL_ENFORCE_PORT25_EGRESS || 'true' }}
+      TF_VAR_smtp_host: ${{ vars.SMTP_HOST || '' }}
+      TF_VAR_smtp_port: ${{ vars.SMTP_PORT || '587' }}
+      TF_VAR_smtp_secure: ${{ vars.SMTP_SECURE || 'false' }}
+      TF_VAR_smtp_from: ${{ vars.SMTP_FROM || '' }}
+      TF_VAR_smtp_from_name: ${{ vars.SMTP_FROM_NAME || 'Claritas' }}
+      TF_VAR_smtp_reply_to: ${{ vars.SMTP_REPLY_TO || '' }}
+      TF_VAR_smtp_username: ${{ secrets.SMTP_USERNAME || '' }}
+      TF_VAR_smtp_password: ${{ secrets.SMTP_PASSWORD || '' }}
+      TF_VAR_email_public_base_url: ${{ vars.EMAIL_PUBLIC_BASE_URL || 'https://app.claritas.info' }}
+      TF_VAR_personal_briefing_email_enabled: ${{ vars.PERSONAL_BRIEFING_EMAIL_ENABLED || 'false' }}
 
     steps:
       - name: 📦 Checkout
@@ -67,37 +66,39 @@ jobs:
       - name: 🌍 Terraform Init (core)
         run: ./infra/scripts/terraform-init-retry.sh infra/gcp/terraform
 
-      - name: ✅ Terraform formatting, validation, and module tests
+      - name: ✅ Terraform formatting and validation
         working-directory: infra/gcp/terraform
         run: |
           terraform fmt -check -recursive
           terraform validate
 
-          # Repository variables configure the production plan/apply, but must not
-          # override the explicit/default values exercised by isolated module tests.
-          for variable in "${!TF_VAR_postal_@}"; do
-            unset "$variable"
-          done
-          terraform test -test-directory=tests
 
       - name: 🛠️ Terraform Import (existing resources)
         working-directory: infra/gcp/terraform
         run: |
-          terraform import google_storage_bucket.terraform_state claritas-tf-state || true
-          terraform import google_artifact_registry_repository.claritas_app projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/repositories/claritas-app || true
-          terraform import google_container_cluster.primary projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/clusters/${{ env.GKE_CLUSTER }} || true
-          terraform import google_compute_global_address.sql_psa_range projects/${{ env.PROJECT_ID }}/global/addresses/claritas-sql-psa-range || true
+          set -euo pipefail
 
-          # Service Networking VPC connection (peering)
-          terraform import google_service_networking_connection.vpc_connection "https://www.googleapis.com/compute/v1/projects/${{ env.PROJECT_ID }}/global/networks/${{ env.NETWORK }}:services/servicenetworking.googleapis.com" || true
+          import_if_missing() {
+            local address="$1"
+            local import_id="$2"
 
-          # Cloud SQL (PostgreSQL) resources
-          terraform import google_sql_database_instance.pg projects/${{ env.PROJECT_ID }}/instances/claritas-sql || true
-          terraform import google_sql_database.db projects/${{ env.PROJECT_ID }}/instances/claritas-sql/databases/claritas || true
-          terraform import google_sql_user.app projects/${{ env.PROJECT_ID }}/instances/claritas-sql/users/claritas_app || true
+            if terraform state list | grep -Fxq "$address"; then
+              echo "$address is already managed; skipping import."
+              return
+            fi
 
-          # GCP Service Account used for Workload Identity (already exists)
-          terraform import google_service_account.claritas_sql_gsa "projects/${{ env.PROJECT_ID }}/serviceAccounts/claritas-sql-gsa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com" || true
+            terraform import "$address" "$import_id"
+          }
+
+          import_if_missing google_storage_bucket.terraform_state claritas-tf-state
+          import_if_missing google_artifact_registry_repository.claritas_app "projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/repositories/claritas-app"
+          import_if_missing google_container_cluster.primary "projects/${{ env.PROJECT_ID }}/locations/${{ env.REGION }}/clusters/${{ env.GKE_CLUSTER }}"
+          import_if_missing google_compute_global_address.sql_psa_range "projects/${{ env.PROJECT_ID }}/global/addresses/claritas-sql-psa-range"
+          import_if_missing google_service_networking_connection.vpc_connection "projects/${{ env.PROJECT_ID }}/global/networks/${{ env.NETWORK }}:servicenetworking.googleapis.com"
+          import_if_missing google_sql_database_instance.pg "projects/${{ env.PROJECT_ID }}/instances/claritas-sql"
+          import_if_missing google_sql_database.db "projects/${{ env.PROJECT_ID }}/instances/claritas-sql/databases/claritas"
+          import_if_missing google_sql_user.app "projects/${{ env.PROJECT_ID }}/instances/claritas-sql/users/claritas_app"
+          import_if_missing google_service_account.claritas_sql_gsa "projects/${{ env.PROJECT_ID }}/serviceAccounts/claritas-sql-gsa@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
 
       - name: 🔍 Terraform Plan (core)
         working-directory: infra/gcp/terraform
@@ -278,91 +279,12 @@ jobs:
       ############################################
       # (Optional) Redeploy API if needed
       ############################################
-      - name: 🔄 Show deployments
-        run: |
-          kubectl -n "${{ env.K8S_NAMESPACE }}" get deploy,svc,ingress
-
-      ############################################
-      # Postal post-apply readiness checks
-      ############################################
-      - name: 📮 Publish Postal setup details
-        if: ${{ env.TF_VAR_postal_enabled == 'true' }}
-        working-directory: infra/gcp/terraform
-        run: |
-          set -euo pipefail
-          delegation=$(terraform output -json postal_dns_delegation)
-          web_url=$(terraform output -raw postal_web_url)
-          external_ip=$(terraform output -raw postal_external_ip)
-          admin_password_command=$(terraform output -raw postal_admin_password_command)
-
-          {
-            echo "## Postal deployment"
-            echo
-            echo "- Web UI: \`${web_url}\`"
-            echo "- Static IPv4: \`${external_ip}\`"
-            echo "- Parent DNS delegation:"
-            echo '```json'
-            echo "$delegation" | jq .
-            echo '```'
-            echo "- Retrieve the bootstrapped administrator password:"
-            echo '```bash'
-            echo "$admin_password_command"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: 🩺 Verify Postal services
-        if: ${{ env.TF_VAR_postal_enabled == 'true' }}
-        run: |
-          set -euo pipefail
-          healthy=false
-          for attempt in $(seq 1 40); do
-            if gcloud compute ssh claritas-postal \
-              --project "${{ env.PROJECT_ID }}" \
-              --zone "${{ env.ZONE }}" \
-              --tunnel-through-iap \
-              --quiet \
-              --command "sudo /usr/local/bin/postal-healthcheck"; then
-              healthy=true
-              break
-            fi
-            echo "Postal is still bootstrapping (attempt ${attempt}/40)."
-            sleep 15
-          done
-
-          if [ "$healthy" != "true" ]; then
-            echo "::error::Postal did not become healthy within 10 minutes."
-            gcloud compute ssh claritas-postal \
-              --project "${{ env.PROJECT_ID }}" \
-              --zone "${{ env.ZONE }}" \
-              --tunnel-through-iap \
-              --quiet \
-              --command "sudo tail -n 250 /var/log/claritas-postal-bootstrap.log; cd /opt/postal && sudo docker compose ps && sudo docker compose logs --tail=150" || true
-            exit 1
-          fi
-
-      - name: ✉️ Verify external SMTP egress
-        if: ${{ env.TF_VAR_postal_enabled == 'true' }}
-        run: |
-          set -euo pipefail
-          if gcloud compute ssh claritas-postal \
-            --project "${{ env.PROJECT_ID }}" \
-            --zone "${{ env.ZONE }}" \
-            --tunnel-through-iap \
-            --quiet \
-            --command "sudo /usr/local/bin/postal-port25-check"; then
-            echo "- External TCP/25 egress: available" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- External TCP/25 egress: **blocked** — direct internet delivery cannot be enabled." >> "$GITHUB_STEP_SUMMARY"
-            if [ "${POSTAL_ENFORCE_PORT25_EGRESS}" = "true" ]; then
-              echo "::error::Google Cloud external TCP/25 egress is blocked. Postal cannot deliver directly to destination MX servers."
-              exit 1
-            fi
-            echo "::warning::Postal is healthy, but external TCP/25 egress is blocked."
-          fi
-
-      - name: 🔄 Activate Postal configuration in API
-        if: ${{ env.TF_VAR_postal_enabled == 'true' && env.TF_VAR_postal_email_delivery_enabled == 'true' }}
+      - name: 🔄 Restart API after Terraform-managed configuration changes
         run: |
           set -euo pipefail
           kubectl -n "${{ env.K8S_NAMESPACE }}" rollout restart deployment/claritas-api
           kubectl -n "${{ env.K8S_NAMESPACE }}" rollout status deployment/claritas-api --timeout=300s
+
+      - name: 🔄 Show deployments
+        run: |
+          kubectl -n "${{ env.K8S_NAMESPACE }}" get deploy,svc,ingress
