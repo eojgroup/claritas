@@ -11,7 +11,17 @@ WIDGET_SOURCE_ROOT = File.join(ROOT, "ClaritasWidgets")
 WATCH_WIDGET_SOURCE_ROOT = File.join(ROOT, "ClaritasWatchWidgets")
 
 bundle_id = ENV.fetch("BUNDLE_ID", "com.eojgroup.claritas")
-watch_bundle_id = ENV.fetch("WATCH_BUNDLE_ID", "#{bundle_id}.watchkitapp")
+# A watchOS companion is embedded in the iOS app, so App Store validation
+# requires its bundle identifier to be a child of the iOS app identifier.
+# Do not permit an independently configured watch identifier: doing so can
+# create an archive that installs locally but cannot be uploaded.
+watch_bundle_id = "#{bundle_id}.watchkitapp"
+if ENV.key?("WATCH_BUNDLE_ID") && ENV.fetch("WATCH_BUNDLE_ID") != watch_bundle_id
+  raise <<~MESSAGE
+    WATCH_BUNDLE_ID must be #{watch_bundle_id.inspect} because the embedded
+    watch app bundle identifier must be prefixed with the iOS app bundle identifier.
+  MESSAGE
+end
 development_team = ENV.fetch("DEVELOPMENT_TEAM", "VTBJTFDTQY")
 ios_deployment_target = ENV.fetch("IOS_DEPLOYMENT_TARGET", "16.0")
 watchos_deployment_target = ENV.fetch("WATCHOS_DEPLOYMENT_TARGET", "10.0")

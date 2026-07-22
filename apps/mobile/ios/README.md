@@ -66,6 +66,11 @@ ruby generate_xcodeproj.rb
 
 Then re-open the `.xcodeproj` in Xcode.
 
+The generator always derives the watch app identifier as
+`<BUNDLE_ID>.watchkitapp`. Do not set `WATCH_BUNDLE_ID` to a separate value:
+Apple requires every embedded watch app identifier to be prefixed by its iOS
+container app identifier.
+
 ## Versioning
 
 `apps/mobile/ios/VERSION` is the committed source of truth for Apple app versions:
