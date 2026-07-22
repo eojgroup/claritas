@@ -1118,6 +1118,65 @@ app.get("/api/briefings/daily/email/status", requireSession, async (_req, res) =
         return res.status(500).json({ error: e.message || String(e) });
     }
 });
+function validEmail(value) {
+    return !!value && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+function verificationRedirect(verified) {
+    const base = (0, email_1.getEmailRuntimeConfig)().public_base_url;
+    return `${base || ""}/?email_verification=${verified ? "success" : "invalid"}`;
+}
+app.post("/api/email-verifications", requireSession, async (_req, res) => {
+    try {
+        const userId = getAuthenticatedUserId(res);
+        const { rows } = await (0, db_1.query)(`SELECT u.email, u.email_verified, MAX(t.created_at) AS last_requested_at
+       FROM app_user u LEFT JOIN email_verification_token t ON t.user_id = u.id
+       WHERE u.id = $1 GROUP BY u.id`, [userId]);
+        const user = rows[0];
+        if (!user || !validEmail(user.email))
+            return res.status(400).json({ error: "Your account has no valid email address." });
+        if (user.email_verified)
+            return res.json({ ok: true, already_verified: true });
+        if (user.last_requested_at && Date.now() - new Date(user.last_requested_at).getTime() < 60_000) {
+            return res.status(429).json({ error: "Please wait one minute before requesting another verification email." });
+        }
+        const emailConfig = (0, email_1.getEmailRuntimeConfig)();
+        if (!emailConfig.configured)
+            return res.status(503).json({ error: "SMTP is not configured." });
+        if (!emailConfig.public_base_url)
+            return res.status(503).json({ error: "EMAIL_PUBLIC_BASE_URL is not configured." });
+        const token = (0, crypto_1.randomBytes)(32).toString("base64url");
+        const tokenHash = (0, crypto_1.createHash)("sha256").update(token).digest("hex");
+        await (0, db_1.query)(`UPDATE email_verification_token SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL`, [userId]);
+        await (0, db_1.query)(`INSERT INTO email_verification_token (user_id, email, token_hash, expires_at) VALUES ($1, $2, $3, now() + interval '1 hour')`, [userId, user.email, tokenHash]);
+        await (0, email_1.sendEmailVerificationEmail)(user.email, `${emailConfig.public_base_url}/api/email-verifications/confirm?token=${encodeURIComponent(token)}`);
+        return res.status(202).json({ ok: true });
+    }
+    catch (e) {
+        return res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.get("/api/email-verifications/confirm", async (req, res) => {
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    if (!token)
+        return res.redirect(303, verificationRedirect(false));
+    try {
+        const tokenHash = (0, crypto_1.createHash)("sha256").update(token).digest("hex");
+        const updated = await (0, db_1.withTransaction)(async (client) => {
+            const { rows } = await client.query(`UPDATE email_verification_token SET consumed_at = now()
+         WHERE token_hash = $1 AND consumed_at IS NULL AND expires_at > now()
+         RETURNING user_id, email`, [tokenHash]);
+            const verification = rows[0];
+            if (!verification)
+                return false;
+            const result = await client.query(`UPDATE app_user SET email_verified = true WHERE id = $1 AND email = $2`, [verification.user_id, verification.email]);
+            return result.rowCount === 1;
+        });
+        return res.redirect(303, verificationRedirect(updated));
+    }
+    catch {
+        return res.redirect(303, verificationRedirect(false));
+    }
+});
 app.get("/api/briefings/daily/personal/latest", requireSession, async (_req, res) => {
     try {
         const userId = getAuthenticatedUserId(res);

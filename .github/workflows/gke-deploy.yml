@@ -4,6 +4,20 @@ on:
   push:
     branches:
       - main
+    # Runtime deployments own application images, Kubernetes manifests, and
+    # Flyway scripts. Pure Terraform/docs changes do not need image builds.
+    paths:
+      - 'apps/**'
+      - 'infra/k8s/**'
+      - 'infra/gcp/sql/**'
+      - '.github/workflows/gke-deploy.yml'
+
+# Terraform Infrastructure Deployment also runs Flyway against this same
+# database. Keep the two production workflows mutually exclusive while either
+# is applying infrastructure or database changes.
+concurrency:
+  group: claritas-production-deploy
+  cancel-in-progress: false
 
 permissions:
   id-token: write
@@ -578,16 +592,23 @@ jobs:
           NS: ${{ env.NAMESPACE }}
         run: |
           set -euo pipefail
-          # Upsert Flyway scripts from repo SQL directory
-          kubectl -n "$NS" create configmap flyway-scripts \
+          # Each migration Job gets an immutable view of the scripts from its
+          # own commit; another deployment cannot replace its mounted ConfigMap.
+          python3 infra/scripts/check-flyway-migrations.py
+          scripts="flyway-scripts-${GITHUB_RUN_ID}"
+          kubectl -n "$NS" create configmap "$scripts" \
             --from-file=infra/gcp/sql/ \
             --dry-run=client -o yaml | kubectl apply -f -
 
           # Use a unique Job name to avoid collisions across runs
           job="flyway-migrate-${GITHUB_RUN_ID}"
+          scripts="flyway-scripts-${GITHUB_RUN_ID}"
           kubectl -n "$NS" delete job "$job" --ignore-not-found=true || true
           # Apply manifest with a run-scoped job name
-          sed -E "s/^\s*name: flyway-migrate$/  name: ${job}/" infra/k8s/migrations/flyway-job.yaml | kubectl -n "$NS" apply -f -
+          sed -E \
+            -e "s/^\s*name: flyway-migrate$/  name: ${job}/" \
+            -e "s/^\s*name: flyway-scripts$/            name: ${scripts}/" \
+            infra/k8s/migrations/flyway-job.yaml | kubectl -n "$NS" apply -f -
 
           echo "Waiting for Flyway job/$job completion..."
           if ! kubectl -n "$NS" wait --for=condition=complete "job/${job}" --timeout=420s; then
@@ -601,6 +622,7 @@ jobs:
           fi
           kubectl -n "$NS" logs "job/$job" -c flyway --tail=200 || true
           kubectl -n "$NS" delete job "$job" --wait=true || true
+          kubectl -n "$NS" delete configmap "$scripts" --ignore-not-found=true || true
 
       - name: ✅ Verify DB schema and migration history
         env:
