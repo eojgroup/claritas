@@ -129,10 +129,12 @@ jobs:
           DB_USER=$(terraform output -raw db_user 2>/dev/null | tr -d '\n')
           DB_PASS=$(terraform output -raw db_pass 2>/dev/null | tr -d '\n')
 
-          echo "icn=${ICN}" >> "$GITHUB_OUTPUT"
-          echo "db_name=${DB_NAME}" >> "$GITHUB_OUTPUT"
-          echo "db_user=${DB_USER}" >> "$GITHUB_OUTPUT"
-          echo "db_pass=${DB_PASS}" >> "$GITHUB_OUTPUT"
+          {
+            echo "icn=${ICN}"
+            echo "db_name=${DB_NAME}"
+            echo "db_user=${DB_USER}"
+            echo "db_pass=${DB_PASS}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: 🕵️ Mask DB secret
         run: |
