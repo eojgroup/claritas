@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_PODCAST_DISCOVERY_TERMS = void 0;
 exports.ingestPodcastIndex = ingestPodcastIndex;
 exports.discoverPodcastFeeds = discoverPodcastFeeds;
 exports.podcastParamsFromEnv = podcastParamsFromEnv;
@@ -12,6 +13,12 @@ const node_net_1 = __importDefault(require("node:net"));
 const db_1 = require("../db");
 const podcast_intelligence_1 = require("../podcast-intelligence");
 const BASE_URL = "https://api.podcastindex.org/api/1.0";
+exports.DEFAULT_PODCAST_DISCOVERY_TERMS = [
+    "geopolitics",
+    "security",
+    "technology",
+    "markets",
+];
 const USER_AGENT = process.env.PODCASTINDEX_USER_AGENT?.trim() ||
     "Claritas/1.0 (+https://app.claritas.info)";
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
@@ -575,8 +582,9 @@ async function resolveFeeds(queries, feedIds, maxFeeds) {
     return Array.from(feeds.values());
 }
 function configuredQueries() {
-    return (process.env.PODCAST_DISCOVERY_TERMS || "")
+    const configured = (process.env.PODCAST_DISCOVERY_TERMS || "")
         .split(",").map((value) => value.trim()).filter(Boolean).slice(0, 20);
+    return configured.length > 0 ? configured : [...exports.DEFAULT_PODCAST_DISCOVERY_TERMS];
 }
 async function ingestPodcastIndex(params = {}) {
     const queriesInput = params.queries?.length
@@ -682,8 +690,7 @@ async function discoverPodcastFeeds(searchTerm, max = 20) {
 function podcastParamsFromEnv(overrides = {}) {
     const envFeedIds = (process.env.PODCAST_FEED_IDS || "")
         .split(",").map(Number).filter((value) => Number.isSafeInteger(value) && value > 0);
-    const envTerms = (process.env.PODCAST_DISCOVERY_TERMS || "")
-        .split(",").map((value) => value.trim()).filter(Boolean);
+    const envTerms = configuredQueries();
     return {
         ...overrides,
         feedIds: overrides.feedIds?.length ? overrides.feedIds : envFeedIds,

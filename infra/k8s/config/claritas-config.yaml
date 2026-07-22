@@ -26,6 +26,8 @@ data:
   # Daily briefings are text-only. Disabling OpenCode tools allows routing to
   # free/non-tool-capable models and prevents unnecessary container access.
   OPENCODE_DISABLE_TOOLS: "true"
+  # Used when repository variables do not provide explicit PodcastIndex targets.
+  PODCAST_DISCOVERY_TERMS: "geopolitics,security,technology,markets"
   KEYCLOAK_REALM: "claritas"
   KEYCLOAK_WEB_CLIENT_ID: "claritas-web"
   KEYCLOAK_MOBILE_CLIENT_ID: "claritas-mobile"

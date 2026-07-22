@@ -6,6 +6,12 @@ import { extractPodcastIntelligence } from "../podcast-intelligence";
 import type { FeedRow, SourceRow } from "./types";
 
 const BASE_URL = "https://api.podcastindex.org/api/1.0";
+export const DEFAULT_PODCAST_DISCOVERY_TERMS = [
+  "geopolitics",
+  "security",
+  "technology",
+  "markets",
+] as const;
 const USER_AGENT =
   process.env.PODCASTINDEX_USER_AGENT?.trim() ||
   "Claritas/1.0 (+https://app.claritas.info)";
@@ -683,8 +689,9 @@ async function resolveFeeds(queries: string[], feedIds: number[], maxFeeds: numb
 }
 
 function configuredQueries(): string[] {
-  return (process.env.PODCAST_DISCOVERY_TERMS || "")
+  const configured = (process.env.PODCAST_DISCOVERY_TERMS || "")
     .split(",").map((value) => value.trim()).filter(Boolean).slice(0, 20);
+  return configured.length > 0 ? configured : [...DEFAULT_PODCAST_DISCOVERY_TERMS];
 }
 
 export async function ingestPodcastIndex(params: PodcastIndexIngestParams = {}): Promise<PodcastIndexIngestResult> {
@@ -792,8 +799,7 @@ export async function discoverPodcastFeeds(searchTerm: string, max = 20): Promis
 export function podcastParamsFromEnv(overrides: PodcastIngestParams = {}): PodcastIngestParams {
   const envFeedIds = (process.env.PODCAST_FEED_IDS || "")
     .split(",").map(Number).filter((value) => Number.isSafeInteger(value) && value > 0);
-  const envTerms = (process.env.PODCAST_DISCOVERY_TERMS || "")
-    .split(",").map((value) => value.trim()).filter(Boolean);
+  const envTerms = configuredQueries();
   return {
     ...overrides,
     feedIds: overrides.feedIds?.length ? overrides.feedIds : envFeedIds,

@@ -214,8 +214,9 @@ npm run dev
 - Podcast discovery and intelligence:
   - Create a free developer account at `https://api.podcastindex.org` and generate an API key
     and secret. Keep both server-side.
-  - Configure at least one discovery target with `PODCAST_DISCOVERY_TERMS` (comma-separated)
-    or `PODCAST_FEED_IDS` (comma-separated PodcastIndex feed IDs).
+  - Optionally configure discovery targets with `PODCAST_DISCOVERY_TERMS` (comma-separated)
+    or `PODCAST_FEED_IDS` (comma-separated PodcastIndex feed IDs). When neither is set,
+    the scheduler uses the built-in terms `geopolitics,security,technology,markets`.
   - Optional limits: `PODCAST_MAX_FEEDS` and `PODCAST_MAX_EPISODES_PER_FEED`.
   - Optional LLM extraction toggle: `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`. Metadata
     entity/topic signals remain available when LLM extraction is off.

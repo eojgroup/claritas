@@ -65,7 +65,25 @@ const GENERIC_TLDS = new Set([
 ]);
 
 const COUNTRY_ALIASES: CountryAliasSpec[] = [
-  { iso2: "US", aliases: ["united states", "united states of america", "usa", "u.s.", "american", "washington"] },
+  {
+    iso2: "US",
+    aliases: [
+      "united states",
+      "united states of america",
+      "usa",
+      "u.s.",
+      "american",
+      "washington",
+      "federal reserve",
+      "the fed",
+      "fed outlook",
+      "fed policy",
+      "fed rate",
+      "fed rates",
+      "pentagon",
+      "white house",
+    ],
+  },
   { iso2: "GB", aliases: ["united kingdom", "great britain", "britain", "uk", "british", "england", "london"] },
   { iso2: "FR", aliases: ["france", "french", "paris"] },
   { iso2: "DE", aliases: ["germany", "german", "berlin", "dax"] },
@@ -89,7 +107,10 @@ const COUNTRY_ALIASES: CountryAliasSpec[] = [
   { iso2: "UA", aliases: ["ukraine", "ukrainian", "kyiv", "kiev"] },
   { iso2: "RU", aliases: ["russia", "russian", "moscow", "kremlin"] },
   { iso2: "TR", aliases: ["turkey", "turkish", "ankara", "istanbul"] },
-  { iso2: "IR", aliases: ["iran", "iranian", "tehran", "islamic republic of iran"] },
+  {
+    iso2: "IR",
+    aliases: ["iran", "iranian", "tehran", "islamic republic of iran", "strait of hormuz", "hormuz"],
+  },
   { iso2: "IQ", aliases: ["iraq", "iraqi", "baghdad"] },
   { iso2: "IL", aliases: ["israel", "israeli", "tel aviv", "jerusalem"] },
   { iso2: "PS", aliases: ["palestine", "palestinian", "gaza", "west bank"] },
@@ -101,7 +122,7 @@ const COUNTRY_ALIASES: CountryAliasSpec[] = [
   { iso2: "QA", aliases: ["qatar", "qatari", "doha"] },
   { iso2: "KW", aliases: ["kuwait", "kuwaiti"] },
   { iso2: "OM", aliases: ["oman", "omani", "muscat"] },
-  { iso2: "YE", aliases: ["yemen", "yemeni", "sanaa"] },
+  { iso2: "YE", aliases: ["yemen", "yemeni", "sanaa", "houthi", "houthis"] },
   { iso2: "EG", aliases: ["egypt", "egyptian", "cairo"] },
   { iso2: "MA", aliases: ["morocco", "moroccan", "rabat", "casablanca"] },
   { iso2: "DZ", aliases: ["algeria", "algerian", "algiers"] },
@@ -155,7 +176,7 @@ const ALIAS_MATCHERS: AliasMatcher[] = COUNTRY_ALIASES.flatMap(({ iso2, aliases 
 
 function buildAliasPattern(alias: string): RegExp {
   const escaped = escapeRegExp(alias.trim()).replace(/\s+/g, "\\s+");
-  return new RegExp(`\\b${escaped}\\b`, "gi");
+  return new RegExp(`(?<![A-Za-z0-9])${escaped}(?![A-Za-z0-9])`, "gi");
 }
 
 function escapeRegExp(value: string): string {
@@ -341,4 +362,3 @@ export function inferNewsCountry(input: NewsCountryInferenceInput): CountryInfer
     },
   };
 }
-
