@@ -43,13 +43,8 @@ graph TB
         O1[Logs / Metrics / Audit]
     end
 
-    subgraph Email Delivery (Dedicated Compute VM)
-        P1[Postal SMTP Submission :2525]
-        P2[Postal Worker + Public MTA :25]
-        P3[Postal Web + Caddy HTTPS]
-        P4[(MariaDB Persistent Disk)]
-        P5[Cloud DNS + Static IP + PTR]
-    end
+    SMTP[External SMTP Provider]
+
 
     W1 --> E1 --> A1
     M1 --> E1 --> A1
@@ -80,12 +75,5 @@ graph TB
     A1 --> O1
     J1 --> O1
     A1 --> A5
-    A5 -->|Authenticated SMTP over VPC| P1
-    P1 --> P2
-    P2 -->|Direct SMTP| R1[Recipient MX Servers]
-    R1 -->|Bounces| P2
-    P1 --> P4
-    P2 --> P4
-    P3 --> P4
-    P5 --> P2
+    A5 -->|Authenticated SMTP over TLS| SMTP
     P5 --> P3
