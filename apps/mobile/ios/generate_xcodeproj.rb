@@ -7,6 +7,7 @@ ROOT = File.expand_path(__dir__)
 PROJECT_PATH = File.join(ROOT, "Claritas", "Claritas.xcodeproj")
 IOS_SOURCE_ROOT = File.join(ROOT, "Claritas")
 WATCH_SOURCE_ROOT = File.join(ROOT, "ClaritasWatch")
+WIDGET_SOURCE_ROOT = File.join(ROOT, "ClaritasWidgets")
 
 bundle_id = ENV.fetch("BUNDLE_ID", "com.eojgroup.claritas")
 watch_bundle_id = ENV.fetch("WATCH_BUNDLE_ID", "#{bundle_id}.watchkitapp")
@@ -36,10 +37,11 @@ project.root_object.attributes["LastUpgradeCheck"] = "1600"
 
 ios_target = project.new_target(:application, "Claritas", :ios, ios_deployment_target)
 watch_target = project.new_target(:application, "Claritas Watch App", :watchos, watchos_deployment_target)
+widget_target = project.new_target(:app_extension, "Claritas Widgets", :ios, ios_deployment_target)
 
 # Swift modules autolink these frameworks. Removing xcodeproj's version-pinned
 # framework references keeps the generated project portable across Xcode SDKs.
-[ios_target, watch_target].each do |target|
+[ios_target, watch_target, widget_target].each do |target|
   target.frameworks_build_phase.files.each(&:remove_from_project)
 end
 project.frameworks_group.children.each(&:remove_from_project)
@@ -55,6 +57,8 @@ configure_target(
   {
     "ASSETCATALOG_COMPILER_APPICON_NAME" => "AppIcon",
     "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME" => "AccentColor",
+    "CLARITAS_WIDGET_APP_GROUP" => "group.#{bundle_id}",
+    "CODE_SIGN_ENTITLEMENTS" => "Claritas.entitlements",
     "CODE_SIGN_STYLE" => "Automatic",
     "CURRENT_PROJECT_VERSION" => build_number,
     "DEVELOPMENT_TEAM" => development_team,
@@ -68,6 +72,26 @@ configure_target(
     "SDKROOT" => "iphoneos",
     "SWIFT_VERSION" => "5.0",
     "TARGETED_DEVICE_FAMILY" => "1,2"
+  }
+)
+
+configure_target(
+  widget_target,
+  {
+    "APPLICATION_EXTENSION_API_ONLY" => "YES",
+    "CLARITAS_WIDGET_APP_GROUP" => "group.#{bundle_id}",
+    "CODE_SIGN_ENTITLEMENTS" => "../ClaritasWidgets/ClaritasWidgets.entitlements",
+    "CODE_SIGN_STYLE" => "Automatic",
+    "CURRENT_PROJECT_VERSION" => build_number,
+    "DEVELOPMENT_TEAM" => development_team,
+    "GENERATE_INFOPLIST_FILE" => "NO",
+    "INFOPLIST_FILE" => "../ClaritasWidgets/Info.plist",
+    "IPHONEOS_DEPLOYMENT_TARGET" => ios_deployment_target,
+    "MARKETING_VERSION" => marketing_version,
+    "PRODUCT_BUNDLE_IDENTIFIER" => "#{bundle_id}.widgets",
+    "SDKROOT" => "iphoneos",
+    "SKIP_INSTALL" => "YES",
+    "SWIFT_VERSION" => "5.0"
   }
 )
 
@@ -96,6 +120,7 @@ configure_target(
 root_group = project.main_group
 ios_group = root_group.new_group("Claritas")
 watch_group = root_group.new_group("ClaritasWatch", "../ClaritasWatch")
+widget_group = root_group.new_group("ClaritasWidgets", "../ClaritasWidgets")
 
 def add_files(group, base_path, relative_paths)
   relative_paths.to_h do |relative_path|
@@ -199,6 +224,8 @@ ios_refs = add_files(ios_group, IOS_SOURCE_ROOT, ios_swift_paths + ios_resource_
 watch_swift_paths = Dir.chdir(WATCH_SOURCE_ROOT) { Dir.glob("**/*.swift").sort }
 watch_resource_paths = ["Assets.xcassets", "Config.plist"]
 watch_refs = add_files(watch_group, WATCH_SOURCE_ROOT, watch_swift_paths + watch_resource_paths + ["Info.plist"])
+widget_swift_paths = Dir.chdir(WIDGET_SOURCE_ROOT) { Dir.glob("**/*.swift").sort }
+widget_refs = add_files(widget_group, WIDGET_SOURCE_ROOT, widget_swift_paths + ["Info.plist", "ClaritasWidgets.entitlements"])
 
 ios_swift_paths.each { |path| ios_target.source_build_phase.add_file_reference(ios_refs.fetch(path)) }
 ios_resource_paths.each { |path| ios_target.resources_build_phase.add_file_reference(ios_refs.fetch(path)) }
@@ -208,8 +235,15 @@ watch_swift_paths.each { |path| watch_target.source_build_phase.add_file_referen
   watch_target.source_build_phase.add_file_reference(ios_refs.fetch(path))
 end
 watch_resource_paths.each { |path| watch_target.resources_build_phase.add_file_reference(watch_refs.fetch(path)) }
+widget_swift_paths.each { |path| widget_target.source_build_phase.add_file_reference(widget_refs.fetch(path)) }
 
 ios_target.add_dependency(watch_target)
+ios_target.add_dependency(widget_target)
+embed_widgets = ios_target.new_copy_files_build_phase("Embed Foundation Extensions")
+embed_widgets.dst_subfolder_spec = "13"
+widget_product = embed_widgets.add_file_reference(widget_target.product_reference)
+widget_product.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy", "CodeSignOnCopy"] }
+
 embed_watch = ios_target.new_copy_files_build_phase("Embed Watch Content")
 embed_watch.dst_subfolder_spec = "16"
 embed_watch.dst_path = "$(CONTENTS_FOLDER_PATH)/Watch"

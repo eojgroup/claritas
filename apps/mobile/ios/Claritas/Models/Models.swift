@@ -421,6 +421,41 @@ struct DailySignalBriefing: Codable, Identifiable {
     }
 }
 
+struct PersonalDailyBriefing: Codable, Identifiable {
+    let id: Int
+    let briefing_date: String
+    let title: String
+    let update_text: String
+    let key_takeaways: [String]
+    let generated_by: String?
+    let delivery_status: String?
+    let sent_at: String?
+    let created_at: String
+    let updated_at: String
+
+    var updatedDate: Date? { APIDateParser.parse(updated_at) }
+    var sentDate: Date? { sent_at.flatMap(APIDateParser.parse) }
+
+    enum CodingKeys: String, CodingKey {
+        case id, briefing_date, title, update_text, key_takeaways, generated_by
+        case delivery_status, sent_at, created_at, updated_at
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeFlexibleInt(forKey: .id)
+        briefing_date = try container.decode(String.self, forKey: .briefing_date)
+        title = try container.decode(String.self, forKey: .title)
+        update_text = try container.decode(String.self, forKey: .update_text)
+        key_takeaways = try container.decodeIfPresent([String].self, forKey: .key_takeaways) ?? []
+        generated_by = try container.decodeIfPresent(String.self, forKey: .generated_by)
+        delivery_status = try container.decodeIfPresent(String.self, forKey: .delivery_status)
+        sent_at = try container.decodeIfPresent(String.self, forKey: .sent_at)
+        created_at = try container.decode(String.self, forKey: .created_at)
+        updated_at = try container.decode(String.self, forKey: .updated_at)
+    }
+}
+
 struct DailyBriefingSchedule: Codable, Identifiable {
     let user_id: Int
     let enabled: Bool
