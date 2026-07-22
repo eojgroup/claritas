@@ -1,0 +1,37 @@
+name: Validate Deployment Definitions
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'infra/gcp/sql/**'
+      - 'infra/k8s/migrations/**'
+      - 'infra/scripts/check-flyway-migrations.py'
+      - 'infra/scripts/wait-for-k8s-job.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Workflows, migrations, and scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+
+      - name: Validate Flyway migration versions
+        run: python3 infra/scripts/check-flyway-migrations.py
+
+      - name: Check deployment shell scripts
+        run: bash -n infra/scripts/wait-for-k8s-job.sh
