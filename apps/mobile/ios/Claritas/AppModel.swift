@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published var selectedCountry: String? = nil
     @Published var selectedSymbol: String? = nil
     @Published var dailyBriefing: DailySignalBriefing? = nil
+    @Published var personalDailyBriefing: PersonalDailyBriefing? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
     @Published var news: [NewsItem] = []
     @Published var podcasts: [PodcastEpisode] = []
@@ -274,6 +275,10 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchLatestDailyBriefing()) }
             catch { return .failure(error) }
         }()
+        async let personalBriefingResult: Result<PersonalDailyBriefing?, Error> = {
+            do { return .success(try await api.fetchLatestPersonalDailyBriefing()) }
+            catch { return .failure(error) }
+        }()
         async let scheduleResult: Result<DailyBriefingSchedule, Error> = {
             do { return .success(try await api.fetchDailyBriefingSchedule()) }
             catch { return .failure(error) }
@@ -314,6 +319,7 @@ final class AppModel: ObservableObject {
         let (
             resolvedStats,
             resolvedBriefing,
+            resolvedPersonalBriefing,
             resolvedSchedule,
             resolvedWeather,
             resolvedLeadership,
@@ -325,6 +331,7 @@ final class AppModel: ObservableObject {
         ) = await (
             statsResult,
             briefingResult,
+            personalBriefingResult,
             scheduleResult,
             weatherResult,
             leadershipResult,
@@ -340,6 +347,9 @@ final class AppModel: ObservableObject {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedBriefing, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedPersonalBriefing, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedSchedule, isPaymentRequired(error) {
@@ -378,6 +388,9 @@ final class AppModel: ObservableObject {
         if case .success(let briefing) = resolvedBriefing {
             dailyBriefing = briefing
         }
+        if case .success(let briefing) = resolvedPersonalBriefing {
+            personalDailyBriefing = briefing
+        }
         if case .success(let schedule) = resolvedSchedule {
             dailyBriefingSchedule = schedule
             dailyBriefingScheduleError = nil
@@ -409,11 +422,19 @@ final class AppModel: ObservableObject {
         if case .success(let earningRows) = resolvedMarketEarnings {
             marketEarnings = earningRows
         }
+        WidgetSnapshotStore.save(
+            dailyBriefing: dailyBriefing,
+            personalBriefing: personalDailyBriefing,
+            newsCount: news.count,
+            marketQuotes: marketQuotes,
+            weather: weather
+        )
     }
 
     func clearAppData() {
         clearSelection()
         dailyBriefing = nil
+        personalDailyBriefing = nil
         dailyBriefingSchedule = nil
         dailyBriefingScheduleError = nil
         dailyBriefingScheduleNotice = nil

@@ -40,8 +40,11 @@ struct PadOverviewView: View {
                     HStack(alignment: .top, spacing: 16) {
                         briefingPanel
                             .frame(maxWidth: .infinity, alignment: .top)
-                        focusPanel
-                            .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
+                        VStack(spacing: 16) {
+                            personalBriefingPanel
+                            focusPanel
+                        }
+                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
                     }
 
                     HStack(alignment: .top, spacing: 16) {
@@ -138,6 +141,29 @@ struct PadOverviewView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 180)
+            }
+        }
+    }
+
+    private var personalBriefingPanel: some View {
+        BrandCard(title: "Your newsletter briefing", icon: "person.crop.circle.badge.checkmark") {
+            if let briefing = model.personalDailyBriefing {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(briefing.title)
+                        .font(.headline)
+                        .lineLimit(2)
+                    Text(briefing.update_text)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(4)
+                    Text("Delivered \(briefing.sentDate?.formatted(date: .abbreviated, time: .shortened) ?? briefing.briefing_date)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Your personalised newsletter briefing will appear here after its first delivery.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
         }
     }
