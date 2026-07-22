@@ -4,6 +4,20 @@ on:
   push:
     branches:
       - main
+    # Runtime deployments own application images, Kubernetes manifests, and
+    # Flyway scripts. Pure Terraform/docs changes do not need image builds.
+    paths:
+      - 'apps/**'
+      - 'infra/k8s/**'
+      - 'infra/gcp/sql/**'
+      - '.github/workflows/gke-deploy.yml'
+
+# Terraform Infrastructure Deployment also runs Flyway against this same
+# database. Keep the two production workflows mutually exclusive while either
+# is applying infrastructure or database changes.
+concurrency:
+  group: claritas-production-deploy
+  cancel-in-progress: false
 
 # Terraform Infrastructure Deployment also runs Flyway against this same
 # database. Keep the two production workflows mutually exclusive while either
@@ -587,6 +601,7 @@ jobs:
           set -euo pipefail
           # Each migration Job gets an immutable view of the scripts from its
           # own commit; another deployment cannot replace its mounted ConfigMap.
+          python3 infra/scripts/check-flyway-migrations.py
           scripts="flyway-scripts-${GITHUB_RUN_ID}"
           kubectl -n "$NS" create configmap "$scripts" \
             --from-file=infra/gcp/sql/ \

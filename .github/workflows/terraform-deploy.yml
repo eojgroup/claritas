@@ -3,6 +3,13 @@ name: Terraform Infrastructure Deployment
 on:
   push:
     branches: [main]
+    # Application deployments are owned by gke-deploy.yml. Restrict this
+    # expensive infrastructure workflow to Terraform changes; operators can
+    # still run it explicitly when GitHub variables or secrets change.
+    paths:
+      - 'infra/gcp/terraform/**'
+      - 'infra/scripts/**'
+      - '.github/workflows/terraform-deploy.yml'
   workflow_dispatch:
 
 concurrency:
@@ -209,6 +216,7 @@ jobs:
       ############################################
       - name: 🧩 Create run-scoped Flyway scripts ConfigMap from repo
         run: |
+          python3 infra/scripts/check-flyway-migrations.py
           kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap "flyway-scripts-${GITHUB_RUN_ID}" \
             --from-file=infra/gcp/sql/ \
             --dry-run=client -o yaml | kubectl apply -f -
