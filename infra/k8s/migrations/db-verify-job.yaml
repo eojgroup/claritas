@@ -6,9 +6,36 @@ spec:
   backoffLimit: 0
   template:
     spec:
-      shareProcessNamespace: true
       restartPolicy: Never
       serviceAccountName: flyway-sa
+      initContainers:
+        # Keep the proxy available for the verification command without making
+        # it part of the Job's completion condition.
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
+          restartPolicy: Always
+          command:
+            - /cloud-sql-proxy
+          args:
+            - "--structured-logs"
+            - "--private-ip"
+            - "--port=5432"
+            - "--exit-zero-on-sigterm"
+            - "$(INSTANCE_CONNECTION_NAME)"
+          env:
+            - name: INSTANCE_CONNECTION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: claritas-config
+                  key: INSTANCE_CONNECTION_NAME
+          startupProbe:
+            tcpSocket:
+              port: 5432
+            periodSeconds: 1
+            failureThreshold: 30
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits: { cpu: "200m", memory: "128Mi" }
       containers:
         - name: db-verify
           image: postgres:16-alpine
@@ -16,15 +43,6 @@ spec:
           args:
             - |
               set -euo pipefail
-              cleanup_proxy() {
-                if command -v killall >/dev/null 2>&1; then
-                  killall cloud-sql-proxy >/dev/null 2>&1 || true
-                else
-                  PIDS=$(ps -eo pid,args | awk '/cloud-sql-proxy/{print $1}')
-                  [ -n "$PIDS" ] && kill $PIDS || true
-                fi
-              }
-              trap cleanup_proxy EXIT
               export PGPASSWORD="${DB_PASSWORD}"
 
               # Wait for cloud-sql-proxy sidecar to be ready on localhost.
@@ -108,25 +126,6 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_USER } }
             - name: DB_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
-          resources:
-            requests: { cpu: "25m", memory: "32Mi" }
-            limits: { cpu: "200m", memory: "128Mi" }
-        - name: cloud-sql-proxy
-          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
-          command:
-            - /cloud-sql-proxy
-          args:
-            - "--structured-logs"
-            - "--private-ip"
-            - "--port=5432"
-            - "--exit-zero-on-sigterm"
-            - "$(INSTANCE_CONNECTION_NAME)"
-          env:
-            - name: INSTANCE_CONNECTION_NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: claritas-config
-                  key: INSTANCE_CONNECTION_NAME
           resources:
             requests: { cpu: "25m", memory: "32Mi" }
             limits: { cpu: "200m", memory: "128Mi" }

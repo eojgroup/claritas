@@ -6,9 +6,37 @@ spec:
   backoffLimit: 0
   template:
     spec:
-      shareProcessNamespace: true
       restartPolicy: Never
       serviceAccountName: flyway-sa
+      initContainers:
+        # A restartable init container is a Kubernetes-native sidecar. Unlike a
+        # regular second container, it does not keep a completed Job alive and
+        # Kubernetes terminates it after the Flyway container exits.
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
+          restartPolicy: Always
+          command:
+            - /cloud-sql-proxy
+          args:
+            - "--structured-logs"
+            - "--private-ip"
+            - "--port=5432"
+            - "--exit-zero-on-sigterm"
+            - "$(INSTANCE_CONNECTION_NAME)"
+          env:
+            - name: INSTANCE_CONNECTION_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: claritas-config
+                  key: INSTANCE_CONNECTION_NAME
+          startupProbe:
+            tcpSocket:
+              port: 5432
+            periodSeconds: 1
+            failureThreshold: 30
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits: { cpu: "200m", memory: "128Mi" }
       containers:
         - name: flyway
           image: flyway/flyway:10.17-alpine
@@ -16,15 +44,6 @@ spec:
           args:
             - |
               set -e
-              cleanup_proxy() {
-                if command -v killall >/dev/null 2>&1; then
-                  killall cloud-sql-proxy >/dev/null 2>&1 || true
-                else
-                  PIDS=$(ps -eo pid,args | awk '/cloud-sql-proxy/{print $1}')
-                  [ -n "$PIDS" ] && kill $PIDS || true
-                fi
-              }
-              trap cleanup_proxy EXIT
               # Compose JDBC URL from DB_NAME provided via ConfigMap
               export FLYWAY_URL="jdbc:postgresql://127.0.0.1:5432/${DB_NAME}"
               # Fail fast on bad credentials/config. Long retry loops hide real errors.
@@ -57,25 +76,6 @@ spec:
           resources:
             requests: { cpu: "25m", memory: "64Mi" }
             limits:   { cpu: "200m", memory: "192Mi" }
-        - name: cloud-sql-proxy
-          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
-          command:
-            - /cloud-sql-proxy
-          args:
-            - "--structured-logs"
-            - "--private-ip"
-            - "--port=5432"
-            - "--exit-zero-on-sigterm"
-            - "$(INSTANCE_CONNECTION_NAME)"
-          env:
-            - name: INSTANCE_CONNECTION_NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: claritas-config
-                  key: INSTANCE_CONNECTION_NAME
-          resources:
-            requests: { cpu: "25m", memory: "32Mi" }
-            limits:   { cpu: "200m", memory: "128Mi" }
       volumes:
         - name: flyway-sql
           configMap:
