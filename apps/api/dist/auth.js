@@ -26,6 +26,13 @@ function requiredEnv(name) {
         throw new Error(`Missing required env: ${name}`);
     return value;
 }
+function parseDatabaseId(value, field) {
+    const id = typeof value === "number" ? value : Number(value);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+        throw new Error(`Invalid database identifier for ${field}.`);
+    }
+    return id;
+}
 function getEnabledProviders() {
     const configured = (optionalEnv("AUTH_PROVIDERS") || "google,microsoft,apple")
         .split(",")
@@ -286,16 +293,20 @@ async function getAuthContext(req) {
     const row = rows[0];
     if (!row)
         return null;
+    // PostgreSQL BIGINT values are returned as strings by node-postgres by default.
+    // Normalize them at the auth boundary so all protected handlers receive numeric IDs.
+    const sessionId = parseDatabaseId(row.session_id, "auth_session.id");
+    const userId = parseDatabaseId(row.user_id, "app_user.id");
     const roles = row.roles || [];
     const billing = await (0, billing_1.resolveBillingAccessState)({
-        userId: row.user_id,
+        userId,
         roles,
     });
-    await (0, db_1.query)(`UPDATE auth_session SET last_seen_at = now() WHERE id = $1`, [row.session_id]);
+    await (0, db_1.query)(`UPDATE auth_session SET last_seen_at = now() WHERE id = $1`, [sessionId]);
     return {
-        sessionId: row.session_id,
+        sessionId,
         user: {
-            id: row.user_id,
+            id: userId,
             email: row.email,
             display_name: row.display_name,
             avatar_url: row.avatar_url,
