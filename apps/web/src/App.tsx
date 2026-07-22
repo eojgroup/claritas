@@ -704,6 +704,7 @@ import {
   getAuthStartUrl,
   logoutAuth,
   imageProxy,
+  requestEmailVerification,
   sendPersonalBriefingPreview,
   updateDailyBriefingSchedule,
   type AuthProvider,
@@ -3740,6 +3741,16 @@ export default function ClaritasDashboard() {
       setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSendingDailyBriefingPreview(false);
+    }
+  };
+
+  const handleRequestEmailVerification = async () => {
+    setDailyBriefingScheduleError(null);
+    try {
+      await requestEmailVerification();
+      setDailyBriefingScheduleNotice("Verification email sent. Open the link in that email, then refresh this page.");
+    } catch (err) {
+      setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -8190,6 +8201,11 @@ export default function ClaritasDashboard() {
                                     : "SMTP setup required"}
                                 </div>
                               </div>
+                              {!dailyBriefingEmailStatus?.recipient_verified && dailyBriefingEmailStatus?.configured && (
+                                <button type="button" onClick={() => void handleRequestEmailVerification()} className="mt-2 text-xs font-semibold text-[color:var(--shell-accent)] underline">
+                                  Send verification email
+                                </button>
+                              )}
                             </div>
                             <div className="mt-4">
                               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">

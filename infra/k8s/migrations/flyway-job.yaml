@@ -48,13 +48,15 @@ spec:
             - name: FLYWAY_LOCATIONS
               value: "filesystem:/flyway/sql"
             - name: JAVA_TOOL_OPTIONS
-              value: "-Xms64m -Xmx256m -XX:MaxRAMPercentage=75"
+              # Keep this short-lived migration Job schedulable on the small
+              # production node pool. Flyway only loads the migration set once.
+              value: "-Xms32m -Xmx128m -XX:MaxRAMPercentage=75"
           volumeMounts:
             - name: flyway-sql
               mountPath: /flyway/sql
           resources:
-            requests: { cpu: "50m", memory: "64Mi" }
-            limits:   { cpu: "200m", memory: "256Mi" }
+            requests: { cpu: "25m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "192Mi" }
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
           command:
@@ -72,8 +74,8 @@ spec:
                   name: claritas-config
                   key: INSTANCE_CONNECTION_NAME
           resources:
-            requests: { cpu: "50m", memory: "64Mi" }
-            limits:   { cpu: "200m", memory: "256Mi" }
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }
       volumes:
         - name: flyway-sql
           configMap:

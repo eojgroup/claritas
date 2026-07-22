@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: terraform-production
+  # Shared with gke-deploy.yml because both workflows run Flyway migrations.
+  group: claritas-production-deploy
   cancel-in-progress: false
 
 permissions:
@@ -206,9 +207,9 @@ jobs:
       ############################################
       # Run Flyway migrations (via K8s Job)
       ############################################
-      - name: 🧩 Upsert Flyway scripts ConfigMap from repo
+      - name: 🧩 Create run-scoped Flyway scripts ConfigMap from repo
         run: |
-          kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap flyway-scripts \
+          kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap "flyway-scripts-${GITHUB_RUN_ID}" \
             --from-file=infra/gcp/sql/ \
             --dry-run=client -o yaml | kubectl apply -f -
 
@@ -217,13 +218,17 @@ jobs:
           set -euo pipefail
           ns="${{ env.K8S_NAMESPACE }}"
           job="flyway-migrate-${GITHUB_RUN_ID}"
+          scripts="flyway-scripts-${GITHUB_RUN_ID}"
 
           # Ensure fresh Job
           kubectl -n "$ns" delete job "$job" --ignore-not-found=true || true
 
           # Apply explicitly into the target namespace, with a unique Job name to avoid cross-workflow races
           # Render the manifest with a run-scoped name
-          sed -E "s/^\s*name: flyway-migrate$/  name: ${job}/" infra/k8s/migrations/flyway-job.yaml | kubectl -n "$ns" apply -f -
+          sed -E \
+            -e "s/^\s*name: flyway-migrate$/  name: ${job}/" \
+            -e "s/^\s*name: flyway-scripts$/            name: ${scripts}/" \
+            infra/k8s/migrations/flyway-job.yaml | kubectl -n "$ns" apply -f -
 
           # Verify that the Job object exists (fast-fail if not created)
           echo "Verifying job/$job exists in namespace $ns ..."
@@ -245,6 +250,7 @@ jobs:
           set -euo pipefail
           ns="${{ env.K8S_NAMESPACE }}"
           job="flyway-migrate-${GITHUB_RUN_ID}"
+          scripts="flyway-scripts-${GITHUB_RUN_ID}"
 
           echo "Waiting for Flyway job/$job completion..."
           if ! kubectl -n "$ns" wait --for=condition=complete "job/${job}" --timeout=420s; then
@@ -258,6 +264,7 @@ jobs:
           fi
           kubectl -n "$ns" logs "job/$job" -c flyway --tail=200 || true
           kubectl -n "$ns" delete job "$job" --wait=true || true
+          kubectl -n "$ns" delete configmap "$scripts" --ignore-not-found=true || true
 
       - name: ✅ Verify DB schema and migration history
         run: |
