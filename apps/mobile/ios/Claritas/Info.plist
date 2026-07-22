@@ -49,5 +49,7 @@
         <key>NSAllowsArbitraryLoads</key>
         <true/>
     </dict>
+	<key>CLARITAS_WIDGET_APP_GROUP</key>
+	<string>$(CLARITAS_WIDGET_APP_GROUP)</string>
 </dict>
 </plist>

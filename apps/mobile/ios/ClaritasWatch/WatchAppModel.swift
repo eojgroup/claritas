@@ -147,6 +147,7 @@ final class WatchAppModel: ObservableObject {
             lastUpdated = Date()
             connectionState = .ready
             saveCache()
+            WatchWidgetSnapshotStore.save(briefing: briefing, personalBriefing: personalBriefing)
         } else if errors.contains(where: isUnauthorized) {
             WatchKeychain.authToken = nil
             connectionState = .waitingForPhone

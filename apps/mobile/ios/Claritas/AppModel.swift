@@ -422,6 +422,13 @@ final class AppModel: ObservableObject {
         if case .success(let earningRows) = resolvedMarketEarnings {
             marketEarnings = earningRows
         }
+        WidgetSnapshotStore.save(
+            dailyBriefing: dailyBriefing,
+            personalBriefing: personalDailyBriefing,
+            newsCount: news.count,
+            marketQuotes: marketQuotes,
+            weather: weather
+        )
     }
 
     func clearAppData() {
