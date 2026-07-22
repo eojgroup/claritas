@@ -13,22 +13,55 @@ on:
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
       - '.github/workflows/gke-deploy.yml'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - 'infra/gcp/sql/**'
+      - 'infra/k8s/migrations/**'
+      - 'infra/scripts/check-flyway-migrations.py'
+      - 'infra/scripts/wait-for-k8s-job.sh'
   workflow_dispatch:
 
 # Terraform deployment also updates production Kubernetes configuration.
-# Serialize both workflows, while keeping Flyway ownership in this workflow.
+# Serialize production runs, but isolate and supersede validation runs per PR.
 concurrency:
-  group: claritas-production-deploy
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('claritas-deployment-validation-{0}', github.event.pull_request.number) || 'claritas-production-deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
+  validate:
+    name: Validate workflows, migrations, and scripts
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+
+      - name: Validate Flyway migration versions
+        run: python3 infra/scripts/check-flyway-migrations.py
+
+      - name: Check deployment shell scripts
+        run: bash -n infra/scripts/wait-for-k8s-job.sh
+
   build:
     name: Build Docker Image and Push to Artifact Registry
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: 📦 Checkout code
@@ -139,8 +172,12 @@ jobs:
 
   deploy:
     name: Deploy to GKE
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: read
+      id-token: write
     env:
       PROJECT_ID: claritas-457808
       REGION: europe-west2
