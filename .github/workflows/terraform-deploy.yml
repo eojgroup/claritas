@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: terraform-production
+  # Shared with gke-deploy.yml because both workflows run Flyway migrations.
+  group: claritas-production-deploy
   cancel-in-progress: false
 
 permissions:

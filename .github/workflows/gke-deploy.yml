@@ -5,6 +5,13 @@ on:
     branches:
       - main
 
+# Terraform Infrastructure Deployment also runs Flyway against this same
+# database. Keep the two production workflows mutually exclusive so neither
+# can replace the shared flyway-scripts ConfigMap while the other is migrating.
+concurrency:
+  group: claritas-production-deploy
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
