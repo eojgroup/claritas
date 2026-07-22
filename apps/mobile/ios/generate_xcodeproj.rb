@@ -7,6 +7,7 @@ ROOT = File.expand_path(__dir__)
 PROJECT_PATH = File.join(ROOT, "Claritas", "Claritas.xcodeproj")
 IOS_SOURCE_ROOT = File.join(ROOT, "Claritas")
 WATCH_SOURCE_ROOT = File.join(ROOT, "ClaritasWatch")
+WATCH_WIDGET_SOURCE_ROOT = File.join(ROOT, "ClaritasWatchWidgets")
 
 bundle_id = ENV.fetch("BUNDLE_ID", "com.eojgroup.claritas")
 watch_bundle_id = ENV.fetch("WATCH_BUNDLE_ID", "#{bundle_id}.watchkitapp")
@@ -36,10 +37,11 @@ project.root_object.attributes["LastUpgradeCheck"] = "1600"
 
 ios_target = project.new_target(:application, "Claritas", :ios, ios_deployment_target)
 watch_target = project.new_target(:application, "Claritas Watch App", :watchos, watchos_deployment_target)
+watch_widget_target = project.new_target(:watch2_extension, "Claritas Watch Widgets", :watchos, watchos_deployment_target)
 
 # Swift modules autolink these frameworks. Removing xcodeproj's version-pinned
 # framework references keeps the generated project portable across Xcode SDKs.
-[ios_target, watch_target].each do |target|
+[ios_target, watch_target, watch_widget_target].each do |target|
   target.frameworks_build_phase.files.each(&:remove_from_project)
 end
 project.frameworks_group.children.each(&:remove_from_project)
@@ -72,11 +74,33 @@ configure_target(
 )
 
 configure_target(
+  watch_widget_target,
+  {
+    "APPLICATION_EXTENSION_API_ONLY" => "YES",
+    "CLARITAS_WATCH_WIDGET_APP_GROUP" => "group.#{bundle_id}.watch",
+    "CODE_SIGN_ENTITLEMENTS" => "../ClaritasWatchWidgets/ClaritasWatchWidgets.entitlements",
+    "CODE_SIGN_STYLE" => "Automatic",
+    "CURRENT_PROJECT_VERSION" => build_number,
+    "DEVELOPMENT_TEAM" => development_team,
+    "GENERATE_INFOPLIST_FILE" => "NO",
+    "INFOPLIST_FILE" => "../ClaritasWatchWidgets/Info.plist",
+    "MARKETING_VERSION" => marketing_version,
+    "PRODUCT_BUNDLE_IDENTIFIER" => "#{watch_bundle_id}.widgets",
+    "SDKROOT" => "watchos",
+    "SKIP_INSTALL" => "YES",
+    "SWIFT_VERSION" => "5.0",
+    "WATCHOS_DEPLOYMENT_TARGET" => watchos_deployment_target
+  }
+)
+
+configure_target(
   watch_target,
   {
     "ASSETCATALOG_COMPILER_APPICON_NAME" => "AppIcon",
     "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME" => "AccentColor",
     "CLARITAS_IOS_BUNDLE_IDENTIFIER" => bundle_id,
+    "CLARITAS_WATCH_WIDGET_APP_GROUP" => "group.#{bundle_id}.watch",
+    "CODE_SIGN_ENTITLEMENTS" => "../ClaritasWatch/ClaritasWatch.entitlements",
     "CODE_SIGN_STYLE" => "Automatic",
     "CURRENT_PROJECT_VERSION" => build_number,
     "DEVELOPMENT_TEAM" => development_team,
@@ -96,6 +120,7 @@ configure_target(
 root_group = project.main_group
 ios_group = root_group.new_group("Claritas")
 watch_group = root_group.new_group("ClaritasWatch", "../ClaritasWatch")
+watch_widget_group = root_group.new_group("ClaritasWatchWidgets", "../ClaritasWatchWidgets")
 
 def add_files(group, base_path, relative_paths)
   relative_paths.to_h do |relative_path|
@@ -198,7 +223,9 @@ ios_refs = add_files(ios_group, IOS_SOURCE_ROOT, ios_swift_paths + ios_resource_
 
 watch_swift_paths = Dir.chdir(WATCH_SOURCE_ROOT) { Dir.glob("**/*.swift").sort }
 watch_resource_paths = ["Assets.xcassets", "Config.plist"]
-watch_refs = add_files(watch_group, WATCH_SOURCE_ROOT, watch_swift_paths + watch_resource_paths + ["Info.plist"])
+watch_refs = add_files(watch_group, WATCH_SOURCE_ROOT, watch_swift_paths + watch_resource_paths + ["Info.plist", "ClaritasWatch.entitlements"])
+watch_widget_swift_paths = Dir.chdir(WATCH_WIDGET_SOURCE_ROOT) { Dir.glob("**/*.swift").sort }
+watch_widget_refs = add_files(watch_widget_group, WATCH_WIDGET_SOURCE_ROOT, watch_widget_swift_paths + ["Info.plist", "ClaritasWatchWidgets.entitlements"])
 
 ios_swift_paths.each { |path| ios_target.source_build_phase.add_file_reference(ios_refs.fetch(path)) }
 ios_resource_paths.each { |path| ios_target.resources_build_phase.add_file_reference(ios_refs.fetch(path)) }
@@ -208,8 +235,15 @@ watch_swift_paths.each { |path| watch_target.source_build_phase.add_file_referen
   watch_target.source_build_phase.add_file_reference(ios_refs.fetch(path))
 end
 watch_resource_paths.each { |path| watch_target.resources_build_phase.add_file_reference(watch_refs.fetch(path)) }
+watch_widget_swift_paths.each { |path| watch_widget_target.source_build_phase.add_file_reference(watch_widget_refs.fetch(path)) }
 
 ios_target.add_dependency(watch_target)
+watch_target.add_dependency(watch_widget_target)
+embed_watch_widgets = watch_target.new_copy_files_build_phase("Embed Watch Extensions")
+embed_watch_widgets.dst_subfolder_spec = "13"
+watch_widget_product = embed_watch_widgets.add_file_reference(watch_widget_target.product_reference)
+watch_widget_product.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy", "CodeSignOnCopy"] }
+
 embed_watch = ios_target.new_copy_files_build_phase("Embed Watch Content")
 embed_watch.dst_subfolder_spec = "16"
 embed_watch.dst_path = "$(CONTENTS_FOLDER_PATH)/Watch"

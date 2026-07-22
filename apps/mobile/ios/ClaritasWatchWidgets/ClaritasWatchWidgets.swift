@@ -1,0 +1,56 @@
+import SwiftUI
+import WidgetKit
+
+private struct ClaritasWatchEntry: TimelineEntry {
+    let date: Date
+    let title: String
+    let summary: String
+    let newsCount: Int
+    let marketDirection: Double
+}
+
+private struct ClaritasWatchProvider: TimelineProvider {
+    func placeholder(in context: Context) -> ClaritasWatchEntry {
+        .init(date: .now, title: "Daily briefing", summary: "Signals ready", newsCount: 8, marketDirection: 0.4)
+    }
+
+    func getSnapshot(in context: Context, completion: @escaping (ClaritasWatchEntry) -> Void) { completion(entry()) }
+
+    func getTimeline(in context: Context, completion: @escaping (Timeline<ClaritasWatchEntry>) -> Void) {
+        completion(Timeline(entries: [entry()], policy: .after(.now.addingTimeInterval(30 * 60))))
+    }
+
+    private func entry() -> ClaritasWatchEntry {
+        let suiteName = Bundle.main.object(forInfoDictionaryKey: "CLARITAS_WATCH_WIDGET_APP_GROUP") as? String
+        let values = suiteName.flatMap(UserDefaults.init(suiteName:))?.dictionary(forKey: "claritas.watch.widget.snapshot") ?? [:]
+        return .init(
+            date: .now,
+            title: values["title"] as? String ?? "Daily briefing",
+            summary: values["summary"] as? String ?? "Open Claritas for current signals.",
+            newsCount: values["newsCount"] as? Int ?? 0,
+            marketDirection: values["marketDirection"] as? Double ?? 0
+        )
+    }
+}
+
+struct ClaritasWatchWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "ClaritasWatchWidget", provider: ClaritasWatchProvider()) { entry in
+            VStack(alignment: .leading, spacing: 3) {
+                Label("Briefing", systemImage: "sparkles")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.orange)
+                Text(entry.title).font(.caption.weight(.semibold)).lineLimit(2)
+                Text(entry.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                Text("\(entry.newsCount) news · \(String(format: "%+.1f%%", entry.marketDirection))")
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            .background(Color(red: 0.04, green: 0.11, blue: 0.18))
+        }
+        .configurationDisplayName("Claritas briefing")
+        .description("Today’s briefing and signal pulse.")
+        .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline])
+    }
+}
+
+@main struct ClaritasWatchWidgets: WidgetBundle { var body: some Widget { ClaritasWatchWidget() } }

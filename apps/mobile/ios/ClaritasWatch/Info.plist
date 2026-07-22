@@ -29,5 +29,7 @@
     <true/>
     <key>WKCompanionAppBundleIdentifier</key>
     <string>$(CLARITAS_IOS_BUNDLE_IDENTIFIER)</string>
+	<key>CLARITAS_WATCH_WIDGET_APP_GROUP</key>
+	<string>$(CLARITAS_WATCH_WIDGET_APP_GROUP)</string>
 </dict>
 </plist>
