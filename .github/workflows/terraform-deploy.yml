@@ -82,7 +82,7 @@ jobs:
             local address="$1"
             local import_id="$2"
 
-            if terraform state list | grep -Fxq "$address"; then
+            if terraform state show "$address" >/dev/null 2>&1; then
               echo "$address is already managed; skipping import."
               return
             fi
