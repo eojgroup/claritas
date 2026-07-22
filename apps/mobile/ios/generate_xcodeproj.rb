@@ -273,7 +273,7 @@ embed_widgets.dst_subfolder_spec = "13"
 widget_product = embed_widgets.add_file_reference(widget_target.product_reference)
 widget_product.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy", "CodeSignOnCopy"] }
 
-embed_watch_widgets = watch_target.new_copy_files_build_phase("Embed Foundation Extensions")
+embed_watch_widgets = watch_target.new_copy_files_build_phase("Embed Watch Extensions")
 embed_watch_widgets.dst_subfolder_spec = "13"
 watch_widget_product = embed_watch_widgets.add_file_reference(watch_widget_target.product_reference)
 watch_widget_product.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy", "CodeSignOnCopy"] }
