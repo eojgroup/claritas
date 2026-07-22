@@ -19,6 +19,13 @@ concurrency:
   group: claritas-production-deploy
   cancel-in-progress: false
 
+# Terraform Infrastructure Deployment also runs Flyway against this same
+# database. Keep the two production workflows mutually exclusive while either
+# is applying infrastructure or database changes.
+concurrency:
+  group: claritas-production-deploy
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
