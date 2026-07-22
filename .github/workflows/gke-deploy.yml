@@ -10,18 +10,13 @@ on:
       - 'apps/**'
       - 'infra/k8s/**'
       - 'infra/gcp/sql/**'
+      - 'infra/scripts/check-flyway-migrations.py'
+      - 'infra/scripts/wait-for-k8s-job.sh'
       - '.github/workflows/gke-deploy.yml'
+  workflow_dispatch:
 
-# Terraform Infrastructure Deployment also runs Flyway against this same
-# database. Keep the two production workflows mutually exclusive while either
-# is applying infrastructure or database changes.
-concurrency:
-  group: claritas-production-deploy
-  cancel-in-progress: false
-
-# Terraform Infrastructure Deployment also runs Flyway against this same
-# database. Keep the two production workflows mutually exclusive while either
-# is applying infrastructure or database changes.
+# Terraform deployment also updates production Kubernetes configuration.
+# Serialize both workflows, while keeping Flyway ownership in this workflow.
 concurrency:
   group: claritas-production-deploy
   cancel-in-progress: false
@@ -46,8 +41,10 @@ jobs:
         run: |
           echo "PWD=$(pwd)"
           ls -la
-          echo "---- apps/web ----" && ls -la ./apps/web || true
-          echo "---- apps/api ----" && ls -la ./apps/api || true
+          echo "---- apps/web ----"
+          ls -la ./apps/web || true
+          echo "---- apps/api ----"
+          ls -la ./apps/api || true
 
       - name: 🔐 Authenticate to Google Cloud via OIDC
         id: auth
@@ -192,11 +189,16 @@ jobs:
 
       - name: 🔎 Debug cluster & namespace
         run: |
-          echo "Context:" && kubectl config current-context
-          echo "Namespaces:" && kubectl get ns -o wide
-          echo "All deployments (all namespaces):" && kubectl get deploy -A -o wide || true
-          echo "Resources in ${NAMESPACE}:" && kubectl -n "${NAMESPACE}" get all || true
-          echo "Manifests present:" && ls -la ./infra/k8s || true
+          echo "Context:"
+          kubectl config current-context
+          echo "Namespaces:"
+          kubectl get ns -o wide
+          echo "All deployments (all namespaces):"
+          kubectl get deploy -A -o wide || true
+          echo "Resources in ${NAMESPACE}:"
+          kubectl -n "${NAMESPACE}" get all || true
+          echo "Manifests present:"
+          ls -la ./infra/k8s || true
 
       - name: ✅ Validate manifests have no placeholder images
         run: |
@@ -609,7 +611,11 @@ jobs:
 
           # Use a unique Job name to avoid collisions across runs
           job="flyway-migrate-${GITHUB_RUN_ID}"
-          scripts="flyway-scripts-${GITHUB_RUN_ID}"
+          cleanup_migration_artifacts() {
+            kubectl -n "$NS" delete job "$job" --ignore-not-found=true --wait=false || true
+            kubectl -n "$NS" delete configmap "$scripts" --ignore-not-found=true || true
+          }
+          trap cleanup_migration_artifacts EXIT
           kubectl -n "$NS" delete job "$job" --ignore-not-found=true || true
           # Apply manifest with a run-scoped job name
           sed -E \
@@ -618,7 +624,7 @@ jobs:
             infra/k8s/migrations/flyway-job.yaml | kubectl -n "$NS" apply -f -
 
           echo "Waiting for Flyway job/$job completion..."
-          if ! kubectl -n "$NS" wait --for=condition=complete "job/${job}" --timeout=420s; then
+          if ! ./infra/scripts/wait-for-k8s-job.sh "$NS" "$job" 420; then
             echo "::error::Flyway job did not complete successfully" >&2
             kubectl -n "$NS" get job "$job" -o wide || true
             kubectl -n "$NS" describe job "$job" | sed -n '1,200p' || true
@@ -628,8 +634,6 @@ jobs:
             exit 1
           fi
           kubectl -n "$NS" logs "job/$job" -c flyway --tail=200 || true
-          kubectl -n "$NS" delete job "$job" --wait=true || true
-          kubectl -n "$NS" delete configmap "$scripts" --ignore-not-found=true || true
 
       - name: ✅ Verify DB schema and migration history
         env:
@@ -637,9 +641,13 @@ jobs:
         run: |
           set -euo pipefail
           job="db-verify-${GITHUB_RUN_ID}"
+          cleanup_verify_job() {
+            kubectl -n "$NS" delete job "$job" --ignore-not-found=true --wait=false || true
+          }
+          trap cleanup_verify_job EXIT
           kubectl -n "$NS" delete job "$job" --ignore-not-found=true || true
           sed -E "s/^\s*name: db-verify$/  name: ${job}/" infra/k8s/migrations/db-verify-job.yaml | kubectl -n "$NS" apply -f -
-          if ! kubectl -n "$NS" wait --for=condition=complete "job/${job}" --timeout=600s; then
+          if ! ./infra/scripts/wait-for-k8s-job.sh "$NS" "$job" 600; then
             echo "::error::DB verification failed" >&2
             kubectl -n "$NS" describe "job/${job}" || true
             kubectl -n "$NS" logs "job/${job}" -c db-verify --tail=200 || true
@@ -647,7 +655,6 @@ jobs:
             exit 1
           fi
           kubectl -n "$NS" logs "job/${job}" -c db-verify --tail=200 || true
-          kubectl -n "$NS" delete "job/${job}" --wait=true || true
 
       - name: 📤 Set image and rollout (with diagnostics)
         run: |
@@ -669,19 +676,19 @@ jobs:
               echo "=== describe deployment ==="
               kubectl -n "$ns" describe deployment "${dep}" | sed -n '1,200p' || true
               echo "=== replica sets ==="
-              kubectl -n "$ns" get rs -l app=${dep} -o wide || true
+              kubectl -n "$ns" get rs -l "app=${dep}" -o wide || true
               local rs
-              rs="$(kubectl -n "$ns" get rs -l app=${dep} -o name | tail -n1 || true)"
+              rs="$(kubectl -n "$ns" get rs -l "app=${dep}" -o name | tail -n1 || true)"
               if [ -n "${rs}" ]; then
                 echo "=== describe $rs ==="
                 kubectl -n "$ns" describe "${rs}" | sed -n '1,200p' || true
               fi
               echo "=== pods ==="
-              kubectl -n "$ns" get pods -l app=${dep} -o wide || true
-              for p in $(kubectl -n "$ns" get pods -l app=${dep} -o name); do
+              kubectl -n "$ns" get pods -l "app=${dep}" -o wide || true
+              while IFS= read -r p; do
                 echo "--- logs $p (all containers, last 200) ---"
                 kubectl -n "$ns" logs "$p" --all-containers --tail=200 || true
-              done
+              done < <(kubectl -n "$ns" get pods -l "app=${dep}" -o name)
               exit 1
             fi
             echo "✅ ${dep} rolled out"
@@ -738,9 +745,21 @@ jobs:
           gcloud dns record-sets transaction start --zone="${DNS_ZONE}" || true
 
           for host in "${DOMAIN}" "${AUTH_DOMAIN}"; do
-            EXISTING=$(gcloud dns record-sets list --zone="${DNS_ZONE}" --name="${host}." --type=A --format='value(rrdatas[])') || true
-            if [ -n "${EXISTING:-}" ]; then
-              gcloud dns record-sets transaction remove --zone="${DNS_ZONE}" --name="${host}." --type=A --ttl=300 ${EXISTING} || true
+            mapfile -t existing_records < <(
+              gcloud dns record-sets list \
+                --zone="${DNS_ZONE}" \
+                --name="${host}." \
+                --type=A \
+                --flatten='rrdatas[]' \
+                --format='value(rrdatas)' || true
+            )
+            if (( ${#existing_records[@]} > 0 )); then
+              gcloud dns record-sets transaction remove \
+                --zone="${DNS_ZONE}" \
+                --name="${host}." \
+                --type=A \
+                --ttl=300 \
+                "${existing_records[@]}" || true
             fi
             gcloud dns record-sets transaction add --zone="${DNS_ZONE}" --name="${host}." --type=A --ttl=300 "${INGRESS_IP}"
           done

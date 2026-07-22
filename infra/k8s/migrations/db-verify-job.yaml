@@ -3,7 +3,7 @@ kind: Job
 metadata:
   name: db-verify
 spec:
-  backoffLimit: 1
+  backoffLimit: 0
   template:
     spec:
       shareProcessNamespace: true
@@ -16,6 +16,15 @@ spec:
           args:
             - |
               set -euo pipefail
+              cleanup_proxy() {
+                if command -v killall >/dev/null 2>&1; then
+                  killall cloud-sql-proxy >/dev/null 2>&1 || true
+                else
+                  PIDS=$(ps -eo pid,args | awk '/cloud-sql-proxy/{print $1}')
+                  [ -n "$PIDS" ] && kill $PIDS || true
+                fi
+              }
+              trap cleanup_proxy EXIT
               export PGPASSWORD="${DB_PASSWORD}"
 
               # Wait for cloud-sql-proxy sidecar to be ready on localhost.
@@ -75,37 +84,23 @@ spec:
                 \quit 1
               \endif
 
-              -- Ensure all expected migrations are marked successful
-              SELECT count(*) AS missing_versions
-              FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7'), ('8'), ('9')) AS v(version)
-              WHERE NOT EXISTS (
-                SELECT 1
-                FROM flyway_schema_history f
-                WHERE f.version = v.version
-                  AND f.success = true
-              );
+              -- Flyway migrate/validate has already checked the repository's
+              -- current scripts. Independently reject any failed history row
+              -- without duplicating a version list that becomes stale.
+              SELECT count(*) AS failed_migrations
+              FROM flyway_schema_history
+              WHERE success IS DISTINCT FROM true;
               \gset
-              \if :missing_versions != 0
-                \echo 'Missing successful Flyway versions:'
-                SELECT array_agg(v.version)
-                FROM (VALUES ('1'), ('2'), ('3'), ('4'), ('5'), ('6'), ('7'), ('8'), ('9')) AS v(version)
-                WHERE NOT EXISTS (
-                  SELECT 1
-                  FROM flyway_schema_history f
-                  WHERE f.version = v.version
-                    AND f.success = true
-                );
+              \if :failed_migrations != 0
+                \echo 'Unsuccessful Flyway history entries:'
+                SELECT installed_rank, version, description, success
+                FROM flyway_schema_history
+                WHERE success IS DISTINCT FROM true
+                ORDER BY installed_rank;
                 \quit 1
               \endif
               SQL
 
-              # Stop sidecar so Job can complete.
-              if command -v killall >/dev/null 2>&1; then
-                killall cloud-sql-proxy >/dev/null 2>&1 || true
-              else
-                PIDS=$(ps -eo pid,args | awk '/cloud-sql-proxy/{print $1}')
-                [ -n "$PIDS" ] && kill $PIDS || true
-              fi
           env:
             - name: DB_NAME
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_NAME } }

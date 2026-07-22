@@ -3,7 +3,7 @@ kind: Job
 metadata:
   name: flyway-migrate
 spec:
-  backoffLimit: 2
+  backoffLimit: 0
   template:
     spec:
       shareProcessNamespace: true
@@ -16,6 +16,15 @@ spec:
           args:
             - |
               set -e
+              cleanup_proxy() {
+                if command -v killall >/dev/null 2>&1; then
+                  killall cloud-sql-proxy >/dev/null 2>&1 || true
+                else
+                  PIDS=$(ps -eo pid,args | awk '/cloud-sql-proxy/{print $1}')
+                  [ -n "$PIDS" ] && kill $PIDS || true
+                fi
+              }
+              trap cleanup_proxy EXIT
               # Compose JDBC URL from DB_NAME provided via ConfigMap
               export FLYWAY_URL="jdbc:postgresql://127.0.0.1:5432/${DB_NAME}"
               # Fail fast on bad credentials/config. Long retry loops hide real errors.
@@ -27,15 +36,6 @@ spec:
               /flyway/flyway info
               /flyway/flyway migrate
               /flyway/flyway validate
-              STATUS=$?
-              # Signal the sidecar proxy to exit so the Job can complete
-              if command -v killall >/dev/null 2>&1; then
-                killall cloud-sql-proxy >/dev/null 2>&1 || true
-              else
-                PIDS=$(ps -eo pid,args | awk '/cloud-sql-proxy/{print $1}')
-                [ -n "$PIDS" ] && kill $PIDS || true
-              fi
-              exit "$STATUS"
           env:
             - name: DB_NAME
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_NAME } }

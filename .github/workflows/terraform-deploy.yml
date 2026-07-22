@@ -8,12 +8,13 @@ on:
     # still run it explicitly when GitHub variables or secrets change.
     paths:
       - 'infra/gcp/terraform/**'
-      - 'infra/scripts/**'
+      - 'infra/scripts/terraform-init-retry.sh'
       - '.github/workflows/terraform-deploy.yml'
   workflow_dispatch:
 
 concurrency:
-  # Shared with gke-deploy.yml because both workflows run Flyway migrations.
+  # Shared with gke-deploy.yml because both workflows mutate production
+  # Kubernetes configuration. Application migrations belong to GKE deploy.
   group: claritas-production-deploy
   cancel-in-progress: false
 
@@ -23,7 +24,7 @@ permissions:
 
 jobs:
   deploy:
-    name: Terraform + Cloud SQL + Migrations
+    name: Terraform + Cloud SQL + Configuration
     runs-on: ubuntu-latest
 
     env:
@@ -128,10 +129,12 @@ jobs:
           DB_USER=$(terraform output -raw db_user 2>/dev/null | tr -d '\n')
           DB_PASS=$(terraform output -raw db_pass 2>/dev/null | tr -d '\n')
 
-          echo "icn=${ICN}" >> "$GITHUB_OUTPUT"
-          echo "db_name=${DB_NAME}" >> "$GITHUB_OUTPUT"
-          echo "db_user=${DB_USER}" >> "$GITHUB_OUTPUT"
-          echo "db_pass=${DB_PASS}" >> "$GITHUB_OUTPUT"
+          {
+            echo "icn=${ICN}"
+            echo "db_name=${DB_NAME}"
+            echo "db_user=${DB_USER}"
+            echo "db_pass=${DB_PASS}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: 🕵️ Mask DB secret
         run: |
@@ -210,86 +213,6 @@ jobs:
               --from-literal=FINNHUB_API_KEY="$FINNHUB_API_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
           fi
-
-      ############################################
-      # Run Flyway migrations (via K8s Job)
-      ############################################
-      - name: 🧩 Create run-scoped Flyway scripts ConfigMap from repo
-        run: |
-          python3 infra/scripts/check-flyway-migrations.py
-          kubectl -n "${{ env.K8S_NAMESPACE }}" create configmap "flyway-scripts-${GITHUB_RUN_ID}" \
-            --from-file=infra/gcp/sql/ \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-      - name: 📜 Apply migration manifests
-        run: |
-          set -euo pipefail
-          ns="${{ env.K8S_NAMESPACE }}"
-          job="flyway-migrate-${GITHUB_RUN_ID}"
-          scripts="flyway-scripts-${GITHUB_RUN_ID}"
-
-          # Ensure fresh Job
-          kubectl -n "$ns" delete job "$job" --ignore-not-found=true || true
-
-          # Apply explicitly into the target namespace, with a unique Job name to avoid cross-workflow races
-          # Render the manifest with a run-scoped name
-          sed -E \
-            -e "s/^\s*name: flyway-migrate$/  name: ${job}/" \
-            -e "s/^\s*name: flyway-scripts$/            name: ${scripts}/" \
-            infra/k8s/migrations/flyway-job.yaml | kubectl -n "$ns" apply -f -
-
-          # Verify that the Job object exists (fast-fail if not created)
-          echo "Verifying job/$job exists in namespace $ns ..."
-          for i in $(seq 1 10); do
-            if kubectl -n "$ns" get job "$job" >/dev/null 2>&1; then
-              kubectl -n "$ns" get job "$job" -o wide || true
-              break
-            fi
-            sleep 2
-          done
-          if ! kubectl -n "$ns" get job "$job" >/dev/null 2>&1; then
-            echo "::error::Failed to create job/$job. Recent events:" >&2
-            kubectl -n "$ns" get events --sort-by=.lastTimestamp | tail -n 50 || true
-            exit 1
-          fi
-
-      - name: 🕒 Wait for migrations (robust to job GC)
-        run: |
-          set -euo pipefail
-          ns="${{ env.K8S_NAMESPACE }}"
-          job="flyway-migrate-${GITHUB_RUN_ID}"
-          scripts="flyway-scripts-${GITHUB_RUN_ID}"
-
-          echo "Waiting for Flyway job/$job completion..."
-          if ! kubectl -n "$ns" wait --for=condition=complete "job/${job}" --timeout=420s; then
-            echo "::error::Flyway job did not complete successfully" >&2
-            kubectl -n "$ns" get job "$job" -o wide || true
-            kubectl -n "$ns" describe job "$job" | sed -n '1,200p' || true
-            kubectl -n "$ns" get pods -l job-name=$job -o wide || true
-            kubectl -n "$ns" logs "job/$job" -c flyway --tail=200 || true
-            kubectl -n "$ns" logs "job/$job" -c cloud-sql-proxy --tail=200 || true
-            exit 1
-          fi
-          kubectl -n "$ns" logs "job/$job" -c flyway --tail=200 || true
-          kubectl -n "$ns" delete job "$job" --wait=true || true
-          kubectl -n "$ns" delete configmap "$scripts" --ignore-not-found=true || true
-
-      - name: ✅ Verify DB schema and migration history
-        run: |
-          set -euo pipefail
-          ns="${{ env.K8S_NAMESPACE }}"
-          job="db-verify-${GITHUB_RUN_ID}"
-          kubectl -n "$ns" delete job "$job" --ignore-not-found=true || true
-          sed -E "s/^\s*name: db-verify$/  name: ${job}/" infra/k8s/migrations/db-verify-job.yaml | kubectl -n "$ns" apply -f -
-          if ! kubectl -n "$ns" wait --for=condition=complete "job/${job}" --timeout=600s; then
-            echo "::error::DB verification failed" >&2
-            kubectl -n "$ns" describe "job/${job}" || true
-            kubectl -n "$ns" logs "job/${job}" -c db-verify --tail=200 || true
-            kubectl -n "$ns" logs "job/${job}" -c cloud-sql-proxy --tail=200 || true
-            exit 1
-          fi
-          kubectl -n "$ns" logs "job/${job}" -c db-verify --tail=200 || true
-          kubectl -n "$ns" delete "job/${job}" --wait=true || true
 
       ############################################
       # (Optional) Redeploy API if needed
