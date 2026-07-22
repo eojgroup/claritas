@@ -271,13 +271,14 @@ export async function sendEmailVerificationEmail(recipient: string, verification
   const config = getEmailRuntimeConfig();
   const url = safeWebUrl(verificationUrl);
   if (!url) throw new Error("EMAIL_PUBLIC_BASE_URL must be a valid HTTP(S) URL before sending verification email.");
+  const destination = new URL(url);
   await getTransporter().sendMail({
     from: config.from,
     to: recipient,
     replyTo: config.reply_to || undefined,
     subject: "Verify your Claritas email address",
-    text: `Verify your Claritas email address by opening this link:\n\n${url}\n\nThis link expires in one hour. If you did not request it, you can ignore this email.`,
-    html: `<p>Verify your Claritas email address by opening this link:</p><p><a href="${escapeHtml(url)}">Verify email address</a></p><p>This link expires in one hour. If you did not request it, you can ignore this email.</p>`,
+    text: `Verify your Claritas email address by opening this link:\n\n${url}\n\nThe destination is ${destination.origin}. Email security systems can replace clickable links with a redirect. If your browser warns about a redirect, copy and paste the exact Claritas address above into your browser instead.\n\nThis link expires in one hour. If you did not request it, you can ignore this email.`,
+    html: `<p>Verify your Claritas email address:</p><p><a href="${escapeHtml(url)}">Verify email address</a></p><p style="color:#475569">The destination is <strong>${escapeHtml(destination.origin)}</strong>. Email security systems can replace clickable links with a redirect. If your browser warns about a redirect, copy and paste this exact Claritas address into your browser instead:</p><div style="padding:12px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;word-break:break-all"><code>${escapeHtml(url)}</code></div><p>This link expires in one hour. If you did not request it, you can ignore this email.</p>`,
     headers: { "X-Claritas-Message-Type": "email-verification" },
   });
 }

@@ -18,6 +18,16 @@ and **Send preview** reports that delivery was suppressed.
 This is an identity-verification state, not a Brevo/SMTP failure. Users can
 select **Send verification email** in Preferences and open the one-hour link
 sent to their signed-in account address. This is the normal self-service path.
+The message identifies the expected `app.claritas.info` destination and also
+shows the complete first-party URL as a copy/paste fallback. If an email client
+or browser warns about a rewritten tracking or safety redirect, the user can
+copy that displayed Claritas URL into the browser without following the
+intermediate redirect.
+
+Brevo account-security messages, including notifications that ask an operator
+to authorize a new SMTP source IP, are not Claritas user-verification messages.
+Operators should verify the source IP and authorize it from **Brevo → Settings
+→ Security → Authorized IPs** instead of relying on an emailed redirect.
 
 ## Administrator recovery path
 
