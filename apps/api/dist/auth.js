@@ -373,6 +373,29 @@ function normalizeScheduleTimezone(value) {
     }
     return timezone;
 }
+function normalizeScheduleSelectionList(value, fieldName, options) {
+    if (!Array.isArray(value)) {
+        throw scheduleError(400, `${fieldName} must be an array of strings.`);
+    }
+    if (value.length > options.maxItems) {
+        throw scheduleError(400, `${fieldName} supports at most ${options.maxItems} selections.`);
+    }
+    const values = value.map((entry) => {
+        if (typeof entry !== "string") {
+            throw scheduleError(400, `${fieldName} must contain only strings.`);
+        }
+        const trimmed = entry.replace(/\s+/g, " ").trim();
+        if (!trimmed || trimmed.length > options.maxLength) {
+            throw scheduleError(400, `${fieldName} values must be between 1 and ${options.maxLength} characters.`);
+        }
+        const normalized = options.uppercase ? trimmed.toUpperCase() : trimmed;
+        if (options.pattern && !options.pattern.test(normalized)) {
+            throw scheduleError(400, `${fieldName} contains an invalid value: ${trimmed}.`);
+        }
+        return normalized;
+    });
+    return Array.from(new Set(values));
+}
 function parseDailyBriefingSchedulePatch(raw) {
     const body = asPlainObject(raw);
     const patch = {};
@@ -381,6 +404,12 @@ function parseDailyBriefingSchedulePatch(raw) {
             throw scheduleError(400, "enabled must be a boolean.");
         patch.enabled = body.enabled;
     }
+    if (Object.prototype.hasOwnProperty.call(body, "email_enabled")) {
+        if (typeof body.email_enabled !== "boolean") {
+            throw scheduleError(400, "email_enabled must be a boolean.");
+        }
+        patch.email_enabled = body.email_enabled;
+    }
     const scheduledTime = body.scheduled_time ?? body.schedule_time;
     if (typeof scheduledTime !== "undefined") {
         patch.scheduled_time = normalizeScheduleTime(scheduledTime);
@@ -388,6 +417,43 @@ function parseDailyBriefingSchedulePatch(raw) {
     const timezone = body.schedule_timezone ?? body.timezone;
     if (typeof timezone !== "undefined") {
         patch.schedule_timezone = normalizeScheduleTimezone(timezone);
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "industries")) {
+        patch.industries = normalizeScheduleSelectionList(body.industries, "industries", {
+            maxItems: 20,
+            maxLength: 80,
+        });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "company_symbols")) {
+        patch.company_symbols = normalizeScheduleSelectionList(body.company_symbols, "company_symbols", {
+            maxItems: 50,
+            maxLength: 16,
+            uppercase: true,
+            pattern: /^[A-Z0-9][A-Z0-9._-]*$/,
+        });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "country_iso2s")) {
+        patch.country_iso2s = normalizeScheduleSelectionList(body.country_iso2s, "country_iso2s", {
+            maxItems: 50,
+            maxLength: 2,
+            uppercase: true,
+            pattern: /^[A-Z]{2}$/,
+        });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "regions")) {
+        patch.regions = normalizeScheduleSelectionList(body.regions, "regions", {
+            maxItems: 20,
+            maxLength: 80,
+        });
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "max_items")) {
+        if (typeof body.max_items !== "number" ||
+            !Number.isInteger(body.max_items) ||
+            body.max_items < 3 ||
+            body.max_items > 25) {
+            throw scheduleError(400, "max_items must be an integer between 3 and 25.");
+        }
+        patch.max_items = body.max_items;
     }
     return patch;
 }
@@ -415,11 +481,18 @@ function toDailyBriefingSchedule(row) {
     return {
         user_id: Number(row.user_id),
         enabled: !!row.enabled,
+        email_enabled: !!row.email_enabled,
         scheduled_time: timeToApiString(row.scheduled_time),
         timezone: row.schedule_timezone,
+        industries: Array.isArray(row.industries) ? row.industries : [],
+        company_symbols: Array.isArray(row.company_symbols) ? row.company_symbols : [],
+        country_iso2s: Array.isArray(row.country_iso2s) ? row.country_iso2s : [],
+        regions: Array.isArray(row.regions) ? row.regions : [],
+        max_items: Number(row.max_items) || 10,
         last_scheduled_for: dateToApiString(row.last_scheduled_for),
         last_triggered_at: timestampToApiString(row.last_triggered_at),
         last_job_id: row.last_job_id,
+        last_personal_job_id: row.last_personal_job_id,
         created_at: timestampToApiString(row.created_at) || new Date().toISOString(),
         updated_at: timestampToApiString(row.updated_at) || new Date().toISOString(),
     };
@@ -434,11 +507,18 @@ async function getDailyBriefingSchedule(userId) {
     const { rows } = await (0, db_1.query)(`SELECT
        user_id,
        enabled,
+       email_enabled,
        scheduled_time::text AS scheduled_time,
        schedule_timezone,
+       industries,
+       company_symbols,
+       country_iso2s,
+       regions,
+       max_items,
        last_scheduled_for,
        last_triggered_at,
        last_job_id,
+       last_personal_job_id,
        created_at,
        updated_at
      FROM user_daily_briefing_schedule
@@ -454,22 +534,41 @@ async function updateDailyBriefingSchedule(userId, patch) {
      SET enabled = COALESCE($2, enabled),
          scheduled_time = COALESCE($3::time, scheduled_time),
          schedule_timezone = COALESCE($4, schedule_timezone),
+         email_enabled = COALESCE($5, email_enabled),
+         industries = COALESCE($6::text[], industries),
+         company_symbols = COALESCE($7::text[], company_symbols),
+         country_iso2s = COALESCE($8::text[], country_iso2s),
+         regions = COALESCE($9::text[], regions),
+         max_items = COALESCE($10::int, max_items),
          updated_at = now()
      WHERE user_id = $1
      RETURNING
        user_id,
        enabled,
+       email_enabled,
        scheduled_time::text AS scheduled_time,
        schedule_timezone,
+       industries,
+       company_symbols,
+       country_iso2s,
+       regions,
+       max_items,
        last_scheduled_for,
        last_triggered_at,
        last_job_id,
+       last_personal_job_id,
        created_at,
        updated_at`, [
         userId,
         typeof patch.enabled === "boolean" ? patch.enabled : null,
         patch.scheduled_time ?? null,
         patch.schedule_timezone ?? null,
+        typeof patch.email_enabled === "boolean" ? patch.email_enabled : null,
+        patch.industries ?? null,
+        patch.company_symbols ?? null,
+        patch.country_iso2s ?? null,
+        patch.regions ?? null,
+        patch.max_items ?? null,
     ]);
     if (!rows[0])
         throw scheduleError(500, "Failed to update daily briefing schedule.");

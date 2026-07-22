@@ -909,6 +909,16 @@ export default function ClaritasDashboard() {
     () => getScheduleTimezoneOptions(dailyBriefingScheduleDraft.timezone),
     [dailyBriefingScheduleDraft.timezone],
   );
+  const dailyBriefingEmailSubscriptionLabel =
+    isLoadingDailyBriefingSchedule || !dailyBriefingSchedule
+      ? "Checking subscription…"
+      : dailyBriefingScheduleDraft.email_enabled !== dailyBriefingSchedule.email_enabled
+        ? dailyBriefingScheduleDraft.email_enabled
+          ? "Save to subscribe"
+          : "Save to unsubscribe"
+        : dailyBriefingSchedule.email_enabled
+          ? "Subscribed"
+          : "Not subscribed";
 
   useEffect(() => {
     const el = document.documentElement;
@@ -3673,7 +3683,11 @@ export default function ClaritasDashboard() {
         regions: schedule.regions || [],
         max_items: schedule.max_items || 10,
       });
-      setDailyBriefingScheduleNotice("Personal briefing preferences saved.");
+      setDailyBriefingScheduleNotice(
+        schedule.email_enabled
+          ? "Subscribed to daily briefing emails. Preferences saved."
+          : "Not subscribed to daily briefing emails. Preferences saved.",
+      );
     } catch (err) {
       setDailyBriefingScheduleError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -8190,15 +8204,20 @@ export default function ClaritasDashboard() {
                                   />
                                   Email this briefing to me
                                 </label>
-                                <div className="text-xs text-[color:var(--shell-muted)]">
-                                  {dailyBriefingEmailStatus?.recipient || "No account email"} ·{" "}
-                                  {dailyBriefingEmailStatus?.recipient_verified
-                                    ? "verified"
-                                    : "not verified"}
-                                  {" · "}
-                                  {dailyBriefingEmailStatus?.configured
-                                    ? "SMTP ready"
-                                    : "SMTP setup required"}
+                                <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-[color:var(--shell-muted)]">
+                                  <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 font-semibold text-[color:var(--shell-ink)]">
+                                    {dailyBriefingEmailSubscriptionLabel}
+                                  </span>
+                                  <span>
+                                    {dailyBriefingEmailStatus?.recipient || "No account email"} ·{" "}
+                                    {dailyBriefingEmailStatus?.recipient_verified
+                                      ? "verified"
+                                      : "not verified"}
+                                    {" · "}
+                                    {dailyBriefingEmailStatus?.configured
+                                      ? "SMTP ready"
+                                      : "SMTP setup required"}
+                                  </span>
                                 </div>
                               </div>
                               {!dailyBriefingEmailStatus?.recipient_verified && dailyBriefingEmailStatus?.configured && (
