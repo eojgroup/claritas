@@ -266,3 +266,18 @@ export async function sendBriefingEmail(
   });
   return { message_id: typeof info.messageId === "string" ? info.messageId : null };
 }
+
+export async function sendEmailVerificationEmail(recipient: string, verificationUrl: string): Promise<void> {
+  const config = getEmailRuntimeConfig();
+  const url = safeWebUrl(verificationUrl);
+  if (!url) throw new Error("EMAIL_PUBLIC_BASE_URL must be a valid HTTP(S) URL before sending verification email.");
+  await getTransporter().sendMail({
+    from: config.from,
+    to: recipient,
+    replyTo: config.reply_to || undefined,
+    subject: "Verify your Claritas email address",
+    text: `Verify your Claritas email address by opening this link:\n\n${url}\n\nThis link expires in one hour. If you did not request it, you can ignore this email.`,
+    html: `<p>Verify your Claritas email address by opening this link:</p><p><a href="${escapeHtml(url)}">Verify email address</a></p><p>This link expires in one hour. If you did not request it, you can ignore this email.</p>`,
+    headers: { "X-Claritas-Message-Type": "email-verification" },
+  });
+}

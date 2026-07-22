@@ -593,6 +593,11 @@ export async function fetchDailyBriefingEmailStatus(): Promise<DailyBriefingEmai
   return data.email as DailyBriefingEmailStatus;
 }
 
+export async function requestEmailVerification(): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/email-verifications`, { method: "POST", credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to request email verification"));
+}
+
 export async function sendPersonalBriefingPreview(): Promise<PersonalBriefingJob> {
   const resp = await fetch(`${API_BASE}/api/briefings/daily/personal/preview`, {
     method: "POST",
