@@ -28,11 +28,6 @@ spec:
                 configMapKeyRef:
                   name: claritas-config
                   key: INSTANCE_CONNECTION_NAME
-          startupProbe:
-            tcpSocket:
-              port: 5432
-            periodSeconds: 1
-            failureThreshold: 30
           resources:
             requests: { cpu: "25m", memory: "32Mi" }
             limits: { cpu: "200m", memory: "128Mi" }
