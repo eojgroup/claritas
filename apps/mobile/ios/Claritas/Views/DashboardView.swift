@@ -79,6 +79,7 @@ struct DashboardView: View {
                     }
 
                     if section == .overview {
+                        briefingDashboardCard
                         overviewMetricsCard
                     }
 
@@ -239,6 +240,7 @@ struct DashboardView: View {
                                     countryStats: model.countryStats,
                                     weather: model.weather,
                                     marketQuotes: model.marketQuotes,
+                                    leadership: model.leadership,
                                     selectedCountry: model.selectedCountry,
                                     onSelectCountry: { iso in
                                         let normalized = iso.uppercased()
@@ -464,6 +466,71 @@ struct DashboardView: View {
         let dates = model.news.compactMap(\.eventDate).sorted()
         guard let start = dates.first, let end = dates.last else { return "No dated news" }
         return "\(start.formatted(date: .abbreviated, time: .omitted)) - \(end.formatted(date: .abbreviated, time: .omitted))"
+    }
+
+    private var briefingDashboardCard: some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 16) {
+                BrandSectionHeader(
+                    kicker: "Daily intelligence",
+                    title: "Today’s briefings",
+                    detail: "The global signal update and the version prepared for you and your newsletter."
+                )
+
+                briefingSummary(
+                    title: "Daily briefing",
+                    icon: "globe",
+                    briefing: model.dailyBriefing.map { ($0.title, $0.update_text, $0.key_takeaways, $0.briefing_date) },
+                    emptyMessage: "No global briefing has been published yet."
+                )
+
+                Divider()
+
+                briefingSummary(
+                    title: "Your personalised briefing",
+                    icon: "person.crop.circle.badge.checkmark",
+                    briefing: model.personalDailyBriefing.map { ($0.title, $0.update_text, $0.key_takeaways, $0.briefing_date) },
+                    emptyMessage: "Your personalised newsletter briefing will appear here after its first delivery."
+                )
+            }
+        }
+    }
+
+    private func briefingSummary(
+        title: String,
+        icon: String,
+        briefing: (title: String, text: String, takeaways: [String], date: String)?,
+        emptyMessage: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+            if let briefing {
+                Text(briefing.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                Text(briefing.text)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                ForEach(Array(briefing.takeaways.prefix(2).enumerated()), id: \.offset) { _, takeaway in
+                    Label(takeaway, systemImage: "circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                Text(briefing.date)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(emptyMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var overviewMetricsCard: some View {

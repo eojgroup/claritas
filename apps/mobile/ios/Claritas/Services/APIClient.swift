@@ -213,6 +213,11 @@ final class APIClient {
         return try await request(req, as: DailySignalBriefingResponse.self).briefing
     }
 
+    func fetchLatestPersonalDailyBriefing() async throws -> PersonalDailyBriefing? {
+        let req = URLRequest(url: baseURL.appendingPathComponent("/api/briefings/daily/personal/latest"))
+        return try await request(req, as: PersonalDailyBriefingResponse.self).briefing
+    }
+
     func fetchDailyBriefingSchedule() async throws -> DailyBriefingSchedule {
         let req = URLRequest(url: baseURL.appendingPathComponent("/api/auth/me/briefings/daily/schedule"))
         return try await request(req, as: DailyBriefingSchedule.self, rootKey: "schedule")
@@ -686,4 +691,8 @@ struct WeatherIngestResponse: Decodable {
     let last_http_status: Int?
     let last_http_error: String?
     let last_db_error: String?
+}
+
+private struct PersonalDailyBriefingResponse: Decodable {
+    let briefing: PersonalDailyBriefing?
 }

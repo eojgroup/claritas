@@ -206,7 +206,30 @@ private struct WatchBriefingView: View {
                                     .font(.caption2)
                             }
                         }
+                    }
+
+                    if let briefing = model.personalBriefing {
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 5) {
+                                WatchSectionLabel(title: "Your briefing", icon: "person.crop.circle")
+                                Text(briefing.title)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(2)
+                                Text(briefing.update_text)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
+                        }
                     } else {
+                        WatchCard {
+                            Text("Your newsletter briefing will appear here after delivery.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if model.briefing == nil {
                         WatchCard {
                             Text("No published briefing yet.")
                                 .font(.caption)
