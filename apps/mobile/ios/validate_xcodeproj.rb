@@ -1,11 +1,11 @@
 #!/usr/bin/env ruby
 
+require "json"
 require "xcodeproj"
 
 ROOT = File.expand_path(__dir__)
 PROJECT_PATH = File.join(ROOT, "Claritas", "Claritas.xcodeproj")
 PROJECT_DIR = File.dirname(PROJECT_PATH)
-BUNDLE_ANCHOR = "$(CLARITAS_BUNDLE_IDENTIFIER)"
 
 errors = []
 check = lambda do |condition, message|
@@ -20,38 +20,38 @@ specifications = {
   "Claritas" => {
     product_type: "com.apple.product-type.application",
     sdk: "iphoneos",
-    bundle_id: BUNDLE_ANCHOR,
+    bundle_suffix: nil,
     plist: File.join(ROOT, "Claritas", "Info.plist"),
     package_type: "APPL"
   },
   "Claritas Widgets" => {
     product_type: "com.apple.product-type.app-extension",
     sdk: "iphoneos",
-    bundle_id: "#{BUNDLE_ANCHOR}.widgets",
+    bundle_suffix: "widgets",
     plist: File.join(ROOT, "ClaritasWidgets", "Info.plist"),
     package_type: "XPC!"
   },
   "Claritas Watch App" => {
     product_type: "com.apple.product-type.application",
     sdk: "watchos",
-    bundle_id: "#{BUNDLE_ANCHOR}.watchkitapp",
+    bundle_suffix: "watchkitapp",
     plist: File.join(ROOT, "ClaritasWatch", "Info.plist"),
     package_type: "APPL"
   },
   "Claritas Watch Widgets" => {
     product_type: "com.apple.product-type.app-extension",
     sdk: "watchos",
-    bundle_id: "#{BUNDLE_ANCHOR}.watchkitapp.widgets",
+    bundle_suffix: "watchkitapp.widgets",
     plist: File.join(ROOT, "ClaritasWatchWidgets", "Info.plist"),
     package_type: "XPC!"
   }
 }
 
 app_group_specifications = {
-  "Claritas" => ["CLARITAS_WIDGET_APP_GROUP", "group.#{BUNDLE_ANCHOR}"],
-  "Claritas Widgets" => ["CLARITAS_WIDGET_APP_GROUP", "group.#{BUNDLE_ANCHOR}"],
-  "Claritas Watch App" => ["CLARITAS_WATCH_WIDGET_APP_GROUP", "group.#{BUNDLE_ANCHOR}.watch"],
-  "Claritas Watch Widgets" => ["CLARITAS_WATCH_WIDGET_APP_GROUP", "group.#{BUNDLE_ANCHOR}.watch"]
+  "Claritas" => ["CLARITAS_WIDGET_APP_GROUP", nil],
+  "Claritas Widgets" => ["CLARITAS_WIDGET_APP_GROUP", nil],
+  "Claritas Watch App" => ["CLARITAS_WATCH_WIDGET_APP_GROUP", "watch"],
+  "Claritas Watch Widgets" => ["CLARITAS_WATCH_WIDGET_APP_GROUP", "watch"]
 }
 
 project_bundle_ids = project.build_configurations.map do |configuration|
@@ -95,14 +95,21 @@ specifications.each do |target_name, specification|
   target.build_configurations.each do |configuration|
     settings = configuration.build_settings
     prefix = "#{target_name} #{configuration.name}"
+    expected_bundle_id = [resolved_bundle_anchor, specification[:bundle_suffix]].compact.join(".")
     check.call(settings["SDKROOT"] == specification[:sdk], "#{prefix} has the wrong SDK")
-    check.call(settings["PRODUCT_BUNDLE_IDENTIFIER"] == specification[:bundle_id], "#{prefix} has the wrong bundle identifier")
-    app_group_setting, expected_app_group = app_group_specifications.fetch(target_name)
+    check.call(settings["PRODUCT_BUNDLE_IDENTIFIER"] == expected_bundle_id, "#{prefix} has the wrong bundle identifier")
+    check.call(
+      !settings["PRODUCT_BUNDLE_IDENTIFIER"].to_s.include?("$("),
+      "#{prefix} PRODUCT_BUNDLE_IDENTIFIER must be concrete"
+    )
+    app_group_setting, app_group_suffix = app_group_specifications.fetch(target_name)
+    expected_app_group = ["group.#{resolved_bundle_anchor}", app_group_suffix].compact.join(".")
     check.call(settings[app_group_setting] == expected_app_group, "#{prefix} has the wrong App Group")
+    check.call(!settings[app_group_setting].to_s.include?("$("), "#{prefix} App Group must be concrete")
     check.call(settings["CODE_SIGN_STYLE"] == "Automatic", "#{prefix} must use automatic signing")
     check.call(!settings["DEVELOPMENT_TEAM"].to_s.empty?, "#{prefix} must define a development team")
 
-    resolved_product_identifier = settings["PRODUCT_BUNDLE_IDENTIFIER"].to_s.sub(BUNDLE_ANCHOR, resolved_bundle_anchor)
+    resolved_product_identifier = settings["PRODUCT_BUNDLE_IDENTIFIER"].to_s
     check.call(
       resolved_product_identifier.match?(/\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/),
       "#{prefix} resolves to an invalid bundle identifier"
@@ -157,8 +164,10 @@ embedding_pairs.each do |parent_name, child_name, destination|
     "#{parent_name} must embed #{child_name} in destination #{destination}"
   )
 
-  parent_id = specifications.fetch(parent_name).fetch(:bundle_id)
-  child_id = specifications.fetch(child_name).fetch(:bundle_id)
+  parent_suffix = specifications.fetch(parent_name).fetch(:bundle_suffix)
+  child_suffix = specifications.fetch(child_name).fetch(:bundle_suffix)
+  parent_id = [resolved_bundle_anchor, parent_suffix].compact.join(".")
+  child_id = [resolved_bundle_anchor, child_suffix].compact.join(".")
   check.call(child_id.start_with?("#{parent_id}."), "#{child_name} bundle identifier must be prefixed by #{parent_name}")
 end
 
@@ -167,6 +176,19 @@ check.call(
   watch_plist["WKCompanionAppBundleIdentifier"] == "$(CLARITAS_IOS_BUNDLE_IDENTIFIER)",
   "Watch app must identify its companion iOS app"
 )
+targets.fetch("Claritas Watch App").build_configurations.each do |configuration|
+  check.call(
+    configuration.build_settings["CLARITAS_IOS_BUNDLE_IDENTIFIER"] == resolved_bundle_anchor,
+    "Claritas Watch App #{configuration.name} companion identifier must be concrete"
+  )
+end
+
+accent_color_path = File.join(ROOT, "Claritas", "Assets.xcassets", "AccentColor.colorset", "Contents.json")
+check.call(File.file?(accent_color_path), "Claritas must define the configured AccentColor asset")
+if File.file?(accent_color_path)
+  accent_color = JSON.parse(File.read(accent_color_path))
+  check.call(!accent_color.fetch("colors", []).empty?, "Claritas AccentColor asset must contain a color")
+end
 
 if errors.any?
   warn errors.map { |error| "ERROR: #{error}" }.join("\n")

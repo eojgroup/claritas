@@ -16,16 +16,19 @@ bundle_id = ENV.fetch("BUNDLE_ID", "com.eojgroup.claritas")
 # Do not permit an independently configured watch identifier: doing so can
 # create an archive that installs locally but cannot be uploaded.
 watch_bundle_id = "#{bundle_id}.watchkitapp"
-bundle_identifier_setting = "$(CLARITAS_BUNDLE_IDENTIFIER)"
+# PRODUCT_BUNDLE_IDENTIFIER must be concrete in each target. Xcode does not
+# reliably expand a project-level custom setting when validating an embedded
+# Watch extension and sanitizes the unresolved token into a literal
+# __CLARITAS-BUNDLE-IDENTIFIER__ prefix.
 product_identifiers = {
-  ios: bundle_identifier_setting,
-  widget: "#{bundle_identifier_setting}.widgets",
-  watch: "#{bundle_identifier_setting}.watchkitapp",
-  watch_widget: "#{bundle_identifier_setting}.watchkitapp.widgets"
+  ios: bundle_id,
+  widget: "#{bundle_id}.widgets",
+  watch: watch_bundle_id,
+  watch_widget: "#{watch_bundle_id}.widgets"
 }.freeze
 app_group_identifiers = {
-  ios: "group.#{bundle_identifier_setting}",
-  watch: "group.#{bundle_identifier_setting}.watch"
+  ios: "group.#{bundle_id}",
+  watch: "group.#{bundle_id}.watch"
 }.freeze
 if ENV.key?("WATCH_BUNDLE_ID") && ENV.fetch("WATCH_BUNDLE_ID") != watch_bundle_id
   raise <<~MESSAGE

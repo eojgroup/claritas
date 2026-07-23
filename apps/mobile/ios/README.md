@@ -14,10 +14,10 @@ The project contains one App Store product with two Xcode targets:
 2. Set your signing team:
    - Select the `Claritas` target -> Signing & Capabilities -> Team -> choose your team.
    - Select `Claritas Watch App` and choose the same team.
-   - To change the bundle identifier, select the `Claritas` **project** (not an
-     individual target), then set `CLARITAS_BUNDLE_IDENTIFIER` for both Debug
-     and Release. This shared setting defaults to `com.eojgroup.claritas` and
-     derives the child identifiers for the Watch app and extensions.
+   - To change the bundle identifier, regenerate the project with
+     `BUNDLE_ID=com.yourorg.claritas ruby generate_xcodeproj.rb`. The generator
+     writes concrete identifiers for every target and derives the Watch app
+     and extension identifiers from that value.
 3. Configure the API base URL:
    - Edit `apps/mobile/ios/Claritas/Config.plist` -> `API_BASE_URL` to point to your backend (e.g. `https://your-host.com`).
    - Keep `apps/mobile/ios/ClaritasWatch/Config.plist` aligned for first launch. The iPhone app sends its active URL to the watch after pairing.
@@ -74,11 +74,10 @@ Apple requires every embedded watch app identifier to be prefixed by its iOS
 container app identifier.
 
 Do not paste `$(CLARITAS_BUNDLE_IDENTIFIER)` into a target's Bundle Identifier
-field in Signing & Capabilities. Xcode can treat that text as a new literal App
-ID and sanitize it to a value such as
+field in Signing & Capabilities. Xcode can leave the custom setting unresolved
+during embedded-binary validation and sanitize it to a value such as
 `--CLARITAS-BUNDLE-IDENTIFIER-.watchkitapp.widgets`. Change `BUNDLE_ID` through
-the generator (or the shared project-level setting) and keep the generated
-target expressions intact.
+the generator and keep the generated concrete target identifiers intact.
 
 Validate the checked-in project, both WidgetKit extension plists, embedding
 phases, automatic signing, and all parent-child bundle identifier relationships:
