@@ -9,14 +9,12 @@ private struct ClaritasWidgetEntry: TimelineEntry {
 private struct ClaritasWidgetSnapshot {
     let dailyTitle: String
     let dailyText: String
-    let personalTitle: String
-    let personalText: String
     let newsCount: Int
     let marketMove: Double
     let weatherCountry: String
     let weatherTemp: Double
 
-    static let placeholder = ClaritasWidgetSnapshot(dailyTitle: "Daily signal briefing", dailyText: "Concise global intelligence, ready for review.", personalTitle: "Your briefing", personalText: "A personal update is ready.", newsCount: 12, marketMove: 0.8, weatherCountry: "TN", weatherTemp: 28)
+    static let placeholder = ClaritasWidgetSnapshot(dailyTitle: "Geospatial signal pulse", dailyText: "Cross-source relevance is ready for review.", newsCount: 12, marketMove: 0.8, weatherCountry: "TN", weatherTemp: 28)
 }
 
 private struct ClaritasWidgetProvider: TimelineProvider {
@@ -33,8 +31,6 @@ private struct ClaritasWidgetProvider: TimelineProvider {
         return ClaritasWidgetSnapshot(
             dailyTitle: values["dailyTitle"] as? String ?? ClaritasWidgetSnapshot.placeholder.dailyTitle,
             dailyText: values["dailyText"] as? String ?? ClaritasWidgetSnapshot.placeholder.dailyText,
-            personalTitle: values["personalTitle"] as? String ?? ClaritasWidgetSnapshot.placeholder.personalTitle,
-            personalText: values["personalText"] as? String ?? ClaritasWidgetSnapshot.placeholder.personalText,
             newsCount: values["newsCount"] as? Int ?? 0,
             marketMove: values["marketMove"] as? Double ?? 0,
             weatherCountry: values["weatherCountry"] as? String ?? "—",
@@ -50,8 +46,8 @@ struct ClaritasBriefingWidget: Widget {
         StaticConfiguration(kind: kind, provider: ClaritasWidgetProvider()) { entry in
             ClaritasWidgetView(entry: entry)
         }
-        .configurationDisplayName("Claritas briefing")
-        .description("A concise view of today’s global and personal intelligence.")
+        .configurationDisplayName("Claritas signal pulse")
+        .description("A concise view of today’s global signal pulse.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -62,13 +58,13 @@ private struct ClaritasWidgetView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Label("CLARITAS", systemImage: "sparkles")
+            Label("CLARITAS", systemImage: "globe.europe.africa.fill")
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(.orange)
-            Text(family == .systemSmall ? entry.snapshot.dailyTitle : entry.snapshot.personalTitle)
+            Text(entry.snapshot.dailyTitle)
                 .font(.headline)
                 .lineLimit(2)
-            Text(family == .systemSmall ? entry.snapshot.dailyText : entry.snapshot.personalText)
+            Text(entry.snapshot.dailyText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(family == .systemLarge ? 5 : 3)

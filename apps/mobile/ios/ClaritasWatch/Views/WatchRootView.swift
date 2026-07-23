@@ -11,7 +11,6 @@ struct WatchRootView: View {
             } else {
                 TabView {
                     WatchSignalGlanceView()
-                    WatchBriefingView()
                     WatchNewsView()
                     WatchMarketsView()
                     WatchWeatherView()
@@ -28,13 +27,20 @@ struct WatchRootView: View {
 
 private struct WatchSignalGlanceView: View {
     @EnvironmentObject private var model: WatchAppModel
+    @State private var layer: WatchMapLayer = .signals
+    @State private var region: WatchMapRegion = .global
+    @State private var selectedCountry: String?
 
-    private var topMover: MarketQuote? {
-        model.markets.max { abs($0.percent_change ?? 0) < abs($1.percent_change ?? 0) }
-    }
-
-    private var topWeather: CountryWeather? {
-        model.weatherAlerts.first ?? model.weather.first
+    private var points: [WatchMapPoint] {
+        WatchMapData.points(
+            layer: layer,
+            region: region,
+            news: model.news,
+            podcasts: model.podcasts,
+            weather: model.weather,
+            markets: model.markets,
+            leadership: model.leadership
+        )
     }
 
     var body: some View {
@@ -42,89 +48,107 @@ private struct WatchSignalGlanceView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        WatchSectionLabel(title: "Signal glance", icon: "waveform.path.ecg")
+                        WatchSectionLabel(title: "Geospatial pulse", icon: "globe.europe.africa.fill")
                         Spacer()
                         WatchRefreshStatus()
                     }
 
-                    WatchCard {
-                        HStack(alignment: .firstTextBaseline) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(model.criticalSignalCount)")
-                                    .font(.title.weight(.semibold))
-                                    .monospacedDigit()
-                                    .foregroundStyle(
-                                        model.criticalSignalCount > 0
-                                            ? WatchPalette.orange
-                                            : WatchPalette.sage
-                                    )
-                                Text("Threshold signals")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(
-                                systemName: model.criticalSignalCount > 0
-                                    ? "exclamationmark.triangle.fill"
-                                    : "checkmark.circle.fill"
-                            )
-                            .foregroundStyle(
-                                model.criticalSignalCount > 0
-                                    ? WatchPalette.orange
-                                    : WatchPalette.sage
-                            )
-                        }
-                    }
-
-                    if let mover = topMover {
-                        WatchCard {
-                            VStack(alignment: .leading, spacing: 3) {
-                                WatchSectionLabel(title: "Top market move", icon: "chart.line.uptrend.xyaxis")
-                                HStack {
-                                    Text(mover.symbol)
-                                        .font(.headline)
-                                    Spacer()
-                                    Text(mover.percent_change.map { String(format: "%+.2f%%", $0) } ?? "—")
-                                        .font(.headline.monospacedDigit())
-                                        .foregroundStyle((mover.percent_change ?? 0) >= 0 ? WatchPalette.sage : WatchPalette.negative)
+                    HStack(spacing: 6) {
+                        Menu {
+                            ForEach(WatchMapLayer.allCases) { item in
+                                Button {
+                                    layer = item
+                                    selectedCountry = nil
+                                } label: {
+                                    if layer == item {
+                                        Label(item.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(item.label)
+                                    }
                                 }
                             }
+                        } label: {
+                            Label(layer.label, systemImage: "square.3.layers.3d")
+                                .font(.caption2.weight(.semibold))
+                        }
+
+                        Menu {
+                            ForEach(WatchMapRegion.allCases) { item in
+                                Button {
+                                    region = item
+                                    selectedCountry = nil
+                                } label: {
+                                    if region == item {
+                                        Label(item.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(item.label)
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label(region.label, systemImage: "scope")
+                                .font(.caption2.weight(.semibold))
                         }
                     }
+                    .buttonStyle(.bordered)
 
-                    if let weather = topWeather {
+                    WatchSignalMap(
+                        points: points,
+                        region: region,
+                        selectedCountry: $selectedCountry
+                    )
+                    .frame(height: 118)
+
+                    if let selected = points.first(where: { $0.iso == selectedCountry }) ?? points.first {
                         WatchCard {
-                            VStack(alignment: .leading, spacing: 3) {
-                                WatchSectionLabel(title: "Weather scope", icon: "cloud.sun.fill")
+                            VStack(alignment: .leading, spacing: 4) {
                                 HStack {
-                                    Text(weather.country.uppercased())
+                                    Text(selectedCountry == nil ? "HIGHEST RELEVANCE" : "SELECTED")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .tracking(1)
+                                        .foregroundStyle(WatchPalette.orange)
+                                    Spacer()
+                                    Text("#\(selected.rank)")
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(selected.iso)
                                         .font(.headline)
                                     Spacer()
-                                    Text(weather.temp_c.map { String(format: "%.0f°", $0) } ?? "—")
+                                    Text(selected.valueLabel)
                                         .font(.headline.monospacedDigit())
+                                        .foregroundStyle(WatchPalette.orange)
                                 }
-                                Text(weather.weather_desc ?? weather.weather_main ?? "Current conditions")
+                                Text(selected.detail)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-
-                    if let story = model.news.first {
-                        WatchCard {
-                            VStack(alignment: .leading, spacing: 3) {
-                                WatchSectionLabel(title: "Latest headline", icon: "newspaper")
-                                Text(story.title ?? "Untitled")
-                                    .font(.caption.weight(.semibold))
                                     .lineLimit(2)
                             }
                         }
                     }
 
+                    WatchCard {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Text("\(points.count) mapped")
+                                Spacer()
+                                Text("\(model.criticalSignalCount) thresholds")
+                            }
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            Text("News 40% · podcast 25% · weather 15% · markets 15%")
+                                .font(.system(size: 8))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     HStack {
                         Button {
-                            model.openOnPhone("dashboard")
+                            model.openOnPhone(
+                                "dashboard",
+                                country: selectedCountry ?? points.first?.iso
+                            )
                         } label: {
                             Label("iPhone", systemImage: "iphone")
                         }
@@ -135,6 +159,14 @@ private struct WatchSignalGlanceView: View {
                             Image(systemName: "arrow.clockwise")
                         }
                         .accessibilityLabel("Refresh signals")
+
+                        Button {
+                            selectedCountry = nil
+                            region = .global
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                        }
+                        .accessibilityLabel("Reset map")
                     }
                     .buttonStyle(.bordered)
                 }
@@ -144,6 +176,400 @@ private struct WatchSignalGlanceView: View {
             .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
     }
+}
+
+private enum WatchMapLayer: String, CaseIterable, Identifiable {
+    case signals
+    case news
+    case weather
+    case leadership
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .signals: return "Signals"
+        case .news: return "News"
+        case .weather: return "Weather"
+        case .leadership: return "Leaders"
+        }
+    }
+}
+
+private enum WatchMapRegion: String, CaseIterable, Identifiable {
+    case global
+    case americas
+    case europe
+    case africa
+    case asia
+    case apac
+    case oceania
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .global: return "Global"
+        case .americas: return "Americas"
+        case .europe: return "Europe"
+        case .africa: return "Africa"
+        case .asia: return "Asia"
+        case .apac: return "APAC"
+        case .oceania: return "Oceania"
+        }
+    }
+
+    var bounds: (minLon: Double, maxLon: Double, minLat: Double, maxLat: Double) {
+        switch self {
+        case .global: return (-180, 180, -60, 82)
+        case .americas: return (-170, -30, -58, 75)
+        case .europe: return (-25, 50, 32, 72)
+        case .africa: return (-22, 58, -38, 40)
+        case .asia: return (35, 180, -12, 80)
+        case .apac: return (65, 180, -52, 60)
+        case .oceania: return (105, 180, -52, 8)
+        }
+    }
+
+    func contains(longitude: Double, latitude: Double) -> Bool {
+        let b = bounds
+        return longitude >= b.minLon && longitude <= b.maxLon &&
+            latitude >= b.minLat && latitude <= b.maxLat
+    }
+}
+
+private struct WatchMapPoint: Identifiable {
+    let iso: String
+    let valueLabel: String
+    let detail: String
+    let magnitude: Double
+    let longitude: Double
+    let latitude: Double
+    let rank: Int
+    var id: String { iso }
+}
+
+private enum WatchMapData {
+    static func points(
+        layer: WatchMapLayer,
+        region: WatchMapRegion,
+        news: [NewsItem],
+        podcasts: [PodcastEpisode],
+        weather: [CountryWeather],
+        markets: [MarketQuote],
+        leadership: [CountryLeadership]
+    ) -> [WatchMapPoint] {
+        var values: [(iso: String, label: String, detail: String, magnitude: Double)] = []
+        let newsCounts = Dictionary(grouping: news.compactMap { item in
+            item.country_iso2?.uppercased()
+        }, by: { $0 }).mapValues(\.count)
+
+        switch layer {
+        case .news:
+            values = newsCounts.map { iso, count in
+                (iso, "\(count)", "\(count) mapped \(count == 1 ? "story" : "stories")", Double(count))
+            }
+        case .weather:
+            values = weather.map { row in
+                let severity = max(abs((row.temp_c ?? 20) - 20), 1)
+                return (
+                    row.country.uppercased(),
+                    row.temp_c.map { String(format: "%.0f°", $0) } ?? "—",
+                    row.weather_main ?? "Current conditions",
+                    severity
+                )
+            }
+        case .leadership:
+            values = leadership.map { row in
+                (
+                    row.country.uppercased(),
+                    "\(max(row.roles.count, 1))",
+                    row.roles.first?.person_name ?? "Leadership record",
+                    Double(max(row.roles.count, 1))
+                )
+            }
+        case .signals:
+            var weatherByCountry: [String: CountryWeather] = [:]
+            for row in weather {
+                let iso = row.country.uppercased()
+                if let current = weatherByCountry[iso],
+                   (current.observedDate ?? .distantPast) >= (row.observedDate ?? .distantPast) {
+                    continue
+                }
+                weatherByCountry[iso] = row
+            }
+            var marketByCountry: [String: MarketQuote] = [:]
+            for quote in markets {
+                guard let iso = quote.country?.uppercased() else { continue }
+                let current = marketByCountry[iso]
+                if current == nil ||
+                    abs(quote.percent_change ?? quote.change ?? 0) >
+                    abs(current?.percent_change ?? current?.change ?? 0) {
+                    marketByCountry[iso] = quote
+                }
+            }
+            var podcastCounts: [String: Int] = [:]
+            for episode in podcasts {
+                for signal in episode.signals {
+                    for iso in signal.countries where iso.count == 2 {
+                        podcastCounts[iso.uppercased(), default: 0] += 1
+                    }
+                }
+            }
+            let countries = Set(newsCounts.keys)
+                .union(weatherByCountry.keys)
+                .union(marketByCountry.keys)
+                .union(podcastCounts.keys)
+            let maxNews = Double(max(newsCounts.values.max() ?? 1, 1))
+            let maxMarket = max(
+                marketByCountry.values.map { abs($0.percent_change ?? $0.change ?? 0) }.max() ?? 1,
+                1
+            )
+
+            values = countries.map { iso in
+                let count = newsCounts[iso] ?? 0
+                let newsScore = count > 0 ? log1p(Double(count)) / log1p(maxNews) : 0
+                let weatherRow = weatherByCountry[iso]
+                let weatherScore = weatherRow?.temp_c.map {
+                    min(1, max(0, (abs($0 - 20) - 8) / 24))
+                } ?? 0
+                let market = marketByCountry[iso]
+                let marketScore = market == nil
+                    ? 0
+                    : abs(market?.percent_change ?? market?.change ?? 0) / maxMarket
+                let podcastCount = podcastCounts[iso] ?? 0
+                let podcastScore = min(1, Double(podcastCount) / 4)
+                let domainCount = [count > 0, weatherScore > 0, market != nil, podcastCount > 0]
+                    .filter { $0 }.count
+                let relevance = min(
+                    100,
+                    round(
+                        newsScore * 40 +
+                        podcastScore * 25 +
+                        weatherScore * 15 +
+                        marketScore * 15 +
+                        Double(max(0, domainCount - 1) * 2)
+                    )
+                )
+                return (
+                    iso,
+                    "\(Int(relevance))/100",
+                    "\(domainCount) linked \(domainCount == 1 ? "domain" : "domains")",
+                    relevance
+                )
+            }
+        }
+
+        return values.compactMap { item -> WatchMapPoint? in
+            guard item.magnitude > 0,
+                  let coordinate = WatchCountryCentroids.values[item.iso],
+                  region.contains(longitude: coordinate.longitude, latitude: coordinate.latitude) else {
+                return nil
+            }
+            return WatchMapPoint(
+                iso: item.iso,
+                valueLabel: item.label,
+                detail: item.detail,
+                magnitude: item.magnitude,
+                longitude: coordinate.longitude,
+                latitude: coordinate.latitude,
+                rank: 0
+            )
+        }
+        .sorted { $0.magnitude > $1.magnitude }
+        .enumerated()
+        .map { index, item in
+            WatchMapPoint(
+                iso: item.iso,
+                valueLabel: item.valueLabel,
+                detail: item.detail,
+                magnitude: item.magnitude,
+                longitude: item.longitude,
+                latitude: item.latitude,
+                rank: index + 1
+            )
+        }
+    }
+}
+
+private struct WatchSignalMap: View {
+    let points: [WatchMapPoint]
+    let region: WatchMapRegion
+    @Binding var selectedCountry: String?
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.black.opacity(0.34))
+
+                Canvas { context, size in
+                    for polygon in WatchWorldGeometry.land {
+                        let visiblePolygon = clipped(polygon)
+                        guard visiblePolygon.count >= 3 else { continue }
+                        var path = Path()
+                        for (index, coordinate) in visiblePolygon.enumerated() {
+                            let point = project(
+                                longitude: coordinate.0,
+                                latitude: coordinate.1,
+                                size: size
+                            )
+                            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+                        }
+                        path.closeSubpath()
+                        context.fill(path, with: .color(WatchPalette.sage.opacity(0.42)))
+                        context.stroke(path, with: .color(WatchPalette.sage.opacity(0.7)), lineWidth: 0.45)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                ForEach(points.prefix(12)) { point in
+                    Button {
+                        selectedCountry = selectedCountry == point.iso ? nil : point.iso
+                    } label: {
+                        let selected = selectedCountry == point.iso
+                        ZStack {
+                            Circle()
+                                .fill(WatchPalette.orange.opacity(0.28))
+                                .frame(width: bubbleSize(point) + 6, height: bubbleSize(point) + 6)
+                            Circle()
+                                .fill(WatchPalette.orange)
+                                .overlay(
+                                    Circle().stroke(Color.white, lineWidth: selected ? 2 : 0.8)
+                                )
+                                .frame(width: bubbleSize(point), height: bubbleSize(point))
+                        }
+                        .frame(width: 28, height: 28)
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .position(
+                        project(
+                            longitude: point.longitude,
+                            latitude: point.latitude,
+                            size: proxy.size
+                        )
+                    )
+                    .accessibilityLabel("\(point.iso), rank \(point.rank), \(point.detail)")
+                }
+            }
+        }
+    }
+
+    private func project(longitude: Double, latitude: Double, size: CGSize) -> CGPoint {
+        let bounds = region.bounds
+        let x = (longitude - bounds.minLon) / (bounds.maxLon - bounds.minLon)
+        let y = (bounds.maxLat - latitude) / (bounds.maxLat - bounds.minLat)
+        return CGPoint(
+            x: max(4, min(size.width - 4, x * size.width)),
+            y: max(4, min(size.height - 4, y * size.height))
+        )
+    }
+
+    private func bubbleSize(_ point: WatchMapPoint) -> CGFloat {
+        let maximum = max(points.map(\.magnitude).max() ?? 1, 1)
+        return 7 + CGFloat(sqrt(point.magnitude / maximum) * 8)
+    }
+
+    private func clipped(_ polygon: [(Double, Double)]) -> [(Double, Double)] {
+        let bounds = region.bounds
+        let minLon = CGFloat(bounds.minLon)
+        let maxLon = CGFloat(bounds.maxLon)
+        let minLat = CGFloat(bounds.minLat)
+        let maxLat = CGFloat(bounds.maxLat)
+        var points = polygon.map { CGPoint(x: CGFloat($0.0), y: CGFloat($0.1)) }
+        points = clip(
+            points,
+            inside: { $0.x >= minLon },
+            intersection: { start, end in
+                let ratio = (minLon - start.x) / (end.x - start.x)
+                return CGPoint(x: minLon, y: start.y + ratio * (end.y - start.y))
+            }
+        )
+        points = clip(
+            points,
+            inside: { $0.x <= maxLon },
+            intersection: { start, end in
+                let ratio = (maxLon - start.x) / (end.x - start.x)
+                return CGPoint(x: maxLon, y: start.y + ratio * (end.y - start.y))
+            }
+        )
+        points = clip(
+            points,
+            inside: { $0.y >= minLat },
+            intersection: { start, end in
+                let ratio = (minLat - start.y) / (end.y - start.y)
+                return CGPoint(x: start.x + ratio * (end.x - start.x), y: minLat)
+            }
+        )
+        points = clip(
+            points,
+            inside: { $0.y <= maxLat },
+            intersection: { start, end in
+                let ratio = (maxLat - start.y) / (end.y - start.y)
+                return CGPoint(x: start.x + ratio * (end.x - start.x), y: maxLat)
+            }
+        )
+        return points.map { (Double($0.x), Double($0.y)) }
+    }
+
+    private func clip(
+        _ input: [CGPoint],
+        inside: (CGPoint) -> Bool,
+        intersection: (CGPoint, CGPoint) -> CGPoint
+    ) -> [CGPoint] {
+        guard var start = input.last else { return [] }
+        var output: [CGPoint] = []
+        for end in input {
+            if inside(end) {
+                if !inside(start) { output.append(intersection(start, end)) }
+                output.append(end)
+            } else if inside(start) {
+                output.append(intersection(start, end))
+            }
+            start = end
+        }
+        return output
+    }
+}
+
+private enum WatchWorldGeometry {
+    static let land: [[(Double, Double)]] = [
+        [(-168, 70), (-145, 62), (-130, 52), (-124, 35), (-105, 22), (-82, 8), (-70, 18), (-52, 48), (-62, 68), (-100, 78), (-140, 74)],
+        [(-82, 10), (-68, 8), (-50, -5), (-38, -24), (-54, -55), (-73, -48), (-80, -12)],
+        [(-18, 36), (5, 58), (30, 70), (58, 62), (88, 74), (145, 68), (178, 52), (154, 28), (118, 4), (101, 18), (72, 20), (54, 8), (42, 30), (24, 34), (10, 42)],
+        [(-18, 35), (10, 37), (34, 30), (51, 12), (40, -35), (18, -35), (0, -18), (-12, 8)],
+        [(112, -12), (153, -10), (156, -38), (132, -45), (113, -32)],
+        [(166, -35), (179, -38), (174, -48), (166, -44)]
+    ]
+}
+
+private enum WatchCountryCentroids {
+    struct Coordinate {
+        let latitude: Double
+        let longitude: Double
+    }
+
+    static let values: [String: Coordinate] = [
+        "US": .init(latitude: 37.1, longitude: -95.7), "CA": .init(latitude: 56.1, longitude: -106.3),
+        "MX": .init(latitude: 23.6, longitude: -102.5), "BR": .init(latitude: -14.2, longitude: -51.9),
+        "AR": .init(latitude: -38.4, longitude: -63.6), "CL": .init(latitude: -35.7, longitude: -71.5),
+        "CO": .init(latitude: 4.6, longitude: -74.3), "PE": .init(latitude: -9.2, longitude: -75.0),
+        "GB": .init(latitude: 55.4, longitude: -3.4), "FR": .init(latitude: 46.2, longitude: 2.2),
+        "DE": .init(latitude: 51.2, longitude: 10.5), "ES": .init(latitude: 40.5, longitude: -3.7),
+        "IT": .init(latitude: 41.9, longitude: 12.6), "SE": .init(latitude: 60.1, longitude: 18.6),
+        "NO": .init(latitude: 60.5, longitude: 8.5), "PL": .init(latitude: 51.9, longitude: 19.1),
+        "UA": .init(latitude: 48.4, longitude: 31.2), "TR": .init(latitude: 39.0, longitude: 35.2),
+        "RU": .init(latitude: 61.5, longitude: 105.3), "EG": .init(latitude: 26.8, longitude: 30.8),
+        "NG": .init(latitude: 9.1, longitude: 8.7), "ZA": .init(latitude: -30.6, longitude: 22.9),
+        "KE": .init(latitude: 0.0, longitude: 37.9), "AE": .init(latitude: 23.4, longitude: 53.8),
+        "SA": .init(latitude: 23.9, longitude: 45.1), "IL": .init(latitude: 31.0, longitude: 34.9),
+        "IN": .init(latitude: 20.6, longitude: 79.0), "PK": .init(latitude: 30.4, longitude: 69.3),
+        "CN": .init(latitude: 35.9, longitude: 104.2), "JP": .init(latitude: 36.2, longitude: 138.3),
+        "KR": .init(latitude: 35.9, longitude: 127.8), "VN": .init(latitude: 14.1, longitude: 108.3),
+        "TH": .init(latitude: 15.9, longitude: 101.0), "MY": .init(latitude: 4.2, longitude: 102.0),
+        "SG": .init(latitude: 1.4, longitude: 103.8), "ID": .init(latitude: -0.8, longitude: 113.9),
+        "PH": .init(latitude: 12.9, longitude: 121.8), "AU": .init(latitude: -25.3, longitude: 133.8),
+        "NZ": .init(latitude: -40.9, longitude: 174.9)
+    ]
 }
 
 private struct WatchPairingView: View {
@@ -205,27 +631,6 @@ private struct WatchBriefingView: View {
                                 Text(takeaway)
                                     .font(.caption2)
                             }
-                        }
-                    }
-
-                    if let briefing = model.personalBriefing {
-                        WatchCard {
-                            VStack(alignment: .leading, spacing: 5) {
-                                WatchSectionLabel(title: "Your briefing", icon: "person.crop.circle")
-                                Text(briefing.title)
-                                    .font(.caption.weight(.semibold))
-                                    .lineLimit(2)
-                                Text(briefing.update_text)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(3)
-                            }
-                        }
-                    } else {
-                        WatchCard {
-                            Text("Your newsletter briefing will appear here after delivery.")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
                         }
                     }
 

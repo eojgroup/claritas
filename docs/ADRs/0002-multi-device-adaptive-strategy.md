@@ -18,13 +18,16 @@ Define device roles:
 | Mobile web/iPhone (`<768px` or compact size class) | Triage and drill-in workspace |
 | Apple Watch | Companion-only signal glance |
 
-Desktop keeps comparison, charts, maps, dense feeds, and full admin configuration. Its dashboard overview pairs the map with podcast and leadership context after the briefing synthesis. Tablet shows one major stage at a time and uses 44-point touch targets. Mobile prioritizes KPI subset, compact briefing, evidence/context rows, alerts, live rows, saved/current scope, and drill-in. Mobile web retains a reduced-control map preview; the native iPhone map remains behind intentional disclosure. Watch shows freshness, threshold count, top mover, affected weather, headline alerts, a short briefing, and phone handoff.
+Desktop keeps comparison, charts, maps, dense feeds, and full admin configuration. Its dashboard overview pairs the map with podcast and leadership context. Tablet uses the map as the dominant review stage, retains compare/pin, and uses 44-point touch targets. Mobile opens with the same Signals, News, Weather, and Leadership map contract using compact layer and region controls before KPI, alert, and feed drill-ins. Watch retains a simplified interactive version of that map contract—layers, regional scope, rank, highest relevance, selection, and reset—plus freshness and phone handoff.
 
-Maps, full charts, configuration-heavy forms, admin mutations, profile editing, policies, podcast evidence exploration, and leadership exploration are unavailable on watch.
+Full charts, comparison, configuration-heavy forms, admin mutations, profile editing, policies, and dense evidence exploration are unavailable on watch.
+
+Personal briefing content remains newsletter-only and is not presented by the iPhone, iPad, watch, or their widgets. Daily briefing generation and scheduling may remain as backend/newsletter capabilities, but briefing cards are not part of the primary native app hierarchy.
 
 ## Consequences
 
 - Components adapt by device role, not only by available width.
+- The map interaction contract is shared while visual density and simultaneous controls adapt by device.
 - Some content is intentionally omitted rather than stacked.
 - Watch-to-phone navigation uses `WatchConnectivity`.
 - Device-specific reductions must be documented when a new screen is added.

@@ -5,7 +5,6 @@ struct RootView: View {
     enum Tab: Hashable {
         case overview
         case dashboard
-        case briefing
         case news
         case podcasts
         case weather
@@ -18,7 +17,6 @@ struct RootView: View {
             switch self {
             case .overview: return "Signal desk"
             case .dashboard: return "Dashboard"
-            case .briefing: return "Briefing"
             case .news: return "News"
             case .podcasts: return "Podcasts"
             case .weather: return "Weather"
@@ -33,7 +31,6 @@ struct RootView: View {
             switch self {
             case .overview: return "rectangle.3.group.fill"
             case .dashboard: return "square.grid.2x2"
-            case .briefing: return "sparkles"
             case .news: return "newspaper"
             case .podcasts: return "mic.fill"
             case .weather: return "cloud.sun"
@@ -87,12 +84,14 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             guard let destination = note.object as? String else { return }
+            if let country = note.userInfo?["country"] as? String, !country.isEmpty {
+                model.selectedCountry = country.uppercased()
+            }
             let next: Tab
             switch destination {
             case "news": next = .news
             case "weather": next = .weather
             case "markets": next = .markets
-            case "briefing": next = .briefing
             default: next = .dashboard
             }
             tab = next
@@ -103,17 +102,16 @@ struct RootView: View {
     private var compactShell: some View {
         TabView(selection: $tab) {
             compactTab(.dashboard)
-            compactTab(.briefing)
             compactTab(.news)
-            compactTab(.podcasts)
             compactTab(.weather)
             compactTab(.markets)
+            compactTab(.profile)
+            compactTab(.podcasts)
 
             if model.isAdmin {
                 compactTab(.admin)
             }
 
-            compactTab(.profile)
             compactTab(.policies)
         }
         .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
@@ -162,16 +160,14 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .dashboard, .briefing, .news, .podcasts, .weather, .markets, .admin, .profile, .policies]
-            : [.overview, .dashboard, .briefing, .news, .podcasts, .weather, .markets, .profile, .policies]
+            ? [.overview, .news, .podcasts, .weather, .markets, .admin, .profile, .policies]
+            : [.overview, .news, .podcasts, .weather, .markets, .profile, .policies]
     }
 
     private var sidebar: some View {
         List(selection: $sidebarSelection) {
             Section("Workspace") {
                 sidebarLink(.overview)
-                sidebarLink(.dashboard)
-                sidebarLink(.briefing)
             }
             Section("Signals") {
                 sidebarLink(.news)
@@ -237,8 +233,6 @@ struct RootView: View {
             PadOverviewView(destination: $sidebarSelection)
         case .dashboard:
             DashboardView()
-        case .briefing:
-            DailyBriefingWorkspaceView()
         case .news:
             NewsWorkspaceView()
         case .podcasts:

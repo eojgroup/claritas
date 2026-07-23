@@ -11,7 +11,6 @@ final class WatchAppModel: ObservableObject {
     }
 
     @Published private(set) var briefing: DailySignalBriefing?
-    @Published private(set) var personalBriefing: PersonalDailyBriefing?
     @Published private(set) var news: [NewsItem] = []
     @Published private(set) var podcasts: [PodcastEpisode] = []
     @Published private(set) var weather: [CountryWeather] = []
@@ -84,7 +83,6 @@ final class WatchAppModel: ObservableObject {
         api.setAuthToken(token)
 
         async let briefingResult = result { try await api.fetchLatestDailyBriefing() }
-        async let personalBriefingResult = result { try await api.fetchLatestPersonalDailyBriefing() }
         async let newsResult = result { try await api.fetchNews(limit: 12) }
         async let podcastResult = result { try await api.fetchPodcasts(limit: 8) }
         async let weatherResult = result { try await api.fetchCountryWeather() }
@@ -94,7 +92,6 @@ final class WatchAppModel: ObservableObject {
 
         let results = await (
             briefingResult,
-            personalBriefingResult,
             newsResult,
             podcastResult,
             weatherResult,
@@ -109,30 +106,26 @@ final class WatchAppModel: ObservableObject {
         case .failure(let error): errors.append(error)
         }
         switch results.1 {
-        case .success(let value): personalBriefing = value
-        case .failure(let error): errors.append(error)
-        }
-        switch results.2 {
         case .success(let value): news = Array(value.prefix(12))
         case .failure(let error): errors.append(error)
         }
-        switch results.3 {
+        switch results.2 {
         case .success(let value): podcasts = Array(value.prefix(8))
         case .failure(let error): errors.append(error)
         }
-        switch results.4 {
+        switch results.3 {
         case .success(let value): weather = Array(value.prefix(20))
         case .failure(let error): errors.append(error)
         }
-        switch results.5 {
+        switch results.4 {
         case .success(let value): leadership = value
         case .failure(let error): errors.append(error)
         }
-        switch results.6 {
+        switch results.5 {
         case .success(let value): markets = Array(value.prefix(20))
         case .failure(let error): errors.append(error)
         }
-        switch results.7 {
+        switch results.6 {
         case .success(let value):
             briefingSchedule = value
             briefingScheduleError = nil
@@ -148,8 +141,6 @@ final class WatchAppModel: ObservableObject {
             connectionState = .ready
             saveCache()
             WatchWidgetSnapshotStore.save(
-                briefing: briefing,
-                personalBriefing: personalBriefing,
                 newsCount: news.count,
                 marketDirection: marketDirection
             )
@@ -165,8 +156,8 @@ final class WatchAppModel: ObservableObject {
         connectivity.requestContext()
     }
 
-    func openOnPhone(_ destination: String) {
-        connectivity.openOnPhone(destination)
+    func openOnPhone(_ destination: String, country: String? = nil) {
+        connectivity.openOnPhone(destination, country: country)
     }
 
     func updateDailyBriefingSchedule(enabled: Bool, scheduledTime: String, timezone: String) async {
@@ -229,7 +220,6 @@ final class WatchAppModel: ObservableObject {
     private func saveCache() {
         let snapshot = WatchSnapshot(
             briefing: briefing,
-            personalBriefing: personalBriefing,
             news: news,
             podcasts: podcasts,
             weather: weather,
@@ -248,7 +238,6 @@ final class WatchAppModel: ObservableObject {
             return
         }
         briefing = snapshot.briefing
-        personalBriefing = snapshot.personalBriefing
         news = snapshot.news
         podcasts = snapshot.podcasts
         weather = snapshot.weather
@@ -261,7 +250,6 @@ final class WatchAppModel: ObservableObject {
 
 private struct WatchSnapshot: Codable {
     let briefing: DailySignalBriefing?
-    let personalBriefing: PersonalDailyBriefing?
     let news: [NewsItem]
     let podcasts: [PodcastEpisode]
     let weather: [CountryWeather]

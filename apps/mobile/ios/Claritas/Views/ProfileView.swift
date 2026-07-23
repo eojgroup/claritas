@@ -24,7 +24,7 @@ struct ProfileView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("THEME_DARK") private var dark: Bool = true
-    @AppStorage("DEFAULT_MAP_MODE") private var defaultMapMode: String = "news"
+    @AppStorage("DEFAULT_MAP_MODE") private var defaultMapMode: String = "signals"
     @AppStorage("DEFAULT_LIST_MODE") private var defaultListMode: String = "news"
     @State private var isSigningOut: Bool = false
     @State private var section: Section = .overview
@@ -303,9 +303,9 @@ struct ProfileView: View {
                     Text("Default map mode")
                         .font(.subheadline.weight(.semibold))
                     Picker("Default map mode", selection: $defaultMapMode) {
+                        Text("Signals").tag("signals")
                         Text("News").tag("news")
                         Text("Weather").tag("weather")
-                        Text("Markets").tag("market")
                         Text("Leaders").tag("leadership")
                     }
                     .pickerStyle(.segmented)

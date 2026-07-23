@@ -6,8 +6,8 @@ This document is the source of truth for the Claritas product interface across w
 
 Claritas is an **analytics-first operational workspace**. The interface helps an operator answer four questions in order:
 
-1. What changed?
-2. Where did it change?
+1. Where is relevance concentrated?
+2. What changed?
 3. Why does it matter?
 4. What needs attention?
 
@@ -19,15 +19,14 @@ The clients share one API and one selection model. A selected country or symbol 
 
 ```mermaid
 flowchart LR
-  API[Claritas API] --> Brief[Daily briefing synthesis]
+  API[Claritas API] --> Brief[Newsletter briefing synthesis]
   API --> News[News events]
   API --> Podcasts[Podcast evidence]
   API --> Weather[Weather conditions]
   API --> Markets[Market movement]
   API --> Leadership[Country leadership]
 
-  Brief --> Desk[Signal desk]
-  News --> Desk
+  News --> Desk[Signal desk]
   Podcasts --> Desk
   Weather --> Desk
   Markets --> Desk
@@ -43,7 +42,7 @@ Each domain has a distinct analytical responsibility:
 
 | Domain | Primary question | Primary representation |
 | --- | --- | --- |
-| Daily briefing | What is the cross-domain situation? | Compact synthesis with key takeaways and freshness |
+| Daily briefing | What is the cross-domain situation? | Newsletter synthesis; not a primary app workspace |
 | News | What events are occurring and how significant is coverage? | Dense story stream, timeline, source mix, country coverage |
 | Podcast intelligence | What claims, risks, and evidence support the signal? | Episode evidence, extracted signals, timestamps |
 | Weather | Which conditions exceed operating thresholds and where? | Threshold queue, observation feed, map, distribution charts |
@@ -67,7 +66,7 @@ flowchart LR
   Country --> Score[Cross-source relevance score]
   Score --> Map[Signal relevance map]
   Score --> Queue[Attention signal]
-  Evidence --> Brief[Daily briefing]
+  Evidence --> Brief[Newsletter briefing]
   Leader --> Brief
 ```
 
@@ -127,22 +126,25 @@ Watch is a fifth, companion-only archetype: compact signal cards with freshness,
 ### iPhone
 
 - `TabView` and `NavigationStack` preserve platform-native navigation.
-- The dashboard is triage-first. The map is an on-demand disclosure, not the first full-height surface.
+- The dashboard is map-first. Signals, News, Weather, and Leadership use the same layer and relevance contract as web.
+- Region scope, ranked bubbles, highest-relevance guidance, country selection, pinning, zoom/pan, and reset are touch-sized and visible without disclosure.
 - Full data-domain workspaces remain available as drill-ins.
 - Profile uses native settings controls and Policies uses a reading layout.
 
 ### iPad
 
 - `NavigationSplitView` groups Workspace, Signals, Operations, and Account.
-- The overview uses a deliberate two-column review layout: a dominant briefing or stream and a narrower focus/context column.
+- The overview uses the map as its dominant surface, with region scope, country selection, compare, pin, and cross-domain drill-in.
+- Metrics and streams follow the map; focus, markets, and weather occupy the narrower context column.
 - Touch targets remain at least 44 points. Controls use native menus, segmented controls, and toolbars.
 
 ### Apple Watch
 
-- The first page is a signal glance, not a briefing editor or mini-dashboard.
-- Secondary pages are Daily Briefing, headline alerts, movers/breaches, and affected weather scope.
-- Podcast evidence, leadership exploration, maps, charts, admin, profile editing, and policy reading are intentionally unavailable.
-- “Open on iPhone” sends a destination through `WatchConnectivity`; the iPhone opens the matching workspace.
+- The first page is a compact map-led signal glance, not a briefing editor or mini-dashboard.
+- The watch map preserves the same four layers, regional scope, ranking, highest-relevance explanation, country selection, and reset behavior in a glanceable form.
+- Secondary pages are headline alerts, movers/breaches, and affected weather scope.
+- Dense evidence, compare, admin, profile editing, and policy reading remain unavailable.
+- “Open on iPhone” sends the destination and selected/highest country through `WatchConnectivity`; the iPhone opens the matching workspace with that country focused.
 
 ## Visual System and Tokens
 
@@ -250,19 +252,19 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 | Class | Width | Workspace level | Adaptation |
 | --- | --- | --- | --- |
 | Desktop | `>= 1280px` | Full workspace | Persistent sidebar; overview briefing; map + evidence/leadership context; chart + insights rail; full compare/export |
-| Tablet web / iPad-like | `768–1279px` | Reduced workspace | One major stage at a time; briefing then map/context; full-width trend and insights; large touch controls; simplified simultaneous density |
-| Mobile web / iPhone-like | `< 768px` | Triage workspace | KPI subset; compact briefing; podcast/leadership context; reduced-control map preview; anomaly queue and live feed; bottom monitoring nav |
+| Tablet web / iPad-like | `768–1279px` | Reduced workspace | Map-led review; compare/pin and context; full-width trend and insights; large touch controls; simplified simultaneous density |
+| Mobile web / iPhone-like | `< 768px` | Triage workspace | Map-led orientation; touch-sized layer/region controls; KPI subset, anomaly queue, and live feed; bottom monitoring nav |
 | Narrow phone | `320–389px` | Triage workspace | Same content priority with shorter labels, horizontal filter/TOC scrolling, no wide charts/tables |
-| Apple Watch | watchOS layout system | Companion only | Signal glance, freshness, briefing excerpt, top mover, affected weather, headline alerts, phone handoff |
+| Apple Watch | watchOS layout system | Companion only | Compact layer map, ranked-country explanation, freshness, movers, affected weather, headline alerts, phone handoff |
 
 ### Content priority by device
 
 | Content | Desktop | Tablet | Mobile | Watch |
 | --- | --- | --- | --- | --- |
 | KPI summary | Full strip | 2-column strip | Top subset | One threshold count |
-| Daily briefing | Prominent overview synthesis | Primary review panel | Two-line/two-takeaway compact synthesis | Short excerpt |
+| Daily briefing | Newsletter/admin context only | Newsletter/admin context only | Newsletter settings only | Omitted |
 | Primary chart | Full, interactive | Full-width, touch-friendly | One useful chart without brush | Omitted |
-| Map bubbles | First-row spatial overview | Full-width staged panel | Compact reduced-control preview on mobile web; on-demand drill-in in the native app | Omitted |
+| Map bubbles | First-row spatial overview | Dominant full-width panel with compare/pin | Primary native overview with touch-sized controls | Compact interactive overview |
 | Podcast and leadership context | Two-lane evidence/context band beside the map | Full-width staged band | Compact actionable rows before the map preview | Omitted |
 | Dense feed/table | Side-by-side | Full-width stage | Compact rows | Top six only |
 | Compare/export | Full | Reduced | Drill-in only | Omitted |
@@ -275,13 +277,12 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 ### Dashboard
 
 - KPI strip establishes cross-domain posture.
-- Daily briefing is the first synthesis surface because it answers what changed and why it matters across domains.
-- The world map is the first visual analysis surface and remains visible without requiring a drilldown on web. Its default Signals layer ranks cross-source relevance; News, Weather, and Leadership remain inspectable raw layers.
+- The world map is the first synthesis and visual analysis surface on every app touchpoint. Its default Signals layer ranks cross-source relevance; News, Weather, and Leadership remain inspectable raw layers.
 - Signal relevance is explainable: news concentration contributes 40%, attributed podcast relevance 25%, weather anomaly 15%, market movement 15%, with a small cross-domain confirmation bonus and a 100-point cap. Leadership appears as decision-maker context but does not inflate urgency.
 - The highest-relevance country receives a distinct ring, a `#1` marker, and a persistent recommendation. Its tooltip and country profile list the contributing domains and sources.
 - The panel beside the desktop map shows podcast/leadership context until a country is selected, then becomes a cross-domain country profile. Clearing selection restores the global context band.
 - The live feed is the final full-width Dashboard stage. News defaults to shared priority rows with band/rank, time, geography, headline, and source; image and long summary appear only for the selected row.
-- The daily briefing exposes direct Podcast and Leadership evidence routes. Briefing generation version 2 supplies podcast country linkage and current leadership records to the synthesis prompt while preserving podcast attribution and uncertainty.
+- Newsletter briefing generation may still use podcast country linkage and current leadership records while preserving podcast attribution and uncertainty; personal briefing content is not rendered in the apps.
 - News volume analysis and the attention queue belong to the News analyst workspace. They are intentionally omitted from Dashboard so the overview ends after current cross-domain evidence rather than turning into a second News page.
 
 ### News
@@ -347,7 +348,7 @@ The API exposes process liveness separately from database-backed readiness. Kube
 
 ## Why Layouts Differ
 
-Analytics pages benefit from simultaneous comparison and therefore use dominant charts/maps plus supporting rails and feeds. Settings pages benefit from predictable grouping and short edit paths. Policy pages benefit from reading rhythm and stable references. Admin pages benefit from operational safeguards and separation between observation and mutation. Watch benefits from urgency, freshness, and handoff; reproducing maps, charts, forms, or document pages would reduce usefulness.
+Analytics pages benefit from simultaneous comparison and therefore use dominant charts/maps plus supporting rails and feeds. Settings pages benefit from predictable grouping and short edit paths. Policy pages benefit from reading rhythm and stable references. Admin pages benefit from operational safeguards and separation between observation and mutation. Watch keeps the map’s explanatory contract but reduces geometry, controls, and visible points to preserve glanceability.
 
 Shared tokens and component contracts create one product identity. Shared geometry is not required when the device role or task is different.
 
@@ -357,8 +358,8 @@ Shared tokens and component contracts create one product identity. Shared geomet
 | --- | --- | --- | --- |
 | Shell/navigation | `apps/web/src/App.tsx`, `index.css` | `RootView.swift` | `WatchRootView.swift` |
 | Tokens/surfaces | `index.css` | `BrandComponents.swift` | `WatchBrand.swift` |
-| Dashboard | `App.tsx` | `DashboardView.swift`, `PadOverviewView.swift` | `WatchSignalGlanceView`, `WatchBriefingView` |
-| Maps | `WorldMapBubbles.tsx` | `InteractiveCountryBubbleMap` | Intentionally unavailable |
+| Dashboard | `App.tsx` | `DashboardView.swift`, `PadOverviewView.swift` | `WatchSignalGlanceView` |
+| Maps | `WorldMapBubbles.tsx` | `SignalMapPanel`, `InteractiveCountryBubbleMap` | `WatchSignalMap` |
 | Admin | `AdminIngestionPanel.tsx`, `AdminUserManagementPanel.tsx` | `AdminWorkspaceView` | Intentionally unavailable |
 | Settings/documents | `App.tsx` | `ProfileView.swift`, `PoliciesWorkspaceView` | Phone handoff only |
 | Handoff | N/A | `WatchSyncCoordinator.swift` | `WatchConnectivityClient.swift` |
@@ -370,20 +371,20 @@ The previous UI relied on repeated rounded, bordered, glass-like cards with simi
 The current system:
 
 - flattens standard panels and reduces borders, shadows, and radius;
-- moves KPI, briefing synthesis, spatial orientation, and evidence context ahead of detailed trend/feed analysis;
+- moves spatial orientation, KPI context, and evidence ahead of detailed trend/feed analysis;
 - consolidates controls into consistent bars;
 - converts news, weather, market, and run history content into denser rows;
 - gives market symbols a real contextual drilldown;
 - gives weather explicit thresholds;
-- preserves the daily briefing, map bubbles, and useful charts with clearer roles, while promoting podcast evidence and leadership context into the dashboard overview;
+- keeps personal briefing content newsletter-only and removes briefing cards from app overview surfaces;
 - replaces separate Dashboard and News story treatments with one expandable priority-stream contract;
 - adds an explainable cross-source signal-relevance map, a visible highest-priority country, and driver-level country context;
 - simplifies map time interaction to a single aggregate coverage window and removes low-context playback;
 - carries podcast country provenance and leadership records into daily briefing generation, and prevents unresolved Wikidata entity IDs from appearing as names;
 - gives Admin, Profile, and Policies separate archetypes;
-- treats tablet as a staged two-column review workspace;
-- treats mobile as triage and drill-in;
-- treats watch as companion-only with phone handoff.
+- treats tablet as a map-led two-column review workspace;
+- treats mobile as map-led triage and drill-in;
+- treats watch as a map-led companion with phone handoff.
 
 Related decisions are recorded in:
 

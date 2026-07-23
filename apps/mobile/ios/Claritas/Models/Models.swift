@@ -142,6 +142,7 @@ struct PodcastSignal: Codable, Identifiable {
     let summary: String?
     let entities: [String]
     let topics: [String]
+    let countries: [String]
     let risk_level: String?
     let confidence: Double?
 
@@ -152,6 +153,7 @@ struct PodcastSignal: Codable, Identifiable {
         case summary
         case entities
         case topics
+        case countries
         case risk_level
         case confidence
     }
@@ -164,6 +166,7 @@ struct PodcastSignal: Codable, Identifiable {
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         entities = (try? container.decode([String].self, forKey: .entities)) ?? []
         topics = (try? container.decode([String].self, forKey: .topics)) ?? []
+        countries = (try? container.decode([String].self, forKey: .countries)) ?? []
         risk_level = try container.decodeIfPresent(String.self, forKey: .risk_level)
         if let value = try? container.decode(Double.self, forKey: .confidence) {
             confidence = value

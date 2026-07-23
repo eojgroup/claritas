@@ -11,7 +11,7 @@ private struct ClaritasWatchEntry: TimelineEntry {
 
 private struct ClaritasWatchProvider: TimelineProvider {
     func placeholder(in context: Context) -> ClaritasWatchEntry {
-        .init(date: .now, title: "Daily briefing", summary: "Signals ready", newsCount: 8, marketDirection: 0.4)
+        .init(date: .now, title: "Geospatial signal pulse", summary: "Signals ready", newsCount: 8, marketDirection: 0.4)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (ClaritasWatchEntry) -> Void) { completion(entry()) }
@@ -25,7 +25,7 @@ private struct ClaritasWatchProvider: TimelineProvider {
         let values = suiteName.flatMap(UserDefaults.init(suiteName:))?.dictionary(forKey: "claritas.watch.widget.snapshot") ?? [:]
         return .init(
             date: .now,
-            title: values["title"] as? String ?? "Daily briefing",
+            title: values["title"] as? String ?? "Geospatial signal pulse",
             summary: values["summary"] as? String ?? "Open Claritas for current signals.",
             newsCount: values["newsCount"] as? Int ?? 0,
             marketDirection: values["marketDirection"] as? Double ?? 0
@@ -37,7 +37,7 @@ struct ClaritasWatchWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "ClaritasWatchWidget", provider: ClaritasWatchProvider()) { entry in
             VStack(alignment: .leading, spacing: 3) {
-                Label("Briefing", systemImage: "sparkles")
+                Label("Signal map", systemImage: "globe.europe.africa.fill")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.orange)
                 Text(entry.title).font(.caption.weight(.semibold)).lineLimit(2)
@@ -47,8 +47,8 @@ struct ClaritasWatchWidget: Widget {
             }
             .background(Color(red: 0.04, green: 0.11, blue: 0.18))
         }
-        .configurationDisplayName("Claritas briefing")
-        .description("Today’s briefing and signal pulse.")
+        .configurationDisplayName("Claritas signal pulse")
+        .description("Today’s cross-source signal pulse.")
         .supportedFamilies([.accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }

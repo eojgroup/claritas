@@ -35,22 +35,20 @@ struct PadOverviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     commandHeader
-                    metrics
 
-                    HStack(alignment: .top, spacing: 16) {
-                        briefingPanel
-                            .frame(maxWidth: .infinity, alignment: .top)
-                        VStack(spacing: 16) {
-                            personalBriefingPanel
-                            focusPanel
-                        }
-                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
-                    }
+                    SignalMapPanel(
+                        height: 470,
+                        allowsComparison: true,
+                        showsCountryProfile: true
+                    )
+
+                    metrics
 
                     HStack(alignment: .top, spacing: 16) {
                         newsPanel
                             .frame(maxWidth: .infinity, alignment: .top)
                         VStack(spacing: 16) {
+                            focusPanel
                             marketPanel
                             weatherPanel
                         }
@@ -68,9 +66,9 @@ struct PadOverviewView: View {
                 Text("Tablet review workspace")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                Text("Operational signal review")
+                Text("Geospatial signal desk")
                     .font(.largeTitle.weight(.semibold))
-                Text("Two-stage review across briefing, news, podcast evidence, markets, weather, and country leadership.")
+                Text("The same cross-source map as web, with touch-first scope, selection, comparison, and drill-in.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -84,9 +82,9 @@ struct PadOverviewView: View {
                 .buttonStyle(.bordered)
 
                 Button {
-                    destination = .dashboard
+                    model.clearSelection()
                 } label: {
-                    Label("Open globe", systemImage: "globe.europe.africa")
+                    Label("Reset focus", systemImage: "arrow.counterclockwise")
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -105,69 +103,6 @@ struct PadOverviewView: View {
         }
     }
 
-    private var briefingPanel: some View {
-        BrandCard(title: "Daily briefing", icon: "sparkles") {
-            if let briefing = model.dailyBriefing {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(briefing.title)
-                        .font(.title2.weight(.semibold))
-                    Text(briefing.update_text)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                    Divider()
-                    ForEach(Array(briefing.key_takeaways.prefix(5).enumerated()), id: \.offset) { _, takeaway in
-                        HStack(alignment: .top, spacing: 8) {
-                            Circle()
-                                .fill(ClaritasPalette.shellAccent(for: colorScheme))
-                                .frame(width: 6, height: 6)
-                                .padding(.top, 6)
-                            Text(takeaway)
-                                .font(.subheadline)
-                        }
-                    }
-                    Text("Updated \(briefing.updatedDate?.formatted(date: .abbreviated, time: .shortened) ?? briefing.briefing_date)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.largeTitle)
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    Text("No published briefing")
-                        .font(.headline)
-                    Text("Publish a daily briefing from the admin workspace.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 180)
-            }
-        }
-    }
-
-    private var personalBriefingPanel: some View {
-        BrandCard(title: "Your newsletter briefing", icon: "person.crop.circle.badge.checkmark") {
-            if let briefing = model.personalDailyBriefing {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(briefing.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                    Text(briefing.update_text)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(4)
-                    Text("Delivered \(briefing.sentDate?.formatted(date: .abbreviated, time: .shortened) ?? briefing.briefing_date)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Text("Your personalised newsletter briefing will appear here after its first delivery.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
     private var focusPanel: some View {
         BrandCard(title: "Current focus", icon: "scope") {
             VStack(alignment: .leading, spacing: 12) {
@@ -175,9 +110,9 @@ struct PadOverviewView: View {
                 focusRow(label: "Market symbol", value: model.selectedSymbol ?? "All symbols")
                 Divider()
                 Button {
-                    destination = .dashboard
+                    destination = .news
                 } label: {
-                    Label("Explore cross-signals", systemImage: "arrow.up.right")
+                    Label("Open related news", systemImage: "arrow.up.right")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

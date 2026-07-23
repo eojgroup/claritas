@@ -22,10 +22,14 @@ final class WatchConnectivityClient: NSObject, WCSessionDelegate {
         })
     }
 
-    func openOnPhone(_ destination: String) {
+    func openOnPhone(_ destination: String, country: String? = nil) {
         guard WCSession.isSupported(), WCSession.default.isReachable else { return }
+        var message = ["openOnPhone": destination]
+        if let country, !country.isEmpty {
+            message["country"] = country.uppercased()
+        }
         WCSession.default.sendMessage(
-            ["openOnPhone": destination],
+            message,
             replyHandler: nil,
             errorHandler: nil
         )

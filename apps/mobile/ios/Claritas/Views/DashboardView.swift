@@ -5,18 +5,15 @@ import MapKit
 struct DashboardView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("DEFAULT_MAP_MODE") private var defaultMapModeRaw: String = "news"
     @AppStorage("DEFAULT_LIST_MODE") private var defaultListModeRaw: String = "news"
     @State private var query: String = ""
-    @State private var mapMode: ListMode = .news
     @State private var listMode: ListMode = .news
     @State private var section: DashboardSection = .overview
     @State private var minTemp: String = ""
     @State private var marketEarningsWindowDays: Int = 14
     @State private var hasAppliedStoredModes: Bool = false
-    @State private var showMap: Bool = false
 
-    enum ListMode: String, CaseIterable { case news, weather, market, leadership }
+    enum ListMode: String, CaseIterable { case news, weather, market }
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
 
     var body: some View {
@@ -79,7 +76,11 @@ struct DashboardView: View {
                     }
 
                     if section == .overview {
-                        briefingDashboardCard
+                        SignalMapPanel(
+                            height: 350,
+                            allowsComparison: true,
+                            showsCountryProfile: false
+                        )
                         overviewMetricsCard
                     }
 
@@ -88,70 +89,6 @@ struct DashboardView: View {
                     }
 
                     if section == .overview {
-                        DashboardCard {
-                            DisclosureGroup(isExpanded: $showMap) {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Picker("Map mode", selection: $mapMode) {
-                                        Text("News").tag(ListMode.news)
-                                        Text("Weather").tag(ListMode.weather)
-                                        Text("Markets").tag(ListMode.market)
-                                        Text("Leaders").tag(ListMode.leadership)
-                                    }
-                                    .pickerStyle(.segmented)
-                                    .onChange(of: mapMode) { newValue in
-                                        if newValue != .leadership {
-                                            listMode = newValue
-                                        }
-                                    }
-                                }
-
-                                ZStack {
-                                    InteractiveCountryBubbleMap(
-                                        mode: mapMode,
-                                        countryStats: model.countryStats,
-                                        weather: model.weather,
-                                        marketQuotes: model.marketQuotes,
-                                        leadership: model.leadership,
-                                        selectedCountry: model.selectedCountry,
-                                        onSelectCountry: { iso in
-                                            let normalized = iso.uppercased()
-                                            model.selectedCountry = (model.selectedCountry ?? "").uppercased() == normalized ? nil : normalized
-                                        }
-                                    )
-                                        .frame(height: 220)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .stroke(ClaritasPalette.beige, lineWidth: 1)
-                                        )
-
-                                    if mapMode == .weather && model.weather.isEmpty {
-                                        HStack(spacing: 8) {
-                                            Text("No weather stats yet.")
-                                                .font(.caption)
-                                            Button(action: { Task { await model.refreshWeatherNow() } }) {
-                                                Text(model.isRefreshingWeather ? "Refreshing…" : "Refresh now")
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .disabled(model.isRefreshingWeather)
-                                        }
-                                        .padding(10)
-                                        .background(.ultraThinMaterial, in: Capsule())
-                                    }
-                                }
-                                .padding(.top, 12)
-                            } label: {
-                                HStack {
-                                    Label("Geospatial view", systemImage: "globe.europe.africa")
-                                        .font(.subheadline.weight(.semibold))
-                                    Spacer()
-                                    Text(showMap ? mapTitle : "Open on demand")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-
                         DashboardCard {
                             VStack(spacing: 12) {
                                 HStack {
@@ -227,35 +164,6 @@ struct DashboardView: View {
                             )
                         }
                     } else {
-                        DashboardCard {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Market index map")
-                                    .font(.headline)
-                                Text("Relative index volatility by country")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-
-                                InteractiveCountryBubbleMap(
-                                    mode: .market,
-                                    countryStats: model.countryStats,
-                                    weather: model.weather,
-                                    marketQuotes: model.marketQuotes,
-                                    leadership: model.leadership,
-                                    selectedCountry: model.selectedCountry,
-                                    onSelectCountry: { iso in
-                                        let normalized = iso.uppercased()
-                                        model.selectedCountry = (model.selectedCountry ?? "").uppercased() == normalized ? nil : normalized
-                                    }
-                                )
-                                .frame(height: 220)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(ClaritasPalette.beige, lineWidth: 1)
-                                )
-                            }
-                        }
-
                         DashboardCard {
                             MarketStatusPanel(
                                 rows: marketStatusRows,
@@ -369,8 +277,7 @@ struct DashboardView: View {
         }
         .onAppear {
             guard !hasAppliedStoredModes else { return }
-            mapMode = ListMode(rawValue: defaultMapModeRaw) ?? .news
-            listMode = ListMode(rawValue: defaultListModeRaw) ?? mapMode
+            listMode = ListMode(rawValue: defaultListModeRaw) ?? .news
             hasAppliedStoredModes = true
         }
         .task {
@@ -466,71 +373,6 @@ struct DashboardView: View {
         let dates = model.news.compactMap(\.eventDate).sorted()
         guard let start = dates.first, let end = dates.last else { return "No dated news" }
         return "\(start.formatted(date: .abbreviated, time: .omitted)) - \(end.formatted(date: .abbreviated, time: .omitted))"
-    }
-
-    private var briefingDashboardCard: some View {
-        DashboardCard {
-            VStack(alignment: .leading, spacing: 16) {
-                BrandSectionHeader(
-                    kicker: "Daily intelligence",
-                    title: "Today’s briefings",
-                    detail: "The global signal update and the version prepared for you and your newsletter."
-                )
-
-                briefingSummary(
-                    title: "Daily briefing",
-                    icon: "globe",
-                    briefing: model.dailyBriefing.map { ($0.title, $0.update_text, $0.key_takeaways, $0.briefing_date) },
-                    emptyMessage: "No global briefing has been published yet."
-                )
-
-                Divider()
-
-                briefingSummary(
-                    title: "Your personalised briefing",
-                    icon: "person.crop.circle.badge.checkmark",
-                    briefing: model.personalDailyBriefing.map { ($0.title, $0.update_text, $0.key_takeaways, $0.briefing_date) },
-                    emptyMessage: "Your personalised newsletter briefing will appear here after its first delivery."
-                )
-            }
-        }
-    }
-
-    private func briefingSummary(
-        title: String,
-        icon: String,
-        briefing: (title: String, text: String, takeaways: [String], date: String)?,
-        emptyMessage: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-            if let briefing {
-                Text(briefing.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                Text(briefing.text)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                ForEach(Array(briefing.takeaways.prefix(2).enumerated()), id: \.offset) { _, takeaway in
-                    Label(takeaway, systemImage: "circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .symbolRenderingMode(.hierarchical)
-                }
-                Text(briefing.date)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(emptyMessage)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var overviewMetricsCard: some View {
@@ -750,18 +592,6 @@ struct DashboardView: View {
         colorScheme == .dark ? ClaritasPalette.beige.opacity(0.35) : ClaritasPalette.beige
     }
 
-    private var mapTitle: String {
-        switch mapMode {
-        case .news:
-            return "#News per country"
-        case .weather:
-            return "Weather per country"
-        case .market:
-            return "Index volatility by country"
-        case .leadership:
-            return "Current leadership by country"
-        }
-    }
 }
 
 private struct SearchPreviewItem: Identifiable {
@@ -2745,105 +2575,611 @@ struct PolicyDetailView: View {
     }
 }
 
-private struct InteractiveCountryBubbleMap: View {
-    let mode: DashboardView.ListMode
-    let countryStats: [CountryStat]
-    let weather: [CountryWeather]
-    let marketQuotes: [MarketQuote]
-    let leadership: [CountryLeadership]
-    let selectedCountry: String?
-    let onSelectCountry: (String) -> Void
+enum SignalMapMode: String, CaseIterable, Identifiable {
+    case signals
+    case news
+    case weather
+    case leadership
 
-    @State private var region = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 15, longitude: 10),
-        span: MKCoordinateSpan(latitudeDelta: 140, longitudeDelta: 260)
-    )
+    var id: String { rawValue }
 
-    private var points: [CountryBubblePoint] {
-        switch mode {
-        case .news:
-            var mapped: [CountryBubblePoint] = []
-            for stat in countryStats {
-                let iso = stat.country.uppercased()
-                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { continue }
-                mapped.append(
-                    CountryBubblePoint(
-                        id: "news-\(iso)",
-                        iso: iso,
-                        valueLabel: "\(stat.count)",
-                        detail: "\(stat.count) news",
-                        magnitude: max(Double(stat.count), 1),
-                        coordinate: coordinate
-                    )
-                )
-            }
-            return mapped.sorted { $0.magnitude > $1.magnitude }
-
-        case .weather:
-            var mapped: [CountryBubblePoint] = []
-            for row in weather {
-                let iso = row.country.uppercased()
-                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { continue }
-                let label = row.temp_c.map { String(format: "%.0f°", $0) } ?? "—"
-                let detail = row.weather_main ?? "Weather"
-                mapped.append(
-                    CountryBubblePoint(
-                        id: "weather-\(iso)",
-                        iso: iso,
-                        valueLabel: label,
-                        detail: detail,
-                        magnitude: max(abs(row.temp_c ?? 0), 1),
-                        coordinate: coordinate
-                    )
-                )
-            }
-            return mapped.sorted { $0.magnitude > $1.magnitude }
-        case .market:
-            var grouped: [String: [MarketQuote]] = [:]
-            for quote in marketQuotes {
-                guard let country = quote.country?.uppercased(), !country.isEmpty else { continue }
-                grouped[country, default: []].append(quote)
-            }
-            var mapped: [CountryBubblePoint] = []
-            for (country, quotes) in grouped {
-                guard let coordinate = CountryCentroidLookup.coordinate(for: country) else { continue }
-                let changes = quotes.compactMap { $0.percent_change }
-                let avgChange = changes.isEmpty ? 0 : changes.reduce(0, +) / Double(changes.count)
-                let marketCodes = quotes
-                    .compactMap { marketQuoteMetadata($0).marketCode }
-                    .filter { !$0.isEmpty }
-                let primaryMarketCode = marketCodes.first ?? "INDEX"
-                mapped.append(
-                    CountryBubblePoint(
-                        id: "market-\(country)",
-                        iso: country,
-                        valueLabel: "\(Int(abs(avgChange).rounded()))%",
-                        detail: "\(primaryMarketCode) · \(String(format: "%+.2f%%", avgChange))",
-                        magnitude: max(abs(avgChange), 1),
-                        coordinate: coordinate
-                    )
-                )
-            }
-            return mapped.sorted { $0.magnitude > $1.magnitude }
-        case .leadership:
-            return leadership.compactMap { row in
-                let iso = row.country.uppercased()
-                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { return nil }
-                let names = row.roles.map(\.person_name)
-                return CountryBubblePoint(
-                    id: "leadership-\(iso)",
-                    iso: iso,
-                    valueLabel: "\(max(row.roles.count, 1))",
-                    detail: names.isEmpty ? "Leadership record" : names.joined(separator: ", "),
-                    magnitude: Double(max(row.roles.count, 1)),
-                    coordinate: coordinate
-                )
-            }
+    var label: String {
+        switch self {
+        case .signals: return "Signals"
+        case .news: return "News"
+        case .weather: return "Weather"
+        case .leadership: return "Leaders"
         }
     }
 
+    var title: String {
+        switch self {
+        case .signals: return "Cross-source signal relevance"
+        case .news: return "Story concentration"
+        case .weather: return "Latest weather conditions"
+        case .leadership: return "Country leadership"
+        }
+    }
+
+    var legend: String {
+        switch self {
+        case .signals: return "Signal relevance"
+        case .news: return "Mapped stories"
+        case .weather: return "Temperature severity"
+        case .leadership: return "Leadership records"
+        }
+    }
+}
+
+enum SignalMapRegion: String, CaseIterable, Identifiable {
+    case global
+    case americas
+    case europe
+    case africa
+    case asia
+    case apac
+    case oceania
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+
+    var coordinateRegion: MKCoordinateRegion {
+        switch self {
+        case .global:
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 15, longitude: 10),
+                span: MKCoordinateSpan(latitudeDelta: 145, longitudeDelta: 300)
+            )
+        case .americas:
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 13, longitude: -82),
+                span: MKCoordinateSpan(latitudeDelta: 132, longitudeDelta: 112)
+            )
+        case .europe:
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 52, longitude: 15),
+                span: MKCoordinateSpan(latitudeDelta: 42, longitudeDelta: 64)
+            )
+        case .africa:
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 2, longitude: 20),
+                span: MKCoordinateSpan(latitudeDelta: 76, longitudeDelta: 84)
+            )
+        case .asia:
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 34, longitude: 88),
+                span: MKCoordinateSpan(latitudeDelta: 92, longitudeDelta: 132)
+            )
+        case .apac:
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: 10, longitude: 120),
+                span: MKCoordinateSpan(latitudeDelta: 105, longitudeDelta: 132)
+            )
+        case .oceania:
+            return MKCoordinateRegion(
+                center: CLLocationCoordinate2D(latitude: -24, longitude: 145),
+                span: MKCoordinateSpan(latitudeDelta: 65, longitudeDelta: 82)
+            )
+        }
+    }
+
+    func contains(_ iso: String) -> Bool {
+        let normalized = iso.uppercased()
+        switch self {
+        case .global:
+            return true
+        case .americas:
+            return Self.americasCountries.contains(normalized)
+        case .europe:
+            return Self.europeCountries.contains(normalized)
+        case .africa:
+            return Self.africaCountries.contains(normalized)
+        case .asia:
+            return Self.asiaCountries.contains(normalized)
+        case .apac:
+            return Self.apacCountries.contains(normalized)
+        case .oceania:
+            return Self.oceaniaCountries.contains(normalized)
+        }
+    }
+
+    private static let americasCountries: Set<String> = [
+        "AR", "BO", "BR", "CA", "CL", "CO", "CR", "CU", "DO", "EC", "GT", "HN",
+        "JM", "MX", "NI", "PA", "PE", "PR", "PY", "SV", "TT", "US", "UY", "VE"
+    ]
+    private static let europeCountries: Set<String> = [
+        "AL", "AT", "BA", "BE", "BG", "CH", "CZ", "DE", "DK", "EE", "ES", "FI",
+        "FR", "GB", "GR", "HR", "HU", "IE", "IS", "IT", "LT", "LU", "LV", "NL",
+        "NO", "PL", "PT", "RO", "RS", "SE", "SI", "SK", "UA"
+    ]
+    private static let africaCountries: Set<String> = [
+        "AO", "BF", "BI", "BJ", "BW", "CD", "CG", "CI", "CM", "DZ", "EG", "ET",
+        "GA", "GH", "KE", "LY", "MA", "MG", "ML", "MZ", "NA", "NE", "NG", "RW",
+        "SD", "SN", "SO", "TZ", "UG", "ZA", "ZM", "ZW"
+    ]
+    private static let asiaCountries: Set<String> = [
+        "AE", "AF", "BD", "BH", "CN", "HK", "ID", "IL", "IN", "IQ", "IR", "JO",
+        "JP", "KH", "KP", "KR", "KW", "KZ", "LA", "LB", "LK", "MM", "MN", "MY",
+        "NP", "OM", "PH", "PK", "QA", "RU", "SA", "SG", "SY", "TH", "TR", "TW",
+        "UZ", "VN", "YE"
+    ]
+    private static let apacCountries: Set<String> = [
+        "AU", "BD", "BN", "CN", "FJ", "HK", "ID", "IN", "JP", "KH", "KR", "LA",
+        "LK", "MM", "MN", "MY", "NP", "NZ", "PG", "PH", "PK", "SG", "TH", "TW", "VN"
+    ]
+    private static let oceaniaCountries: Set<String> = [
+        "AU", "FJ", "FM", "KI", "MH", "NR", "NZ", "PG", "PW", "SB", "TO", "TV", "VU", "WS"
+    ]
+}
+
+struct SignalMapPanel: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("DEFAULT_MAP_MODE") private var storedMode: String = SignalMapMode.signals.rawValue
+    @State private var mode: SignalMapMode = .signals
+    @State private var region: SignalMapRegion = .global
+    @State private var compareMode = false
+    @State private var comparisonCountry: String?
+    @State private var pinnedCountry: String?
+    @State private var resetToken = 0
+
+    let height: CGFloat
+    let allowsComparison: Bool
+    let showsCountryProfile: Bool
+
+    private var points: [CountryBubblePoint] {
+        SignalMapDataBuilder.points(
+            for: mode,
+            region: region,
+            countryStats: model.countryStats,
+            podcasts: model.podcasts,
+            weather: model.weather,
+            marketQuotes: model.marketQuotes,
+            leadership: model.leadership
+        )
+    }
+
+    private var highest: CountryBubblePoint? { points.first }
+
+    var body: some View {
+        DashboardCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    BrandSectionHeader(
+                        kicker: "Geospatial pulse",
+                        title: "Map: \(mode.title)",
+                        detail: "Select a country to inspect the drivers behind its rank."
+                    )
+                    Spacer(minLength: 0)
+                }
+
+                Picker("Map layer", selection: $mode) {
+                    ForEach(SignalMapMode.allCases) { item in
+                        Text(item.label).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: mode) { next in
+                    storedMode = next.rawValue
+                    clearComparison()
+                }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(SignalMapRegion.allCases) { item in
+                            Button(item.label) {
+                                region = item
+                                clearComparison()
+                                resetToken += 1
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .tint(region == item ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
+                        }
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    if allowsComparison {
+                        Button {
+                            compareMode.toggle()
+                            if !compareMode { comparisonCountry = nil }
+                        } label: {
+                            Label(compareMode ? "Comparing" : "Compare", systemImage: "square.split.2x1")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(compareMode ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
+                    }
+
+                    Button {
+                        pinnedCountry = model.selectedCountry?.uppercased()
+                    } label: {
+                        Label(
+                            pinnedCountry == nil ? "Pin selection" : "Pinned \(pinnedCountry!)",
+                            systemImage: pinnedCountry == nil ? "pin" : "pin.fill"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(model.selectedCountry == nil)
+
+                    Spacer()
+
+                    Button {
+                        model.selectedCountry = nil
+                        comparisonCountry = nil
+                        pinnedCountry = nil
+                        compareMode = false
+                        resetToken += 1
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .font(.caption)
+
+                ZStack(alignment: .topLeading) {
+                    InteractiveCountryBubbleMap(
+                        points: points,
+                        mapRegion: region,
+                        selectedCountry: model.selectedCountry,
+                        comparisonCountry: comparisonCountry,
+                        pinnedCountry: pinnedCountry,
+                        featuredCountry: mode == .signals ? highest?.iso : nil,
+                        resetToken: resetToken,
+                        onSelectCountry: selectCountry
+                    )
+                    .frame(height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(ClaritasPalette.shellBorderStrong(for: colorScheme), lineWidth: 1)
+                    )
+
+                    if mode == .signals, let highest {
+                        Button {
+                            selectCountry(highest.iso)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("HIGHEST SIGNAL RELEVANCE")
+                                    .font(.caption2.weight(.bold))
+                                    .tracking(1.4)
+                                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                                Text("\(highest.iso) · \(highest.valueLabel)")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                                Text(highest.detail)
+                                    .font(.caption2)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    .lineLimit(2)
+                            }
+                            .frame(maxWidth: height >= 440 ? 240 : 178, alignment: .leading)
+                            .padding(10)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(alignment: .leading) {
+                                Rectangle()
+                                    .fill(ClaritasPalette.shellAccent(for: colorScheme))
+                                    .frame(width: 3)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(10)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    HStack(spacing: 4) {
+                        Circle().fill(ClaritasPalette.shellAccent(for: colorScheme)).frame(width: 10, height: 10)
+                        Circle().fill(ClaritasPalette.shellAccent(for: colorScheme)).frame(width: 14, height: 14)
+                        Circle().fill(ClaritasPalette.shellAccent(for: colorScheme)).frame(width: 18, height: 18)
+                    }
+                    Text("\(mode.legend) · log-scaled")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(points.count) mapped")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                if mode == .signals {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Relevance model")
+                            .font(.caption.weight(.semibold))
+                        Text("News 40% · podcast evidence 25% · weather 15% · markets 15% · confirmation bonus")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                    }
+                }
+
+                if let selected = selectedPoint {
+                    Divider()
+                    HStack(alignment: .top, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(comparisonCountry == selected.iso ? "Comparison" : "Selected country")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text("\(selected.iso) · \(selected.valueLabel)")
+                                .font(.headline.monospacedDigit())
+                            Text(selected.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if pinnedCountry == selected.iso {
+                            Label("Pinned", systemImage: "pin.fill")
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                        }
+                    }
+                }
+
+                if showsCountryProfile, model.selectedCountry != nil {
+                    Divider()
+                    CountryProfileView(selectedCountry: model.selectedCountry)
+                }
+            }
+        }
+        .onAppear {
+            let resolved = SignalMapMode(rawValue: storedMode) ?? .signals
+            mode = resolved
+            storedMode = resolved.rawValue
+        }
+    }
+
+    private var selectedPoint: CountryBubblePoint? {
+        let iso = (comparisonCountry ?? model.selectedCountry)?.uppercased()
+        return points.first { $0.iso == iso }
+    }
+
+    private func selectCountry(_ iso: String) {
+        let normalized = iso.uppercased()
+        if compareMode,
+           let primary = model.selectedCountry?.uppercased(),
+           primary != normalized {
+            comparisonCountry = normalized
+            return
+        }
+        model.selectedCountry = model.selectedCountry?.uppercased() == normalized ? nil : normalized
+        comparisonCountry = nil
+    }
+
+    private func clearComparison() {
+        comparisonCountry = nil
+        compareMode = false
+    }
+}
+
+private enum SignalMapDataBuilder {
+    static func points(
+        for mode: SignalMapMode,
+        region: SignalMapRegion,
+        countryStats: [CountryStat],
+        podcasts: [PodcastEpisode],
+        weather: [CountryWeather],
+        marketQuotes: [MarketQuote],
+        leadership: [CountryLeadership]
+    ) -> [CountryBubblePoint] {
+        let raw: [CountryBubblePoint]
+        switch mode {
+        case .signals:
+            raw = signalPoints(
+                countryStats: countryStats,
+                podcasts: podcasts,
+                weather: weather,
+                marketQuotes: marketQuotes
+            )
+        case .news:
+            raw = countryStats.map { stat in
+                point(
+                    id: "news-\(stat.country)",
+                    iso: stat.country,
+                    valueLabel: "\(stat.count)",
+                    detail: "\(stat.count) mapped \(stat.count == 1 ? "story" : "stories")",
+                    magnitude: Double(max(stat.count, 1))
+                )
+            }
+        case .weather:
+            raw = weather.map { row in
+                let temperature = row.temp_c ?? 0
+                let severity = max(abs(temperature - 20), 1)
+                return point(
+                    id: "weather-\(row.country)",
+                    iso: row.country,
+                    valueLabel: row.temp_c.map { String(format: "%.0f°C", $0) } ?? "—",
+                    detail: "\(row.weather_main ?? "Current conditions") · \(Int(row.humidity ?? 0))% humidity",
+                    magnitude: severity
+                )
+            }
+        case .leadership:
+            raw = leadership.map { row in
+                let names = row.roles.map(\.person_name).filter { !$0.isEmpty }
+                return point(
+                    id: "leadership-\(row.country)",
+                    iso: row.country,
+                    valueLabel: "\(max(row.roles.count, 1))",
+                    detail: names.isEmpty ? "Leadership record" : names.joined(separator: " · "),
+                    magnitude: Double(max(row.roles.count, 1))
+                )
+            }
+        }
+
+        return raw
+            .filter { region.contains($0.iso) && CountryCentroidLookup.coordinate(for: $0.iso) != nil }
+            .sorted { $0.magnitude > $1.magnitude }
+            .enumerated()
+            .map { index, item in
+                CountryBubblePoint(
+                    id: item.id,
+                    iso: item.iso,
+                    valueLabel: item.valueLabel,
+                    detail: item.detail,
+                    magnitude: item.magnitude,
+                    rank: index + 1,
+                    coordinate: item.coordinate
+                )
+            }
+    }
+
+    private static func signalPoints(
+        countryStats: [CountryStat],
+        podcasts: [PodcastEpisode],
+        weather: [CountryWeather],
+        marketQuotes: [MarketQuote]
+    ) -> [CountryBubblePoint] {
+        let newsByCountry = Dictionary(
+            uniqueKeysWithValues: countryStats.map { ($0.country.uppercased(), $0.count) }
+        )
+        var weatherByCountry: [String: CountryWeather] = [:]
+        for row in weather {
+            let iso = row.country.uppercased()
+            if let current = weatherByCountry[iso],
+               (current.observedDate ?? .distantPast) >= (row.observedDate ?? .distantPast) {
+                continue
+            }
+            weatherByCountry[iso] = row
+        }
+        var marketByCountry: [String: MarketQuote] = [:]
+        for quote in marketQuotes {
+            guard let iso = quote.country?.uppercased(), !iso.isEmpty else { continue }
+            let current = marketByCountry[iso]
+            if current == nil ||
+                abs(quote.percent_change ?? quote.change ?? 0) >
+                abs(current?.percent_change ?? current?.change ?? 0) {
+                marketByCountry[iso] = quote
+            }
+        }
+
+        var podcastByCountry: [String: (count: Int, score: Double)] = [:]
+        for episode in podcasts {
+            for signal in episode.signals {
+                let riskBase: Double
+                switch signal.risk_level?.lowercased() {
+                case "critical": riskBase = 100
+                case "high": riskBase = 82
+                case "medium": riskBase = 60
+                case "low": riskBase = 38
+                default: riskBase = 32
+                }
+                let score = riskBase * (0.65 + (signal.confidence ?? 0.55) * 0.35)
+                for country in signal.countries {
+                    let iso = country.uppercased()
+                    guard iso.count == 2 else { continue }
+                    let current = podcastByCountry[iso] ?? (0, 0)
+                    podcastByCountry[iso] = (current.count + 1, max(current.score, score))
+                }
+            }
+        }
+
+        let countries = Set(newsByCountry.keys)
+            .union(weatherByCountry.keys)
+            .union(marketByCountry.keys)
+            .union(podcastByCountry.keys)
+        let maxNews = Double(max(newsByCountry.values.max() ?? 1, 1))
+        let maxMarket = max(
+            marketByCountry.values.map { abs($0.percent_change ?? $0.change ?? 0) }.max() ?? 1,
+            1
+        )
+
+        return countries.compactMap { iso in
+            var domains: [String] = []
+            let newsCount = newsByCountry[iso] ?? 0
+            let newsRelevance = newsCount > 0
+                ? log1p(Double(newsCount)) / log1p(maxNews)
+                : 0
+            if newsCount > 0 { domains.append("news") }
+
+            let currentWeather = weatherByCountry[iso]
+            let temperatureSeverity = currentWeather?.temp_c.map {
+                min(1, max(0, (abs($0 - 20) - 8) / 24))
+            } ?? 0
+            let humiditySeverity = currentWeather?.humidity.map {
+                min(1, max(0, ($0 - 75) / 25))
+            } ?? 0
+            let windSeverity = currentWeather?.wind_speed.map { min(1, $0 / 25) } ?? 0
+            let weatherRelevance = max(temperatureSeverity, max(humiditySeverity, windSeverity))
+            if weatherRelevance > 0 { domains.append("weather") }
+
+            let market = marketByCountry[iso]
+            let marketMove = abs(market?.percent_change ?? market?.change ?? 0)
+            let marketRelevance = market == nil ? 0 : marketMove / maxMarket
+            if market != nil { domains.append("markets") }
+
+            let podcast = podcastByCountry[iso]
+            let podcastRelevance = podcast.map {
+                min(1, ($0.score + min(18, Double($0.count * 3))) / 100)
+            } ?? 0
+            if podcast != nil { domains.append("podcast") }
+
+            let breadthBonus = Double(max(0, domains.count - 1) * 2)
+            let relevance = min(
+                100,
+                round(
+                    newsRelevance * 40 +
+                    podcastRelevance * 25 +
+                    weatherRelevance * 15 +
+                    marketRelevance * 15 +
+                    breadthBonus
+                )
+            )
+            guard relevance > 0 else { return nil }
+
+            var drivers: [String] = []
+            if newsCount > 0 { drivers.append("\(newsCount) stories") }
+            if let podcast { drivers.append("\(podcast.count) podcast signals") }
+            if let currentWeather, weatherRelevance > 0 {
+                drivers.append(currentWeather.temp_c.map { String(format: "%.0f°C", $0) } ?? "weather")
+            }
+            if let market {
+                drivers.append("\(market.symbol) \(String(format: "%+.1f%%", market.percent_change ?? market.change ?? 0))")
+            }
+            return point(
+                id: "signals-\(iso)",
+                iso: iso,
+                valueLabel: "\(Int(relevance))/100",
+                detail: "\(domains.count) linked \(domains.count == 1 ? "domain" : "domains") · \(drivers.prefix(2).joined(separator: " · "))",
+                magnitude: relevance
+            )
+        }
+    }
+
+    private static func point(
+        id: String,
+        iso: String,
+        valueLabel: String,
+        detail: String,
+        magnitude: Double
+    ) -> CountryBubblePoint {
+        let normalized = iso.uppercased()
+        return CountryBubblePoint(
+            id: id,
+            iso: normalized,
+            valueLabel: valueLabel,
+            detail: detail,
+            magnitude: magnitude,
+            rank: 0,
+            coordinate: CountryCentroidLookup.coordinate(for: normalized) ??
+                CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        )
+    }
+}
+
+private struct InteractiveCountryBubbleMap: View {
+    let points: [CountryBubblePoint]
+    let mapRegion: SignalMapRegion
+    let selectedCountry: String?
+    let comparisonCountry: String?
+    let pinnedCountry: String?
+    let featuredCountry: String?
+    let resetToken: Int
+    let onSelectCountry: (String) -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var region = SignalMapRegion.global.coordinateRegion
+
     private var pointsSignature: String {
-        points.map(\.id).joined(separator: "|")
+        points.map { "\($0.id)-\($0.magnitude)" }.joined(separator: "|")
     }
 
     var body: some View {
@@ -2853,17 +3189,21 @@ private struct InteractiveCountryBubbleMap: View {
                     bubbleView(for: point)
                 }
             }
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        ClaritasPalette.darkBlue.opacity(0.08),
+                        Color.clear,
+                        ClaritasPalette.shellBackground(for: .dark).opacity(0.12)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .allowsHitTesting(false)
+            }
 
             if points.isEmpty {
-                Text(
-                    mode == .news
-                        ? "No mapped news stats yet."
-                        : mode == .weather
-                            ? "No mapped weather stats yet."
-                            : mode == .market
-                                ? "No mapped market stats yet."
-                                : "No mapped leadership records yet."
-                )
+                Text("No mapped \(mapRegion.label.lowercased()) data for this layer.")
                     .font(.footnote)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -2871,107 +3211,80 @@ private struct InteractiveCountryBubbleMap: View {
                     .padding()
             }
         }
-        .onAppear {
-            fitRegion(animated: false)
-        }
-        .onChange(of: mode) { _ in
-            fitRegion(animated: true)
-        }
-        .onChange(of: pointsSignature) { _ in
-            fitRegion(animated: true)
-        }
-        .onChange(of: selectedCountry) { next in
-            centerOnCountry(next)
-        }
+        .onAppear { fitRegion(animated: false) }
+        .onChange(of: mapRegion) { _ in fitRegion(animated: true) }
+        .onChange(of: pointsSignature) { _ in fitRegion(animated: true) }
+        .onChange(of: resetToken) { _ in fitRegion(animated: true) }
+        .onChange(of: selectedCountry) { next in centerOnCountry(next) }
     }
 
     private func bubbleView(for point: CountryBubblePoint) -> some View {
         let selected = point.iso == selectedCountry?.uppercased()
+        let compared = point.iso == comparisonCountry?.uppercased()
+        let pinned = point.iso == pinnedCountry?.uppercased()
+        let featured = point.iso == featuredCountry?.uppercased()
         let size = bubbleSize(for: point)
-        let fillColor: Color
-        switch mode {
-        case .news:
-            fillColor = selected
-                ? ClaritasPalette.darkGreen
-                : ClaritasPalette.darkBlue.opacity(0.86)
-        case .weather:
-            fillColor = selected
-                ? ClaritasPalette.brown
-                : ClaritasPalette.brown.opacity(0.78)
-        case .market:
-            fillColor = selected
-                ? ClaritasPalette.darkBlue
-                : ClaritasPalette.darkBlue.opacity(0.72)
-        case .leadership:
-            fillColor = selected
-                ? ClaritasPalette.darkGreen
-                : ClaritasPalette.grey.opacity(0.82)
-        }
 
         return Button(action: { onSelectCountry(point.iso) }) {
-            VStack(spacing: 4) {
+            VStack(spacing: 2) {
                 ZStack {
+                    if featured || pinned {
+                        Circle()
+                            .stroke(
+                                featured
+                                    ? ClaritasPalette.shellAccent(for: colorScheme)
+                                    : ClaritasPalette.shellAccentSecondary(for: colorScheme),
+                                style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])
+                            )
+                            .frame(width: size + 12, height: size + 12)
+                    }
                     Circle()
-                        .fill(fillColor)
+                        .fill(ClaritasPalette.shellAccent(for: colorScheme).opacity(0.28))
+                        .frame(width: size + 8, height: size + 8)
                     Circle()
-                        .stroke(Color.white.opacity(selected ? 0.95 : 0.6), lineWidth: selected ? 2 : 1)
-                    Text(point.valueLabel)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
-                        .minimumScaleFactor(0.7)
-                        .lineLimit(1)
-                        .padding(.horizontal, 4)
+                        .fill(ClaritasPalette.shellAccent(for: colorScheme))
+                        .overlay(
+                            Circle().stroke(
+                                compared
+                                    ? ClaritasPalette.shellAccentSecondary(for: colorScheme)
+                                    : Color.white.opacity(selected ? 1 : 0.72),
+                                lineWidth: selected || compared ? 3 : 1.5
+                            )
+                        )
+                        .frame(width: size, height: size)
                 }
-                .frame(width: size, height: size)
 
                 Text(point.iso)
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption2.weight(.bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Color.black.opacity(0.62), in: Capsule())
+                    .shadow(color: .black, radius: 2)
+                    .overlay(alignment: .trailing) {
+                        if featured {
+                            Text("#1")
+                                .font(.system(size: 7, weight: .bold))
+                                .offset(x: 14, y: 0)
+                        }
+                    }
             }
+            .frame(minWidth: ClaritasLayout.minimumTouchTarget, minHeight: ClaritasLayout.minimumTouchTarget)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(point.iso), \(point.detail)")
+        .accessibilityLabel("\(point.iso), rank \(point.rank), \(point.detail)")
+        .accessibilityHint("Select country")
     }
 
     private func bubbleSize(for point: CountryBubblePoint) -> CGFloat {
-        let magnitudes = points.map(\.magnitude)
+        let magnitudes = points.map { log1p(max($0.magnitude, 0)) }
         guard let minimum = magnitudes.min(), let maximum = magnitudes.max(), maximum > minimum else {
-            return 32
+            return 24
         }
-        let normalized = (point.magnitude - minimum) / (maximum - minimum)
-        return 28 + CGFloat(normalized * 18)
+        let normalized = (log1p(max(point.magnitude, 0)) - minimum) / (maximum - minimum)
+        return 20 + CGFloat(normalized * 18)
     }
 
     private func fitRegion(animated: Bool) {
-        guard !points.isEmpty else {
-            let world = MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 15, longitude: 10),
-                span: MKCoordinateSpan(latitudeDelta: 140, longitudeDelta: 260)
-            )
-            setRegion(world, animated: animated)
-            return
-        }
-
-        let latitudes = points.map { $0.coordinate.latitude }
-        let longitudes = points.map { $0.coordinate.longitude }
-        guard let minLat = latitudes.min(),
-              let maxLat = latitudes.max(),
-              let minLon = longitudes.min(),
-              let maxLon = longitudes.max() else {
-            return
-        }
-
-        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLon + maxLon) / 2)
-        let latitudeDelta = min(max((maxLat - minLat) + 26, 36), 170)
-        let longitudeDelta = min(max((maxLon - minLon) + 40, 60), 300)
-        let fitted = MKCoordinateRegion(
-            center: center,
-            span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
-        )
-        setRegion(fitted, animated: animated)
+        setRegion(mapRegion.coordinateRegion, animated: animated)
     }
 
     private func centerOnCountry(_ iso: String?) {
@@ -2988,9 +3301,7 @@ private struct InteractiveCountryBubbleMap: View {
 
     private func setRegion(_ next: MKCoordinateRegion, animated: Bool) {
         if animated {
-            withAnimation(.easeInOut(duration: 0.28)) {
-                region = next
-            }
+            withAnimation(.easeInOut(duration: 0.28)) { region = next }
         } else {
             region = next
         }
@@ -3003,6 +3314,7 @@ private struct CountryBubblePoint: Identifiable {
     let valueLabel: String
     let detail: String
     let magnitude: Double
+    let rank: Int
     let coordinate: CLLocationCoordinate2D
 }
 
@@ -3016,6 +3328,16 @@ private enum CountryCentroidLookup {
         "CL": CLLocationCoordinate2D(latitude: -35.6751, longitude: -71.543),
         "CO": CLLocationCoordinate2D(latitude: 4.5709, longitude: -74.2973),
         "PE": CLLocationCoordinate2D(latitude: -9.19, longitude: -75.0152),
+        "BO": CLLocationCoordinate2D(latitude: -16.2902, longitude: -63.5887),
+        "EC": CLLocationCoordinate2D(latitude: -1.8312, longitude: -78.1834),
+        "VE": CLLocationCoordinate2D(latitude: 6.4238, longitude: -66.5897),
+        "UY": CLLocationCoordinate2D(latitude: -32.5228, longitude: -55.7658),
+        "PY": CLLocationCoordinate2D(latitude: -23.4425, longitude: -58.4438),
+        "CR": CLLocationCoordinate2D(latitude: 9.7489, longitude: -83.7534),
+        "PA": CLLocationCoordinate2D(latitude: 8.538, longitude: -80.7821),
+        "GT": CLLocationCoordinate2D(latitude: 15.7835, longitude: -90.2308),
+        "DO": CLLocationCoordinate2D(latitude: 18.7357, longitude: -70.1627),
+        "CU": CLLocationCoordinate2D(latitude: 21.5218, longitude: -77.7812),
         "GB": CLLocationCoordinate2D(latitude: 55.3781, longitude: -3.436),
         "IE": CLLocationCoordinate2D(latitude: 53.1424, longitude: -7.6921),
         "FR": CLLocationCoordinate2D(latitude: 46.2276, longitude: 2.2137),
@@ -3038,27 +3360,62 @@ private enum CountryCentroidLookup {
         "HU": CLLocationCoordinate2D(latitude: 47.1625, longitude: 19.5033),
         "GR": CLLocationCoordinate2D(latitude: 39.0742, longitude: 21.8243),
         "TR": CLLocationCoordinate2D(latitude: 38.9637, longitude: 35.2433),
+        "IS": CLLocationCoordinate2D(latitude: 64.9631, longitude: -19.0208),
+        "EE": CLLocationCoordinate2D(latitude: 58.5953, longitude: 25.0136),
+        "LV": CLLocationCoordinate2D(latitude: 56.8796, longitude: 24.6032),
+        "LT": CLLocationCoordinate2D(latitude: 55.1694, longitude: 23.8813),
+        "BG": CLLocationCoordinate2D(latitude: 42.7339, longitude: 25.4858),
+        "HR": CLLocationCoordinate2D(latitude: 45.1, longitude: 15.2),
+        "RS": CLLocationCoordinate2D(latitude: 44.0165, longitude: 21.0059),
+        "SK": CLLocationCoordinate2D(latitude: 48.669, longitude: 19.699),
+        "SI": CLLocationCoordinate2D(latitude: 46.1512, longitude: 14.9955),
         "RU": CLLocationCoordinate2D(latitude: 61.524, longitude: 105.3188),
         "EG": CLLocationCoordinate2D(latitude: 26.8206, longitude: 30.8025),
         "NG": CLLocationCoordinate2D(latitude: 9.082, longitude: 8.6753),
         "ZA": CLLocationCoordinate2D(latitude: -30.5595, longitude: 22.9375),
         "KE": CLLocationCoordinate2D(latitude: -0.0236, longitude: 37.9062),
+        "DZ": CLLocationCoordinate2D(latitude: 28.0339, longitude: 1.6596),
+        "MA": CLLocationCoordinate2D(latitude: 31.7917, longitude: -7.0926),
+        "GH": CLLocationCoordinate2D(latitude: 7.9465, longitude: -1.0232),
+        "ET": CLLocationCoordinate2D(latitude: 9.145, longitude: 40.4897),
+        "TZ": CLLocationCoordinate2D(latitude: -6.369, longitude: 34.8888),
+        "UG": CLLocationCoordinate2D(latitude: 1.3733, longitude: 32.2903),
+        "AO": CLLocationCoordinate2D(latitude: -11.2027, longitude: 17.8739),
+        "ZM": CLLocationCoordinate2D(latitude: -13.1339, longitude: 27.8493),
+        "ZW": CLLocationCoordinate2D(latitude: -19.0154, longitude: 29.1549),
+        "MZ": CLLocationCoordinate2D(latitude: -18.6657, longitude: 35.5296),
+        "SD": CLLocationCoordinate2D(latitude: 12.8628, longitude: 30.2176),
+        "SN": CLLocationCoordinate2D(latitude: 14.4974, longitude: -14.4524),
         "AE": CLLocationCoordinate2D(latitude: 23.4241, longitude: 53.8478),
         "SA": CLLocationCoordinate2D(latitude: 23.8859, longitude: 45.0792),
         "IL": CLLocationCoordinate2D(latitude: 31.0461, longitude: 34.8516),
+        "IQ": CLLocationCoordinate2D(latitude: 33.2232, longitude: 43.6793),
+        "JO": CLLocationCoordinate2D(latitude: 30.5852, longitude: 36.2384),
+        "QA": CLLocationCoordinate2D(latitude: 25.3548, longitude: 51.1839),
+        "KW": CLLocationCoordinate2D(latitude: 29.3117, longitude: 47.4818),
+        "OM": CLLocationCoordinate2D(latitude: 21.4735, longitude: 55.9754),
         "IN": CLLocationCoordinate2D(latitude: 20.5937, longitude: 78.9629),
         "PK": CLLocationCoordinate2D(latitude: 30.3753, longitude: 69.3451),
+        "BD": CLLocationCoordinate2D(latitude: 23.685, longitude: 90.3563),
+        "LK": CLLocationCoordinate2D(latitude: 7.8731, longitude: 80.7718),
         "CN": CLLocationCoordinate2D(latitude: 35.8617, longitude: 104.1954),
         "JP": CLLocationCoordinate2D(latitude: 36.2048, longitude: 138.2529),
         "KR": CLLocationCoordinate2D(latitude: 35.9078, longitude: 127.7669),
         "VN": CLLocationCoordinate2D(latitude: 14.0583, longitude: 108.2772),
         "TH": CLLocationCoordinate2D(latitude: 15.87, longitude: 100.9925),
+        "MM": CLLocationCoordinate2D(latitude: 21.9162, longitude: 95.956),
+        "KH": CLLocationCoordinate2D(latitude: 12.5657, longitude: 104.991),
+        "TW": CLLocationCoordinate2D(latitude: 23.6978, longitude: 120.9605),
+        "HK": CLLocationCoordinate2D(latitude: 22.3193, longitude: 114.1694),
+        "KZ": CLLocationCoordinate2D(latitude: 48.0196, longitude: 66.9237),
         "MY": CLLocationCoordinate2D(latitude: 4.2105, longitude: 101.9758),
         "SG": CLLocationCoordinate2D(latitude: 1.3521, longitude: 103.8198),
         "ID": CLLocationCoordinate2D(latitude: -0.7893, longitude: 113.9213),
         "PH": CLLocationCoordinate2D(latitude: 12.8797, longitude: 121.774),
         "AU": CLLocationCoordinate2D(latitude: -25.2744, longitude: 133.7751),
         "NZ": CLLocationCoordinate2D(latitude: -40.9006, longitude: 174.886),
+        "PG": CLLocationCoordinate2D(latitude: -6.315, longitude: 143.9555),
+        "FJ": CLLocationCoordinate2D(latitude: -17.7134, longitude: 178.065)
     ]
 
     static func coordinate(for iso2: String) -> CLLocationCoordinate2D? {
