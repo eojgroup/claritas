@@ -54,37 +54,21 @@ private struct WatchSignalGlanceView: View {
                     }
 
                     HStack(spacing: 6) {
-                        Menu {
-                            ForEach(WatchMapLayer.allCases) { item in
-                                Button {
-                                    layer = item
-                                    selectedCountry = nil
-                                } label: {
-                                    if layer == item {
-                                        Label(item.label, systemImage: "checkmark")
-                                    } else {
-                                        Text(item.label)
-                                    }
-                                }
-                            }
+                        NavigationLink {
+                            WatchMapLayerSelection(
+                                selection: $layer,
+                                onSelect: { selectedCountry = nil }
+                            )
                         } label: {
                             Label(layer.label, systemImage: "square.3.layers.3d")
                                 .font(.caption2.weight(.semibold))
                         }
 
-                        Menu {
-                            ForEach(WatchMapRegion.allCases) { item in
-                                Button {
-                                    region = item
-                                    selectedCountry = nil
-                                } label: {
-                                    if region == item {
-                                        Label(item.label, systemImage: "checkmark")
-                                    } else {
-                                        Text(item.label)
-                                    }
-                                }
-                            }
+                        NavigationLink {
+                            WatchMapRegionSelection(
+                                selection: $region,
+                                onSelect: { selectedCountry = nil }
+                            )
                         } label: {
                             Label(region.label, systemImage: "scope")
                                 .font(.caption2.weight(.semibold))
@@ -175,6 +159,62 @@ private struct WatchSignalGlanceView: View {
             .navigationTitle("Claritas")
             .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
+    }
+}
+
+private struct WatchMapLayerSelection: View {
+    @Binding var selection: WatchMapLayer
+    let onSelect: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ForEach(WatchMapLayer.allCases) { item in
+                Button {
+                    selection = item
+                    onSelect()
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(item.label)
+                        Spacer()
+                        if selection == item {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(WatchPalette.orange)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Layer")
+    }
+}
+
+private struct WatchMapRegionSelection: View {
+    @Binding var selection: WatchMapRegion
+    let onSelect: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ForEach(WatchMapRegion.allCases) { item in
+                Button {
+                    selection = item
+                    onSelect()
+                    dismiss()
+                } label: {
+                    HStack {
+                        Text(item.label)
+                        Spacer()
+                        if selection == item {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(WatchPalette.orange)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Region")
     }
 }
 
