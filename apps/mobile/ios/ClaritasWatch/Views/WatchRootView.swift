@@ -382,7 +382,7 @@ private struct WatchBriefingScheduleContent: View {
         .task {
             apply(model.briefingSchedule)
         }
-        .onChange(of: model.briefingSchedule?.updated_at) { _ in
+        .onChange(of: model.briefingSchedule?.updated_at) {
             apply(model.briefingSchedule)
         }
     }

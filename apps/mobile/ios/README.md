@@ -14,8 +14,10 @@ The project contains one App Store product with two Xcode targets:
 2. Set your signing team:
    - Select the `Claritas` target -> Signing & Capabilities -> Team -> choose your team.
    - Select `Claritas Watch App` and choose the same team.
-   - Optionally change the Bundle Identifier from the default `com.eojgroup.claritas`.
-   - Keep the watch bundle identifier as a child identifier, such as `com.yourorg.claritas.watchkitapp`.
+   - To change the bundle identifier, select the `Claritas` **project** (not an
+     individual target), then set `CLARITAS_BUNDLE_IDENTIFIER` for both Debug
+     and Release. This shared setting defaults to `com.eojgroup.claritas` and
+     derives the child identifiers for the Watch app and extensions.
 3. Configure the API base URL:
    - Edit `apps/mobile/ios/Claritas/Config.plist` -> `API_BASE_URL` to point to your backend (e.g. `https://your-host.com`).
    - Keep `apps/mobile/ios/ClaritasWatch/Config.plist` aligned for first launch. The iPhone app sends its active URL to the watch after pairing.
