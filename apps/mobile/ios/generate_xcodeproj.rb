@@ -50,6 +50,7 @@ project.root_object.attributes["LastUpgradeCheck"] = "1600"
 # together, rather than allowing their identifiers to drift apart.
 project.build_configurations.each do |configuration|
   configuration.build_settings["CLARITAS_BUNDLE_IDENTIFIER"] = bundle_id
+  configuration.build_settings["REGISTER_APP_GROUPS"] = "YES"
 end
 
 ios_target = project.new_target(:application, "Claritas", :ios, ios_deployment_target)

@@ -50,6 +50,10 @@ specifications = {
 project_bundle_ids = project.build_configurations.map do |configuration|
   value = configuration.build_settings["CLARITAS_BUNDLE_IDENTIFIER"].to_s
   check.call(!value.empty?, "Project #{configuration.name} must define CLARITAS_BUNDLE_IDENTIFIER")
+  check.call(
+    configuration.build_settings["REGISTER_APP_GROUPS"] == "YES",
+    "Project #{configuration.name} must register App Groups for automatic signing"
+  )
   value
 end
 check.call(project_bundle_ids.uniq.length == 1, "Project configurations must use the same CLARITAS_BUNDLE_IDENTIFIER")
