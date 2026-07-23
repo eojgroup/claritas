@@ -16,6 +16,17 @@ bundle_id = ENV.fetch("BUNDLE_ID", "com.eojgroup.claritas")
 # Do not permit an independently configured watch identifier: doing so can
 # create an archive that installs locally but cannot be uploaded.
 watch_bundle_id = "#{bundle_id}.watchkitapp"
+bundle_identifier_setting = "$(CLARITAS_BUNDLE_IDENTIFIER)"
+product_identifiers = {
+  ios: bundle_identifier_setting,
+  widget: "#{bundle_identifier_setting}.widgets",
+  watch: "#{bundle_identifier_setting}.watchkitapp",
+  watch_widget: "#{bundle_identifier_setting}.watchkitapp.widgets"
+}.freeze
+app_group_identifiers = {
+  ios: "group.#{bundle_identifier_setting}",
+  watch: "group.#{bundle_identifier_setting}.watch"
+}.freeze
 if ENV.key?("WATCH_BUNDLE_ID") && ENV.fetch("WATCH_BUNDLE_ID") != watch_bundle_id
   raise <<~MESSAGE
     WATCH_BUNDLE_ID must be #{watch_bundle_id.inspect} because the embedded
@@ -76,8 +87,8 @@ configure_target(
   {
     "ASSETCATALOG_COMPILER_APPICON_NAME" => "AppIcon",
     "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME" => "AccentColor",
-    "CLARITAS_IOS_BUNDLE_IDENTIFIER" => "$(CLARITAS_BUNDLE_IDENTIFIER)",
-    "CLARITAS_WIDGET_APP_GROUP" => "group.$(CLARITAS_BUNDLE_IDENTIFIER)",
+    "CLARITAS_IOS_BUNDLE_IDENTIFIER" => product_identifiers.fetch(:ios),
+    "CLARITAS_WIDGET_APP_GROUP" => app_group_identifiers.fetch(:ios),
     "CODE_SIGN_ENTITLEMENTS" => "Claritas.entitlements",
     "CODE_SIGN_STYLE" => "Automatic",
     "CURRENT_PROJECT_VERSION" => build_number,
@@ -88,7 +99,7 @@ configure_target(
     "INFOPLIST_KEY_LSApplicationCategoryType" => "public.app-category.news",
     "IPHONEOS_DEPLOYMENT_TARGET" => ios_deployment_target,
     "MARKETING_VERSION" => marketing_version,
-    "PRODUCT_BUNDLE_IDENTIFIER" => "$(CLARITAS_BUNDLE_IDENTIFIER)",
+    "PRODUCT_BUNDLE_IDENTIFIER" => product_identifiers.fetch(:ios),
     "SDKROOT" => "iphoneos",
     "SWIFT_VERSION" => "5.0",
     "TARGETED_DEVICE_FAMILY" => "1,2"
@@ -99,7 +110,7 @@ configure_target(
   widget_target,
   {
     "APPLICATION_EXTENSION_API_ONLY" => "YES",
-    "CLARITAS_WIDGET_APP_GROUP" => "group.$(CLARITAS_BUNDLE_IDENTIFIER)",
+    "CLARITAS_WIDGET_APP_GROUP" => app_group_identifiers.fetch(:ios),
     "CODE_SIGN_ENTITLEMENTS" => "../ClaritasWidgets/ClaritasWidgets.entitlements",
     "CODE_SIGN_STYLE" => "Automatic",
     "CURRENT_PROJECT_VERSION" => build_number,
@@ -108,7 +119,7 @@ configure_target(
     "INFOPLIST_FILE" => "../ClaritasWidgets/Info.plist",
     "IPHONEOS_DEPLOYMENT_TARGET" => ios_deployment_target,
     "MARKETING_VERSION" => marketing_version,
-    "PRODUCT_BUNDLE_IDENTIFIER" => "$(CLARITAS_BUNDLE_IDENTIFIER).widgets",
+    "PRODUCT_BUNDLE_IDENTIFIER" => product_identifiers.fetch(:widget),
     "SDKROOT" => "iphoneos",
     "SKIP_INSTALL" => "YES",
     "SWIFT_VERSION" => "5.0"
@@ -119,7 +130,7 @@ configure_target(
   watch_widget_target,
   {
     "APPLICATION_EXTENSION_API_ONLY" => "YES",
-    "CLARITAS_WATCH_WIDGET_APP_GROUP" => "group.$(CLARITAS_BUNDLE_IDENTIFIER).watch",
+    "CLARITAS_WATCH_WIDGET_APP_GROUP" => app_group_identifiers.fetch(:watch),
     "CODE_SIGN_ENTITLEMENTS" => "../ClaritasWatchWidgets/ClaritasWatchWidgets.entitlements",
     "CODE_SIGN_STYLE" => "Automatic",
     "CURRENT_PROJECT_VERSION" => build_number,
@@ -127,7 +138,7 @@ configure_target(
     "GENERATE_INFOPLIST_FILE" => "NO",
     "INFOPLIST_FILE" => "../ClaritasWatchWidgets/Info.plist",
     "MARKETING_VERSION" => marketing_version,
-    "PRODUCT_BUNDLE_IDENTIFIER" => "$(CLARITAS_BUNDLE_IDENTIFIER).watchkitapp.widgets",
+    "PRODUCT_BUNDLE_IDENTIFIER" => product_identifiers.fetch(:watch_widget),
     "SDKROOT" => "watchos",
     "SKIP_INSTALL" => "YES",
     "SWIFT_VERSION" => "5.0",
@@ -141,8 +152,8 @@ configure_target(
   {
     "ASSETCATALOG_COMPILER_APPICON_NAME" => "AppIcon",
     "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME" => "AccentColor",
-    "CLARITAS_IOS_BUNDLE_IDENTIFIER" => "$(CLARITAS_BUNDLE_IDENTIFIER)",
-    "CLARITAS_WATCH_WIDGET_APP_GROUP" => "group.$(CLARITAS_BUNDLE_IDENTIFIER).watch",
+    "CLARITAS_IOS_BUNDLE_IDENTIFIER" => product_identifiers.fetch(:ios),
+    "CLARITAS_WATCH_WIDGET_APP_GROUP" => app_group_identifiers.fetch(:watch),
     "CODE_SIGN_ENTITLEMENTS" => "../ClaritasWatch/ClaritasWatch.entitlements",
     "CODE_SIGN_STYLE" => "Automatic",
     "CURRENT_PROJECT_VERSION" => build_number,
@@ -151,7 +162,7 @@ configure_target(
     "INFOPLIST_FILE" => "../ClaritasWatch/Info.plist",
     "INFOPLIST_KEY_CFBundleDisplayName" => "Claritas",
     "MARKETING_VERSION" => marketing_version,
-    "PRODUCT_BUNDLE_IDENTIFIER" => "$(CLARITAS_BUNDLE_IDENTIFIER).watchkitapp",
+    "PRODUCT_BUNDLE_IDENTIFIER" => product_identifiers.fetch(:watch),
     "SDKROOT" => "watchos",
     "SKIP_INSTALL" => "YES",
     "SWIFT_VERSION" => "5.0",

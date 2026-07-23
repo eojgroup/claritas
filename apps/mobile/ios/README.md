@@ -73,6 +73,13 @@ The generator always derives the watch app identifier as
 Apple requires every embedded watch app identifier to be prefixed by its iOS
 container app identifier.
 
+Do not paste `$(CLARITAS_BUNDLE_IDENTIFIER)` into a target's Bundle Identifier
+field in Signing & Capabilities. Xcode can treat that text as a new literal App
+ID and sanitize it to a value such as
+`--CLARITAS-BUNDLE-IDENTIFIER-.watchkitapp.widgets`. Change `BUNDLE_ID` through
+the generator (or the shared project-level setting) and keep the generated
+target expressions intact.
+
 Validate the checked-in project, both WidgetKit extension plists, embedding
 phases, automatic signing, and all parent-child bundle identifier relationships:
 

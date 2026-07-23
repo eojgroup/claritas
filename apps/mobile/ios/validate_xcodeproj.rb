@@ -47,6 +47,13 @@ specifications = {
   }
 }
 
+app_group_specifications = {
+  "Claritas" => ["CLARITAS_WIDGET_APP_GROUP", "group.#{BUNDLE_ANCHOR}"],
+  "Claritas Widgets" => ["CLARITAS_WIDGET_APP_GROUP", "group.#{BUNDLE_ANCHOR}"],
+  "Claritas Watch App" => ["CLARITAS_WATCH_WIDGET_APP_GROUP", "group.#{BUNDLE_ANCHOR}.watch"],
+  "Claritas Watch Widgets" => ["CLARITAS_WATCH_WIDGET_APP_GROUP", "group.#{BUNDLE_ANCHOR}.watch"]
+}
+
 project_bundle_ids = project.build_configurations.map do |configuration|
   value = configuration.build_settings["CLARITAS_BUNDLE_IDENTIFIER"].to_s
   check.call(!value.empty?, "Project #{configuration.name} must define CLARITAS_BUNDLE_IDENTIFIER")
@@ -57,6 +64,11 @@ project_bundle_ids = project.build_configurations.map do |configuration|
   value
 end
 check.call(project_bundle_ids.uniq.length == 1, "Project configurations must use the same CLARITAS_BUNDLE_IDENTIFIER")
+resolved_bundle_anchor = project_bundle_ids.first.to_s
+check.call(
+  resolved_bundle_anchor.match?(/\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/),
+  "CLARITAS_BUNDLE_IDENTIFIER must be a concrete reverse-DNS identifier"
+)
 
 identity_values = {
   "CFBundleExecutable" => "$(EXECUTABLE_NAME)",
@@ -85,8 +97,20 @@ specifications.each do |target_name, specification|
     prefix = "#{target_name} #{configuration.name}"
     check.call(settings["SDKROOT"] == specification[:sdk], "#{prefix} has the wrong SDK")
     check.call(settings["PRODUCT_BUNDLE_IDENTIFIER"] == specification[:bundle_id], "#{prefix} has the wrong bundle identifier")
+    app_group_setting, expected_app_group = app_group_specifications.fetch(target_name)
+    check.call(settings[app_group_setting] == expected_app_group, "#{prefix} has the wrong App Group")
     check.call(settings["CODE_SIGN_STYLE"] == "Automatic", "#{prefix} must use automatic signing")
     check.call(!settings["DEVELOPMENT_TEAM"].to_s.empty?, "#{prefix} must define a development team")
+
+    resolved_product_identifier = settings["PRODUCT_BUNDLE_IDENTIFIER"].to_s.sub(BUNDLE_ANCHOR, resolved_bundle_anchor)
+    check.call(
+      resolved_product_identifier.match?(/\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/),
+      "#{prefix} resolves to an invalid bundle identifier"
+    )
+    check.call(
+      !resolved_product_identifier.include?("CLARITAS-BUNDLE-IDENTIFIER"),
+      "#{prefix} contains a sanitized, unresolved bundle identifier"
+    )
 
     configured_plist = File.expand_path(settings.fetch("INFOPLIST_FILE"), PROJECT_DIR)
     check.call(configured_plist == specification[:plist], "#{prefix} points to the wrong Info.plist")
