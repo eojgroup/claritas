@@ -379,6 +379,14 @@
 						DevelopmentTeam = VTBJTFDTQY;
 						ProvisioningStyle = Automatic;
 					};
+					6F51F1F92769FFD9DD8A7E31 = {
+						DevelopmentTeam = VTBJTFDTQY;
+						ProvisioningStyle = Automatic;
+					};
+					BFB1D1340E53CD5E72B15845 = {
+						DevelopmentTeam = VTBJTFDTQY;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = D9D8DFB2CE80AD62A6853211 /* Build configuration list for PBXProject "Claritas" */;
@@ -725,6 +733,7 @@
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
 				VALIDATE_PRODUCT = YES;
 				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
@@ -818,6 +827,7 @@
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
 				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Debug;

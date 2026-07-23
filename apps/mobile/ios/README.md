@@ -73,6 +73,13 @@ The generator always derives the watch app identifier as
 Apple requires every embedded watch app identifier to be prefixed by its iOS
 container app identifier.
 
+Validate the checked-in project, both WidgetKit extension plists, embedding
+phases, automatic signing, and all parent-child bundle identifier relationships:
+
+```bash
+ruby validate_xcodeproj.rb
+```
+
 ## Versioning
 
 `apps/mobile/ios/VERSION` is the committed source of truth for Apple app versions:

@@ -130,6 +130,7 @@ configure_target(
     "SDKROOT" => "watchos",
     "SKIP_INSTALL" => "YES",
     "SWIFT_VERSION" => "5.0",
+    "TARGETED_DEVICE_FAMILY" => "4",
     "WATCHOS_DEPLOYMENT_TARGET" => watchos_deployment_target
   }
 )
@@ -303,7 +304,9 @@ watch_product.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy", "CodeSignOnCo
 
 project.root_object.attributes["TargetAttributes"] = {
   ios_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" },
-  watch_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" }
+  watch_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" },
+  widget_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" },
+  watch_widget_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" }
 }
 
 project.save
