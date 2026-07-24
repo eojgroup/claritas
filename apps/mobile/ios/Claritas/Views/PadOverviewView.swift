@@ -7,7 +7,7 @@ struct PadOverviewView: View {
     @Binding var destination: RootView.Tab?
 
     private var marketAverage: Double {
-        let moves = model.marketQuotes.compactMap(\.percent_change)
+        let moves = scopedMarketQuotes.compactMap(\.percent_change)
         guard !moves.isEmpty else { return 0 }
         return moves.reduce(0, +) / Double(moves.count)
     }
@@ -17,17 +17,38 @@ struct PadOverviewView: View {
     }
 
     private var topMarkets: [MarketQuote] {
-        model.marketQuotes
+        scopedMarketQuotes
             .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
             .prefix(7)
             .map { $0 }
     }
 
     private var topWeather: [CountryWeather] {
-        model.weather
+        scopedWeather
             .sorted { ($0.temp_c ?? -999) > ($1.temp_c ?? -999) }
             .prefix(6)
             .map { $0 }
+    }
+
+    private var scopedMarketQuotes: [MarketQuote] {
+        guard let selected = model.selectedCountry?.uppercased() else {
+            return model.marketQuotes
+        }
+        return model.marketQuotes.filter { ($0.country ?? "").uppercased() == selected }
+    }
+
+    private var scopedWeather: [CountryWeather] {
+        guard let selected = model.selectedCountry?.uppercased() else {
+            return model.weather
+        }
+        return model.weather.filter { $0.country.uppercased() == selected }
+    }
+
+    private var focusedNews: [NewsItem] {
+        guard let selected = model.selectedCountry?.uppercased() else {
+            return model.news
+        }
+        return model.news.filter { ($0.country_iso2 ?? "").uppercased() == selected }
     }
 
     var body: some View {
@@ -35,6 +56,7 @@ struct PadOverviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     commandHeader
+                    workspaceStrip
 
                     SignalMapPanel(
                         height: 470,
@@ -63,44 +85,126 @@ struct PadOverviewView: View {
     private var commandHeader: some View {
         HStack(alignment: .center, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Tablet review workspace")
+                Text("LIVE INTELLIGENCE WORKSPACE")
                     .font(.caption.weight(.semibold))
+                    .tracking(1.4)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 Text("Geospatial signal desk")
                     .font(.largeTitle.weight(.semibold))
-                Text("The same cross-source map as web, with touch-first scope, selection, comparison, and drill-in.")
+                Text("Cross-source relevance, evidence, and operational context in a touch-first review surface.")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             }
             Spacer()
-            HStack(spacing: 10) {
-                Button {
-                    destination = .news
-                } label: {
-                    Label("News", systemImage: "newspaper")
-                }
-                .buttonStyle(.bordered)
-
+            if model.selectedCountry != nil || model.selectedSymbol != nil {
                 Button {
                     model.clearSelection()
                 } label: {
                     Label("Reset focus", systemImage: "arrow.counterclockwise")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
             }
-            .controlSize(.large)
         }
         .padding(20)
         .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
     }
 
-    private var metrics: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
-            BrandMetricCard(title: "News signals", value: "\(model.news.count)", detail: "Recent intelligence items", tone: ClaritasPalette.dataBlue(for: colorScheme))
-            BrandMetricCard(title: "Countries", value: "\(model.countryStats.count)", detail: "Countries with current coverage", tone: ClaritasPalette.positiveText(for: colorScheme))
-            BrandMetricCard(title: "Market pulse", value: String(format: "%+.2f%%", marketAverage), detail: "\(activeMarkets) tracked markets open", tone: marketAverage >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
-            BrandMetricCard(title: "Weather stations", value: "\(model.weather.count)", detail: "Latest country observations", tone: ClaritasPalette.shellAccent(for: colorScheme))
+    private var workspaceStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                workspaceButton(.overview, label: "Signals")
+                workspaceButton(.news, label: "News")
+                workspaceButton(.podcasts, label: "Podcasts")
+                workspaceButton(.weather, label: "Weather")
+                workspaceButton(.markets, label: "Markets")
+            }
+            .padding(.horizontal, 2)
         }
+        .padding(8)
+        .background(ClaritasPalette.shellBackgroundElevated(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+        )
+    }
+
+    private func workspaceButton(_ item: RootView.Tab, label: String) -> some View {
+        Button {
+            destination = item
+        } label: {
+            Label(label, systemImage: item.icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(
+                    item == .overview
+                        ? ClaritasPalette.shellInk(for: colorScheme)
+                        : ClaritasPalette.shellMuted(for: colorScheme)
+                )
+                .padding(.horizontal, 14)
+                .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                .background(
+                    item == .overview
+                        ? ClaritasPalette.shellHighlight(for: colorScheme)
+                        : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 9)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var metrics: some View {
+        HStack(alignment: .top, spacing: 0) {
+            metricCell(
+                title: "News signals",
+                value: "\(focusedNews.count)",
+                detail: model.selectedCountry == nil ? "Recent intelligence items" : "In current country focus",
+                tone: ClaritasPalette.dataBlue(for: colorScheme)
+            )
+            Divider()
+            metricCell(
+                title: "Countries",
+                value: "\(model.countryStats.count)",
+                detail: "With current coverage",
+                tone: ClaritasPalette.positiveText(for: colorScheme)
+            )
+            Divider()
+            metricCell(
+                title: "Market pulse",
+                value: String(format: "%+.2f%%", marketAverage),
+                detail: "\(activeMarkets) tracked markets open",
+                tone: marketAverage >= 0
+                    ? ClaritasPalette.positiveText(for: colorScheme)
+                    : ClaritasPalette.negativeText(for: colorScheme)
+            )
+            Divider()
+            metricCell(
+                title: "Weather",
+                value: "\(scopedWeather.count)",
+                detail: model.selectedCountry == nil ? "Latest observations" : "In current country focus",
+                tone: ClaritasPalette.shellAccent(for: colorScheme)
+            )
+        }
+        .padding(.vertical, 14)
+        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
+    }
+
+    private func metricCell(title: String, value: String, detail: String, tone: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .tracking(1.2)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            Text(value)
+                .font(.title2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(tone)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
     }
 
     private var focusPanel: some View {
@@ -140,7 +244,7 @@ struct PadOverviewView: View {
     private var newsPanel: some View {
         BrandCard(title: "Latest intelligence", icon: "newspaper") {
             VStack(spacing: 0) {
-                ForEach(model.news.prefix(7)) { item in
+                ForEach(focusedNews.prefix(7)) { item in
                     Button {
                         if let country = item.country_iso2 {
                             model.selectedCountry = country.uppercased()
@@ -166,6 +270,12 @@ struct PadOverviewView: View {
                     }
                     .buttonStyle(.plain)
                     Divider()
+                }
+                if focusedNews.isEmpty {
+                    Text("No recent intelligence matches the current country focus.")
+                        .font(.subheadline)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .padding(.vertical, 18)
                 }
             }
         }

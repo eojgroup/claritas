@@ -19,6 +19,35 @@ struct DashboardView: View {
     var body: some View {
         DashboardBackground {
             ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    mobileCommandHeader
+
+                    SignalMapPanel(
+                        height: 310,
+                        allowsComparison: false,
+                        showsCountryProfile: false
+                    )
+
+                    mobilePostureStrip
+
+                    if model.selectedCountry != nil {
+                        mobileFocusCard
+                    }
+
+                    mobilePriorityCard
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 16)
+            }
+            .refreshable {
+                await model.loadInitial()
+            }
+        }
+    }
+
+    private var legacyDashboard: some View {
+        DashboardBackground {
+            ScrollView {
                 VStack(spacing: 18) {
                     DashboardHeaderView()
 
@@ -288,6 +317,352 @@ struct DashboardView: View {
         .onChange(of: marketEarningsWindowDays) { next in
             Task { await model.refreshMarketEarnings(windowDays: next) }
         }
+    }
+
+    private var mobileCommandHeader: some View {
+        HStack(alignment: .top, spacing: 12) {
+            BrandSectionHeader(
+                kicker: "GLOBAL SIGNAL DESK",
+                title: "Decision pulse",
+                detail: "Map first. Only the signals that need attention now."
+            )
+            Spacer(minLength: 4)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(ClaritasPalette.positiveText(for: colorScheme))
+                    .frame(width: 7, height: 7)
+                Text("Live")
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            .padding(.horizontal, 10)
+            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+            .background(
+                ClaritasPalette.shellSurfaceMuted(for: colorScheme),
+                in: Capsule()
+            )
+        }
+        .padding(16)
+        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
+    }
+
+    private var mobilePostureStrip: some View {
+        HStack(alignment: .top, spacing: 0) {
+            mobileMetric(
+                label: "Coverage",
+                value: "\(model.countryStats.count)",
+                detail: "countries",
+                tone: ClaritasPalette.shellAccentSecondary(for: colorScheme)
+            )
+            Divider()
+            mobileMetric(
+                label: "Thresholds",
+                value: "\(mobileThresholdCount)",
+                detail: "need review",
+                tone: mobileThresholdCount > 0
+                    ? ClaritasPalette.negativeText(for: colorScheme)
+                    : ClaritasPalette.positiveText(for: colorScheme)
+            )
+            Divider()
+            mobileMetric(
+                label: "Markets",
+                value: String(format: "%+.1f%%", mobileMarketAverage),
+                detail: "tracked avg.",
+                tone: mobileMarketAverage >= 0
+                    ? ClaritasPalette.positiveText(for: colorScheme)
+                    : ClaritasPalette.negativeText(for: colorScheme)
+            )
+        }
+        .padding(.vertical, 12)
+        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
+    }
+
+    private func mobileMetric(label: String, value: String, detail: String, tone: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(1)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            Text(value)
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(tone)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+    }
+
+    private var mobileFocusCard: some View {
+        BrandCard(title: "Active country profile", icon: "scope") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(mobileCountryName)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                        Text(model.selectedCountry?.uppercased() ?? "")
+                            .font(.caption.weight(.semibold))
+                            .tracking(1.4)
+                            .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                    }
+                    Spacer()
+                    Button("Clear") {
+                        model.clearSelection()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                HStack(alignment: .top, spacing: 10) {
+                    mobileFocusMetric(
+                        label: "News",
+                        value: "\(mobileCountryNews.count)",
+                        detail: "stories"
+                    )
+                    mobileFocusMetric(
+                        label: "Weather",
+                        value: mobileCountryWeather?.temp_c.map { String(format: "%.0f°C", $0) } ?? "—",
+                        detail: mobileCountryWeather?.weather_main ?? "No update"
+                    )
+                    mobileFocusMetric(
+                        label: "Mover",
+                        value: mobileCountryMarkets.first?.symbol ?? "—",
+                        detail: mobileCountryMarkets.first?.percent_change.map { String(format: "%+.1f%%", $0) } ?? "No quote"
+                    )
+                }
+
+                if let leader = mobileCountryLeadership?.roles.first {
+                    Divider()
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "person.crop.rectangle.stack")
+                            .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(leader.roleLabel)
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            Text(leader.person_name)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func mobileFocusMetric(label: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(1)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(
+            ClaritasPalette.shellSurfaceMuted(for: colorScheme),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
+    }
+
+    private var mobilePriorityCard: some View {
+        BrandCard(title: "Needs attention", icon: "scope") {
+            VStack(spacing: 0) {
+                if let headline = mobilePriorityHeadline {
+                    Button {
+                        model.selectedCountry = headline.country_iso2?.uppercased()
+                    } label: {
+                        mobileSignalRow(
+                            icon: "newspaper",
+                            eyebrow: "Headline",
+                            value: headline.title ?? "Untitled",
+                            detail: [
+                                headline.country_iso2?.uppercased(),
+                                headline.source_name
+                            ].compactMap { $0 }.joined(separator: " · "),
+                            tone: ClaritasPalette.shellAccent(for: colorScheme)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                }
+
+                if let weather = mobilePriorityWeather {
+                    Button {
+                        model.selectedCountry = weather.country.uppercased()
+                    } label: {
+                        mobileSignalRow(
+                            icon: "cloud.sun",
+                            eyebrow: "Weather exception",
+                            value: "\(weather.country.uppercased()) · \(weather.temp_c.map { String(format: "%.0f°C", $0) } ?? "—")",
+                            detail: weather.weather_desc ?? weather.weather_main ?? "Current conditions",
+                            tone: ClaritasPalette.shellAccentSecondary(for: colorScheme)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                }
+
+                if let quote = mobilePriorityMarket {
+                    Button {
+                        model.selectedSymbol = quote.symbol
+                        model.selectedCountry = quote.country?.uppercased()
+                    } label: {
+                        mobileSignalRow(
+                            icon: "chart.line.uptrend.xyaxis",
+                            eyebrow: "Market mover",
+                            value: "\(quote.symbol) · \(quote.percent_change.map { String(format: "%+.2f%%", $0) } ?? "—")",
+                            detail: quote.company_name ?? quote.exchange ?? "Tracked instrument",
+                            tone: (quote.percent_change ?? 0) >= 0
+                                ? ClaritasPalette.positiveText(for: colorScheme)
+                                : ClaritasPalette.negativeText(for: colorScheme)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if mobilePriorityHeadline == nil &&
+                    mobilePriorityWeather == nil &&
+                    mobilePriorityMarket == nil {
+                    Text("Current sources have not produced an actionable signal yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .padding(.vertical, 16)
+                }
+            }
+        }
+    }
+
+    private func mobileSignalRow(
+        icon: String,
+        eyebrow: String,
+        value: String,
+        detail: String,
+        tone: Color
+    ) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tone)
+                .frame(width: 28, height: 28)
+                .background(tone.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(eyebrow.uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(1)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    .lineLimit(2)
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+        }
+        .frame(minHeight: 64)
+        .contentShape(Rectangle())
+    }
+
+    private var mobileMarketAverage: Double {
+        let changes = model.marketQuotes.compactMap(\.percent_change)
+        guard !changes.isEmpty else { return 0 }
+        return changes.reduce(0, +) / Double(changes.count)
+    }
+
+    private var mobileThresholdCount: Int {
+        let weatherCount = model.weather.filter {
+            ($0.temp_c.map { $0 >= 35 || $0 <= 0 } ?? false) ||
+                ($0.humidity.map { $0 >= 85 } ?? false) ||
+                ($0.wind_speed.map { $0 >= 15 } ?? false)
+        }.count
+        let marketCount = model.marketQuotes.filter {
+            abs($0.percent_change ?? 0) >= 2
+        }.count
+        return weatherCount + marketCount
+    }
+
+    private var mobilePriorityHeadline: NewsItem? {
+        guard let selected = model.selectedCountry?.uppercased() else {
+            return model.news.first
+        }
+        return model.news.first { ($0.country_iso2 ?? "").uppercased() == selected }
+    }
+
+    private var mobilePriorityWeather: CountryWeather? {
+        let rows: [CountryWeather]
+        if let selected = model.selectedCountry?.uppercased() {
+            rows = model.weather.filter { $0.country.uppercased() == selected }
+        } else {
+            rows = model.weather
+        }
+        return rows.max { mobileWeatherSeverity($0) < mobileWeatherSeverity($1) }
+    }
+
+    private func mobileWeatherSeverity(_ row: CountryWeather) -> Double {
+        let temperature = row.temp_c.map { abs($0 - 20) } ?? 0
+        let humidity = max(0, (row.humidity ?? 0) - 70) / 2
+        let wind = max(0, (row.wind_speed ?? 0) - 8)
+        return temperature + humidity + wind
+    }
+
+    private var mobilePriorityMarket: MarketQuote? {
+        let rows: [MarketQuote]
+        if let selected = model.selectedCountry?.uppercased() {
+            rows = model.marketQuotes.filter { ($0.country ?? "").uppercased() == selected }
+        } else {
+            rows = model.marketQuotes
+        }
+        return rows.max { abs($0.percent_change ?? 0) < abs($1.percent_change ?? 0) }
+    }
+
+    private var mobileCountryName: String {
+        guard let selected = model.selectedCountry?.uppercased() else { return "Global" }
+        return Locale(identifier: "en_US").localizedString(forRegionCode: selected) ?? selected
+    }
+
+    private var mobileCountryNews: [NewsItem] {
+        guard let selected = model.selectedCountry?.uppercased() else { return [] }
+        return model.news.filter { ($0.country_iso2 ?? "").uppercased() == selected }
+    }
+
+    private var mobileCountryWeather: CountryWeather? {
+        guard let selected = model.selectedCountry?.uppercased() else { return nil }
+        return model.weather
+            .filter { $0.country.uppercased() == selected }
+            .max { ($0.observedDate ?? .distantPast) < ($1.observedDate ?? .distantPast) }
+    }
+
+    private var mobileCountryMarkets: [MarketQuote] {
+        guard let selected = model.selectedCountry?.uppercased() else { return [] }
+        return model.marketQuotes
+            .filter { ($0.country ?? "").uppercased() == selected }
+            .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
+    }
+
+    private var mobileCountryLeadership: CountryLeadership? {
+        guard let selected = model.selectedCountry?.uppercased() else { return nil }
+        return model.leadership.first { $0.country.uppercased() == selected }
     }
 
     private func filteredWeather() -> [CountryWeather] {
@@ -2647,6 +3022,18 @@ enum SignalMapRegion: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
 
+    var geographicBounds: (minLon: Double, maxLon: Double, minLat: Double, maxLat: Double) {
+        switch self {
+        case .global: return (-180, 180, -60, 82)
+        case .americas: return (-170, -30, -58, 75)
+        case .europe: return (-25, 50, 32, 72)
+        case .africa: return (-22, 58, -38, 40)
+        case .asia: return (35, 180, -12, 80)
+        case .apac: return (65, 180, -52, 60)
+        case .oceania: return (105, 180, -52, 8)
+        }
+    }
+
     var coordinateRegion: MKCoordinateRegion {
         switch self {
         case .global:
@@ -2739,6 +3126,7 @@ enum SignalMapRegion: String, CaseIterable, Identifiable {
 struct SignalMapPanel: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @AppStorage("DEFAULT_MAP_MODE") private var storedMode: String = SignalMapMode.signals.rawValue
     @State private var mode: SignalMapMode = .signals
     @State private var region: SignalMapRegion = .global
@@ -2797,14 +3185,15 @@ struct SignalMapPanel: View {
                                 resetToken += 1
                             }
                             .buttonStyle(.bordered)
-                            .controlSize(.small)
+                            .controlSize(.regular)
+                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
                             .tint(region == item ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
                         }
                     }
                 }
 
                 HStack(spacing: 8) {
-                    if allowsComparison {
+                    if allowsComparison, horizontalSizeClass == .regular {
                         Button {
                             compareMode.toggle()
                             if !compareMode { comparisonCountry = nil }
@@ -2815,16 +3204,18 @@ struct SignalMapPanel: View {
                         .tint(compareMode ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
                     }
 
-                    Button {
-                        pinnedCountry = model.selectedCountry?.uppercased()
-                    } label: {
-                        Label(
-                            pinnedCountry == nil ? "Pin selection" : "Pinned \(pinnedCountry!)",
-                            systemImage: pinnedCountry == nil ? "pin" : "pin.fill"
-                        )
+                    if horizontalSizeClass == .regular {
+                        Button {
+                            pinnedCountry = model.selectedCountry?.uppercased()
+                        } label: {
+                            Label(
+                                pinnedCountry == nil ? "Pin selection" : "Pinned \(pinnedCountry!)",
+                                systemImage: pinnedCountry == nil ? "pin" : "pin.fill"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.selectedCountry == nil)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(model.selectedCountry == nil)
 
                     Spacer()
 
@@ -3199,47 +3590,64 @@ private struct InteractiveCountryBubbleMap: View {
     let resetToken: Int
     let onSelectCountry: (String) -> Void
 
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var region = SignalMapRegion.global.coordinateRegion
-
-    private var pointsSignature: String {
-        points.map { "\($0.id)-\($0.magnitude)" }.joined(separator: "|")
-    }
+    @State private var committedScale: CGFloat = 1
+    @GestureState private var gestureScale: CGFloat = 1
+    @State private var committedOffset: CGSize = .zero
+    @GestureState private var gestureOffset: CGSize = .zero
 
     var body: some View {
-        ZStack {
-            Map(coordinateRegion: $region, interactionModes: [.pan, .zoom], annotationItems: points) { point in
-                MapAnnotation(coordinate: point.coordinate) {
-                    bubbleView(for: point)
+        GeometryReader { proxy in
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    LinearGradient(
+                        colors: [
+                            Color(hex: "#0C1C27"),
+                            ClaritasPalette.shellSidebar(for: .dark),
+                            Color(hex: "#071018")
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+
+                    Canvas { context, size in
+                        drawGrid(context: context, size: size)
+                        drawLand(context: context, size: size)
+                    }
+
+                    ForEach(points.prefix(64)) { point in
+                        bubbleView(for: point)
+                            .position(project(point.coordinate, size: proxy.size))
+                    }
+                }
+                .scaleEffect(committedScale * gestureScale)
+                .offset(
+                    x: committedOffset.width + gestureOffset.width,
+                    y: committedOffset.height + gestureOffset.height
+                )
+                .contentShape(Rectangle())
+                .simultaneousGesture(magnificationGesture)
+                .simultaneousGesture(dragGesture)
+
+                viewportControls
+
+                if points.isEmpty {
+                    Text("No mapped \(mapRegion.label.lowercased()) data for this layer.")
+                        .font(.footnote)
+                        .foregroundStyle(Color(hex: "#F2EEE6"))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color(hex: "#11222E").opacity(0.94), in: Capsule())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .overlay {
-                LinearGradient(
-                    colors: [
-                        ClaritasPalette.darkBlue.opacity(0.08),
-                        Color.clear,
-                        ClaritasPalette.shellBackground(for: .dark).opacity(0.12)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .allowsHitTesting(false)
-            }
-
-            if points.isEmpty {
-                Text("No mapped \(mapRegion.label.lowercased()) data for this layer.")
-                    .font(.footnote)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .padding()
+            .clipped()
+            .onAppear { resetViewport() }
+            .onChange(of: mapRegion) { _ in resetViewport() }
+            .onChange(of: resetToken) { _ in resetViewport() }
+            .onChange(of: selectedCountry) { next in
+                focus(on: next, size: proxy.size)
             }
         }
-        .onAppear { fitRegion(animated: false) }
-        .onChange(of: mapRegion) { _ in fitRegion(animated: true) }
-        .onChange(of: pointsSignature) { _ in fitRegion(animated: true) }
-        .onChange(of: resetToken) { _ in fitRegion(animated: true) }
-        .onChange(of: selectedCountry) { next in centerOnCountry(next) }
     }
 
     private func bubbleView(for point: CountryBubblePoint) -> some View {
@@ -3256,21 +3664,21 @@ private struct InteractiveCountryBubbleMap: View {
                         Circle()
                             .stroke(
                                 featured
-                                    ? ClaritasPalette.shellAccent(for: colorScheme)
-                                    : ClaritasPalette.shellAccentSecondary(for: colorScheme),
+                                    ? ClaritasPalette.shellAccent(for: .dark)
+                                    : ClaritasPalette.shellAccentSecondary(for: .dark),
                                 style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])
                             )
                             .frame(width: size + 12, height: size + 12)
                     }
                     Circle()
-                        .fill(ClaritasPalette.shellAccent(for: colorScheme).opacity(0.28))
+                        .fill(ClaritasPalette.shellAccent(for: .dark).opacity(0.26))
                         .frame(width: size + 8, height: size + 8)
                     Circle()
-                        .fill(ClaritasPalette.shellAccent(for: colorScheme))
+                        .fill(ClaritasPalette.shellAccent(for: .dark))
                         .overlay(
                             Circle().stroke(
                                 compared
-                                    ? ClaritasPalette.shellAccentSecondary(for: colorScheme)
+                                    ? ClaritasPalette.shellAccentSecondary(for: .dark)
                                     : Color.white.opacity(selected ? 1 : 0.72),
                                 lineWidth: selected || compared ? 3 : 1.5
                             )
@@ -3304,32 +3712,243 @@ private struct InteractiveCountryBubbleMap: View {
             return 24
         }
         let normalized = (log1p(max(point.magnitude, 0)) - minimum) / (maximum - minimum)
-        return 20 + CGFloat(normalized * 18)
+        return 18 + CGFloat(normalized * 18)
     }
 
-    private func fitRegion(animated: Bool) {
-        setRegion(mapRegion.coordinateRegion, animated: animated)
+    private var viewportControls: some View {
+        VStack(spacing: 0) {
+            viewportButton(icon: "plus", label: "Zoom in") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    committedScale = min(3, committedScale + 0.35)
+                }
+            }
+            Divider().overlay(Color.white.opacity(0.12))
+            viewportButton(icon: "minus", label: "Zoom out") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    committedScale = max(1, committedScale - 0.35)
+                    if committedScale == 1 {
+                        committedOffset = .zero
+                    }
+                }
+            }
+            Divider().overlay(Color.white.opacity(0.12))
+            viewportButton(icon: "scope", label: "Reset map") {
+                resetViewport()
+            }
+        }
+        .background(Color(hex: "#11222E").opacity(0.94), in: RoundedRectangle(cornerRadius: 9))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+        .padding(10)
     }
 
-    private func centerOnCountry(_ iso: String?) {
+    private func viewportButton(
+        icon: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(hex: "#F2EEE6"))
+                .frame(width: ClaritasLayout.minimumTouchTarget, height: ClaritasLayout.minimumTouchTarget)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .updating($gestureScale) { value, state, _ in
+                state = value
+            }
+            .onEnded { value in
+                committedScale = min(3, max(1, committedScale * value))
+                if committedScale == 1 {
+                    committedOffset = .zero
+                }
+            }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .updating($gestureOffset) { value, state, _ in
+                state = value.translation
+            }
+            .onEnded { value in
+                guard committedScale > 1 else {
+                    committedOffset = .zero
+                    return
+                }
+                committedOffset = CGSize(
+                    width: max(-220, min(220, committedOffset.width + value.translation.width)),
+                    height: max(-160, min(160, committedOffset.height + value.translation.height))
+                )
+            }
+    }
+
+    private func resetViewport() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            committedScale = 1
+            committedOffset = .zero
+        }
+    }
+
+    private func focus(on iso: String?, size: CGSize) {
         guard let iso = iso?.uppercased(),
               let point = points.first(where: { $0.iso == iso }) else {
             return
         }
-        let focused = MKCoordinateRegion(
-            center: point.coordinate,
-            span: MKCoordinateSpan(latitudeDelta: 30, longitudeDelta: 42)
-        )
-        setRegion(focused, animated: true)
-    }
-
-    private func setRegion(_ next: MKCoordinateRegion, animated: Bool) {
-        if animated {
-            withAnimation(.easeInOut(duration: 0.28)) { region = next }
-        } else {
-            region = next
+        let projected = project(point.coordinate, size: size)
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let nextScale = max(committedScale, 1.35)
+        withAnimation(.easeInOut(duration: 0.24)) {
+            committedScale = nextScale
+            committedOffset = CGSize(
+                width: max(-220, min(220, -nextScale * (projected.x - center.x))),
+                height: max(-160, min(160, -nextScale * (projected.y - center.y)))
+            )
         }
     }
+
+    private func drawGrid(context: GraphicsContext, size: CGSize) {
+        var grid = Path()
+        for index in 1..<6 {
+            let x = size.width * CGFloat(index) / 6
+            grid.move(to: CGPoint(x: x, y: 0))
+            grid.addLine(to: CGPoint(x: x, y: size.height))
+        }
+        for index in 1..<4 {
+            let y = size.height * CGFloat(index) / 4
+            grid.move(to: CGPoint(x: 0, y: y))
+            grid.addLine(to: CGPoint(x: size.width, y: y))
+        }
+        context.stroke(grid, with: .color(Color.white.opacity(0.055)), lineWidth: 0.7)
+    }
+
+    private func drawLand(context: GraphicsContext, size: CGSize) {
+        for polygon in ClaritasWorldGeometry.land {
+            let visiblePolygon = clipped(polygon)
+            guard visiblePolygon.count >= 3 else { continue }
+            var path = Path()
+            for (index, coordinate) in visiblePolygon.enumerated() {
+                let point = project(
+                    CLLocationCoordinate2D(latitude: coordinate.1, longitude: coordinate.0),
+                    size: size
+                )
+                if index == 0 {
+                    path.move(to: point)
+                } else {
+                    path.addLine(to: point)
+                }
+            }
+            path.closeSubpath()
+            context.fill(path, with: .color(Color(hex: "#254453").opacity(0.82)))
+            context.stroke(path, with: .color(Color(hex: "#77A8BA").opacity(0.5)), lineWidth: 0.8)
+        }
+    }
+
+    private func project(_ coordinate: CLLocationCoordinate2D, size: CGSize) -> CGPoint {
+        let bounds = mapRegion.geographicBounds
+        let x = (coordinate.longitude - bounds.minLon) / (bounds.maxLon - bounds.minLon)
+        let y = (bounds.maxLat - coordinate.latitude) / (bounds.maxLat - bounds.minLat)
+        return CGPoint(
+            x: max(5, min(size.width - 5, x * size.width)),
+            y: max(5, min(size.height - 5, y * size.height))
+        )
+    }
+
+    private func clipped(_ polygon: [(Double, Double)]) -> [(Double, Double)] {
+        let bounds = mapRegion.geographicBounds
+        let minLon = CGFloat(bounds.minLon)
+        let maxLon = CGFloat(bounds.maxLon)
+        let minLat = CGFloat(bounds.minLat)
+        let maxLat = CGFloat(bounds.maxLat)
+        var polygonPoints = polygon.map { CGPoint(x: CGFloat($0.0), y: CGFloat($0.1)) }
+        polygonPoints = clip(
+            polygonPoints,
+            inside: { $0.x >= minLon },
+            intersection: { start, end in
+                let ratio = (minLon - start.x) / (end.x - start.x)
+                return CGPoint(x: minLon, y: start.y + ratio * (end.y - start.y))
+            }
+        )
+        polygonPoints = clip(
+            polygonPoints,
+            inside: { $0.x <= maxLon },
+            intersection: { start, end in
+                let ratio = (maxLon - start.x) / (end.x - start.x)
+                return CGPoint(x: maxLon, y: start.y + ratio * (end.y - start.y))
+            }
+        )
+        polygonPoints = clip(
+            polygonPoints,
+            inside: { $0.y >= minLat },
+            intersection: { start, end in
+                let ratio = (minLat - start.y) / (end.y - start.y)
+                return CGPoint(x: start.x + ratio * (end.x - start.x), y: minLat)
+            }
+        )
+        polygonPoints = clip(
+            polygonPoints,
+            inside: { $0.y <= maxLat },
+            intersection: { start, end in
+                let ratio = (maxLat - start.y) / (end.y - start.y)
+                return CGPoint(x: start.x + ratio * (end.x - start.x), y: maxLat)
+            }
+        )
+        return polygonPoints.map { (Double($0.x), Double($0.y)) }
+    }
+
+    private func clip(
+        _ input: [CGPoint],
+        inside: (CGPoint) -> Bool,
+        intersection: (CGPoint, CGPoint) -> CGPoint
+    ) -> [CGPoint] {
+        guard var start = input.last else { return [] }
+        var output: [CGPoint] = []
+        for end in input {
+            if inside(end) {
+                if !inside(start) {
+                    output.append(intersection(start, end))
+                }
+                output.append(end)
+            } else if inside(start) {
+                output.append(intersection(start, end))
+            }
+            start = end
+        }
+        return output
+    }
+}
+
+private enum ClaritasWorldGeometry {
+    static let land: [[(Double, Double)]] = [
+        [
+            (-168, 70), (-150, 67), (-140, 59), (-130, 54), (-124, 48), (-123, 37),
+            (-116, 28), (-105, 22), (-96, 19), (-84, 9), (-77, 8), (-70, 18),
+            (-64, 31), (-52, 48), (-58, 61), (-73, 72), (-100, 78), (-140, 74)
+        ],
+        [
+            (-82, 10), (-72, 11), (-62, 5), (-50, -5), (-38, -24), (-51, -36),
+            (-54, -55), (-69, -52), (-73, -48), (-78, -25), (-80, -12)
+        ],
+        [
+            (-18, 36), (-9, 44), (5, 58), (20, 65), (30, 70), (58, 62),
+            (88, 74), (120, 70), (145, 68), (178, 52), (160, 39), (154, 28),
+            (136, 20), (118, 4), (105, 4), (101, 18), (90, 22), (72, 20),
+            (54, 8), (42, 30), (28, 34), (18, 42), (10, 42)
+        ],
+        [
+            (-18, 35), (0, 37), (10, 37), (24, 32), (34, 30), (51, 12),
+            (45, -15), (40, -35), (25, -35), (18, -35), (8, -28), (0, -18),
+            (-9, 5), (-12, 8)
+        ],
+        [(112, -12), (128, -10), (153, -10), (156, -27), (153, -38), (132, -45), (113, -32)],
+        [(166, -35), (179, -38), (178, -43), (174, -48), (166, -44)]
+    ]
 }
 
 private struct CountryBubblePoint: Identifiable {

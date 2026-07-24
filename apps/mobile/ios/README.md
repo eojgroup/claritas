@@ -24,17 +24,16 @@ The project contains one App Store product with two Xcode targets:
    - Ensure `AUTH_CALLBACK_URL` matches your registered iOS URL scheme (default: `claritas://auth/callback`).
    - Or at runtime set `UserDefaults.standard.set("https://your-host.com", forKey: "API_BASE_URL")` in AppDelegate for advanced configs.
 4. Run `Claritas` on a paired iPhone + Apple Watch simulator or devices and sign in on iPhone.
-5. Run/install `Claritas Watch App`. It loads the latest published briefing, news, markets, and weather, and caches the last successful update.
+5. Run/install `Claritas Watch App`. Its three-page companion flow preserves the interactive signal map, adds a read-only published briefing glance, and condenses urgent news/weather/market context into one Pulse page. It caches the last successful update.
 6. Run `Claritas` on an iPad simulator or device. The same universal app provides:
    - Persistent split-view navigation.
-   - Daily briefing and cross-signal command center.
-   - Full dashboard, news, weather, markets, admin, profile, and policies workspaces.
+   - A web-aligned, map-led signal desk with native analysis tabs, focus state, KPI posture, and a two-column review stage.
+   - Full news, podcast, weather, markets, admin, profile, and policies workspaces.
    - Multi-window iPadOS support.
 7. The iPhone app will load:
-   - Country news list (with thumbnail proxy).
-   - Weather list (with filters + refresh).
-   - Country profile panel reflecting your selection.
-   - Admin panel (for users with `admin` role) with ingestion controls and user/role management.
+   - Five stable destinations: Pulse, News, Weather, Markets, and More.
+   - A condensed map-first Pulse with current posture, selection-driven country context, and one actionable item per urgent domain.
+   - Podcast conclusions, the published briefing, account/reference tools, and eligible admin controls under More.
 
 ## Watch Authentication
 
@@ -114,5 +113,5 @@ For CI builds that regenerate the project, `MARKETING_VERSION`, `BUILD_NUMBER`, 
 
 - ATS is currently permissive (NSAllowsArbitraryLoads=true) to simplify dev. For production, replace with explicit domain exceptions or HTTPS endpoints.
 - Backend auth redirect validation now supports non-HTTP callback schemes via `AUTH_ALLOWED_REDIRECT_SCHEMES` (default includes `claritas`).
-- The map view is a placeholder; a future step can add country bubble overlays using MapKit annotations and an ISO2->centroid dataset.
+- The native map uses a touch-first dark geospatial canvas, shared country-centroid relevance points, region scope, selection, ranked bubble scale, pan/zoom, and reset behavior aligned with web and Watch.
 - The structure is modular (Models, Services, Views) to ease future extensions (auth, settings, notifications, charts).

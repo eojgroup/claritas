@@ -11,9 +11,8 @@ struct WatchRootView: View {
             } else {
                 TabView {
                     WatchSignalGlanceView()
-                    WatchNewsView()
-                    WatchMarketsView()
-                    WatchWeatherView()
+                    WatchBriefingView()
+                    WatchPulseView()
                 }
                 .tabViewStyle(.verticalPage)
             }
@@ -653,14 +652,28 @@ private struct WatchBriefingView: View {
                     }
 
                     if let briefing = model.briefing {
-                        Text(briefing.title)
-                            .font(.headline)
-                            .foregroundStyle(WatchPalette.cream)
-
-                        Text(briefing.update_text)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(briefing.status.uppercased())
+                                        .font(.system(size: 8, weight: .bold))
+                                        .tracking(1)
+                                        .foregroundStyle(WatchPalette.orange)
+                                    Spacer()
+                                    Text(briefing.updatedDate?.formatted(date: .omitted, time: .shortened) ?? briefing.briefing_date)
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(briefing.title)
+                                    .font(.headline)
+                                    .foregroundStyle(WatchPalette.cream)
+                                    .lineLimit(2)
+                                Text(briefing.update_text)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(4)
+                            }
+                        }
 
                         ForEach(Array(briefing.key_takeaways.prefix(2).enumerated()), id: \.offset) { _, takeaway in
                             HStack(alignment: .top, spacing: 6) {
@@ -756,6 +769,134 @@ private struct WatchBriefingView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct WatchPulseView: View {
+    @EnvironmentObject private var model: WatchAppModel
+
+    private var topMover: MarketQuote? {
+        model.markets.max {
+            abs($0.percent_change ?? 0) < abs($1.percent_change ?? 0)
+        }
+    }
+
+    private var priorityWeather: CountryWeather? {
+        (model.weatherAlerts.isEmpty ? model.weather : model.weatherAlerts)
+            .max { weatherSeverity($0) < weatherSeverity($1) }
+    }
+
+    private func weatherSeverity(_ row: CountryWeather) -> Double {
+        let temperature = row.temp_c.map { abs($0 - 20) } ?? 0
+        let humidity = max(0, (row.humidity ?? 0) - 70) / 2
+        let wind = max(0, (row.wind_speed ?? 0) - 8)
+        return temperature + humidity + wind
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        WatchSectionLabel(title: "Urgent pulse", icon: "waveform.path.ecg")
+                        Spacer()
+                        WatchRefreshStatus()
+                    }
+
+                    WatchCard {
+                        HStack {
+                            Text("\(model.criticalSignalCount)")
+                                .font(.title2.weight(.bold))
+                                .monospacedDigit()
+                                .foregroundStyle(
+                                    model.criticalSignalCount > 0
+                                        ? WatchPalette.negative
+                                        : WatchPalette.sage
+                                )
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("threshold signals")
+                                    .font(.caption.weight(.semibold))
+                                Text("Weather + markets")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    if let headline = model.news.first {
+                        pulseCard(
+                            label: "Headline",
+                            icon: "newspaper",
+                            title: headline.title ?? "Untitled",
+                            detail: [
+                                headline.country_iso2?.uppercased(),
+                                headline.source_name
+                            ].compactMap { $0 }.joined(separator: " · "),
+                            tone: WatchPalette.orange
+                        )
+                    }
+
+                    if let weather = priorityWeather {
+                        pulseCard(
+                            label: "Weather",
+                            icon: "cloud.sun",
+                            title: "\(weather.country.uppercased()) · \(weather.temp_c.map { String(format: "%.0f°", $0) } ?? "—")",
+                            detail: weather.weather_desc ?? weather.weather_main ?? "Current conditions",
+                            tone: WatchPalette.sage
+                        )
+                    }
+
+                    if let mover = topMover {
+                        pulseCard(
+                            label: "Market",
+                            icon: "chart.line.uptrend.xyaxis",
+                            title: "\(mover.symbol) · \(mover.percent_change.map { String(format: "%+.1f%%", $0) } ?? "—")",
+                            detail: mover.company_name ?? mover.exchange ?? "Tracked instrument",
+                            tone: (mover.percent_change ?? 0) >= 0
+                                ? WatchPalette.sage
+                                : WatchPalette.negative
+                        )
+                    }
+
+                    Button {
+                        model.openOnPhone("dashboard")
+                    } label: {
+                        Label("Continue on iPhone", systemImage: "iphone")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 3)
+            }
+            .navigationTitle("Pulse")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+        }
+    }
+
+    private func pulseCard(
+        label: String,
+        icon: String,
+        title: String,
+        detail: String,
+        tone: Color
+    ) -> some View {
+        WatchCard {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(label.uppercased(), systemImage: icon)
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(tone)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(WatchPalette.cream)
+                    .lineLimit(2)
+                if !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
     }
 }
 

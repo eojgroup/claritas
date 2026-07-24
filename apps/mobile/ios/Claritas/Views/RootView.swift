@@ -12,6 +12,8 @@ struct RootView: View {
         case admin
         case profile
         case policies
+        case briefing
+        case more
 
         var title: String {
             switch self {
@@ -24,6 +26,8 @@ struct RootView: View {
             case .admin: return "Admin"
             case .profile: return "Profile"
             case .policies: return "Policies"
+            case .briefing: return "Daily briefing"
+            case .more: return "More"
             }
         }
 
@@ -38,6 +42,8 @@ struct RootView: View {
             case .admin: return "shield.lefthalf.filled"
             case .profile: return "person.crop.circle"
             case .policies: return "doc.text"
+            case .briefing: return "sparkles"
+            case .more: return "ellipsis.circle"
             }
         }
     }
@@ -48,6 +54,7 @@ struct RootView: View {
     @State private var tab: Tab = .dashboard
     @State private var sidebarSelection: Tab? = .overview
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var compactMorePath: [Tab] = []
     @AppStorage("THEME_DARK") private var dark: Bool = true
 
     var body: some View {
@@ -92,10 +99,13 @@ struct RootView: View {
             case "news": next = .news
             case "weather": next = .weather
             case "markets": next = .markets
+            case "briefing":
+                next = .more
+                compactMorePath = [.briefing]
             default: next = .dashboard
             }
             tab = next
-            sidebarSelection = next
+            sidebarSelection = sidebarItems.contains(next) ? next : .overview
         }
     }
 
@@ -105,14 +115,7 @@ struct RootView: View {
             compactTab(.news)
             compactTab(.weather)
             compactTab(.markets)
-            compactTab(.profile)
-            compactTab(.podcasts)
-
-            if model.isAdmin {
-                compactTab(.admin)
-            }
-
-            compactTab(.policies)
+            compactTab(.more)
         }
         .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
         .onChange(of: model.isAdmin) { isAdmin in
@@ -123,10 +126,25 @@ struct RootView: View {
     }
 
     private func compactTab(_ item: Tab) -> some View {
-        NavigationStack {
-            destinationView(for: item)
-                .navigationTitle(item == .dashboard ? "Claritas" : item.title)
-                .modifier(ShellNavigationChrome())
+        Group {
+            if item == .more {
+                NavigationStack(path: $compactMorePath) {
+                    destinationView(for: item)
+                        .navigationTitle(item.title)
+                        .modifier(ShellNavigationChrome())
+                        .navigationDestination(for: Tab.self) { destination in
+                            destinationView(for: destination)
+                                .navigationTitle(destination.title)
+                                .modifier(ShellNavigationChrome())
+                        }
+                }
+            } else {
+                NavigationStack {
+                    destinationView(for: item)
+                        .navigationTitle(item == .dashboard ? "Claritas" : item.title)
+                        .modifier(ShellNavigationChrome())
+                }
+            }
         }
         .tabItem { Label(item.title, systemImage: item.icon) }
         .tag(item)
@@ -247,6 +265,10 @@ struct RootView: View {
             ProfileView()
         case .policies:
             PoliciesWorkspaceView()
+        case .briefing:
+            DailyBriefingWorkspaceView()
+        case .more:
+            CompactMoreView()
         }
     }
 
@@ -256,6 +278,102 @@ struct RootView: View {
 
     private var marketStatusTaskKey: String {
         "\(model.authStatus.rawValue)-\(model.hasPaidAccess)-status"
+    }
+}
+
+private struct CompactMoreView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    BrandSectionHeader(
+                        kicker: "Claritas",
+                        title: "More",
+                        detail: "Evidence, briefing, account, and reference tools."
+                    )
+
+                    BrandCard(title: "Intelligence", icon: "waveform.path.ecg") {
+                        destinationRow(
+                            title: "Podcast intelligence",
+                            detail: "Overall conclusions and attributed episode evidence",
+                            icon: "mic.fill",
+                            destination: PodcastWorkspaceView()
+                        )
+                        Divider()
+                        destinationRow(
+                            title: "Daily briefing",
+                            detail: "Published cross-domain synopsis and delivery schedule",
+                            icon: "sparkles",
+                            destination: DailyBriefingWorkspaceView()
+                        )
+                    }
+
+                    if model.isAdmin {
+                        BrandCard(title: "Operations", icon: "shield.lefthalf.filled") {
+                            destinationRow(
+                                title: "Admin",
+                                detail: "Service status and operational controls",
+                                icon: "gearshape.2",
+                                destination: AdminWorkspaceView()
+                            )
+                        }
+                    }
+
+                    BrandCard(title: "Account and reference", icon: "person.crop.circle") {
+                        destinationRow(
+                            title: "Profile",
+                            detail: model.authUser?.display_name ?? model.authUser?.email ?? "Account settings",
+                            icon: "person.crop.circle",
+                            destination: ProfileView()
+                        )
+                        Divider()
+                        destinationRow(
+                            title: "Policies",
+                            detail: "Privacy, terms, cookies, and copyright",
+                            icon: "doc.text",
+                            destination: PoliciesWorkspaceView()
+                        )
+                    }
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 20)
+            }
+        }
+    }
+
+    private func destinationRow<Destination: View>(
+        title: String,
+        detail: String,
+        icon: String,
+        destination: Destination
+    ) -> some View {
+        NavigationLink(destination: destination) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.headline)
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .lineLimit(2)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            }
+            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
