@@ -1145,7 +1145,7 @@ export default function ClaritasDashboard() {
     fetchCountryLeadership()
       .then(setLeadershipStats)
       .catch(() => setLeadershipStats([]));
-    fetchMarketQuotes({ refresh: true })
+    fetchMarketQuotes({ refresh: false })
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
     fetchTransportOverview({ detail: "aggregate" })
@@ -1250,7 +1250,7 @@ export default function ClaritasDashboard() {
     };
     const id = window.setInterval(() => {
       void refresh();
-    }, 20_000);
+    }, 60_000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -1262,7 +1262,7 @@ export default function ClaritasDashboard() {
     let cancelled = false;
     const refreshStatus = async () => {
       try {
-        const rows = await fetchMarketStatus({ refresh: true });
+        const rows = await fetchMarketStatus({ refresh: false });
         if (!cancelled) setMarketStatusRows(rows);
       } catch {
         if (!cancelled) setMarketStatusRows([]);

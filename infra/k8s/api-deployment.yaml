@@ -46,6 +46,8 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_SECRET, optional: true } }
             - name: AISSTREAM_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-aisstream, key: AISSTREAM_API_KEY, optional: true } }
+            - name: AISSTREAM_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_ENABLED, optional: true } }
             - name: AISSTREAM_SAMPLE_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_SAMPLE_SECONDS, optional: true } }
             - name: ADSB_LOL_POLL_ENABLED
@@ -120,6 +122,38 @@ spec:
               value: "127.0.0.1"
             - name: DB_PORT
               value: "5432"
+            - name: DB_CONNECTION_TIMEOUT_MS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_CONNECTION_TIMEOUT_MS, optional: true } }
+            - name: DB_POOL_MAX
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_POOL_MAX, optional: true } }
+            - name: DB_POOL_IDLE_TIMEOUT_MS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_POOL_IDLE_TIMEOUT_MS, optional: true } }
+            - name: DB_POOL_MAX_LIFETIME_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_POOL_MAX_LIFETIME_SECONDS, optional: true } }
+            - name: DB_POOL_MONITOR_INTERVAL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_POOL_MONITOR_INTERVAL_SECONDS, optional: true } }
+            - name: DB_STATEMENT_TIMEOUT_MS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_STATEMENT_TIMEOUT_MS, optional: true } }
+            - name: DB_SLOW_QUERY_MS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_SLOW_QUERY_MS, optional: true } }
+            - name: CLARITAS_DB_APPLICATION_NAME
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: CLARITAS_DB_APPLICATION_NAME, optional: true } }
+            - name: TRANSPORT_TRACK_SAMPLE_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_TRACK_SAMPLE_SECONDS, optional: true } }
+            - name: TRANSPORT_OVERVIEW_CACHE_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_OVERVIEW_CACHE_SECONDS, optional: true } }
+            - name: TRANSPORT_TRACK_RETENTION_DAYS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_TRACK_RETENTION_DAYS, optional: true } }
+            - name: TRANSPORT_AGGREGATE_RETENTION_DAYS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_AGGREGATE_RETENTION_DAYS, optional: true } }
+            - name: TRANSPORT_SNAPSHOT_RETENTION_DAYS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_SNAPSHOT_RETENTION_DAYS, optional: true } }
+            - name: TRANSPORT_RETENTION_INTERVAL_MINUTES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RETENTION_INTERVAL_MINUTES, optional: true } }
+            - name: TRANSPORT_RETENTION_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RETENTION_BATCH_SIZE, optional: true } }
+            - name: TRANSPORT_RETENTION_MAX_BATCHES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RETENTION_MAX_BATCHES, optional: true } }
             - name: AUTH_BASE_URL
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_BASE_URL } }
             - name: AUTH_PROVIDERS

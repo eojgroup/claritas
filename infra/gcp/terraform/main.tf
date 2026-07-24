@@ -265,7 +265,7 @@ resource "google_sql_database_instance" "pg" {
   deletion_protection = true
 
   settings {
-    tier              = "db-f1-micro"
+    tier              = var.cloud_sql_tier
     availability_type = "ZONAL"
     disk_type         = "PD_SSD"
     disk_autoresize   = true

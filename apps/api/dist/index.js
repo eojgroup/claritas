@@ -65,6 +65,8 @@ app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 app.get("/readyz", async (_req, res) => {
     try {
         await db_1.pool.query("SELECT 1");
+        const poolStats = (0, db_1.getDatabasePoolStats)();
+        res.setHeader("X-Claritas-DB-Pool-Waiting", String(poolStats.waiting));
         return res.status(200).send("ready");
     }
     catch (error) {
@@ -2166,7 +2168,10 @@ app.get("/api/admin/ingestion/metrics", requireAdminRole, async (req, res) => {
             return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market, podcasts." });
         }
         const metrics = await (0, ingestion_admin_1.getMetrics)({ days, pipeline });
-        return res.json(metrics);
+        return res.json({
+            ...metrics,
+            database_pool: (0, db_1.getDatabasePoolStats)(),
+        });
     }
     catch (e) {
         return res.status(500).json({ error: e.message || String(e) });
@@ -2347,15 +2352,14 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
             : undefined;
         const refresh = typeof req.query.refresh === "string" &&
             ["1", "true", "yes", "on"].includes(req.query.refresh.trim().toLowerCase());
-        if (refresh) {
-            await (0, transport_1.refreshAviationNow)(false);
-        }
         const overview = await (0, transport_1.getTransportOverview)({
             detail,
             mode,
             country,
             entityLimit: Number.isFinite(entityLimitRaw) ? entityLimitRaw : undefined,
+            bypassCache: refresh,
         });
+        res.setHeader("Cache-Control", refresh ? "private, no-store" : "private, max-age=30, stale-while-revalidate=30");
         return res.json(overview);
     }
     catch (error) {
@@ -2482,6 +2486,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
         res.status(500).send("proxy error");
     }
 });
+(0, db_1.startDatabasePoolMonitoring)();
 (0, ingestion_automation_1.startIngestionAutomationWorker)();
 startDailyBriefingSchedulerWorker();
 (0, personal_briefing_1.startPersonalBriefingWorker)();

@@ -15,6 +15,35 @@ const connectionTimeoutMillis = Math.max(
   500,
   parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || "2500", 10) || 2500,
 );
+const poolMax = Math.max(
+  1,
+  Math.min(parseInt(process.env.DB_POOL_MAX || "5", 10) || 5, 20),
+);
+const idleTimeoutMillis = Math.max(
+  5_000,
+  Math.min(
+    parseInt(process.env.DB_POOL_IDLE_TIMEOUT_MS || "30000", 10) || 30_000,
+    300_000,
+  ),
+);
+const maxLifetimeSeconds = Math.max(
+  60,
+  Math.min(
+    parseInt(process.env.DB_POOL_MAX_LIFETIME_SECONDS || "1800", 10) || 1_800,
+    7_200,
+  ),
+);
+const statementTimeoutMillis = Math.max(
+  1_000,
+  Math.min(
+    parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || "15000", 10) || 15_000,
+    120_000,
+  ),
+);
+const slowQueryMillis = Math.max(
+  100,
+  Math.min(parseInt(process.env.DB_SLOW_QUERY_MS || "750", 10) || 750, 60_000),
+);
 
 export const pool = new Pool({
   host,
@@ -23,8 +52,60 @@ export const pool = new Pool({
   user,
   password,
   ssl: false,
+  application_name:
+    process.env.CLARITAS_DB_APPLICATION_NAME?.trim() || "claritas-api",
+  max: poolMax,
+  min: 0,
+  idleTimeoutMillis,
+  maxLifetimeSeconds,
   connectionTimeoutMillis,
+  statement_timeout: statementTimeoutMillis,
+  query_timeout: statementTimeoutMillis + 2_000,
 });
+
+pool.on("error", (error) => {
+  console.error(
+    JSON.stringify({
+      event: "database_pool_error",
+      message: error.message,
+      pool: getDatabasePoolStats(),
+    }),
+  );
+});
+
+export function getDatabasePoolStats() {
+  return {
+    max: poolMax,
+    total: pool.totalCount,
+    idle: pool.idleCount,
+    waiting: pool.waitingCount,
+  };
+}
+
+let poolMonitorTimer: NodeJS.Timeout | null = null;
+
+export function startDatabasePoolMonitoring(): void {
+  if (poolMonitorTimer) return;
+  const seconds = Math.max(
+    10,
+    Math.min(
+      parseInt(process.env.DB_POOL_MONITOR_INTERVAL_SECONDS || "30", 10) || 30,
+      300,
+    ),
+  );
+  poolMonitorTimer = setInterval(() => {
+    const stats = getDatabasePoolStats();
+    if (stats.waiting > 0 || stats.total >= stats.max) {
+      console.warn(
+        JSON.stringify({
+          event: "database_pool_pressure",
+          ...stats,
+        }),
+      );
+    }
+  }, seconds * 1_000);
+  poolMonitorTimer.unref();
+}
 
 export function isDatabaseUnavailableError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -68,12 +149,24 @@ export function isDatabaseUnavailableError(error: unknown): boolean {
 }
 
 export async function query<T = any>(text: string, params?: any[]): Promise<{ rows: T[] }>{
+  const startedAt = Date.now();
   const client = await pool.connect();
   try {
     const res = await client.query(text, params);
     return { rows: res.rows as T[] };
   } finally {
     client.release();
+    const durationMs = Date.now() - startedAt;
+    if (durationMs >= slowQueryMillis) {
+      console.warn(
+        JSON.stringify({
+          event: "database_slow_query",
+          duration_ms: durationMs,
+          statement: text.replace(/\s+/g, " ").trim().slice(0, 180),
+          pool: getDatabasePoolStats(),
+        }),
+      );
+    }
   }
 }
 

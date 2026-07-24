@@ -6,6 +6,7 @@ This directory contains architecture and product design references that should e
 
 - [UI Architecture and Cross-Device Design](cross-device-design.md): the analytics-first operational workspace, page archetypes, component contracts, adaptive rules, and implemented layouts for web, iPhone, iPad, and Apple Watch.
 - [Business Capabilities](capabilities.md): business capability map for the Claritas platform.
+- [Cloud SQL capacity and transport load](../operations/cloud-sql-capacity.md): production sizing, connection budgets, bounded transport retention, and incident controls.
 
 ## UI Architecture Decisions
 

@@ -17,7 +17,8 @@ const AIS_STREAM_URL = "wss://stream.aisstream.io/v0/stream";
 const ADSB_BASE_URL = "https://api.adsb.lol";
 const WORKER_LOCK_NAMESPACE = 9433;
 const WORKER_LOCK_KEY = 21;
-const TRANSPORT_TRACK_SAMPLE_MS = 3 * 60 * 1000;
+const TRANSPORT_SCOPE_GLOBAL = "*";
+const OVERVIEW_CACHE_MAX_ENTRIES = 64;
 const COUNTRY_REFERENCES = world_countries_1.default;
 const COUNTRY_NAME_BY_ISO = new Map(COUNTRY_REFERENCES.flatMap((country) => country.cca2
     ? [[country.cca2.toUpperCase(), country.name?.common ?? country.cca2.toUpperCase()]]
@@ -112,6 +113,21 @@ let aisReconnectAttempt = 0;
 let aviationRefresh = null;
 let lastAviationRefreshAt = 0;
 let transportWorkerStarted = false;
+let transportRetentionTimer = null;
+function enabledFromEnv(name, fallback = true) {
+    const value = process.env[name]?.trim().toLowerCase();
+    if (!value)
+        return fallback;
+    return !["0", "false", "no", "off"].includes(value);
+}
+function boundedIntegerFromEnv(name, fallback, minimum, maximum) {
+    const parsed = Number.parseInt(process.env[name] || "", 10);
+    return Math.max(minimum, Math.min(Number.isFinite(parsed) ? parsed : fallback, maximum));
+}
+function transportTrackSampleMilliseconds() {
+    return (boundedIntegerFromEnv("TRANSPORT_TRACK_SAMPLE_SECONDS", 300, 60, 1_800) *
+        1_000);
+}
 function asRecord(value) {
     return value && typeof value === "object" && !Array.isArray(value)
         ? value
@@ -310,8 +326,7 @@ function resolveAisBoundingBoxes() {
     return [[[-90, -180], [90, 180]]];
 }
 function aisSampleMilliseconds() {
-    const seconds = Number.parseInt(process.env.AISSTREAM_SAMPLE_SECONDS || "60", 10);
-    return Math.max(15, Math.min(Number.isFinite(seconds) ? seconds : 60, 900)) * 1000;
+    return (boundedIntegerFromEnv("AISSTREAM_SAMPLE_SECONDS", 300, 60, 900) * 1_000);
 }
 function queueMaritimeMessage(message) {
     const envelope = asRecord(message);
@@ -445,6 +460,10 @@ function queueMaritimeMessage(message) {
     }
 }
 function connectAisStream() {
+    if (!enabledFromEnv("AISSTREAM_ENABLED")) {
+        console.info("AISstream ingestion is disabled by AISSTREAM_ENABLED.");
+        return;
+    }
     const apiKey = process.env.AISSTREAM_API_KEY?.trim();
     if (!apiKey) {
         console.info("AISstream ingestion is disabled until AISSTREAM_API_KEY is configured.");
@@ -492,8 +511,11 @@ function connectAisStream() {
     });
 }
 function scheduleAisReconnect() {
-    if (aisReconnectTimer || !process.env.AISSTREAM_API_KEY?.trim())
+    if (aisReconnectTimer ||
+        !enabledFromEnv("AISSTREAM_ENABLED") ||
+        !process.env.AISSTREAM_API_KEY?.trim()) {
         return;
+    }
     const delay = Math.min(60_000, 2_000 * 2 ** Math.min(aisReconnectAttempt, 5));
     aisReconnectAttempt += 1;
     aisReconnectTimer = setTimeout(() => {
@@ -770,14 +792,46 @@ async function storeTransportSnapshots(snapshots) {
          flight_number = COALESCE(EXCLUDED.flight_number, transport_snapshot.flight_number),
          registration = COALESCE(EXCLUDED.registration, transport_snapshot.registration),
          vehicle_type = COALESCE(EXCLUDED.vehicle_type, transport_snapshot.vehicle_type),
-         latitude = COALESCE(EXCLUDED.latitude, transport_snapshot.latitude),
-         longitude = COALESCE(EXCLUDED.longitude, transport_snapshot.longitude),
-         heading = COALESCE(EXCLUDED.heading, transport_snapshot.heading),
-         speed = COALESCE(EXCLUDED.speed, transport_snapshot.speed),
-         altitude = COALESCE(EXCLUDED.altitude, transport_snapshot.altitude),
-         vertical_rate = COALESCE(EXCLUDED.vertical_rate, transport_snapshot.vertical_rate),
+         latitude = CASE
+           WHEN EXCLUDED.latitude IS NULL
+             OR EXCLUDED.observed_at < transport_snapshot.observed_at
+             THEN transport_snapshot.latitude
+           ELSE EXCLUDED.latitude
+         END,
+         longitude = CASE
+           WHEN EXCLUDED.longitude IS NULL
+             OR EXCLUDED.observed_at < transport_snapshot.observed_at
+             THEN transport_snapshot.longitude
+           ELSE EXCLUDED.longitude
+         END,
+         heading = CASE
+           WHEN EXCLUDED.latitude IS NULL
+             OR EXCLUDED.observed_at < transport_snapshot.observed_at
+             THEN transport_snapshot.heading
+           ELSE COALESCE(EXCLUDED.heading, transport_snapshot.heading)
+         END,
+         speed = CASE
+           WHEN EXCLUDED.latitude IS NULL
+             OR EXCLUDED.observed_at < transport_snapshot.observed_at
+             THEN transport_snapshot.speed
+           ELSE COALESCE(EXCLUDED.speed, transport_snapshot.speed)
+         END,
+         altitude = CASE
+           WHEN EXCLUDED.latitude IS NULL
+             OR EXCLUDED.observed_at < transport_snapshot.observed_at
+             THEN transport_snapshot.altitude
+           ELSE COALESCE(EXCLUDED.altitude, transport_snapshot.altitude)
+         END,
+         vertical_rate = CASE
+           WHEN EXCLUDED.latitude IS NULL
+             OR EXCLUDED.observed_at < transport_snapshot.observed_at
+             THEN transport_snapshot.vertical_rate
+           ELSE COALESCE(EXCLUDED.vertical_rate, transport_snapshot.vertical_rate)
+         END,
          current_country_iso2 = CASE
-           WHEN EXCLUDED.latitude IS NULL THEN transport_snapshot.current_country_iso2
+           WHEN EXCLUDED.latitude IS NULL
+             OR EXCLUDED.observed_at < transport_snapshot.observed_at
+             THEN transport_snapshot.current_country_iso2
            ELSE EXCLUDED.current_country_iso2
          END,
          origin_country_iso2 = COALESCE(EXCLUDED.origin_country_iso2, transport_snapshot.origin_country_iso2),
@@ -808,7 +862,9 @@ async function storeTransportSnapshots(snapshots) {
          payload = transport_snapshot.payload || EXCLUDED.payload,
          vehicle_category = COALESCE(EXCLUDED.vehicle_category, transport_snapshot.vehicle_category),
          current_location_name = CASE
-           WHEN EXCLUDED.latitude IS NULL THEN transport_snapshot.current_location_name
+           WHEN EXCLUDED.latitude IS NULL
+             OR EXCLUDED.observed_at < transport_snapshot.observed_at
+             THEN transport_snapshot.current_location_name
            ELSE EXCLUDED.current_location_name
          END`, values);
     }
@@ -817,8 +873,10 @@ async function storeTransportSnapshots(snapshots) {
             return false;
         const key = `${snapshot.mode}:${snapshot.entity_id}`;
         const observed = new Date(snapshot.observed_at).getTime();
-        if (observed - (lastTrackAt.get(key) ?? 0) < TRANSPORT_TRACK_SAMPLE_MS)
+        if (observed - (lastTrackAt.get(key) ?? 0) <
+            transportTrackSampleMilliseconds()) {
             return false;
+        }
         lastTrackAt.set(key, observed);
         return true;
     });
@@ -838,6 +896,52 @@ async function storeTransportSnapshots(snapshots) {
          observed_at, source_name, vehicle_category, current_location_name
        ) VALUES ${rows.join(", ")}
        ON CONFLICT (mode, entity_id, observed_at) DO NOTHING`, values);
+    }
+    const activityRows = trackPoints.flatMap((snapshot) => {
+        const bucket = new Date(snapshot.observed_at);
+        bucket.setUTCMinutes(0, 0, 0);
+        const scopes = new Set([TRANSPORT_SCOPE_GLOBAL]);
+        [
+            snapshot.current_country_iso2,
+            snapshot.origin_country_iso2,
+            snapshot.destination_country_iso2,
+        ].forEach((country) => {
+            const normalized = normalizeIso2(country);
+            if (normalized)
+                scopes.add(normalized);
+        });
+        return Array.from(scopes, (country) => ({
+            snapshot,
+            country,
+            bucket: bucket.toISOString(),
+        }));
+    });
+    for (let offset = 0; offset < activityRows.length; offset += 500) {
+        const batch = activityRows.slice(offset, offset + 500);
+        const values = [];
+        const rows = batch.map(({ snapshot, country, bucket }, index) => {
+            const start = index * 8;
+            values.push(bucket, snapshot.mode, snapshot.entity_id, country, snapshot.observed_at, snapshot.observed_at, snapshot.source_name, snapshot.vehicle_category ?? null);
+            return `(${Array.from({ length: 8 }, (_, valueIndex) => `$${start + valueIndex + 1}`).join(", ")})`;
+        });
+        await (0, db_1.query)(`INSERT INTO transport_entity_activity_hour (
+         bucket, mode, entity_id, country_iso2, first_observed_at,
+         last_observed_at, source_name, vehicle_category
+       ) VALUES ${rows.join(", ")}
+       ON CONFLICT (bucket, mode, entity_id, country_iso2) DO UPDATE SET
+         first_observed_at = LEAST(
+           transport_entity_activity_hour.first_observed_at,
+           EXCLUDED.first_observed_at
+         ),
+         last_observed_at = GREATEST(
+           transport_entity_activity_hour.last_observed_at,
+           EXCLUDED.last_observed_at
+         ),
+         source_name = EXCLUDED.source_name,
+         vehicle_category = COALESCE(
+           EXCLUDED.vehicle_category,
+           transport_entity_activity_hour.vehicle_category
+         )`, values);
     }
 }
 function activeTransportWhere(alias = "s") {
@@ -909,54 +1013,7 @@ function describeTrendChange(metric, noun) {
     }
     return `${metric.current} ${noun}, ${Math.abs(metric.change_pct).toFixed(1)}% ${metric.direction === "up" ? "higher" : "lower"} than the previous 24-hour window.`;
 }
-function movementEventsCte() {
-    return `WITH sequenced AS (
-    SELECT
-      p.entity_id,
-      p.observed_at,
-      p.current_country_iso2,
-      p.current_location_name,
-      p.vehicle_category,
-      LAG(p.current_country_iso2) OVER (
-        PARTITION BY p.entity_id ORDER BY p.observed_at
-      ) AS previous_country_iso2,
-      LAG(p.current_location_name) OVER (
-        PARTITION BY p.entity_id ORDER BY p.observed_at
-      ) AS previous_location_name,
-      LAG(p.vehicle_category) OVER (
-        PARTITION BY p.entity_id ORDER BY p.observed_at
-      ) AS previous_vehicle_category
-    FROM transport_track_point p
-    WHERE p.mode = 'maritime'
-      AND p.observed_at >= now() - interval '49 hours'
-  ),
-  events AS (
-    SELECT
-      entity_id,
-      'departure'::text AS event_type,
-      previous_country_iso2 AS country,
-      previous_location_name AS location_name,
-      COALESCE(previous_vehicle_category, vehicle_category) AS vehicle_category,
-      observed_at
-    FROM sequenced
-    WHERE observed_at >= now() - interval '48 hours'
-      AND previous_location_name IS NOT NULL
-      AND current_location_name IS DISTINCT FROM previous_location_name
-    UNION ALL
-    SELECT
-      entity_id,
-      'arrival'::text AS event_type,
-      current_country_iso2 AS country,
-      current_location_name AS location_name,
-      vehicle_category,
-      observed_at
-    FROM sequenced
-    WHERE observed_at >= now() - interval '48 hours'
-      AND current_location_name IS NOT NULL
-      AND previous_location_name IS DISTINCT FROM current_location_name
-  )`;
-}
-async function getTransportOverview(options) {
+async function loadTransportOverview(options) {
     const detail = options?.detail ?? "aggregate";
     const mode = options?.mode ?? null;
     const country = normalizeIso2(options?.country) ?? null;
@@ -977,7 +1034,7 @@ async function getTransportOverview(options) {
         params.push(country);
     const where = filters.join(" AND ");
     const trendCountryParams = country ? [country] : [];
-    const [modeResult, countryResult, routeResult, activityResult, movementTrendResult, aviationTrendResult, portTrendResult,] = await Promise.all([
+    const [modeResult, countryResult, routeResult, activityResult,] = await Promise.all([
         (0, db_1.query)(`SELECT
          s.mode,
          COUNT(*) AS active_count,
@@ -1044,104 +1101,110 @@ async function getTransportOverview(options) {
        ORDER BY active_count DESC
        LIMIT 100`, params),
         (0, db_1.query)(`SELECT
-         date_trunc('hour', p.observed_at) AS bucket,
-         p.mode,
-         COUNT(DISTINCT p.entity_id) AS active_count
-       FROM transport_track_point p
-       WHERE p.observed_at >= now() - interval '24 hours'
-         ${mode ? `AND p.mode = $1` : ""}
-         ${country
-            ? `AND (
-                  p.current_country_iso2 = $${mode ? 2 : 1}
-                  OR p.origin_country_iso2 = $${mode ? 2 : 1}
-                  OR p.destination_country_iso2 = $${mode ? 2 : 1}
-                )`
-            : ""}
-       GROUP BY bucket, p.mode
-       ORDER BY bucket, p.mode`, params),
+         a.bucket,
+         a.mode,
+         COUNT(DISTINCT a.entity_id) AS active_count
+       FROM transport_entity_activity_hour a
+       WHERE a.last_observed_at >= now() - interval '24 hours'
+         AND a.country_iso2 = ${country ? `$${mode ? 2 : 1}` : `'${TRANSPORT_SCOPE_GLOBAL}'`}
+         ${mode ? `AND a.mode = $1` : ""}
+       GROUP BY a.bucket, a.mode
+       ORDER BY a.bucket, a.mode`, params),
+    ]);
+    // Keep a single overview refresh below the per-replica pool cap. The second
+    // wave reads compact event/hour tables and cannot starve unrelated requests.
+    const [movementTrendResult, aviationTrendResult, portTrendResult] = await Promise.all([
         mode === "aviation"
             ? Promise.resolve({ rows: [] })
-            : (0, db_1.query)(`${movementEventsCte()}
-           SELECT
-             CASE WHEN GROUPING(country) = 1 THEN NULL ELSE BTRIM(country::text) END AS country,
+            : (0, db_1.query)(`SELECT
+             CASE
+               WHEN GROUPING(e.country_iso2) = 1 THEN NULL
+               ELSE BTRIM(e.country_iso2::text)
+             END AS country,
              COUNT(*) FILTER (
-               WHERE event_type = 'departure'
-                 AND observed_at >= now() - interval '24 hours'
+               WHERE e.event_type = 'departure'
+                 AND e.observed_at >= now() - interval '24 hours'
              ) AS departures_current,
              COUNT(*) FILTER (
-               WHERE event_type = 'departure'
-                 AND observed_at < now() - interval '24 hours'
+               WHERE e.event_type = 'departure'
+                 AND e.observed_at < now() - interval '24 hours'
              ) AS departures_previous,
              COUNT(*) FILTER (
-               WHERE event_type = 'departure'
-                 AND vehicle_category IN ('cargo', 'tanker')
-                 AND observed_at >= now() - interval '24 hours'
+               WHERE e.event_type = 'departure'
+                 AND e.vehicle_category IN ('cargo', 'tanker')
+                 AND e.observed_at >= now() - interval '24 hours'
              ) AS cargo_departures_current,
              COUNT(*) FILTER (
-               WHERE event_type = 'departure'
-                 AND vehicle_category IN ('cargo', 'tanker')
-                 AND observed_at < now() - interval '24 hours'
+               WHERE e.event_type = 'departure'
+                 AND e.vehicle_category IN ('cargo', 'tanker')
+                 AND e.observed_at < now() - interval '24 hours'
              ) AS cargo_departures_previous,
              COUNT(*) FILTER (
-               WHERE event_type = 'arrival'
-                 AND observed_at >= now() - interval '24 hours'
+               WHERE e.event_type = 'arrival'
+                 AND e.observed_at >= now() - interval '24 hours'
              ) AS arrivals_current,
              COUNT(*) FILTER (
-               WHERE event_type = 'arrival'
-                 AND observed_at < now() - interval '24 hours'
+               WHERE e.event_type = 'arrival'
+                 AND e.observed_at < now() - interval '24 hours'
              ) AS arrivals_previous
-           FROM events
-           WHERE country IS NOT NULL
-             ${country ? "AND BTRIM(country::text) = $1" : ""}
-           GROUP BY GROUPING SETS ((country), ())`, trendCountryParams),
+           FROM transport_movement_event e
+           WHERE e.observed_at >= now() - interval '48 hours'
+             ${country ? "AND BTRIM(e.country_iso2::text) = $1" : ""}
+           GROUP BY GROUPING SETS ((e.country_iso2), ())`, trendCountryParams),
         mode === "maritime"
             ? Promise.resolve({ rows: [] })
-            : (0, db_1.query)(`WITH linked AS (
-             SELECT DISTINCT
-               p.entity_id,
-               p.observed_at,
-               link.country
-             FROM transport_track_point p
-             CROSS JOIN LATERAL (
-               VALUES
-                 (p.current_country_iso2),
-                 (p.origin_country_iso2),
-                 (p.destination_country_iso2)
-             ) AS link(country)
-             WHERE p.mode = 'aviation'
-               AND p.observed_at >= now() - interval '48 hours'
-               AND link.country IS NOT NULL
+            : (0, db_1.query)(`WITH country_counts AS (
+             SELECT
+               a.country_iso2 AS country,
+               COUNT(DISTINCT a.entity_id) FILTER (
+                 WHERE a.last_observed_at >= now() - interval '24 hours'
+               ) AS flights_current,
+               COUNT(DISTINCT a.entity_id) FILTER (
+                 WHERE a.first_observed_at < now() - interval '24 hours'
+                   AND a.last_observed_at >= now() - interval '48 hours'
+               ) AS flights_previous
+             FROM transport_entity_activity_hour a
+             WHERE a.mode = 'aviation'
+               AND a.country_iso2 <> '${TRANSPORT_SCOPE_GLOBAL}'
+               AND a.last_observed_at >= now() - interval '48 hours'
+               ${country ? "AND a.country_iso2 = $1" : ""}
+             GROUP BY a.country_iso2
+           ),
+           total_count AS (
+             SELECT
+               NULL::text AS country,
+               COUNT(DISTINCT a.entity_id) FILTER (
+                 WHERE a.last_observed_at >= now() - interval '24 hours'
+               ) AS flights_current,
+               COUNT(DISTINCT a.entity_id) FILTER (
+                 WHERE a.first_observed_at < now() - interval '24 hours'
+                   AND a.last_observed_at >= now() - interval '48 hours'
+               ) AS flights_previous
+             FROM transport_entity_activity_hour a
+             WHERE a.mode = 'aviation'
+               AND a.last_observed_at >= now() - interval '48 hours'
+               AND a.country_iso2 = ${country ? "$1" : `'${TRANSPORT_SCOPE_GLOBAL}'`}
            )
-           SELECT
-             CASE WHEN GROUPING(country) = 1 THEN NULL ELSE BTRIM(country::text) END AS country,
-             COUNT(DISTINCT entity_id) FILTER (
-               WHERE observed_at >= now() - interval '24 hours'
-             ) AS flights_current,
-             COUNT(DISTINCT entity_id) FILTER (
-               WHERE observed_at < now() - interval '24 hours'
-             ) AS flights_previous
-           FROM linked
-           WHERE true
-             ${country ? "AND BTRIM(country::text) = $1" : ""}
-           GROUP BY GROUPING SETS ((country), ())`, trendCountryParams),
+           SELECT country, flights_current, flights_previous
+           FROM country_counts
+           UNION ALL
+           SELECT country, flights_current, flights_previous
+           FROM total_count`, trendCountryParams),
         mode === "aviation"
             ? Promise.resolve({ rows: [] })
-            : (0, db_1.query)(`${movementEventsCte()}
-           SELECT
-             BTRIM(country::text) AS country,
-             location_name,
-             COUNT(*) FILTER (WHERE event_type = 'departure') AS departures_current,
-             COUNT(*) FILTER (WHERE event_type = 'arrival') AS arrivals_current,
+            : (0, db_1.query)(`SELECT
+             BTRIM(e.country_iso2::text) AS country,
+             e.location_name,
+             COUNT(*) FILTER (WHERE e.event_type = 'departure') AS departures_current,
+             COUNT(*) FILTER (WHERE e.event_type = 'arrival') AS arrivals_current,
              COUNT(*) FILTER (
-               WHERE event_type = 'departure'
-                 AND vehicle_category IN ('cargo', 'tanker')
+               WHERE e.event_type = 'departure'
+                 AND e.vehicle_category IN ('cargo', 'tanker')
              ) AS cargo_departures_current
-           FROM events
-           WHERE country IS NOT NULL
-             AND location_name IS NOT NULL
-             AND observed_at >= now() - interval '24 hours'
-             ${country ? "AND BTRIM(country::text) = $1" : ""}
-           GROUP BY country, location_name
+           FROM transport_movement_event e
+           WHERE e.observed_at >= now() - interval '24 hours'
+             ${country ? "AND BTRIM(e.country_iso2::text) = $1" : ""}
+           GROUP BY e.country_iso2, e.location_name
            ORDER BY COUNT(*) DESC, location_name
            LIMIT 20`, trendCountryParams),
     ]);
@@ -1328,7 +1391,8 @@ async function getTransportOverview(options) {
             maritime: {
                 source: "AISstream",
                 transport: "WebSocket",
-                configured: Boolean(process.env.AISSTREAM_API_KEY?.trim()),
+                configured: enabledFromEnv("AISSTREAM_ENABLED") &&
+                    Boolean(process.env.AISSTREAM_API_KEY?.trim()),
                 freshness_minutes: 120,
                 movement_method: "Monitored-port geofences with 24-hour comparison windows.",
                 cargo_method: "Cargo/tanker vessel departures are a movement proxy, not cargo volume.",
@@ -1336,13 +1400,70 @@ async function getTransportOverview(options) {
             aviation: {
                 source: "adsb.lol",
                 transport: "REST",
-                configured: true,
+                configured: enabledFromEnv("ADSB_LOL_POLL_ENABLED"),
                 freshness_minutes: 20,
                 license: "ODbL-1.0",
                 poll_areas: configuredAdsbPollPoints().length,
             },
         },
     };
+}
+const transportOverviewCache = new Map();
+const transportOverviewInflight = new Map();
+function transportOverviewCacheKey(options) {
+    return JSON.stringify({
+        detail: options?.detail ?? "aggregate",
+        mode: options?.mode ?? null,
+        country: normalizeIso2(options?.country) ?? null,
+        entityLimit: options?.entityLimit ?? null,
+    });
+}
+function transportOverviewCacheMilliseconds() {
+    return (boundedIntegerFromEnv("TRANSPORT_OVERVIEW_CACHE_SECONDS", 60, 10, 300) *
+        1_000);
+}
+async function getTransportOverview(options) {
+    const key = transportOverviewCacheKey(options);
+    const now = Date.now();
+    const cached = transportOverviewCache.get(key);
+    if (!options?.bypassCache && cached && cached.expiresAt > now) {
+        transportOverviewCache.delete(key);
+        transportOverviewCache.set(key, cached);
+        return cached.value;
+    }
+    const existing = transportOverviewInflight.get(key);
+    if (existing)
+        return existing;
+    const startedAt = Date.now();
+    const pending = loadTransportOverview(options)
+        .then((value) => {
+        transportOverviewCache.set(key, {
+            expiresAt: Date.now() + transportOverviewCacheMilliseconds(),
+            value,
+        });
+        while (transportOverviewCache.size > OVERVIEW_CACHE_MAX_ENTRIES) {
+            const oldestKey = transportOverviewCache.keys().next().value;
+            if (!oldestKey)
+                break;
+            transportOverviewCache.delete(oldestKey);
+        }
+        const durationMs = Date.now() - startedAt;
+        if (durationMs >= 750) {
+            console.warn(JSON.stringify({
+                event: "transport_overview_slow_refresh",
+                duration_ms: durationMs,
+                detail: options?.detail ?? "aggregate",
+                mode: options?.mode ?? "all",
+                country: normalizeIso2(options?.country),
+            }));
+        }
+        return value;
+    })
+        .finally(() => {
+        transportOverviewInflight.delete(key);
+    });
+    transportOverviewInflight.set(key, pending);
+    return pending;
 }
 async function getTransportEntity(mode, entityId) {
     const entityResult = await (0, db_1.query)(`SELECT *
@@ -1371,6 +1492,105 @@ async function getTransportEntity(mode, entityId) {
         })),
     };
 }
+async function pruneTransportTable(target) {
+    const batchSize = boundedIntegerFromEnv("TRANSPORT_RETENTION_BATCH_SIZE", 5_000, 500, 20_000);
+    const maxBatches = boundedIntegerFromEnv("TRANSPORT_RETENTION_MAX_BATCHES", 20, 1, 100);
+    let deleted = 0;
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+        const result = await (0, db_1.query)(`WITH doomed AS (
+         SELECT ctid
+         FROM ${target.table}
+         WHERE ${target.timestampColumn} < now() - ($1 * interval '1 day')
+         ORDER BY ${target.timestampColumn}
+         LIMIT $2
+       ),
+       removed AS (
+         DELETE FROM ${target.table} target
+         USING doomed
+         WHERE target.ctid = doomed.ctid
+         RETURNING 1
+       )
+       SELECT COUNT(*) AS deleted
+       FROM removed`, [target.retentionDays, batchSize]);
+        const countDeleted = count(result.rows[0]?.deleted);
+        deleted += countDeleted;
+        if (countDeleted < batchSize)
+            break;
+    }
+    return deleted;
+}
+async function pruneTransportHistory() {
+    const trackDays = boundedIntegerFromEnv("TRANSPORT_TRACK_RETENTION_DAYS", 7, 2, 30);
+    const aggregateDays = boundedIntegerFromEnv("TRANSPORT_AGGREGATE_RETENTION_DAYS", 90, 7, 730);
+    const snapshotDays = boundedIntegerFromEnv("TRANSPORT_SNAPSHOT_RETENTION_DAYS", 30, 7, 365);
+    const targets = [
+        {
+            table: "transport_track_point",
+            timestampColumn: "observed_at",
+            retentionDays: trackDays,
+        },
+        {
+            table: "transport_movement_event",
+            timestampColumn: "observed_at",
+            retentionDays: aggregateDays,
+        },
+        {
+            table: "transport_movement_hour",
+            timestampColumn: "bucket",
+            retentionDays: aggregateDays,
+        },
+        {
+            table: "transport_entity_activity_hour",
+            timestampColumn: "bucket",
+            retentionDays: aggregateDays,
+        },
+        {
+            table: "transport_snapshot",
+            timestampColumn: "observed_at",
+            retentionDays: snapshotDays,
+        },
+    ];
+    const deleted = {};
+    for (const target of targets) {
+        deleted[target.table] = await pruneTransportTable(target);
+    }
+    const memoryCutoff = Date.now() - 2 * 24 * 60 * 60 * 1_000;
+    for (const [key, observedAt] of lastTrackAt) {
+        if (observedAt < memoryCutoff)
+            lastTrackAt.delete(key);
+    }
+    for (const [mmsi, observedAt] of lastMaritimeQueuedAt) {
+        if (observedAt >= memoryCutoff)
+            continue;
+        lastMaritimeQueuedAt.delete(mmsi);
+        maritimeStatic.delete(mmsi);
+        firstMaritimeCountry.delete(mmsi);
+    }
+    for (const [callsign, cached] of routeCache) {
+        if (cached.expiresAt < Date.now())
+            routeCache.delete(callsign);
+    }
+    if (Object.values(deleted).some((value) => value > 0)) {
+        console.info(JSON.stringify({
+            event: "transport_retention_pruned",
+            deleted,
+        }));
+    }
+}
+function startTransportRetentionWorker() {
+    if (transportRetentionTimer)
+        return;
+    const minutes = boundedIntegerFromEnv("TRANSPORT_RETENTION_INTERVAL_MINUTES", 60, 15, 1_440);
+    void pruneTransportHistory().catch((error) => {
+        console.warn(`Initial transport retention pass failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    transportRetentionTimer = setInterval(() => {
+        void pruneTransportHistory().catch((error) => {
+            console.warn(`Transport retention pass failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
+    }, minutes * 60_000);
+    transportRetentionTimer.unref();
+}
 async function acquireTransportWorkerLock() {
     try {
         const client = await db_1.pool.connect();
@@ -1381,16 +1601,17 @@ async function acquireTransportWorkerLock() {
             return;
         }
         connectAisStream();
+        startTransportRetentionWorker();
         aisFlushTimer = setInterval(() => {
             void flushMaritimeQueue();
         }, 5_000);
         aisFlushTimer.unref();
-        const aviationEnabled = String(process.env.ADSB_LOL_POLL_ENABLED || "true").trim().toLowerCase() !== "false";
+        const aviationEnabled = enabledFromEnv("ADSB_LOL_POLL_ENABLED");
         if (aviationEnabled) {
             void refreshAviationNow(true).catch((error) => {
                 console.warn(`Initial adsb.lol refresh failed: ${error instanceof Error ? error.message : String(error)}`);
             });
-            const seconds = Math.max(60, Math.min(Number.parseInt(process.env.ADSB_LOL_POLL_SECONDS || "120", 10) || 120, 1800));
+            const seconds = Math.max(60, Math.min(Number.parseInt(process.env.ADSB_LOL_POLL_SECONDS || "300", 10) || 300, 1_800));
             const timer = setInterval(() => {
                 void refreshAviationNow(true).catch((error) => {
                     console.warn(`Scheduled adsb.lol refresh failed: ${error instanceof Error ? error.message : String(error)}`);

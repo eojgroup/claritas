@@ -1244,7 +1244,7 @@ export async function ingestFinnhubMarketNews(params?: {
 
 export async function refreshMarketQuotesRealtime(
   symbolsInput?: string[] | null,
-  minRefreshMs = 15_000
+  minRefreshMs = 60_000
 ): Promise<void> {
   const symbols = symbolsInput && symbolsInput.length > 0 ? symbolsInput : [...DEFAULT_MARKET_SYMBOLS];
   const normalizedSymbols = Array.from(new Set(symbols.map(normalizeSymbol).filter(Boolean)));

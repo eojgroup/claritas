@@ -950,7 +950,7 @@ async function ingestFinnhubMarketNews(params) {
         max_id: maxSeenId,
     };
 }
-async function refreshMarketQuotesRealtime(symbolsInput, minRefreshMs = 15_000) {
+async function refreshMarketQuotesRealtime(symbolsInput, minRefreshMs = 60_000) {
     const symbols = symbolsInput && symbolsInput.length > 0 ? symbolsInput : [...exports.DEFAULT_MARKET_SYMBOLS];
     const normalizedSymbols = Array.from(new Set(symbols.map(normalizeSymbol).filter(Boolean)));
     const symbolsKey = normalizedSymbols.join(",");

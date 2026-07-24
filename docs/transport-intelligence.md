@@ -20,8 +20,12 @@ flowchart LR
   Flag --> Snapshot
   Port --> Snapshot
   Snapshot --> Trail[(Sampled track points)]
+  Snapshot --> Event[(Port movement events)]
+  Trail --> Presence[(Hourly entity-country presence)]
+  Event --> MovementHour[(Hourly country-port movement)]
   Snapshot --> Aggregate[Country and corridor aggregates]
-  Trail --> Trend[24h vs prior 24h movement trends]
+  Event --> Trend[24h vs prior 24h movement trends]
+  Presence --> Trend
   Trend --> Briefing[Daily + personal briefing takeaways]
   Trend --> Profile[Country profile]
   Trail --> Full[Web + iPad drill-in]
@@ -29,7 +33,7 @@ flowchart LR
   Aggregate --> Compact[iPhone + Watch pulse]
 ```
 
-Only one API replica holds the PostgreSQL advisory lock for scheduled transport ingestion. This prevents duplicate global WebSocket subscriptions and polling loops while keeping the API itself horizontally scalable.
+Only one API replica holds the PostgreSQL advisory lock for scheduled transport ingestion. This prevents duplicate global WebSocket subscriptions and polling loops while keeping the API itself horizontally scalable. HTTP refresh requests only bypass the short-lived overview cache; they never launch ingestion work from a request-serving replica.
 
 ## Sources and configuration
 
@@ -37,16 +41,17 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 
 - Runtime environment variable and GitHub Actions repository secret: `AISSTREAM_API_KEY`.
 - Kubernetes secret: `claritas-aisstream`, key `AISSTREAM_API_KEY`.
+- `AISSTREAM_ENABLED` is the operational safety switch and defaults to `true`.
 - Default subscription covers the global bounding box and requests position, Class B position, long-range position, ship static, and static data reports.
 - `AISSTREAM_BOUNDING_BOXES` can replace global coverage with a JSON array of provider-format bounding boxes.
-- `AISSTREAM_SAMPLE_SECONDS` controls current-position sampling and defaults to 60 seconds.
+- `AISSTREAM_SAMPLE_SECONDS` controls current-position sampling and defaults to 300 seconds.
 - MMSI Maritime Identification Digits link a vessel to its flag country. Position-in-country, monitored-port geofences, the first observed voyage country, and recognizable AIS destination/UN LOCODE values add current, origin, and destination relationships.
 
 ### adsb.lol
 
 - No API key is required.
 - `ADSB_LOL_POLL_ENABLED` enables scheduled collection and defaults to `true`.
-- `ADSB_LOL_POLL_SECONDS` defaults to 120 seconds.
+- `ADSB_LOL_POLL_SECONDS` defaults to 300 seconds.
 - `ADSB_LOL_MAX_ROUTE_LOOKUPS` limits plausible route lookups per cycle and defaults to 60.
 - `ADSB_LOL_POLL_POINTS` can override the built-in global hub grid with JSON objects containing `label`, `lat`, `lon`, and a radius of at most 250 nautical miles.
 - `ADSB_LOL_USER_AGENT` should identify the deployment and a monitored contact.
@@ -70,7 +75,7 @@ Country aggregates count unique vehicles per role. A single vehicle is counted o
 
 Claritas compares the latest 24 hours with the preceding 24 hours:
 
-- A ship departure is observed when a sampled vessel track leaves one of the monitored port geofences. An arrival is the inverse transition.
+- A ship departure is recorded once when a current vessel snapshot leaves one of the monitored port geofences. An arrival is the inverse transition. These immutable transition events replace repeated window-function scans over raw tracks.
 - Cargo-vessel flow counts departures from AIS ship categories `cargo` and `tanker`. It is a movement proxy only. AIS does not disclose cargo tonnage, vessel load, trade value, or complete port-authority movement totals.
 - Flight activity counts unique aircraft with a current, origin, or destination country link in each window. Coverage depends on configured poll areas and upstream ADS-B reception.
 - Percentage change is `(current - previous) / previous`. When the previous window is zero, the API labels non-zero activity as a new baseline instead of manufacturing a percentage.
@@ -83,7 +88,7 @@ The API returns both the underlying current/previous values and concise, qualifi
 - `GET /api/transport/overview?detail=full` adds current flight and vessel records for web and iPad. Optional `mode`, `country`, and `entity_limit` filters apply consistently to aggregates and details.
 - `GET /api/transport/entities/:mode/:entityId` returns the current normalized record and up to 24 hours of sampled track points.
 
-All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client.
+All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Equivalent overview requests are coalesced and cached for 60 seconds per API replica; at most four database reads run concurrently in the first refresh wave and three compact aggregate reads in the second.
 
 ## Presentation contract
 
@@ -91,4 +96,6 @@ All endpoints use the same authenticated paid-access boundary as the other Clari
 - iPhone shows only KPIs, qualified trend takeaways, leading countries, and leading corridors. It does not receive raw vehicles or track points during normal app bootstrap.
 - Watch shows only aggregate flight/vessel/country counts, a qualified takeaway, an aggregate country bubble map, and the leading corridor, with a handoff to the iPhone transport section.
 
-Freshness windows are 20 minutes for aviation and two hours for maritime snapshots. Historical track points are sampled at three-minute resolution to preserve useful movement shape without writing every upstream message.
+Freshness windows are 20 minutes for aviation and two hours for maritime snapshots. Historical track points are sampled at five-minute resolution and retained for seven days. Current snapshots are retained for 30 days after their last observation; movement events and hourly aggregates are retained for 90 days. The advisory-lock owner prunes expired rows in bounded batches once an hour.
+
+The operational defaults are documented in [Cloud SQL capacity and transport load](operations/cloud-sql-capacity.md).

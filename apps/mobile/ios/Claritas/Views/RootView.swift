@@ -81,15 +81,17 @@ struct RootView: View {
         .task(id: marketRefreshTaskKey) {
             guard model.authStatus == .authed, model.hasPaidAccess else { return }
             while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { return }
                 await model.refreshMarketQuotes(forceRefresh: true)
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
             }
         }
         .task(id: marketStatusTaskKey) {
             guard model.authStatus == .authed, model.hasPaidAccess else { return }
             while !Task.isCancelled {
-                await model.refreshMarketStatus(forceRefresh: true)
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { return }
+                await model.refreshMarketStatus(forceRefresh: false)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in

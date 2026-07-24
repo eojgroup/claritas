@@ -58,6 +58,12 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_DB_USER } }
             - name: KC_DB_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_DB_PASSWORD } }
+            - name: KC_DB_POOL_INITIAL_SIZE
+              value: "1"
+            - name: KC_DB_POOL_MIN_SIZE
+              value: "1"
+            - name: KC_DB_POOL_MAX_SIZE
+              value: "10"
             - name: KEYCLOAK_ADMIN
               valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_ADMIN } }
             - name: KEYCLOAK_ADMIN_PASSWORD

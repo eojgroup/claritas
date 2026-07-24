@@ -14,6 +14,28 @@ variable "zone" {
   default     = "europe-west2-b" # Adjust to a specific zone in West Europe (e.g., europe-west2-b)
 }
 
+variable "cloud_sql_tier" {
+  description = "Dedicated-core Cloud SQL machine tier used by the production PostgreSQL instance."
+  type        = string
+  default     = "db-custom-2-7680"
+
+  validation {
+    condition     = can(regex("^db-custom-[1-9][0-9]*-[1-9][0-9]*$", var.cloud_sql_tier))
+    error_message = "cloud_sql_tier must be a dedicated-core custom tier such as db-custom-2-7680."
+  }
+}
+
+variable "cloud_sql_connection_alert_threshold" {
+  description = "Backend connection count that triggers the Cloud SQL connection-pressure alert."
+  type        = number
+  default     = 250
+
+  validation {
+    condition     = var.cloud_sql_connection_alert_threshold >= 10
+    error_message = "cloud_sql_connection_alert_threshold must be at least 10."
+  }
+}
+
 variable "api_egress_node_locations" {
   description = "Zones used by the private API node pool. One node is created in each zone for availability."
   type        = list(string)

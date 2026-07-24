@@ -16,7 +16,6 @@ import {
 import {
   getTransportEntity,
   getTransportOverview,
-  refreshAviationNow,
   startTransportIngestionWorkers,
   type TransportMode,
 } from "./connectors/transport";
@@ -29,7 +28,14 @@ import {
   parseMarketSymbolsInput,
   refreshMarketQuotesRealtime,
 } from "./connectors/finnhub";
-import { isDatabaseUnavailableError, pool, query, withTransaction } from "./db";
+import {
+  getDatabasePoolStats,
+  isDatabaseUnavailableError,
+  pool,
+  query,
+  startDatabasePoolMonitoring,
+  withTransaction,
+} from "./db";
 import authRouter, { requireAuth, requirePaidAccess, requireRole } from "./auth";
 import {
   IngestionValidationError,
@@ -99,6 +105,8 @@ app.get("/healthz", (_req, res) => res.status(200).send("ok"));
 app.get("/readyz", async (_req, res) => {
   try {
     await pool.query("SELECT 1");
+    const poolStats = getDatabasePoolStats();
+    res.setHeader("X-Claritas-DB-Pool-Waiting", String(poolStats.waiting));
     return res.status(200).send("ready");
   } catch (error) {
     console.warn("Readiness check failed: database unavailable.");
@@ -2573,7 +2581,10 @@ app.get("/api/admin/ingestion/metrics", requireAdminRole, async (req, res) => {
       return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market, podcasts." });
     }
     const metrics = await getMetrics({ days, pipeline });
-    return res.json(metrics);
+    return res.json({
+      ...metrics,
+      database_pool: getDatabasePoolStats(),
+    });
   } catch (e: any) {
     return res.status(500).json({ error: e.message || String(e) });
   }
@@ -2762,15 +2773,17 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
     const refresh =
       typeof req.query.refresh === "string" &&
       ["1", "true", "yes", "on"].includes(req.query.refresh.trim().toLowerCase());
-    if (refresh) {
-      await refreshAviationNow(false);
-    }
     const overview = await getTransportOverview({
       detail,
       mode,
       country,
       entityLimit: Number.isFinite(entityLimitRaw as number) ? entityLimitRaw : undefined,
+      bypassCache: refresh,
     });
+    res.setHeader(
+      "Cache-Control",
+      refresh ? "private, no-store" : "private, max-age=30, stale-while-revalidate=30",
+    );
     return res.json(overview);
   } catch (error) {
     if (isDatabaseUnavailableError(error)) {
@@ -2899,6 +2912,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
   }
 });
 
+startDatabasePoolMonitoring();
 startIngestionAutomationWorker();
 startDailyBriefingSchedulerWorker();
 startPersonalBriefingWorker();
