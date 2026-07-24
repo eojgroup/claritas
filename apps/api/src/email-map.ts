@@ -40,6 +40,9 @@ type BriefingMapPalette = {
   marker: string;
   markerHalo: string;
   markerStroke: string;
+  secondaryMarker: string;
+  secondaryMarkerHalo: string;
+  secondaryMarkerStroke: string;
   labelOutline: string;
 };
 
@@ -77,6 +80,9 @@ const MAP_PALETTES: Record<BriefingEmailTheme, BriefingMapPalette> = {
     marker: "#E6A06A",
     markerHalo: "#E6A06A",
     markerStroke: "#FFFAF1",
+    secondaryMarker: "#3E6A80",
+    secondaryMarkerHalo: "#3E6A80",
+    secondaryMarkerStroke: "#FFFAF1",
     labelOutline: "#F3E9D7",
   },
   dark: {
@@ -93,6 +99,9 @@ const MAP_PALETTES: Record<BriefingEmailTheme, BriefingMapPalette> = {
     marker: "#EDA36A",
     markerHalo: "#EDA36A",
     markerStroke: "#FFF4E8",
+    secondaryMarker: "#77A8BA",
+    secondaryMarkerHalo: "#77A8BA",
+    secondaryMarkerStroke: "#081119",
     labelOutline: "#081119",
   },
 };
@@ -240,8 +249,12 @@ export function renderBriefingMapSvg(
     const [latitude, longitude] = reference.latlng;
     const [x, y] = project([longitude, latitude]);
     const radius = 8 + 18 * Math.sqrt(country.relevance_score / 100);
-    const labelVisible = index < 12;
-    const label = labelVisible
+    const isFeatured = index === 0;
+    const markerRadius = isFeatured ? radius : Math.max(7, radius * 0.58);
+    const markerFill = isFeatured ? palette.marker : palette.secondaryMarker;
+    const markerHalo = isFeatured ? palette.markerHalo : palette.secondaryMarkerHalo;
+    const markerStroke = isFeatured ? palette.markerStroke : palette.secondaryMarkerStroke;
+    const label = isFeatured
       ? `<text x="${x.toFixed(1)}" y="${(y - radius - 8).toFixed(
           1
         )}" text-anchor="middle" fill="${palette.ink}" stroke="${palette.labelOutline}" stroke-width="5" paint-order="stroke" font-family="Times New Roman, Times, serif" font-size="18" font-weight="700" letter-spacing="1">${escapeXml(
@@ -249,27 +262,32 @@ export function renderBriefingMapSvg(
         )}</text>`
       : "";
     const featuredRing =
-      index === 0
+      isFeatured
         ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(
             radius + 9
           ).toFixed(
             1
           )}" fill="none" stroke="${palette.featuredCountryBorder}" stroke-width="3" stroke-dasharray="7 5"/>`
         : "";
+    const innerRing = isFeatured
+      ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(
+          markerRadius * 0.52
+        ).toFixed(
+          1
+        )}" fill="none" stroke="${markerStroke}" stroke-opacity="0.55" stroke-width="2"/>`
+      : "";
     return [
       `<g>${featuredRing}<circle cx="${x.toFixed(1)}" cy="${y.toFixed(
         1
-      )}" r="${(radius + 7).toFixed(
+      )}" r="${(markerRadius + (isFeatured ? 7 : 4)).toFixed(
         1
-      )}" fill="${palette.markerHalo}" fill-opacity="0.22"/><circle cx="${x.toFixed(
+      )}" fill="${markerHalo}" fill-opacity="${isFeatured ? "0.22" : "0.16"}"/><circle cx="${x.toFixed(
         1
-      )}" cy="${y.toFixed(1)}" r="${radius.toFixed(
+      )}" cy="${y.toFixed(1)}" r="${markerRadius.toFixed(
         1
-      )}" fill="${palette.marker}" stroke="${palette.markerStroke}" stroke-width="2.5"/><circle cx="${x.toFixed(
-        1
-      )}" cy="${y.toFixed(1)}" r="${(radius * 0.52).toFixed(
-        1
-      )}" fill="none" stroke="${palette.markerStroke}" stroke-opacity="0.55" stroke-width="2"/>${label}</g>`,
+      )}" fill="${markerFill}" stroke="${markerStroke}" stroke-width="${
+        isFeatured ? 2.5 : 1.5
+      }"/>${innerRing}${label}</g>`,
     ];
   }).join("");
 
@@ -290,7 +308,10 @@ export function renderBriefingMapSvg(
     <g>${markers}</g>
     <g transform="translate(36 ${HEIGHT - 28})">
       <circle cx="7" cy="-2" r="7" fill="${palette.marker}"/>
-      <text x="22" y="4" fill="${palette.muted}" font-family="Times New Roman, Times, serif" font-size="14">Bubble size represents weighted cross-source relevance</text>
+      <text x="22" y="4" fill="${palette.muted}" font-family="Times New Roman, Times, serif" font-size="14">Highest-relevance country</text>
+      <circle cx="225" cy="-2" r="6" fill="${palette.secondaryMarker}" stroke="${palette.secondaryMarkerStroke}" stroke-width="1"/>
+      <text x="239" y="4" fill="${palette.muted}" font-family="Times New Roman, Times, serif" font-size="14">Other contributing countries</text>
+      <text x="455" y="4" fill="${palette.muted}" font-family="Times New Roman, Times, serif" font-size="14">Marker size = weighted relevance</text>
     </g>
     <text x="${WIDTH - 36}" y="${HEIGHT - 24}" text-anchor="end" fill="${palette.attribution}" font-family="Times New Roman, Times, serif" font-size="11">Natural Earth geometry · country reference: world-countries (ODbL)</text>
   </svg>`;
