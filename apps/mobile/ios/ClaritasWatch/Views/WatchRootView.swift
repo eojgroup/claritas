@@ -30,7 +30,8 @@ private struct WatchTransportPulseView: View {
     @State private var selectedCountry: String?
 
     private var points: [WatchMapPoint] {
-        (model.transport?.countries ?? []).compactMap { country in
+        let rankedPoints: [WatchMapPoint] = (model.transport?.countries ?? []).compactMap {
+            (country: TransportCountryAggregate) -> WatchMapPoint? in
             guard
                 let coordinate = WatchCountryCentroids.values[country.country],
                 country.active_count > 0
@@ -45,11 +46,18 @@ private struct WatchTransportPulseView: View {
                 rank: 0
             )
         }
-        .sorted { $0.magnitude > $1.magnitude }
-        .prefix(12)
-        .enumerated()
-        .map { index, point in
-            WatchMapPoint(
+
+        let leadingPoints: [WatchMapPoint] = Array(
+            rankedPoints
+                .sorted { (left: WatchMapPoint, right: WatchMapPoint) in
+                    left.magnitude > right.magnitude
+                }
+                .prefix(12)
+        )
+
+        return leadingPoints.enumerated().map { indexedPoint -> WatchMapPoint in
+            let (index, point): (Int, WatchMapPoint) = indexedPoint
+            return WatchMapPoint(
                 iso: point.iso,
                 valueLabel: point.valueLabel,
                 detail: point.detail,
