@@ -128,13 +128,19 @@ jobs:
           DB_NAME=$(terraform output -raw db_name 2>/dev/null | tr -d '\n')
           DB_USER=$(terraform output -raw db_user 2>/dev/null | tr -d '\n')
           DB_PASS=$(terraform output -raw db_pass 2>/dev/null | tr -d '\n')
+          API_EGRESS_IP=$(terraform output -raw api_egress_ip 2>/dev/null | tr -d '\n')
 
           {
             echo "icn=${ICN}"
             echo "db_name=${DB_NAME}"
             echo "db_user=${DB_USER}"
             echo "db_pass=${DB_PASS}"
+            echo "api_egress_ip=${API_EGRESS_IP}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: 📮 Show SMTP allowlist address
+        run: |
+          echo "::notice title=Claritas static egress IP::Authorize ${{ steps.tf_out.outputs.api_egress_ip }} for SMTP in Brevo."
 
       - name: 🕵️ Mask DB secret
         run: |

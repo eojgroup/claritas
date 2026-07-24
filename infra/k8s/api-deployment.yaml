@@ -12,6 +12,22 @@ spec:
       labels: { app: claritas-api }
     spec:
       serviceAccountName: api-sa
+      nodeSelector:
+        claritas-egress: static
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: claritas-api
+          effect: NoSchedule
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: claritas-api
       containers:
         - name: claritas-api
           image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api:latest

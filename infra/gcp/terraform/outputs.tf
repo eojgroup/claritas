@@ -53,6 +53,11 @@ output "artifact_registry_repo_name" {
   value = google_artifact_registry_repository.claritas_app.name
 }
 
+output "api_egress_ip" {
+  description = "Stable outbound IP for Claritas API and SMTP traffic. Authorize this address with the SMTP provider."
+  value       = google_compute_address.api_egress.address
+}
+
 output "claritas_sql_gsa_email" {
   value = google_service_account.claritas_sql_gsa.email
 }
