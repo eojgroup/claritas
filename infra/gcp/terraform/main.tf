@@ -98,6 +98,16 @@ resource "google_project_iam_member" "terraform_runner_secretmanager" {
   ]
 }
 
+resource "google_project_iam_member" "terraform_runner_monitoring_alerts" {
+  project = var.project_id
+  role    = "roles/monitoring.alertPolicyEditor"
+  member  = "serviceAccount:${local.terraform_runner_sa}"
+
+  depends_on = [
+    google_project_service.enabled_services["monitoring.googleapis.com"]
+  ]
+}
+
 resource "google_secret_manager_secret" "auth" {
   for_each  = local.auth_secret_names
   project   = var.project_id

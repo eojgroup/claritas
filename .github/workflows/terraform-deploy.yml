@@ -69,6 +69,16 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
           install_components: gke-gcloud-auth-plugin
 
+      # Bootstrap the least-privilege permission needed to create Terraform's
+      # alert policies. Terraform manages the same binding after this step.
+      - name: 🚨 Ensure alert-policy IAM permission
+        run: |
+          gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+            --member="serviceAccount:terraform-github-oidc@${PROJECT_ID}.iam.gserviceaccount.com" \
+            --role="roles/monitoring.alertPolicyEditor" \
+            --condition=None \
+            --quiet
+
       ############################################
       # Core Terraform (networking, GKE, registry)
       ############################################

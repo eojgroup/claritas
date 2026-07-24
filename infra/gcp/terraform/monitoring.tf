@@ -33,7 +33,8 @@ resource "google_monitoring_alert_policy" "cloud_sql_memory_pressure" {
   }
 
   depends_on = [
-    google_project_service.enabled_services["monitoring.googleapis.com"]
+    google_project_service.enabled_services["monitoring.googleapis.com"],
+    google_project_iam_member.terraform_runner_monitoring_alerts
   ]
 }
 
@@ -72,7 +73,8 @@ resource "google_monitoring_alert_policy" "cloud_sql_cpu_pressure" {
   }
 
   depends_on = [
-    google_project_service.enabled_services["monitoring.googleapis.com"]
+    google_project_service.enabled_services["monitoring.googleapis.com"],
+    google_project_iam_member.terraform_runner_monitoring_alerts
   ]
 }
 
@@ -113,6 +115,7 @@ resource "google_monitoring_alert_policy" "cloud_sql_connection_pressure" {
   }
 
   depends_on = [
-    google_project_service.enabled_services["monitoring.googleapis.com"]
+    google_project_service.enabled_services["monitoring.googleapis.com"],
+    google_project_iam_member.terraform_runner_monitoring_alerts
   ]
 }

@@ -50,6 +50,9 @@ Terraform manages Cloud Monitoring alert policies for:
 - CPU utilization above 85% for ten minutes;
 - backend connections above the reserved threshold for five minutes.
 
+The deployment identity receives only the Monitoring AlertPolicy Editor role
+needed to manage these policies.
+
 During an alert, inspect Cloud SQL System Insights and Query Insights, then
 correlate with `database_pool_pressure`, `database_slow_query`,
 `transport_overview_slow_refresh`, and `transport_retention_pruned` logs.
