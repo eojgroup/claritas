@@ -14,6 +14,17 @@ variable "zone" {
   default     = "europe-west2-b" # Adjust to a specific zone in West Europe (e.g., europe-west2-b)
 }
 
+variable "api_egress_node_locations" {
+  description = "Zones used by the private API node pool. One node is created in each zone for availability."
+  type        = list(string)
+  default     = ["europe-west2-b", "europe-west2-c"]
+
+  validation {
+    condition     = length(var.api_egress_node_locations) >= 2
+    error_message = "api_egress_node_locations must contain at least two zones."
+  }
+}
+
 variable "auth_google_client_id" {
   description = "OAuth client ID for Google"
   type        = string

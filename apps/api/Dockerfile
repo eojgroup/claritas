@@ -13,6 +13,10 @@ WORKDIR /srv
 ENV NODE_ENV=production
 ENV PORT=8080
 
+# Sharp rasterizes the briefing map at send time; install a deterministic font
+# so labels render correctly in the minimal Alpine runtime.
+RUN apk add --no-cache fontconfig ttf-dejavu
+
 # Install prod deps
 COPY --from=build /app/package*.json ./
 RUN npm ci --omit=dev

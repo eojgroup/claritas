@@ -1,6 +1,12 @@
 import { randomUUID } from "crypto";
 import { pool, query, withTransaction } from "./db";
-import { getEmailRuntimeConfig, sendBriefingEmail, type BriefingEmailContent } from "./email";
+import {
+  getEmailRuntimeConfig,
+  sendBriefingEmail,
+  type BriefingEmailContent,
+  type BriefingEmailCountryProfile,
+} from "./email";
+import type { BriefingMapCountry } from "./email-map";
 import { createLlmClientFromEnv } from "./llm";
 
 export type PersonalBriefingPreferences = {
@@ -100,6 +106,11 @@ type DeliveryClaimRow = {
   metadata: unknown;
 };
 
+type BriefingGeospatialContext = {
+  countries: BriefingMapCountry[];
+  highest_country: BriefingEmailCountryProfile | null;
+};
+
 const JOB_MAX_ATTEMPTS = 3;
 const DELIVERY_MAX_ATTEMPTS = 3;
 const WORKER_POLL_MS = 10_000;
@@ -188,6 +199,12 @@ function boundedTextList(value: unknown, maxItems: number, maxLength: number): s
         .filter(Boolean)
     )
   ).slice(0, maxItems);
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = typeof value === "string" && value.trim() ? Number(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function parsePreferences(value: unknown): PersonalBriefingPreferences {
@@ -757,6 +774,286 @@ async function queueEmailDelivery(
   );
 }
 
+function normalizedCountryKey(value: string | null): string | null {
+  const normalized = boundedText(value, 100).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return normalized || null;
+}
+
+function isPodcastSignal(signal: SelectedSignal): boolean {
+  return (
+    (signal.kind || "").toLowerCase().includes("podcast") ||
+    signal.source_name.toLowerCase().includes("podcast")
+  );
+}
+
+async function buildBriefingGeospatialContext(
+  signals: SelectedSignal[],
+  markets: MarketRow[]
+): Promise<BriefingGeospatialContext> {
+  const countryResult = await query<{
+    iso2: string;
+    name: string;
+    region: string | null;
+  }>(
+    `SELECT upper(iso2::text) AS iso2, name, region
+     FROM country`
+  );
+  const countriesByIso = new Map(
+    countryResult.rows.map((country) => [country.iso2, country] as const)
+  );
+  const isoByCountryName = new Map<string, string>();
+  for (const country of countryResult.rows) {
+    const key = normalizedCountryKey(country.name);
+    if (key) isoByCountryName.set(key, country.iso2);
+  }
+  isoByCountryName.set("united states of america", "US");
+  isoByCountryName.set("united kingdom", "GB");
+  isoByCountryName.set("south korea", "KR");
+
+  const resolveCountry = (value: string | null): string | null => {
+    const trimmed = boundedText(value, 100).toUpperCase();
+    if (/^[A-Z]{2}$/.test(trimmed)) return trimmed;
+    const key = normalizedCountryKey(value);
+    return key ? isoByCountryName.get(key) ?? null : null;
+  };
+
+  type Aggregate = {
+    news_count: number;
+    podcast_count: number;
+    market_count: number;
+    max_market_move: number;
+  };
+  const aggregateByIso = new Map<string, Aggregate>();
+  const aggregateFor = (iso2: string): Aggregate => {
+    const current = aggregateByIso.get(iso2) ?? {
+      news_count: 0,
+      podcast_count: 0,
+      market_count: 0,
+      max_market_move: 0,
+    };
+    aggregateByIso.set(iso2, current);
+    return current;
+  };
+
+  for (const signal of signals) {
+    const iso2 = resolveCountry(signal.country_iso2);
+    if (!iso2) continue;
+    const aggregate = aggregateFor(iso2);
+    if (isPodcastSignal(signal)) aggregate.podcast_count += 1;
+    else aggregate.news_count += 1;
+  }
+  for (const market of markets) {
+    const iso2 = resolveCountry(market.country);
+    if (!iso2) continue;
+    const aggregate = aggregateFor(iso2);
+    aggregate.market_count += 1;
+    aggregate.max_market_move = Math.max(
+      aggregate.max_market_move,
+      Math.abs(market.percent_change ?? market.change ?? 0)
+    );
+  }
+
+  const candidateIsos = Array.from(aggregateByIso.keys());
+  if (candidateIsos.length === 0) {
+    return { countries: [], highest_country: null };
+  }
+
+  const weatherResult = await query<{
+    country_iso2: string;
+    temp_c: number | null;
+    humidity: number | null;
+    wind_speed: number | null;
+    weather_main: string | null;
+    observed_at: string | Date;
+  }>(
+    `SELECT
+       upper(country_iso2::text) AS country_iso2,
+       temp_c,
+       humidity,
+       wind_speed,
+       weather_main,
+       observed_at
+     FROM weather_snapshot
+     WHERE upper(country_iso2::text) = ANY($1::text[])`,
+    [candidateIsos]
+  );
+  const weatherByIso = new Map(
+    weatherResult.rows.map((weather) => [weather.country_iso2, weather] as const)
+  );
+  const maxNews = Math.max(
+    1,
+    ...Array.from(aggregateByIso.values()).map((aggregate) => aggregate.news_count)
+  );
+  const maxPodcast = Math.max(
+    1,
+    ...Array.from(aggregateByIso.values()).map((aggregate) => aggregate.podcast_count)
+  );
+  const maxMarketMove = Math.max(
+    1,
+    ...Array.from(aggregateByIso.values()).map((aggregate) => aggregate.max_market_move)
+  );
+
+  const mapCountries = candidateIsos
+    .map((iso2): BriefingMapCountry & { relevance_drivers: string[] } => {
+      const aggregate = aggregateFor(iso2);
+      const weather = weatherByIso.get(iso2);
+      const newsRelevance =
+        aggregate.news_count > 0
+          ? Math.log1p(aggregate.news_count) / Math.log1p(maxNews)
+          : 0;
+      const podcastRelevance = aggregate.podcast_count / maxPodcast;
+      const temperatureSeverity =
+        typeof weather?.temp_c === "number"
+          ? Math.min(1, Math.max(0, (Math.abs(weather.temp_c - 20) - 8) / 24))
+          : 0;
+      const humiditySeverity =
+        typeof weather?.humidity === "number"
+          ? Math.min(1, Math.max(0, (weather.humidity - 75) / 25))
+          : 0;
+      const windSeverity =
+        typeof weather?.wind_speed === "number"
+          ? Math.min(1, Math.max(0, weather.wind_speed / 25))
+          : 0;
+      const weatherRelevance = Math.max(
+        temperatureSeverity,
+        humiditySeverity,
+        windSeverity
+      );
+      const marketRelevance =
+        aggregate.market_count > 0 ? aggregate.max_market_move / maxMarketMove : 0;
+      const domains = [
+        newsRelevance > 0 ? "news" : null,
+        podcastRelevance > 0 ? "podcast" : null,
+        weatherRelevance > 0 ? "weather" : null,
+        marketRelevance > 0 ? "markets" : null,
+      ].filter((domain): domain is string => !!domain);
+      const breadthBonus = Math.max(0, domains.length - 1) * 2;
+      const relevanceScore = Math.min(
+        100,
+        Math.round(
+          newsRelevance * 40 +
+            podcastRelevance * 25 +
+            weatherRelevance * 15 +
+            marketRelevance * 15 +
+            breadthBonus
+        )
+      );
+      const country = countriesByIso.get(iso2);
+      const relevanceDrivers = [
+        aggregate.news_count > 0
+          ? `News: ${aggregate.news_count} selected ${
+              aggregate.news_count === 1 ? "story" : "stories"
+            }`
+          : null,
+        aggregate.podcast_count > 0
+          ? `Podcast: ${aggregate.podcast_count} attributed ${
+              aggregate.podcast_count === 1 ? "signal" : "signals"
+            }`
+          : null,
+        weather
+          ? `Weather: ${
+              weather.temp_c == null ? "temperature unavailable" : `${weather.temp_c.toFixed(1)}°C`
+            }${weather.weather_main ? ` · ${weather.weather_main}` : ""}`
+          : null,
+        aggregate.market_count > 0
+          ? `Markets: ${aggregate.market_count} linked ${
+              aggregate.market_count === 1 ? "instrument" : "instruments"
+            }`
+          : null,
+      ].filter((driver): driver is string => !!driver);
+      return {
+        country_iso2: iso2,
+        country_name: country?.name ?? iso2,
+        relevance_score: relevanceScore,
+        news_count: aggregate.news_count,
+        podcast_count: aggregate.podcast_count,
+        market_count: aggregate.market_count,
+        relevance_drivers: relevanceDrivers,
+      };
+    })
+    .filter((country) => country.relevance_score > 0)
+    .sort(
+      (left, right) =>
+        right.relevance_score - left.relevance_score ||
+        right.news_count + right.podcast_count - (left.news_count + left.podcast_count) ||
+        left.country_iso2.localeCompare(right.country_iso2)
+    );
+
+  const highest = mapCountries[0];
+  if (!highest) return { countries: [], highest_country: null };
+
+  const leadershipResult = await query<{
+    government_type: string | null;
+    summary: string | null;
+    role_type: string | null;
+    person_name: string | null;
+    started_at: string | Date | null;
+  }>(
+    `SELECT
+       cl.government_type,
+       cl.summary,
+       clr.role_type,
+       clr.person_name,
+       clr.started_at
+     FROM country_leadership cl
+     LEFT JOIN country_leadership_role clr
+       ON clr.country_iso2 = cl.country_iso2
+     WHERE upper(cl.country_iso2::text) = $1
+     ORDER BY clr.role_type, clr.person_name`,
+    [highest.country_iso2]
+  );
+  const leadershipBase = leadershipResult.rows[0];
+  const leadershipRoles: NonNullable<
+    BriefingEmailCountryProfile["leadership"]
+  >["roles"] = leadershipResult.rows.flatMap((role) => {
+    if (
+      (role.role_type !== "head_of_state" &&
+        role.role_type !== "head_of_government") ||
+      !role.person_name
+    ) {
+      return [];
+    }
+    return [
+      {
+        role_type: role.role_type,
+        person_name: boundedText(role.person_name, 200),
+        started_at: toIso(role.started_at),
+      },
+    ];
+  });
+  const weather = weatherByIso.get(highest.country_iso2);
+  const country = countriesByIso.get(highest.country_iso2);
+
+  return {
+    countries: mapCountries.map(({ relevance_drivers: _drivers, ...mapCountry }) => mapCountry),
+    highest_country: {
+      country_iso2: highest.country_iso2,
+      country_name: highest.country_name,
+      region: country?.region ?? null,
+      relevance_score: highest.relevance_score,
+      relevance_drivers: highest.relevance_drivers,
+      news_count: highest.news_count,
+      podcast_count: highest.podcast_count,
+      market_count: highest.market_count,
+      weather: weather
+        ? {
+            temp_c: weather.temp_c,
+            humidity: weather.humidity,
+            weather_main: weather.weather_main,
+            observed_at: toIso(weather.observed_at),
+          }
+        : null,
+      leadership: leadershipBase
+        ? {
+            government_type: boundedText(leadershipBase.government_type, 300) || null,
+            summary: boundedText(leadershipBase.summary, 1_000) || null,
+            roles: leadershipRoles,
+          }
+        : null,
+    },
+  };
+}
+
 async function generateForJob(job: PersonalBriefingJobRow): Promise<number> {
   const preferences = parsePreferences(job.preference_snapshot);
   const sourceWindowEnd = new Date();
@@ -785,6 +1082,7 @@ async function generateForJob(job: PersonalBriefingJobRow): Promise<number> {
     signals,
     markets
   );
+  const geospatialContext = await buildBriefingGeospatialContext(signals, markets);
   const metadata = {
     prompt_version: PROMPT_VERSION,
     selection_semantics: "company OR configured industry/geography filters",
@@ -793,6 +1091,7 @@ async function generateForJob(job: PersonalBriefingJobRow): Promise<number> {
       ...market,
       observed_at: toIso(market.observed_at),
     })),
+    geospatial_context: geospatialContext,
     data_quality_notes: generated.data_quality_notes,
     generation: generated.generation_metadata,
   };
@@ -894,6 +1193,101 @@ function toEmailContent(row: DeliveryClaimRow): BriefingEmailContent {
   const metadata = asRecord(row.metadata);
   const signals = Array.isArray(metadata.selected_signals) ? metadata.selected_signals : [];
   const markets = Array.isArray(metadata.markets) ? metadata.markets : [];
+  const geospatialContext = asRecord(metadata.geospatial_context);
+  const mapCountries = Array.isArray(geospatialContext.countries)
+    ? geospatialContext.countries
+        .slice(0, 80)
+        .map((value): BriefingMapCountry | null => {
+          const country = asRecord(value);
+          const countryIso2 = boundedText(country.country_iso2, 2).toUpperCase();
+          const relevanceScore = finiteNumber(country.relevance_score);
+          if (!/^[A-Z]{2}$/.test(countryIso2) || relevanceScore == null) return null;
+          return {
+            country_iso2: countryIso2,
+            country_name: boundedText(country.country_name, 120) || countryIso2,
+            relevance_score: Math.max(0, Math.min(100, relevanceScore)),
+            news_count: Math.max(0, Math.trunc(finiteNumber(country.news_count) ?? 0)),
+            podcast_count: Math.max(0, Math.trunc(finiteNumber(country.podcast_count) ?? 0)),
+            market_count: Math.max(0, Math.trunc(finiteNumber(country.market_count) ?? 0)),
+          };
+        })
+        .filter((country): country is BriefingMapCountry => !!country)
+    : [];
+  const highestRecord = asRecord(geospatialContext.highest_country);
+  const highestIso2 = boundedText(highestRecord.country_iso2, 2).toUpperCase();
+  const highestWeather = asRecord(highestRecord.weather);
+  const highestLeadership = asRecord(highestRecord.leadership);
+  const leadershipRoles: NonNullable<
+    BriefingEmailCountryProfile["leadership"]
+  >["roles"] = Array.isArray(highestLeadership.roles)
+    ? highestLeadership.roles.flatMap((value) => {
+        const role = asRecord(value);
+        const roleType = boundedText(role.role_type, 30);
+        const personName = boundedText(role.person_name, 200);
+        if (
+          (roleType !== "head_of_state" && roleType !== "head_of_government") ||
+          !personName
+        ) {
+          return [];
+        }
+        const normalizedRoleType: "head_of_state" | "head_of_government" =
+          roleType;
+        return [
+          {
+            role_type: normalizedRoleType,
+            person_name: personName,
+            started_at: toIso(boundedText(role.started_at, 40) || null),
+          },
+        ];
+      })
+    : [];
+  const highestRelevance = finiteNumber(highestRecord.relevance_score);
+  const highestCountry: BriefingEmailCountryProfile | null =
+    /^[A-Z]{2}$/.test(highestIso2) && highestRelevance != null
+      ? {
+          country_iso2: highestIso2,
+          country_name: boundedText(highestRecord.country_name, 120) || highestIso2,
+          region: boundedText(highestRecord.region, 120) || null,
+          relevance_score: Math.max(0, Math.min(100, highestRelevance)),
+          relevance_drivers: boundedTextList(
+            highestRecord.relevance_drivers,
+            6,
+            240
+          ),
+          news_count: Math.max(
+            0,
+            Math.trunc(finiteNumber(highestRecord.news_count) ?? 0)
+          ),
+          podcast_count: Math.max(
+            0,
+            Math.trunc(finiteNumber(highestRecord.podcast_count) ?? 0)
+          ),
+          market_count: Math.max(
+            0,
+            Math.trunc(finiteNumber(highestRecord.market_count) ?? 0)
+          ),
+          weather:
+            Object.keys(highestWeather).length > 0
+              ? {
+                  temp_c: finiteNumber(highestWeather.temp_c),
+                  humidity: finiteNumber(highestWeather.humidity),
+                  weather_main: boundedText(highestWeather.weather_main, 120) || null,
+                  observed_at: toIso(
+                    boundedText(highestWeather.observed_at, 40) || null
+                  ),
+                }
+              : null,
+          leadership:
+            Object.keys(highestLeadership).length > 0
+              ? {
+                  government_type:
+                    boundedText(highestLeadership.government_type, 300) || null,
+                  summary: boundedText(highestLeadership.summary, 1_000) || null,
+                  roles: leadershipRoles,
+                }
+              : null,
+        }
+      : null;
   return {
     title: row.title,
     briefing_date: toDateString(row.briefing_date),
@@ -920,6 +1314,8 @@ function toEmailContent(row: DeliveryClaimRow): BriefingEmailContent {
           typeof market.percent_change === "number" ? market.percent_change : null,
       };
     }),
+    map_countries: mapCountries,
+    highest_relevance_country: highestCountry,
   };
 }
 

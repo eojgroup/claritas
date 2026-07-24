@@ -15,7 +15,10 @@ on:
       - '.github/workflows/gke-deploy.yml'
   pull_request:
     paths:
+      - 'apps/api/**'
       - '.github/workflows/**'
+      - 'infra/gcp/terraform/**'
+      - 'infra/k8s/api-deployment.yaml'
       - 'infra/gcp/sql/**'
       - 'infra/k8s/migrations/**'
       - 'infra/scripts/check-flyway-migrations.py'
@@ -48,6 +51,32 @@ jobs:
 
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/api/package-lock.json
+
+      - name: Build API and smoke-test briefing map
+        working-directory: apps/api
+        run: |
+          npm ci
+          npm run build
+          node -e 'const map=require("./dist/email-map.js"); map.renderBriefingMapPng([{country_iso2:"US",country_name:"United States",relevance_score:95,news_count:4,podcast_count:1,market_count:2}]).then((image)=>{if(image.length<1000)process.exit(1);console.log(`Rendered ${image.length} byte briefing map.`);})'
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.8.5
+
+      - name: Validate Terraform
+        working-directory: infra/gcp/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate
 
       - name: Validate Flyway migration versions
         run: python3 infra/scripts/check-flyway-migrations.py
@@ -593,6 +622,18 @@ jobs:
 
           kubectl -n "$NS" create secret generic claritas-auth "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: 🌐 Ensure static API egress infrastructure exists
+        run: |
+          set -euo pipefail
+          ./infra/scripts/terraform-init-retry.sh infra/gcp/terraform
+          terraform -chdir=infra/gcp/terraform apply -auto-approve -var-file="terraform.tfvars" -lock-timeout=5m \
+            -target=google_compute_address.api_egress \
+            -target=google_compute_router.api_egress \
+            -target=google_compute_router_nat.api_egress \
+            -target=google_container_node_pool.api_egress
+          EGRESS_IP="$(terraform -chdir=infra/gcp/terraform output -raw api_egress_ip)"
+          echo "::notice title=Claritas static egress IP::Authorize ${EGRESS_IP} for SMTP in Brevo."
+
       - name: 🛠️ Apply workload deployments
         run: |
           kubectl apply -f ./infra/k8s/web-deployment.yaml
@@ -735,6 +776,41 @@ jobs:
           wait_rollout claritas-api
           wait_rollout opencode
           wait_rollout keycloak
+
+      - name: 🌐 Verify API pods use the reserved egress IP
+        run: |
+          set -euo pipefail
+          expected="$(terraform -chdir=infra/gcp/terraform output -raw api_egress_ip)"
+          mapfile -t pods < <(
+            kubectl -n "${NAMESPACE}" get pods \
+              -l app=claritas-api \
+              --field-selector=status.phase=Running \
+              -o name
+          )
+          if [ "${#pods[@]}" -eq 0 ]; then
+            echo "::error::No running Claritas API pods were found for egress verification." >&2
+            exit 1
+          fi
+          for pod in "${pods[@]}"; do
+            actual=""
+            for attempt in 1 2 3; do
+              actual="$(
+                kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- \
+                  node -e 'fetch("https://api.ipify.org").then((response)=>response.text()).then((ip)=>process.stdout.write(ip.trim()))' \
+                  2>/dev/null || true
+              )"
+              if [ -n "$actual" ]; then
+                break
+              fi
+              sleep $((attempt * 5))
+            done
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::${pod} used ${actual:-an unknown address}; expected reserved egress ${expected}." >&2
+              exit 1
+            fi
+            echo "${pod} -> ${actual}"
+          done
+          echo "::notice title=Verified Claritas egress::All API pods use ${expected}."
 
       - name: 🧪 Verify OpenCode tool-free briefing runtime
         run: |

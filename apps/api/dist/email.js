@@ -8,6 +8,7 @@ exports.renderBriefingEmail = renderBriefingEmail;
 exports.sendBriefingEmail = sendBriefingEmail;
 exports.sendEmailVerificationEmail = sendEmailVerificationEmail;
 const nodemailer_1 = __importDefault(require("nodemailer"));
+const email_map_1 = require("./email-map");
 let transporter = null;
 let transporterKey = null;
 function optionalEnv(name) {
@@ -101,7 +102,7 @@ function formatMarketValue(market) {
         : null;
     return move ? `${price} · ${move}` : price;
 }
-function renderBriefingEmail(content) {
+function renderBriefingEmail(content, options = {}) {
     const config = getEmailRuntimeConfig();
     const subject = `${content.title} — ${content.briefing_date}`;
     const takeawayHtml = content.key_takeaways
@@ -124,6 +125,58 @@ function renderBriefingEmail(content) {
     const marketHtml = content.markets
         .map((market) => `<li style="margin:0 0 8px"><strong>${escapeHtml(market.symbol)}</strong>${market.company_name ? ` · ${escapeHtml(market.company_name)}` : ""}<div style="font-size:12px;color:#64748b">${escapeHtml(formatMarketValue(market))}</div></li>`)
         .join("");
+    const mapHtml = options.map_cid
+        ? `<h2 style="margin:26px 0 10px;font-size:18px">Geospatial signal pulse</h2>
+       <img src="cid:${escapeHtml(options.map_cid)}" width="624" alt="World map showing the countries most relevant to this briefing" style="display:block;width:100%;max-width:624px;height:auto;border:0;border-radius:12px;background:#07121a" />`
+        : "";
+    const countryProfile = content.highest_relevance_country;
+    const countryProfileHtml = countryProfile
+        ? (() => {
+            const weather = countryProfile.weather;
+            const metricCells = [
+                ["Relevance", `${Math.round(countryProfile.relevance_score)}/100`],
+                ["News", String(countryProfile.news_count)],
+                ["Weather", weather?.temp_c == null ? "—" : `${weather.temp_c.toFixed(1)}°C`],
+                ["Podcast", String(countryProfile.podcast_count)],
+                ["Leadership", String(countryProfile.leadership?.roles.length ?? 0)],
+                ["Markets", String(countryProfile.market_count)],
+            ]
+                .map(([label, value]) => `<td style="padding:10px 8px;border:1px solid #d7e1e6;text-align:center"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#64748b">${escapeHtml(label)}</div><strong style="display:block;margin-top:4px;font-size:17px;color:#0f172a">${escapeHtml(value)}</strong></td>`)
+                .join("");
+            const drivers = countryProfile.relevance_drivers
+                .slice(0, 5)
+                .map((driver) => `<li style="margin:0 0 6px;color:#334155">${escapeHtml(driver)}</li>`)
+                .join("");
+            const weatherHtml = weather
+                ? `<p style="margin:12px 0 0;color:#334155"><strong>Weather:</strong> ${weather.temp_c == null ? "Temperature unavailable" : `${weather.temp_c.toFixed(1)}°C`}${weather.weather_main ? ` · ${escapeHtml(weather.weather_main)}` : ""}${weather.humidity == null ? "" : ` · ${weather.humidity}% humidity`}</p>`
+                : "";
+            const leadershipHtml = countryProfile.leadership?.roles.length
+                ? `<p style="margin:12px 0 4px;color:#334155"><strong>Current leadership${countryProfile.leadership.government_type
+                    ? ` · ${escapeHtml(countryProfile.leadership.government_type)}`
+                    : ""}</strong></p><ul style="margin:4px 0 0;padding-left:20px">${countryProfile.leadership.roles
+                    .slice(0, 4)
+                    .map((role) => `<li style="margin:0 0 5px;color:#334155">${escapeHtml(role.role_type === "head_of_state"
+                    ? "Head of state"
+                    : "Head of government")}: ${escapeHtml(role.person_name)}${role.started_at
+                    ? ` <span style="color:#64748b">(since ${escapeHtml(role.started_at.slice(0, 10))})</span>`
+                    : ""}</li>`)
+                    .join("")}</ul>`
+                : "";
+            return `<div style="margin-top:14px;border:1px solid #d7e1e6;border-radius:12px;overflow:hidden">
+          <div style="padding:16px 18px;background:#0d202b;color:#f8fafc">
+            <div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#9fb0ba">Highest relevance country · ${escapeHtml(countryProfile.country_iso2)}</div>
+            <div style="margin-top:5px;font-size:22px;font-weight:700">${escapeHtml(countryProfile.country_name)}</div>
+            <div style="font-size:12px;color:#bdcbd2">${escapeHtml(countryProfile.region || "Global country context")}</div>
+          </div>
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f8fafc"><tr>${metricCells}</tr></table>
+          <div style="padding:16px 18px;background:#ffffff">
+            ${drivers ? `<strong style="font-size:13px;color:#0f172a">Why this country is relevant</strong><ul style="margin:8px 0 0;padding-left:20px">${drivers}</ul>` : ""}
+            ${weatherHtml}
+            ${leadershipHtml}
+          </div>
+        </div>`;
+        })()
+        : "";
     const preferencesUrl = config.public_base_url ? `${config.public_base_url}/?view=profile` : null;
     const html = `<!doctype html>
 <html>
@@ -137,6 +190,8 @@ function renderBriefingEmail(content) {
             <h1 style="margin:10px 0 6px;font-size:28px;line-height:1.2">${escapeHtml(content.title)}</h1>
             <div style="font-size:13px;color:#64748b">${escapeHtml(content.briefing_date)}</div>
             <p style="font-size:16px;line-height:1.6">${escapeHtml(content.update_text)}</p>
+            ${mapHtml}
+            ${countryProfileHtml}
             ${takeawayHtml
         ? `<h2 style="margin:26px 0 10px;font-size:18px">Key takeaways</h2><ul style="padding-left:20px;line-height:1.5">${takeawayHtml}</ul>`
         : ""}
@@ -162,6 +217,24 @@ function renderBriefingEmail(content) {
         "",
         content.update_text,
         "",
+        ...(countryProfile
+            ? [
+                "HIGHEST RELEVANCE COUNTRY",
+                `${countryProfile.country_name} (${countryProfile.country_iso2}) — ${Math.round(countryProfile.relevance_score)}/100`,
+                ...countryProfile.relevance_drivers.map((driver) => `- ${driver}`),
+                ...(countryProfile.weather
+                    ? [
+                        `Weather: ${countryProfile.weather.temp_c == null
+                            ? "temperature unavailable"
+                            : `${countryProfile.weather.temp_c.toFixed(1)}°C`}${countryProfile.weather.weather_main
+                            ? ` · ${countryProfile.weather.weather_main}`
+                            : ""}`,
+                    ]
+                    : []),
+                ...(countryProfile.leadership?.roles ?? []).map((role) => `${role.role_type === "head_of_state" ? "Head of state" : "Head of government"}: ${role.person_name}`),
+                "",
+            ]
+            : []),
         ...(content.key_takeaways.length
             ? ["KEY TAKEAWAYS", ...content.key_takeaways.map((item) => `- ${item}`), ""]
             : []),
@@ -191,7 +264,19 @@ function renderBriefingEmail(content) {
 }
 async function sendBriefingEmail(recipient, content) {
     const config = getEmailRuntimeConfig();
-    const rendered = renderBriefingEmail(content);
+    const mapCid = `claritas-briefing-map-${content.briefing_date}@claritas`;
+    let mapImage = null;
+    if (content.map_countries.length > 0) {
+        try {
+            mapImage = await (0, email_map_1.renderBriefingMapPng)(content.map_countries);
+        }
+        catch (error) {
+            console.warn("Briefing map rendering failed; sending the email without the image:", error instanceof Error ? error.message : String(error));
+        }
+    }
+    const rendered = renderBriefingEmail(content, {
+        map_cid: mapImage ? mapCid : null,
+    });
     const info = await getTransporter().sendMail({
         from: config.from,
         to: recipient,
@@ -199,6 +284,17 @@ async function sendBriefingEmail(recipient, content) {
         subject: rendered.subject,
         text: rendered.text,
         html: rendered.html,
+        attachments: mapImage
+            ? [
+                {
+                    filename: `claritas-signal-map-${content.briefing_date}.png`,
+                    content: mapImage,
+                    contentType: "image/png",
+                    cid: mapCid,
+                    contentDisposition: "inline",
+                },
+            ]
+            : undefined,
         headers: {
             "X-Claritas-Message-Type": "personal-daily-briefing",
         },
