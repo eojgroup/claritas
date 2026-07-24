@@ -64,7 +64,7 @@ jobs:
         run: |
           npm ci
           npm run build
-          node -e 'const map=require("./dist/email-map.js"); map.renderBriefingMapPng([{country_iso2:"US",country_name:"United States",relevance_score:95,news_count:4,podcast_count:1,market_count:2}]).then((image)=>{if(image.length<1000)process.exit(1);console.log(`Rendered ${image.length} byte briefing map.`);})'
+          node -e 'const map=require("./dist/email-map.js"); map.renderBriefingMapPng([{country_iso2:"US",country_name:"United States",relevance_score:95,news_count:4,podcast_count:1,market_count:2}]).then((image)=>{if(image.length<1000)process.exit(1);console.log("Rendered "+image.length+" byte briefing map.");})'
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
