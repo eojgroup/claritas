@@ -903,10 +903,37 @@ private struct WatchNewsView: View {
 
 private struct WatchPodcastsView: View {
     @EnvironmentObject private var model: WatchAppModel
+    private var podcastSummary: PodcastIntelligenceSummary {
+        PodcastIntelligenceSummary.make(from: model.podcasts)
+    }
 
     var body: some View {
         NavigationStack {
             List {
+                if !model.podcasts.isEmpty {
+                    Section {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(podcastSummary.conclusions)
+                                .font(.caption2)
+                                .foregroundStyle(WatchPalette.cream)
+                                .lineLimit(7)
+                            HStack {
+                                Label("\(podcastSummary.signals)", systemImage: "waveform")
+                                Spacer()
+                                Label("\(podcastSummary.elevatedRisks)", systemImage: "exclamationmark.triangle")
+                            }
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(
+                                podcastSummary.elevatedRisks > 0
+                                    ? WatchPalette.negative
+                                    : WatchPalette.sage
+                            )
+                        }
+                    } header: {
+                        WatchSectionLabel(title: "Conclusions", icon: "lightbulb.max")
+                    }
+                }
+
                 Section {
                     if model.podcasts.isEmpty {
                         Text("No podcast intelligence")
@@ -933,7 +960,7 @@ private struct WatchPodcastsView: View {
                         }
                     }
                 } header: {
-                    WatchSectionLabel(title: "Podcasts", icon: "mic.fill")
+                    WatchSectionLabel(title: "Episode evidence", icon: "mic.fill")
                 }
             }
             .navigationTitle("Podcasts")

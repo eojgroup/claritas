@@ -39,13 +39,13 @@ struct ClaritasWatchWidget: Widget {
             VStack(alignment: .leading, spacing: 3) {
                 Label("Signal map", systemImage: "globe.europe.africa.fill")
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color(red: 237.0 / 255.0, green: 163.0 / 255.0, blue: 106.0 / 255.0))
                 Text(entry.title).font(.caption.weight(.semibold)).lineLimit(2)
                 Text(entry.summary).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                 Text("\(entry.newsCount) news · \(String(format: "%+.1f%%", entry.marketDirection))")
                     .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
             }
-            .background(Color(red: 0.04, green: 0.11, blue: 0.18))
+            .background(Color(red: 8.0 / 255.0, green: 17.0 / 255.0, blue: 25.0 / 255.0))
         }
         .configurationDisplayName("Claritas signal pulse")
         .description("Today’s cross-source signal pulse.")

@@ -1777,12 +1777,36 @@ struct PoliciesWorkspaceView: View {
 
                     DisclosureGroup("Claritas colour reference") {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
-                            BrandSwatch(name: "Command Navy", hex: "#172F42", color: ClaritasPalette.darkBlue)
-                            BrandSwatch(name: "Signal Blue", hex: "#3E6A80", color: ClaritasPalette.dataBlue(for: colorScheme))
-                            BrandSwatch(name: "Shell Bronze", hex: "#E6A06A", color: ClaritasPalette.orange)
-                            BrandSwatch(name: "Warm Surface", hex: "#FFFAF1", color: Color(hex: "#FFFAF1"))
-                            BrandSwatch(name: "Muted Text", hex: "#53616A", color: ClaritasPalette.grey)
-                            BrandSwatch(name: "Primary Ink", hex: "#172F42", color: ClaritasPalette.text)
+                            BrandSwatch(
+                                name: "Command Navy",
+                                hex: colorScheme == .dark ? "#315F72" : "#172F42",
+                                color: colorScheme == .dark ? Color(hex: "#315F72") : ClaritasPalette.darkBlue
+                            )
+                            BrandSwatch(
+                                name: "Signal Blue",
+                                hex: colorScheme == .dark ? "#77A8BA" : "#3E6A80",
+                                color: ClaritasPalette.dataBlue(for: colorScheme)
+                            )
+                            BrandSwatch(
+                                name: "Signal Orange",
+                                hex: colorScheme == .dark ? "#EDA36A" : "#E6A06A",
+                                color: ClaritasPalette.shellAccent(for: colorScheme)
+                            )
+                            BrandSwatch(
+                                name: "Working Surface",
+                                hex: colorScheme == .dark ? "#11222E" : "#FFFAF1",
+                                color: ClaritasPalette.shellSurface(for: colorScheme)
+                            )
+                            BrandSwatch(
+                                name: "Muted Text",
+                                hex: colorScheme == .dark ? "#A9B5BA" : "#53616A",
+                                color: ClaritasPalette.shellMuted(for: colorScheme)
+                            )
+                            BrandSwatch(
+                                name: "Primary Ink",
+                                hex: colorScheme == .dark ? "#F2EEE6" : "#172F42",
+                                color: ClaritasPalette.shellInk(for: colorScheme)
+                            )
                         }
                         .padding(.top, 14)
                     }
@@ -2408,7 +2432,7 @@ private struct DashboardBackground<Content: View>: View {
                     ClaritasPalette.shellBackgroundElevated(for: colorScheme),
                     ClaritasPalette.shellBackground(for: colorScheme),
                     colorScheme == .dark
-                        ? Color(hex: "#0C1720")
+                        ? Color(hex: "#081119")
                         : Color(hex: "#EFE1CF")
                 ],
                 startPoint: .top,

@@ -538,6 +538,9 @@ struct PodcastWorkspaceView: View {
     @State private var signalType = "all"
 
     private let signalTypes = ["all", "entity", "topic", "claim", "event", "risk"]
+    private var podcastSummary: PodcastIntelligenceSummary {
+        PodcastIntelligenceSummary.make(from: model.podcasts)
+    }
 
     var body: some View {
         BrandBackground {
@@ -545,6 +548,9 @@ struct PodcastWorkspaceView: View {
                 LazyVStack(spacing: 16) {
                     controls
                     metrics
+                    if !model.podcasts.isEmpty {
+                        conclusions
+                    }
 
                     if let error = model.podcastLoadError {
                         Text(error)
@@ -664,6 +670,128 @@ struct PodcastWorkspaceView: View {
                 detail: "Extracted findings",
                 tone: ClaritasPalette.shellAccentSecondary(for: colorScheme)
             )
+        }
+    }
+
+    private var conclusions: some View {
+        let summary = podcastSummary
+        let themes = summary.leadingTopics.isEmpty
+            ? summary.leadingEntities
+            : summary.leadingTopics
+
+        return BrandCard(title: "Overall conclusions", icon: "lightbulb.max") {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(summary.conclusions)
+                    .font(.subheadline)
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 190), spacing: 12)],
+                    spacing: 12
+                ) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("LEADING THEMES")
+                            .font(.caption2.weight(.semibold))
+                            .tracking(1.4)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        if themes.isEmpty {
+                            Text("No recurring topics extracted yet.")
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(themes) { item in
+                                        Text("\(item.name) · \(item.count)")
+                                            .font(.caption.weight(.semibold))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 5)
+                                            .background(
+                                                ClaritasPalette.shellAccentSecondary(for: colorScheme).opacity(0.14),
+                                                in: Capsule()
+                                            )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("RISK POSTURE")
+                            .font(.caption2.weight(.semibold))
+                            .tracking(1.4)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        Text("\(summary.elevatedRisks)")
+                            .font(.title2.weight(.semibold))
+                            .foregroundStyle(
+                                summary.elevatedRisks > 0
+                                    ? ClaritasPalette.negativeText(for: colorScheme)
+                                    : ClaritasPalette.positiveText(for: colorScheme)
+                            )
+                        Text("High or critical · \(summary.risks) total risk signals")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        if let priority = summary.prioritySignal {
+                            Text(priority.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("EVIDENCE QUALITY")
+                            .font(.caption2.weight(.semibold))
+                            .tracking(1.4)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        Text(
+                            summary.episodes > 0
+                                ? "\(Int((Double(summary.transcripts) / Double(summary.episodes) * 100).rounded()))%"
+                                : "—"
+                        )
+                        .font(.title2.weight(.semibold))
+                        Text(
+                            summary.averageConfidence.map {
+                                "Transcript coverage · \(Int(($0 * 100).rounded()))% avg confidence"
+                            } ?? "Transcript coverage"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if !summary.leadingCountries.isEmpty {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("GEOGRAPHIC FOCUS")
+                            .font(.caption2.weight(.semibold))
+                            .tracking(1.4)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(summary.leadingCountries) { country in
+                                    Text("\(country.name.uppercased()) · \(country.count)")
+                                        .font(.caption.weight(.semibold))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            ClaritasPalette.shellAccent(for: colorScheme).opacity(0.14),
+                                            in: Capsule()
+                                        )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text("Episode evidence")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
+            }
         }
     }
 

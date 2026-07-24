@@ -1534,14 +1534,22 @@ export default function ClaritasDashboard() {
   const selectedWindowDays = selectedWindowOption.days;
   const selectedWindowLabel = selectedWindowOption.label;
 
+  const newsTrendPrimaryScope = useMemo(() => {
+    if (!selectedCountry) return newsSearchScope;
+    const selectedIso = selectedCountry.toUpperCase();
+    return newsSearchScope.filter(
+      (item) => item.country_iso2?.toUpperCase() === selectedIso,
+    );
+  }, [newsSearchScope, selectedCountry]);
+
   const newsDateBounds = useMemo(() => {
-    const keys = newsSearchScope
+    const keys = newsTrendPrimaryScope
       .map((item) => (item.event_time ? getDateKey(item.event_time) : null))
       .filter((value): value is string => Boolean(value))
       .sort();
     if (keys.length === 0) return null;
     return { start: keys[0], end: keys[keys.length - 1] };
-  }, [newsSearchScope]);
+  }, [newsTrendPrimaryScope]);
 
   const newsCoverageLabel = useMemo(() => {
     if (!newsDateBounds) return "No dated articles loaded";
@@ -1584,10 +1592,8 @@ export default function ClaritasDashboard() {
         dateKey: string;
         label: string;
         count: number;
-        selectedCount: number;
         comparisonCount: number;
         rollingAvg: number;
-        selectedRollingAvg: number;
         comparisonRollingAvg: number;
         topCountries: string[];
       }
@@ -1602,10 +1608,8 @@ export default function ClaritasDashboard() {
           dateKey: key,
           label: formatter.format(cursor),
           count: 0,
-          selectedCount: 0,
           comparisonCount: 0,
           rollingAvg: 0,
-          selectedRollingAvg: 0,
           comparisonRollingAvg: 0,
           topCountries: [],
         });
@@ -1623,15 +1627,17 @@ export default function ClaritasDashboard() {
       if (!key) return;
       const bucket = buckets.get(key);
       if (!bucket) return;
-      bucket.count += 1;
       const iso = item.country_iso2?.toUpperCase();
-      if (iso) {
+      const inPrimaryScope = selectedIso ? iso === selectedIso : true;
+      if (inPrimaryScope) {
+        bucket.count += 1;
+      }
+      if (iso && inPrimaryScope) {
         const countryMap = perDayCountries.get(key) ?? new Map<string, number>();
         countryMap.set(iso, (countryMap.get(iso) ?? 0) + 1);
         perDayCountries.set(key, countryMap);
-        if (selectedIso && iso === selectedIso) bucket.selectedCount += 1;
-        if (comparisonIso && iso === comparisonIso) bucket.comparisonCount += 1;
       }
+      if (comparisonIso && iso === comparisonIso) bucket.comparisonCount += 1;
     });
 
     const points = Array.from(buckets.values());
@@ -1641,13 +1647,9 @@ export default function ClaritasDashboard() {
       const avg =
         window.reduce((sum, item) => sum + item.count, 0) / window.length;
       bucket.rollingAvg = Number(avg.toFixed(2));
-      const selectedAvg =
-        window.reduce((sum, item) => sum + item.selectedCount, 0) /
-        window.length;
       const comparisonAvg =
         window.reduce((sum, item) => sum + item.comparisonCount, 0) /
         window.length;
-      bucket.selectedRollingAvg = Number(selectedAvg.toFixed(2));
       bucket.comparisonRollingAvg = Number(comparisonAvg.toFixed(2));
       const countryMap = perDayCountries.get(bucket.dateKey);
       if (!countryMap) return;
@@ -2826,6 +2828,22 @@ export default function ClaritasDashboard() {
     const signalRows = podcasts.flatMap((episode) =>
       episode.signals.map((signal) => ({ episode, signal })),
     );
+    const rankLabels = (values: string[]) => {
+      const counts = new Map<string, { label: string; count: number }>();
+      values.forEach((value) => {
+        const label = value.trim();
+        if (!label) return;
+        const key = label.toLocaleLowerCase();
+        const current = counts.get(key);
+        counts.set(key, {
+          label: current?.label ?? label,
+          count: (current?.count ?? 0) + 1,
+        });
+      });
+      return Array.from(counts.values()).sort(
+        (a, b) => b.count - a.count || a.label.localeCompare(b.label),
+      );
+    };
     const riskRank: Record<string, number> = {
       critical: 4,
       high: 3,
@@ -2844,19 +2862,77 @@ export default function ClaritasDashboard() {
     const latestEpisode = [...podcasts].sort((a, b) =>
       (b.event_time ?? "").localeCompare(a.event_time ?? ""),
     )[0];
+    const transcripts = podcasts.filter(
+      (episode) => episode.transcript_status === "available",
+    ).length;
+    const risks = signalRows.filter(
+      ({ signal }) => signal.type === "risk" || Boolean(signal.risk_level),
+    );
+    const elevatedRisks = risks.filter(({ signal }) =>
+      ["critical", "high"].includes(signal.risk_level ?? ""),
+    ).length;
+    const confidences = signalRows
+      .map(({ signal }) => signal.confidence)
+      .filter((value): value is number => typeof value === "number");
+    const topTopics = rankLabels(
+      signalRows.flatMap(({ signal }) => signal.topics),
+    ).slice(0, 4);
+    const topEntities = rankLabels(
+      signalRows.flatMap(({ signal }) => signal.entities),
+    ).slice(0, 4);
+    const signalTypes = rankLabels(
+      signalRows.map(({ signal }) => signal.type),
+    );
+    const topCountries = Array.from(podcastCountryLinks.entries())
+      .map(([iso, linkage]) => ({
+        iso,
+        name: countryMeta.get(iso)?.name ?? iso,
+        count: linkage.signalCount,
+      }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+      .slice(0, 4);
+    const theme = topTopics[0] ?? topEntities[0] ?? signalTypes[0];
+    const conclusions =
+      signalRows.length === 0
+        ? "No extracted signals are available in the current podcast scope, so there is not yet enough structured evidence for an overall conclusion."
+        : [
+            theme
+              ? `${theme.label} is the leading recurring theme, appearing in ${theme.count} extracted ${theme.count === 1 ? "signal" : "signals"}.`
+              : `${signalRows.length} extracted signals define the current evidence set.`,
+            elevatedRisks > 0
+              ? `${elevatedRisks} high or critical risk ${elevatedRisks === 1 ? "signal requires" : "signals require"} priority review.`
+              : risks.length > 0
+                ? `${risks.length} risk ${risks.length === 1 ? "signal is" : "signals are"} present, with none currently rated high or critical.`
+                : "No explicit risk signals are present in the current scope.",
+            topCountries[0]
+              ? `${topCountries[0].name} has the strongest geographic linkage across the podcast evidence.`
+              : "The extracted findings do not yet show a dominant geographic concentration.",
+          ].join(" ");
 
     return {
       episodes: podcasts.length,
       signals: signalRows.length,
+      transcripts,
       evidence: podcasts.reduce(
         (total, episode) => total + episode.evidence.length,
         0,
       ),
-      risks: signalRows.filter(({ signal }) => signal.type === "risk").length,
+      risks: risks.length,
+      elevatedRisks,
+      averageConfidence:
+        confidences.length > 0
+          ? confidences.reduce((sum, value) => sum + value, 0) /
+            confidences.length
+          : null,
+      topTopics,
+      topEntities,
+      topCountries,
+      dominantSignalType: signalTypes[0] ?? null,
+      conclusions,
       prioritySignal,
       latestEpisode,
     };
-  }, [podcasts]);
+  }, [countryMeta, podcastCountryLinks, podcasts]);
 
   const leadershipSummary = useMemo(() => {
     const roles = leadershipStats.reduce(
@@ -3391,8 +3467,7 @@ export default function ClaritasDashboard() {
     const header = [
       "date",
       "label",
-      "total",
-      "selected",
+      "primary_scope",
       "comparison",
       "rolling_avg",
     ];
@@ -3401,7 +3476,6 @@ export default function ClaritasDashboard() {
         d.dateKey,
         d.label,
         d.count,
-        d.selectedCount,
         d.comparisonCount,
         d.rollingAvg,
       ].join(","),
@@ -3458,18 +3532,14 @@ export default function ClaritasDashboard() {
   }) => {
     if (!active || !payload || payload.length === 0) return null;
     const point = payload[0].payload;
+    const primaryLabel = selectedCountry?.toUpperCase() ?? regionLabel;
     return (
       <div className="app-card rounded-lg px-3 py-2 text-xs text-[color:var(--shell-ink)]">
         <div className="font-semibold">{label}</div>
-        <div>Total: {point.count}</div>
-        {selectedCountry && (
-          <div>
-            {selectedCountry.toUpperCase()}:{" "}
-            {chartView === "rolling"
-              ? point.selectedRollingAvg
-              : point.selectedCount}
-          </div>
-        )}
+        <div>
+          {primaryLabel}:{" "}
+          {chartView === "rolling" ? point.rollingAvg : point.count}
+        </div>
         {comparisonCountry && (
           <div>
             {comparisonCountry.toUpperCase()}:{" "}
@@ -6106,21 +6176,15 @@ export default function ClaritasDashboard() {
                     <div ref={chartRef} className="h-[22rem] min-h-[18rem] p-4">
                       {newsTrendTotal === 0 ? (
                         <div className="grid h-full place-items-center text-sm text-[color:var(--shell-muted)]">
-                          No timestamped articles yet.
+                          No timestamped articles in the current country scope.
                         </div>
                       ) : (
                         <>
                           <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
                             <span className="inline-flex items-center gap-2">
                               <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
-                              {regionLabel}
+                              {selectedCountry?.toUpperCase() ?? regionLabel}
                             </span>
-                            {selectedCountry && (
-                              <span className="inline-flex items-center gap-2">
-                                <span className="h-2 w-2 rounded-full bg-[color:var(--signal-sky)]" />
-                                {selectedCountry.toUpperCase()}
-                              </span>
-                            )}
                             {comparisonCountry && (
                               <span className="inline-flex items-center gap-2">
                                 <span className="h-2 w-2 rounded-full bg-[color:var(--signal-amber)]" />
@@ -6181,19 +6245,6 @@ export default function ClaritasDashboard() {
                                   type="monotone"
                                   dataKey="rollingAvg"
                                   stroke="var(--signal-emerald)"
-                                  strokeWidth={2}
-                                  dot={false}
-                                />
-                              )}
-                              {selectedCountry && (
-                                <Line
-                                  type="monotone"
-                                  dataKey={
-                                    chartView === "rolling"
-                                      ? "selectedRollingAvg"
-                                      : "selectedCount"
-                                  }
-                                  stroke="var(--signal-sky)"
                                   strokeWidth={2}
                                   dot={false}
                                 />
@@ -6611,7 +6662,7 @@ export default function ClaritasDashboard() {
                       Episodes
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {podcasts.length}
+                      {podcastSummary.episodes}
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
@@ -6619,7 +6670,7 @@ export default function ClaritasDashboard() {
                       Transcripts
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {podcasts.filter((episode) => episode.transcript_status === "available").length}
+                      {podcastSummary.transcripts}
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
@@ -6627,7 +6678,7 @@ export default function ClaritasDashboard() {
                       Signals
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {podcasts.reduce((total, episode) => total + episode.signals.length, 0)}
+                      {podcastSummary.signals}
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
@@ -6635,10 +6686,121 @@ export default function ClaritasDashboard() {
                       Evidence
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {podcasts.reduce((total, episode) => total + episode.evidence.length, 0)}
+                      {podcastSummary.evidence}
                     </div>
                   </div>
                 </section>
+
+                {podcastSummary.episodes > 0 && (
+                  <section className={`${cardBase} overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Podcast conclusions
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Overall readout from the current evidence
+                      </div>
+                    </div>
+                    <div className="space-y-4 p-4">
+                      <p className="max-w-[90ch] text-sm leading-6 text-[color:var(--shell-ink)]">
+                        {podcastSummary.conclusions}
+                      </p>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                            Leading themes
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {(podcastSummary.topTopics.length > 0
+                              ? podcastSummary.topTopics
+                              : podcastSummary.topEntities
+                            ).map((item) => (
+                              <span
+                                key={`podcast-theme-${item.label}`}
+                                className="rounded-full border border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] px-2 py-1 text-xs text-[color:var(--shell-ink)]"
+                              >
+                                {item.label} · {item.count}
+                              </span>
+                            ))}
+                            {podcastSummary.topTopics.length === 0 &&
+                              podcastSummary.topEntities.length === 0 && (
+                                <span className="text-xs text-[color:var(--shell-muted)]">
+                                  No recurring topics extracted yet.
+                                </span>
+                              )}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                            Risk posture
+                          </div>
+                          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                            {podcastSummary.elevatedRisks}
+                          </div>
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            High or critical · {podcastSummary.risks} total risk signals
+                          </div>
+                          {podcastSummary.prioritySignal && (
+                            <div className="mt-2 line-clamp-2 text-xs font-semibold text-[color:var(--shell-ink)]">
+                              {podcastSummary.prioritySignal.signal.title}
+                            </div>
+                          )}
+                        </div>
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                            Geographic focus
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            {podcastSummary.topCountries.map((country) => (
+                              <button
+                                key={`podcast-conclusion-country-${country.iso}`}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedCountry(country.iso);
+                                  setMapMode("signals");
+                                  setActiveView("dashboard");
+                                }}
+                                className="flex w-full items-center justify-between rounded-md px-1 py-0.5 text-left text-xs text-[color:var(--shell-ink)] hover:bg-[color:var(--shell-surface-muted)]"
+                              >
+                                <span>{country.name}</span>
+                                <span className="text-[color:var(--shell-muted)]">
+                                  {country.count}
+                                </span>
+                              </button>
+                            ))}
+                            {podcastSummary.topCountries.length === 0 && (
+                              <span className="text-xs text-[color:var(--shell-muted)]">
+                                No country concentration detected.
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                            Evidence quality
+                          </div>
+                          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                            {podcastSummary.episodes > 0
+                              ? `${Math.round((podcastSummary.transcripts / podcastSummary.episodes) * 100)}%`
+                              : "—"}
+                          </div>
+                          <div className="text-xs text-[color:var(--shell-muted)]">
+                            Transcript coverage
+                            {podcastSummary.averageConfidence != null
+                              ? ` · ${Math.round(podcastSummary.averageConfidence * 100)}% avg confidence`
+                              : ""}
+                          </div>
+                          {podcastSummary.dominantSignalType && (
+                            <div className="mt-2 text-xs text-[color:var(--shell-ink)]">
+                              Dominant extraction:{" "}
+                              <strong>{podcastSummary.dominantSignalType.label}</strong>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                )}
 
                 {podcastLoadError && (
                   <section className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -6647,6 +6809,16 @@ export default function ClaritasDashboard() {
                 )}
 
                 <section className="space-y-3">
+                  {podcastSummary.episodes > 0 && (
+                    <div className="px-1">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Episode evidence
+                      </div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Source detail behind the conclusions
+                      </div>
+                    </div>
+                  )}
                   {!isLoadingPodcasts && podcasts.length === 0 && !podcastLoadError && (
                     <div className={`${cardBase} px-4 py-10 text-center text-sm text-[color:var(--shell-muted)]`}>
                       No podcast intelligence matches the current filters.

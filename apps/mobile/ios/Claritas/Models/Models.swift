@@ -314,6 +314,125 @@ struct PodcastEpisode: Codable, Identifiable {
     }
 }
 
+struct PodcastSummaryItem: Identifiable {
+    let name: String
+    let count: Int
+
+    var id: String { name.lowercased() }
+}
+
+struct PodcastIntelligenceSummary {
+    let episodes: Int
+    let transcripts: Int
+    let signals: Int
+    let evidence: Int
+    let risks: Int
+    let elevatedRisks: Int
+    let averageConfidence: Double?
+    let leadingTopics: [PodcastSummaryItem]
+    let leadingEntities: [PodcastSummaryItem]
+    let leadingCountries: [PodcastSummaryItem]
+    let dominantSignalType: PodcastSummaryItem?
+    let prioritySignal: PodcastSignal?
+    let conclusions: String
+
+    static func make(from episodes: [PodcastEpisode]) -> PodcastIntelligenceSummary {
+        let signals = episodes.flatMap(\.signals)
+        let risks = signals.filter { $0.type == "risk" || $0.risk_level != nil }
+        let elevatedRisks = risks.filter {
+            guard let level = $0.risk_level?.lowercased() else { return false }
+            return level == "high" || level == "critical"
+        }
+        let confidences = signals.compactMap(\.confidence)
+        let topics = rankedLabels(signals.flatMap(\.topics))
+        let entities = rankedLabels(signals.flatMap(\.entities))
+        let countries = rankedLabels(signals.flatMap(\.countries))
+        let signalTypes = rankedLabels(signals.map(\.type))
+        let riskRank = ["critical": 4, "high": 3, "medium": 2, "low": 1]
+        let prioritySignal = signals.sorted { left, right in
+            let leftRank = riskRank[left.risk_level?.lowercased() ?? ""] ?? 0
+            let rightRank = riskRank[right.risk_level?.lowercased() ?? ""] ?? 0
+            if leftRank != rightRank {
+                return leftRank > rightRank
+            }
+            return (left.confidence ?? 0) > (right.confidence ?? 0)
+        }.first
+        let theme = topics.first ?? entities.first ?? signalTypes.first
+
+        let conclusions: String
+        if signals.isEmpty {
+            conclusions = "No extracted signals are available in the current podcast scope, so there is not yet enough structured evidence for an overall conclusion."
+        } else {
+            var statements: [String] = []
+            if let theme {
+                statements.append(
+                    "\(theme.name) is the leading recurring theme, appearing in \(theme.count) extracted \(theme.count == 1 ? "signal" : "signals")."
+                )
+            } else {
+                statements.append("\(signals.count) extracted signals define the current evidence set.")
+            }
+
+            if !elevatedRisks.isEmpty {
+                statements.append(
+                    "\(elevatedRisks.count) high or critical risk \(elevatedRisks.count == 1 ? "signal requires" : "signals require") priority review."
+                )
+            } else if !risks.isEmpty {
+                statements.append(
+                    "\(risks.count) risk \(risks.count == 1 ? "signal is" : "signals are") present, with none currently rated high or critical."
+                )
+            } else {
+                statements.append("No explicit risk signals are present in the current scope.")
+            }
+
+            if let country = countries.first {
+                statements.append("\(country.name) has the strongest geographic linkage across the podcast evidence.")
+            } else {
+                statements.append("The extracted findings do not yet show a dominant geographic concentration.")
+            }
+            conclusions = statements.joined(separator: " ")
+        }
+
+        return PodcastIntelligenceSummary(
+            episodes: episodes.count,
+            transcripts: episodes.filter { $0.transcript_status == "available" }.count,
+            signals: signals.count,
+            evidence: episodes.reduce(0) { $0 + $1.evidence.count },
+            risks: risks.count,
+            elevatedRisks: elevatedRisks.count,
+            averageConfidence: confidences.isEmpty
+                ? nil
+                : confidences.reduce(0, +) / Double(confidences.count),
+            leadingTopics: Array(topics.prefix(4)),
+            leadingEntities: Array(entities.prefix(4)),
+            leadingCountries: Array(countries.prefix(4)),
+            dominantSignalType: signalTypes.first,
+            prioritySignal: prioritySignal,
+            conclusions: conclusions
+        )
+    }
+
+    private static func rankedLabels(_ values: [String]) -> [PodcastSummaryItem] {
+        var counts: [String: Int] = [:]
+        var labels: [String: String] = [:]
+        for value in values {
+            let label = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty else { continue }
+            let key = label.lowercased()
+            counts[key, default: 0] += 1
+            labels[key] = labels[key] ?? label
+        }
+        return counts
+            .map { key, count in
+                PodcastSummaryItem(name: labels[key] ?? key, count: count)
+            }
+            .sorted {
+                $0.count == $1.count
+                    ? $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                    : $0.count > $1.count
+            }
+    }
+}
+
 struct CountryStat: Codable, Identifiable {
     let country: String
     let count: Int
