@@ -138,6 +138,7 @@ export default function TransportTrackingMap({
   };
 
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    // Pointer capture retargets the eventual click, so markers own their gesture.
     if (
       event.target instanceof Element &&
       event.target.closest('[data-transport-entity="true"]')
