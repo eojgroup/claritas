@@ -15,6 +15,12 @@ The matching rule is:
 An empty set does not filter that dimension. With no interests selected, the briefing uses the
 latest signals. Followed companies also contribute their latest available market snapshot.
 
+Country and region preferences also select matching transport aggregates. Broad transport context
+is included for transportation-sensitive industries and for an unfiltered briefing. It contributes
+country relevance, a transport metric in the highest-relevance country profile, and a qualified
+movement takeaway. AIS cargo/tanker departures are a vessel-movement proxy rather than measured
+cargo tonnage; flight counts are bounded by Claritas polling areas and available ADS-B reception.
+
 ## Runtime design
 
 The API scheduler inserts one idempotent job per user and local calendar date. API replicas claim

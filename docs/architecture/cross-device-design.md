@@ -370,6 +370,7 @@ Shared tokens and component contracts create one product identity. Shared geomet
 | Tokens/surfaces | `index.css` | `BrandComponents.swift` | `WatchBrand.swift` |
 | Dashboard | `App.tsx` | `DashboardView.swift`, `PadOverviewView.swift` | `WatchSignalGlanceView`, `WatchBriefingView`, `WatchPulseView` |
 | Maps | `WorldMapBubbles.tsx` | `SignalMapPanel`, `InteractiveCountryBubbleMap` | `WatchSignalMap` |
+| Transport | `TransportWorkspace.tsx` | `TransportWorkspaceView.swift`, `CountryProfileView.swift` | `WatchTransportPulseView` |
 | Admin | `AdminIngestionPanel.tsx`, `AdminUserManagementPanel.tsx` | `AdminWorkspaceView` | Intentionally unavailable |
 | Settings/documents | `App.tsx` | `ProfileView.swift`, `PoliciesWorkspaceView` | Phone handoff only |
 | Handoff | N/A | `WatchSyncCoordinator.swift` | `WatchConnectivityClient.swift` |
@@ -390,7 +391,7 @@ The current system:
 - replaces separate Dashboard and News story treatments with one expandable priority-stream contract;
 - adds an explainable cross-source signal-relevance map, a visible highest-priority country, and driver-level country context;
 - simplifies map time interaction to a single aggregate coverage window and removes low-context playback;
-- carries podcast country provenance and leadership records into daily briefing generation, and prevents unresolved Wikidata entity IDs from appearing as names;
+- carries podcast country provenance, leadership records, and qualified transport movement trends into daily and personal briefing generation, and prevents unresolved Wikidata entity IDs from appearing as names;
 - gives Admin, Profile, and Policies separate archetypes;
 - treats tablet as a map-led two-column review workspace;
 - treats mobile as map-led triage and drill-in;

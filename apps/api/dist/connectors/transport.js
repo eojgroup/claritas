@@ -30,29 +30,39 @@ const ISO_BY_NUMERIC = new Map(COUNTRY_REFERENCES.flatMap((country) => country.c
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const worldAtlas = require("world-atlas/countries-110m.json");
 const COUNTRY_GEOMETRIES = buildCountryGeometries();
-const MARITIME_PORT_COUNTRIES = [
-    [/\b(?:USLAX|LOS ANGELES|LONG BEACH)\b/i, "US"],
-    [/\b(?:USNYC|NEW YORK|NEWARK)\b/i, "US"],
-    [/\b(?:CAVAN|VANCOUVER)\b/i, "CA"],
-    [/\b(?:BRSSZ|SANTOS)\b/i, "BR"],
-    [/\b(?:NLRTM|ROTTERDAM)\b/i, "NL"],
-    [/\b(?:BEANR|ANTWERP)\b/i, "BE"],
-    [/\b(?:DEHAM|HAMBURG)\b/i, "DE"],
-    [/\b(?:GBFXT|FELIXSTOWE|GBSOU|SOUTHAMPTON)\b/i, "GB"],
-    [/\b(?:ESALG|ALGECIRAS|ESVLC|VALENCIA)\b/i, "ES"],
-    [/\b(?:GRPIR|PIRAEUS)\b/i, "GR"],
-    [/\b(?:EGPSD|PORT SAID|SUEZ)\b/i, "EG"],
-    [/\b(?:AEJEA|JEBEL ALI|DUBAI)\b/i, "AE"],
-    [/\b(?:SGSIN|SINGAPORE)\b/i, "SG"],
-    [/\b(?:CNSHA|SHANGHAI|CNNGB|NINGBO|CNSZX|SHENZHEN)\b/i, "CN"],
-    [/\b(?:HKHKG|HONG KONG)\b/i, "HK"],
-    [/\b(?:KRPUS|BUSAN)\b/i, "KR"],
-    [/\b(?:JPYOK|YOKOHAMA|JPTYO|TOKYO)\b/i, "JP"],
-    [/\b(?:MYPKG|PORT KLANG|TANJUNG PELEPAS)\b/i, "MY"],
-    [/\b(?:LKCMB|COLOMBO)\b/i, "LK"],
-    [/\b(?:INNSA|NHAVA SHEVA|MUNDRA)\b/i, "IN"],
-    [/\b(?:AUSYD|SYDNEY|AUMEL|MELBOURNE)\b/i, "AU"],
-    [/\b(?:ZADUR|DURBAN|ZACPT|CAPE TOWN)\b/i, "ZA"],
+const MARITIME_PORTS = [
+    { name: "Los Angeles / Long Beach", iso2: "US", latitude: 33.74, longitude: -118.24, radius_km: 42, pattern: /\b(?:USLAX|USLGB|LOS ANGELES|LONG BEACH)\b/i },
+    { name: "New York / Newark", iso2: "US", latitude: 40.67, longitude: -74.08, radius_km: 45, pattern: /\b(?:USNYC|USNWK|NEW YORK|NEWARK)\b/i },
+    { name: "Savannah", iso2: "US", latitude: 32.08, longitude: -81.09, radius_km: 32, pattern: /\b(?:USSAV|SAVANNAH)\b/i },
+    { name: "Vancouver", iso2: "CA", latitude: 49.30, longitude: -123.11, radius_km: 42, pattern: /\b(?:CAVAN|VANCOUVER)\b/i },
+    { name: "Santos", iso2: "BR", latitude: -23.96, longitude: -46.30, radius_km: 36, pattern: /\b(?:BRSSZ|SANTOS)\b/i },
+    { name: "Rotterdam", iso2: "NL", latitude: 51.95, longitude: 4.14, radius_km: 48, pattern: /\b(?:NLRTM|ROTTERDAM)\b/i },
+    { name: "Antwerp-Bruges", iso2: "BE", latitude: 51.27, longitude: 4.34, radius_km: 42, pattern: /\b(?:BEANR|ANTWERP|BRUGES)\b/i },
+    { name: "Hamburg", iso2: "DE", latitude: 53.54, longitude: 9.93, radius_km: 32, pattern: /\b(?:DEHAM|HAMBURG)\b/i },
+    { name: "Felixstowe", iso2: "GB", latitude: 51.95, longitude: 1.31, radius_km: 30, pattern: /\b(?:GBFXT|FELIXSTOWE)\b/i },
+    { name: "Southampton", iso2: "GB", latitude: 50.90, longitude: -1.40, radius_km: 30, pattern: /\b(?:GBSOU|SOUTHAMPTON)\b/i },
+    { name: "Algeciras", iso2: "ES", latitude: 36.13, longitude: -5.44, radius_km: 32, pattern: /\b(?:ESALG|ALGECIRAS)\b/i },
+    { name: "Valencia", iso2: "ES", latitude: 39.44, longitude: -0.31, radius_km: 30, pattern: /\b(?:ESVLC|VALENCIA)\b/i },
+    { name: "Piraeus", iso2: "GR", latitude: 37.94, longitude: 23.63, radius_km: 28, pattern: /\b(?:GRPIR|PIRAEUS)\b/i },
+    { name: "Port Said", iso2: "EG", latitude: 31.25, longitude: 32.31, radius_km: 38, pattern: /\b(?:EGPSD|PORT SAID|SUEZ)\b/i },
+    { name: "Jebel Ali", iso2: "AE", latitude: 25.01, longitude: 55.06, radius_km: 38, pattern: /\b(?:AEJEA|JEBEL ALI|DUBAI)\b/i },
+    { name: "Singapore", iso2: "SG", latitude: 1.25, longitude: 103.82, radius_km: 55, pattern: /\b(?:SGSIN|SINGAPORE)\b/i },
+    { name: "Shanghai", iso2: "CN", latitude: 31.23, longitude: 121.50, radius_km: 55, pattern: /\b(?:CNSHA|SHANGHAI)\b/i },
+    { name: "Ningbo-Zhoushan", iso2: "CN", latitude: 29.87, longitude: 121.84, radius_km: 55, pattern: /\b(?:CNNGB|NINGBO|ZHOUSHAN)\b/i },
+    { name: "Shenzhen", iso2: "CN", latitude: 22.51, longitude: 113.88, radius_km: 42, pattern: /\b(?:CNSZX|SHENZHEN|YANTIAN)\b/i },
+    { name: "Hong Kong", iso2: "HK", latitude: 22.30, longitude: 114.16, radius_km: 38, pattern: /\b(?:HKHKG|HONG KONG)\b/i },
+    { name: "Busan", iso2: "KR", latitude: 35.10, longitude: 129.04, radius_km: 34, pattern: /\b(?:KRPUS|BUSAN)\b/i },
+    { name: "Yokohama", iso2: "JP", latitude: 35.45, longitude: 139.65, radius_km: 32, pattern: /\b(?:JPYOK|YOKOHAMA)\b/i },
+    { name: "Tokyo", iso2: "JP", latitude: 35.62, longitude: 139.78, radius_km: 32, pattern: /\b(?:JPTYO|TOKYO)\b/i },
+    { name: "Port Klang", iso2: "MY", latitude: 3.00, longitude: 101.39, radius_km: 34, pattern: /\b(?:MYPKG|PORT KLANG)\b/i },
+    { name: "Tanjung Pelepas", iso2: "MY", latitude: 1.36, longitude: 103.55, radius_km: 30, pattern: /\b(?:MYTPP|TANJUNG PELEPAS)\b/i },
+    { name: "Colombo", iso2: "LK", latitude: 6.95, longitude: 79.84, radius_km: 32, pattern: /\b(?:LKCMB|COLOMBO)\b/i },
+    { name: "Nhava Sheva", iso2: "IN", latitude: 18.95, longitude: 72.95, radius_km: 36, pattern: /\b(?:INNSA|NHAVA SHEVA|JAWAHARLAL NEHRU)\b/i },
+    { name: "Mundra", iso2: "IN", latitude: 22.74, longitude: 69.71, radius_km: 34, pattern: /\b(?:INMUN|MUNDRA)\b/i },
+    { name: "Sydney", iso2: "AU", latitude: -33.86, longitude: 151.20, radius_km: 32, pattern: /\b(?:AUSYD|SYDNEY)\b/i },
+    { name: "Melbourne", iso2: "AU", latitude: -37.84, longitude: 144.91, radius_km: 34, pattern: /\b(?:AUMEL|MELBOURNE)\b/i },
+    { name: "Durban", iso2: "ZA", latitude: -29.87, longitude: 31.04, radius_km: 32, pattern: /\b(?:ZADUR|DURBAN)\b/i },
+    { name: "Cape Town", iso2: "ZA", latitude: -33.91, longitude: 18.44, radius_km: 32, pattern: /\b(?:ZACPT|CAPE TOWN)\b/i },
 ];
 const NAVIGATION_STATUS = {
     0: "Under way using engine",
@@ -219,9 +229,9 @@ function destinationCountryFromText(value) {
     const unLocode = normalized.match(/(?:^|\s)([A-Z]{2})[A-Z]{3}(?:\s|$)/)?.[1];
     if (unLocode && VALID_ISO2.has(unLocode))
         return unLocode;
-    for (const [pattern, iso2] of MARITIME_PORT_COUNTRIES) {
-        if (pattern.test(normalized))
-            return iso2;
+    for (const port of MARITIME_PORTS) {
+        if (port.pattern.test(normalized))
+            return port.iso2;
     }
     for (const country of COUNTRY_REFERENCES) {
         const name = country.name?.common?.toUpperCase();
@@ -229,6 +239,61 @@ function destinationCountryFromText(value) {
             return country.cca2.toUpperCase();
     }
     return null;
+}
+function maritimeCategory(value) {
+    const normalized = value?.trim().toLowerCase();
+    if (!normalized)
+        return null;
+    const numeric = Number.parseInt(normalized, 10);
+    if (Number.isFinite(numeric)) {
+        if (numeric === 30)
+            return "fishing";
+        if (numeric >= 40 && numeric <= 49)
+            return "high_speed";
+        if (numeric >= 60 && numeric <= 69)
+            return "passenger";
+        if (numeric >= 70 && numeric <= 79)
+            return "cargo";
+        if (numeric >= 80 && numeric <= 89)
+            return "tanker";
+        if (numeric >= 31 && numeric <= 39)
+            return "service";
+        if (numeric >= 50 && numeric <= 59)
+            return "service";
+        if (numeric >= 90 && numeric <= 99)
+            return "other";
+    }
+    if (normalized.includes("cargo") || normalized.includes("freight"))
+        return "cargo";
+    if (normalized.includes("tanker"))
+        return "tanker";
+    if (normalized.includes("passenger") || normalized.includes("ferry"))
+        return "passenger";
+    if (normalized.includes("fishing"))
+        return "fishing";
+    return null;
+}
+function distanceKm(latitudeA, longitudeA, latitudeB, longitudeB) {
+    const radians = Math.PI / 180;
+    const latitudeDelta = (latitudeB - latitudeA) * radians;
+    const longitudeDelta = (longitudeB - longitudeA) * radians;
+    const firstLatitude = latitudeA * radians;
+    const secondLatitude = latitudeB * radians;
+    const haversine = Math.sin(latitudeDelta / 2) ** 2 +
+        Math.cos(firstLatitude) *
+            Math.cos(secondLatitude) *
+            Math.sin(longitudeDelta / 2) ** 2;
+    return 6_371 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+function maritimePortAtPosition(latitude, longitude) {
+    let nearest = null;
+    for (const port of MARITIME_PORTS) {
+        const distance = distanceKm(latitude, longitude, port.latitude, port.longitude);
+        if (distance > port.radius_km || (nearest && distance >= nearest.distance))
+            continue;
+        nearest = { port, distance };
+    }
+    return nearest?.port ?? null;
 }
 function resolveAisBoundingBoxes() {
     const configured = process.env.AISSTREAM_BOUNDING_BOXES?.trim();
@@ -291,6 +356,7 @@ function queueMaritimeMessage(message) {
             display_name: displayName ?? maritimeStatic.get(mmsi)?.display_name,
             callsign: callsign ?? maritimeStatic.get(mmsi)?.callsign,
             vehicle_type: shipType ?? maritimeStatic.get(mmsi)?.vehicle_type,
+            vehicle_category: maritimeCategory(shipType) ?? maritimeStatic.get(mmsi)?.vehicle_category,
             destination_name: destinationName ?? maritimeStatic.get(mmsi)?.destination_name,
             destination_country_iso2: destinationCountry ?? maritimeStatic.get(mmsi)?.destination_country_iso2,
             route_label: destinationName
@@ -304,8 +370,11 @@ function queueMaritimeMessage(message) {
     const staticData = maritimeStatic.get(mmsi);
     const registration = (0, mmsi_country_lookup_1.getCountryFromMMSI)(mmsi);
     const registrationCountry = registration.valid ? normalizeIso2(registration.alpha2) : null;
+    const currentPort = isPosition && latitude != null && longitude != null
+        ? maritimePortAtPosition(latitude, longitude)
+        : null;
     const currentCountry = isPosition && latitude != null && longitude != null
-        ? countryAtPosition(latitude, longitude)
+        ? currentPort?.iso2 ?? countryAtPosition(latitude, longitude)
         : null;
     if (currentCountry && !firstMaritimeCountry.has(mmsi)) {
         firstMaritimeCountry.set(mmsi, currentCountry);
@@ -322,7 +391,8 @@ function queueMaritimeMessage(message) {
     const alert = navigationStatusNumber != null &&
         [2, 6, 14].includes(Math.round(navigationStatusNumber));
     const linkageBasis = [
-        currentCountry ? "position_country" : null,
+        currentCountry && !currentPort ? "position_country" : null,
+        currentPort ? "port_geofence" : null,
         originCountry ? "voyage_origin" : null,
         staticData?.destination_country_iso2 ? "declared_destination" : null,
         registrationCountry ? "mmsi_flag" : null,
@@ -334,6 +404,7 @@ function queueMaritimeMessage(message) {
         callsign: callsign ?? staticData?.callsign,
         registration: mmsi,
         vehicle_type: shipType ?? staticData?.vehicle_type ?? registration.type,
+        vehicle_category: maritimeCategory(shipType) ?? staticData?.vehicle_category,
         latitude,
         longitude,
         heading: asFinite(body.TrueHeading ?? body.Cog),
@@ -344,6 +415,7 @@ function queueMaritimeMessage(message) {
         registration_country_iso2: registrationCountry,
         origin_name: originCountry ? COUNTRY_NAME_BY_ISO.get(originCountry) ?? originCountry : null,
         destination_name: staticData?.destination_name,
+        current_location_name: currentPort?.name,
         route_label: staticData?.route_label,
         linkage_basis: linkageBasis,
         linkage_confidence: currentCountry || staticData?.destination_country_iso2
@@ -566,6 +638,7 @@ function flightSnapshot(aircraft, route, observedAt) {
         flight_number: flightNumber,
         registration: asString(aircraft.r),
         vehicle_type: asString(aircraft.t),
+        vehicle_category: "aircraft",
         latitude,
         longitude,
         heading: asFinite(aircraft.track),
@@ -678,9 +751,9 @@ async function storeTransportSnapshots(snapshots) {
             continue;
         const values = [];
         const rows = batch.map((snapshot, index) => {
-            const start = index * 31;
-            values.push(snapshot.mode, snapshot.entity_id, snapshot.display_name ?? null, snapshot.callsign ?? null, snapshot.flight_number ?? null, snapshot.registration ?? null, snapshot.vehicle_type ?? null, snapshot.latitude ?? null, snapshot.longitude ?? null, snapshot.heading ?? null, snapshot.speed ?? null, snapshot.altitude ?? null, snapshot.vertical_rate ?? null, snapshot.current_country_iso2 ?? null, snapshot.origin_country_iso2 ?? null, snapshot.destination_country_iso2 ?? null, snapshot.registration_country_iso2 ?? null, snapshot.origin_name ?? null, snapshot.destination_name ?? null, snapshot.origin_latitude ?? null, snapshot.origin_longitude ?? null, snapshot.destination_latitude ?? null, snapshot.destination_longitude ?? null, snapshot.route_label ?? null, snapshot.linkage_basis ?? [], snapshot.linkage_confidence ?? "none", snapshot.status ?? null, snapshot.is_alert ?? false, snapshot.source_name, snapshot.observed_at, JSON.stringify(snapshot.payload));
-            return `(${Array.from({ length: 31 }, (_, valueIndex) => `$${start + valueIndex + 1}`).join(", ")})`;
+            const start = index * 33;
+            values.push(snapshot.mode, snapshot.entity_id, snapshot.display_name ?? null, snapshot.callsign ?? null, snapshot.flight_number ?? null, snapshot.registration ?? null, snapshot.vehicle_type ?? null, snapshot.latitude ?? null, snapshot.longitude ?? null, snapshot.heading ?? null, snapshot.speed ?? null, snapshot.altitude ?? null, snapshot.vertical_rate ?? null, snapshot.current_country_iso2 ?? null, snapshot.origin_country_iso2 ?? null, snapshot.destination_country_iso2 ?? null, snapshot.registration_country_iso2 ?? null, snapshot.origin_name ?? null, snapshot.destination_name ?? null, snapshot.origin_latitude ?? null, snapshot.origin_longitude ?? null, snapshot.destination_latitude ?? null, snapshot.destination_longitude ?? null, snapshot.route_label ?? null, snapshot.linkage_basis ?? [], snapshot.linkage_confidence ?? "none", snapshot.status ?? null, snapshot.is_alert ?? false, snapshot.source_name, snapshot.observed_at, JSON.stringify(snapshot.payload), snapshot.vehicle_category ?? null, snapshot.current_location_name ?? null);
+            return `(${Array.from({ length: 33 }, (_, valueIndex) => `$${start + valueIndex + 1}`).join(", ")})`;
         });
         await (0, db_1.query)(`INSERT INTO transport_snapshot (
          mode, entity_id, display_name, callsign, flight_number, registration,
@@ -689,7 +762,7 @@ async function storeTransportSnapshots(snapshots) {
          registration_country_iso2, origin_name, destination_name, origin_latitude,
          origin_longitude, destination_latitude, destination_longitude, route_label,
          linkage_basis, linkage_confidence, status, is_alert, source_name, observed_at,
-         payload
+         payload, vehicle_category, current_location_name
        ) VALUES ${rows.join(", ")}
        ON CONFLICT (mode, entity_id) DO UPDATE SET
          display_name = COALESCE(EXCLUDED.display_name, transport_snapshot.display_name),
@@ -703,7 +776,10 @@ async function storeTransportSnapshots(snapshots) {
          speed = COALESCE(EXCLUDED.speed, transport_snapshot.speed),
          altitude = COALESCE(EXCLUDED.altitude, transport_snapshot.altitude),
          vertical_rate = COALESCE(EXCLUDED.vertical_rate, transport_snapshot.vertical_rate),
-         current_country_iso2 = COALESCE(EXCLUDED.current_country_iso2, transport_snapshot.current_country_iso2),
+         current_country_iso2 = CASE
+           WHEN EXCLUDED.latitude IS NULL THEN transport_snapshot.current_country_iso2
+           ELSE EXCLUDED.current_country_iso2
+         END,
          origin_country_iso2 = COALESCE(EXCLUDED.origin_country_iso2, transport_snapshot.origin_country_iso2),
          destination_country_iso2 = COALESCE(EXCLUDED.destination_country_iso2, transport_snapshot.destination_country_iso2),
          registration_country_iso2 = COALESCE(EXCLUDED.registration_country_iso2, transport_snapshot.registration_country_iso2),
@@ -729,7 +805,12 @@ async function storeTransportSnapshots(snapshots) {
          END,
          source_name = EXCLUDED.source_name,
          observed_at = GREATEST(EXCLUDED.observed_at, transport_snapshot.observed_at),
-         payload = transport_snapshot.payload || EXCLUDED.payload`, values);
+         payload = transport_snapshot.payload || EXCLUDED.payload,
+         vehicle_category = COALESCE(EXCLUDED.vehicle_category, transport_snapshot.vehicle_category),
+         current_location_name = CASE
+           WHEN EXCLUDED.latitude IS NULL THEN transport_snapshot.current_location_name
+           ELSE EXCLUDED.current_location_name
+         END`, values);
     }
     const trackPoints = snapshots.filter((snapshot) => {
         if (snapshot.latitude == null || snapshot.longitude == null)
@@ -745,16 +826,16 @@ async function storeTransportSnapshots(snapshots) {
         const batch = trackPoints.slice(offset, offset + 200);
         const values = [];
         const rows = batch.map((snapshot, index) => {
-            const start = index * 12;
+            const start = index * 14;
             const observed = new Date(snapshot.observed_at);
             observed.setUTCSeconds(0, 0);
-            values.push(snapshot.mode, snapshot.entity_id, snapshot.latitude, snapshot.longitude, snapshot.heading ?? null, snapshot.speed ?? null, snapshot.altitude ?? null, snapshot.current_country_iso2 ?? null, snapshot.origin_country_iso2 ?? null, snapshot.destination_country_iso2 ?? null, observed.toISOString(), snapshot.source_name);
-            return `(${Array.from({ length: 12 }, (_, valueIndex) => `$${start + valueIndex + 1}`).join(", ")})`;
+            values.push(snapshot.mode, snapshot.entity_id, snapshot.latitude, snapshot.longitude, snapshot.heading ?? null, snapshot.speed ?? null, snapshot.altitude ?? null, snapshot.current_country_iso2 ?? null, snapshot.origin_country_iso2 ?? null, snapshot.destination_country_iso2 ?? null, observed.toISOString(), snapshot.source_name, snapshot.vehicle_category ?? null, snapshot.current_location_name ?? null);
+            return `(${Array.from({ length: 14 }, (_, valueIndex) => `$${start + valueIndex + 1}`).join(", ")})`;
         });
         await (0, db_1.query)(`INSERT INTO transport_track_point (
          mode, entity_id, latitude, longitude, heading, speed, altitude,
          current_country_iso2, origin_country_iso2, destination_country_iso2,
-         observed_at, source_name
+         observed_at, source_name, vehicle_category, current_location_name
        ) VALUES ${rows.join(", ")}
        ON CONFLICT (mode, entity_id, observed_at) DO NOTHING`, values);
     }
@@ -789,6 +870,92 @@ function serializeEntity(row) {
         country_links: links,
     };
 }
+function percentageChange(currentValue, previousValue) {
+    if (previousValue === 0)
+        return currentValue === 0 ? 0 : null;
+    return Math.round(((currentValue - previousValue) / previousValue) * 10_000) / 100;
+}
+function trendDirection(currentValue, previousValue) {
+    if (previousValue === 0 && currentValue > 0)
+        return "new";
+    if (currentValue > previousValue)
+        return "up";
+    if (currentValue < previousValue)
+        return "down";
+    return "flat";
+}
+function transportTrendMetric(currentValue, previousValue) {
+    return {
+        current: currentValue,
+        previous: previousValue,
+        change_pct: percentageChange(currentValue, previousValue),
+        direction: trendDirection(currentValue, previousValue),
+    };
+}
+function emptyCountryTransportTrend() {
+    return {
+        ship_departures: transportTrendMetric(0, 0),
+        cargo_vessel_departures: transportTrendMetric(0, 0),
+        ship_arrivals: transportTrendMetric(0, 0),
+        tracked_flights: transportTrendMetric(0, 0),
+    };
+}
+function describeTrendChange(metric, noun) {
+    if (metric.direction === "new") {
+        return `${metric.current} ${noun}; the previous 24-hour window had no comparable observations.`;
+    }
+    if (metric.change_pct == null || metric.direction === "flat") {
+        return `${metric.current} ${noun}, unchanged from the previous 24-hour window.`;
+    }
+    return `${metric.current} ${noun}, ${Math.abs(metric.change_pct).toFixed(1)}% ${metric.direction === "up" ? "higher" : "lower"} than the previous 24-hour window.`;
+}
+function movementEventsCte() {
+    return `WITH sequenced AS (
+    SELECT
+      p.entity_id,
+      p.observed_at,
+      p.current_country_iso2,
+      p.current_location_name,
+      p.vehicle_category,
+      LAG(p.current_country_iso2) OVER (
+        PARTITION BY p.entity_id ORDER BY p.observed_at
+      ) AS previous_country_iso2,
+      LAG(p.current_location_name) OVER (
+        PARTITION BY p.entity_id ORDER BY p.observed_at
+      ) AS previous_location_name,
+      LAG(p.vehicle_category) OVER (
+        PARTITION BY p.entity_id ORDER BY p.observed_at
+      ) AS previous_vehicle_category
+    FROM transport_track_point p
+    WHERE p.mode = 'maritime'
+      AND p.observed_at >= now() - interval '49 hours'
+  ),
+  events AS (
+    SELECT
+      entity_id,
+      'departure'::text AS event_type,
+      previous_country_iso2 AS country,
+      previous_location_name AS location_name,
+      COALESCE(previous_vehicle_category, vehicle_category) AS vehicle_category,
+      observed_at
+    FROM sequenced
+    WHERE observed_at >= now() - interval '48 hours'
+      AND previous_location_name IS NOT NULL
+      AND current_location_name IS DISTINCT FROM previous_location_name
+    UNION ALL
+    SELECT
+      entity_id,
+      'arrival'::text AS event_type,
+      current_country_iso2 AS country,
+      current_location_name AS location_name,
+      vehicle_category,
+      observed_at
+    FROM sequenced
+    WHERE observed_at >= now() - interval '48 hours'
+      AND current_location_name IS NOT NULL
+      AND previous_location_name IS DISTINCT FROM current_location_name
+  )`;
+}
 async function getTransportOverview(options) {
     const detail = options?.detail ?? "aggregate";
     const mode = options?.mode ?? null;
@@ -809,7 +976,8 @@ async function getTransportOverview(options) {
     if (country)
         params.push(country);
     const where = filters.join(" AND ");
-    const [modeResult, countryResult, routeResult, activityResult] = await Promise.all([
+    const trendCountryParams = country ? [country] : [];
+    const [modeResult, countryResult, routeResult, activityResult, movementTrendResult, aviationTrendResult, portTrendResult,] = await Promise.all([
         (0, db_1.query)(`SELECT
          s.mode,
          COUNT(*) AS active_count,
@@ -891,17 +1059,112 @@ async function getTransportOverview(options) {
             : ""}
        GROUP BY bucket, p.mode
        ORDER BY bucket, p.mode`, params),
+        mode === "aviation"
+            ? Promise.resolve({ rows: [] })
+            : (0, db_1.query)(`${movementEventsCte()}
+           SELECT
+             CASE WHEN GROUPING(country) = 1 THEN NULL ELSE BTRIM(country::text) END AS country,
+             COUNT(*) FILTER (
+               WHERE event_type = 'departure'
+                 AND observed_at >= now() - interval '24 hours'
+             ) AS departures_current,
+             COUNT(*) FILTER (
+               WHERE event_type = 'departure'
+                 AND observed_at < now() - interval '24 hours'
+             ) AS departures_previous,
+             COUNT(*) FILTER (
+               WHERE event_type = 'departure'
+                 AND vehicle_category IN ('cargo', 'tanker')
+                 AND observed_at >= now() - interval '24 hours'
+             ) AS cargo_departures_current,
+             COUNT(*) FILTER (
+               WHERE event_type = 'departure'
+                 AND vehicle_category IN ('cargo', 'tanker')
+                 AND observed_at < now() - interval '24 hours'
+             ) AS cargo_departures_previous,
+             COUNT(*) FILTER (
+               WHERE event_type = 'arrival'
+                 AND observed_at >= now() - interval '24 hours'
+             ) AS arrivals_current,
+             COUNT(*) FILTER (
+               WHERE event_type = 'arrival'
+                 AND observed_at < now() - interval '24 hours'
+             ) AS arrivals_previous
+           FROM events
+           WHERE country IS NOT NULL
+             ${country ? "AND BTRIM(country::text) = $1" : ""}
+           GROUP BY GROUPING SETS ((country), ())`, trendCountryParams),
+        mode === "maritime"
+            ? Promise.resolve({ rows: [] })
+            : (0, db_1.query)(`WITH linked AS (
+             SELECT DISTINCT
+               p.entity_id,
+               p.observed_at,
+               link.country
+             FROM transport_track_point p
+             CROSS JOIN LATERAL (
+               VALUES
+                 (p.current_country_iso2),
+                 (p.origin_country_iso2),
+                 (p.destination_country_iso2)
+             ) AS link(country)
+             WHERE p.mode = 'aviation'
+               AND p.observed_at >= now() - interval '48 hours'
+               AND link.country IS NOT NULL
+           )
+           SELECT
+             CASE WHEN GROUPING(country) = 1 THEN NULL ELSE BTRIM(country::text) END AS country,
+             COUNT(DISTINCT entity_id) FILTER (
+               WHERE observed_at >= now() - interval '24 hours'
+             ) AS flights_current,
+             COUNT(DISTINCT entity_id) FILTER (
+               WHERE observed_at < now() - interval '24 hours'
+             ) AS flights_previous
+           FROM linked
+           WHERE true
+             ${country ? "AND BTRIM(country::text) = $1" : ""}
+           GROUP BY GROUPING SETS ((country), ())`, trendCountryParams),
+        mode === "aviation"
+            ? Promise.resolve({ rows: [] })
+            : (0, db_1.query)(`${movementEventsCte()}
+           SELECT
+             BTRIM(country::text) AS country,
+             location_name,
+             COUNT(*) FILTER (WHERE event_type = 'departure') AS departures_current,
+             COUNT(*) FILTER (WHERE event_type = 'arrival') AS arrivals_current,
+             COUNT(*) FILTER (
+               WHERE event_type = 'departure'
+                 AND vehicle_category IN ('cargo', 'tanker')
+             ) AS cargo_departures_current
+           FROM events
+           WHERE country IS NOT NULL
+             AND location_name IS NOT NULL
+             AND observed_at >= now() - interval '24 hours'
+             ${country ? "AND BTRIM(country::text) = $1" : ""}
+           GROUP BY country, location_name
+           ORDER BY COUNT(*) DESC, location_name
+           LIMIT 20`, trendCountryParams),
     ]);
     const countries = new Map();
-    for (const row of countryResult.rows) {
-        const iso2 = row.country.trim().toUpperCase();
-        const aggregate = countries.get(iso2) ?? {
-            country: iso2,
-            country_name: COUNTRY_NAME_BY_ISO.get(iso2) ?? iso2,
+    const aggregateForCountry = (iso2) => {
+        const normalized = iso2.trim().toUpperCase();
+        const existing = countries.get(normalized);
+        if (existing)
+            return existing;
+        const created = {
+            country: normalized,
+            country_name: COUNTRY_NAME_BY_ISO.get(normalized) ?? normalized,
             active_count: 0,
             maritime: { active: 0, current: 0, origins: 0, destinations: 0, flagged: 0 },
             aviation: { active: 0, current: 0, origins: 0, destinations: 0, registered: 0 },
+            trend: emptyCountryTransportTrend(),
         };
+        countries.set(normalized, created);
+        return created;
+    };
+    for (const row of countryResult.rows) {
+        const iso2 = row.country.trim().toUpperCase();
+        const aggregate = aggregateForCountry(iso2);
         const active = count(row.active_count);
         aggregate.active_count += active;
         if (row.mode === "maritime") {
@@ -922,7 +1185,20 @@ async function getTransportOverview(options) {
                 registered: count(row.registration_count),
             };
         }
-        countries.set(iso2, aggregate);
+    }
+    for (const row of movementTrendResult.rows) {
+        if (!row.country)
+            continue;
+        const aggregate = aggregateForCountry(row.country);
+        aggregate.trend.ship_departures = transportTrendMetric(count(row.departures_current), count(row.departures_previous));
+        aggregate.trend.cargo_vessel_departures = transportTrendMetric(count(row.cargo_departures_current), count(row.cargo_departures_previous));
+        aggregate.trend.ship_arrivals = transportTrendMetric(count(row.arrivals_current), count(row.arrivals_previous));
+    }
+    for (const row of aviationTrendResult.rows) {
+        if (!row.country)
+            continue;
+        const aggregate = aggregateForCountry(row.country);
+        aggregate.trend.tracked_flights = transportTrendMetric(count(row.flights_current), count(row.flights_previous));
     }
     const summaryModes = {
         maritime: { active: 0, routed: 0, alerts: 0, latest_observed_at: null },
@@ -941,12 +1217,13 @@ async function getTransportOverview(options) {
         const entityLimit = Math.max(25, Math.min(options?.entityLimit ?? 900, 2500));
         const entityResult = await (0, db_1.query)(`SELECT
          s.id, s.mode, s.entity_id, s.display_name, s.callsign, s.flight_number,
-         s.registration, s.vehicle_type, s.latitude, s.longitude, s.heading,
+         s.registration, s.vehicle_type, s.vehicle_category,
+         s.latitude, s.longitude, s.heading,
          s.speed, s.altitude, s.vertical_rate, s.current_country_iso2,
          s.origin_country_iso2, s.destination_country_iso2,
          s.registration_country_iso2, s.origin_name, s.destination_name,
          s.origin_latitude, s.origin_longitude, s.destination_latitude,
-         s.destination_longitude, s.route_label, s.linkage_basis,
+         s.destination_longitude, s.current_location_name, s.route_label, s.linkage_basis,
          s.linkage_confidence, s.status, s.is_alert, s.source_name,
          s.observed_at, '{}'::jsonb AS payload
        FROM transport_snapshot s
@@ -954,6 +1231,61 @@ async function getTransportOverview(options) {
        ORDER BY s.is_alert DESC, s.observed_at DESC
        LIMIT ${entityLimit}`, params);
         entities = entityResult.rows.map(serializeEntity);
+    }
+    const movementTotal = movementTrendResult.rows.find((row) => row.country == null);
+    const aviationTotal = aviationTrendResult.rows.find((row) => row.country == null);
+    const trends = {
+        window_hours: 24,
+        comparison: "previous_24_hours",
+        maritime: {
+            ship_departures: transportTrendMetric(count(movementTotal?.departures_current), count(movementTotal?.departures_previous)),
+            cargo_vessel_departures: transportTrendMetric(count(movementTotal?.cargo_departures_current), count(movementTotal?.cargo_departures_previous)),
+            ship_arrivals: transportTrendMetric(count(movementTotal?.arrivals_current), count(movementTotal?.arrivals_previous)),
+        },
+        aviation: {
+            tracked_flights: transportTrendMetric(count(aviationTotal?.flights_current), count(aviationTotal?.flights_previous)),
+        },
+    };
+    const scopeName = country
+        ? COUNTRY_NAME_BY_ISO.get(country) ?? country
+        : "Global";
+    const takeaways = [];
+    if (mode !== "aviation") {
+        takeaways.push({
+            id: "ship-departures",
+            mode: "maritime",
+            title: `${scopeName} ship departures`,
+            summary: describeTrendChange(trends.maritime.ship_departures, "tracked departures from monitored ports"),
+            current_value: trends.maritime.ship_departures.current,
+            previous_value: trends.maritime.ship_departures.previous,
+            change_pct: trends.maritime.ship_departures.change_pct,
+            direction: trends.maritime.ship_departures.direction,
+            qualifier: "Port-geofence events; not a complete port authority movement count.",
+        });
+        takeaways.push({
+            id: "cargo-vessel-departures",
+            mode: "maritime",
+            title: `${scopeName} cargo-vessel flow`,
+            summary: describeTrendChange(trends.maritime.cargo_vessel_departures, "cargo or tanker vessel departures"),
+            current_value: trends.maritime.cargo_vessel_departures.current,
+            previous_value: trends.maritime.cargo_vessel_departures.previous,
+            change_pct: trends.maritime.cargo_vessel_departures.change_pct,
+            direction: trends.maritime.cargo_vessel_departures.direction,
+            qualifier: "Movement proxy only; AIS does not report cargo tonnage or load.",
+        });
+    }
+    if (mode !== "maritime") {
+        takeaways.push({
+            id: "tracked-flights",
+            mode: "aviation",
+            title: `${scopeName} flight activity`,
+            summary: describeTrendChange(trends.aviation.tracked_flights, "uniquely tracked aircraft with country links"),
+            current_value: trends.aviation.tracked_flights.current,
+            previous_value: trends.aviation.tracked_flights.previous,
+            change_pct: trends.aviation.tracked_flights.change_pct,
+            direction: trends.aviation.tracked_flights.direction,
+            qualifier: "Coverage reflects Claritas polling areas and available ADS-B reception.",
+        });
     }
     return {
         generated_at: new Date().toISOString(),
@@ -976,6 +1308,16 @@ async function getTransportOverview(options) {
             active_count: count(row.active_count),
             examples: row.examples ?? [],
         })),
+        trends,
+        takeaways,
+        ports: portTrendResult.rows.map((row) => ({
+            country: row.country.trim(),
+            country_name: COUNTRY_NAME_BY_ISO.get(row.country.trim()) ?? row.country.trim(),
+            location_name: row.location_name,
+            departures: count(row.departures_current),
+            arrivals: count(row.arrivals_current),
+            cargo_vessel_departures: count(row.cargo_departures_current),
+        })),
         activity: activityResult.rows.map((row) => ({
             bucket: isoDate(row.bucket),
             mode: row.mode,
@@ -988,6 +1330,8 @@ async function getTransportOverview(options) {
                 transport: "WebSocket",
                 configured: Boolean(process.env.AISSTREAM_API_KEY?.trim()),
                 freshness_minutes: 120,
+                movement_method: "Monitored-port geofences with 24-hour comparison windows.",
+                cargo_method: "Cargo/tanker vessel departures are a movement proxy, not cargo volume.",
             },
             aviation: {
                 source: "adsb.lol",
@@ -1009,7 +1353,8 @@ async function getTransportEntity(mode, entityId) {
     if (!entity)
         return null;
     const trackResult = await (0, db_1.query)(`SELECT
-       latitude, longitude, heading, speed, altitude, current_country_iso2, observed_at
+       latitude, longitude, heading, speed, altitude, current_country_iso2,
+       current_location_name, vehicle_category, observed_at
      FROM transport_track_point
      WHERE mode = $1 AND entity_id = $2
        AND observed_at >= now() - interval '24 hours'

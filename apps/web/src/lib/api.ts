@@ -165,6 +165,20 @@ export type TransportModeAggregate = {
   latest_observed_at: string | null;
 };
 
+export type TransportTrendMetric = {
+  current: number;
+  previous: number;
+  change_pct: number | null;
+  direction: "up" | "down" | "flat" | "new";
+};
+
+export type TransportCountryTrend = {
+  ship_departures: TransportTrendMetric;
+  cargo_vessel_departures: TransportTrendMetric;
+  ship_arrivals: TransportTrendMetric;
+  tracked_flights: TransportTrendMetric;
+};
+
 export type TransportCountryAggregate = {
   country: string;
   country_name: string;
@@ -183,6 +197,7 @@ export type TransportCountryAggregate = {
     destinations: number;
     registered: number;
   };
+  trend: TransportCountryTrend;
 };
 
 export type TransportRouteAggregate = {
@@ -204,6 +219,7 @@ export type TransportEntity = {
   flight_number: string | null;
   registration: string | null;
   vehicle_type: string | null;
+  vehicle_category: string | null;
   latitude: number | null;
   longitude: number | null;
   heading: number | null;
@@ -220,6 +236,7 @@ export type TransportEntity = {
   origin_longitude: number | null;
   destination_latitude: number | null;
   destination_longitude: number | null;
+  current_location_name: string | null;
   route_label: string | null;
   linkage_basis: string[];
   linkage_confidence: "high" | "medium" | "low" | "none";
@@ -251,6 +268,37 @@ export type TransportOverview = {
   };
   countries: TransportCountryAggregate[];
   routes: TransportRouteAggregate[];
+  trends: {
+    window_hours: number;
+    comparison: "previous_24_hours";
+    maritime: {
+      ship_departures: TransportTrendMetric;
+      cargo_vessel_departures: TransportTrendMetric;
+      ship_arrivals: TransportTrendMetric;
+    };
+    aviation: {
+      tracked_flights: TransportTrendMetric;
+    };
+  };
+  takeaways: Array<{
+    id: string;
+    mode: TransportMode;
+    title: string;
+    summary: string;
+    current_value: number;
+    previous_value: number;
+    change_pct: number | null;
+    direction: TransportTrendMetric["direction"];
+    qualifier: string;
+  }>;
+  ports: Array<{
+    country: string;
+    country_name: string;
+    location_name: string;
+    departures: number;
+    arrivals: number;
+    cargo_vessel_departures: number;
+  }>;
   activity: TransportActivityPoint[];
   entities: TransportEntity[];
   coverage: {
@@ -259,6 +307,8 @@ export type TransportOverview = {
       transport: "WebSocket";
       configured: boolean;
       freshness_minutes: number;
+      movement_method: string;
+      cargo_method: string;
     };
     aviation: {
       source: "adsb.lol";
@@ -278,6 +328,8 @@ export type TransportTrackPoint = {
   speed: number | null;
   altitude: number | null;
   current_country_iso2: string | null;
+  current_location_name: string | null;
+  vehicle_category: string | null;
   observed_at: string;
 };
 

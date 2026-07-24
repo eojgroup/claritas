@@ -1,6 +1,7 @@
 import { query } from "./db";
 import { createLlmClientFromEnv, getLlmRuntimeConfig, type LlmClient } from "./llm";
 import { getCountryLeadershipLatest } from "./connectors/wikidata-leadership";
+import { getTransportOverview } from "./connectors/transport";
 
 export type GeneratedBriefingStatus = "draft" | "published";
 
@@ -85,12 +86,14 @@ type BriefingContext = {
     markets: number;
     weather: number;
     leadership: number;
+    transport: number;
   };
   news: Array<Record<string, unknown>>;
   podcasts: Array<Record<string, unknown>>;
   markets: Array<Record<string, unknown>>;
   weather: Array<Record<string, unknown>>;
   leadership: Array<Record<string, unknown>>;
+  transport: Record<string, unknown>;
 };
 
 type BriefingModelOutput = {
@@ -110,7 +113,7 @@ export class BriefingGenerationError extends Error {
   }
 }
 
-const PROMPT_VERSION = "daily-signal-briefing.v2";
+const PROMPT_VERSION = "daily-signal-briefing.v3";
 
 const BRIEFING_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -199,7 +202,14 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
   const weatherLimit = clampInteger(options.maxWeatherItems, 16, 5, 80);
   const leadershipLimit = clampInteger(options.maxLeadershipItems, 200, 1, 250);
 
-  const [newsResult, podcastResult, marketResult, weatherResult, leadershipResult] = await Promise.all([
+  const [
+    newsResult,
+    podcastResult,
+    marketResult,
+    weatherResult,
+    leadershipResult,
+    transportResult,
+  ] = await Promise.all([
     query<NewsContextRow>(
       `SELECT
          i.id,
@@ -304,6 +314,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
       [end, weatherLimit]
     ),
     getCountryLeadershipLatest(),
+    getTransportOverview({ detail: "aggregate" }),
   ]);
 
   const news = newsResult.rows.map((row) => ({
@@ -370,6 +381,21 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     source_updated_at: row.source_updated_at,
     retrieved_at: row.retrieved_at,
   }));
+  const transport = {
+    generated_at: transportResult.generated_at,
+    summary: transportResult.summary,
+    trends: transportResult.trends,
+    takeaways: transportResult.takeaways,
+    leading_countries: transportResult.countries.slice(0, 12),
+    leading_routes: transportResult.routes.slice(0, 12),
+    monitored_ports: transportResult.ports.slice(0, 12),
+    methodology: {
+      maritime: transportResult.coverage.maritime.movement_method,
+      cargo: transportResult.coverage.maritime.cargo_method,
+      aviation:
+        "Flight activity reflects Claritas polling areas and available ADS-B reception.",
+    },
+  };
 
   return {
     briefing_date: options.briefingDate,
@@ -382,12 +408,14 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
       markets: markets.length,
       weather: weather.length,
       leadership: leadership.length,
+      transport: transportResult.summary.active,
     },
     news,
     podcasts,
     markets,
     weather,
     leadership,
+    transport,
   };
 }
 
@@ -395,7 +423,8 @@ function buildSystemPrompt(): string {
   return [
     "You generate Claritas daily signal briefings from supplied JSON evidence.",
     "Use only the supplied evidence. Do not invent facts, numbers, sources, causal links, or forecasts.",
-    "Cover News, Podcast Intelligence, Markets, Weather, and relevant national Leadership when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
+    "Cover News, Podcast Intelligence, Markets, Weather, Transport, and relevant national Leadership when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
+    "Transport comparisons use tracked observations, monitored-port geofences, and 24-hour comparison windows. Describe cargo-vessel departures as a movement proxy; never present them as cargo tonnage, load, trade value, or complete port-authority counts.",
     "Treat podcast claims as attributed speaker statements, not independently verified facts. Retain uncertainty and attribution.",
     "Connect named leaders and countries only when the supplied evidence supports the relationship. Leadership records are context, not proof of involvement.",
     "Markets content is informational only. Do not give investment advice or tell users to buy, sell, or hold.",

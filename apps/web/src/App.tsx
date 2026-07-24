@@ -704,6 +704,7 @@ import {
   fetchNews,
   fetchPodcasts,
   fetchPersonalBriefingJob,
+  fetchTransportOverview,
   getAuthStartUrl,
   logoutAuth,
   imageProxy,
@@ -728,6 +729,7 @@ import {
   type PodcastEpisode,
   type PodcastExternalLink,
   type PodcastSignal,
+  type TransportOverview,
 } from "./lib/api";
 
 function getPodcastExternalLinks(episode: PodcastEpisode): PodcastExternalLink[] {
@@ -810,6 +812,7 @@ export default function ClaritasDashboard() {
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [marketStatusRows, setMarketStatusRows] = useState<MarketStatus[]>([]);
   const [marketEarnings, setMarketEarnings] = useState<EarningsEvent[]>([]);
+  const [transportOverview, setTransportOverview] = useState<TransportOverview | null>(null);
   const [marketEarningsWindowDays, setMarketEarningsWindowDays] = useState<7 | 14 | 30>(14);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
@@ -1145,6 +1148,9 @@ export default function ClaritasDashboard() {
     fetchMarketQuotes({ refresh: true })
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
+    fetchTransportOverview({ detail: "aggregate" })
+      .then(setTransportOverview)
+      .catch(() => setTransportOverview(null));
     fetchDailySignalBriefingLatest()
       .then((briefing) => {
         setDailyBriefing(briefing);
@@ -2734,6 +2740,15 @@ export default function ClaritasDashboard() {
     return (marketByCountry.get(relationCountry) ?? []).slice(0, 6);
   }, [marketByCountry, relationCountry]);
 
+  const relatedTransport = useMemo(() => {
+    if (!relationCountry) return null;
+    return (
+      transportOverview?.countries.find(
+        (country) => country.country.toUpperCase() === relationCountry,
+      ) ?? null
+    );
+  }, [relationCountry, transportOverview]);
+
   const relatedNews = useMemo(() => {
     if (!relationCountry) return [];
     return [...news]
@@ -3002,7 +3017,14 @@ export default function ClaritasDashboard() {
           ? relatedWeather.humidity
           : null,
       relevanceScore: relevance?.count ?? 0,
-      relevanceDrivers: relevance?.meta?.lines ?? [],
+      relevanceDrivers: [
+        ...(relevance?.meta?.lines ?? []),
+        ...(relatedTransport && relatedTransport.active_count > 0
+          ? [
+              `Transport: ${relatedTransport.active_count} active links · ${relatedTransport.trend.ship_departures.current} ship departures · ${relatedTransport.trend.tracked_flights.current} tracked flights`,
+            ]
+          : []),
+      ],
       maxMarketMove: Math.max(
         1,
         ...relatedMarkets.map((quote) =>
@@ -3017,6 +3039,7 @@ export default function ClaritasDashboard() {
     mapCountryStats,
     relatedMarkets,
     relatedNews.length,
+    relatedTransport,
     relatedWeather,
     selectedCountry,
   ]);
@@ -5200,6 +5223,15 @@ export default function ClaritasDashboard() {
                                 <strong>{relatedMarkets.length}</strong>
                                 <small>linked instruments</small>
                               </div>
+                              <div>
+                                <span>Transport</span>
+                                <strong>{relatedTransport?.active_count ?? 0}</strong>
+                                <small>
+                                  {(relatedTransport?.trend.ship_departures.current ?? 0) +
+                                    (relatedTransport?.trend.tracked_flights.current ?? 0)}{" "}
+                                  24h movements
+                                </small>
+                              </div>
                             </div>
 
                             <section className="country-profile-section">
@@ -5342,6 +5374,62 @@ export default function ClaritasDashboard() {
                                 </div>
                               </div>
                             </section>
+
+                            {relatedTransport && (
+                              <section className="country-profile-section">
+                                <div className="country-profile-section-heading">
+                                  <Route className="h-4 w-4" />
+                                  <span>Transport movement</span>
+                                  <small>24h compared with previous 24h</small>
+                                </div>
+                                <div className="country-transport-grid">
+                                  {[
+                                    {
+                                      label: "Ship departures",
+                                      metric: relatedTransport.trend.ship_departures,
+                                    },
+                                    {
+                                      label: "Cargo vessels",
+                                      metric:
+                                        relatedTransport.trend
+                                          .cargo_vessel_departures,
+                                    },
+                                    {
+                                      label: "Tracked flights",
+                                      metric: relatedTransport.trend.tracked_flights,
+                                    },
+                                  ].map(({ label, metric }) => (
+                                    <div key={label}>
+                                      <span>{label}</span>
+                                      <strong>{metric.current}</strong>
+                                      <small data-direction={metric.direction}>
+                                        {metric.direction === "new"
+                                          ? "New baseline"
+                                          : metric.change_pct == null
+                                            ? "No comparison"
+                                            : formatSignedMetric(
+                                                metric.change_pct,
+                                                1,
+                                                "%",
+                                              )}
+                                      </small>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p className="country-transport-note">
+                                  Cargo-vessel departures are an AIS movement
+                                  proxy, not measured cargo tonnage.
+                                </p>
+                                <button
+                                  type="button"
+                                  className="country-transport-open"
+                                  onClick={() => setActiveView("transport")}
+                                >
+                                  Open live transport detail
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </button>
+                              </section>
+                            )}
 
                             <section className="country-profile-section">
                               <div className="country-profile-section-heading">
@@ -5553,6 +5641,45 @@ export default function ClaritasDashboard() {
                                 </small>
                                 <span>
                                   Explore map
+                                  <ArrowUpRight className="h-3.5 w-3.5" />
+                                </span>
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setActiveView("transport")}
+                              className="context-signal"
+                              aria-label="Open transport intelligence workspace"
+                            >
+                              <span className="context-signal-icon">
+                                <Route className="h-4 w-4" />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="context-signal-label">
+                                  Transport movement
+                                </span>
+                                <strong>
+                                  {transportOverview?.takeaways[0]?.title ??
+                                    "Country-linked ship and flight activity"}
+                                </strong>
+                                <small>
+                                  {transportOverview?.takeaways[0]?.summary ??
+                                    "Comparing the latest 24 hours with the previous 24 hours"}
+                                </small>
+                              </span>
+                              <span className="context-signal-stat">
+                                <strong>
+                                  {transportOverview?.summary.active ?? "—"}
+                                </strong>
+                                <small>
+                                  active ·{" "}
+                                  {transportOverview?.summary.linked_countries ??
+                                    0}{" "}
+                                  countries
+                                </small>
+                                <span>
+                                  Open movements
                                   <ArrowUpRight className="h-3.5 w-3.5" />
                                 </span>
                               </span>

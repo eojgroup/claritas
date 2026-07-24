@@ -101,6 +101,28 @@ private struct WatchTransportPulseView: View {
                         }
                     }
 
+                    if let takeaway = model.transport?.takeaways?.first {
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Image(systemName: takeaway.mode == .aviation ? "airplane" : "ferry.fill")
+                                        .foregroundStyle(
+                                            takeaway.mode == .aviation
+                                                ? WatchPalette.sage
+                                                : WatchPalette.orange
+                                        )
+                                    Text(takeaway.title)
+                                        .font(.caption.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                Text(takeaway.summary)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
+                        }
+                    }
+
                     if !points.isEmpty {
                         WatchSignalMap(
                             points: points,

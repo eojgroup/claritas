@@ -12,4 +12,4 @@
 | C08  | Mobile Accessibility        | Deliver core functionality on mobile devices                                | Native apps with offline support                 |
 | C09  | User Preferences & Profiles | Support saved queries, alert configs, and personal dashboards               | Personalized views and notifications             |
 | C10  | Governance & Access Control | Ensure secure, role-based access to features and datasets                   | Role-based permissions, audit trails             |
-| C11  | Transport Intelligence      | Normalize live aviation and maritime movement into country-linked routes    | Flight numbers, shipping corridors, route maps    |
+| C11  | Transport Intelligence      | Normalize live aviation and maritime movement into country-linked routes and qualified trends | Flight numbers, shipping corridors, port departures, country profiles, briefing takeaways |

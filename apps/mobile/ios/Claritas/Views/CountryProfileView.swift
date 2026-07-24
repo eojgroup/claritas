@@ -40,6 +40,13 @@ struct CountryProfileView: View {
             .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
     }
 
+    private var transportCountry: TransportCountryAggregate? {
+        guard let iso else { return nil }
+        return model.transportOverview?.countries.first {
+            $0.country.uppercased() == iso
+        }
+    }
+
     private var topSourceLabels: String {
         let labels = countryNews
             .compactMap { item -> String? in
@@ -62,7 +69,10 @@ struct CountryProfileView: View {
                     Text("\(countryName) (\(iso))")
                         .font(.title3.weight(.semibold))
 
-                    HStack(spacing: 10) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 120), spacing: 10)],
+                        spacing: 10
+                    ) {
                         CountryMetric(label: "News", value: "\(countryNews.count)", detail: "Loaded stories")
                         CountryMetric(
                             label: "Weather",
@@ -74,6 +84,41 @@ struct CountryProfileView: View {
                             value: marketQuotes.first.map { $0.symbol } ?? "—",
                             detail: marketQuotes.first.map { signedPercent($0.percent_change) } ?? "No market quote"
                         )
+                        CountryMetric(
+                            label: "Transport",
+                            value: "\(transportCountry?.active_count ?? 0)",
+                            detail: "Active country links"
+                        )
+                    }
+
+                    if let trend = transportCountry?.trend {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Transport movement · 24h")
+                                .font(.headline)
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 120), spacing: 10)],
+                                spacing: 10
+                            ) {
+                                CountryMetric(
+                                    label: "Departures",
+                                    value: "\(trend.ship_departures.current)",
+                                    detail: trendLabel(trend.ship_departures)
+                                )
+                                CountryMetric(
+                                    label: "Cargo vessels",
+                                    value: "\(trend.cargo_vessel_departures.current)",
+                                    detail: trendLabel(trend.cargo_vessel_departures)
+                                )
+                                CountryMetric(
+                                    label: "Flights",
+                                    value: "\(trend.tracked_flights.current)",
+                                    detail: trendLabel(trend.tracked_flights)
+                                )
+                            }
+                            Text("Cargo-vessel departures are an AIS movement proxy, not measured cargo tonnage.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Text("Sources: \(topSourceLabels)")
@@ -159,6 +204,12 @@ struct CountryProfileView: View {
         guard let value else { return "—" }
         let text = value.formatted(.number.precision(.fractionLength(2)))
         return value >= 0 ? "+\(text)%" : "\(text)%"
+    }
+
+    private func trendLabel(_ metric: TransportTrendMetric) -> String {
+        if metric.direction == "new" { return "New baseline" }
+        guard let change = metric.change_pct else { return "No comparison" }
+        return "\(signedPercent(change)) vs prior 24h"
     }
 
     private func formatDate(_ date: Date?) -> String {

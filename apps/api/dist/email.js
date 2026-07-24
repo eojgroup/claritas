@@ -171,6 +171,7 @@ function renderBriefingEmail(content, options = {}) {
                 ["Podcast", String(countryProfile.podcast_count)],
                 ["Leadership", String(countryProfile.leadership?.roles.length ?? 0)],
                 ["Markets", String(countryProfile.market_count)],
+                ["Transport", String(countryProfile.transport?.active_count ?? 0)],
             ]
                 .map(([label, value]) => `<td style="padding:10px 8px;border:1px solid ${palette.border};text-align:center"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:${palette.muted}">${escapeHtml(label)}</div><strong style="display:block;margin-top:4px;font-size:17px;color:${palette.ink}">${escapeHtml(value)}</strong></td>`)
                 .join("");
@@ -267,6 +268,11 @@ function renderBriefingEmail(content, options = {}) {
                     ]
                     : []),
                 ...(countryProfile.leadership?.roles ?? []).map((role) => `${role.role_type === "head_of_state" ? "Head of state" : "Head of government"}: ${role.person_name}`),
+                ...(countryProfile.transport
+                    ? [
+                        `Transport: ${countryProfile.transport.active_count} active links · ${countryProfile.transport.ship_departures} ship departures · ${countryProfile.transport.tracked_flights} tracked flights`,
+                    ]
+                    : []),
                 "",
             ]
             : []),

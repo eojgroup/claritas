@@ -5,10 +5,13 @@ import {
   ArrowRight,
   ExternalLink,
   LocateFixed,
+  Minus,
   Plane,
   RefreshCw,
   Route,
   Ship,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
 import {
   Area,
@@ -47,6 +50,12 @@ function timeLabel(value: string | null | undefined) {
 function formatNumber(value: number | null | undefined, suffix = "") {
   if (value == null || !Number.isFinite(value)) return "—";
   return `${Math.round(value).toLocaleString()}${suffix}`;
+}
+
+function changeLabel(value: number | null, direction: "up" | "down" | "flat" | "new") {
+  if (direction === "new") return "New baseline";
+  if (value == null || direction === "flat") return "No change";
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
 export default function TransportWorkspace() {
@@ -232,6 +241,31 @@ export default function TransportWorkspace() {
         </article>
       </div>
 
+      <div className="transport-takeaway-grid" aria-label="Transport takeaways">
+        {(overview?.takeaways ?? []).map((takeaway) => {
+          const DirectionIcon =
+            takeaway.direction === "up"
+              ? TrendingUp
+              : takeaway.direction === "down"
+                ? TrendingDown
+                : Minus;
+          return (
+            <article key={takeaway.id} data-direction={takeaway.direction}>
+              <div>
+                {takeaway.mode === "aviation" ? <Plane /> : <Ship />}
+                <span>{takeaway.title}</span>
+                <strong>
+                  <DirectionIcon />
+                  {changeLabel(takeaway.change_pct, takeaway.direction)}
+                </strong>
+              </div>
+              <p>{takeaway.summary}</p>
+              <small>{takeaway.qualifier}</small>
+            </article>
+          );
+        })}
+      </div>
+
       <div className="transport-map-stage">
         <div className="transport-map-panel">
           <header>
@@ -259,7 +293,12 @@ export default function TransportWorkspace() {
               <div className="transport-detail-title">
                 <span>{selected.mode === "aviation" ? "Flight track" : "Vessel track"}</span>
                 <h2>{selected.display_name ?? selected.entity_id}</h2>
-                <p>{selected.route_label ?? selected.status ?? "Route is being resolved"}</p>
+                <p>
+                  {selected.route_label ??
+                    selected.current_location_name ??
+                    selected.status ??
+                    "Route is being resolved"}
+                </p>
               </div>
               <dl>
                 <div>
@@ -477,6 +516,47 @@ export default function TransportWorkspace() {
           </div>
         </article>
       </div>
+
+      <article className="app-card transport-port-card">
+        <header>
+          <div>
+            <span>Observed port transitions · 24 hours</span>
+            <h2>Departures, arrivals, and cargo-vessel flow</h2>
+          </div>
+          <Anchor />
+        </header>
+        <div className="transport-port-grid">
+          {(overview?.ports ?? []).slice(0, 12).map((port) => (
+            <button
+              type="button"
+              key={`${port.country}-${port.location_name}`}
+              onClick={() => setCountry(port.country)}
+            >
+              <span>
+                <b>{port.location_name}</b>
+                <small>{port.country_name}</small>
+              </span>
+              <span>
+                <small>Departures</small>
+                <b>{port.departures}</b>
+              </span>
+              <span>
+                <small>Arrivals</small>
+                <b>{port.arrivals}</b>
+              </span>
+              <span>
+                <small>Cargo vessels</small>
+                <b>{port.cargo_vessel_departures}</b>
+              </span>
+            </button>
+          ))}
+          {(overview?.ports.length ?? 0) === 0 && (
+            <div className="transport-chart-empty">
+              Port movement baselines will appear after vessels enter and leave monitored geofences.
+            </div>
+          )}
+        </div>
+      </article>
 
       <article className="app-card transport-entity-table">
         <header>

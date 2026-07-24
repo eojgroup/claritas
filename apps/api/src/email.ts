@@ -41,6 +41,11 @@ export type BriefingEmailCountryProfile = {
   news_count: number;
   podcast_count: number;
   market_count: number;
+  transport: {
+    active_count: number;
+    ship_departures: number;
+    tracked_flights: number;
+  } | null;
   weather: {
     temp_c: number | null;
     humidity: number | null;
@@ -271,6 +276,7 @@ export function renderBriefingEmail(
           ["Podcast", String(countryProfile.podcast_count)],
           ["Leadership", String(countryProfile.leadership?.roles.length ?? 0)],
           ["Markets", String(countryProfile.market_count)],
+          ["Transport", String(countryProfile.transport?.active_count ?? 0)],
         ]
           .map(
             ([label, value]) =>
@@ -418,6 +424,11 @@ export function renderBriefingEmail(
                 role.person_name
               }`
           ),
+          ...(countryProfile.transport
+            ? [
+                `Transport: ${countryProfile.transport.active_count} active links · ${countryProfile.transport.ship_departures} ship departures · ${countryProfile.transport.tracked_flights} tracked flights`,
+              ]
+            : []),
           "",
         ]
       : []),

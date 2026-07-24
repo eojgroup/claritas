@@ -1,6 +1,6 @@
 # Daily Briefing Generation with OpenCode
 
-Claritas generates daily briefings by collecting News, Markets, and Weather evidence from its own database, sending that bounded context to an LLM backend, validating structured JSON, and saving the result in `daily_signal_briefing`.
+Claritas generates daily briefings by collecting news, markets, weather, podcast, leadership, and transport evidence from its own data layer, sending that bounded context to an LLM backend, validating structured JSON, and saving the result in `daily_signal_briefing`.
 
 The API is provider-neutral internally, with an OpenCode adapter as the first runtime backend.
 
@@ -8,12 +8,18 @@ The API is provider-neutral internally, with an OpenCode adapter as the first ru
 
 ```text
 POST /api/ingest/briefings/daily/:date/generate
-  -> collect item, market_snapshot, weather_snapshot context
+  -> collect bounded cross-domain context
+  -> add country-linked transport activity and 24h movement comparisons
   -> call opencode server
   -> parse structured JSON
   -> upsert daily_signal_briefing
   -> dashboard reads /api/briefings/daily/latest
 ```
+
+Transport context includes current and previous 24-hour values, country aggregates, leading
+routes, monitored-port transitions, and generated takeaways. The prompt requires the model to
+describe AIS cargo/tanker departures as a vessel-movement proxy—not cargo tonnage, load, or trade
+value—and to qualify flight totals by the configured ADS-B polling coverage.
 
 ## Claritas API Configuration
 

@@ -63,6 +63,7 @@ struct TransportWorkspaceView: View {
 
             controls
             metricStrip
+            takeawayStrip
 
             HStack(alignment: .top, spacing: 16) {
                 BrandCard(title: "Global movement map", icon: "map.fill") {
@@ -96,6 +97,7 @@ struct TransportWorkspaceView: View {
                     .frame(maxWidth: .infinity)
             }
 
+            portMovements
             entityList
             provenance
         }
@@ -119,6 +121,7 @@ struct TransportWorkspaceView: View {
             }
 
             metricGrid
+            takeawayStrip
 
             BrandCard(title: "Leading countries", icon: "globe.americas.fill") {
                 VStack(spacing: 0) {
@@ -281,6 +284,98 @@ struct TransportWorkspaceView: View {
                 detail: "Safety states",
                 tone: ClaritasPalette.negativeText(for: colorScheme)
             )
+        }
+    }
+
+    @ViewBuilder
+    private var takeawayStrip: some View {
+        let takeaways = overview?.takeaways ?? []
+        if !takeaways.isEmpty {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: isPad ? 240 : 150), spacing: 12)],
+                spacing: 12
+            ) {
+                ForEach(takeaways) { takeaway in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: takeaway.mode == .aviation ? "airplane" : "ferry.fill")
+                            Text(takeaway.title.uppercased())
+                                .lineLimit(1)
+                            Spacer()
+                            Text(trendLabel(takeaway))
+                                .foregroundStyle(trendTone(takeaway.direction))
+                        }
+                        .font(.caption2.weight(.semibold))
+
+                        Text(takeaway.summary)
+                            .font(.subheadline.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text(takeaway.qualifier)
+                            .font(.caption2)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(13)
+                    .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
+                    .brandGlass(cornerRadius: 12, elevated: true)
+                }
+            }
+        }
+    }
+
+    private var portMovements: some View {
+        BrandCard(title: "Observed port transitions · 24h", icon: "anchor") {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 250), spacing: 10)],
+                spacing: 10
+            ) {
+                ForEach((overview?.ports ?? []).prefix(12)) { port in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(port.location_name)
+                                .font(.subheadline.weight(.semibold))
+                            Text("\(port.country_name) · \(port.country)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        movementValue("Out", port.departures)
+                        movementValue("In", port.arrivals)
+                        movementValue("Cargo", port.cargo_vessel_departures)
+                    }
+                    .padding(10)
+                    .background(
+                        ClaritasPalette.shellBackgroundElevated(for: colorScheme),
+                        in: RoundedRectangle(cornerRadius: 9)
+                    )
+                }
+            }
+        }
+    }
+
+    private func trendLabel(_ takeaway: TransportTakeaway) -> String {
+        if takeaway.direction == "new" { return "New" }
+        guard let change = takeaway.change_pct else { return "—" }
+        let formatted = change.formatted(.number.precision(.fractionLength(1)))
+        return change > 0 ? "+\(formatted)%" : "\(formatted)%"
+    }
+
+    private func trendTone(_ direction: String) -> Color {
+        switch direction {
+        case "up": return ClaritasPalette.positiveText(for: colorScheme)
+        case "down": return ClaritasPalette.negativeText(for: colorScheme)
+        default: return ClaritasPalette.shellMuted(for: colorScheme)
+        }
+    }
+
+    private func movementValue(_ label: String, _ value: Int) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text("\(value)")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 

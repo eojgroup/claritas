@@ -775,6 +775,37 @@ struct TransportModeAggregates: Codable {
     let aviation: TransportModeAggregate
 }
 
+struct TransportTrendMetric: Codable {
+    let current: Int
+    let previous: Int
+    let change_pct: Double?
+    let direction: String
+}
+
+struct TransportCountryTrend: Codable {
+    let ship_departures: TransportTrendMetric
+    let cargo_vessel_departures: TransportTrendMetric
+    let ship_arrivals: TransportTrendMetric
+    let tracked_flights: TransportTrendMetric
+}
+
+struct TransportTrends: Codable {
+    struct Maritime: Codable {
+        let ship_departures: TransportTrendMetric
+        let cargo_vessel_departures: TransportTrendMetric
+        let ship_arrivals: TransportTrendMetric
+    }
+
+    struct Aviation: Codable {
+        let tracked_flights: TransportTrendMetric
+    }
+
+    let window_hours: Int
+    let comparison: String
+    let maritime: Maritime
+    let aviation: Aviation
+}
+
 struct TransportSummary: Codable {
     let active: Int
     let routed: Int
@@ -805,6 +836,7 @@ struct TransportCountryAggregate: Codable, Identifiable {
     let active_count: Int
     let maritime: TransportMaritimeCountryAggregate
     let aviation: TransportAviationCountryAggregate
+    let trend: TransportCountryTrend?
 
     var id: String { country }
 }
@@ -846,6 +878,7 @@ struct TransportEntity: Codable, Identifiable {
     let flight_number: String?
     let registration: String?
     let vehicle_type: String?
+    let vehicle_category: String?
     let latitude: Double?
     let longitude: Double?
     let heading: Double?
@@ -862,6 +895,7 @@ struct TransportEntity: Codable, Identifiable {
     let origin_longitude: Double?
     let destination_latitude: Double?
     let destination_longitude: Double?
+    let current_location_name: String?
     let route_label: String?
     let linkage_basis: [String]
     let linkage_confidence: String
@@ -881,6 +915,8 @@ struct TransportTrackPoint: Codable, Identifiable {
     let speed: Double?
     let altitude: Double?
     let current_country_iso2: String?
+    let current_location_name: String?
+    let vehicle_category: String?
     let observed_at: String
 
     var id: String { "\(observed_at)-\(latitude)-\(longitude)" }
@@ -891,6 +927,8 @@ struct MaritimeTransportCoverage: Codable {
     let transport: String
     let configured: Bool
     let freshness_minutes: Int
+    let movement_method: String?
+    let cargo_method: String?
 }
 
 struct AviationTransportCoverage: Codable {
@@ -913,11 +951,37 @@ struct TransportOverview: Codable {
     let summary: TransportSummary
     let countries: [TransportCountryAggregate]
     let routes: [TransportRouteAggregate]
+    let trends: TransportTrends?
+    let takeaways: [TransportTakeaway]?
+    let ports: [TransportPortAggregate]?
     let activity: [TransportActivityPoint]
     let entities: [TransportEntity]
     let coverage: TransportCoverage
 
     var generatedDate: Date? { APIDateParser.parse(generated_at) }
+}
+
+struct TransportTakeaway: Codable, Identifiable {
+    let id: String
+    let mode: TransportMode
+    let title: String
+    let summary: String
+    let current_value: Int
+    let previous_value: Int
+    let change_pct: Double?
+    let direction: String
+    let qualifier: String
+}
+
+struct TransportPortAggregate: Codable, Identifiable {
+    let country: String
+    let country_name: String
+    let location_name: String
+    let departures: Int
+    let arrivals: Int
+    let cargo_vessel_departures: Int
+
+    var id: String { "\(country)-\(location_name)" }
 }
 
 struct TransportEntityDetail: Codable {
