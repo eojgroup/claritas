@@ -138,6 +138,12 @@ export default function TransportTrackingMap({
   };
 
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest('[data-transport-entity="true"]')
+    ) {
+      return;
+    }
     event.currentTarget.setPointerCapture(event.pointerId);
     dragRef.current = {
       pointerId: event.pointerId,
@@ -232,9 +238,12 @@ export default function TransportTrackingMap({
                   data-mode={entity.mode}
                   data-selected={isSelected || undefined}
                   data-alert={entity.is_alert || undefined}
+                  data-transport-entity="true"
                   tabIndex={0}
                   role="button"
+                  aria-pressed={isSelected}
                   aria-label={`${entity.display_name ?? entity.entity_id}, ${entity.mode}`}
+                  onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation();
                     onSelect?.(entity);
@@ -247,13 +256,19 @@ export default function TransportTrackingMap({
                   }}
                   onPointerEnter={() => setHovered(entity)}
                   onPointerLeave={() => setHovered(null)}
+                  onFocus={() => setHovered(entity)}
+                  onBlur={() => setHovered(null)}
                 >
+                  <circle className="transport-map-hit-target" r={14} />
                   {entity.mode === "aviation" ? (
                     <path d="M 0 -7 L 3 -1 L 7 2 L 7 4 L 1 2 L 1 7 L -1 7 L -1 2 L -7 4 L -7 2 L -3 -1 Z" />
                   ) : (
                     <path d="M 0 -6 L 5 4 L 0 7 L -5 4 Z" />
                   )}
-                  <circle r={isSelected ? 11 : 7} />
+                  <circle
+                    className="transport-map-marker-ring"
+                    r={isSelected ? 11 : 7}
+                  />
                 </g>
               );
             })}

@@ -347,6 +347,25 @@ function asFinite(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizedHeading(...values: unknown[]): number | null {
+  for (const value of values) {
+    const heading = asFinite(value);
+    if (heading != null && heading >= 0 && heading < 360) return heading;
+  }
+  return null;
+}
+
+function normalizedTransportSpeed(
+  mode: TransportMode,
+  value: unknown,
+): number | null {
+  const speed = asFinite(value);
+  if (speed == null || speed < 0) return null;
+  // AIS encodes 102.3 knots as "speed not available".
+  if (mode === "maritime" && speed >= 102.3) return null;
+  return speed;
+}
+
 function normalizeIso2(value: unknown): string | null {
   const output = asString(value)?.toUpperCase() ?? "";
   return VALID_ISO2.has(output) ? output : null;
@@ -659,8 +678,8 @@ function queueMaritimeMessage(message: unknown): void {
       maritimeCategory(shipType) ?? staticData?.vehicle_category,
     latitude,
     longitude,
-    heading: asFinite(body.TrueHeading ?? body.Cog),
-    speed: asFinite(body.Sog),
+    heading: normalizedHeading(body.TrueHeading, body.Cog),
+    speed: normalizedTransportSpeed("maritime", body.Sog),
     current_country_iso2: currentCountry,
     origin_country_iso2: originCountry,
     destination_country_iso2: staticData?.destination_country_iso2,
@@ -941,8 +960,8 @@ function flightSnapshot(
     vehicle_category: "aircraft",
     latitude,
     longitude,
-    heading: asFinite(aircraft.track),
-    speed: asFinite(aircraft.gs),
+    heading: normalizedHeading(aircraft.track),
+    speed: normalizedTransportSpeed("aviation", aircraft.gs),
     altitude,
     vertical_rate: asFinite(aircraft.baro_rate ?? aircraft.geom_rate),
     current_country_iso2: currentCountry,
@@ -1352,6 +1371,8 @@ function serializeEntity(row: TransportSnapshotRow) {
   return {
     ...row,
     id: `${row.mode}:${row.entity_id}`,
+    heading: normalizedHeading(row.heading),
+    speed: normalizedTransportSpeed(row.mode, row.speed),
     observed_at: isoDate(row.observed_at),
     linkage_basis: row.linkage_basis ?? [],
     country_links: links,
@@ -2018,6 +2039,8 @@ export async function getTransportEntity(mode: TransportMode, entityId: string) 
     },
     track: trackResult.rows.map((point) => ({
       ...point,
+      heading: normalizedHeading(point.heading),
+      speed: normalizedTransportSpeed(mode, point.speed),
       observed_at: isoDate(point.observed_at),
     })),
   };

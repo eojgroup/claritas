@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Anchor,
@@ -66,7 +66,9 @@ export default function TransportWorkspace() {
   const [track, setTrack] = useState<TransportTrackPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingEntity, setLoadingEntity] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectionRequestRef = useRef(0);
 
   const load = useCallback(
     async (force = false) => {
@@ -82,11 +84,6 @@ export default function TransportWorkspace() {
         });
         setOverview(value);
         setError(null);
-        if (selected) {
-          const replacement = value.entities.find((entity) => entity.id === selected.id);
-          setSelected(replacement ?? null);
-          if (!replacement) setTrack([]);
-        }
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
@@ -94,7 +91,7 @@ export default function TransportWorkspace() {
         setRefreshing(false);
       }
     },
-    [country, mode, selected],
+    [country, mode],
   );
 
   useEffect(() => {
@@ -107,16 +104,37 @@ export default function TransportWorkspace() {
   }, [country, mode]);
 
   const selectEntity = useCallback(async (entity: TransportEntity) => {
+    const requestID = selectionRequestRef.current + 1;
+    selectionRequestRef.current = requestID;
     setSelected(entity);
     setTrack([]);
+    setLoadingEntity(true);
     try {
       const detail = await fetchTransportEntity(entity.mode, entity.entity_id);
+      if (selectionRequestRef.current !== requestID) return;
       setSelected(detail.entity);
       setTrack(detail.track);
     } catch {
       // The current snapshot remains useful if a historical trail is not yet sampled.
+    } finally {
+      if (selectionRequestRef.current === requestID) setLoadingEntity(false);
     }
   }, []);
+
+  const clearSelection = useCallback(() => {
+    selectionRequestRef.current += 1;
+    setSelected(null);
+    setTrack([]);
+    setLoadingEntity(false);
+  }, []);
+
+  const selectCountry = useCallback(
+    (nextCountry: string) => {
+      clearSelection();
+      setCountry(nextCountry);
+    },
+    [clearSelection],
+  );
 
   const activity = useMemo(() => {
     const buckets = new Map<
@@ -168,8 +186,7 @@ export default function TransportWorkspace() {
               aria-pressed={mode === item}
               onClick={() => {
                 setMode(item);
-                setSelected(null);
-                setTrack([]);
+                clearSelection();
               }}
             >
               {item === "all" ? <Route /> : item === "aviation" ? <Plane /> : <Ship />}
@@ -183,9 +200,7 @@ export default function TransportWorkspace() {
           <select
             value={country}
             onChange={(event) => {
-              setCountry(event.currentTarget.value);
-              setSelected(null);
-              setTrack([]);
+              selectCountry(event.currentTarget.value);
             }}
           >
             <option value="">Global network</option>
@@ -287,7 +302,7 @@ export default function TransportWorkspace() {
           />
         </div>
 
-        <aside className="transport-detail-panel">
+        <aside className="transport-detail-panel" aria-busy={loadingEntity}>
           {selected ? (
             <>
               <div className="transport-detail-title">
@@ -344,8 +359,16 @@ export default function TransportWorkspace() {
                 </small>
               </div>
               <p className="transport-freshness">
-                <LocateFixed /> Last observed {timeLabel(selected.observed_at)} ·{" "}
-                {track.length} sampled trail points
+                {loadingEntity ? (
+                  <>
+                    <RefreshCw className="animate-spin" /> Loading sampled trail…
+                  </>
+                ) : (
+                  <>
+                    <LocateFixed /> Last observed {timeLabel(selected.observed_at)} ·{" "}
+                    {track.length} sampled trail points
+                  </>
+                )}
               </p>
             </>
           ) : (
@@ -456,7 +479,7 @@ export default function TransportWorkspace() {
               <button
                 type="button"
                 key={`${route.mode}-${route.origin_country}-${route.destination_country}`}
-                onClick={() => setCountry(route.destination_country)}
+                onClick={() => selectCountry(route.destination_country)}
               >
                 <span className="transport-flow-node">
                   <b>{route.origin_country}</b>
@@ -492,7 +515,9 @@ export default function TransportWorkspace() {
               <button
                 type="button"
                 key={entry.country}
-                onClick={() => setCountry(entry.country === country ? "" : entry.country)}
+                onClick={() =>
+                  selectCountry(entry.country === country ? "" : entry.country)
+                }
                 aria-pressed={country === entry.country}
               >
                 <span>
@@ -530,7 +555,7 @@ export default function TransportWorkspace() {
             <button
               type="button"
               key={`${port.country}-${port.location_name}`}
-              onClick={() => setCountry(port.country)}
+              onClick={() => selectCountry(port.country)}
             >
               <span>
                 <b>{port.location_name}</b>

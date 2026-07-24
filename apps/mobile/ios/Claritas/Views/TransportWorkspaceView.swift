@@ -11,7 +11,9 @@ struct TransportWorkspaceView: View {
     @State private var selectedEntity: TransportEntity?
     @State private var selectedTrack: [TransportTrackPoint] = []
     @State private var isLoadingDetails = false
+    @State private var isLoadingEntity = false
     @State private var detailError: String?
+    @State private var selectionRequestID = UUID()
 
     private var isPad: Bool {
         UIDevice.current.userInterfaceIdiom == .pad
@@ -198,6 +200,9 @@ struct TransportWorkspaceView: View {
             }
             .pickerStyle(.segmented)
             .frame(maxWidth: 420)
+            .onChange(of: mode) { _ in
+                clearSelection()
+            }
 
             Spacer()
 
@@ -399,7 +404,12 @@ struct TransportWorkspaceView: View {
     }
 
     private var entityDetail: some View {
-        BrandCard(title: selectedEntity?.mode == .maritime ? "Vessel track" : "Flight track", icon: "scope") {
+        BrandCard(
+            title: selectedEntity.map {
+                $0.mode == .maritime ? "Vessel track" : "Flight track"
+            } ?? "Vehicle details",
+            icon: "scope"
+        ) {
             if let entity = selectedEntity {
                 VStack(alignment: .leading, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -454,9 +464,19 @@ struct TransportWorkspaceView: View {
                         }
                     }
 
-                    Text("\(entity.linkage_confidence.capitalized) confidence · \(selectedTrack.count) sampled trail points")
+                    if isLoadingEntity {
+                        HStack(spacing: 7) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Loading sampled trail…")
+                        }
                         .font(.caption)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    } else {
+                        Text("\(entity.linkage_confidence.capitalized) confidence · \(selectedTrack.count) sampled trail points")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    }
                 }
             } else {
                 VStack(spacing: 12) {
@@ -737,29 +757,50 @@ struct TransportWorkspaceView: View {
         detailError = nil
         defer { isLoadingDetails = false }
         do {
-            detailedOverview = try await model.api.fetchTransportOverview(
+            let value = try await model.api.fetchTransportOverview(
                 detail: "full",
                 entityLimit: 1_200,
                 refresh: forceRefresh
             )
+            detailedOverview = value
+            if let selectedEntity,
+               !value.entities.contains(where: { $0.id == selectedEntity.id }) {
+                clearSelection()
+            }
         } catch {
             detailError = error.localizedDescription
         }
     }
 
     private func select(_ entity: TransportEntity) async {
+        let requestID = UUID()
+        selectionRequestID = requestID
         selectedEntity = entity
         selectedTrack = []
+        isLoadingEntity = true
+        defer {
+            if selectionRequestID == requestID {
+                isLoadingEntity = false
+            }
+        }
         do {
             let detail = try await model.api.fetchTransportEntity(
                 mode: entity.mode,
                 entityID: entity.entity_id
             )
+            guard selectionRequestID == requestID else { return }
             selectedEntity = detail.entity
             selectedTrack = detail.track
         } catch {
             // Current snapshot remains visible while track sampling catches up.
         }
+    }
+
+    private func clearSelection() {
+        selectionRequestID = UUID()
+        selectedEntity = nil
+        selectedTrack = []
+        isLoadingEntity = false
     }
 }
 
@@ -776,6 +817,10 @@ private struct TransportCanvasMap: View {
     let track: [TransportTrackPoint]
     let onSelect: (TransportEntity) -> Void
     @Environment(\.colorScheme) private var colorScheme
+
+    private var plottedEntities: [TransportEntity] {
+        Array(entities.prefix(1_000))
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -804,7 +849,7 @@ private struct TransportCanvasMap: View {
                 HStack(spacing: 12) {
                     legendItem("Aircraft", color: ClaritasPalette.dataBlue(for: colorScheme))
                     legendItem("Vessels", color: ClaritasPalette.shellAccent(for: colorScheme))
-                    Text("\(entities.count) visible")
+                    Text("\(plottedEntities.count) visible")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -818,6 +863,11 @@ private struct TransportCanvasMap: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
         )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Live transport map with \(plottedEntities.count) selectable vehicles"
+        )
+        .accessibilityHint("Tap near an aircraft or vessel to show its details")
     }
 
     private func project(latitude: Double, longitude: Double, size: CGSize) -> CGPoint {
@@ -885,7 +935,7 @@ private struct TransportCanvasMap: View {
     }
 
     private func drawRoutes(context: GraphicsContext, size: CGSize) {
-        for entity in entities.prefix(180) {
+        for entity in plottedEntities.prefix(180) {
             guard
                 let originLatitude = entity.origin_latitude,
                 let originLongitude = entity.origin_longitude,
@@ -947,7 +997,7 @@ private struct TransportCanvasMap: View {
     }
 
     private func drawEntities(context: GraphicsContext, size: CGSize) {
-        for entity in entities.prefix(1_000) {
+        for entity in plottedEntities {
             guard let latitude = entity.latitude, let longitude = entity.longitude else { continue }
             let point = project(latitude: latitude, longitude: longitude, size: size)
             let selected = entity.id == selectedID
@@ -975,7 +1025,7 @@ private struct TransportCanvasMap: View {
     }
 
     private func nearestEntity(to location: CGPoint, size: CGSize) -> TransportEntity? {
-        entities
+        plottedEntities
             .compactMap { entity -> (TransportEntity, CGFloat)? in
                 guard let latitude = entity.latitude, let longitude = entity.longitude else {
                     return nil

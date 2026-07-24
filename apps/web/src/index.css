@@ -3110,6 +3110,7 @@ body {
 .transport-map-entities g path {
   stroke-width: 1.1;
   vector-effect: non-scaling-stroke;
+  pointer-events: none;
 }
 
 .transport-map-entities g[data-mode="aviation"] path {
@@ -3122,18 +3123,25 @@ body {
   stroke: #fff0df;
 }
 
-.transport-map-entities g circle {
+.transport-map-entities .transport-map-hit-target {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+
+.transport-map-entities .transport-map-marker-ring {
   fill: transparent;
   stroke: transparent;
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
+  pointer-events: none;
 }
 
-.transport-map-entities g[data-selected="true"] circle {
+.transport-map-entities g[data-selected="true"] .transport-map-marker-ring {
   stroke: var(--shell-ink);
 }
 
-.transport-map-entities g[data-alert="true"] circle {
+.transport-map-entities g[data-alert="true"] .transport-map-marker-ring {
   fill: color-mix(in srgb, var(--viz-negative) 26%, transparent);
   stroke: var(--viz-negative);
 }
@@ -3202,6 +3210,7 @@ body {
   color: var(--shell-muted);
   font-size: 9px;
   backdrop-filter: blur(10px);
+  pointer-events: none;
 }
 
 .transport-map-legend span {
