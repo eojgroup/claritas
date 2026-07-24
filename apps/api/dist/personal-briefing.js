@@ -110,6 +110,7 @@ function parsePreferences(value) {
         max_items: Number.isFinite(parsedMaxItems)
             ? Math.min(Math.max(parsedMaxItems, 3), 25)
             : 10,
+        email_theme: record.email_theme === "light" ? "light" : "dark",
     };
 }
 function escapeRegExp(value) {
@@ -176,6 +177,7 @@ async function getPersonalBriefingReferenceOptions() {
 async function enqueuePersonalBriefingJob(userId, briefingDate, options = {}) {
     const scheduleResult = await (0, db_1.query)(`SELECT
        email_enabled,
+       email_theme,
        industries,
        company_symbols,
        country_iso2s,
@@ -945,6 +947,7 @@ function toEmailContent(row) {
         }),
         map_countries: mapCountries,
         highest_relevance_country: highestCountry,
+        theme: parsePreferences(row.preference_snapshot).email_theme,
     };
 }
 async function claimEmailDelivery() {
@@ -975,6 +978,7 @@ async function claimEmailDelivery() {
        b.title,
        b.update_text,
        b.key_takeaways,
+       b.preference_snapshot,
        b.metadata
      FROM claimed
      JOIN personal_daily_briefing b ON b.id = claimed.briefing_id`, [DELIVERY_MAX_ATTEMPTS]);
@@ -1077,6 +1081,7 @@ async function enqueueDuePersonalBriefingJobs(limit) {
         const dueResult = await client.query(`SELECT
          user_id,
          email_enabled,
+         email_theme,
          timezone(schedule_timezone, now())::date AS local_schedule_date,
          industries,
          company_symbols,

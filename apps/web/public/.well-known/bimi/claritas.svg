@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  version="1.2"
+  baseProfile="tiny-ps"
+  width="512"
+  height="512"
+  viewBox="0 0 512 512"
+>
+  <title>Claritas</title>
+  <desc>Claritas overlapping signal circles and C mark on a solid navy background.</desc>
+  <rect width="512" height="512" fill="#081119"/>
+  <circle cx="196" cy="256" r="134" fill="#77A8BA"/>
+  <circle cx="256" cy="256" r="134" fill="#EDA36A"/>
+  <circle cx="316" cy="256" r="134" fill="#F1C49E"/>
+  <path
+    d="M 329 177 A 106 106 0 1 0 329 335"
+    fill="none"
+    stroke="#172F42"
+    stroke-width="46"
+    stroke-linecap="round"
+  />
+</svg>

@@ -6,7 +6,7 @@ import {
   type BriefingEmailContent,
   type BriefingEmailCountryProfile,
 } from "./email";
-import type { BriefingMapCountry } from "./email-map";
+import type { BriefingEmailTheme, BriefingMapCountry } from "./email-map";
 import { createLlmClientFromEnv } from "./llm";
 
 export type PersonalBriefingPreferences = {
@@ -15,6 +15,7 @@ export type PersonalBriefingPreferences = {
   country_iso2s: string[];
   regions: string[];
   max_items: number;
+  email_theme: BriefingEmailTheme;
 };
 
 export type PersonalBriefingJobStatus = "queued" | "running" | "success" | "failed";
@@ -103,6 +104,7 @@ type DeliveryClaimRow = {
   title: string;
   update_text: string;
   key_takeaways: unknown;
+  preference_snapshot: unknown;
   metadata: unknown;
 };
 
@@ -225,6 +227,7 @@ function parsePreferences(value: unknown): PersonalBriefingPreferences {
     max_items: Number.isFinite(parsedMaxItems)
       ? Math.min(Math.max(parsedMaxItems, 3), 25)
       : 10,
+    email_theme: record.email_theme === "light" ? "light" : "dark",
   };
 }
 
@@ -319,6 +322,7 @@ export async function enqueuePersonalBriefingJob(
 ) {
   const scheduleResult = await query<{
     email_enabled: boolean;
+    email_theme: BriefingEmailTheme;
     industries: string[];
     company_symbols: string[];
     country_iso2s: string[];
@@ -327,6 +331,7 @@ export async function enqueuePersonalBriefingJob(
   }>(
     `SELECT
        email_enabled,
+       email_theme,
        industries,
        company_symbols,
        country_iso2s,
@@ -1316,6 +1321,7 @@ function toEmailContent(row: DeliveryClaimRow): BriefingEmailContent {
     }),
     map_countries: mapCountries,
     highest_relevance_country: highestCountry,
+    theme: parsePreferences(row.preference_snapshot).email_theme,
   };
 }
 
@@ -1348,6 +1354,7 @@ async function claimEmailDelivery(): Promise<DeliveryClaimRow | null> {
        b.title,
        b.update_text,
        b.key_takeaways,
+       b.preference_snapshot,
        b.metadata
      FROM claimed
      JOIN personal_daily_briefing b ON b.id = claimed.briefing_id`,
@@ -1462,6 +1469,7 @@ export async function enqueueDuePersonalBriefingJobs(limit: number): Promise<num
     const dueResult = await client.query<{
       user_id: number;
       email_enabled: boolean;
+      email_theme: BriefingEmailTheme;
       local_schedule_date: string | Date;
       industries: string[];
       company_symbols: string[];
@@ -1472,6 +1480,7 @@ export async function enqueueDuePersonalBriefingJobs(limit: number): Promise<num
       `SELECT
          user_id,
          email_enabled,
+         email_theme,
          timezone(schedule_timezone, now())::date AS local_schedule_date,
          industries,
          company_symbols,

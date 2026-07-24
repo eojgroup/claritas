@@ -861,6 +861,7 @@ export default function ClaritasDashboard() {
   const [dailyBriefingScheduleDraft, setDailyBriefingScheduleDraft] = useState<{
     enabled: boolean;
     email_enabled: boolean;
+    email_theme: "light" | "dark";
     scheduled_time: string;
     timezone: string;
     industries: string[];
@@ -871,6 +872,7 @@ export default function ClaritasDashboard() {
   }>({
     enabled: true,
     email_enabled: false,
+    email_theme: "dark",
     scheduled_time: "07:00",
     timezone: getBrowserTimeZone(),
     industries: [],
@@ -1165,6 +1167,7 @@ export default function ClaritasDashboard() {
         setDailyBriefingScheduleDraft({
           enabled: schedule.enabled,
           email_enabled: schedule.email_enabled,
+          email_theme: schedule.email_theme || "dark",
           scheduled_time: schedule.scheduled_time,
           timezone: schedule.timezone || getBrowserTimeZone(),
           industries: schedule.industries || [],
@@ -3733,6 +3736,7 @@ export default function ClaritasDashboard() {
       const schedule = await updateDailyBriefingSchedule({
         enabled: dailyBriefingScheduleDraft.enabled,
         email_enabled: dailyBriefingScheduleDraft.email_enabled,
+        email_theme: dailyBriefingScheduleDraft.email_theme,
         scheduled_time: scheduledTime,
         timezone,
         industries: dailyBriefingScheduleDraft.industries,
@@ -3745,6 +3749,7 @@ export default function ClaritasDashboard() {
       setDailyBriefingScheduleDraft({
         enabled: schedule.enabled,
         email_enabled: schedule.email_enabled,
+        email_theme: schedule.email_theme || "dark",
         scheduled_time: schedule.scheduled_time,
         timezone: schedule.timezone || timezone,
         industries: schedule.industries || [],
@@ -3781,6 +3786,7 @@ export default function ClaritasDashboard() {
       const schedule = await updateDailyBriefingSchedule({
         enabled: dailyBriefingScheduleDraft.enabled,
         email_enabled: dailyBriefingScheduleDraft.email_enabled,
+        email_theme: dailyBriefingScheduleDraft.email_theme,
         scheduled_time: scheduledTime,
         timezone,
         industries: dailyBriefingScheduleDraft.industries,
@@ -8397,6 +8403,43 @@ export default function ClaritasDashboard() {
                                   Send verification email
                                 </button>
                               )}
+                              <div className="mt-3 flex flex-col gap-2 border-t border-[color:var(--shell-border)] pt-3 sm:flex-row sm:items-end sm:justify-between">
+                                <label className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                                  Email &amp; map appearance
+                                  <select
+                                    value={dailyBriefingScheduleDraft.email_theme}
+                                    onChange={(event) => {
+                                      const emailTheme =
+                                        event.currentTarget.value === "light" ? "light" : "dark";
+                                      setDailyBriefingScheduleDraft((current) => ({
+                                        ...current,
+                                        email_theme: emailTheme,
+                                      }));
+                                    }}
+                                    className="mt-1 block min-w-40 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm normal-case tracking-normal text-[color:var(--shell-ink)]"
+                                  >
+                                    <option value="dark">Dark</option>
+                                    <option value="light">Light</option>
+                                  </select>
+                                </label>
+                                <div className="flex flex-col items-start gap-1 sm:items-end">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDailyBriefingScheduleDraft((current) => ({
+                                        ...current,
+                                        email_theme: dark ? "dark" : "light",
+                                      }))
+                                    }
+                                    className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]"
+                                  >
+                                    Match current website ({dark ? "Dark" : "Light"})
+                                  </button>
+                                  <span className="text-xs text-[color:var(--shell-muted)]">
+                                    Applied to the newsletter and its geospatial map.
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                             <div className="mt-4">
                               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">

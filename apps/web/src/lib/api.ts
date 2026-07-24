@@ -181,6 +181,7 @@ export type DailyBriefingSchedule = {
   user_id: number;
   enabled: boolean;
   email_enabled: boolean;
+  email_theme: "light" | "dark";
   scheduled_time: string;
   timezone: string;
   industries: string[];
@@ -560,6 +561,7 @@ export async function fetchDailyBriefingSchedule(): Promise<DailyBriefingSchedul
 export async function updateDailyBriefingSchedule(payload: {
   enabled?: boolean;
   email_enabled?: boolean;
+  email_theme?: "light" | "dark";
   scheduled_time?: string;
   timezone?: string;
   industries?: string[];

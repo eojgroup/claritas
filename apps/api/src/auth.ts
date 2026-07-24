@@ -33,6 +33,7 @@ type DailyBriefingScheduleRow = {
   user_id: number;
   enabled: boolean;
   email_enabled: boolean;
+  email_theme: "light" | "dark";
   scheduled_time: string;
   schedule_timezone: string;
   industries: string[];
@@ -530,6 +531,7 @@ function normalizeScheduleSelectionList(
 function parseDailyBriefingSchedulePatch(raw: unknown): {
   enabled?: boolean;
   email_enabled?: boolean;
+  email_theme?: "light" | "dark";
   scheduled_time?: string;
   schedule_timezone?: string;
   industries?: string[];
@@ -542,6 +544,7 @@ function parseDailyBriefingSchedulePatch(raw: unknown): {
   const patch: {
     enabled?: boolean;
     email_enabled?: boolean;
+    email_theme?: "light" | "dark";
     scheduled_time?: string;
     schedule_timezone?: string;
     industries?: string[];
@@ -561,6 +564,13 @@ function parseDailyBriefingSchedulePatch(raw: unknown): {
       throw scheduleError(400, "email_enabled must be a boolean.");
     }
     patch.email_enabled = body.email_enabled;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, "email_theme")) {
+    if (body.email_theme !== "light" && body.email_theme !== "dark") {
+      throw scheduleError(400, "email_theme must be light or dark.");
+    }
+    patch.email_theme = body.email_theme;
   }
 
   const scheduledTime = body.scheduled_time ?? body.schedule_time;
@@ -643,6 +653,7 @@ function toDailyBriefingSchedule(row: DailyBriefingScheduleRow) {
     user_id: Number(row.user_id),
     enabled: !!row.enabled,
     email_enabled: !!row.email_enabled,
+    email_theme: row.email_theme === "light" ? "light" : "dark",
     scheduled_time: timeToApiString(row.scheduled_time),
     timezone: row.schedule_timezone,
     industries: Array.isArray(row.industries) ? row.industries : [],
@@ -675,6 +686,7 @@ async function getDailyBriefingSchedule(userId: number) {
        user_id,
        enabled,
        email_enabled,
+       email_theme,
        scheduled_time::text AS scheduled_time,
        schedule_timezone,
        industries,
@@ -713,12 +725,14 @@ async function updateDailyBriefingSchedule(
          country_iso2s = COALESCE($8::text[], country_iso2s),
          regions = COALESCE($9::text[], regions),
          max_items = COALESCE($10::int, max_items),
+         email_theme = COALESCE($11, email_theme),
          updated_at = now()
      WHERE user_id = $1
      RETURNING
        user_id,
        enabled,
        email_enabled,
+       email_theme,
        scheduled_time::text AS scheduled_time,
        schedule_timezone,
        industries,
@@ -743,6 +757,7 @@ async function updateDailyBriefingSchedule(
       patch.country_iso2s ?? null,
       patch.regions ?? null,
       patch.max_items ?? null,
+      patch.email_theme ?? null,
     ]
   );
   if (!rows[0]) throw scheduleError(500, "Failed to update daily briefing schedule.");

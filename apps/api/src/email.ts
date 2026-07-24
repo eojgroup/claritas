@@ -1,6 +1,7 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import {
   renderBriefingMapPng,
+  type BriefingEmailTheme,
   type BriefingMapCountry,
 } from "./email-map";
 
@@ -66,7 +67,53 @@ export type BriefingEmailContent = {
   markets: BriefingEmailMarket[];
   map_countries: BriefingMapCountry[];
   highest_relevance_country: BriefingEmailCountryProfile | null;
+  theme: BriefingEmailTheme;
 };
+
+type BriefingEmailPalette = {
+  page: string;
+  panel: string;
+  surface: string;
+  surfaceMuted: string;
+  ink: string;
+  muted: string;
+  border: string;
+  accent: string;
+  link: string;
+  strong: string;
+  onStrong: string;
+};
+
+const BRIEFING_EMAIL_PALETTES: Record<BriefingEmailTheme, BriefingEmailPalette> = {
+  light: {
+    page: "#F3E9D7",
+    panel: "#FFFAF1",
+    surface: "#FFFAF1",
+    surfaceMuted: "#E8D9C2",
+    ink: "#172F42",
+    muted: "#53616A",
+    border: "#D5C1A4",
+    accent: "#E6A06A",
+    link: "#2A5268",
+    strong: "#172F42",
+    onStrong: "#FFFAF1",
+  },
+  dark: {
+    page: "#081119",
+    panel: "#0C1822",
+    surface: "#152A38",
+    surfaceMuted: "#1B303E",
+    ink: "#F2EEE6",
+    muted: "#A9B5BA",
+    border: "#35566A",
+    accent: "#EDA36A",
+    link: "#9BC1CF",
+    strong: "#315F72",
+    onStrong: "#FFFAF1",
+  },
+};
+
+const EMAIL_FONT = "'Times New Roman', Times, serif";
 
 let transporter: Transporter | null = null;
 let transporterKey: string | null = null;
@@ -180,33 +227,38 @@ export function renderBriefingEmail(
   text: string;
 } {
   const config = getEmailRuntimeConfig();
+  const theme: BriefingEmailTheme = content.theme === "light" ? "light" : "dark";
+  const palette = BRIEFING_EMAIL_PALETTES[theme];
   const subject = `${content.title} — ${content.briefing_date}`;
   const takeawayHtml = content.key_takeaways
-    .map((takeaway) => `<li style="margin:0 0 8px">${escapeHtml(takeaway)}</li>`)
+    .map(
+      (takeaway) =>
+        `<li style="margin:0 0 8px;color:${palette.ink}">${escapeHtml(takeaway)}</li>`
+    )
     .join("");
   const signalHtml = content.signals
     .map((signal) => {
       const url = safeWebUrl(signal.url);
       const title = escapeHtml(signal.title);
       const linkedTitle = url
-        ? `<a href="${escapeHtml(url)}" style="color:#164e63;text-decoration:underline">${title}</a>`
+        ? `<a href="${escapeHtml(url)}" style="color:${palette.link};text-decoration:underline">${title}</a>`
         : title;
       const reasons = signal.reasons.length > 0 ? ` · ${escapeHtml(signal.reasons.join(", "))}` : "";
       const summary = signal.summary
-        ? `<div style="margin-top:5px;color:#475569">${escapeHtml(signal.summary)}</div>`
+        ? `<div style="margin-top:5px;color:${palette.muted}">${escapeHtml(signal.summary)}</div>`
         : "";
-      return `<li style="margin:0 0 14px"><strong>${linkedTitle}</strong><div style="font-size:12px;color:#64748b">${escapeHtml(signal.source_name)}${reasons}</div>${summary}</li>`;
+      return `<li style="margin:0 0 14px;color:${palette.ink}"><strong>${linkedTitle}</strong><div style="font-size:12px;color:${palette.muted}">${escapeHtml(signal.source_name)}${reasons}</div>${summary}</li>`;
     })
     .join("");
   const marketHtml = content.markets
     .map(
       (market) =>
-        `<li style="margin:0 0 8px"><strong>${escapeHtml(market.symbol)}</strong>${market.company_name ? ` · ${escapeHtml(market.company_name)}` : ""}<div style="font-size:12px;color:#64748b">${escapeHtml(formatMarketValue(market))}</div></li>`
+        `<li style="margin:0 0 8px;color:${palette.ink}"><strong>${escapeHtml(market.symbol)}</strong>${market.company_name ? ` · ${escapeHtml(market.company_name)}` : ""}<div style="font-size:12px;color:${palette.muted}">${escapeHtml(formatMarketValue(market))}</div></li>`
     )
     .join("");
   const mapHtml = options.map_cid
-    ? `<h2 style="margin:26px 0 10px;font-size:18px">Geospatial signal pulse</h2>
-       <img src="cid:${escapeHtml(options.map_cid)}" width="624" alt="World map showing the countries most relevant to this briefing" style="display:block;width:100%;max-width:624px;height:auto;border:0;border-radius:12px;background:#07121a" />`
+    ? `<h2 style="margin:26px 0 10px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">Geospatial signal pulse</h2>
+       <img src="cid:${escapeHtml(options.map_cid)}" width="624" alt="World map showing the countries most relevant to this briefing" style="display:block;width:100%;max-width:624px;height:auto;border:0;border-radius:12px;background:${palette.page}" />`
     : "";
   const countryProfile = content.highest_relevance_country;
   const countryProfileHtml = countryProfile
@@ -222,9 +274,9 @@ export function renderBriefingEmail(
         ]
           .map(
             ([label, value]) =>
-              `<td style="padding:10px 8px;border:1px solid #d7e1e6;text-align:center"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#64748b">${escapeHtml(
+              `<td style="padding:10px 8px;border:1px solid ${palette.border};text-align:center"><div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:${palette.muted}">${escapeHtml(
                 label
-              )}</div><strong style="display:block;margin-top:4px;font-size:17px;color:#0f172a">${escapeHtml(
+              )}</div><strong style="display:block;margin-top:4px;font-size:17px;color:${palette.ink}">${escapeHtml(
                 value
               )}</strong></td>`
           )
@@ -233,11 +285,11 @@ export function renderBriefingEmail(
           .slice(0, 5)
           .map(
             (driver) =>
-              `<li style="margin:0 0 6px;color:#334155">${escapeHtml(driver)}</li>`
+              `<li style="margin:0 0 6px;color:${palette.ink}">${escapeHtml(driver)}</li>`
           )
           .join("");
         const weatherHtml = weather
-          ? `<p style="margin:12px 0 0;color:#334155"><strong>Weather:</strong> ${
+          ? `<p style="margin:12px 0 0;color:${palette.ink}"><strong>Weather:</strong> ${
               weather.temp_c == null ? "Temperature unavailable" : `${weather.temp_c.toFixed(1)}°C`
             }${weather.weather_main ? ` · ${escapeHtml(weather.weather_main)}` : ""}${
               weather.humidity == null ? "" : ` · ${weather.humidity}% humidity`
@@ -245,7 +297,7 @@ export function renderBriefingEmail(
           : "";
         const leadershipHtml =
           countryProfile.leadership?.roles.length
-            ? `<p style="margin:12px 0 4px;color:#334155"><strong>Current leadership${
+            ? `<p style="margin:12px 0 4px;color:${palette.ink}"><strong>Current leadership${
                 countryProfile.leadership.government_type
                   ? ` · ${escapeHtml(countryProfile.leadership.government_type)}`
                   : ""
@@ -253,13 +305,13 @@ export function renderBriefingEmail(
                 .slice(0, 4)
                 .map(
                   (role) =>
-                    `<li style="margin:0 0 5px;color:#334155">${escapeHtml(
+                    `<li style="margin:0 0 5px;color:${palette.ink}">${escapeHtml(
                       role.role_type === "head_of_state"
                         ? "Head of state"
                         : "Head of government"
                     )}: ${escapeHtml(role.person_name)}${
                       role.started_at
-                        ? ` <span style="color:#64748b">(since ${escapeHtml(
+                        ? ` <span style="color:${palette.muted}">(since ${escapeHtml(
                             role.started_at.slice(0, 10)
                           )})</span>`
                         : ""
@@ -267,21 +319,21 @@ export function renderBriefingEmail(
                 )
                 .join("")}</ul>`
             : "";
-        return `<div style="margin-top:14px;border:1px solid #d7e1e6;border-radius:12px;overflow:hidden">
-          <div style="padding:16px 18px;background:#0d202b;color:#f8fafc">
-            <div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#9fb0ba">Highest relevance country · ${escapeHtml(
+        return `<div style="margin-top:14px;border:1px solid ${palette.border};border-radius:12px;overflow:hidden">
+          <div style="padding:16px 18px;background:${palette.strong};color:${palette.onStrong}">
+            <div style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:${palette.accent}">Highest relevance country · ${escapeHtml(
               countryProfile.country_iso2
             )}</div>
-            <div style="margin-top:5px;font-size:22px;font-weight:700">${escapeHtml(
+            <div style="margin-top:5px;font-family:${EMAIL_FONT};font-size:22px;font-weight:700">${escapeHtml(
               countryProfile.country_name
             )}</div>
-            <div style="font-size:12px;color:#bdcbd2">${escapeHtml(
+            <div style="font-size:12px;color:${palette.onStrong}">${escapeHtml(
               countryProfile.region || "Global country context"
             )}</div>
           </div>
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f8fafc"><tr>${metricCells}</tr></table>
-          <div style="padding:16px 18px;background:#ffffff">
-            ${drivers ? `<strong style="font-size:13px;color:#0f172a">Why this country is relevant</strong><ul style="margin:8px 0 0;padding-left:20px">${drivers}</ul>` : ""}
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:${palette.surfaceMuted};font-family:${EMAIL_FONT}"><tr>${metricCells}</tr></table>
+          <div style="padding:16px 18px;background:${palette.surface}">
+            ${drivers ? `<strong style="font-size:13px;color:${palette.ink}">Why this country is relevant</strong><ul style="margin:8px 0 0;padding-left:20px">${drivers}</ul>` : ""}
             ${weatherHtml}
             ${leadershipHtml}
           </div>
@@ -291,37 +343,41 @@ export function renderBriefingEmail(
   const preferencesUrl = config.public_base_url ? `${config.public_base_url}/?view=profile` : null;
 
   const html = `<!doctype html>
-<html>
-  <body style="margin:0;background:#f8fafc;color:#0f172a;font-family:Arial,sans-serif">
+<html lang="en">
+  <head>
+    <meta name="color-scheme" content="${theme}">
+    <meta name="supported-color-schemes" content="${theme}">
+  </head>
+  <body style="margin:0;background:${palette.page};color:${palette.ink};font-family:${EMAIL_FONT}">
     <div style="display:none;max-height:0;overflow:hidden">${escapeHtml(content.update_text.slice(0, 140))}</div>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${palette.page};font-family:${EMAIL_FONT}">
       <tr><td align="center" style="padding:24px 12px">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;background:${palette.panel};border:1px solid ${palette.border};border-radius:14px;font-family:${EMAIL_FONT}">
           <tr><td style="padding:28px">
-            <div style="font-size:12px;font-weight:700;letter-spacing:.18em;color:#0e7490;text-transform:uppercase">Claritas personalised briefing</div>
-            <h1 style="margin:10px 0 6px;font-size:28px;line-height:1.2">${escapeHtml(content.title)}</h1>
-            <div style="font-size:13px;color:#64748b">${escapeHtml(content.briefing_date)}</div>
-            <p style="font-size:16px;line-height:1.6">${escapeHtml(content.update_text)}</p>
+            <div style="font-size:12px;font-weight:700;letter-spacing:.18em;color:${palette.accent};text-transform:uppercase">Claritas personalised briefing</div>
+            <h1 style="margin:10px 0 6px;font-family:${EMAIL_FONT};font-size:30px;line-height:1.2;color:${palette.ink}">${escapeHtml(content.title)}</h1>
+            <div style="font-size:13px;color:${palette.muted}">${escapeHtml(content.briefing_date)}</div>
+            <p style="font-size:16px;line-height:1.6;color:${palette.ink}">${escapeHtml(content.update_text)}</p>
             ${mapHtml}
             ${countryProfileHtml}
             ${
               takeawayHtml
-                ? `<h2 style="margin:26px 0 10px;font-size:18px">Key takeaways</h2><ul style="padding-left:20px;line-height:1.5">${takeawayHtml}</ul>`
+                ? `<h2 style="margin:26px 0 10px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">Key takeaways</h2><ul style="padding-left:20px;line-height:1.5">${takeawayHtml}</ul>`
                 : ""
             }
             ${
               signalHtml
-                ? `<h2 style="margin:26px 0 10px;font-size:18px">Signals selected for you</h2><ol style="padding-left:22px;line-height:1.45">${signalHtml}</ol>`
+                ? `<h2 style="margin:26px 0 10px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">Signals selected for you</h2><ol style="padding-left:22px;line-height:1.45">${signalHtml}</ol>`
                 : ""
             }
             ${
               marketHtml
-                ? `<h2 style="margin:26px 0 10px;font-size:18px">Companies you follow</h2><ul style="padding-left:20px;line-height:1.45">${marketHtml}</ul>`
+                ? `<h2 style="margin:26px 0 10px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">Companies you follow</h2><ul style="padding-left:20px;line-height:1.45">${marketHtml}</ul>`
                 : ""
             }
-            <div style="margin-top:28px;padding-top:18px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b">
+            <div style="margin-top:28px;padding-top:18px;border-top:1px solid ${palette.border};font-size:12px;color:${palette.muted}">
               You received this because daily briefing email is enabled for your Claritas account.
-              ${preferencesUrl ? ` <a href="${escapeHtml(preferencesUrl)}" style="color:#164e63">Manage briefing preferences</a>.` : " You can disable it in your Claritas profile."}
+              ${preferencesUrl ? ` <a href="${escapeHtml(preferencesUrl)}" style="color:${palette.link}">Manage briefing preferences</a>.` : " You can disable it in your Claritas profile."}
             </div>
           </td></tr>
         </table>
@@ -406,7 +462,7 @@ export async function sendBriefingEmail(
   let mapImage: Buffer | null = null;
   if (content.map_countries.length > 0) {
     try {
-      mapImage = await renderBriefingMapPng(content.map_countries);
+      mapImage = await renderBriefingMapPng(content.map_countries, content.theme);
     } catch (error) {
       console.warn(
         "Briefing map rendering failed; sending the email without the image:",
@@ -444,6 +500,7 @@ export async function sendBriefingEmail(
 
 export async function sendEmailVerificationEmail(recipient: string, verificationUrl: string): Promise<void> {
   const config = getEmailRuntimeConfig();
+  const palette = BRIEFING_EMAIL_PALETTES.light;
   const url = safeWebUrl(verificationUrl);
   if (!url) throw new Error("EMAIL_PUBLIC_BASE_URL must be a valid HTTP(S) URL before sending verification email.");
   const destination = new URL(url);
@@ -453,7 +510,7 @@ export async function sendEmailVerificationEmail(recipient: string, verification
     replyTo: config.reply_to || undefined,
     subject: "Verify your Claritas email address",
     text: `Verify your Claritas email address by opening this link:\n\n${url}\n\nThe destination is ${destination.origin}. Email security systems can replace clickable links with a redirect. If your browser warns about a redirect, copy and paste the exact Claritas address above into your browser instead.\n\nThis link expires in one hour. If you did not request it, you can ignore this email.`,
-    html: `<p>Verify your Claritas email address:</p><p><a href="${escapeHtml(url)}">Verify email address</a></p><p style="color:#475569">The destination is <strong>${escapeHtml(destination.origin)}</strong>. Email security systems can replace clickable links with a redirect. If your browser warns about a redirect, copy and paste this exact Claritas address into your browser instead:</p><div style="padding:12px;background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;word-break:break-all"><code>${escapeHtml(url)}</code></div><p>This link expires in one hour. If you did not request it, you can ignore this email.</p>`,
+    html: `<!doctype html><html lang="en"><body style="margin:0;padding:24px;background:${palette.page};color:${palette.ink};font-family:${EMAIL_FONT}"><div style="max-width:640px;margin:0 auto;padding:28px;background:${palette.panel};border:1px solid ${palette.border};border-radius:14px"><div style="font-size:12px;font-weight:700;letter-spacing:.18em;color:${palette.accent};text-transform:uppercase">Claritas account security</div><h1 style="font-family:${EMAIL_FONT};color:${palette.ink}">Verify your Claritas email address</h1><p><a href="${escapeHtml(url)}" style="color:${palette.link};font-weight:700">Verify email address</a></p><p style="color:${palette.muted}">The destination is <strong>${escapeHtml(destination.origin)}</strong>. Email security systems can replace clickable links with a redirect. If your browser warns about a redirect, copy and paste this exact Claritas address into your browser instead:</p><div style="padding:12px;background:${palette.surfaceMuted};border:1px solid ${palette.border};border-radius:8px;word-break:break-all"><code>${escapeHtml(url)}</code></div><p>This link expires in one hour. If you did not request it, you can ignore this email.</p></div></body></html>`,
     headers: { "X-Claritas-Message-Type": "email-verification" },
   });
 }
