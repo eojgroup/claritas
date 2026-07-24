@@ -44,6 +44,18 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_KEY, optional: true } }
             - name: PODCASTINDEX_API_SECRET
               valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_SECRET, optional: true } }
+            - name: AISSTREAM_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-aisstream, key: AISSTREAM_API_KEY, optional: true } }
+            - name: AISSTREAM_SAMPLE_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_SAMPLE_SECONDS, optional: true } }
+            - name: ADSB_LOL_POLL_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_POLL_ENABLED, optional: true } }
+            - name: ADSB_LOL_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_POLL_SECONDS, optional: true } }
+            - name: ADSB_LOL_MAX_ROUTE_LOOKUPS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_MAX_ROUTE_LOOKUPS, optional: true } }
+            - name: ADSB_LOL_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_USER_AGENT, optional: true } }
             - name: PODCAST_DISCOVERY_TERMS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_DISCOVERY_TERMS, optional: true } }
             - name: PODCAST_FEED_IDS

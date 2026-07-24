@@ -9,6 +9,7 @@ struct RootView: View {
         case podcasts
         case weather
         case markets
+        case transport
         case admin
         case profile
         case policies
@@ -23,6 +24,7 @@ struct RootView: View {
             case .podcasts: return "Podcasts"
             case .weather: return "Weather"
             case .markets: return "Markets"
+            case .transport: return "Transport"
             case .admin: return "Admin"
             case .profile: return "Profile"
             case .policies: return "Policies"
@@ -39,6 +41,7 @@ struct RootView: View {
             case .podcasts: return "mic.fill"
             case .weather: return "cloud.sun"
             case .markets: return "chart.line.uptrend.xyaxis"
+            case .transport: return "point.topleft.down.to.point.bottomright.curvepath"
             case .admin: return "shield.lefthalf.filled"
             case .profile: return "person.crop.circle"
             case .policies: return "doc.text"
@@ -99,6 +102,9 @@ struct RootView: View {
             case "news": next = .news
             case "weather": next = .weather
             case "markets": next = .markets
+            case "transport":
+                next = .more
+                compactMorePath = [.transport]
             case "briefing":
                 next = .more
                 compactMorePath = [.briefing]
@@ -178,8 +184,8 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .news, .podcasts, .weather, .markets, .admin, .profile, .policies]
-            : [.overview, .news, .podcasts, .weather, .markets, .profile, .policies]
+            ? [.overview, .news, .podcasts, .weather, .markets, .transport, .admin, .profile, .policies]
+            : [.overview, .news, .podcasts, .weather, .markets, .transport, .profile, .policies]
     }
 
     private var sidebar: some View {
@@ -192,6 +198,7 @@ struct RootView: View {
                 sidebarLink(.podcasts)
                 sidebarLink(.weather)
                 sidebarLink(.markets)
+                sidebarLink(.transport)
             }
             if model.isAdmin {
                 Section("Operations") {
@@ -259,6 +266,8 @@ struct RootView: View {
             WeatherWorkspaceView()
         case .markets:
             MarketsWorkspaceView()
+        case .transport:
+            TransportWorkspaceView()
         case .admin:
             AdminWorkspaceView()
         case .profile:
@@ -308,6 +317,13 @@ private struct CompactMoreView: View {
                             detail: "Published cross-domain synopsis and delivery schedule",
                             icon: "sparkles",
                             destination: DailyBriefingWorkspaceView()
+                        )
+                        Divider()
+                        destinationRow(
+                            title: "Transport pulse",
+                            detail: "Aggregate flight, shipping, corridor, and country activity",
+                            icon: "point.topleft.down.to.point.bottomright.curvepath",
+                            destination: TransportWorkspaceView()
                         )
                     }
 

@@ -118,6 +118,7 @@ struct PadOverviewView: View {
                 workspaceButton(.podcasts, label: "Podcasts")
                 workspaceButton(.weather, label: "Weather")
                 workspaceButton(.markets, label: "Markets")
+                workspaceButton(.transport, label: "Transport")
             }
             .padding(.horizontal, 2)
         }

@@ -28,15 +28,18 @@ final class AppModel: ObservableObject {
     @Published var marketQuotes: [MarketQuote] = []
     @Published var marketStatus: [MarketStatus] = []
     @Published var marketEarnings: [EarningsEvent] = []
+    @Published var transportOverview: TransportOverview? = nil
     @Published var isRefreshingNews: Bool = false
     @Published var isRefreshingPodcasts: Bool = false
     @Published var isRefreshingWeather: Bool = false
     @Published var isRefreshingMarketQuotes: Bool = false
     @Published var isRefreshingMarketStatus: Bool = false
     @Published var isRefreshingMarketEarnings: Bool = false
+    @Published var isRefreshingTransport: Bool = false
     @Published var newsLoadMode: NewsLoadMode = .recent
     @Published var newsLoadError: String? = nil
     @Published var podcastLoadError: String? = nil
+    @Published var transportLoadError: String? = nil
     @Published var authStatus: AuthStatus = .checking
     @Published var authUser: AuthUser? = nil
     @Published var authProviders: [AuthProvider] = []
@@ -310,6 +313,14 @@ final class AppModel: ObservableObject {
             }
             catch { return .failure(error) }
         }()
+        async let transportResult: Result<TransportOverview, Error> = {
+            do {
+                return .success(
+                    try await api.fetchTransportOverview(detail: "aggregate", refresh: false)
+                )
+            }
+            catch { return .failure(error) }
+        }()
 
         let (
             resolvedStats,
@@ -321,7 +332,8 @@ final class AppModel: ObservableObject {
             resolvedPodcasts,
             resolvedMarket,
             resolvedMarketStatus,
-            resolvedMarketEarnings
+            resolvedMarketEarnings,
+            resolvedTransport
         ) = await (
             statsResult,
             briefingResult,
@@ -332,7 +344,8 @@ final class AppModel: ObservableObject {
             podcastResult,
             marketResult,
             marketStatusResult,
-            marketEarningsResult
+            marketEarningsResult,
+            transportResult
         )
 
         var paymentRequiredDetected = false
@@ -364,6 +377,9 @@ final class AppModel: ObservableObject {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedMarketEarnings, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedTransport, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if paymentRequiredDetected {
@@ -409,6 +425,13 @@ final class AppModel: ObservableObject {
         if case .success(let earningRows) = resolvedMarketEarnings {
             marketEarnings = earningRows
         }
+        if case .success(let transport) = resolvedTransport {
+            transportOverview = transport
+            transportLoadError = nil
+        }
+        if case .failure(let error) = resolvedTransport {
+            transportLoadError = (error as? APIError)?.message ?? error.localizedDescription
+        }
         WidgetSnapshotStore.save(
             newsCount: news.count,
             marketQuotes: marketQuotes,
@@ -430,8 +453,10 @@ final class AppModel: ObservableObject {
         marketQuotes = []
         marketStatus = []
         marketEarnings = []
+        transportOverview = nil
         newsLoadError = nil
         podcastLoadError = nil
+        transportLoadError = nil
     }
 
     func clearSelection() {
@@ -622,6 +647,31 @@ final class AppModel: ObservableObject {
                 await refreshAccess()
             }
             // keep current rows on transient failures
+        }
+    }
+
+    func refreshTransport(forceRefresh: Bool = false) async {
+        guard !isRefreshingTransport else { return }
+        guard hasPaidAccess else {
+            clearAppData()
+            return
+        }
+        isRefreshingTransport = true
+        transportLoadError = nil
+        defer { isRefreshingTransport = false }
+
+        do {
+            transportOverview = try await api.fetchTransportOverview(
+                detail: "aggregate",
+                refresh: forceRefresh
+            )
+        } catch {
+            if isPaymentRequired(error) {
+                clearAppData()
+                await refreshAccess()
+                return
+            }
+            transportLoadError = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 

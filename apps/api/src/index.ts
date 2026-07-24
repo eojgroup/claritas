@@ -14,6 +14,13 @@ import {
   ingestWikidataLeadership,
 } from "./connectors/wikidata-leadership";
 import {
+  getTransportEntity,
+  getTransportOverview,
+  refreshAviationNow,
+  startTransportIngestionWorkers,
+  type TransportMode,
+} from "./connectors/transport";
+import {
   getFinnhubEarningsCalendar,
   getFinnhubMarketStatus,
   getMarketQuotesLatest,
@@ -2734,6 +2741,68 @@ app.get("/api/leadership/countries", requireAuthenticated, async (_req, res) => 
   }
 });
 
+app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
+  try {
+    const detail = req.query.detail === "full" ? "full" : "aggregate";
+    const modeRaw = typeof req.query.mode === "string" ? req.query.mode.trim().toLowerCase() : "";
+    const mode: TransportMode | undefined =
+      modeRaw === "maritime" || modeRaw === "aviation" ? modeRaw : undefined;
+    if (modeRaw && !mode) {
+      return res.status(400).json({ error: "mode must be maritime or aviation." });
+    }
+    const country =
+      typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : undefined;
+    if (country && !/^[A-Z]{2}$/.test(country)) {
+      return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
+    }
+    const entityLimitRaw =
+      typeof req.query.entity_limit === "string"
+        ? Number.parseInt(req.query.entity_limit, 10)
+        : undefined;
+    const refresh =
+      typeof req.query.refresh === "string" &&
+      ["1", "true", "yes", "on"].includes(req.query.refresh.trim().toLowerCase());
+    if (refresh) {
+      await refreshAviationNow(false);
+    }
+    const overview = await getTransportOverview({
+      detail,
+      mode,
+      country,
+      entityLimit: Number.isFinite(entityLimitRaw as number) ? entityLimitRaw : undefined,
+    });
+    return res.json(overview);
+  } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      res.setHeader("Retry-After", "5");
+      return res.status(503).json({ error: "Transport data service is reconnecting. Retry shortly." });
+    }
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get("/api/transport/entities/:mode/:entityId", requireAuthenticated, async (req, res) => {
+  try {
+    const modeRaw = req.params.mode?.trim().toLowerCase();
+    if (modeRaw !== "maritime" && modeRaw !== "aviation") {
+      return res.status(400).json({ error: "mode must be maritime or aviation." });
+    }
+    const entityId = req.params.entityId?.trim();
+    if (!entityId || entityId.length > 64) {
+      return res.status(400).json({ error: "A valid entity id is required." });
+    }
+    const result = await getTransportEntity(modeRaw, entityId);
+    if (!result) return res.status(404).json({ error: "Tracked entity not found." });
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 // Latest market quotes with optional on-demand refresh for near real-time views
 app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
   try {
@@ -2833,6 +2902,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
 startIngestionAutomationWorker();
 startDailyBriefingSchedulerWorker();
 startPersonalBriefingWorker();
+startTransportIngestionWorkers();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API listening on http://0.0.0.0:${PORT}`);

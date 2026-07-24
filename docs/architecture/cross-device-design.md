@@ -25,12 +25,14 @@ flowchart LR
   API --> Weather[Weather conditions]
   API --> Markets[Market movement]
   API --> Leadership[Country leadership]
+  API --> Transport[Transport movement]
 
   News --> Desk[Signal desk]
   Podcasts --> Desk
   Weather --> Desk
   Markets --> Desk
   Leadership --> Desk
+  Transport --> Desk
 
   Desk --> Web[Desktop workspace]
   Desk --> Pad[Tablet review workspace]
@@ -48,6 +50,7 @@ Each domain has a distinct analytical responsibility:
 | Weather | Which conditions exceed operating thresholds and where? | Threshold queue, observation feed, map, distribution charts |
 | Markets | Which instruments moved and what context may explain it? | Watchlist, symbol drilldown, session range, movers, benchmark regime |
 | Leadership | Who provides the current country/government context? | Leadership map layer and country detail |
+| Transport | How are flights and shipping routes connecting countries now? | Live track map, route corridors, country network, activity trends |
 
 Maps and graphs are not decoration. Bubble maps answer spatial distribution questions. Graphs answer change, comparison, mix, correlation, and ranking questions. A visual is omitted when the available data cannot support a useful analytical statement.
 
@@ -61,6 +64,7 @@ flowchart LR
   Weather[Weather observation] -->|ISO country| Country
   Market[Market instrument] -->|listing/country| Country
   Leader[Leadership record] -->|ISO country + Wikidata entity| Country
+  Transport[Aircraft or vessel] -->|position, route, registration, flag| Country
   Podcast[Podcast finding] -->|explicit ISO or country/leader mention| Country
   Podcast -->|episode + timestamp| Evidence[Attributed evidence]
   Country --> Score[Cross-source relevance score]
@@ -85,7 +89,8 @@ Claritas
 │   ├── News
 │   ├── Podcasts
 │   ├── Weather
-│   └── Markets
+│   ├── Markets
+│   └── Transport
 ├── Operate
 │   └── Admin
 └── Account and reference
@@ -137,6 +142,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 - `NavigationSplitView` groups Workspace, Signals, Operations, and Account.
 - The signal desk carries a native, horizontally scrollable workspace strip that mirrors the web analysis destinations while retaining the platform sidebar and keyboard/pointer behavior.
 - The overview uses the map as its dominant surface, with region scope, country selection, compare, pin, and cross-domain drill-in.
+- The dedicated Transport workspace exposes live aircraft and vessel markers, route curves, sampled tracks, flight numbers/MMSIs, country linkage, corridor flows, and activity/country charts.
 - A compact KPI posture strip follows the map. The lower stage uses a wide intelligence stream and a narrower selection-driven context rail for focus, market movement, and weather thresholds.
 - Touch targets remain at least 44 points. Controls use native menus, segmented controls, and toolbars.
 
@@ -146,6 +152,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 - The second page is a read-only Daily Brief tab with the published situation summary, two takeaways, cross-domain counts, freshness, and iPhone handoff.
 - The watch map preserves the same four layers, regional scope, ranking, highest-relevance explanation, country selection, and reset behavior in a glanceable form.
 - A single Pulse page replaces separate domain deep dives and limits itself to the most relevant headline, weather exception, and market mover.
+- A Transport pulse page adds aggregate flight, vessel, connected-country, and leading-corridor context without sending raw tracks to Watch.
 - Dense lists, evidence, compare, schedule editing, admin, profile editing, and policy reading remain unavailable.
 - “Open on iPhone” sends the destination and selected/highest country through `WatchConnectivity`; the iPhone opens the matching workspace with that country focused.
 

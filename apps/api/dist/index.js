@@ -43,6 +43,7 @@ const thenewsapi_1 = require("./connectors/thenewsapi");
 const podcastindex_1 = require("./connectors/podcastindex");
 const openweather_1 = require("./connectors/openweather");
 const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
+const transport_1 = require("./connectors/transport");
 const finnhub_1 = require("./connectors/finnhub");
 const db_1 = require("./db");
 const auth_1 = __importStar(require("./auth"));
@@ -2329,6 +2330,65 @@ app.get("/api/leadership/countries", requireAuthenticated, async (_req, res) => 
         res.status(500).json({ error: e.message || String(e) });
     }
 });
+app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
+    try {
+        const detail = req.query.detail === "full" ? "full" : "aggregate";
+        const modeRaw = typeof req.query.mode === "string" ? req.query.mode.trim().toLowerCase() : "";
+        const mode = modeRaw === "maritime" || modeRaw === "aviation" ? modeRaw : undefined;
+        if (modeRaw && !mode) {
+            return res.status(400).json({ error: "mode must be maritime or aviation." });
+        }
+        const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : undefined;
+        if (country && !/^[A-Z]{2}$/.test(country)) {
+            return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
+        }
+        const entityLimitRaw = typeof req.query.entity_limit === "string"
+            ? Number.parseInt(req.query.entity_limit, 10)
+            : undefined;
+        const refresh = typeof req.query.refresh === "string" &&
+            ["1", "true", "yes", "on"].includes(req.query.refresh.trim().toLowerCase());
+        if (refresh) {
+            await (0, transport_1.refreshAviationNow)(false);
+        }
+        const overview = await (0, transport_1.getTransportOverview)({
+            detail,
+            mode,
+            country,
+            entityLimit: Number.isFinite(entityLimitRaw) ? entityLimitRaw : undefined,
+        });
+        return res.json(overview);
+    }
+    catch (error) {
+        if ((0, db_1.isDatabaseUnavailableError)(error)) {
+            res.setHeader("Retry-After", "5");
+            return res.status(503).json({ error: "Transport data service is reconnecting. Retry shortly." });
+        }
+        return res.status(500).json({
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+});
+app.get("/api/transport/entities/:mode/:entityId", requireAuthenticated, async (req, res) => {
+    try {
+        const modeRaw = req.params.mode?.trim().toLowerCase();
+        if (modeRaw !== "maritime" && modeRaw !== "aviation") {
+            return res.status(400).json({ error: "mode must be maritime or aviation." });
+        }
+        const entityId = req.params.entityId?.trim();
+        if (!entityId || entityId.length > 64) {
+            return res.status(400).json({ error: "A valid entity id is required." });
+        }
+        const result = await (0, transport_1.getTransportEntity)(modeRaw, entityId);
+        if (!result)
+            return res.status(404).json({ error: "Tracked entity not found." });
+        return res.json(result);
+    }
+    catch (error) {
+        return res.status(500).json({
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+});
 // Latest market quotes with optional on-demand refresh for near real-time views
 app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
     try {
@@ -2425,6 +2485,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
 (0, ingestion_automation_1.startIngestionAutomationWorker)();
 startDailyBriefingSchedulerWorker();
 (0, personal_briefing_1.startPersonalBriefingWorker)();
+(0, transport_1.startTransportIngestionWorkers)();
 app.listen(PORT, "0.0.0.0", () => {
     console.log(`API listening on http://0.0.0.0:${PORT}`);
 });

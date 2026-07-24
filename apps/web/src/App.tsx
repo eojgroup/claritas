@@ -26,6 +26,7 @@ import {
   CheckCheck,
   Podcast,
   RefreshCw,
+  Route,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -123,6 +124,7 @@ type AppView =
   | "podcasts"
   | "weather"
   | "markets"
+  | "transport"
   | "admin"
   | "profile"
   | "legal";
@@ -685,6 +687,7 @@ import PaywallPage from "./components/PaywallPage";
 import AdminIngestionPanel from "./components/AdminIngestionPanel";
 import AdminUserManagementPanel from "./components/AdminUserManagementPanel";
 import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePreview";
+import TransportWorkspace from "./components/TransportWorkspace";
 import {
   fetchAuthMe,
   fetchAuthProviders,
@@ -3606,6 +3609,13 @@ export default function ClaritasDashboard() {
       icon: ChartNoAxesCombined,
       group: "analysis",
     },
+    {
+      id: "transport",
+      label: "Transport",
+      view: "transport" as const,
+      icon: Route,
+      group: "analysis",
+    },
     ...(isAdmin
       ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings, group: "operations" }]
       : []),
@@ -3638,6 +3648,11 @@ export default function ClaritasDashboard() {
       kicker: "Market desk",
       title: "Watchlist & correlations",
       summary: "Movement, volatility, and linked contextual signals",
+    },
+    transport: {
+      kicker: "Movement intelligence",
+      title: "Shipping & flight routes",
+      summary: "Live tracks, flight numbers, corridors, and country relationships",
     },
     admin: {
       kicker: "Control room",
@@ -8032,6 +8047,7 @@ export default function ClaritasDashboard() {
                 </section>
               </div>
             )}
+            {activeView === "transport" && <TransportWorkspace />}
             {activeView === "admin" && isAdmin && (
               <div className="workspace-page control-room-page min-w-0 space-y-4">
                 <section className="control-room-intro">

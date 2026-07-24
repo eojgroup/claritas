@@ -16,6 +16,7 @@ final class WatchAppModel: ObservableObject {
     @Published private(set) var weather: [CountryWeather] = []
     @Published private(set) var leadership: [CountryLeadership] = []
     @Published private(set) var markets: [MarketQuote] = []
+    @Published private(set) var transport: TransportOverview?
     @Published private(set) var briefingSchedule: DailyBriefingSchedule?
     @Published private(set) var isSavingBriefingSchedule: Bool = false
     @Published private(set) var briefingScheduleError: String?
@@ -49,7 +50,7 @@ final class WatchAppModel: ObservableObject {
     }
 
     var criticalSignalCount: Int {
-        weatherAlerts.count + marketBreaches.count
+        weatherAlerts.count + marketBreaches.count + (transport?.summary.alerts ?? 0)
     }
 
     init() {
@@ -88,6 +89,9 @@ final class WatchAppModel: ObservableObject {
         async let weatherResult = result { try await api.fetchCountryWeather() }
         async let leadershipResult = result { try await api.fetchCountryLeadership() }
         async let marketResult = result { try await api.fetchMarketQuotes(refresh: false) }
+        async let transportResult = result {
+            try await api.fetchTransportOverview(detail: "aggregate", refresh: false)
+        }
         async let scheduleResult = result { try await api.fetchDailyBriefingSchedule() }
 
         let results = await (
@@ -97,6 +101,7 @@ final class WatchAppModel: ObservableObject {
             weatherResult,
             leadershipResult,
             marketResult,
+            transportResult,
             scheduleResult
         )
         var errors: [Error] = []
@@ -126,6 +131,13 @@ final class WatchAppModel: ObservableObject {
         case .failure(let error): errors.append(error)
         }
         switch results.6 {
+        case .success(let value): transport = value
+        case .failure(let error):
+            if isUnauthorized(error) {
+                errors.append(error)
+            }
+        }
+        switch results.7 {
         case .success(let value):
             briefingSchedule = value
             briefingScheduleError = nil
@@ -225,6 +237,7 @@ final class WatchAppModel: ObservableObject {
             weather: weather,
             leadership: leadership,
             markets: markets,
+            transport: transport,
             briefingSchedule: briefingSchedule,
             lastUpdated: lastUpdated
         )
@@ -243,6 +256,7 @@ final class WatchAppModel: ObservableObject {
         weather = snapshot.weather
         leadership = snapshot.leadership
         markets = snapshot.markets
+        transport = snapshot.transport
         briefingSchedule = snapshot.briefingSchedule
         lastUpdated = snapshot.lastUpdated
     }
@@ -255,6 +269,7 @@ private struct WatchSnapshot: Codable {
     let weather: [CountryWeather]
     let leadership: [CountryLeadership]
     let markets: [MarketQuote]
+    let transport: TransportOverview?
     let briefingSchedule: DailyBriefingSchedule?
     let lastUpdated: Date?
 }

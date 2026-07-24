@@ -28,6 +28,13 @@ data:
   OPENCODE_DISABLE_TOOLS: "true"
   # Used when repository variables do not provide explicit PodcastIndex targets.
   PODCAST_DISCOVERY_TERMS: "geopolitics,security,technology,markets"
+  # Global transport ingestion is sampled before persistence. adsb.lol is
+  # keyless; AISstream remains disabled until AISSTREAM_API_KEY is supplied.
+  AISSTREAM_SAMPLE_SECONDS: "60"
+  ADSB_LOL_POLL_ENABLED: "true"
+  ADSB_LOL_POLL_SECONDS: "120"
+  ADSB_LOL_MAX_ROUTE_LOOKUPS: "60"
+  ADSB_LOL_USER_AGENT: "Claritas/1.0 (+https://app.claritas.info; engineering@claritas.info)"
   KEYCLOAK_REALM: "claritas"
   KEYCLOAK_WEB_CLIENT_ID: "claritas-web"
   KEYCLOAK_MOBILE_CLIENT_ID: "claritas-mobile"

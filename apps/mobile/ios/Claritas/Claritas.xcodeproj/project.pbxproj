@@ -41,6 +41,7 @@
 		E27C70621870456EC37129CD /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 101379AF2A53B6505282FB2C /* Assets.xcassets */; };
 		E33253BEAE45041065C51644 /* AuthSessionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D24D9ECA6A5E741A3FB2FC /* AuthSessionPresenter.swift */; };
 		E49ED117B9B81B52E397F87C /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACAF61E06CBCF20C27A86C96 /* WeatherListView.swift */; };
+		F0A1B2C3D4E5F60718293A4B /* TransportWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C3D4E5F60718293A4C /* TransportWorkspaceView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -145,6 +146,7 @@
 		EC9CC8986286FD29B5ED905D /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		ED937F1494BDED67624C0C5D /* PadOverviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PadOverviewView.swift; path = Views/PadOverviewView.swift; sourceTree = "<group>"; };
 		F9C49435E99D37881D1936E8 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		F0A1B2C3D4E5F60718293A4C /* TransportWorkspaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TransportWorkspaceView.swift; path = Views/TransportWorkspaceView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -269,6 +271,7 @@
 				ED937F1494BDED67624C0C5D /* PadOverviewView.swift */,
 				7A6172E4DA3540FA7F9E04C3 /* ProfileView.swift */,
 				B85961F8F22DCC36D52DCFD3 /* RootView.swift */,
+				F0A1B2C3D4E5F60718293A4C /* TransportWorkspaceView.swift */,
 				ACAF61E06CBCF20C27A86C96 /* WeatherListView.swift */,
 				2AB6760EBE6A8AD52C7B79A3 /* Assets.xcassets */,
 				8A4A431709F67F0DE7EB5D29 /* Config.plist */,
@@ -473,6 +476,7 @@
 				86D477D62645694315FD6287 /* PadOverviewView.swift in Sources */,
 				D4BF3E00FCBBFE8636964DAE /* ProfileView.swift in Sources */,
 				34FAB210A191102EBB04AC43 /* RootView.swift in Sources */,
+				F0A1B2C3D4E5F60718293A4B /* TransportWorkspaceView.swift in Sources */,
 				E49ED117B9B81B52E397F87C /* WeatherListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

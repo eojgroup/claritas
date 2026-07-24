@@ -752,6 +752,179 @@ struct EarningsEvent: Codable, Identifiable {
     var id: String { "\(symbol)-\(date ?? "na")-\(hour ?? "na")-\(year ?? 0)-\(quarter ?? 0)" }
 }
 
+enum TransportMode: String, Codable, CaseIterable, Identifiable {
+    case maritime
+    case aviation
+
+    var id: String { rawValue }
+}
+
+struct TransportModeAggregate: Codable {
+    let active: Int
+    let routed: Int
+    let alerts: Int
+    let latest_observed_at: String?
+
+    var latestObservedDate: Date? {
+        latest_observed_at.flatMap(APIDateParser.parse)
+    }
+}
+
+struct TransportModeAggregates: Codable {
+    let maritime: TransportModeAggregate
+    let aviation: TransportModeAggregate
+}
+
+struct TransportSummary: Codable {
+    let active: Int
+    let routed: Int
+    let alerts: Int
+    let linked_countries: Int
+    let modes: TransportModeAggregates
+}
+
+struct TransportMaritimeCountryAggregate: Codable {
+    let active: Int
+    let current: Int
+    let origins: Int
+    let destinations: Int
+    let flagged: Int
+}
+
+struct TransportAviationCountryAggregate: Codable {
+    let active: Int
+    let current: Int
+    let origins: Int
+    let destinations: Int
+    let registered: Int
+}
+
+struct TransportCountryAggregate: Codable, Identifiable {
+    let country: String
+    let country_name: String
+    let active_count: Int
+    let maritime: TransportMaritimeCountryAggregate
+    let aviation: TransportAviationCountryAggregate
+
+    var id: String { country }
+}
+
+struct TransportRouteAggregate: Codable, Identifiable {
+    let mode: TransportMode
+    let origin_country: String
+    let origin_name: String
+    let destination_country: String
+    let destination_name: String
+    let active_count: Int
+    let examples: [String]
+
+    var id: String { "\(mode.rawValue)-\(origin_country)-\(destination_country)" }
+}
+
+struct TransportActivityPoint: Codable, Identifiable {
+    let bucket: String
+    let mode: TransportMode
+    let active_count: Int
+
+    var id: String { "\(bucket)-\(mode.rawValue)" }
+    var bucketDate: Date? { APIDateParser.parse(bucket) }
+}
+
+struct TransportCountryLink: Codable, Identifiable {
+    let role: String
+    let country: String
+
+    var id: String { "\(role)-\(country)" }
+}
+
+struct TransportEntity: Codable, Identifiable {
+    let id: String
+    let mode: TransportMode
+    let entity_id: String
+    let display_name: String?
+    let callsign: String?
+    let flight_number: String?
+    let registration: String?
+    let vehicle_type: String?
+    let latitude: Double?
+    let longitude: Double?
+    let heading: Double?
+    let speed: Double?
+    let altitude: Double?
+    let vertical_rate: Double?
+    let current_country_iso2: String?
+    let origin_country_iso2: String?
+    let destination_country_iso2: String?
+    let registration_country_iso2: String?
+    let origin_name: String?
+    let destination_name: String?
+    let origin_latitude: Double?
+    let origin_longitude: Double?
+    let destination_latitude: Double?
+    let destination_longitude: Double?
+    let route_label: String?
+    let linkage_basis: [String]
+    let linkage_confidence: String
+    let status: String?
+    let is_alert: Bool
+    let source_name: String
+    let observed_at: String
+    let country_links: [TransportCountryLink]
+
+    var observedDate: Date? { APIDateParser.parse(observed_at) }
+}
+
+struct TransportTrackPoint: Codable, Identifiable {
+    let latitude: Double
+    let longitude: Double
+    let heading: Double?
+    let speed: Double?
+    let altitude: Double?
+    let current_country_iso2: String?
+    let observed_at: String
+
+    var id: String { "\(observed_at)-\(latitude)-\(longitude)" }
+}
+
+struct MaritimeTransportCoverage: Codable {
+    let source: String
+    let transport: String
+    let configured: Bool
+    let freshness_minutes: Int
+}
+
+struct AviationTransportCoverage: Codable {
+    let source: String
+    let transport: String
+    let configured: Bool
+    let freshness_minutes: Int
+    let license: String
+    let poll_areas: Int
+}
+
+struct TransportCoverage: Codable {
+    let maritime: MaritimeTransportCoverage
+    let aviation: AviationTransportCoverage
+}
+
+struct TransportOverview: Codable {
+    let generated_at: String
+    let detail: String
+    let summary: TransportSummary
+    let countries: [TransportCountryAggregate]
+    let routes: [TransportRouteAggregate]
+    let activity: [TransportActivityPoint]
+    let entities: [TransportEntity]
+    let coverage: TransportCoverage
+
+    var generatedDate: Date? { APIDateParser.parse(generated_at) }
+}
+
+struct TransportEntityDetail: Codable {
+    let entity: TransportEntity
+    let track: [TransportTrackPoint]
+}
+
 enum IngestionPipeline: String, Codable, CaseIterable, Identifiable {
     case news
     case weather

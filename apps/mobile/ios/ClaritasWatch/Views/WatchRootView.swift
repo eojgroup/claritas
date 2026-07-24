@@ -13,6 +13,7 @@ struct WatchRootView: View {
                     WatchSignalGlanceView()
                     WatchBriefingView()
                     WatchPulseView()
+                    WatchTransportPulseView()
                 }
                 .tabViewStyle(.verticalPage)
             }
@@ -21,6 +22,168 @@ struct WatchRootView: View {
         .task {
             await model.bootstrap()
         }
+    }
+}
+
+private struct WatchTransportPulseView: View {
+    @EnvironmentObject private var model: WatchAppModel
+    @State private var selectedCountry: String?
+
+    private var points: [WatchMapPoint] {
+        (model.transport?.countries ?? []).compactMap { country in
+            guard
+                let coordinate = WatchCountryCentroids.values[country.country],
+                country.active_count > 0
+            else { return nil }
+            return WatchMapPoint(
+                iso: country.country,
+                valueLabel: "\(country.active_count)",
+                detail: "\(country.aviation.active) flights · \(country.maritime.active) vessels",
+                magnitude: Double(country.active_count),
+                longitude: coordinate.longitude,
+                latitude: coordinate.latitude,
+                rank: 0
+            )
+        }
+        .sorted { $0.magnitude > $1.magnitude }
+        .prefix(12)
+        .enumerated()
+        .map { index, point in
+            WatchMapPoint(
+                iso: point.iso,
+                valueLabel: point.valueLabel,
+                detail: point.detail,
+                magnitude: point.magnitude,
+                longitude: point.longitude,
+                latitude: point.latitude,
+                rank: index + 1
+            )
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        WatchSectionLabel(title: "Transport pulse", icon: "point.topleft.down.to.point.bottomright.curvepath")
+                        Spacer()
+                        WatchRefreshStatus()
+                    }
+
+                    WatchCard {
+                        HStack {
+                            metric(
+                                value: "\(model.transport?.summary.modes.aviation.active ?? 0)",
+                                label: "Flights",
+                                color: WatchPalette.sage
+                            )
+                            Divider()
+                            metric(
+                                value: "\(model.transport?.summary.modes.maritime.active ?? 0)",
+                                label: "Vessels",
+                                color: WatchPalette.orange
+                            )
+                            Divider()
+                            metric(
+                                value: "\(model.transport?.summary.linked_countries ?? 0)",
+                                label: "Countries",
+                                color: WatchPalette.cream
+                            )
+                        }
+                    }
+
+                    if !points.isEmpty {
+                        WatchSignalMap(
+                            points: points,
+                            region: .global,
+                            selectedCountry: $selectedCountry
+                        )
+                        .frame(height: 108)
+                    }
+
+                    if let selected = points.first(where: { $0.iso == selectedCountry }) ?? points.first {
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(selected.iso)
+                                        .font(.headline)
+                                    Spacer()
+                                    Text("#\(selected.rank)")
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(WatchPalette.orange)
+                                }
+                                Text(selected.detail)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    if let route = model.transport?.routes.first {
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("LEADING CORRIDOR")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .tracking(1)
+                                    .foregroundStyle(.secondary)
+                                HStack {
+                                    Image(systemName: route.mode == .aviation ? "airplane" : "ferry.fill")
+                                        .foregroundStyle(
+                                            route.mode == .aviation
+                                                ? WatchPalette.sage
+                                                : WatchPalette.orange
+                                        )
+                                    Text(route.origin_country)
+                                        .font(.headline)
+                                    Image(systemName: "arrow.right")
+                                        .font(.caption2)
+                                    Text(route.destination_country)
+                                        .font(.headline)
+                                    Spacer()
+                                    Text("\(route.active_count)")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Button {
+                            model.openOnPhone(
+                                "transport",
+                                country: selectedCountry ?? points.first?.iso
+                            )
+                        } label: {
+                            Label("iPhone", systemImage: "iphone")
+                        }
+                        Button {
+                            Task { await model.refresh() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .accessibilityLabel("Refresh transport aggregates")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.horizontal, 3)
+            }
+            .navigationTitle("Transport")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+        }
+    }
+
+    private func metric(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

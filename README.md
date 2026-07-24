@@ -211,6 +211,7 @@ npm run dev
   - `OPENWEATHER_API_KEY`
   - `PODCASTINDEX_API_KEY`
   - `PODCASTINDEX_API_SECRET`
+  - `AISSTREAM_API_KEY`
 - Podcast discovery and intelligence:
   - Create a free developer account at `https://api.podcastindex.org` and generate an API key
     and secret. Keep both server-side.
@@ -232,6 +233,14 @@ npm run dev
     product URL and monitored contact address.
   - Example: `Claritas/1.0 (https://claritas.info; engineering@claritas.info)`
   - Structured Wikidata content is consumed under CC0.
+- Transport intelligence combines AISstream maritime data with keyless adsb.lol
+  flight positions and plausible routes. See
+  [transport intelligence](docs/transport-intelligence.md) for sampling,
+  country linkage, platform detail levels, and provider operating notes.
+  - Create the AISstream credential as the GitHub repository secret
+    `AISSTREAM_API_KEY`; the deployment writes it to Kubernetes secret
+    `claritas-aisstream` under the same key.
+  - adsb.lol requires no API key. Its published data is ODbL 1.0.
 - TheNewsAPI integration notes:
   - Base API URL: `https://api.thenewsapi.com/v1`
   - `publishedAfter` (when provided in admin ingestion payload) must be `YYYY-MM-DD`
@@ -242,9 +251,10 @@ npm run dev
   - `claritas-thenewsapi` / `THENEWSAPI_API_TOKEN`
   - `claritas-openweather` / `OPENWEATHER_API_KEY`
   - `claritas-podcastindex` / `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`
+  - `claritas-aisstream` / `AISSTREAM_API_KEY`
 - Production secret source (recommended):
   - GitHub repository secrets: `THENEWSAPI_API_TOKEN`, `PODCASTINDEX_API_KEY`,
-    `PODCASTINDEX_API_SECRET`
+    `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`
   - GitHub repository variables: `PODCAST_DISCOVERY_TERMS`, `PODCAST_FEED_IDS`,
     `PODCAST_MAX_FEEDS`, `PODCAST_MAX_EPISODES_PER_FEED`,
     `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`, `PODCASTINDEX_USER_AGENT`

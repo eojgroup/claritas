@@ -286,6 +286,45 @@ final class APIClient {
         return try await request(URLRequest(url: comps.url!), as: [EarningsEvent].self, rootKey: "events")
     }
 
+    func fetchTransportOverview(
+        detail: String = "aggregate",
+        mode: TransportMode? = nil,
+        country: String? = nil,
+        entityLimit: Int? = nil,
+        refresh: Bool = false
+    ) async throws -> TransportOverview {
+        var comps = URLComponents(
+            url: baseURL.appendingPathComponent("/api/transport/overview"),
+            resolvingAgainstBaseURL: false
+        )!
+        var items = [URLQueryItem(name: "detail", value: detail)]
+        if let mode {
+            items.append(URLQueryItem(name: "mode", value: mode.rawValue))
+        }
+        if let country = nonEmpty(country) {
+            items.append(URLQueryItem(name: "country", value: country.uppercased()))
+        }
+        if let entityLimit {
+            items.append(URLQueryItem(name: "entity_limit", value: String(entityLimit)))
+        }
+        if refresh {
+            items.append(URLQueryItem(name: "refresh", value: "true"))
+        }
+        comps.queryItems = items
+        return try await request(URLRequest(url: comps.url!), as: TransportOverview.self)
+    }
+
+    func fetchTransportEntity(
+        mode: TransportMode,
+        entityID: String
+    ) async throws -> TransportEntityDetail {
+        let encodedID = entityID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? entityID
+        let url = baseURL.appendingPathComponent(
+            "/api/transport/entities/\(mode.rawValue)/\(encodedID)"
+        )
+        return try await request(URLRequest(url: url), as: TransportEntityDetail.self)
+    }
+
     func ingestWeatherNow(country: String?) async throws -> WeatherIngestResponse {
         var req = URLRequest(url: baseURL.appendingPathComponent("/api/ingest/openweather/country-current"))
         req.httpMethod = "POST"

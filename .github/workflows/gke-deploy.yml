@@ -405,6 +405,7 @@ jobs:
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
           PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
         run: |
           set -euo pipefail
           # Upsert NewsAPI secret if provided
@@ -451,6 +452,15 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::PodcastIndex credentials not provided; podcast automation remains disabled"
+          fi
+
+          # AISstream uses one server-side key for the long-lived maritime feed.
+          if [ -n "${AISSTREAM_API_KEY:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-aisstream \
+              --from-literal=AISSTREAM_API_KEY="$AISSTREAM_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::AISSTREAM_API_KEY not provided; maritime transport ingestion remains disabled"
           fi
 
       - name: 🔐 Ensure OpenCode briefing secrets exist

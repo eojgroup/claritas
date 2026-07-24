@@ -2686,3 +2686,892 @@ body {
     color: var(--shell-accent);
   }
 }
+
+/* Transport intelligence workspace */
+.transport-workspace {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.transport-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.transport-mode-switch {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--shell-border);
+  border-radius: 11px;
+  background: var(--shell-bg-elevated);
+}
+
+.transport-mode-switch button,
+.transport-refresh {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  color: var(--shell-muted);
+  font-size: 12px;
+  font-weight: 650;
+  transition: 150ms ease;
+}
+
+.transport-mode-switch button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--shell-accent-2) 12%, transparent);
+  color: var(--shell-ink);
+  box-shadow: inset 0 0 0 1px var(--shell-border);
+}
+
+.transport-mode-switch svg,
+.transport-refresh svg {
+  width: 15px;
+  height: 15px;
+}
+
+.transport-controls label {
+  display: grid;
+  gap: 5px;
+  color: var(--shell-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.transport-controls select {
+  min-width: 220px;
+  min-height: 40px;
+  border: 1px solid var(--shell-border);
+  border-radius: 9px;
+  background: var(--shell-surface);
+  color: var(--shell-ink);
+  padding: 0 34px 0 11px;
+  font-size: 12px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.transport-refresh {
+  margin-left: auto;
+  border: 1px solid var(--shell-border);
+  background: var(--shell-surface);
+  color: var(--shell-ink);
+}
+
+.transport-refresh:hover:not(:disabled) {
+  border-color: var(--shell-accent-2);
+}
+
+.transport-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--viz-negative) 45%, var(--shell-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--viz-negative) 8%, var(--shell-surface));
+}
+
+.transport-notice svg {
+  width: 18px;
+  color: var(--viz-negative);
+}
+
+.transport-notice div {
+  display: grid;
+  gap: 3px;
+}
+
+.transport-notice strong {
+  font-size: 13px;
+}
+
+.transport-notice span {
+  color: var(--shell-muted);
+  font-size: 12px;
+}
+
+.transport-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--shell-border);
+  border-radius: 13px;
+  background: var(--shell-surface);
+  overflow: hidden;
+}
+
+.transport-kpi-strip article {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 16px 18px;
+  border-right: 1px solid var(--shell-border);
+}
+
+.transport-kpi-strip article:last-child {
+  border-right: 0;
+}
+
+.transport-kpi-strip span,
+.transport-map-panel header span,
+.transport-detail-title span,
+.transport-chart-card header span,
+.transport-routes-card header span,
+.transport-country-list header span,
+.transport-entity-table header span {
+  color: var(--shell-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.transport-kpi-strip strong {
+  font-size: clamp(24px, 2.4vw, 36px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.transport-kpi-strip small {
+  overflow: hidden;
+  color: var(--shell-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transport-kpi-strip article[data-alert="true"] strong {
+  color: var(--viz-negative);
+}
+
+.transport-map-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(270px, 330px);
+  min-height: 620px;
+  border: 1px solid var(--shell-border);
+  border-radius: 14px;
+  background: var(--shell-surface);
+  overflow: hidden;
+}
+
+.transport-map-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  padding: 16px;
+  background:
+    radial-gradient(circle at 40% 30%, color-mix(in srgb, var(--shell-accent-2) 9%, transparent), transparent 48%),
+    var(--shell-bg);
+}
+
+.transport-map-panel > header,
+.transport-chart-card > header,
+.transport-routes-card > header,
+.transport-country-list > header,
+.transport-entity-table > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.transport-map-panel h2,
+.transport-detail-panel h2,
+.transport-chart-card h2,
+.transport-routes-card h2,
+.transport-country-list h2,
+.transport-entity-table h2 {
+  margin: 3px 0 0;
+  color: var(--shell-ink);
+  font-size: 16px;
+  font-weight: 680;
+}
+
+.transport-map-panel header small,
+.transport-entity-table header > small {
+  color: var(--shell-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.transport-map-shell {
+  position: relative;
+  min-height: 510px;
+  border: 1px solid var(--shell-border);
+  border-radius: 11px;
+  background: var(--shell-bg);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.transport-map-shell svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 510px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.transport-map-shell svg:active {
+  cursor: grabbing;
+}
+
+.transport-map-ocean {
+  fill: color-mix(in srgb, var(--shell-bg) 92%, #173a50);
+}
+
+.transport-map-land path {
+  fill: color-mix(in srgb, var(--shell-surface-strong) 84%, #426174);
+  stroke: color-mix(in srgb, var(--shell-border) 72%, #7190a0);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.transport-map-routes path {
+  fill: none;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-dasharray: 4 4;
+  opacity: 0.3;
+  vector-effect: non-scaling-stroke;
+}
+
+.transport-map-routes path[data-mode="aviation"] {
+  stroke: #77a8ba;
+}
+
+.transport-map-routes path[data-mode="maritime"] {
+  stroke: #eda36a;
+}
+
+.transport-map-routes path[data-selected="true"] {
+  stroke-width: 2.4;
+  opacity: 0.95;
+}
+
+.transport-map-track {
+  fill: none;
+  stroke: #f2eee6;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+  vector-effect: non-scaling-stroke;
+}
+
+.transport-map-entities g {
+  cursor: pointer;
+  outline: none;
+}
+
+.transport-map-entities g path {
+  stroke-width: 1.1;
+  vector-effect: non-scaling-stroke;
+}
+
+.transport-map-entities g[data-mode="aviation"] path {
+  fill: #77a8ba;
+  stroke: #e1f2f8;
+}
+
+.transport-map-entities g[data-mode="maritime"] path {
+  fill: #eda36a;
+  stroke: #fff0df;
+}
+
+.transport-map-entities g circle {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.transport-map-entities g[data-selected="true"] circle {
+  stroke: var(--shell-ink);
+}
+
+.transport-map-entities g[data-alert="true"] circle {
+  fill: color-mix(in srgb, var(--viz-negative) 26%, transparent);
+  stroke: var(--viz-negative);
+}
+
+.transport-map-controls {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  gap: 4px;
+}
+
+.transport-map-controls button {
+  min-width: 32px;
+  min-height: 32px;
+  border: 1px solid var(--shell-border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--shell-surface) 90%, transparent);
+  color: var(--shell-ink);
+  font-size: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.transport-map-tooltip {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  gap: 3px;
+  width: min(260px, calc(100% - 150px));
+  padding: 10px 12px;
+  border: 1px solid var(--shell-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--shell-surface) 92%, transparent);
+  backdrop-filter: blur(14px);
+  pointer-events: none;
+}
+
+.transport-map-tooltip strong {
+  font-size: 12px;
+}
+
+.transport-map-tooltip span,
+.transport-map-tooltip small {
+  overflow: hidden;
+  color: var(--shell-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transport-map-legend {
+  position: absolute;
+  z-index: 3;
+  right: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--shell-surface) 90%, transparent);
+  color: var(--shell-muted);
+  font-size: 9px;
+  backdrop-filter: blur(10px);
+}
+
+.transport-map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.transport-map-legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.transport-map-legend i[data-mode="aviation"] {
+  background: #77a8ba;
+}
+
+.transport-map-legend i[data-mode="maritime"] {
+  background: #eda36a;
+}
+
+.transport-map-legend i[data-mode="alert"] {
+  background: var(--viz-negative);
+}
+
+.transport-detail-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+  border-left: 1px solid var(--shell-border);
+  background: var(--shell-surface-strong);
+}
+
+.transport-detail-title p {
+  margin: 5px 0 0;
+  color: var(--shell-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.transport-detail-panel dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  border: 1px solid var(--shell-border);
+  border-radius: 10px;
+  background: var(--shell-border);
+  overflow: hidden;
+}
+
+.transport-detail-panel dl div {
+  display: grid;
+  gap: 4px;
+  padding: 11px;
+  background: var(--shell-surface);
+}
+
+.transport-detail-panel dt {
+  color: var(--shell-muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.transport-detail-panel dd {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.transport-country-chain {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 5px;
+}
+
+.transport-country-chain span {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  border: 1px solid var(--shell-border);
+  border-radius: 9px;
+  background: var(--shell-surface);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.transport-country-chain svg {
+  width: 12px;
+  color: var(--shell-muted);
+}
+
+.transport-linkage {
+  display: grid;
+  gap: 8px;
+}
+
+.transport-linkage strong {
+  font-size: 11px;
+}
+
+.transport-linkage > div,
+.transport-table-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.transport-linkage span,
+.transport-table-tags span {
+  padding: 4px 7px;
+  border: 1px solid var(--shell-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shell-accent-2) 12%, transparent);
+  color: var(--shell-muted);
+  font-size: 9px;
+  text-transform: capitalize;
+}
+
+.transport-linkage small,
+.transport-freshness {
+  color: var(--shell-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.transport-freshness {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.transport-freshness svg {
+  width: 13px;
+}
+
+.transport-detail-empty {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  flex: 1;
+  min-height: 340px;
+  text-align: center;
+}
+
+.transport-detail-empty > svg {
+  width: 36px;
+  height: 36px;
+  color: var(--shell-accent-2);
+  opacity: 0.75;
+}
+
+.transport-detail-empty p {
+  max-width: 240px;
+  color: var(--shell-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.transport-analytics-grid,
+.transport-lower-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.transport-chart-card,
+.transport-routes-card,
+.transport-country-list,
+.transport-entity-table {
+  min-width: 0;
+  padding: 16px;
+}
+
+.transport-chart {
+  height: 310px;
+  color: var(--shell-muted);
+  font-size: 10px;
+}
+
+.transport-chart-empty {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  padding: 20px;
+  color: var(--shell-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.transport-routes-card header > svg {
+  width: 20px;
+  color: var(--shell-accent);
+}
+
+.transport-flow-list {
+  display: grid;
+  gap: 7px;
+}
+
+.transport-flow-list > button {
+  display: grid;
+  grid-template-columns: minmax(74px, 1fr) minmax(90px, 1.4fr) minmax(74px, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.transport-flow-list > button:hover {
+  background: color-mix(in srgb, var(--shell-accent-2) 12%, transparent);
+}
+
+.transport-flow-node {
+  display: grid;
+  min-width: 0;
+}
+
+.transport-flow-node b {
+  font-size: 12px;
+}
+
+.transport-flow-node small {
+  overflow: hidden;
+  color: var(--shell-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transport-flow-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 2px;
+  background: var(--shell-border);
+}
+
+.transport-flow-line i {
+  position: absolute;
+  left: 0;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.transport-flow-line[data-mode="aviation"] i {
+  background: #77a8ba;
+}
+
+.transport-flow-line[data-mode="maritime"] i {
+  background: #eda36a;
+}
+
+.transport-flow-line em {
+  position: absolute;
+  right: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: var(--shell-surface);
+  color: var(--shell-ink);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.transport-country-scroll {
+  max-height: 480px;
+  overflow: auto;
+}
+
+.transport-country-scroll > button {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.7fr) repeat(3, minmax(54px, 0.7fr));
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--shell-border);
+  text-align: left;
+}
+
+.transport-country-scroll > button:first-child {
+  border-top: 0;
+}
+
+.transport-country-scroll > button:hover,
+.transport-country-scroll > button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--shell-accent-2) 12%, transparent);
+}
+
+.transport-country-scroll span {
+  display: grid;
+  gap: 2px;
+}
+
+.transport-country-scroll b {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.transport-country-scroll small {
+  overflow: hidden;
+  color: var(--shell-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transport-table-scroll {
+  overflow: auto;
+}
+
+.transport-entity-table table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.transport-entity-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--shell-border);
+  color: var(--shell-muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.transport-entity-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--shell-border);
+  font-variant-numeric: tabular-nums;
+}
+
+.transport-entity-table tbody tr {
+  cursor: pointer;
+}
+
+.transport-entity-table tbody tr:hover,
+.transport-entity-table tbody tr[data-selected="true"] {
+  background: color-mix(in srgb, var(--shell-accent-2) 12%, transparent);
+}
+
+.transport-entity-table td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--shell-muted);
+}
+
+.transport-entity-table td:first-child svg {
+  width: 13px;
+}
+
+.transport-entity-table td strong,
+.transport-entity-table td small {
+  display: block;
+}
+
+.transport-entity-table td small {
+  margin-top: 2px;
+  color: var(--shell-muted);
+  font-size: 9px;
+}
+
+.transport-sources {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px;
+  color: var(--shell-muted);
+  font-size: 10px;
+}
+
+.transport-sources span,
+.transport-sources a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.transport-sources > span > svg,
+.transport-sources a svg {
+  width: 12px;
+}
+
+.transport-sources a {
+  color: var(--shell-accent-2);
+}
+
+@media (max-width: 1180px) {
+  .transport-map-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .transport-detail-panel {
+    min-height: 260px;
+    border-top: 1px solid var(--shell-border);
+    border-left: 0;
+  }
+
+  .transport-detail-empty {
+    min-height: 220px;
+  }
+}
+
+@media (max-width: 900px) {
+  .transport-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transport-kpi-strip article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .transport-kpi-strip article:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--shell-border);
+  }
+
+  .transport-analytics-grid,
+  .transport-lower-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .transport-mode-switch {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .transport-mode-switch button {
+    flex: 1 0 auto;
+    min-height: 44px;
+  }
+
+  .transport-controls label,
+  .transport-controls select,
+  .transport-refresh {
+    width: 100%;
+  }
+
+  .transport-refresh {
+    min-height: 44px;
+    margin-left: 0;
+  }
+
+  .transport-kpi-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .transport-kpi-strip article {
+    border-right: 0;
+    border-bottom: 1px solid var(--shell-border);
+  }
+
+  .transport-kpi-strip article:last-child {
+    border-bottom: 0;
+  }
+
+  .transport-map-panel {
+    padding: 10px;
+  }
+
+  .transport-map-panel > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .transport-map-shell,
+  .transport-map-shell svg {
+    min-height: 380px;
+  }
+
+  .transport-map-tooltip {
+    top: 50px;
+    left: 10px;
+    right: auto;
+    width: calc(100% - 20px);
+  }
+
+  .transport-detail-panel {
+    padding: 14px;
+  }
+
+  .transport-country-scroll > button {
+    grid-template-columns: minmax(120px, 1.6fr) repeat(2, minmax(52px, 0.7fr));
+  }
+
+  .transport-country-scroll > button span:last-child {
+    display: none;
+  }
+}

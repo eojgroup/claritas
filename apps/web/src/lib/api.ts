@@ -156,6 +156,131 @@ export type EarningsEvent = {
   payload?: unknown;
 };
 
+export type TransportMode = "maritime" | "aviation";
+
+export type TransportModeAggregate = {
+  active: number;
+  routed: number;
+  alerts: number;
+  latest_observed_at: string | null;
+};
+
+export type TransportCountryAggregate = {
+  country: string;
+  country_name: string;
+  active_count: number;
+  maritime: {
+    active: number;
+    current: number;
+    origins: number;
+    destinations: number;
+    flagged: number;
+  };
+  aviation: {
+    active: number;
+    current: number;
+    origins: number;
+    destinations: number;
+    registered: number;
+  };
+};
+
+export type TransportRouteAggregate = {
+  mode: TransportMode;
+  origin_country: string;
+  origin_name: string;
+  destination_country: string;
+  destination_name: string;
+  active_count: number;
+  examples: string[];
+};
+
+export type TransportEntity = {
+  id: string;
+  mode: TransportMode;
+  entity_id: string;
+  display_name: string | null;
+  callsign: string | null;
+  flight_number: string | null;
+  registration: string | null;
+  vehicle_type: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  heading: number | null;
+  speed: number | null;
+  altitude: number | null;
+  vertical_rate: number | null;
+  current_country_iso2: string | null;
+  origin_country_iso2: string | null;
+  destination_country_iso2: string | null;
+  registration_country_iso2: string | null;
+  origin_name: string | null;
+  destination_name: string | null;
+  origin_latitude: number | null;
+  origin_longitude: number | null;
+  destination_latitude: number | null;
+  destination_longitude: number | null;
+  route_label: string | null;
+  linkage_basis: string[];
+  linkage_confidence: "high" | "medium" | "low" | "none";
+  status: string | null;
+  is_alert: boolean;
+  source_name: "aisstream" | "adsb_lol";
+  observed_at: string;
+  country_links: Array<{
+    role: "current" | "origin" | "destination" | "flag" | "registration";
+    country: string;
+  }>;
+};
+
+export type TransportActivityPoint = {
+  bucket: string;
+  mode: TransportMode;
+  active_count: number;
+};
+
+export type TransportOverview = {
+  generated_at: string;
+  detail: "aggregate" | "full";
+  summary: {
+    active: number;
+    routed: number;
+    alerts: number;
+    linked_countries: number;
+    modes: Record<TransportMode, TransportModeAggregate>;
+  };
+  countries: TransportCountryAggregate[];
+  routes: TransportRouteAggregate[];
+  activity: TransportActivityPoint[];
+  entities: TransportEntity[];
+  coverage: {
+    maritime: {
+      source: "AISstream";
+      transport: "WebSocket";
+      configured: boolean;
+      freshness_minutes: number;
+    };
+    aviation: {
+      source: "adsb.lol";
+      transport: "REST";
+      configured: boolean;
+      freshness_minutes: number;
+      license: string;
+      poll_areas: number;
+    };
+  };
+};
+
+export type TransportTrackPoint = {
+  latitude: number;
+  longitude: number;
+  heading: number | null;
+  speed: number | null;
+  altitude: number | null;
+  current_country_iso2: string | null;
+  observed_at: string;
+};
+
 export type AuthProviderId = "google" | "microsoft" | "apple";
 export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
@@ -797,6 +922,44 @@ export async function fetchMarketEarnings(params?: {
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch market earnings"));
   const data = await resp.json();
   return (data.events ?? []) as EarningsEvent[];
+}
+
+export async function fetchTransportOverview(params?: {
+  detail?: "aggregate" | "full";
+  mode?: TransportMode;
+  country?: string;
+  entityLimit?: number;
+  refresh?: boolean;
+}): Promise<TransportOverview> {
+  const sp = new URLSearchParams();
+  if (params?.detail) sp.set("detail", params.detail);
+  if (params?.mode) sp.set("mode", params.mode);
+  if (params?.country) sp.set("country", params.country);
+  if (typeof params?.entityLimit === "number") {
+    sp.set("entity_limit", String(params.entityLimit));
+  }
+  if (params?.refresh) sp.set("refresh", "true");
+  const suffix = sp.toString() ? `?${sp.toString()}` : "";
+  const resp = await fetch(`${API_BASE}/api/transport/overview${suffix}`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch transport intelligence"));
+  return (await resp.json()) as TransportOverview;
+}
+
+export async function fetchTransportEntity(
+  mode: TransportMode,
+  entityId: string,
+): Promise<{ entity: TransportEntity; track: TransportTrackPoint[] }> {
+  const resp = await fetch(
+    `${API_BASE}/api/transport/entities/${mode}/${encodeURIComponent(entityId)}`,
+    { credentials: "include" },
+  );
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch transport track"));
+  return (await resp.json()) as {
+    entity: TransportEntity;
+    track: TransportTrackPoint[];
+  };
 }
 
 export async function ingestWeatherNow(country?: string) {
