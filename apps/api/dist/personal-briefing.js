@@ -828,7 +828,7 @@ async function generateForJob(job) {
        FROM app_user
        WHERE id = $1
       LIMIT 1`, [job.user_id]).then((result) => result.rows[0]),
-        (0, transport_1.getTransportOverview)({ detail: "aggregate" }),
+        (0, transport_1.getTransportOverviewForBriefing)(),
     ]);
     if (!recipient)
         throw new Error("The briefing user no longer exists.");

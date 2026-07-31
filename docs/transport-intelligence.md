@@ -24,7 +24,7 @@ flowchart LR
   Trail --> Presence[(Hourly entity-country presence)]
   Event --> MovementHour[(Hourly country-port movement)]
   Snapshot --> Aggregate[Country and corridor aggregates]
-  Event --> Trend[24h vs prior 24h movement trends]
+  MovementHour --> Trend[24h vs prior 24h movement trends]
   Presence --> Trend
   Trend --> Briefing[Daily + personal briefing takeaways]
   Trend --> Profile[Country profile]
@@ -88,7 +88,7 @@ The API returns both the underlying current/previous values and concise, qualifi
 - `GET /api/transport/overview?detail=full` adds current flight and vessel records for web and iPad. Optional `mode`, `country`, and `entity_limit` filters apply consistently to aggregates and details.
 - `GET /api/transport/entities/:mode/:entityId` returns the current normalized record and up to 24 hours of sampled track points.
 
-All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Equivalent overview requests are coalesced and cached for 60 seconds per API replica; at most four database reads run concurrently in the first refresh wave and three compact aggregate reads in the second.
+All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Equivalent overview requests are coalesced and cached for 60 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation treats transport as optional evidence: a transient transport read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
 
 ## Presentation contract
 

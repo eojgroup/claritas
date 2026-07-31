@@ -8,7 +8,7 @@ import {
 } from "./email";
 import type { BriefingEmailTheme, BriefingMapCountry } from "./email-map";
 import { createLlmClientFromEnv } from "./llm";
-import { getTransportOverview } from "./connectors/transport";
+import { getTransportOverviewForBriefing } from "./connectors/transport";
 
 export type PersonalBriefingPreferences = {
   industries: string[];
@@ -114,7 +114,9 @@ type BriefingGeospatialContext = {
   highest_country: BriefingEmailCountryProfile | null;
 };
 
-type TransportOverviewResult = Awaited<ReturnType<typeof getTransportOverview>>;
+type TransportOverviewResult = Awaited<
+  ReturnType<typeof getTransportOverviewForBriefing>
+>;
 
 type PersonalTransportContext = {
   countries: TransportOverviewResult["countries"];
@@ -1221,7 +1223,7 @@ async function generateForJob(job: PersonalBriefingJobRow): Promise<number> {
       LIMIT 1`,
       [job.user_id]
     ).then((result) => result.rows[0]),
-    getTransportOverview({ detail: "aggregate" }),
+    getTransportOverviewForBriefing(),
   ]);
   if (!recipient) throw new Error("The briefing user no longer exists.");
 

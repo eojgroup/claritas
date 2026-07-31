@@ -189,7 +189,7 @@ async function collectBriefingContext(options) {
        ORDER BY ws.observed_at DESC, ws.country_iso2 ASC
        LIMIT $2`, [end, weatherLimit]),
         (0, wikidata_leadership_1.getCountryLeadershipLatest)(),
-        (0, transport_1.getTransportOverview)({ detail: "aggregate" }),
+        (0, transport_1.getTransportOverviewForBriefing)(),
     ]);
     const news = newsResult.rows.map((row) => ({
         id: Number(row.id),

@@ -1,7 +1,7 @@
 import { query } from "./db";
 import { createLlmClientFromEnv, getLlmRuntimeConfig, type LlmClient } from "./llm";
 import { getCountryLeadershipLatest } from "./connectors/wikidata-leadership";
-import { getTransportOverview } from "./connectors/transport";
+import { getTransportOverviewForBriefing } from "./connectors/transport";
 
 export type GeneratedBriefingStatus = "draft" | "published";
 
@@ -314,7 +314,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
       [end, weatherLimit]
     ),
     getCountryLeadershipLatest(),
-    getTransportOverview({ detail: "aggregate" }),
+    getTransportOverviewForBriefing(),
   ]);
 
   const news = newsResult.rows.map((row) => ({

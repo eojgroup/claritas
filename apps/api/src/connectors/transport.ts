@@ -1455,12 +1455,12 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
   const where = filters.join(" AND ");
 
   const trendCountryParams = country ? [country] : [];
-  const [
-    modeResult,
-    countryResult,
-    routeResult,
-    activityResult,
-  ] = await Promise.all([
+  // The overview used to launch four aggregate scans at once. On the
+  // production two-vCPU database that made individually bounded queries
+  // compete with each other (and with briefing collection) until PostgreSQL's
+  // statement timeout cancelled one of them. Keep the snapshot scans in a
+  // small first wave, then read the hourly activity table separately.
+  const [modeResult, countryResult] = await Promise.all([
     query<ModeAggregateRow>(
       `SELECT
          s.mode,
@@ -1510,6 +1510,8 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
        ORDER BY active_count DESC, country`,
       params
     ),
+  ]);
+  const [routeResult, activityResult] = await Promise.all([
     query<RouteAggregateRow>(
       `SELECT
          s.mode,
@@ -1541,124 +1543,103 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
          a.mode,
          COUNT(DISTINCT a.entity_id) AS active_count
        FROM transport_entity_activity_hour a
-       WHERE a.last_observed_at >= now() - interval '24 hours'
+       WHERE a.bucket >= date_trunc('hour', now()) - interval '23 hours'
          AND a.country_iso2 = ${
            country ? `$${mode ? 2 : 1}` : `'${TRANSPORT_SCOPE_GLOBAL}'`
          }
-         ${mode ? `AND a.mode = $1` : ""}
+         ${mode ? `AND a.mode = $1` : "AND a.mode IN ('maritime', 'aviation')"}
        GROUP BY a.bucket, a.mode
        ORDER BY a.bucket, a.mode`,
       params
     ),
   ]);
 
-  // Keep a single overview refresh below the per-replica pool cap. The second
-  // wave reads compact event/hour tables and cannot starve unrelated requests.
-  const [movementTrendResult, aviationTrendResult, portTrendResult] =
-    await Promise.all([
+  // Maritime trend and port reads share the compact hourly table. Run them
+  // together, then give the larger aviation presence aggregate its own query
+  // slot so an overview never creates more than two concurrent DB reads.
+  const [movementTrendResult, portTrendResult] = await Promise.all([
     mode === "aviation"
       ? Promise.resolve({ rows: [] as TransportTrendRow[] })
       : query<TransportTrendRow>(
           `SELECT
              CASE
-               WHEN GROUPING(e.country_iso2) = 1 THEN NULL
-               ELSE BTRIM(e.country_iso2::text)
+               WHEN GROUPING(h.country_iso2) = 1 THEN NULL
+               ELSE BTRIM(h.country_iso2::text)
              END AS country,
-             COUNT(*) FILTER (
-               WHERE e.event_type = 'departure'
-                 AND e.observed_at >= now() - interval '24 hours'
+             SUM(h.departures) FILTER (
+               WHERE h.bucket >= date_trunc('hour', now()) - interval '23 hours'
              ) AS departures_current,
-             COUNT(*) FILTER (
-               WHERE e.event_type = 'departure'
-                 AND e.observed_at < now() - interval '24 hours'
+             SUM(h.departures) FILTER (
+               WHERE h.bucket < date_trunc('hour', now()) - interval '23 hours'
              ) AS departures_previous,
-             COUNT(*) FILTER (
-               WHERE e.event_type = 'departure'
-                 AND e.vehicle_category IN ('cargo', 'tanker')
-                 AND e.observed_at >= now() - interval '24 hours'
+             SUM(h.cargo_vessel_departures) FILTER (
+               WHERE h.bucket >= date_trunc('hour', now()) - interval '23 hours'
              ) AS cargo_departures_current,
-             COUNT(*) FILTER (
-               WHERE e.event_type = 'departure'
-                 AND e.vehicle_category IN ('cargo', 'tanker')
-                 AND e.observed_at < now() - interval '24 hours'
+             SUM(h.cargo_vessel_departures) FILTER (
+               WHERE h.bucket < date_trunc('hour', now()) - interval '23 hours'
              ) AS cargo_departures_previous,
-             COUNT(*) FILTER (
-               WHERE e.event_type = 'arrival'
-                 AND e.observed_at >= now() - interval '24 hours'
+             SUM(h.arrivals) FILTER (
+               WHERE h.bucket >= date_trunc('hour', now()) - interval '23 hours'
              ) AS arrivals_current,
-             COUNT(*) FILTER (
-               WHERE e.event_type = 'arrival'
-                 AND e.observed_at < now() - interval '24 hours'
+             SUM(h.arrivals) FILTER (
+               WHERE h.bucket < date_trunc('hour', now()) - interval '23 hours'
              ) AS arrivals_previous
-           FROM transport_movement_event e
-           WHERE e.observed_at >= now() - interval '48 hours'
-             ${country ? "AND BTRIM(e.country_iso2::text) = $1" : ""}
-           GROUP BY GROUPING SETS ((e.country_iso2), ())`,
-          trendCountryParams
-        ),
-    mode === "maritime"
-      ? Promise.resolve({ rows: [] as AviationTrendRow[] })
-      : query<AviationTrendRow>(
-          `WITH country_counts AS (
-             SELECT
-               a.country_iso2 AS country,
-               COUNT(DISTINCT a.entity_id) FILTER (
-                 WHERE a.last_observed_at >= now() - interval '24 hours'
-               ) AS flights_current,
-               COUNT(DISTINCT a.entity_id) FILTER (
-                 WHERE a.first_observed_at < now() - interval '24 hours'
-                   AND a.last_observed_at >= now() - interval '48 hours'
-               ) AS flights_previous
-             FROM transport_entity_activity_hour a
-             WHERE a.mode = 'aviation'
-               AND a.country_iso2 <> '${TRANSPORT_SCOPE_GLOBAL}'
-               AND a.last_observed_at >= now() - interval '48 hours'
-               ${country ? "AND a.country_iso2 = $1" : ""}
-             GROUP BY a.country_iso2
-           ),
-           total_count AS (
-             SELECT
-               NULL::text AS country,
-               COUNT(DISTINCT a.entity_id) FILTER (
-                 WHERE a.last_observed_at >= now() - interval '24 hours'
-               ) AS flights_current,
-               COUNT(DISTINCT a.entity_id) FILTER (
-                 WHERE a.first_observed_at < now() - interval '24 hours'
-                   AND a.last_observed_at >= now() - interval '48 hours'
-               ) AS flights_previous
-             FROM transport_entity_activity_hour a
-             WHERE a.mode = 'aviation'
-               AND a.last_observed_at >= now() - interval '48 hours'
-               AND a.country_iso2 = ${country ? "$1" : `'${TRANSPORT_SCOPE_GLOBAL}'`}
-           )
-           SELECT country, flights_current, flights_previous
-           FROM country_counts
-           UNION ALL
-           SELECT country, flights_current, flights_previous
-           FROM total_count`,
+           FROM transport_movement_hour h
+           WHERE h.bucket >= date_trunc('hour', now()) - interval '47 hours'
+             ${country ? "AND h.country_iso2 = $1" : ""}
+           GROUP BY GROUPING SETS ((h.country_iso2), ())`,
           trendCountryParams
         ),
     mode === "aviation"
       ? Promise.resolve({ rows: [] as PortTrendRow[] })
       : query<PortTrendRow>(
           `SELECT
-             BTRIM(e.country_iso2::text) AS country,
-             e.location_name,
-             COUNT(*) FILTER (WHERE e.event_type = 'departure') AS departures_current,
-             COUNT(*) FILTER (WHERE e.event_type = 'arrival') AS arrivals_current,
-             COUNT(*) FILTER (
-               WHERE e.event_type = 'departure'
-                 AND e.vehicle_category IN ('cargo', 'tanker')
-             ) AS cargo_departures_current
-           FROM transport_movement_event e
-           WHERE e.observed_at >= now() - interval '24 hours'
-             ${country ? "AND BTRIM(e.country_iso2::text) = $1" : ""}
-           GROUP BY e.country_iso2, e.location_name
-           ORDER BY COUNT(*) DESC, location_name
+             BTRIM(h.country_iso2::text) AS country,
+             h.location_name,
+             SUM(h.departures) AS departures_current,
+             SUM(h.arrivals) AS arrivals_current,
+             SUM(h.cargo_vessel_departures) AS cargo_departures_current
+           FROM transport_movement_hour h
+           WHERE h.bucket >= date_trunc('hour', now()) - interval '23 hours'
+             ${country ? "AND h.country_iso2 = $1" : ""}
+           GROUP BY h.country_iso2, h.location_name
+           ORDER BY SUM(h.departures + h.arrivals) DESC, location_name
            LIMIT 20`,
           trendCountryParams
         ),
-    ]);
+  ]);
+  const aviationTrendResult =
+    mode === "maritime"
+      ? { rows: [] as AviationTrendRow[] }
+      : await query<AviationTrendRow>(
+          `WITH entity_windows AS (
+             SELECT
+               a.country_iso2,
+               a.entity_id,
+               MIN(a.bucket) AS first_bucket,
+               MAX(a.bucket) AS last_bucket
+             FROM transport_entity_activity_hour a
+             WHERE a.mode = 'aviation'
+               AND a.bucket >= date_trunc('hour', now()) - interval '47 hours'
+               ${country ? "AND a.country_iso2 = $1" : ""}
+             GROUP BY a.country_iso2, a.entity_id
+           )
+           SELECT
+             CASE
+               WHEN GROUPING(country_iso2) = 1
+                 OR country_iso2 = '${TRANSPORT_SCOPE_GLOBAL}' THEN NULL
+               ELSE country_iso2
+             END AS country,
+             COUNT(*) FILTER (
+               WHERE last_bucket >= date_trunc('hour', now()) - interval '23 hours'
+             ) AS flights_current,
+             COUNT(*) FILTER (
+               WHERE first_bucket < date_trunc('hour', now()) - interval '23 hours'
+             ) AS flights_previous
+           FROM entity_windows
+           GROUP BY ${country ? "GROUPING SETS ((country_iso2), ())" : "country_iso2"}`,
+          trendCountryParams
+        );
 
   const countries = new Map<
     string,
@@ -1953,6 +1934,73 @@ function transportOverviewCacheMilliseconds(): number {
   );
 }
 
+function emptyTransportOverview(): TransportOverviewResult {
+  return {
+    generated_at: new Date().toISOString(),
+    detail: "aggregate",
+    summary: {
+      active: 0,
+      routed: 0,
+      alerts: 0,
+      linked_countries: 0,
+      modes: {
+        maritime: {
+          active: 0,
+          routed: 0,
+          alerts: 0,
+          latest_observed_at: null,
+        },
+        aviation: {
+          active: 0,
+          routed: 0,
+          alerts: 0,
+          latest_observed_at: null,
+        },
+      },
+    },
+    countries: [],
+    routes: [],
+    trends: {
+      window_hours: 24,
+      comparison: "previous_24_hours",
+      maritime: {
+        ship_departures: transportTrendMetric(0, 0),
+        cargo_vessel_departures: transportTrendMetric(0, 0),
+        ship_arrivals: transportTrendMetric(0, 0),
+      },
+      aviation: {
+        tracked_flights: transportTrendMetric(0, 0),
+      },
+    },
+    takeaways: [],
+    ports: [],
+    activity: [],
+    entities: [],
+    coverage: {
+      maritime: {
+        source: "AISstream",
+        transport: "WebSocket",
+        configured:
+          enabledFromEnv("AISSTREAM_ENABLED") &&
+          Boolean(process.env.AISSTREAM_API_KEY?.trim()),
+        freshness_minutes: 120,
+        movement_method:
+          "Monitored-port geofences with 24-hour comparison windows.",
+        cargo_method:
+          "Cargo/tanker vessel departures are a movement proxy, not cargo volume.",
+      },
+      aviation: {
+        source: "adsb.lol",
+        transport: "REST",
+        configured: enabledFromEnv("ADSB_LOL_POLL_ENABLED"),
+        freshness_minutes: 20,
+        license: "ODbL-1.0",
+        poll_areas: configuredAdsbPollPoints().length,
+      },
+    },
+  };
+}
+
 export async function getTransportOverview(
   options?: TransportOverviewOptions,
 ): Promise<TransportOverviewResult> {
@@ -1999,6 +2047,29 @@ export async function getTransportOverview(
     });
   transportOverviewInflight.set(key, pending);
   return pending;
+}
+
+/**
+ * Transport is useful briefing evidence, but it must not prevent every other
+ * source from producing a briefing or email. Prefer the last successful
+ * aggregate during a transient database timeout and otherwise return an
+ * explicit empty transport context.
+ */
+export async function getTransportOverviewForBriefing(): Promise<TransportOverviewResult> {
+  const options: TransportOverviewOptions = { detail: "aggregate" };
+  try {
+    return await getTransportOverview(options);
+  } catch (error) {
+    const cached = transportOverviewCache.get(transportOverviewCacheKey(options));
+    console.warn(
+      JSON.stringify({
+        event: "briefing_transport_context_fallback",
+        fallback: cached ? "stale_cache" : "empty_context",
+        message: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return cached?.value ?? emptyTransportOverview();
+  }
 }
 
 export async function getTransportEntity(mode: TransportMode, entityId: string) {
