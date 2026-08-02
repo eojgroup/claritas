@@ -131,6 +131,25 @@ function trackPath(track: TransportTrackPoint[]): string {
     .join(" ");
 }
 
+function entityLinksCountry(entity: TransportEntity, country: string) {
+  const iso = country.trim().toUpperCase();
+  return entity.country_links.some(
+    (link) => link.country.trim().toUpperCase() === iso,
+  );
+}
+
+function countryLinkRoles(entity: TransportEntity, country: string) {
+  const iso = country.trim().toUpperCase();
+  return entity.country_links
+    .filter((link) => link.country.trim().toUpperCase() === iso)
+    .map((link) =>
+      link.role === "registration" && entity.mode === "maritime"
+        ? "flag"
+        : link.role,
+    )
+    .join(", ");
+}
+
 export default function TransportTrackingMap({
   entities,
   routes = [],
@@ -156,6 +175,7 @@ export default function TransportTrackingMap({
         .filter(
           (entity) =>
             (mode === "all" || entity.mode === mode) &&
+            (!selectedCountry || entityLinksCountry(entity, selectedCountry)) &&
             project(entity.latitude, entity.longitude),
         )
         .slice(0, selectedCountry ? 2_500 : 1_200),
@@ -200,6 +220,7 @@ export default function TransportTrackingMap({
     });
   }, [selectedCountry, visibleRoutes]);
   const selected = visibleEntities.find((entity) => entity.id === selectedId);
+  const focusedEntity = hovered ?? selected;
   const countryScopeView = useMemo(() => {
     const iso = selectedCountry?.toUpperCase();
     const selectedFeature = iso ? countryFeatureByIso.get(iso) : null;
@@ -420,12 +441,16 @@ export default function TransportTrackingMap({
               const coordinate = project(entity.latitude, entity.longitude);
               if (!coordinate) return null;
               const isSelected = entity.id === selectedId;
+              const isCountryLinked = Boolean(
+                selectedCountry && entityLinksCountry(entity, selectedCountry),
+              );
               return (
                 <g
                   key={entity.id}
                   transform={`translate(${coordinate[0]} ${coordinate[1]})`}
                   data-mode={entity.mode}
                   data-selected={isSelected || undefined}
+                  data-country-linked={isCountryLinked || undefined}
                   data-alert={entity.is_alert || undefined}
                   data-transport-entity="true"
                   tabIndex={0}
@@ -457,7 +482,7 @@ export default function TransportTrackingMap({
                     )}
                     <circle
                       className="transport-map-marker-ring"
-                      r={isSelected ? 11 : 7}
+                      r={isSelected ? 11 : isCountryLinked ? 9 : 7}
                     />
                   </g>
                 </g>
@@ -467,28 +492,37 @@ export default function TransportTrackingMap({
         </g>
       </svg>
 
-      {(hovered || selected) && (
+      {focusedEntity && (
         <div className="transport-map-tooltip">
-          <strong>{(hovered ?? selected)?.display_name ?? (hovered ?? selected)?.entity_id}</strong>
+          <strong>{focusedEntity.display_name ?? focusedEntity.entity_id}</strong>
           <span>
-            {(hovered ?? selected)?.route_label ??
-              (hovered ?? selected)?.status ??
+            {focusedEntity.route_label ??
+              focusedEntity.status ??
               "Route pending"}
           </span>
           <small>
-            {(hovered ?? selected)?.mode === "aviation"
-              ? `${Math.round((hovered ?? selected)?.altitude ?? 0).toLocaleString()} ft · ${Math.round(
-                  (hovered ?? selected)?.speed ?? 0,
+            {focusedEntity.mode === "aviation"
+              ? `${Math.round(focusedEntity.altitude ?? 0).toLocaleString()} ft · ${Math.round(
+                  focusedEntity.speed ?? 0,
                 )} kt`
-              : `${Math.round((hovered ?? selected)?.speed ?? 0)} kt · ${
-                  (hovered ?? selected)?.registration_country_iso2 ?? "unlinked flag"
+              : `${Math.round(focusedEntity.speed ?? 0)} kt · ${
+                  focusedEntity.registration_country_iso2 ?? "unlinked flag"
                 }`}
           </small>
+          {selectedCountry && (
+            <small>
+              {selectedCountry.toUpperCase()} link: {countryLinkRoles(
+                focusedEntity,
+                selectedCountry,
+              ) || "country association"}
+            </small>
+          )}
         </div>
       )}
 
       <div className="transport-map-legend">
         {selectedCountry && <span><i data-mode="flow" /> Directed country flow</span>}
+        {selectedCountry && <span><i data-mode="linked" /> Country-linked vehicle</span>}
         <span><i data-mode="aviation" /> Aircraft</span>
         <span><i data-mode="maritime" /> Vessels</span>
         <span><i data-mode="alert" /> Alert</span>

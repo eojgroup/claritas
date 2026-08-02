@@ -2922,6 +2922,52 @@ body {
   color: var(--viz-negative);
 }
 
+.transport-country-insights {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--shell-border);
+  border-radius: 13px;
+  background: var(--shell-surface);
+  overflow: hidden;
+}
+
+.transport-country-insights article {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-right: 1px solid var(--shell-border);
+}
+
+.transport-country-insights article:last-child {
+  border-right: 0;
+}
+
+.transport-country-insights span {
+  color: var(--shell-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.transport-country-insights strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transport-country-insights small {
+  overflow: hidden;
+  color: var(--shell-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .transport-takeaway-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3227,8 +3273,16 @@ body {
   pointer-events: none;
 }
 
+.transport-map-entities g[data-country-linked="true"] .transport-map-marker-ring {
+  fill: color-mix(in srgb, var(--shell-accent-2) 12%, transparent);
+  stroke: color-mix(in srgb, var(--shell-accent-2) 78%, var(--shell-ink));
+  stroke-width: 1.7;
+}
+
 .transport-map-entities g[data-selected="true"] .transport-map-marker-ring {
+  fill: color-mix(in srgb, var(--shell-ink) 10%, transparent);
   stroke: var(--shell-ink);
+  stroke-width: 2.2;
 }
 
 .transport-map-entities g[data-alert="true"] .transport-map-marker-ring {
@@ -3332,6 +3386,11 @@ body {
   height: 2px;
   border-radius: 0;
   background: linear-gradient(90deg, #eda36a 0 48%, #77a8ba 52% 100%);
+}
+
+.transport-map-legend i[data-mode="linked"] {
+  border: 1.5px solid var(--shell-accent-2);
+  background: transparent;
 }
 
 .transport-detail-panel {
@@ -3485,6 +3544,167 @@ body {
   color: var(--shell-muted);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.transport-country-connections {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.transport-country-connections > header {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--shell-border);
+}
+
+.transport-country-connections > header span {
+  color: var(--shell-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.transport-country-connections > header p {
+  margin: 4px 0 0;
+  color: var(--shell-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.transport-country-vehicle-list {
+  display: grid;
+  align-content: start;
+  flex: 1;
+  min-height: 0;
+  max-height: 500px;
+  margin: 0 -8px;
+  overflow-y: auto;
+}
+
+.transport-country-vehicle-list > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 9px;
+  align-items: start;
+  width: 100%;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--shell-border);
+  border-radius: 0;
+  text-align: left;
+}
+
+.transport-country-vehicle-list > button:hover,
+.transport-country-vehicle-list > button:focus-visible {
+  background: color-mix(in srgb, var(--shell-accent-2) 10%, transparent);
+}
+
+.transport-country-vehicle-list > button[data-alert="true"] {
+  background: color-mix(in srgb, var(--viz-negative) 8%, transparent);
+}
+
+.transport-country-vehicle-list i {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  grid-row: 1 / span 2;
+  border: 1px solid var(--shell-border);
+  border-radius: 8px;
+  background: var(--shell-surface);
+}
+
+.transport-country-vehicle-list i[data-mode="aviation"] {
+  color: #77a8ba;
+}
+
+.transport-country-vehicle-list i[data-mode="maritime"] {
+  color: #eda36a;
+}
+
+.transport-country-vehicle-list i svg {
+  width: 14px;
+  height: 14px;
+}
+
+.transport-country-vehicle-list > button > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.transport-country-vehicle-list strong,
+.transport-country-vehicle-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transport-country-vehicle-list strong {
+  font-size: 11px;
+}
+
+.transport-country-vehicle-list small {
+  color: var(--shell-muted);
+  font-size: 9px;
+}
+
+.transport-country-vehicle-list em {
+  grid-column: 2;
+  width: fit-content;
+  padding: 3px 6px;
+  border: 1px solid var(--shell-border);
+  border-radius: 999px;
+  color: var(--shell-muted);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.transport-country-vehicle-list em[data-role="inbound"],
+.transport-country-vehicle-list em[data-role="domestic"] {
+  border-color: color-mix(in srgb, #77a8ba 65%, var(--shell-border));
+  color: #9fc5d3;
+}
+
+.transport-country-vehicle-list em[data-role="outbound"] {
+  border-color: color-mix(in srgb, #eda36a 65%, var(--shell-border));
+  color: #f1b98d;
+}
+
+.transport-country-connections-empty {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 42px 12px;
+  color: var(--shell-muted);
+  text-align: center;
+}
+
+.transport-country-connections-empty svg {
+  width: 28px;
+  color: var(--shell-accent-2);
+}
+
+.transport-country-connections-empty strong {
+  color: var(--shell-ink);
+  font-size: 11px;
+}
+
+.transport-country-connections-empty small,
+.transport-country-connections-limit {
+  color: var(--shell-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.transport-country-connections-limit {
+  padding-top: 9px;
 }
 
 .transport-analytics-grid,
@@ -3782,6 +4002,10 @@ body {
     border-left: 0;
   }
 
+  .transport-country-vehicle-list {
+    max-height: 360px;
+  }
+
   .transport-detail-empty {
     min-height: 220px;
   }
@@ -3797,6 +4021,18 @@ body {
   }
 
   .transport-kpi-strip article:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--shell-border);
+  }
+
+  .transport-country-insights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .transport-country-insights article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .transport-country-insights article:nth-child(-n + 2) {
     border-bottom: 1px solid var(--shell-border);
   }
 
@@ -3840,6 +4076,19 @@ body {
   }
 
   .transport-kpi-strip article:last-child {
+    border-bottom: 0;
+  }
+
+  .transport-country-insights {
+    grid-template-columns: 1fr;
+  }
+
+  .transport-country-insights article {
+    border-right: 0;
+    border-bottom: 1px solid var(--shell-border);
+  }
+
+  .transport-country-insights article:last-child {
     border-bottom: 0;
   }
 

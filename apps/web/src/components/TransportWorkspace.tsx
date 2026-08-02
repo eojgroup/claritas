@@ -61,6 +61,94 @@ function changeLabel(value: number | null, direction: "up" | "down" | "flat" | "
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
+function entityLinksCountry(entity: TransportEntity, country: string) {
+  const iso = country.trim().toUpperCase();
+  return entity.country_links.some(
+    (link) => link.country.trim().toUpperCase() === iso,
+  );
+}
+
+function entityIdentifier(entity: TransportEntity) {
+  return (
+    entity.flight_number ??
+    entity.callsign ??
+    entity.display_name ??
+    entity.entity_id
+  );
+}
+
+function countryConnection(entity: TransportEntity, country: string) {
+  const iso = country.trim().toUpperCase();
+  const originIsCountry = entity.origin_country_iso2?.trim().toUpperCase() === iso;
+  const destinationIsCountry =
+    entity.destination_country_iso2?.trim().toUpperCase() === iso;
+  const currentIsCountry = entity.current_country_iso2?.trim().toUpperCase() === iso;
+  const registrationIsCountry =
+    entity.registration_country_iso2?.trim().toUpperCase() === iso;
+  const originLabel =
+    entity.origin_name ??
+    entity.origin_country_iso2 ??
+    (entity.mode === "maritime" && entity.registration_country_iso2
+      ? `${entity.registration_country_iso2} flag proxy`
+      : "Origin resolving");
+  const destinationLabel =
+    entity.destination_name ??
+    entity.destination_country_iso2 ??
+    "Destination resolving";
+
+  if (originIsCountry && destinationIsCountry) {
+    return {
+      role: "domestic",
+      label: "Domestic",
+      description: `${iso} origin and destination`,
+      rank: 0,
+    };
+  }
+  if (destinationIsCountry) {
+    return {
+      role: "inbound",
+      label: "Inbound",
+      description: `${originLabel} → ${iso}`,
+      rank: 0,
+    };
+  }
+  if (originIsCountry) {
+    return {
+      role: "outbound",
+      label: "Outbound",
+      description: `${iso} → ${destinationLabel}`,
+      rank: 1,
+    };
+  }
+  if (currentIsCountry) {
+    return {
+      role: "current",
+      label: "In country",
+      description: entity.destination_country_iso2
+        ? `Current position · onward to ${destinationLabel}`
+        : "Current position link · route resolving",
+      rank: 2,
+    };
+  }
+  if (registrationIsCountry) {
+    return {
+      role: "registration",
+      label: entity.mode === "maritime" ? "Flag-linked" : "Registered",
+      description:
+        entity.mode === "maritime"
+          ? `${iso} vessel flag · ${destinationLabel}`
+          : `${iso} aircraft registration · route resolving`,
+      rank: 3,
+    };
+  }
+  return {
+    role: "linked",
+    label: "Country-linked",
+    description: `Linked to ${iso} · route resolving`,
+    rank: 4,
+  };
+}
+
 export default function TransportWorkspace({ initialCountry }: Props) {
   const [overview, setOverview] = useState<TransportOverview | null>(null);
   const [mode, setMode] = useState<ModeFilter>("all");
@@ -191,16 +279,96 @@ export default function TransportWorkspace({ initialCountry }: Props) {
     [overview],
   );
 
-  const selectedCountryFlows = useMemo(() => {
+  const selectedCountryInsight = useMemo(() => {
     if (!country) return null;
-    return (overview?.routes ?? []).reduce(
-      (totals, route) => {
-        if (route.origin_country === country) totals.outbound += route.active_count;
-        if (route.destination_country === country) totals.inbound += route.active_count;
-        return totals;
-      },
-      { inbound: 0, outbound: 0 },
+    const iso = country.trim().toUpperCase();
+    const linkedEntities = (overview?.entities ?? [])
+      .filter((entity) => entityLinksCountry(entity, iso))
+      .sort((left, right) => {
+        if (left.is_alert !== right.is_alert) return left.is_alert ? -1 : 1;
+        const roleDifference =
+          countryConnection(left, iso).rank - countryConnection(right, iso).rank;
+        if (roleDifference !== 0) return roleDifference;
+        return (
+          new Date(right.observed_at).getTime() -
+          new Date(left.observed_at).getTime()
+        );
+      });
+    const selectedRoutes = (overview?.routes ?? []).filter(
+      (route) =>
+        route.origin_country.trim().toUpperCase() === iso ||
+        route.destination_country.trim().toUpperCase() === iso,
     );
+    const counterparties = new Map<
+      string,
+      {
+        country: string;
+        name: string;
+        active: number;
+        aviation: number;
+        maritime: number;
+      }
+    >();
+    let inbound = 0;
+    let outbound = 0;
+    for (const route of selectedRoutes) {
+      const isOutbound = route.origin_country.trim().toUpperCase() === iso;
+      const isInbound = route.destination_country.trim().toUpperCase() === iso;
+      if (isOutbound) outbound += route.active_count;
+      if (isInbound) inbound += route.active_count;
+      const counterpartCountry = isOutbound
+        ? route.destination_country.trim().toUpperCase()
+        : route.origin_country.trim().toUpperCase();
+      if (counterpartCountry === iso) continue;
+      const counterpartName = isOutbound
+        ? route.destination_name
+        : route.origin_name;
+      const current = counterparties.get(counterpartCountry) ?? {
+        country: counterpartCountry,
+        name: counterpartName,
+        active: 0,
+        aviation: 0,
+        maritime: 0,
+      };
+      current.active += route.active_count;
+      current[route.mode] += route.active_count;
+      counterparties.set(counterpartCountry, current);
+    }
+    const strongestCounterparty = Array.from(counterparties.values()).sort(
+      (left, right) => right.active - left.active,
+    )[0] ?? null;
+    const currentEntities = linkedEntities.filter(
+      (entity) => entity.current_country_iso2?.trim().toUpperCase() === iso,
+    );
+    const completeRoutes = linkedEntities.filter(
+      (entity) =>
+        entity.origin_country_iso2 && entity.destination_country_iso2,
+    ).length;
+    const proxyOnly = linkedEntities.filter((entity) => {
+      const roles = entity.country_links.filter(
+        (link) => link.country.trim().toUpperCase() === iso,
+      );
+      return (
+        roles.length > 0 &&
+        roles.every(
+          (link) => link.role === "flag" || link.role === "registration",
+        )
+      );
+    }).length;
+    const countryEntry = (overview?.countries ?? []).find(
+      (entry) => entry.country.trim().toUpperCase() === iso,
+    );
+
+    return {
+      countryName: countryEntry?.country_name ?? iso,
+      linkedEntities,
+      inbound,
+      outbound,
+      strongestCounterparty,
+      currentEntities,
+      completeRoutes,
+      proxyOnly,
+    };
   }, [country, overview]);
 
   const entities = overview?.entities ?? [];
@@ -314,16 +482,82 @@ export default function TransportWorkspace({ initialCountry }: Props) {
         })}
       </div>
 
+      {selectedCountryInsight && (
+        <section
+          className="transport-country-insights"
+          aria-label={`${selectedCountryInsight.countryName} transport connections`}
+        >
+          <article>
+            <span>Most connected country</span>
+            <strong>
+              {selectedCountryInsight.strongestCounterparty
+                ? `${selectedCountryInsight.strongestCounterparty.name} (${selectedCountryInsight.strongestCounterparty.country})`
+                : "Resolving"}
+            </strong>
+            <small>
+              {selectedCountryInsight.strongestCounterparty
+                ? `${selectedCountryInsight.strongestCounterparty.active} active · ${selectedCountryInsight.strongestCounterparty.aviation} flights · ${selectedCountryInsight.strongestCounterparty.maritime} vessels`
+                : "No resolved counterpart route in this scope"}
+            </small>
+          </article>
+          <article>
+            <span>Direction split</span>
+            <strong>
+              {selectedCountryInsight.inbound} in · {selectedCountryInsight.outbound} out
+            </strong>
+            <small>
+              {selectedCountryInsight.inbound + selectedCountryInsight.outbound === 0
+                ? "No resolved directional corridors"
+                : selectedCountryInsight.inbound === selectedCountryInsight.outbound
+                  ? "Balanced resolved flow"
+                  : selectedCountryInsight.inbound > selectedCountryInsight.outbound
+                    ? "Inbound-led resolved flow"
+                    : "Outbound-led resolved flow"}
+            </small>
+          </article>
+          <article>
+            <span>Currently in country</span>
+            <strong>{selectedCountryInsight.currentEntities.length}</strong>
+            <small>
+              {selectedCountryInsight.currentEntities.filter(
+                (entity) => entity.mode === "aviation",
+              ).length} flights ·{" "}
+              {selectedCountryInsight.currentEntities.filter(
+                (entity) => entity.mode === "maritime",
+              ).length} vessels with a current-position link
+            </small>
+          </article>
+          <article>
+            <span>Full route data</span>
+            <strong>
+              {selectedCountryInsight.linkedEntities.length > 0
+                ? `${selectedCountryInsight.completeRoutes}/${selectedCountryInsight.linkedEntities.length}`
+                : "—"}
+            </strong>
+            <small>
+              Origin + destination identified
+              {selectedCountryInsight.proxyOnly > 0
+                ? ` · ${selectedCountryInsight.proxyOnly} flag/registration-only`
+                : ""}
+            </small>
+          </article>
+        </section>
+      )}
+
       <div className="transport-map-stage">
         <div className="transport-map-panel">
           <header>
             <div>
               <span>Live tracking</span>
-              <h2>{country ? `${country} arrivals and departures` : "Global movement map"}</h2>
+              <h2>
+                {selectedCountryInsight
+                  ? `${selectedCountryInsight.countryName} (${country}) connections`
+                  : "Global movement map"}
+              </h2>
             </div>
             <small>
-              {selectedCountryFlows
-                ? `${selectedCountryFlows.inbound} inbound · ${selectedCountryFlows.outbound} outbound · `
+              {selectedCountryInsight
+                ? `${selectedCountryInsight.linkedEntities.length} linked vehicles · ${selectedCountryInsight.inbound} inbound · ${selectedCountryInsight.outbound} outbound · `
                 : ""}
               Flights {timeLabel(aviation?.latest_observed_at)} · vessels {timeLabel(maritime?.latest_observed_at)}
             </small>
@@ -413,6 +647,62 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                 )}
               </p>
             </>
+          ) : selectedCountryInsight ? (
+            <div className="transport-country-connections">
+              <header>
+                <span>Connected movements</span>
+                <h2>
+                  {selectedCountryInsight.linkedEntities.length} linked to {country}
+                </h2>
+                <p>
+                  Each live record below shows the country role that placed it in
+                  this view. Select one to follow it on the map.
+                </p>
+              </header>
+              <div className="transport-country-vehicle-list">
+                {selectedCountryInsight.linkedEntities.slice(0, 60).map((entity) => {
+                  const connection = countryConnection(entity, country);
+                  return (
+                    <button
+                      type="button"
+                      key={`country-connection-${entity.id}`}
+                      onClick={() => void selectEntity(entity)}
+                      data-alert={entity.is_alert || undefined}
+                    >
+                      <i data-mode={entity.mode}>
+                        {entity.mode === "aviation" ? <Plane /> : <Ship />}
+                      </i>
+                      <span>
+                        <strong>{entityIdentifier(entity)}</strong>
+                        <small>{connection.description}</small>
+                        <small>
+                          {entity.mode === "aviation" ? "Flight" : "Vessel"} · seen{" "}
+                          {timeLabel(entity.observed_at)}
+                        </small>
+                      </span>
+                      <em data-role={connection.role}>{connection.label}</em>
+                    </button>
+                  );
+                })}
+                {selectedCountryInsight.linkedEntities.length === 0 && (
+                  <div className="transport-country-connections-empty">
+                    <LocateFixed />
+                    <strong>No linked vehicles in the live freshness window</strong>
+                    <small>
+                      Country corridors may still be visible when aggregate route
+                      evidence is available.
+                    </small>
+                  </div>
+                )}
+              </div>
+              {selectedCountryInsight.linkedEntities.length > 60 && (
+                <small className="transport-country-connections-limit">
+                  Showing the 60 freshest of{" "}
+                  {selectedCountryInsight.linkedEntities.length.toLocaleString()} linked
+                  vehicles.
+                </small>
+              )}
+            </div>
           ) : (
             <div className="transport-detail-empty">
               <LocateFixed />
