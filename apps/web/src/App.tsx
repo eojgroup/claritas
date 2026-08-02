@@ -250,6 +250,9 @@ const includesLinkageTerm = (haystack: string, value: string): boolean => {
   return normalized.length >= 3 && haystack.includes(` ${normalized} `);
 };
 
+const getLeadershipDisplayName = (value: string | null | undefined): string =>
+  value && !/^Q\d+$/i.test(value.trim()) ? value.trim() : "Name unavailable";
+
 const prettySourceName = (value: string): string => {
   const normalized = value.trim().toLowerCase();
   if (normalized === "newsapi") return "NewsAPI";
@@ -688,6 +691,7 @@ import TransportWorkspace from "./components/TransportWorkspace";
 import {
   fetchAuthMe,
   fetchAuthProviders,
+  fetchCountryLeadership,
   fetchCountryStats,
   fetchCountryWeather,
   fetchDailyBriefingSchedule,
@@ -710,6 +714,7 @@ import {
   type AuthProvider,
   type AuthProviderId,
   type AuthUser,
+  type CountryLeadership,
   type CountryStat,
   type CountryStatsCoverage,
   type CountryWeather,
@@ -803,6 +808,7 @@ export default function ClaritasDashboard() {
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [countryStatsCoverage, setCountryStatsCoverage] = useState<CountryStatsCoverage | null>(null);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
+  const [leadershipStats, setLeadershipStats] = useState<CountryLeadership[]>([]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [marketStatusRows, setMarketStatusRows] = useState<MarketStatus[]>([]);
   const [marketEarnings, setMarketEarnings] = useState<EarningsEvent[]>([]);
@@ -1136,6 +1142,9 @@ export default function ClaritasDashboard() {
     fetchCountryWeather()
       .then(setWeatherStats)
       .catch(() => setWeatherStats([]));
+    fetchCountryLeadership()
+      .then(setLeadershipStats)
+      .catch(() => setLeadershipStats([]));
     fetchMarketQuotes({ refresh: false })
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
@@ -2877,6 +2886,16 @@ export default function ClaritasDashboard() {
       latestEpisode,
     };
   }, [countryMeta, podcastCountryLinks, podcasts]);
+
+  const selectedLeadershipProfile = useMemo(() => {
+    if (!selectedCountry) return null;
+    return (
+      leadershipStats.find(
+        (country) =>
+          country.country.toUpperCase() === selectedCountry.toUpperCase(),
+      ) ?? null
+    );
+  }, [leadershipStats, selectedCountry]);
 
   const selectedCountryContext = useMemo(() => {
     if (!selectedCountry) return null;
@@ -5019,6 +5038,13 @@ export default function ClaritasDashboard() {
                                 <small>attributed signals</small>
                               </div>
                               <div>
+                                <span>Leadership</span>
+                                <strong>
+                                  {selectedLeadershipProfile?.roles.length ?? 0}
+                                </strong>
+                                <small>current officeholders</small>
+                              </div>
+                              <div>
                                 <span>Markets</span>
                                 <strong>{relatedMarkets.length}</strong>
                                 <small>linked instruments</small>
@@ -5230,6 +5256,46 @@ export default function ClaritasDashboard() {
                                 </button>
                               </section>
                             )}
+
+                            <section className="country-profile-section">
+                              <div className="country-profile-section-heading">
+                                <User className="h-4 w-4" />
+                                <span>Current leadership</span>
+                                <small>
+                                  {selectedLeadershipProfile?.government_type ??
+                                    "Government type unavailable"}
+                                </small>
+                              </div>
+                              <div className="country-leadership-list">
+                                {selectedLeadershipProfile?.roles.map((role) => (
+                                  <div
+                                    key={`${role.role_type}-${role.person_wikidata_id}`}
+                                  >
+                                    <span>
+                                      {role.role_type === "head_of_state"
+                                        ? "Head of state"
+                                        : "Head of government"}
+                                    </span>
+                                    <strong>
+                                      {getLeadershipDisplayName(role.person_name)}
+                                    </strong>
+                                    <small>
+                                      {role.started_at
+                                        ? `In office since ${new Date(
+                                            role.started_at,
+                                          ).toLocaleDateString()}`
+                                        : "Term start unavailable"}
+                                    </small>
+                                  </div>
+                                ))}
+                                {!selectedLeadershipProfile?.roles.length && (
+                                  <div className="product-state">
+                                    Current leadership has not been retrieved for
+                                    this country.
+                                  </div>
+                                )}
+                              </div>
+                            </section>
 
                             {relatedMarkets.length > 0 && (
                               <section className="country-profile-section">

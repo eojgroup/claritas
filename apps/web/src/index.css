@@ -1458,6 +1458,36 @@ body {
   text-align: right;
 }
 
+.country-leadership-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.country-leadership-list > div:not(.product-state) {
+  display: grid;
+  grid-template-columns: minmax(6.2rem, 0.65fr) minmax(0, 1fr);
+  gap: 0.12rem 0.65rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--shell-accent-2);
+}
+
+.country-leadership-list span,
+.country-leadership-list small {
+  color: var(--shell-muted);
+  font-size: 0.62rem;
+}
+
+.country-leadership-list strong {
+  overflow: hidden;
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.country-leadership-list small {
+  grid-column: 2;
+}
+
 .country-market-list {
   display: grid;
   gap: 0.45rem;

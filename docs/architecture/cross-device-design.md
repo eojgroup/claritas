@@ -31,6 +31,7 @@ flowchart LR
   Podcasts --> Desk
   Weather --> Desk
   Markets --> Desk
+  Leadership --> Profile[Selected country profile]
   Leadership -. reference for news-led briefing .-> Brief
   Transport --> Desk
 
@@ -49,6 +50,7 @@ Each domain has a distinct analytical responsibility:
 | Podcast intelligence | What claims, risks, and evidence support the signal? | Episode evidence, extracted signals, timestamps |
 | Weather | Which conditions exceed operating thresholds and where? | Threshold queue, observation feed, map, distribution charts |
 | Markets | Which instruments moved and what context may explain it? | Watchlist, symbol drilldown, session range, movers, benchmark regime |
+| Leadership | Who currently holds the principal national offices? | Selection-driven country profile reference |
 | Transport | How are flights and shipping routes connecting countries now? | Live track map, route corridors, country network, activity trends |
 
 Maps and graphs are not decoration. Bubble maps answer spatial distribution questions. Graphs answer change, comparison, mix, correlation, and ranking questions. A visual is omitted when the available data cannot support a useful analytical statement.
@@ -65,17 +67,18 @@ flowchart LR
   Transport[Aircraft or vessel] -->|position, route, registration, flag| Country
   Podcast[Podcast finding] -->|explicit ISO or country mention| Country
   Podcast -->|episode + timestamp| Evidence[Attributed evidence]
+  Leader[Leadership reference] --> Profile[Country profile]
   Country --> Score[Cross-source relevance score]
   Score --> Map[Signal relevance map]
   Score --> Queue[Attention signal]
   Evidence --> Brief[Newsletter briefing]
-  Leader[Leadership reference] -. only corroborates a news-reported change .-> Brief
+  Leader -. only corroborates a news-reported change .-> Brief
 ```
 
 - News retains publisher, time, and mapped-country provenance.
 - Podcast claims remain attributed to the feed, episode, and timestamped evidence. They are not treated as verified facts.
 - New podcast extraction records explicitly supported ISO alpha-2 countries with each finding. Existing findings receive deterministic UI linkage when their text mentions a country name.
-- Leadership is not a UI domain or urgency signal. A leadership change appears only inside news when a supplied story directly reports it; current records remain bounded reference context for briefing generation.
+- Leadership is not an urgency signal or map layer. Current records appear as reference in the selected country profile. A leadership change appears inside news and briefings only when a supplied story directly reports it.
 - Wikidata entity identifiers are never presented as person names. Missing English labels use Wikidata language fallback; an unresolved entity displays “Name unavailable” while retaining its source link.
 
 ## Information Architecture and Page Archetypes
@@ -204,7 +207,7 @@ Light mode preserves the same roles. It is supported, but the default unconfigur
 | KPI strip | Value, context, optional delta/trend; separators instead of four floating cards |
 | Primary chart | Largest analytical surface, labeled axes/legend, range/compare tools, useful empty state |
 | Map | GeoJSON country layer plus scaled bubble overlay; raw domain layers and a cross-source relevance layer; intensity, rank, hover, polygon selection, legend, one aggregate coverage window, and a visible #1 recommendation turn spatial data into an analytical control |
-| Country profile | Selection-driven cross-domain panel combining relevance drivers, news concentration, weather and freshness, attributed podcast evidence, linked markets, and routes to detailed workspaces |
+| Country profile | Selection-driven cross-domain panel combining relevance drivers, news concentration, weather and freshness, attributed podcast evidence, current leadership, linked markets, and routes to detailed workspaces |
 | Context band | Podcast evidence and transport movement; exposes the strongest available signal and routes directly to detailed evidence or live movement tracking |
 | Priority news stream | Shared compact rows with priority band/rank, aligned time/place/headline/source metadata, selected state, and imagery only in expanded detail; used on Dashboard and News |
 | Insights rail | Exceptions, anomalies, AI/briefing cues, and action destination |
@@ -232,7 +235,7 @@ Shared web implementations live primarily in `apps/web/src/index.css` and `apps/
 
 ### Drilldown and selection
 
-- Selecting a country updates news, weather, market, attributed podcast, map relevance, and transport context where data exists.
+- Selecting a country updates news, weather, market, attributed podcast, current leadership, map relevance, and transport context where data exists.
 - Country polygons and bubble markers share the same selection model. Hover reveals mapped value and rank; selection opens the country profile and adds the country series to the primary trend.
 - Selecting a headline expands only that row, reveals imagery and publisher context, and links its country to the map, profile, and trend. Dashboard and News use the same row contract; unselected headlines remain compact monitoring rows.
 - Selecting the highlighted #1 country opens the score drivers. Selecting a podcast-linked country opens the same shared country state rather than a disconnected podcast-only filter.
@@ -288,7 +291,7 @@ Web breakpoints are device-role boundaries, not just CSS conveniences.
 - The world map is the first synthesis and visual analysis surface on every app touchpoint. Its default Signals layer ranks cross-source relevance; News and Weather remain inspectable raw layers.
 - Signal relevance is explainable: news concentration contributes 40%, attributed podcast relevance 25%, weather anomaly 15%, market movement 15%, with a small cross-domain confirmation bonus and a 100-point cap. Leadership records do not appear in or inflate the model.
 - The highest-relevance country receives a distinct ring, a `#1` marker, and a persistent recommendation. Its tooltip and country profile list the contributing domains and sources.
-- The panel beside the desktop map shows podcast and transport context until a country is selected, then becomes a cross-domain country profile. Clearing selection restores the global context band.
+- The panel beside the desktop map shows podcast and transport context until a country is selected, then becomes a cross-domain country profile with current leadership reference. Clearing selection restores the global context band.
 - The live feed is the final full-width Dashboard stage. News defaults to shared priority rows with band/rank, time, geography, headline, and source; image and long summary appear only for the selected row.
 - Newsletter briefing generation may use leadership records only as reference context for a change directly reported by supplied news. It never emits current leadership as a standalone update. The Watch renders only the published cross-domain synopsis and two takeaways; personalized newsletter bodies remain email-only.
 - News volume analysis and the attention queue belong to the News analyst workspace. They are intentionally omitted from Dashboard so the overview ends after current cross-domain evidence rather than turning into a second News page.
@@ -389,7 +392,7 @@ The current system:
 - replaces separate Dashboard and News story treatments with one expandable priority-stream contract;
 - adds an explainable cross-source signal-relevance map, a visible highest-priority country, and driver-level country context;
 - simplifies map time interaction to a single aggregate coverage window and removes low-context playback;
-- carries podcast country provenance, news-bounded leadership reference, and qualified transport movement trends into daily and personal briefing generation;
+- carries current leadership into the country profile while keeping briefing leadership changes news-bounded, and carries qualified transport movement trends into daily and personal briefing generation;
 - gives Admin, Profile, and Policies separate archetypes;
 - treats tablet as a map-led two-column review workspace;
 - treats mobile as map-led triage and drill-in;
