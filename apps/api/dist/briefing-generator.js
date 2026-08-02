@@ -16,7 +16,7 @@ class BriefingGenerationError extends Error {
     }
 }
 exports.BriefingGenerationError = BriefingGenerationError;
-const PROMPT_VERSION = "daily-signal-briefing.v3";
+const PROMPT_VERSION = "daily-signal-briefing.v4";
 const BRIEFING_OUTPUT_SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -27,7 +27,7 @@ const BRIEFING_OUTPUT_SCHEMA = {
         },
         update_text: {
             type: "string",
-            description: "One concise briefing paragraph covering material news, attributed podcast intelligence, markets, weather, and relevant national leadership using only supplied evidence.",
+            description: "One concise briefing paragraph covering material news, attributed podcast intelligence, markets, weather, and transport using only supplied evidence. Leadership changes may appear only when directly reported by supplied news.",
         },
         key_takeaways: {
             type: "array",
@@ -290,10 +290,10 @@ function buildSystemPrompt() {
     return [
         "You generate Claritas daily signal briefings from supplied JSON evidence.",
         "Use only the supplied evidence. Do not invent facts, numbers, sources, causal links, or forecasts.",
-        "Cover News, Podcast Intelligence, Markets, Weather, Transport, and relevant national Leadership when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
+        "Cover News, Podcast Intelligence, Markets, Weather, and Transport when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
         "Transport comparisons use tracked observations, monitored-port geofences, and 24-hour comparison windows. Describe cargo-vessel departures as a movement proxy; never present them as cargo tonnage, load, trade value, or complete port-authority counts.",
         "Treat podcast claims as attributed speaker statements, not independently verified facts. Retain uncertainty and attribution.",
-        "Connect named leaders and countries only when the supplied evidence supports the relationship. Leadership records are context, not proof of involvement.",
+        "Leadership records are reference context only. Never surface current officeholders, government type, or leadership records as a standalone signal. Mention a leadership change only when a supplied news item directly reports that change; keep it within the news update and cite no inference from Wikidata as evidence of a change.",
         "Markets content is informational only. Do not give investment advice or tell users to buy, sell, or hold.",
         "Keep the result concise, executive, and neutral.",
         "Return JSON only, matching the requested schema.",

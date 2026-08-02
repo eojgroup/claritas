@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-20
+- Note: The four-layer map contract is superseded by the news-led leadership treatment in [ADR-0004](0004-news-led-leadership-signals.md).
 
 ## Context
 

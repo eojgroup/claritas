@@ -2,6 +2,24 @@ import type { ReactNode } from "react";
 import { ArrowUpRight, ChevronDown } from "lucide-react";
 import type { NewsItem } from "../lib/api";
 
+const LEADERSHIP_ROLE_PATTERN =
+  "(?:president|prime minister|premier|chancellor|monarch|king|queen|head of state|head of government)";
+const LEADERSHIP_TRANSITION_PATTERN =
+  "(?:resign(?:s|ed|ation)?|steps? down|ousted|removed from office|sworn in|inaugurated|succeeds?|takes? office|dies|died|death)";
+const LEADERSHIP_CHANGE_PATTERN = new RegExp(
+  `(?:${LEADERSHIP_ROLE_PATTERN}.{0,60}${LEADERSHIP_TRANSITION_PATTERN}|${LEADERSHIP_TRANSITION_PATTERN}.{0,60}${LEADERSHIP_ROLE_PATTERN}|(?:appoint(?:s|ed)|named).{0,24}${LEADERSHIP_ROLE_PATTERN})`,
+  "i",
+);
+
+function isLeadershipChangeStory(item: NewsItem): boolean {
+  const text = `${item.title ?? ""} ${item.summary ?? ""}`;
+  return (
+    /\bleadership (?:change|transition|succession)\b/i.test(text) ||
+    /\b(?:new president|new prime minister|president-elect)\b/i.test(text) ||
+    LEADERSHIP_CHANGE_PATTERN.test(text)
+  );
+}
+
 type PriorityNewsListProps = {
   items: NewsItem[];
   selectedId: number | null;
@@ -53,6 +71,7 @@ export default function PriorityNewsList({
         const isPrimary = Boolean(iso && primaryIso === iso);
         const isSecondary = Boolean(iso && secondaryIso === iso);
         const priorityBand = index < 3 ? "P1" : index < 10 ? "P2" : "P3";
+        const isLeadershipChange = isLeadershipChangeStory(item);
 
         return (
           <article
@@ -95,6 +114,14 @@ export default function PriorityNewsList({
               <span className="dashboard-news-country">{iso ?? "—"}</span>
               <span className="dashboard-news-headline">
                 <strong>{item.title || item.url || "Untitled"}</strong>
+                {isLeadershipChange && (
+                  <span
+                    className="news-leadership-change"
+                    title="Leadership change reported by this news item"
+                  >
+                    Leadership change
+                  </span>
+                )}
                 <small>
                   {item.summary ?? "Select for source and country context."}
                 </small>

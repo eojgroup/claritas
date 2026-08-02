@@ -36,6 +36,9 @@ import {
 } from "../lib/api";
 
 type ModeFilter = TransportMode | "all";
+type Props = {
+  initialCountry?: string | null;
+};
 
 function timeLabel(value: string | null | undefined) {
   if (!value) return "Awaiting data";
@@ -58,10 +61,10 @@ function changeLabel(value: number | null, direction: "up" | "down" | "flat" | "
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-export default function TransportWorkspace() {
+export default function TransportWorkspace({ initialCountry }: Props) {
   const [overview, setOverview] = useState<TransportOverview | null>(null);
   const [mode, setMode] = useState<ModeFilter>("all");
-  const [country, setCountry] = useState<string>("");
+  const [country, setCountry] = useState<string>(() => initialCountry?.toUpperCase() ?? "");
   const [selected, setSelected] = useState<TransportEntity | null>(null);
   const [track, setTrack] = useState<TransportTrackPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,6 +72,11 @@ export default function TransportWorkspace() {
   const [loadingEntity, setLoadingEntity] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selectionRequestRef = useRef(0);
+  const selectedRef = useRef<TransportEntity | null>(null);
+
+  useEffect(() => {
+    if (initialCountry) setCountry(initialCountry.toUpperCase());
+  }, [initialCountry]);
 
   const load = useCallback(
     async (force = false) => {
@@ -79,7 +87,7 @@ export default function TransportWorkspace() {
           detail: "full",
           mode: mode === "all" ? undefined : mode,
           country: country || undefined,
-          entityLimit: 1_200,
+          entityLimit: country ? 2_500 : 1_200,
           refresh: force,
         });
         setOverview(value);
@@ -120,6 +128,19 @@ export default function TransportWorkspace() {
       if (selectionRequestRef.current === requestID) setLoadingEntity(false);
     }
   }, []);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  useEffect(() => {
+    const current = selectedRef.current;
+    if (!current || !overview) return;
+    const refreshed = overview.entities.find((entity) => entity.id === current.id);
+    if (refreshed && refreshed.observed_at !== current.observed_at) {
+      void selectEntity(refreshed);
+    }
+  }, [overview, selectEntity]);
 
   const clearSelection = useCallback(() => {
     selectionRequestRef.current += 1;
@@ -169,6 +190,18 @@ export default function TransportWorkspace() {
       })),
     [overview],
   );
+
+  const selectedCountryFlows = useMemo(() => {
+    if (!country) return null;
+    return (overview?.routes ?? []).reduce(
+      (totals, route) => {
+        if (route.origin_country === country) totals.outbound += route.active_count;
+        if (route.destination_country === country) totals.inbound += route.active_count;
+        return totals;
+      },
+      { inbound: 0, outbound: 0 },
+    );
+  }, [country, overview]);
 
   const entities = overview?.entities ?? [];
   const summary = overview?.summary;
@@ -286,15 +319,19 @@ export default function TransportWorkspace() {
           <header>
             <div>
               <span>Live tracking</span>
-              <h2>Global movement map</h2>
+              <h2>{country ? `${country} arrivals and departures` : "Global movement map"}</h2>
             </div>
             <small>
-              Flights {timeLabel(aviation?.latest_observed_at)} · vessels{" "}
-              {timeLabel(maritime?.latest_observed_at)}
+              {selectedCountryFlows
+                ? `${selectedCountryFlows.inbound} inbound · ${selectedCountryFlows.outbound} outbound · `
+                : ""}
+              Flights {timeLabel(aviation?.latest_observed_at)} · vessels {timeLabel(maritime?.latest_observed_at)}
             </small>
           </header>
           <TransportTrackingMap
             entities={entities}
+            routes={overview?.routes}
+            selectedCountry={country}
             mode={mode}
             selectedId={selected?.id}
             track={track}
@@ -306,7 +343,9 @@ export default function TransportWorkspace() {
           {selected ? (
             <>
               <div className="transport-detail-title">
-                <span>{selected.mode === "aviation" ? "Flight track" : "Vessel track"}</span>
+                <span>
+                  {selected.mode === "aviation" ? "Following flight" : "Following vessel"}
+                </span>
                 <h2>{selected.display_name ?? selected.entity_id}</h2>
                 <p>
                   {selected.route_label ??
@@ -314,6 +353,9 @@ export default function TransportWorkspace() {
                     selected.status ??
                     "Route is being resolved"}
                 </p>
+                <button type="button" onClick={clearSelection}>
+                  Back to {country ? `${country} flows` : "all live vehicles"}
+                </button>
               </div>
               <dl>
                 <div>
@@ -483,7 +525,14 @@ export default function TransportWorkspace() {
               >
                 <span className="transport-flow-node">
                   <b>{route.origin_country}</b>
-                  <small>{route.origin_name}</small>
+                  <small>
+                    {route.origin_name}
+                    {route.origin_basis === "flag_fallback"
+                      ? " · flag proxy"
+                      : route.origin_basis === "mixed"
+                        ? " · some flag proxy"
+                        : ""}
+                  </small>
                 </span>
                 <span className="transport-flow-line" data-mode={route.mode}>
                   <i style={{ width: `${Math.min(100, 20 + route.active_count * 5)}%` }} />

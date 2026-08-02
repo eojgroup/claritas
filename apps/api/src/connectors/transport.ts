@@ -82,6 +82,7 @@ type RouteAggregateRow = {
   origin_country: string;
   destination_country: string;
   active_count: string | number;
+  flag_origin_count: string | number;
   examples: string[] | null;
 };
 
@@ -173,6 +174,8 @@ type MaritimeStatic = {
   vehicle_category?: string | null;
   destination_name?: string | null;
   destination_country_iso2?: string | null;
+  destination_latitude?: number | null;
+  destination_longitude?: number | null;
   route_label?: string | null;
 };
 
@@ -290,6 +293,10 @@ const ADSB_POLL_POINTS = [
 const maritimeQueue = new Map<string, TransportSnapshotInput>();
 const maritimeStatic = new Map<string, MaritimeStatic>();
 const firstMaritimeCountry = new Map<string, string>();
+const firstMaritimePosition = new Map<
+  string,
+  { latitude: number; longitude: number }
+>();
 const lastMaritimeQueuedAt = new Map<string, number>();
 const lastTrackAt = new Map<string, number>();
 const routeCache = new Map<string, { expiresAt: number; value: AdsbRoute | null }>();
@@ -492,6 +499,12 @@ function destinationCountryFromText(value: string | null): string | null {
   return null;
 }
 
+function destinationPortFromText(value: string | null): MaritimePort | null {
+  if (!value) return null;
+  const normalized = value.trim().toUpperCase();
+  return MARITIME_PORTS.find((port) => port.pattern.test(normalized)) ?? null;
+}
+
 function maritimeCategory(value: string | null | undefined): string | null {
   const normalized = value?.trim().toLowerCase();
   if (!normalized) return null;
@@ -610,7 +623,9 @@ function queueMaritimeMessage(message: unknown): void {
   const shipType = asString(body.Type ?? reportB.ShipType);
 
   if (displayName || callsign || destinationName || shipType) {
-    const destinationCountry = destinationCountryFromText(destinationName);
+    const destinationPort = destinationPortFromText(destinationName);
+    const destinationCountry =
+      destinationPort?.iso2 ?? destinationCountryFromText(destinationName);
     maritimeStatic.set(mmsi, {
       ...maritimeStatic.get(mmsi),
       display_name: displayName ?? maritimeStatic.get(mmsi)?.display_name,
@@ -621,6 +636,10 @@ function queueMaritimeMessage(message: unknown): void {
       destination_name: destinationName ?? maritimeStatic.get(mmsi)?.destination_name,
       destination_country_iso2:
         destinationCountry ?? maritimeStatic.get(mmsi)?.destination_country_iso2,
+      destination_latitude:
+        destinationPort?.latitude ?? maritimeStatic.get(mmsi)?.destination_latitude,
+      destination_longitude:
+        destinationPort?.longitude ?? maritimeStatic.get(mmsi)?.destination_longitude,
       route_label: destinationName
         ? `Destination ${destinationName}`
         : maritimeStatic.get(mmsi)?.route_label,
@@ -645,11 +664,20 @@ function queueMaritimeMessage(message: unknown): void {
   if (currentCountry && !firstMaritimeCountry.has(mmsi)) {
     firstMaritimeCountry.set(mmsi, currentCountry);
   }
+  if (
+    isPosition &&
+    latitude != null &&
+    longitude != null &&
+    !firstMaritimePosition.has(mmsi)
+  ) {
+    firstMaritimePosition.set(mmsi, { latitude, longitude });
+  }
   const originCountry =
     staticData?.destination_country_iso2 &&
     firstMaritimeCountry.get(mmsi) !== staticData.destination_country_iso2
       ? firstMaritimeCountry.get(mmsi) ?? null
       : null;
+  const originPosition = firstMaritimePosition.get(mmsi);
   const navigationStatusNumber = asFinite(body.NavigationalStatus);
   const status =
     navigationStatusNumber == null
@@ -686,6 +714,10 @@ function queueMaritimeMessage(message: unknown): void {
     registration_country_iso2: registrationCountry,
     origin_name: originCountry ? COUNTRY_NAME_BY_ISO.get(originCountry) ?? originCountry : null,
     destination_name: staticData?.destination_name,
+    origin_latitude: originPosition?.latitude,
+    origin_longitude: originPosition?.longitude,
+    destination_latitude: staticData?.destination_latitude,
+    destination_longitude: staticData?.destination_longitude,
     current_location_name: currentPort?.name,
     route_label: staticData?.route_label,
     linkage_basis: linkageBasis,
@@ -1439,20 +1471,34 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
   const detail = options?.detail ?? "aggregate";
   const mode = options?.mode ?? null;
   const country = normalizeIso2(options?.country) ?? null;
+  const countryParameter = `$${mode ? 2 : 1}`;
   const filters = [
     activeTransportWhere("s"),
     mode ? `s.mode = $1` : null,
     country
-      ? `(s.current_country_iso2 = $${mode ? 2 : 1}
-          OR s.origin_country_iso2 = $${mode ? 2 : 1}
-          OR s.destination_country_iso2 = $${mode ? 2 : 1}
-          OR s.registration_country_iso2 = $${mode ? 2 : 1})`
+      ? `(s.current_country_iso2 = ${countryParameter}
+          OR s.origin_country_iso2 = ${countryParameter}
+          OR s.destination_country_iso2 = ${countryParameter}
+          OR s.registration_country_iso2 = ${countryParameter})`
       : null,
   ].filter(Boolean);
   const params: unknown[] = [];
   if (mode) params.push(mode);
   if (country) params.push(country);
   const where = filters.join(" AND ");
+  const routeWhere = [
+    activeTransportWhere("s"),
+    mode ? `s.mode = $1` : null,
+    country
+      ? `(COALESCE(
+           s.origin_country_iso2,
+           CASE WHEN s.mode = 'maritime' THEN s.registration_country_iso2 END
+         ) = ${countryParameter}
+         OR s.destination_country_iso2 = ${countryParameter})`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" AND ");
 
   const trendCountryParams = country ? [country] : [];
   // The overview used to launch four aggregate scans at once. On the
@@ -1521,12 +1567,15 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
          ) AS origin_country,
          s.destination_country_iso2 AS destination_country,
          COUNT(*) AS active_count,
+         COUNT(*) FILTER (
+           WHERE s.mode = 'maritime' AND s.origin_country_iso2 IS NULL
+         ) AS flag_origin_count,
          (ARRAY_AGG(
            COALESCE(s.flight_number, s.callsign, s.display_name, s.entity_id)
            ORDER BY s.observed_at DESC
          ))[1:5] AS examples
        FROM transport_snapshot s
-       WHERE ${where}
+       WHERE ${routeWhere}
          AND s.destination_country_iso2 IS NOT NULL
          AND COALESCE(
            s.origin_country_iso2,
@@ -1534,7 +1583,7 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
          ) IS NOT NULL
        GROUP BY s.mode, origin_country, destination_country
        ORDER BY active_count DESC
-       LIMIT 100`,
+       LIMIT ${country ? 500 : 100}`,
       params
     ),
     query<ActivityRow>(
@@ -1862,6 +1911,12 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
         COUNTRY_NAME_BY_ISO.get(row.destination_country.trim()) ??
         row.destination_country.trim(),
       active_count: count(row.active_count),
+      origin_basis:
+        count(row.flag_origin_count) === 0
+          ? "observed"
+          : count(row.flag_origin_count) === count(row.active_count)
+            ? "flag_fallback"
+            : "mixed",
       examples: row.examples ?? [],
     })),
     trends,
@@ -2223,6 +2278,7 @@ async function pruneTransportHistory(): Promise<void> {
     lastMaritimeQueuedAt.delete(mmsi);
     maritimeStatic.delete(mmsi);
     firstMaritimeCountry.delete(mmsi);
+    firstMaritimePosition.delete(mmsi);
   }
   for (const [callsign, cached] of routeCache) {
     if (cached.expiresAt < Date.now()) routeCache.delete(callsign);

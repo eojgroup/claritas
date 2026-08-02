@@ -207,6 +207,7 @@ export type TransportRouteAggregate = {
   destination_country: string;
   destination_name: string;
   active_count: number;
+  origin_basis: "observed" | "flag_fallback" | "mixed";
   examples: string[];
 };
 

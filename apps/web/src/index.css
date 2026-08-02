@@ -1458,36 +1458,6 @@ body {
   text-align: right;
 }
 
-.country-leadership-list {
-  display: grid;
-  gap: 0.55rem;
-}
-
-.country-leadership-list > div:not(.product-state) {
-  display: grid;
-  grid-template-columns: minmax(6.2rem, 0.65fr) minmax(0, 1fr);
-  gap: 0.12rem 0.65rem;
-  padding-left: 0.6rem;
-  border-left: 2px solid var(--shell-accent-2);
-}
-
-.country-leadership-list span,
-.country-leadership-list small {
-  color: var(--shell-muted);
-  font-size: 0.62rem;
-}
-
-.country-leadership-list strong {
-  overflow: hidden;
-  font-size: 0.7rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.country-leadership-list small {
-  grid-column: 2;
-}
-
 .country-market-list {
   display: grid;
   gap: 0.45rem;
@@ -1796,6 +1766,22 @@ body {
 .dashboard-news-headline strong {
   font-size: 0.76rem;
   line-height: 1.1rem;
+}
+
+.news-leadership-change {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 0.15rem;
+  padding: 0.08rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--signal-amber) 48%, var(--shell-border));
+  border-radius: 999px;
+  background: var(--signal-amber-soft);
+  color: var(--shell-ink);
+  font-size: 0.52rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  line-height: 0.8rem;
+  text-transform: uppercase;
 }
 
 .dashboard-news-source {
@@ -3070,6 +3056,45 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+.transport-map-land path[data-selected="true"] {
+  fill: color-mix(in srgb, var(--signal-amber) 30%, var(--shell-surface-strong));
+  stroke: color-mix(in srgb, var(--signal-amber) 76%, var(--shell-ink));
+  stroke-width: 1.5;
+}
+
+.transport-map-flows path {
+  fill: none;
+  stroke-width: var(--flow-weight, 1.4);
+  stroke-linecap: round;
+  opacity: 0.68;
+  vector-effect: non-scaling-stroke;
+}
+
+.transport-map-flows path[data-mode="aviation"] {
+  stroke: #77a8ba;
+}
+
+.transport-map-flows path[data-mode="maritime"] {
+  stroke: #eda36a;
+}
+
+.transport-map-flows path[data-origin-basis="flag_fallback"] {
+  stroke-dasharray: 4 4;
+  opacity: 0.48;
+}
+
+.transport-map-flows path[data-origin-basis="mixed"] {
+  stroke-dasharray: 9 3;
+}
+
+#transport-arrow-aviation path {
+  fill: #77a8ba;
+}
+
+#transport-arrow-maritime path {
+  fill: #eda36a;
+}
+
 .transport-map-routes path {
   fill: none;
   stroke-width: 1.2;
@@ -3100,6 +3125,41 @@ body {
   stroke-linejoin: round;
   opacity: 0.9;
   vector-effect: non-scaling-stroke;
+}
+
+.transport-map-selected-track circle {
+  fill: color-mix(in srgb, var(--shell-ink) 78%, #ffffff);
+  stroke: var(--shell-bg);
+  stroke-width: 0.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.transport-map-selected-track circle[data-latest="true"] {
+  fill: var(--signal-amber);
+  stroke: var(--shell-ink);
+}
+
+.transport-map-flow-nodes {
+  pointer-events: none;
+}
+
+.transport-map-flow-nodes circle {
+  fill: color-mix(in srgb, var(--shell-surface) 90%, transparent);
+  stroke: var(--shell-muted);
+  stroke-width: 1.2;
+}
+
+.transport-map-flow-nodes g[data-selected="true"] circle {
+  fill: color-mix(in srgb, var(--signal-amber) 32%, var(--shell-surface));
+  stroke: var(--signal-amber);
+  stroke-width: 1.8;
+}
+
+.transport-map-flow-nodes text {
+  fill: var(--shell-ink);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
 }
 
 .transport-map-entities g {
@@ -3237,6 +3297,13 @@ body {
   background: var(--viz-negative);
 }
 
+.transport-map-legend i[data-mode="flow"] {
+  width: 14px;
+  height: 2px;
+  border-radius: 0;
+  background: linear-gradient(90deg, #eda36a 0 48%, #77a8ba 52% 100%);
+}
+
 .transport-detail-panel {
   display: flex;
   flex-direction: column;
@@ -3251,6 +3318,20 @@ body {
   color: var(--shell-muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.transport-detail-title button {
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  color: var(--shell-accent-2);
+  font-size: 11px;
+  font-weight: 680;
+  cursor: pointer;
+}
+
+.transport-detail-title button:hover {
+  text-decoration: underline;
 }
 
 .transport-detail-panel dl {

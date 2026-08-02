@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-20
+- Note: The standalone leadership layer and context surface are superseded by [ADR-0004](0004-news-led-leadership-signals.md).
 
 ## Context
 

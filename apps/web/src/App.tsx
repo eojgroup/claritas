@@ -117,7 +117,7 @@ const SPLIT_VIEW_MIN_HEIGHT = 620;
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
 type SearchTopic = "all" | "news" | "podcasts" | "weather" | "markets";
-type MapMode = "signals" | "news" | "weather" | "leadership";
+type MapMode = "signals" | "news" | "weather";
 type AppView =
   | "dashboard"
   | "news"
@@ -249,9 +249,6 @@ const includesLinkageTerm = (haystack: string, value: string): boolean => {
   const normalized = normalizeLinkageText(value).trim();
   return normalized.length >= 3 && haystack.includes(` ${normalized} `);
 };
-
-const getLeadershipDisplayName = (value: string | null | undefined): string =>
-  value && !/^Q\d+$/i.test(value.trim()) ? value.trim() : "Name unavailable";
 
 const prettySourceName = (value: string): string => {
   const normalized = value.trim().toLowerCase();
@@ -691,7 +688,6 @@ import TransportWorkspace from "./components/TransportWorkspace";
 import {
   fetchAuthMe,
   fetchAuthProviders,
-  fetchCountryLeadership,
   fetchCountryStats,
   fetchCountryWeather,
   fetchDailyBriefingSchedule,
@@ -716,7 +712,6 @@ import {
   type AuthUser,
   type CountryStat,
   type CountryStatsCoverage,
-  type CountryLeadership,
   type CountryWeather,
   type DailyBriefingSchedule,
   type DailyBriefingEmailStatus,
@@ -808,7 +803,6 @@ export default function ClaritasDashboard() {
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [countryStatsCoverage, setCountryStatsCoverage] = useState<CountryStatsCoverage | null>(null);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
-  const [leadershipStats, setLeadershipStats] = useState<CountryLeadership[]>([]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [marketStatusRows, setMarketStatusRows] = useState<MarketStatus[]>([]);
   const [marketEarnings, setMarketEarnings] = useState<EarningsEvent[]>([]);
@@ -1142,9 +1136,6 @@ export default function ClaritasDashboard() {
     fetchCountryWeather()
       .then(setWeatherStats)
       .catch(() => setWeatherStats([]));
-    fetchCountryLeadership()
-      .then(setLeadershipStats)
-      .catch(() => setLeadershipStats([]));
     fetchMarketQuotes({ refresh: false })
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
@@ -1899,40 +1890,6 @@ export default function ClaritasDashboard() {
     }));
   }, [mapWeatherScope]);
 
-  const mapLeadershipScope = useMemo(() => {
-    if (!regionCountries) return leadershipStats;
-    return leadershipStats.filter((row) => regionCountries.has(row.country.toUpperCase()));
-  }, [leadershipStats, regionCountries]);
-
-  const mapLeadershipData = useMemo(() => {
-    return mapLeadershipScope.map((row) => {
-      const stateLeaders = row.roles
-        .filter((role) => role.role_type === "head_of_state")
-        .map((role) => getLeadershipDisplayName(role.person_name));
-      const governmentLeaders = row.roles
-        .filter((role) => role.role_type === "head_of_government")
-        .map((role) => getLeadershipDisplayName(role.person_name));
-      return {
-        country: row.country.toUpperCase(),
-        count: Math.max(row.roles.length, 1),
-        tone: "neutral" as const,
-        meta: {
-          subtitle: row.government_type ?? "Current national leadership",
-          lines: [
-            stateLeaders.length > 0 ? `Head of state: ${stateLeaders.join(", ")}` : "Head of state: —",
-            governmentLeaders.length > 0
-              ? `Head of government: ${governmentLeaders.join(", ")}`
-              : "Head of government: —",
-            row.source_updated_at
-              ? `Wikidata updated: ${new Date(row.source_updated_at).toLocaleString()}`
-              : "Wikidata updated: not provided",
-            `Claritas retrieved: ${new Date(row.retrieved_at).toLocaleString()}`,
-          ],
-        },
-      };
-    });
-  }, [mapLeadershipScope]);
-
   const podcastCountryLinks = useMemo(() => {
     type CountryPodcastLink = {
       signalCount: number;
@@ -1944,29 +1901,16 @@ export default function ClaritasDashboard() {
       sources: Set<string>;
     };
     const links = new Map<string, CountryPodcastLink>();
-    const termsByCountry = Array.from(countryMeta.entries()).map(([iso, meta]) => {
-      const leadership = leadershipStats.find(
-        (country) => country.country.toUpperCase() === iso,
-      );
-      return {
-        iso,
-        terms: Array.from(
-          new Set(
-            [
-              meta.name,
-              leadership?.country_name,
-              ...(COUNTRY_LINK_ALIASES[iso] ?? []),
-              ...(leadership?.roles.map((role) =>
-                getLeadershipDisplayName(role.person_name),
-              ) ?? []),
-            ].filter(
-              (value): value is string =>
-                Boolean(value && value !== "Name unavailable"),
-            ),
+    const termsByCountry = Array.from(countryMeta.entries()).map(([iso, meta]) => ({
+      iso,
+      terms: Array.from(
+        new Set(
+          [meta.name, ...(COUNTRY_LINK_ALIASES[iso] ?? [])].filter(
+            (term): term is string => Boolean(term),
           ),
         ),
-      };
-    });
+      ),
+    }));
     const riskScore: Record<string, number> = {
       critical: 100,
       high: 82,
@@ -2038,7 +1982,7 @@ export default function ClaritasDashboard() {
     });
 
     return links;
-  }, [countryMeta, leadershipStats, podcasts]);
+  }, [countryMeta, podcasts]);
 
   const crossSourceMapData = useMemo(() => {
     const newsByCountry = new Map(
@@ -2046,9 +1990,6 @@ export default function ClaritasDashboard() {
     );
     const weatherByIso = new Map(
       weatherStats.map((row) => [row.country.toUpperCase(), row] as const),
-    );
-    const leadershipByIso = new Map(
-      leadershipStats.map((row) => [row.country.toUpperCase(), row] as const),
     );
     const marketByIso = new Map<string, MarketQuote>();
     marketQuotes.forEach((quote) => {
@@ -2087,7 +2028,6 @@ export default function ClaritasDashboard() {
         const weather = weatherByIso.get(iso);
         const market = marketByIso.get(iso);
         const podcast = podcastCountryLinks.get(iso);
-        const leadership = leadershipByIso.get(iso);
         const newsRelevance = newsRow
           ? Math.log1p(newsRow.count) / Math.log1p(maxNews)
           : 0;
@@ -2149,9 +2089,6 @@ export default function ClaritasDashboard() {
                 "%",
               )}`
             : null,
-          leadership?.roles[0]
-            ? `Context: ${getLeadershipDisplayName(leadership.roles[0].person_name)}`
-            : null,
         ].filter((line): line is string => Boolean(line));
 
         return [
@@ -2170,7 +2107,6 @@ export default function ClaritasDashboard() {
       })
       .sort((a, b) => b.count - a.count);
   }, [
-    leadershipStats,
     mapBubbleData,
     marketQuotes,
     podcastCountryLinks,
@@ -2185,17 +2121,13 @@ export default function ClaritasDashboard() {
       ? crossSourceMapData
       : mapMode === "news"
         ? mapBubbleData
-        : mapMode === "weather"
-          ? mapWeatherData
-          : mapLeadershipData;
+        : mapWeatherData;
   const activeMapLegendLabel =
     mapMode === "signals"
       ? "Signal relevance"
       : mapMode === "news"
         ? "Story concentration"
-        : mapMode === "weather"
-          ? "Relative temperature"
-          : "Leadership records";
+        : "Relative temperature";
 
   const pinnedSignalSummary = useMemo(() => {
     if (!pinnedCountry) return null;
@@ -2226,15 +2158,6 @@ export default function ClaritasDashboard() {
       ) ?? null
     );
   }, [pinnedCountry, mapWeatherScope]);
-
-  const pinnedLeadershipSummary = useMemo(() => {
-    if (!pinnedCountry) return null;
-    return (
-      leadershipStats.find(
-        (row) => row.country.toUpperCase() === pinnedCountry.toUpperCase(),
-      ) ?? null
-    );
-  }, [leadershipStats, pinnedCountry]);
 
   const pinnedMeta = useMemo(() => {
     if (!pinnedCountry) return null;
@@ -2954,31 +2877,6 @@ export default function ClaritasDashboard() {
       latestEpisode,
     };
   }, [countryMeta, podcastCountryLinks, podcasts]);
-
-  const leadershipSummary = useMemo(() => {
-    const roles = leadershipStats.reduce(
-      (total, country) => total + country.roles.length,
-      0,
-    );
-    const completeProfiles = leadershipStats.filter(
-      (country) =>
-        country.roles.some((role) => role.role_type === "head_of_state") &&
-        country.roles.some((role) => role.role_type === "head_of_government"),
-    ).length;
-    const selectedProfile = selectedCountry
-      ? leadershipStats.find(
-          (country) =>
-            country.country.toUpperCase() === selectedCountry.toUpperCase(),
-        )
-      : null;
-
-    return {
-      countries: leadershipStats.length,
-      roles,
-      completeProfiles,
-      selectedProfile,
-    };
-  }, [leadershipStats, selectedCountry]);
 
   const selectedCountryContext = useMemo(() => {
     if (!selectedCountry) return null;
@@ -4501,7 +4399,7 @@ export default function ClaritasDashboard() {
                           {signalNotifications.length} active signals require review
                         </div>
                         <p className="mt-1 max-w-2xl text-xs text-[color:var(--shell-muted)] sm:text-sm">
-                          {activeRangeLabel} · {leadershipStats.length} leadership profiles · {latestEventLabel}
+                          {activeRangeLabel} · Latest source update {latestEventLabel}
                         </p>
                       </div>
                       <div className="app-stat-card rounded-lg px-3 py-2">
@@ -4687,26 +4585,6 @@ export default function ClaritasDashboard() {
                               {podcastSummary.evidence} excerpts
                             </small>
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setMapMode("leadership");
-                              requestAnimationFrame(() =>
-                                document
-                                  .getElementById("signal-map-feed")
-                                  ?.scrollIntoView({
-                                    behavior: "smooth",
-                                    block: "start",
-                                  }),
-                              );
-                            }}
-                          >
-                            <User className="h-3.5 w-3.5" />
-                            <strong>Leadership</strong>
-                            <small>
-                              {leadershipSummary.roles} officeholders · Wikidata
-                            </small>
-                          </button>
                         </div>
                       </div>
                       <div className="w-full rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 lg:max-w-md">
@@ -4757,9 +4635,7 @@ export default function ClaritasDashboard() {
                               ? "Cross-source signal relevance"
                               : mapMode === "news"
                                 ? "#News per country"
-                                : mapMode === "weather"
-                                  ? "Weather (temperature) per country"
-                                  : "Country leadership"}
+                                : "Weather (temperature) per country"}
                           </div>
                         </div>
                         <div className="map-mode-tabs flex flex-wrap items-center gap-2 text-xs">
@@ -4798,21 +4674,6 @@ export default function ClaritasDashboard() {
                             }}
                           >
                             Weather
-                          </button>
-                          <button
-                            className={`rounded-full border px-3 py-1 transition ${
-                              mapMode === "leadership"
-                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                            onClick={() => setMapMode("leadership")}
-                          >
-                            Leadership
-                            {leadershipStats.length > 0 && (
-                              <span className="ml-1 opacity-70">
-                                {leadershipStats.length}
-                              </span>
-                            )}
                           </button>
                           <button
                             type="button"
@@ -4964,7 +4825,7 @@ export default function ClaritasDashboard() {
                                   Top source: {pinnedTopSource ?? "—"}
                                 </div>
                               </>
-                            ) : mapMode === "weather" ? (
+                            ) : (
                               <>
                                 <div className="mt-2 text-[color:var(--shell-muted)]">
                                   Temp: {pinnedWeatherSummary?.temp_c ?? "—"}°C
@@ -4978,40 +4839,6 @@ export default function ClaritasDashboard() {
                                   {pinnedWeatherSummary?.observed_at
                                     ? new Date(
                                         pinnedWeatherSummary.observed_at,
-                                      ).toLocaleString()
-                                    : "—"}
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="mt-2 font-medium text-[color:var(--shell-ink)]">
-                                  {pinnedLeadershipSummary?.government_type ??
-                                    "Government type not listed"}
-                                </div>
-                                {pinnedLeadershipSummary?.roles.map((role) => (
-                                  <div
-                                    key={`${role.role_type}-${role.person_wikidata_id}`}
-                                    className="mt-1 text-[color:var(--shell-muted)]"
-                                  >
-                                    {role.role_type === "head_of_state"
-                                      ? "Head of state"
-                                      : "Head of government"}
-                                    : {getLeadershipDisplayName(role.person_name)}
-                                  </div>
-                                ))}
-                                <div className="mt-2 text-[color:var(--shell-muted)]">
-                                  Wikidata updated:{" "}
-                                  {pinnedLeadershipSummary?.source_updated_at
-                                    ? new Date(
-                                        pinnedLeadershipSummary.source_updated_at,
-                                      ).toLocaleString()
-                                    : "Not provided"}
-                                </div>
-                                <div className="text-[color:var(--shell-muted)]">
-                                  Claritas retrieved:{" "}
-                                  {pinnedLeadershipSummary?.retrieved_at
-                                    ? new Date(
-                                        pinnedLeadershipSummary.retrieved_at,
                                       ).toLocaleString()
                                     : "—"}
                                 </div>
@@ -5047,20 +4874,6 @@ export default function ClaritasDashboard() {
                               ) : (
                                 <span>Admin ingestion required.</span>
                               )}
-                            </div>
-                          )}
-                        {mapMode === "leadership" &&
-                          mapLeadershipScope.length === 0 && (
-                            <div className="absolute bottom-4 right-4 flex items-center gap-2 rounded border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs text-[color:var(--shell-muted)]">
-                              <span>No leadership records yet.</span>
-                              {isAdmin ? (
-                                <button
-                                  onClick={() => setActiveView("admin")}
-                                  className="rounded border border-[color:var(--shell-border)] px-2 py-0.5 hover:bg-[color:var(--signal-sky-soft)]"
-                                >
-                                  Open admin ingest
-                                </button>
-                              ) : null}
                             </div>
                           )}
                       </div>
@@ -5127,15 +4940,10 @@ export default function ClaritasDashboard() {
                               </span>
                             )}
                           </div>
-                        ) : mapMode === "weather" ? (
+                        ) : (
                           <div className="text-[color:var(--shell-muted)]">
                             Coverage windows apply to the news layer. Weather uses
                             the latest observation for each country.
-                          </div>
-                        ) : (
-                          <div className="text-[color:var(--shell-muted)]">
-                            Country details show when Wikidata last changed the record and when
-                            Claritas retrieved it.
                           </div>
                         )}
                       </div>
@@ -5209,14 +5017,6 @@ export default function ClaritasDashboard() {
                                   {relatedPodcastLink?.signalCount ?? 0}
                                 </strong>
                                 <small>attributed signals</small>
-                              </div>
-                              <div>
-                                <span>Leadership</span>
-                                <strong>
-                                  {leadershipSummary.selectedProfile?.roles
-                                    .length ?? 0}
-                                </strong>
-                                <small>current officeholders</small>
                               </div>
                               <div>
                                 <span>Markets</span>
@@ -5431,50 +5231,6 @@ export default function ClaritasDashboard() {
                               </section>
                             )}
 
-                            <section className="country-profile-section">
-                              <div className="country-profile-section-heading">
-                                <User className="h-4 w-4" />
-                                <span>Current leadership</span>
-                                <small>
-                                  {leadershipSummary.selectedProfile
-                                    ?.government_type ??
-                                    "Government type unavailable"}
-                                </small>
-                              </div>
-                              <div className="country-leadership-list">
-                                {leadershipSummary.selectedProfile?.roles.map(
-                                  (role) => (
-                                    <div
-                                      key={`${role.role_type}-${role.person_wikidata_id}`}
-                                    >
-                                      <span>
-                                        {role.role_type === "head_of_state"
-                                          ? "Head of state"
-                                          : "Head of government"}
-                                      </span>
-                                      <strong>
-                                        {getLeadershipDisplayName(role.person_name)}
-                                      </strong>
-                                      <small>
-                                        {role.started_at
-                                          ? `In office since ${new Date(
-                                              role.started_at,
-                                            ).toLocaleDateString()}`
-                                          : "Term start unavailable"}
-                                      </small>
-                                    </div>
-                                  ),
-                                )}
-                                {!leadershipSummary.selectedProfile?.roles
-                                  .length && (
-                                  <div className="product-state">
-                                    Current leadership has not been retrieved for
-                                    this country.
-                                  </div>
-                                )}
-                              </div>
-                            </section>
-
                             {relatedMarkets.length > 0 && (
                               <section className="country-profile-section">
                                 <div className="country-profile-section-heading">
@@ -5532,15 +5288,6 @@ export default function ClaritasDashboard() {
                               Open country news
                               <ArrowUpRight className="h-3.5 w-3.5" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setMapMode("leadership");
-                                setPinnedCountry(selectedCountryContext.iso);
-                              }}
-                            >
-                              Pin leadership
-                            </button>
                             {relatedPodcastLink && (
                               <button
                                 type="button"
@@ -5597,50 +5344,6 @@ export default function ClaritasDashboard() {
                                 </small>
                                 <span>
                                   Open evidence
-                                  <ArrowUpRight className="h-3.5 w-3.5" />
-                                </span>
-                              </span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setMapMode("leadership");
-                                requestAnimationFrame(() => {
-                                  document
-                                    .getElementById("signal-map-feed")
-                                    ?.scrollIntoView({
-                                      behavior: "smooth",
-                                      block: "start",
-                                    });
-                                });
-                              }}
-                              className="context-signal"
-                              aria-label="Show country leadership on the world map"
-                            >
-                              <span className="context-signal-icon context-signal-icon-secondary">
-                                <User className="h-4 w-4" />
-                              </span>
-                              <span className="min-w-0">
-                                <span className="context-signal-label">
-                                  Leadership context
-                                </span>
-                                <strong>
-                                  Current heads of state and government
-                                </strong>
-                                <small>
-                                  {leadershipSummary.completeProfiles} profiles
-                                  include both leadership roles
-                                </small>
-                              </span>
-                              <span className="context-signal-stat">
-                                <strong>{leadershipSummary.countries}</strong>
-                                <small>
-                                  countries · {leadershipSummary.roles}{" "}
-                                  officeholders
-                                </small>
-                                <span>
-                                  Explore map
                                   <ArrowUpRight className="h-3.5 w-3.5" />
                                 </span>
                               </span>
@@ -5988,9 +5691,7 @@ export default function ClaritasDashboard() {
                               ? "Cross-source signal relevance"
                               : mapMode === "news"
                                 ? "News coverage by country"
-                                : mapMode === "weather"
-                                  ? "Weather observations by country"
-                                  : "Current country leadership"}
+                                : "Weather observations by country"}
                           </div>
                         </div>
                         <button
@@ -8174,7 +7875,9 @@ export default function ClaritasDashboard() {
                 </section>
               </div>
             )}
-            {activeView === "transport" && <TransportWorkspace />}
+            {activeView === "transport" && (
+              <TransportWorkspace initialCountry={selectedCountry} />
+            )}
             {activeView === "admin" && isAdmin && (
               <div className="workspace-page control-room-page min-w-0 space-y-4">
                 <section className="control-room-intro">
@@ -8852,17 +8555,6 @@ export default function ClaritasDashboard() {
                                 }`}
                               >
                                 Weather
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setMapMode("leadership")}
-                                className={`rounded-full border px-3 py-1 ${
-                                  mapMode === "leadership"
-                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                    : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"
-                                }`}
-                              >
-                                Leadership
                               </button>
                             </div>
                           </div>

@@ -45,7 +45,7 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - Default subscription covers the global bounding box and requests position, Class B position, long-range position, ship static, and static data reports.
 - `AISSTREAM_BOUNDING_BOXES` can replace global coverage with a JSON array of provider-format bounding boxes.
 - `AISSTREAM_SAMPLE_SECONDS` controls current-position sampling and defaults to 300 seconds.
-- MMSI Maritime Identification Digits link a vessel to its flag country. Position-in-country, monitored-port geofences, the first observed voyage country, and recognizable AIS destination/UN LOCODE values add current, origin, and destination relationships.
+- MMSI Maritime Identification Digits link a vessel to its flag country. Position-in-country, monitored-port geofences, the first observed voyage country and position, and recognizable AIS destination/UN LOCODE values add current, origin, and destination relationships. When a declared destination resolves to a monitored port, its coordinates are retained so the individual vessel map can draw a route from the first observed position to that port.
 
 ### adsb.lol
 
@@ -69,7 +69,7 @@ Each current snapshot may carry multiple explicit country roles:
 | Destination | AIS destination interpreted as UN LOCODE, port, or country | Destination airport returned with a plausible route |
 | Flag / registration | ITU-R M.585 MMSI MID | Registration identifier when available |
 
-Country aggregates count unique vehicles per role. A single vehicle is counted once in a country's total even when it has several roles for that country. Maritime corridors fall back to flag-to-destination when a defensible origin has not yet been observed; the UI labels the source and confidence basis instead of presenting that link as an exact port-to-port voyage.
+Country aggregates count unique vehicles per role. A single vehicle is counted once in a country's total even when it has several roles for that country. Maritime corridors fall back to flag-to-destination when a defensible origin has not yet been observed; route aggregates expose whether their origin is observed, a flag fallback, or mixed. The map renders fallback flows with a dashed, lower-confidence treatment and the corridor list labels the flag proxy instead of presenting that link as an exact port-to-port voyage.
 
 ## Movement trends and takeaways
 
@@ -85,14 +85,14 @@ The API returns both the underlying current/previous values and concise, qualifi
 ## API
 
 - `GET /api/transport/overview?detail=aggregate` returns KPIs, country aggregates, corridor aggregates, 24-hour trend comparisons, qualified takeaways, monitored-port movement, hourly activity, freshness, and source coverage. iPhone, Watch, country profiles, and briefing generation use this response.
-- `GET /api/transport/overview?detail=full` adds current flight and vessel records for web and iPad. Optional `mode`, `country`, and `entity_limit` filters apply consistently to aggregates and details.
+- `GET /api/transport/overview?detail=full` adds current flight and vessel records for web and iPad. Optional `mode`, `country`, and `entity_limit` filters apply consistently to aggregates and details. Country-scoped corridor results include only routes whose resolved origin or destination is that country, while the broader entity result retains explicit current/flag/registration linkage.
 - `GET /api/transport/entities/:mode/:entityId` returns the current normalized record and up to 24 hours of sampled track points.
 
 All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Equivalent overview requests are coalesced and cached for 60 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation treats transport as optional evidence: a transient transport read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
 
 ## Presentation contract
 
-- Web and iPad show current vehicles, route curves, a selected sampled track, flight number or MMSI, country-chain drill-in, trend takeaways, monitored-port movement, a 24-hour activity chart, most-connected-country bars, corridor flows, and a dense identifier table.
+- Web and iPad show current vehicles on a 50m-detail base map, exact route curves when endpoint coordinates are available, and directional country-centroid flows for every resolved inbound/outbound corridor in a selected country scope. Selecting a vehicle focuses the map, keeps its marker size usable at deep zoom, refreshes its live position and sampled 24-hour trail, and exposes its flight number or MMSI and country chain. Country scope returns to a fitted view of all visible flow endpoints. Trend takeaways, monitored-port movement, a 24-hour activity chart, most-connected-country bars, corridor flows, and a dense identifier table remain available below the map.
 - iPhone shows only KPIs, qualified trend takeaways, leading countries, and leading corridors. It does not receive raw vehicles or track points during normal app bootstrap.
 - Watch shows only aggregate flight/vessel/country counts, a qualified takeaway, an aggregate country bubble map, and the leading corridor, with a handoff to the iPhone transport section.
 
