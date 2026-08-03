@@ -52,7 +52,7 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - No API key is required.
 - `ADSB_LOL_POLL_ENABLED` enables scheduled collection and defaults to `true`.
 - `ADSB_LOL_POLL_SECONDS` defaults to 300 seconds.
-- `ADSB_LOL_MAX_ROUTE_LOOKUPS` limits plausible route lookups per cycle and defaults to 60.
+- `ADSB_LOL_MAX_ROUTE_LOOKUPS` limits plausible route candidates per cycle and defaults to 2,000. Candidates are sampled proportionally across currently observed countries, then resolved against adsb.lol's CDN-backed standing-route records so early polling areas cannot consume the global budget. Successful and unknown callsigns are cached for 20 minutes; repeated provider failures open a short circuit breaker instead of delaying the whole refresh.
 - `ADSB_LOL_POLL_POINTS` can override the built-in global hub grid with JSON objects containing `label`, `lat`, `lon`, and a radius of at most 250 nautical miles.
 - `ADSB_LOL_USER_AGENT` should identify the deployment and a monitored contact.
 

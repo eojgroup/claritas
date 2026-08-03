@@ -5,6 +5,10 @@ import type { GeometryCollection, Properties, Topology } from "topojson-specific
 import WebSocket from "ws";
 import { getCountryFromMMSI } from "mmsi-country-lookup";
 import { pool, query } from "../db";
+import {
+  prioritizeAdsbRouteLookups,
+  type AdsbRouteLookup,
+} from "./transport-route-enrichment";
 
 export type TransportMode = "maritime" | "aviation";
 export type TransportDetailLevel = "aggregate" | "full";
@@ -190,6 +194,7 @@ type MaritimePort = {
 
 const AIS_STREAM_URL = "wss://stream.aisstream.io/v0/stream";
 const ADSB_BASE_URL = "https://api.adsb.lol";
+const ADSB_STANDING_DATA_BASE_URL = "https://vrs-standing-data.adsb.lol";
 const WORKER_LOCK_NAMESPACE = 9433;
 const WORKER_LOCK_KEY = 21;
 const TRANSPORT_SCOPE_GLOBAL = "*";
@@ -307,6 +312,9 @@ let aisFlushTimer: NodeJS.Timeout | null = null;
 let aisReconnectAttempt = 0;
 let aviationRefresh: Promise<{ fetched: number; stored: number }> | null = null;
 let lastAviationRefreshAt = 0;
+let aviationRouteLookupGeneration = 0;
+let adsbRouteProviderFailures = 0;
+let adsbRouteProviderUnavailableUntil = 0;
 let transportWorkerStarted = false;
 let transportRetentionTimer: NodeJS.Timeout | null = null;
 
@@ -873,9 +881,22 @@ function configuredAdsbPollPoints(): typeof ADSB_POLL_POINTS {
   }
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+class AdsbHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+async function fetchJson<T>(
+  url: string,
+  init?: RequestInit,
+  timeoutMilliseconds = 12_000,
+): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMilliseconds);
   try {
     const response = await fetch(url, {
       ...init,
@@ -889,7 +910,10 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
       },
     });
     if (!response.ok) {
-      throw new Error(`adsb.lol returned HTTP ${response.status}`);
+      throw new AdsbHttpError(
+        `adsb.lol returned HTTP ${response.status}`,
+        response.status,
+      );
     }
     return (await response.json()) as T;
   } finally {
@@ -917,28 +941,69 @@ async function mapWithConcurrency<T, R>(
 
 async function getAdsbRoute(
   callsign: string,
-  latitude: number,
-  longitude: number
 ): Promise<AdsbRoute | null> {
   const cached = routeCache.get(callsign);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (adsbRouteProviderUnavailableUntil > Date.now()) return null;
   try {
+    const normalizedCallsign = callsign.trim().toUpperCase();
+    const prefix = encodeURIComponent(normalizedCallsign.slice(0, 2));
     const route = await fetchJson<AdsbRoute>(
-      `${ADSB_BASE_URL}/api/0/route/${encodeURIComponent(callsign)}/${latitude.toFixed(
-        4
-      )}/${longitude.toFixed(4)}`
+      `${ADSB_STANDING_DATA_BASE_URL}/routes/${prefix}/${encodeURIComponent(normalizedCallsign)}.json`,
+      undefined,
+      5_000,
     );
-    const value =
-      route && route.airport_codes && route.airport_codes !== "unknown" ? route : null;
+    const value = usableAdsbRoute(route);
+    adsbRouteProviderFailures = 0;
+    adsbRouteProviderUnavailableUntil = 0;
     routeCache.set(callsign, {
-      expiresAt: Date.now() + (value ? 20 * 60_000 : 2 * 60_000),
+      expiresAt: Date.now() + 20 * 60_000,
       value,
     });
     return value;
-  } catch {
+  } catch (error) {
+    if (error instanceof AdsbHttpError && error.status === 404) {
+      adsbRouteProviderFailures = 0;
+      adsbRouteProviderUnavailableUntil = 0;
+      routeCache.set(callsign, {
+        expiresAt: Date.now() + 20 * 60_000,
+        value: null,
+      });
+      return null;
+    }
+    adsbRouteProviderFailures += 1;
     routeCache.set(callsign, { expiresAt: Date.now() + 60_000, value: null });
+    if (
+      adsbRouteProviderFailures >= 12 &&
+      adsbRouteProviderUnavailableUntil <= Date.now()
+    ) {
+      adsbRouteProviderUnavailableUntil = Date.now() + 60_000;
+      console.warn(
+        JSON.stringify({
+          event: "adsb_route_provider_circuit_open",
+          failures: adsbRouteProviderFailures,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     return null;
   }
+}
+
+function usableAdsbRoute(route: AdsbRoute | null | undefined): AdsbRoute | null {
+  return route?.airport_codes &&
+    route.airport_codes.toLowerCase() !== "unknown" &&
+    route.plausible !== false
+    ? route
+    : null;
+}
+
+async function enrichAdsbRoutes(
+  lookups: AdsbRouteLookup[],
+): Promise<void> {
+  await mapWithConcurrency(lookups, 20, (lookup) =>
+    getAdsbRoute(lookup.callsign),
+  );
 }
 
 function flightSnapshot(
@@ -1059,48 +1124,60 @@ async function runAviationRefresh(): Promise<{ fetched: number; stored: number }
     }
   }
 
-  const routeByHex = new Map<string, AdsbRoute | null>();
-  const routeCandidates = Array.from(byHex.values())
-    .filter((entry) => {
-      const hex = asString(entry.aircraft.hex)?.toLowerCase();
-      const callsign = asString(entry.aircraft.flight)?.replace(/\s+/g, "");
-      if (!hex || !callsign) return false;
-      const cached = routeCache.get(callsign);
-      if (cached && cached.expiresAt > Date.now()) {
-        routeByHex.set(hex, cached.value);
-        return false;
-      }
-      return true;
-    })
-    .slice(
-      0,
-      Math.max(
-        10,
-        Math.min(Number.parseInt(process.env.ADSB_LOL_MAX_ROUTE_LOOKUPS || "60", 10) || 60, 100)
-      )
-    );
-  const routes = await mapWithConcurrency(routeCandidates, 6, async (entry) => {
+  const uncachedByCallsign = new Map<string, AdsbRouteLookup>();
+  for (const entry of byHex.values()) {
     const callsign = asString(entry.aircraft.flight)?.replace(/\s+/g, "");
     const latitude = asFinite(entry.aircraft.lat);
     const longitude = asFinite(entry.aircraft.lon);
-    return callsign && latitude != null && longitude != null
-      ? getAdsbRoute(callsign, latitude, longitude)
-      : null;
-  });
-  routeCandidates.forEach((entry, index) => {
-    const hex = asString(entry.aircraft.hex)?.toLowerCase();
-    if (hex) routeByHex.set(hex, routes[index]);
-  });
+    if (!callsign || latitude == null || longitude == null) continue;
+    const cached = routeCache.get(callsign);
+    if (cached && cached.expiresAt > Date.now()) continue;
+    if (uncachedByCallsign.has(callsign)) continue;
+    uncachedByCallsign.set(callsign, {
+      callsign,
+      latitude,
+      longitude,
+      scope: countryAtPosition(latitude, longitude) ?? TRANSPORT_SCOPE_GLOBAL,
+    });
+  }
+  const routeLookupLimit = boundedIntegerFromEnv(
+    "ADSB_LOL_MAX_ROUTE_LOOKUPS",
+    2_000,
+    10,
+    5_000,
+  );
+  const routeCandidates = prioritizeAdsbRouteLookups(
+    Array.from(uncachedByCallsign.values()),
+    routeLookupLimit,
+    aviationRouteLookupGeneration,
+  );
+  aviationRouteLookupGeneration += 1;
+  await enrichAdsbRoutes(routeCandidates);
   const snapshots = Array.from(byHex.values()).flatMap((entry) => {
-    const hex = asString(entry.aircraft.hex)?.toLowerCase();
+    const callsign = asString(entry.aircraft.flight)?.replace(/\s+/g, "");
+    const cachedRoute = callsign ? routeCache.get(callsign) : null;
     const snapshot = flightSnapshot(
       entry.aircraft,
-      hex ? routeByHex.get(hex) ?? null : null,
+      cachedRoute && cachedRoute.expiresAt > Date.now()
+        ? cachedRoute.value
+        : null,
       entry.observedAt
     );
     return snapshot ? [snapshot] : [];
   });
   await storeTransportSnapshots(snapshots);
+  console.info(
+    JSON.stringify({
+      event: "adsb_route_enrichment",
+      aircraft: byHex.size,
+      uncached_callsigns: uncachedByCallsign.size,
+      lookup_candidates: routeCandidates.length,
+      routed_snapshots: snapshots.filter(
+        (snapshot) =>
+          snapshot.origin_country_iso2 && snapshot.destination_country_iso2,
+      ).length,
+    }),
+  );
   lastAviationRefreshAt = Date.now();
   return { fetched: byHex.size, stored: snapshots.length };
 }
