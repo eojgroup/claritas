@@ -3166,29 +3166,29 @@ body {
   stroke-width: 1.5;
 }
 
-.transport-map-flows path {
+.transport-map-connections path {
   fill: none;
-  stroke-width: var(--flow-weight, 1.4);
   stroke-linecap: round;
-  opacity: 0.68;
   vector-effect: non-scaling-stroke;
 }
 
-.transport-map-flows path[data-mode="aviation"] {
+.transport-map-connection-halo {
+  stroke: color-mix(in srgb, var(--shell-bg) 82%, var(--shell-border));
+  stroke-width: calc(var(--connection-weight, 1.8px) + 3px);
+  opacity: 0.82;
+}
+
+.transport-map-connection-band {
+  stroke-width: var(--connection-weight, 1.8px);
+  opacity: 0.84;
+}
+
+.transport-map-connection-band[data-mode="aviation"] {
   stroke: #77a8ba;
 }
 
-.transport-map-flows path[data-mode="maritime"] {
+.transport-map-connection-band[data-mode="maritime"] {
   stroke: #eda36a;
-}
-
-.transport-map-flows path[data-origin-basis="flag_fallback"] {
-  stroke-dasharray: 4 4;
-  opacity: 0.48;
-}
-
-.transport-map-flows path[data-origin-basis="mixed"] {
-  stroke-dasharray: 9 3;
 }
 
 #transport-arrow-aviation path {
@@ -3201,10 +3201,10 @@ body {
 
 .transport-map-routes path {
   fill: none;
-  stroke-width: 1.2;
+  stroke-width: 1.35;
   stroke-linecap: round;
   stroke-dasharray: 4 4;
-  opacity: 0.3;
+  opacity: 0.44;
   vector-effect: non-scaling-stroke;
 }
 
@@ -3217,7 +3217,7 @@ body {
 }
 
 .transport-map-routes path[data-selected="true"] {
-  stroke-width: 2.4;
+  stroke-width: 2.6;
   opacity: 0.95;
 }
 
@@ -3426,11 +3426,39 @@ body {
   background: var(--viz-negative);
 }
 
-.transport-map-legend i[data-mode="flow"] {
+.transport-map-legend i[data-mode="aviation-link"],
+.transport-map-legend i[data-mode="maritime-link"] {
+  width: 14px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.transport-map-legend i[data-mode="aviation-link"] {
+  background: #77a8ba;
+}
+
+.transport-map-legend i[data-mode="maritime-link"] {
+  background: #eda36a;
+}
+
+.transport-map-legend i[data-mode="direction"] {
+  position: relative;
   width: 14px;
   height: 2px;
   border-radius: 0;
-  background: linear-gradient(90deg, #eda36a 0 48%, #77a8ba 52% 100%);
+  background: color-mix(in srgb, var(--shell-ink) 74%, #77a8ba);
+}
+
+.transport-map-legend i[data-mode="direction"]::after {
+  position: absolute;
+  top: -3px;
+  right: -1px;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid color-mix(in srgb, var(--shell-ink) 74%, #77a8ba);
+  content: "";
 }
 
 .transport-map-legend i[data-mode="linked"] {

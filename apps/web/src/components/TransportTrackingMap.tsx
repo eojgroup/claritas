@@ -36,6 +36,18 @@ type Props = {
   onCountrySelect?: (country: string) => void;
 };
 
+type CountryConnection = {
+  mode: TransportMode;
+  selectedCountry: string;
+  selectedName: string;
+  counterpartCountry: string;
+  counterpartName: string;
+  activeCount: number;
+  outboundCount: number;
+  inboundCount: number;
+  hasProxyOrigin: boolean;
+};
+
 const WIDTH = 1_120;
 const HEIGHT = 560;
 const topology = worldAtlas as unknown as Topology<{
@@ -109,16 +121,23 @@ function routePath(entity: TransportEntity): string | null {
   return `M ${start[0]} ${start[1]} Q ${midpointX} ${midpointY} ${end[0]} ${end[1]}`;
 }
 
-function aggregateRoutePath(route: TransportRouteAggregate): string | null {
-  const start = countryCoordinateByIso.get(route.origin_country.toUpperCase());
-  const end = countryCoordinateByIso.get(route.destination_country.toUpperCase());
-  if (!start || !end || route.origin_country === route.destination_country) return null;
+function countryConnectionPath(connection: CountryConnection): string | null {
+  const start = countryCoordinateByIso.get(connection.selectedCountry);
+  const end = countryCoordinateByIso.get(connection.counterpartCountry);
+  if (!start || !end || connection.selectedCountry === connection.counterpartCountry) {
+    return null;
+  }
   const dx = end[0] - start[0];
   const dy = end[1] - start[1];
   const distance = Math.hypot(dx, dy);
-  const bend = Math.min(105, distance * 0.18);
-  const midpointX = (start[0] + end[0]) / 2 + (dy / Math.max(distance, 1)) * bend;
-  const midpointY = (start[1] + end[1]) / 2 - (dx / Math.max(distance, 1)) * bend;
+  const bend = Math.min(74, distance * 0.12);
+  const lane = connection.mode === "aviation" ? -1 : 1;
+  const midpointX =
+    (start[0] + end[0]) / 2 +
+    (dy / Math.max(distance, 1)) * bend * lane;
+  const midpointY =
+    (start[1] + end[1]) / 2 -
+    (dx / Math.max(distance, 1)) * bend * lane;
   return `M ${start[0]} ${start[1]} Q ${midpointX} ${midpointY} ${end[0]} ${end[1]}`;
 }
 
@@ -242,25 +261,60 @@ export default function TransportTrackingMap({
             (mode === "all" || route.mode === mode) &&
             includesSelected &&
             matchesComparison &&
-            Boolean(aggregateRoutePath(route))
+            origin !== destination &&
+            countryCoordinateByIso.has(origin) &&
+            countryCoordinateByIso.has(destination)
           );
         },
       );
     },
     [comparisonCountry, mode, routes, selectedCountry],
   );
+  const countryConnections = useMemo(() => {
+    if (!selectedCountry) return [];
+    const selectedIso = selectedCountry.trim().toUpperCase();
+    const connections = new Map<string, CountryConnection>();
+    visibleRoutes.forEach((route) => {
+      const origin = route.origin_country.trim().toUpperCase();
+      const destination = route.destination_country.trim().toUpperCase();
+      const selectedIsOrigin = origin === selectedIso;
+      const counterpartCountry = selectedIsOrigin ? destination : origin;
+      const key = `${route.mode}-${counterpartCountry}`;
+      const connection = connections.get(key) ?? {
+        mode: route.mode,
+        selectedCountry: selectedIso,
+        selectedName: selectedIsOrigin ? route.origin_name : route.destination_name,
+        counterpartCountry,
+        counterpartName: selectedIsOrigin
+          ? route.destination_name
+          : route.origin_name,
+        activeCount: 0,
+        outboundCount: 0,
+        inboundCount: 0,
+        hasProxyOrigin: false,
+      };
+      connection.activeCount += route.active_count;
+      if (selectedIsOrigin) {
+        connection.outboundCount += route.active_count;
+      } else {
+        connection.inboundCount += route.active_count;
+      }
+      connection.hasProxyOrigin ||= route.origin_basis !== "observed";
+      connections.set(key, connection);
+    });
+    return Array.from(connections.values()).filter(countryConnectionPath);
+  }, [selectedCountry, visibleRoutes]);
   const flowCountryNodes = useMemo(() => {
     if (!selectedCountry) return [];
     const countryCodes = new Set<string>([selectedCountry.toUpperCase()]);
-    visibleRoutes.forEach((route) => {
-      countryCodes.add(route.origin_country.toUpperCase());
-      countryCodes.add(route.destination_country.toUpperCase());
+    countryConnections.forEach((connection) => {
+      countryCodes.add(connection.counterpartCountry);
     });
     return Array.from(countryCodes).flatMap((iso) => {
       const coordinate = countryCoordinateByIso.get(iso);
       return coordinate ? [{ iso, coordinate }] : [];
     });
-  }, [selectedCountry, visibleRoutes]);
+  }, [countryConnections, selectedCountry]);
   const selected = visibleEntities.find((entity) => entity.id === selectedId);
   const focusedEntity = hovered ?? selected;
   const countryScopeView = useMemo(() => {
@@ -269,10 +323,10 @@ export default function TransportTrackingMap({
     if (!selectedFeature) return { scale: 1, x: 0, y: 0 };
     const [[featureLeft, featureTop], [featureRight, featureBottom]] =
       path.bounds(selectedFeature);
-    const coordinates = visibleRoutes.flatMap((route) =>
+    const coordinates = countryConnections.flatMap((connection) =>
       [
-        countryCoordinateByIso.get(route.origin_country.toUpperCase()),
-        countryCoordinateByIso.get(route.destination_country.toUpperCase()),
+        countryCoordinateByIso.get(connection.selectedCountry),
+        countryCoordinateByIso.get(connection.counterpartCountry),
       ].filter((coordinate): coordinate is [number, number] => Boolean(coordinate)),
     );
     const left = Math.min(featureLeft, ...coordinates.map((coordinate) => coordinate[0]));
@@ -291,7 +345,7 @@ export default function TransportTrackingMap({
       x: WIDTH / 2 - center[0] * scale,
       y: HEIGHT / 2 - center[1] * scale,
     };
-  }, [selectedCountry, visibleRoutes]);
+  }, [countryConnections, selectedCountry]);
 
   useEffect(() => {
     const coordinate = selected
@@ -381,7 +435,7 @@ export default function TransportTrackingMap({
         </button>
         {selectedCountry && (
           <button type="button" onClick={() => setView(countryScopeView)}>
-            Flows
+            Links
           </button>
         )}
       </div>
@@ -390,7 +444,7 @@ export default function TransportTrackingMap({
         ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         role="img"
-        aria-label={`Live transport tracking map with ${visibleEntities.length} vehicles${comparisonCountry ? ` between ${selectedCountry} and ${comparisonCountry}` : ""}`}
+        aria-label={`Live transport tracking map with ${visibleEntities.length} vehicles and ${countryConnections.length} country connections${comparisonCountry ? ` between ${selectedCountry} and ${comparisonCountry}` : ""}`}
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -429,24 +483,41 @@ export default function TransportTrackingMap({
             })}
           </g>
 
-          <g className="transport-map-flows">
-            {visibleRoutes.map((route) => (
-              <path
-                key={`flow-${route.mode}-${route.origin_country}-${route.destination_country}`}
-                d={aggregateRoutePath(route) ?? ""}
-                data-mode={route.mode}
-                data-origin-basis={route.origin_basis}
-                style={{
-                  "--flow-weight": Math.min(
-                    5,
-                    1.2 + Math.log2(route.active_count + 1),
-                  ),
-                } as CSSProperties}
-                markerEnd={`url(#transport-arrow-${route.mode})`}
-              >
-                <title>{`${route.origin_name} → ${route.destination_name}: ${route.active_count} ${route.mode === "aviation" ? "aircraft" : "vessels"}${route.origin_basis === "observed" ? "" : route.origin_basis === "mixed" ? " (some maritime origins use vessel flag as a proxy)" : " (maritime origin uses vessel flag as a proxy)"}`}</title>
-              </path>
-            ))}
+          <g className="transport-map-connections">
+            {countryConnections.map((connection) => {
+              const connectionPath = countryConnectionPath(connection) ?? "";
+              const connectionStyle = {
+                "--connection-weight": `${Math.min(
+                  5,
+                  1.2 + Math.log2(connection.activeCount + 1),
+                )}px`,
+              } as CSSProperties;
+              const unit =
+                connection.mode === "aviation" ? "flights" : "vessels";
+              const qualification = connection.hasProxyOrigin
+                ? " · includes flag-proxy origin evidence"
+                : "";
+              return (
+                <g
+                  key={`connection-${connection.mode}-${connection.counterpartCountry}`}
+                  data-mode={connection.mode}
+                >
+                  <path
+                    className="transport-map-connection-halo"
+                    d={connectionPath}
+                    style={connectionStyle}
+                  />
+                  <path
+                    className="transport-map-connection-band"
+                    d={connectionPath}
+                    data-mode={connection.mode}
+                    style={connectionStyle}
+                  >
+                    <title>{`${connection.selectedName} ↔ ${connection.counterpartName}: ${connection.activeCount} active ${unit} · ${connection.outboundCount} outbound · ${connection.inboundCount} inbound${qualification}`}</title>
+                  </path>
+                </g>
+              );
+            })}
           </g>
 
           <g className="transport-map-routes">
@@ -456,7 +527,10 @@ export default function TransportTrackingMap({
                 d={routePath(entity) ?? ""}
                 data-mode={entity.mode}
                 data-selected={entity.id === selectedId || undefined}
-              />
+                markerEnd={`url(#transport-arrow-${entity.mode})`}
+              >
+                <title>{`${entity.display_name ?? entity.entity_id}: ${entity.route_label ?? "resolved vehicle route"}`}</title>
+              </path>
             ))}
           </g>
 
@@ -609,7 +683,9 @@ export default function TransportTrackingMap({
       )}
 
       <div className="transport-map-legend">
-        {selectedCountry && <span><i data-mode="flow" /> Directed country flow</span>}
+        {selectedCountry && mode !== "maritime" && <span><i data-mode="aviation-link" /> Flight connection</span>}
+        {selectedCountry && mode !== "aviation" && <span><i data-mode="maritime-link" /> Shipping connection</span>}
+        {routeEntities.length > 0 && <span><i data-mode="direction" /> Vehicle route direction</span>}
         {selectedCountry && <span><i data-mode="linked" /> Country-linked vehicle</span>}
         {comparisonCountry && <span><i data-mode="comparison" /> Compared country</span>}
         <span><i data-mode="aviation" /> Aircraft</span>
