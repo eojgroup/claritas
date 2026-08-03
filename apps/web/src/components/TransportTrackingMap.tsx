@@ -28,10 +28,12 @@ type Props = {
   entities: TransportEntity[];
   routes?: TransportRouteAggregate[];
   selectedCountry?: string | null;
+  comparisonCountry?: string | null;
   selectedId?: string | null;
   track?: TransportTrackPoint[];
   mode?: TransportMode | "all";
   onSelect?: (entity: TransportEntity) => void;
+  onCountrySelect?: (country: string) => void;
 };
 
 const WIDTH = 1_120;
@@ -138,6 +140,25 @@ function entityLinksCountry(entity: TransportEntity, country: string) {
   );
 }
 
+function entityLinksCorridor(
+  entity: TransportEntity,
+  firstCountry: string,
+  secondCountry: string,
+) {
+  const first = firstCountry.trim().toUpperCase();
+  const second = secondCountry.trim().toUpperCase();
+  const origin =
+    entity.origin_country_iso2?.trim().toUpperCase() ??
+    (entity.mode === "maritime"
+      ? entity.registration_country_iso2?.trim().toUpperCase()
+      : undefined);
+  const destination = entity.destination_country_iso2?.trim().toUpperCase();
+  return (
+    (origin === first && destination === second) ||
+    (origin === second && destination === first)
+  );
+}
+
 function countryLinkRoles(entity: TransportEntity, country: string) {
   const iso = country.trim().toUpperCase();
   return entity.country_links
@@ -154,10 +175,12 @@ export default function TransportTrackingMap({
   entities,
   routes = [],
   selectedCountry,
+  comparisonCountry,
   selectedId,
   track = [],
   mode = "all",
   onSelect,
+  onCountrySelect,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<{
@@ -176,10 +199,17 @@ export default function TransportTrackingMap({
           (entity) =>
             (mode === "all" || entity.mode === mode) &&
             (!selectedCountry || entityLinksCountry(entity, selectedCountry)) &&
+            (!selectedCountry ||
+              !comparisonCountry ||
+              entityLinksCorridor(
+                entity,
+                selectedCountry,
+                comparisonCountry,
+              )) &&
             project(entity.latitude, entity.longitude),
         )
         .slice(0, selectedCountry ? 2_500 : 1_200),
-    [entities, mode, selectedCountry],
+    [comparisonCountry, entities, mode, selectedCountry],
   );
   const routeEntities = useMemo(
     () =>
@@ -197,15 +227,27 @@ export default function TransportTrackingMap({
   const visibleRoutes = useMemo(
     () => {
       if (!selectedCountry) return [];
+      const selected = selectedCountry.trim().toUpperCase();
+      const comparison = comparisonCountry?.trim().toUpperCase();
       return routes.filter(
-        (route) =>
-          (mode === "all" || route.mode === mode) &&
-          (route.origin_country.toUpperCase() === selectedCountry.toUpperCase() ||
-            route.destination_country.toUpperCase() === selectedCountry.toUpperCase()) &&
-          aggregateRoutePath(route),
+        (route) => {
+          const origin = route.origin_country.trim().toUpperCase();
+          const destination = route.destination_country.trim().toUpperCase();
+          const includesSelected = origin === selected || destination === selected;
+          const matchesComparison =
+            !comparison ||
+            ((origin === selected && destination === comparison) ||
+              (origin === comparison && destination === selected));
+          return (
+            (mode === "all" || route.mode === mode) &&
+            includesSelected &&
+            matchesComparison &&
+            Boolean(aggregateRoutePath(route))
+          );
+        },
       );
     },
-    [mode, routes, selectedCountry],
+    [comparisonCountry, mode, routes, selectedCountry],
   );
   const flowCountryNodes = useMemo(() => {
     if (!selectedCountry) return [];
@@ -288,7 +330,9 @@ export default function TransportTrackingMap({
     // Pointer capture retargets the eventual click, so markers own their gesture.
     if (
       event.target instanceof Element &&
-      event.target.closest('[data-transport-entity="true"]')
+      event.target.closest(
+        '[data-transport-entity="true"], [data-transport-country-node="true"]',
+      )
     ) {
       return;
     }
@@ -346,7 +390,7 @@ export default function TransportTrackingMap({
         ref={svgRef}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         role="img"
-        aria-label={`Live transport tracking map with ${visibleEntities.length} vehicles`}
+        aria-label={`Live transport tracking map with ${visibleEntities.length} vehicles${comparisonCountry ? ` between ${selectedCountry} and ${comparisonCountry}` : ""}`}
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -366,16 +410,23 @@ export default function TransportTrackingMap({
           transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}
         >
           <g className="transport-map-land">
-            {countries.features.map((country, index) => (
-              <path
-                key={String(country.id ?? index)}
-                d={path(country) ?? ""}
-                data-selected={
-                  countryIsoByNumeric.get(String(country.id ?? "").padStart(3, "0")) ===
-                    selectedCountry?.toUpperCase() || undefined
-                }
-              />
-            ))}
+            {countries.features.map((country, index) => {
+              const iso = countryIsoByNumeric.get(
+                String(country.id ?? "").padStart(3, "0"),
+              );
+              return (
+                <path
+                  key={String(country.id ?? index)}
+                  d={path(country) ?? ""}
+                  data-selected={
+                    iso === selectedCountry?.trim().toUpperCase() || undefined
+                  }
+                  data-comparison={
+                    iso === comparisonCountry?.trim().toUpperCase() || undefined
+                  }
+                />
+              );
+            })}
           </g>
 
           <g className="transport-map-flows">
@@ -428,12 +479,47 @@ export default function TransportTrackingMap({
           )}
 
           <g className="transport-map-flow-nodes">
-            {flowCountryNodes.map(({ iso, coordinate }) => (
-              <g key={iso} transform={`translate(${coordinate[0]} ${coordinate[1]}) scale(${1 / view.scale})`} data-selected={iso === selectedCountry?.toUpperCase() || undefined}>
-                <circle r={iso === selectedCountry?.toUpperCase() ? 11 : 8} />
-                <text y={3.2} textAnchor="middle">{iso}</text>
-              </g>
-            ))}
+            {flowCountryNodes.map(({ iso, coordinate }) => {
+              const isSelected =
+                iso === selectedCountry?.trim().toUpperCase();
+              const isComparison =
+                iso === comparisonCountry?.trim().toUpperCase();
+              const isSelectable = !isSelected && Boolean(onCountrySelect);
+              return (
+                <g
+                  key={iso}
+                  transform={`translate(${coordinate[0]} ${coordinate[1]}) scale(${1 / view.scale})`}
+                  data-selected={isSelected || undefined}
+                  data-comparison={isComparison || undefined}
+                  data-selectable={isSelectable || undefined}
+                  data-transport-country-node="true"
+                  tabIndex={isSelectable ? 0 : undefined}
+                  role={isSelectable ? "button" : undefined}
+                  aria-label={
+                    isSelectable
+                      ? `Compare ${selectedCountry} with ${iso}`
+                      : undefined
+                  }
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (isSelectable) onCountrySelect?.(iso);
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      isSelectable &&
+                      (event.key === "Enter" || event.key === " ")
+                    ) {
+                      event.preventDefault();
+                      onCountrySelect?.(iso);
+                    }
+                  }}
+                >
+                  <circle r={isSelected || isComparison ? 11 : 8} />
+                  <text y={3.2} textAnchor="middle">{iso}</text>
+                </g>
+              );
+            })}
           </g>
 
           <g className="transport-map-entities">
@@ -458,6 +544,7 @@ export default function TransportTrackingMap({
                   aria-pressed={isSelected}
                   aria-label={`${entity.display_name ?? entity.entity_id}, ${entity.mode}`}
                   onPointerDown={(event) => event.stopPropagation()}
+                  onPointerUp={(event) => event.stopPropagation()}
                   onClick={(event) => {
                     event.stopPropagation();
                     onSelect?.(entity);
@@ -474,7 +561,7 @@ export default function TransportTrackingMap({
                   onBlur={() => setHovered(null)}
                 >
                   <g transform={`rotate(${entity.heading ?? 0}) scale(${1 / view.scale})`}>
-                    <circle className="transport-map-hit-target" r={14} />
+                    <circle className="transport-map-hit-target" r={17} />
                     {entity.mode === "aviation" ? (
                       <path d="M 0 -7 L 3 -1 L 7 2 L 7 4 L 1 2 L 1 7 L -1 7 L -1 2 L -7 4 L -7 2 L -3 -1 Z" />
                     ) : (
@@ -517,12 +604,14 @@ export default function TransportTrackingMap({
               ) || "country association"}
             </small>
           )}
+          <small>Select marker to inspect and follow</small>
         </div>
       )}
 
       <div className="transport-map-legend">
         {selectedCountry && <span><i data-mode="flow" /> Directed country flow</span>}
         {selectedCountry && <span><i data-mode="linked" /> Country-linked vehicle</span>}
+        {comparisonCountry && <span><i data-mode="comparison" /> Compared country</span>}
         <span><i data-mode="aviation" /> Aircraft</span>
         <span><i data-mode="maritime" /> Vessels</span>
         <span><i data-mode="alert" /> Alert</span>

@@ -2931,16 +2931,30 @@ body {
   overflow: hidden;
 }
 
-.transport-country-insights article {
+.transport-country-insights > article,
+.transport-country-insights > button {
   display: grid;
   gap: 5px;
   min-width: 0;
   padding: 14px 16px;
   border-right: 1px solid var(--shell-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--shell-ink);
+  text-align: left;
 }
 
-.transport-country-insights article:last-child {
+.transport-country-insights > :last-child {
   border-right: 0;
+}
+
+.transport-country-insight-action {
+  cursor: pointer;
+}
+
+.transport-country-insight-action:hover,
+.transport-country-insight-action:focus-visible {
+  background: color-mix(in srgb, var(--shell-accent-2) 12%, transparent);
 }
 
 .transport-country-insights span {
@@ -2966,6 +2980,14 @@ body {
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.transport-country-insights small svg {
+  display: inline;
+  width: 11px;
+  height: 11px;
+  margin-left: 3px;
+  vertical-align: -2px;
 }
 
 .transport-takeaway-grid {
@@ -3138,6 +3160,12 @@ body {
   stroke-width: 1.5;
 }
 
+.transport-map-land path[data-comparison="true"] {
+  fill: color-mix(in srgb, #77a8ba 30%, var(--shell-surface-strong));
+  stroke: color-mix(in srgb, #77a8ba 82%, var(--shell-ink));
+  stroke-width: 1.5;
+}
+
 .transport-map-flows path {
   fill: none;
   stroke-width: var(--flow-weight, 1.4);
@@ -3216,7 +3244,7 @@ body {
 }
 
 .transport-map-flow-nodes {
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .transport-map-flow-nodes circle {
@@ -3229,6 +3257,23 @@ body {
   fill: color-mix(in srgb, var(--signal-amber) 32%, var(--shell-surface));
   stroke: var(--signal-amber);
   stroke-width: 1.8;
+}
+
+.transport-map-flow-nodes g[data-comparison="true"] circle {
+  fill: color-mix(in srgb, #77a8ba 34%, var(--shell-surface));
+  stroke: #77a8ba;
+  stroke-width: 1.8;
+}
+
+.transport-map-flow-nodes g[data-selectable="true"] {
+  cursor: pointer;
+  outline: none;
+}
+
+.transport-map-flow-nodes g[data-selectable="true"]:hover circle,
+.transport-map-flow-nodes g[data-selectable="true"]:focus-visible circle {
+  stroke: var(--shell-ink);
+  stroke-width: 2.2;
 }
 
 .transport-map-flow-nodes text {
@@ -3391,6 +3436,11 @@ body {
 .transport-map-legend i[data-mode="linked"] {
   border: 1.5px solid var(--shell-accent-2);
   background: transparent;
+}
+
+.transport-map-legend i[data-mode="comparison"] {
+  border: 1px solid #77a8ba;
+  background: color-mix(in srgb, #77a8ba 34%, transparent);
 }
 
 .transport-detail-panel {
@@ -4028,11 +4078,11 @@ body {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .transport-country-insights article:nth-child(2) {
+  .transport-country-insights > :nth-child(2) {
     border-right: 0;
   }
 
-  .transport-country-insights article:nth-child(-n + 2) {
+  .transport-country-insights > :nth-child(-n + 2) {
     border-bottom: 1px solid var(--shell-border);
   }
 
@@ -4083,12 +4133,12 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .transport-country-insights article {
+  .transport-country-insights > * {
     border-right: 0;
     border-bottom: 1px solid var(--shell-border);
   }
 
-  .transport-country-insights article:last-child {
+  .transport-country-insights > :last-child {
     border-bottom: 0;
   }
 

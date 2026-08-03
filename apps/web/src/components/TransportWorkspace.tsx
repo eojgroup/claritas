@@ -68,6 +68,25 @@ function entityLinksCountry(entity: TransportEntity, country: string) {
   );
 }
 
+function entityLinksCorridor(
+  entity: TransportEntity,
+  firstCountry: string,
+  secondCountry: string,
+) {
+  const first = firstCountry.trim().toUpperCase();
+  const second = secondCountry.trim().toUpperCase();
+  const origin =
+    entity.origin_country_iso2?.trim().toUpperCase() ??
+    (entity.mode === "maritime"
+      ? entity.registration_country_iso2?.trim().toUpperCase()
+      : undefined);
+  const destination = entity.destination_country_iso2?.trim().toUpperCase();
+  return (
+    (origin === first && destination === second) ||
+    (origin === second && destination === first)
+  );
+}
+
 function entityIdentifier(entity: TransportEntity) {
   return (
     entity.flight_number ??
@@ -153,6 +172,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
   const [overview, setOverview] = useState<TransportOverview | null>(null);
   const [mode, setMode] = useState<ModeFilter>("all");
   const [country, setCountry] = useState<string>(() => initialCountry?.toUpperCase() ?? "");
+  const [corridorCountry, setCorridorCountry] = useState("");
   const [selected, setSelected] = useState<TransportEntity | null>(null);
   const [track, setTrack] = useState<TransportTrackPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,7 +183,10 @@ export default function TransportWorkspace({ initialCountry }: Props) {
   const selectedRef = useRef<TransportEntity | null>(null);
 
   useEffect(() => {
-    if (initialCountry) setCountry(initialCountry.toUpperCase());
+    if (initialCountry) {
+      setCountry(initialCountry.toUpperCase());
+      setCorridorCountry("");
+    }
   }, [initialCountry]);
 
   const load = useCallback(
@@ -241,6 +264,15 @@ export default function TransportWorkspace({ initialCountry }: Props) {
     (nextCountry: string) => {
       clearSelection();
       setCountry(nextCountry);
+      setCorridorCountry("");
+    },
+    [clearSelection],
+  );
+
+  const selectCorridorCountry = useCallback(
+    (nextCountry: string) => {
+      clearSelection();
+      setCorridorCountry(nextCountry.trim().toUpperCase());
     },
     [clearSelection],
   );
@@ -334,9 +366,10 @@ export default function TransportWorkspace({ initialCountry }: Props) {
       current[route.mode] += route.active_count;
       counterparties.set(counterpartCountry, current);
     }
-    const strongestCounterparty = Array.from(counterparties.values()).sort(
+    const rankedCounterparties = Array.from(counterparties.values()).sort(
       (left, right) => right.active - left.active,
-    )[0] ?? null;
+    );
+    const strongestCounterparty = rankedCounterparties[0] ?? null;
     const currentEntities = linkedEntities.filter(
       (entity) => entity.current_country_iso2?.trim().toUpperCase() === iso,
     );
@@ -365,16 +398,111 @@ export default function TransportWorkspace({ initialCountry }: Props) {
       inbound,
       outbound,
       strongestCounterparty,
+      counterparties: rankedCounterparties,
       currentEntities,
       completeRoutes,
       proxyOnly,
     };
   }, [country, overview]);
 
+  const selectedCorridor = useMemo(() => {
+    if (!country || !corridorCountry) return null;
+    const first = country.trim().toUpperCase();
+    const second = corridorCountry.trim().toUpperCase();
+    const routes = (overview?.routes ?? []).filter((route) => {
+      const origin = route.origin_country.trim().toUpperCase();
+      const destination = route.destination_country.trim().toUpperCase();
+      return (
+        (origin === first && destination === second) ||
+        (origin === second && destination === first)
+      );
+    });
+    const entities = (overview?.entities ?? [])
+      .filter((entity) => entityLinksCorridor(entity, first, second))
+      .sort((left, right) => {
+        if (left.is_alert !== right.is_alert) return left.is_alert ? -1 : 1;
+        return (
+          new Date(right.observed_at).getTime() -
+          new Date(left.observed_at).getTime()
+        );
+      });
+    const active = routes.reduce((total, route) => total + route.active_count, 0);
+    const outbound = routes.reduce(
+      (total, route) =>
+        total +
+        (route.origin_country.trim().toUpperCase() === first
+          ? route.active_count
+          : 0),
+      0,
+    );
+    const inbound = routes.reduce(
+      (total, route) =>
+        total +
+        (route.origin_country.trim().toUpperCase() === second
+          ? route.active_count
+          : 0),
+      0,
+    );
+    const aviation = routes.reduce(
+      (total, route) =>
+        total + (route.mode === "aviation" ? route.active_count : 0),
+      0,
+    );
+    const maritime = routes.reduce(
+      (total, route) =>
+        total + (route.mode === "maritime" ? route.active_count : 0),
+      0,
+    );
+    const observed = routes.reduce(
+      (total, route) =>
+        total + (route.origin_basis === "observed" ? route.active_count : 0),
+      0,
+    );
+    const flagFallback = routes.reduce(
+      (total, route) =>
+        total + (route.origin_basis === "flag_fallback" ? route.active_count : 0),
+      0,
+    );
+    const mixed = routes.reduce(
+      (total, route) =>
+        total + (route.origin_basis === "mixed" ? route.active_count : 0),
+      0,
+    );
+    const counterpart = selectedCountryInsight?.counterparties.find(
+      (entry) => entry.country === second,
+    );
+    const countryEntry = (overview?.countries ?? []).find(
+      (entry) => entry.country.trim().toUpperCase() === second,
+    );
+    const countryRoutedTotal =
+      (selectedCountryInsight?.inbound ?? 0) +
+      (selectedCountryInsight?.outbound ?? 0);
+
+    return {
+      country: second,
+      countryName: counterpart?.name ?? countryEntry?.country_name ?? second,
+      routes,
+      entities,
+      active,
+      outbound,
+      inbound,
+      aviation,
+      maritime,
+      observed,
+      flagFallback,
+      mixed,
+      alerts: entities.filter((entity) => entity.is_alert).length,
+      networkShare:
+        countryRoutedTotal > 0 ? (active / countryRoutedTotal) * 100 : null,
+    };
+  }, [corridorCountry, country, overview, selectedCountryInsight]);
+
   const entities = overview?.entities ?? [];
   const summary = overview?.summary;
   const maritime = summary?.modes.maritime;
   const aviation = summary?.modes.aviation;
+  const displayedEntities = selectedCorridor?.entities ?? entities;
+  const displayedRoutes = selectedCorridor?.routes ?? overview?.routes ?? [];
 
   return (
     <section className="transport-workspace" aria-busy={loading}>
@@ -388,6 +516,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
               onClick={() => {
                 setMode(item);
                 clearSelection();
+                setCorridorCountry("");
               }}
             >
               {item === "all" ? <Route /> : item === "aviation" ? <Plane /> : <Ship />}
@@ -413,6 +542,25 @@ export default function TransportWorkspace({ initialCountry }: Props) {
           </select>
         </label>
 
+        {selectedCountryInsight && (
+          <label>
+            Corridor with
+            <select
+              value={corridorCountry}
+              onChange={(event) =>
+                selectCorridorCountry(event.currentTarget.value)
+              }
+            >
+              <option value="">All country connections</option>
+              {selectedCountryInsight.counterparties.map((entry) => (
+                <option key={entry.country} value={entry.country}>
+                  {entry.name} ({entry.country}) · {entry.active}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
         <button
           type="button"
           className="transport-refresh"
@@ -435,112 +583,208 @@ export default function TransportWorkspace({ initialCountry }: Props) {
       )}
 
       <div className="transport-kpi-strip">
-        <article>
-          <span>Tracked now</span>
-          <strong>{summary?.active.toLocaleString() ?? "—"}</strong>
-          <small>{summary?.linked_countries ?? 0} linked countries</small>
-        </article>
-        <article>
-          <span>Aircraft</span>
-          <strong>{aviation?.active.toLocaleString() ?? "—"}</strong>
-          <small>{aviation?.routed ?? 0} with plausible routes</small>
-        </article>
-        <article>
-          <span>Vessels</span>
-          <strong>{maritime?.active.toLocaleString() ?? "—"}</strong>
-          <small>{maritime?.routed ?? 0} linked corridors</small>
-        </article>
-        <article data-alert={(summary?.alerts ?? 0) > 0 || undefined}>
-          <span>Safety signals</span>
-          <strong>{summary?.alerts.toLocaleString() ?? "—"}</strong>
-          <small>Emergency or navigational states</small>
-        </article>
+        {selectedCorridor ? (
+          <>
+            <article>
+              <span>Total active corridor</span>
+              <strong>{selectedCorridor.active.toLocaleString()}</strong>
+              <small>
+                {selectedCorridor.aviation} flights · {selectedCorridor.maritime} vessels
+              </small>
+            </article>
+            <article>
+              <span>{country} → {selectedCorridor.country}</span>
+              <strong>{selectedCorridor.outbound.toLocaleString()}</strong>
+              <small>Resolved movements from {country}</small>
+            </article>
+            <article>
+              <span>{selectedCorridor.country} → {country}</span>
+              <strong>{selectedCorridor.inbound.toLocaleString()}</strong>
+              <small>Resolved movements into {country}</small>
+            </article>
+            <article data-alert={selectedCorridor.alerts > 0 || undefined}>
+              <span>Selectable live records</span>
+              <strong>{selectedCorridor.entities.length.toLocaleString()}</strong>
+              <small>{selectedCorridor.alerts} safety signals in this corridor</small>
+            </article>
+          </>
+        ) : selectedCountryInsight ? (
+          <>
+            <article>
+              <span>Country-linked now</span>
+              <strong>{summary?.active.toLocaleString() ?? "—"}</strong>
+              <small>
+                {aviation?.active ?? 0} flights · {maritime?.active ?? 0} vessels
+              </small>
+            </article>
+            <article>
+              <span>Resolved arrivals</span>
+              <strong>{selectedCountryInsight.inbound.toLocaleString()}</strong>
+              <small>Active destination links into {country}</small>
+            </article>
+            <article>
+              <span>Resolved departures</span>
+              <strong>{selectedCountryInsight.outbound.toLocaleString()}</strong>
+              <small>Active origin links from {country}</small>
+            </article>
+            <article data-alert={(summary?.alerts ?? 0) > 0 || undefined}>
+              <span>Currently in country</span>
+              <strong>{selectedCountryInsight.currentEntities.length}</strong>
+              <small>{summary?.alerts ?? 0} safety signals in country scope</small>
+            </article>
+          </>
+        ) : (
+          <>
+            <article>
+              <span>Tracked now</span>
+              <strong>{summary?.active.toLocaleString() ?? "—"}</strong>
+              <small>{summary?.linked_countries ?? 0} linked countries</small>
+            </article>
+            <article>
+              <span>Aircraft</span>
+              <strong>{aviation?.active.toLocaleString() ?? "—"}</strong>
+              <small>{aviation?.routed ?? 0} with plausible routes</small>
+            </article>
+            <article>
+              <span>Vessels</span>
+              <strong>{maritime?.active.toLocaleString() ?? "—"}</strong>
+              <small>{maritime?.routed ?? 0} linked corridors</small>
+            </article>
+            <article data-alert={(summary?.alerts ?? 0) > 0 || undefined}>
+              <span>Safety signals</span>
+              <strong>{summary?.alerts.toLocaleString() ?? "—"}</strong>
+              <small>Emergency or navigational states</small>
+            </article>
+          </>
+        )}
       </div>
 
-      <div className="transport-takeaway-grid" aria-label="Transport takeaways">
-        {(overview?.takeaways ?? []).map((takeaway) => {
-          const DirectionIcon =
-            takeaway.direction === "up"
-              ? TrendingUp
-              : takeaway.direction === "down"
-                ? TrendingDown
-                : Minus;
-          return (
-            <article key={takeaway.id} data-direction={takeaway.direction}>
-              <div>
-                {takeaway.mode === "aviation" ? <Plane /> : <Ship />}
-                <span>{takeaway.title}</span>
-                <strong>
-                  <DirectionIcon />
-                  {changeLabel(takeaway.change_pct, takeaway.direction)}
-                </strong>
-              </div>
-              <p>{takeaway.summary}</p>
-              <small>{takeaway.qualifier}</small>
-            </article>
-          );
-        })}
-      </div>
+      {!selectedCorridor && (
+        <div className="transport-takeaway-grid" aria-label="Transport takeaways">
+          {(overview?.takeaways ?? []).map((takeaway) => {
+            const DirectionIcon =
+              takeaway.direction === "up"
+                ? TrendingUp
+                : takeaway.direction === "down"
+                  ? TrendingDown
+                  : Minus;
+            return (
+              <article key={takeaway.id} data-direction={takeaway.direction}>
+                <div>
+                  {takeaway.mode === "aviation" ? <Plane /> : <Ship />}
+                  <span>{takeaway.title}</span>
+                  <strong>
+                    <DirectionIcon />
+                    {changeLabel(takeaway.change_pct, takeaway.direction)}
+                  </strong>
+                </div>
+                <p>{takeaway.summary}</p>
+                <small>{takeaway.qualifier}</small>
+              </article>
+            );
+          })}
+        </div>
+      )}
 
       {selectedCountryInsight && (
         <section
           className="transport-country-insights"
-          aria-label={`${selectedCountryInsight.countryName} transport connections`}
+          aria-label={
+            selectedCorridor
+              ? `${selectedCountryInsight.countryName} and ${selectedCorridor.countryName} transport corridor`
+              : `${selectedCountryInsight.countryName} transport connections`
+          }
         >
-          <article>
-            <span>Most connected country</span>
-            <strong>
-              {selectedCountryInsight.strongestCounterparty
-                ? `${selectedCountryInsight.strongestCounterparty.name} (${selectedCountryInsight.strongestCounterparty.country})`
-                : "Resolving"}
-            </strong>
-            <small>
-              {selectedCountryInsight.strongestCounterparty
-                ? `${selectedCountryInsight.strongestCounterparty.active} active · ${selectedCountryInsight.strongestCounterparty.aviation} flights · ${selectedCountryInsight.strongestCounterparty.maritime} vessels`
-                : "No resolved counterpart route in this scope"}
-            </small>
-          </article>
-          <article>
-            <span>Direction split</span>
-            <strong>
-              {selectedCountryInsight.inbound} in · {selectedCountryInsight.outbound} out
-            </strong>
-            <small>
-              {selectedCountryInsight.inbound + selectedCountryInsight.outbound === 0
-                ? "No resolved directional corridors"
-                : selectedCountryInsight.inbound === selectedCountryInsight.outbound
-                  ? "Balanced resolved flow"
-                  : selectedCountryInsight.inbound > selectedCountryInsight.outbound
-                    ? "Inbound-led resolved flow"
-                    : "Outbound-led resolved flow"}
-            </small>
-          </article>
-          <article>
-            <span>Currently in country</span>
-            <strong>{selectedCountryInsight.currentEntities.length}</strong>
-            <small>
-              {selectedCountryInsight.currentEntities.filter(
-                (entity) => entity.mode === "aviation",
-              ).length} flights ·{" "}
-              {selectedCountryInsight.currentEntities.filter(
-                (entity) => entity.mode === "maritime",
-              ).length} vessels with a current-position link
-            </small>
-          </article>
-          <article>
-            <span>Full route data</span>
-            <strong>
-              {selectedCountryInsight.linkedEntities.length > 0
-                ? `${selectedCountryInsight.completeRoutes}/${selectedCountryInsight.linkedEntities.length}`
-                : "—"}
-            </strong>
-            <small>
-              Origin + destination identified
-              {selectedCountryInsight.proxyOnly > 0
-                ? ` · ${selectedCountryInsight.proxyOnly} flag/registration-only`
-                : ""}
-            </small>
-          </article>
+          {selectedCorridor ? (
+            <>
+              <article>
+                <span>Flights on corridor</span>
+                <strong>{selectedCorridor.aviation.toLocaleString()}</strong>
+                <small>Resolved aircraft routes in either direction</small>
+              </article>
+              <article>
+                <span>Vessels on corridor</span>
+                <strong>{selectedCorridor.maritime.toLocaleString()}</strong>
+                <small>Resolved vessel routes in either direction</small>
+              </article>
+              <article>
+                <span>Share of country network</span>
+                <strong>
+                  {selectedCorridor.networkShare == null
+                    ? "—"
+                    : `${selectedCorridor.networkShare.toFixed(1)}%`}
+                </strong>
+                <small>Share of {country}'s resolved inbound + outbound flow</small>
+              </article>
+              <article>
+                <span>Origin evidence</span>
+                <strong>
+                  {selectedCorridor.observed} observed · {selectedCorridor.flagFallback} proxy
+                </strong>
+                <small>
+                  {selectedCorridor.mixed > 0
+                    ? `${selectedCorridor.mixed} additional movements use mixed origin evidence`
+                    : "No mixed-origin aggregate in this corridor"}
+                </small>
+              </article>
+            </>
+          ) : (
+            <>
+              {selectedCountryInsight.strongestCounterparty ? (
+                <button
+                  type="button"
+                  className="transport-country-insight-action"
+                  onClick={() =>
+                    selectCorridorCountry(
+                      selectedCountryInsight.strongestCounterparty!.country,
+                    )
+                  }
+                >
+                  <span>Most connected country</span>
+                  <strong>
+                    {selectedCountryInsight.strongestCounterparty.name} ({selectedCountryInsight.strongestCounterparty.country})
+                  </strong>
+                  <small>
+                    {selectedCountryInsight.strongestCounterparty.active} active · select to view corridor total
+                    <ArrowRight />
+                  </small>
+                </button>
+              ) : (
+                <article>
+                  <span>Most connected country</span>
+                  <strong>Resolving</strong>
+                  <small>No resolved counterpart route in this scope</small>
+                </article>
+              )}
+              <article>
+                <span>Network reach</span>
+                <strong>{selectedCountryInsight.counterparties.length}</strong>
+                <small>Countries with a resolved inbound or outbound route</small>
+              </article>
+              <article>
+                <span>Full route data</span>
+                <strong>
+                  {selectedCountryInsight.linkedEntities.length > 0
+                    ? `${selectedCountryInsight.completeRoutes}/${selectedCountryInsight.linkedEntities.length}`
+                    : "—"}
+                </strong>
+                <small>Live records with both origin and destination identified</small>
+              </article>
+              <article>
+                <span>Direct country basis</span>
+                <strong>
+                  {Math.max(
+                    0,
+                    selectedCountryInsight.linkedEntities.length -
+                      selectedCountryInsight.proxyOnly,
+                  )}/{selectedCountryInsight.linkedEntities.length}
+                </strong>
+                <small>
+                  {selectedCountryInsight.proxyOnly} flag/registration-only links
+                </small>
+              </article>
+            </>
+          )}
         </section>
       )}
 
@@ -550,15 +794,19 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             <div>
               <span>Live tracking</span>
               <h2>
-                {selectedCountryInsight
-                  ? `${selectedCountryInsight.countryName} (${country}) connections`
-                  : "Global movement map"}
+                {selectedCorridor
+                  ? `${selectedCountryInsight?.countryName ?? country} ↔ ${selectedCorridor.countryName}`
+                  : selectedCountryInsight
+                    ? `${selectedCountryInsight.countryName} (${country}) connections`
+                    : "Global movement map"}
               </h2>
             </div>
             <small>
-              {selectedCountryInsight
-                ? `${selectedCountryInsight.linkedEntities.length} linked vehicles · ${selectedCountryInsight.inbound} inbound · ${selectedCountryInsight.outbound} outbound · `
-                : ""}
+              {selectedCorridor
+                ? `${selectedCorridor.active} total active · ${selectedCorridor.outbound} ${country} → ${selectedCorridor.country} · ${selectedCorridor.inbound} ${selectedCorridor.country} → ${country} · `
+                : selectedCountryInsight
+                  ? `${selectedCountryInsight.linkedEntities.length} linked vehicles · ${selectedCountryInsight.inbound} inbound · ${selectedCountryInsight.outbound} outbound · `
+                  : ""}
               Flights {timeLabel(aviation?.latest_observed_at)} · vessels {timeLabel(maritime?.latest_observed_at)}
             </small>
           </header>
@@ -566,10 +814,12 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             entities={entities}
             routes={overview?.routes}
             selectedCountry={country}
+            comparisonCountry={corridorCountry}
             mode={mode}
             selectedId={selected?.id}
             track={track}
             onSelect={(entity) => void selectEntity(entity)}
+            onCountrySelect={selectCorridorCountry}
           />
         </div>
 
@@ -588,7 +838,11 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                     "Route is being resolved"}
                 </p>
                 <button type="button" onClick={clearSelection}>
-                  Back to {country ? `${country} flows` : "all live vehicles"}
+                  Back to {selectedCorridor
+                    ? `${country} ↔ ${selectedCorridor.country}`
+                    : country
+                      ? `${country} flows`
+                      : "all live vehicles"}
                 </button>
               </div>
               <dl>
@@ -652,54 +906,66 @@ export default function TransportWorkspace({ initialCountry }: Props) {
               <header>
                 <span>Connected movements</span>
                 <h2>
-                  {selectedCountryInsight.linkedEntities.length} linked to {country}
+                  {selectedCorridor
+                    ? `${selectedCorridor.entities.length} live on ${country} ↔ ${selectedCorridor.country}`
+                    : `${selectedCountryInsight.linkedEntities.length} linked to ${country}`}
                 </h2>
                 <p>
-                  Each live record below shows the country role that placed it in
-                  this view. Select one to follow it on the map.
+                  {selectedCorridor
+                    ? "Only vehicles with a resolved route between the two selected countries are shown. Select one to follow it on the map."
+                    : "Each live record below shows the country role that placed it in this view. Select one to follow it on the map."}
                 </p>
               </header>
               <div className="transport-country-vehicle-list">
-                {selectedCountryInsight.linkedEntities.slice(0, 60).map((entity) => {
-                  const connection = countryConnection(entity, country);
-                  return (
-                    <button
-                      type="button"
-                      key={`country-connection-${entity.id}`}
-                      onClick={() => void selectEntity(entity)}
-                      data-alert={entity.is_alert || undefined}
-                    >
-                      <i data-mode={entity.mode}>
-                        {entity.mode === "aviation" ? <Plane /> : <Ship />}
-                      </i>
-                      <span>
-                        <strong>{entityIdentifier(entity)}</strong>
-                        <small>{connection.description}</small>
-                        <small>
-                          {entity.mode === "aviation" ? "Flight" : "Vessel"} · seen{" "}
-                          {timeLabel(entity.observed_at)}
-                        </small>
-                      </span>
-                      <em data-role={connection.role}>{connection.label}</em>
-                    </button>
-                  );
-                })}
-                {selectedCountryInsight.linkedEntities.length === 0 && (
+                {(selectedCorridor?.entities ?? selectedCountryInsight.linkedEntities)
+                  .slice(0, 60)
+                  .map((entity) => {
+                    const connection = countryConnection(entity, country);
+                    return (
+                      <button
+                        type="button"
+                        key={`country-connection-${entity.id}`}
+                        onClick={() => void selectEntity(entity)}
+                        data-alert={entity.is_alert || undefined}
+                      >
+                        <i data-mode={entity.mode}>
+                          {entity.mode === "aviation" ? <Plane /> : <Ship />}
+                        </i>
+                        <span>
+                          <strong>{entityIdentifier(entity)}</strong>
+                          <small>{connection.description}</small>
+                          <small>
+                            {entity.mode === "aviation" ? "Flight" : "Vessel"} · seen{" "}
+                            {timeLabel(entity.observed_at)}
+                          </small>
+                        </span>
+                        <em data-role={connection.role}>{connection.label}</em>
+                      </button>
+                    );
+                  })}
+                {(selectedCorridor?.entities ?? selectedCountryInsight.linkedEntities)
+                  .length === 0 && (
                   <div className="transport-country-connections-empty">
                     <LocateFixed />
-                    <strong>No linked vehicles in the live freshness window</strong>
+                    <strong>
+                      {selectedCorridor
+                        ? "No selectable live records for this corridor"
+                        : "No linked vehicles in the live freshness window"}
+                    </strong>
                     <small>
-                      Country corridors may still be visible when aggregate route
-                      evidence is available.
+                      {selectedCorridor
+                        ? "The aggregate total can exceed the live list when a routed snapshot lacks a drawable current position or the detail limit is reached."
+                        : "Country corridors may still be visible when aggregate route evidence is available."}
                     </small>
                   </div>
                 )}
               </div>
-              {selectedCountryInsight.linkedEntities.length > 60 && (
+              {(selectedCorridor?.entities ?? selectedCountryInsight.linkedEntities)
+                .length > 60 && (
                 <small className="transport-country-connections-limit">
                   Showing the 60 freshest of{" "}
-                  {selectedCountryInsight.linkedEntities.length.toLocaleString()} linked
-                  vehicles.
+                  {(selectedCorridor?.entities ?? selectedCountryInsight.linkedEntities)
+                    .length.toLocaleString()} linked vehicles.
                 </small>
               )}
             </div>
@@ -716,102 +982,123 @@ export default function TransportWorkspace({ initialCountry }: Props) {
         </aside>
       </div>
 
-      <div className="transport-analytics-grid">
-        <article className="app-card transport-chart-card">
-          <header>
-            <div>
-              <span>24-hour sampled activity</span>
-              <h2>Tracked movement over time</h2>
+      {!selectedCorridor && (
+        <div className="transport-analytics-grid">
+          <article className="app-card transport-chart-card">
+            <header>
+              <div>
+                <span>24-hour sampled activity</span>
+                <h2>Tracked movement over time</h2>
+              </div>
+            </header>
+            <div className="transport-chart">
+              {activity.length > 1 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={activity}>
+                    <defs>
+                      <linearGradient id="aviation-fill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#77A8BA" stopOpacity={0.58} />
+                        <stop offset="100%" stopColor="#77A8BA" stopOpacity={0.02} />
+                      </linearGradient>
+                      <linearGradient id="maritime-fill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#EDA36A" stopOpacity={0.5} />
+                        <stop offset="100%" stopColor="#EDA36A" stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="var(--shell-border)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={32} />
+                    <YAxis tick={{ fontSize: 10 }} width={42} />
+                    <Tooltip />
+                    <Legend />
+                    <Area
+                      type="monotone"
+                      dataKey="aviation"
+                      name="Aircraft"
+                      stroke="#77A8BA"
+                      fill="url(#aviation-fill)"
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="maritime"
+                      name="Vessels"
+                      stroke="#EDA36A"
+                      fill="url(#maritime-fill)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="transport-chart-empty">
+                  Trail sampling is building the 24-hour baseline.
+                </div>
+              )}
             </div>
-          </header>
-          <div className="transport-chart">
-            {activity.length > 1 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={activity}>
-                  <defs>
-                    <linearGradient id="aviation-fill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#77A8BA" stopOpacity={0.58} />
-                      <stop offset="100%" stopColor="#77A8BA" stopOpacity={0.02} />
-                    </linearGradient>
-                    <linearGradient id="maritime-fill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#EDA36A" stopOpacity={0.5} />
-                      <stop offset="100%" stopColor="#EDA36A" stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="var(--shell-border)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={32} />
-                  <YAxis tick={{ fontSize: 10 }} width={42} />
-                  <Tooltip />
-                  <Legend />
-                  <Area
-                    type="monotone"
-                    dataKey="aviation"
-                    name="Aircraft"
-                    stroke="#77A8BA"
-                    fill="url(#aviation-fill)"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="maritime"
-                    name="Vessels"
-                    stroke="#EDA36A"
-                    fill="url(#maritime-fill)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="transport-chart-empty">Trail sampling is building the 24-hour baseline.</div>
-            )}
-          </div>
-        </article>
+          </article>
 
-        <article className="app-card transport-chart-card">
-          <header>
-            <div>
-              <span>Country relationships</span>
-              <h2>Most connected countries</h2>
+          <article className="app-card transport-chart-card">
+            <header>
+              <div>
+                <span>Country relationships</span>
+                <h2>Most connected countries</h2>
+              </div>
+            </header>
+            <div className="transport-chart">
+              {countryRows.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={countryRows} layout="vertical" margin={{ left: 8 }}>
+                    <CartesianGrid stroke="var(--shell-border)" horizontal={false} />
+                    <XAxis type="number" tick={{ fontSize: 10 }} />
+                    <YAxis
+                      type="category"
+                      dataKey="country"
+                      tick={{ fontSize: 10 }}
+                      width={34}
+                    />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="flights" name="Flights" stackId="transport" fill="#77A8BA" />
+                    <Bar dataKey="vessels" name="Vessels" stackId="transport" fill="#EDA36A" />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="transport-chart-empty">
+                  No linked countries in the current scope.
+                </div>
+              )}
             </div>
-          </header>
-          <div className="transport-chart">
-            {countryRows.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={countryRows} layout="vertical" margin={{ left: 8 }}>
-                  <CartesianGrid stroke="var(--shell-border)" horizontal={false} />
-                  <XAxis type="number" tick={{ fontSize: 10 }} />
-                  <YAxis
-                    type="category"
-                    dataKey="country"
-                    tick={{ fontSize: 10 }}
-                    width={34}
-                  />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="flights" name="Flights" stackId="transport" fill="#77A8BA" />
-                  <Bar dataKey="vessels" name="Vessels" stackId="transport" fill="#EDA36A" />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="transport-chart-empty">No linked countries in the current scope.</div>
-            )}
-          </div>
-        </article>
-      </div>
+          </article>
+        </div>
+      )}
 
       <div className="transport-lower-grid">
         <article className="app-card transport-routes-card">
           <header>
             <div>
               <span>Network diagram</span>
-              <h2>Leading live corridors</h2>
+              <h2>
+                {selectedCorridor
+                  ? `${country} ↔ ${selectedCorridor.country} route totals`
+                  : "Leading live corridors"}
+              </h2>
             </div>
             <Route />
           </header>
           <div className="transport-flow-list">
-            {(overview?.routes ?? []).slice(0, 12).map((route) => (
+            {displayedRoutes.slice(0, 12).map((route) => (
               <button
                 type="button"
                 key={`${route.mode}-${route.origin_country}-${route.destination_country}`}
-                onClick={() => selectCountry(route.destination_country)}
+                onClick={() => {
+                  const origin = route.origin_country.trim().toUpperCase();
+                  const destination = route.destination_country.trim().toUpperCase();
+                  const selectedIso = country.trim().toUpperCase();
+                  if (selectedIso && (origin === selectedIso || destination === selectedIso)) {
+                    selectCorridorCountry(
+                      origin === selectedIso ? destination : origin,
+                    );
+                    return;
+                  }
+                  selectCountry(destination);
+                }}
               >
                 <span className="transport-flow-node">
                   <b>{route.origin_country}</b>
@@ -834,7 +1121,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                 </span>
               </button>
             ))}
-            {(overview?.routes.length ?? 0) === 0 && (
+            {displayedRoutes.length === 0 && (
               <div className="transport-chart-empty">
                 Routes appear as AIS destinations and plausible flight airport pairs resolve.
               </div>
@@ -850,85 +1137,118 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             </div>
           </header>
           <div className="transport-country-scroll">
-            {(overview?.countries ?? []).slice(0, 18).map((entry) => (
-              <button
-                type="button"
-                key={entry.country}
-                onClick={() =>
-                  selectCountry(entry.country === country ? "" : entry.country)
-                }
-                aria-pressed={country === entry.country}
-              >
-                <span>
-                  <b>{entry.country}</b>
-                  <small>{entry.country_name}</small>
-                </span>
-                <span>
-                  <small>Flights</small>
-                  <b>{entry.aviation.active}</b>
-                </span>
-                <span>
-                  <small>Vessels</small>
-                  <b>{entry.maritime.active}</b>
-                </span>
-                <span>
-                  <small>Arrivals</small>
-                  <b>{entry.aviation.destinations + entry.maritime.destinations}</b>
-                </span>
-              </button>
-            ))}
+            {(overview?.countries ?? []).slice(0, 18).map((entry) => {
+              const entryIso = entry.country.trim().toUpperCase();
+              const isPrimary = entryIso === country.trim().toUpperCase();
+              const isCounterparty = Boolean(
+                selectedCountryInsight?.counterparties.some(
+                  (counterparty) => counterparty.country === entryIso,
+                ),
+              );
+              return (
+                <button
+                  type="button"
+                  key={entry.country}
+                  onClick={() => {
+                    if (isPrimary) {
+                      if (corridorCountry) selectCorridorCountry("");
+                      else selectCountry("");
+                      return;
+                    }
+                    if (country && !isPrimary && isCounterparty) {
+                      selectCorridorCountry(entryIso);
+                      return;
+                    }
+                    selectCountry(entryIso);
+                  }}
+                  aria-pressed={isPrimary || corridorCountry === entryIso}
+                  title={
+                    isPrimary && corridorCountry
+                      ? `Return to all ${country} connections`
+                      : isPrimary
+                        ? "Return to the global network"
+                        : country && isCounterparty
+                          ? `View ${country} ↔ ${entryIso} corridor`
+                          : `Select ${entry.country_name}`
+                  }
+                >
+                  <span>
+                    <b>{entry.country}</b>
+                    <small>{entry.country_name}</small>
+                  </span>
+                  <span>
+                    <small>Flights</small>
+                    <b>{entry.aviation.active}</b>
+                  </span>
+                  <span>
+                    <small>Vessels</small>
+                    <b>{entry.maritime.active}</b>
+                  </span>
+                  <span>
+                    <small>Arrivals</small>
+                    <b>{entry.aviation.destinations + entry.maritime.destinations}</b>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </article>
       </div>
 
-      <article className="app-card transport-port-card">
-        <header>
-          <div>
-            <span>Observed port transitions · 24 hours</span>
-            <h2>Departures, arrivals, and cargo-vessel flow</h2>
-          </div>
-          <Anchor />
-        </header>
-        <div className="transport-port-grid">
-          {(overview?.ports ?? []).slice(0, 12).map((port) => (
-            <button
-              type="button"
-              key={`${port.country}-${port.location_name}`}
-              onClick={() => selectCountry(port.country)}
-            >
-              <span>
-                <b>{port.location_name}</b>
-                <small>{port.country_name}</small>
-              </span>
-              <span>
-                <small>Departures</small>
-                <b>{port.departures}</b>
-              </span>
-              <span>
-                <small>Arrivals</small>
-                <b>{port.arrivals}</b>
-              </span>
-              <span>
-                <small>Cargo vessels</small>
-                <b>{port.cargo_vessel_departures}</b>
-              </span>
-            </button>
-          ))}
-          {(overview?.ports.length ?? 0) === 0 && (
-            <div className="transport-chart-empty">
-              Port movement baselines will appear after vessels enter and leave monitored geofences.
+      {!selectedCorridor && (
+        <article className="app-card transport-port-card">
+          <header>
+            <div>
+              <span>Observed port transitions · 24 hours</span>
+              <h2>Departures, arrivals, and cargo-vessel flow</h2>
             </div>
-          )}
-        </div>
-      </article>
+            <Anchor />
+          </header>
+          <div className="transport-port-grid">
+            {(overview?.ports ?? []).slice(0, 12).map((port) => (
+              <button
+                type="button"
+                key={`${port.country}-${port.location_name}`}
+                onClick={() => selectCountry(port.country)}
+              >
+                <span>
+                  <b>{port.location_name}</b>
+                  <small>{port.country_name}</small>
+                </span>
+                <span>
+                  <small>Departures</small>
+                  <b>{port.departures}</b>
+                </span>
+                <span>
+                  <small>Arrivals</small>
+                  <b>{port.arrivals}</b>
+                </span>
+                <span>
+                  <small>Cargo vessels</small>
+                  <b>{port.cargo_vessel_departures}</b>
+                </span>
+              </button>
+            ))}
+            {(overview?.ports.length ?? 0) === 0 && (
+              <div className="transport-chart-empty">
+                Port movement baselines will appear after vessels enter and leave monitored geofences.
+              </div>
+            )}
+          </div>
+        </article>
+      )}
 
       <article className="app-card transport-entity-table">
         <header>
           <div>
             <span>Live identifiers</span>
-            <h2>Flights and shipping movements</h2>
+            <h2>
+              {selectedCorridor
+                ? `${country} ↔ ${selectedCorridor.country} movements`
+                : "Flights and shipping movements"}
+            </h2>
           </div>
-          <small>{entities.length.toLocaleString()} freshest records shown</small>
+          <small>{displayedEntities.length.toLocaleString()} freshest records shown</small>
         </header>
         <div className="transport-table-scroll">
           <table>
@@ -944,7 +1264,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
               </tr>
             </thead>
             <tbody>
-              {entities.slice(0, 160).map((entity) => (
+              {displayedEntities.slice(0, 160).map((entity) => (
                 <tr
                   key={entity.id}
                   data-selected={selected?.id === entity.id || undefined}
