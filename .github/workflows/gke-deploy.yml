@@ -635,7 +635,6 @@ jobs:
           kubectl apply -f ./infra/k8s/api-deployment.yaml
           kubectl apply -f ./infra/k8s/opencode-deployment.yaml
           kubectl apply -f ./infra/k8s/keycloak-deployment.yaml
-          kubectl apply -f ./infra/k8s/ingest-cronjob.yaml
 
       - name: 🔑 Bootstrap Keycloak realm and IdPs
         env:
