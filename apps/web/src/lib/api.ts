@@ -139,6 +139,8 @@ export type AirQuality = {
   observed_at: string;
   european_aqi: number | null;
   us_aqi: number | null;
+  provider_aqi: number | null;
+  aqi_scale: string | null;
   pm10: number | null;
   pm2_5: number | null;
   label: string;
@@ -248,15 +250,10 @@ export type CountryMarketOverview = {
   fx_rate: number | null;
   fx_change_percent: number | null;
   fx_period_end: string | null;
-  effective_fx_symbol: string | null;
-  effective_fx_rate: number | null;
-  effective_fx_change_percent: number | null;
-  effective_fx_period_end: string | null;
-  effective_fx_source: string | null;
   filing_count_7d: number;
   latest_filing_at: string | null;
   composite_change_percent: number | null;
-  composite_basis: Array<"country_index" | "currency_vs_eur" | "effective_exchange_rate">;
+  composite_basis: Array<"country_index" | "currency_vs_eur">;
   freshness: "current" | "stale" | "unavailable";
 };
 
@@ -267,13 +264,11 @@ export type CountryMarketOverviewResponse = {
     countries: number;
     with_index: number;
     with_fx: number;
-    with_effective_fx: number;
     with_filings: number;
   };
   methodology: {
     index: string;
     fx: string;
-    effective_fx: string;
     composite: string;
     filings: string;
   };
@@ -283,7 +278,6 @@ export type CountryMarketOverviewResponse = {
 export type CountryMarketDetail = {
   summary: CountryMarketOverview;
   fx_history: Array<{ period_end: string; value: number }>;
-  effective_fx_history: Array<{ period_end: string; value: number }>;
   index_history: Array<{ period_end: string; value: number }>;
   filings: MarketFiling[];
   methodology: CountryMarketOverviewResponse["methodology"];
@@ -1250,7 +1244,7 @@ export async function triggerAdminWeatherIngestion(payload?: {
 }
 
 export async function triggerAdminMarketIngestion(payload?: {
-  providers?: { secEdgar?: boolean; ecb?: boolean; oecd?: boolean; bis?: boolean };
+  providers?: { secEdgar?: boolean; ecb?: boolean; oecd?: boolean };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/market/run`, {
     method: "POST",

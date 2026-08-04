@@ -116,18 +116,13 @@ function pipelineLabel(pipeline: IngestionPipeline): string {
 
 function sourceLabel(sourceName: string): string {
   const normalized = sourceName.trim().toLowerCase();
-  if (normalized === "newsapi") return "NewsAPI";
-  if (normalized === "thenewsapi") return "TheNewsAPI";
   if (normalized === "gdelt") return "GDELT";
   if (normalized === "institutional_rss") return "Institutional RSS";
-  if (normalized === "openmeteo") return "Open-Meteo";
   if (normalized === "openweather") return "OpenWeather";
   if (normalized === "nws") return "NOAA/NWS";
-  if (normalized === "finnhub") return "Retired market source";
   if (normalized === "sec_edgar") return "SEC EDGAR";
   if (normalized === "ecb") return "ECB";
   if (normalized === "oecd") return "OECD";
-  if (normalized === "bis") return "BIS";
   if (normalized === "podcastindex") return "PodcastIndex";
   if (normalized === "wikidata") return "Wikidata";
   return sourceName;
@@ -299,7 +294,6 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [runSecEdgarProvider, setRunSecEdgarProvider] = useState(true);
   const [runEcbProvider, setRunEcbProvider] = useState(true);
   const [runOecdProvider, setRunOecdProvider] = useState(true);
-  const [runBisProvider, setRunBisProvider] = useState(true);
   const [podcastSearchTerms, setPodcastSearchTerms] = useState(
     "geopolitics,security,technology,markets",
   );
@@ -547,7 +541,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   }, [refreshOverview, runNwsProvider, runOpenWeatherProvider, weatherCountry]);
 
   const handleTriggerMarket = useCallback(async () => {
-    if (!runSecEdgarProvider && !runEcbProvider && !runOecdProvider && !runBisProvider) {
+    if (!runSecEdgarProvider && !runEcbProvider && !runOecdProvider) {
       setActionError("Select at least one market provider.");
       return;
     }
@@ -557,7 +551,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     try {
       const created = await triggerAdminMarketIngestion(
         {
-          providers: { secEdgar: runSecEdgarProvider, ecb: runEcbProvider, oecd: runOecdProvider, bis: runBisProvider },
+          providers: { secEdgar: runSecEdgarProvider, ecb: runEcbProvider, oecd: runOecdProvider },
         },
       );
       setActionNotice(`Market ingestion run #${created.run.id} was queued.`);
@@ -570,7 +564,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringMarket(false);
     }
-  }, [refreshOverview, runBisProvider, runEcbProvider, runOecdProvider, runSecEdgarProvider]);
+  }, [refreshOverview, runEcbProvider, runOecdProvider, runSecEdgarProvider]);
 
   const handleTriggerPodcasts = useCallback(async () => {
     const searchTerms = podcastSearchTerms
@@ -943,10 +937,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runSecEdgarProvider} onChange={(event) => setRunSecEdgarProvider(event.currentTarget.checked)} />SEC EDGAR (keyless)</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runEcbProvider} onChange={(event) => setRunEcbProvider(event.currentTarget.checked)} />ECB (keyless)</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOecdProvider} onChange={(event) => setRunOecdProvider(event.currentTarget.checked)} />OECD indices (keyless)</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runBisProvider} onChange={(event) => setRunBisProvider(event.currentTarget.checked)} />BIS effective FX (keyless)</label>
             </div>
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
-              SEC supplies filing events and company facts; ECB supplies EUR FX and policy rates; OECD adds monthly national equity direction; BIS adds daily trade-weighted currency strength.
+              SEC supplies filing events and company facts; ECB supplies daily EUR FX and policy rates; OECD adds monthly national equity direction.
             </div>
             <button
               type="button"

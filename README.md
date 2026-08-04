@@ -206,10 +206,7 @@ npm run dev
 ### 3. Provider API Keys and Open Data
 
 - API runtime environment variable names:
-  - `NEWSAPI_API_KEY`
-  - `THENEWSAPI_API_TOKEN`
   - `OPENWEATHER_API_KEY`
-  - `OPEN_METEO_API_KEY` (optional; required for commercial customer endpoints)
   - `PODCASTINDEX_API_KEY`
   - `PODCASTINDEX_API_SECRET`
   - `AISSTREAM_API_KEY`
@@ -237,19 +234,38 @@ npm run dev
 - Open intelligence providers:
   - GDELT DOC/Event/GKG is keyless. Optional tuning: `GDELT_DOC_QUERY`,
     `GDELT_MAX_RAW_ROWS`, and an identifying `GDELT_USER_AGENT`.
+  - Official institutional RSS is keyless. Claritas currently ingests European
+    Commission Press Corner, Federal Reserve and SEC press releases while
+    preserving the publishing institution and feed URL in every item.
   - SEC EDGAR submissions and company facts are keyless. Set
     `SEC_EDGAR_USER_AGENT` to an application name plus monitored contact email,
     and optionally set `SEC_EDGAR_SYMBOLS` (comma-separated equities). For the
     GitHub deployment workflows, create a repository **Actions variable** named
-    `SEC_EDGAR_USER_AGENT` (not a secret); the exact spelling is `EDGAR`, not
-    `EDGARE`.
-  - ECB Data API FX and policy-rate series are keyless.
-  - Open-Meteo public APIs are keyless for eligible use. For a commercial
-    customer plan, create `OPEN_METEO_API_KEY` at `https://open-meteo.com/en/pricing`;
-    the connector then selects the customer endpoints automatically. Optional
-    target control: `OPEN_METEO_COUNTRIES` (comma-separated ISO alpha-2 codes).
+    `SEC_EDGAR_USER_AGENT`; an Actions secret with the same exact name is also
+    accepted, although the value is identification rather than a credential. The
+    exact spelling is `EDGAR`, not `EDGARE`.
+  - ECB Data API FX and policy-rate series and OECD share-price indices are
+    keyless. Source and series identifiers remain
+    attached to market records and API responses.
+  - OpenWeather One Call supplies global current conditions, hourly/daily
+    forecasts, alerts and air quality. Create `OPENWEATHER_API_KEY` at
+    `https://home.openweathermap.org/users/sign_up` and activate the One Call
+    subscription. Claritas targets the free daily-call allowance by default;
+    review OpenWeather attribution and plan terms for the production audience.
+  - NOAA/NWS alerts are keyless and cover the United States. Configure an
+    identifying `NWS_USER_AGENT` as a GitHub Actions variable (or same-named
+    secret), for example `Claritas engineering@claritas.info`.
   - Attribution is stored with provider records and returned by the relevant API
     responses; keep it visible in redistributed data and user-facing exports.
+- Multilingual news and briefings:
+  - Ingestion preserves the original publisher title, summary and language code.
+    GDELT remains the aggregation provider while the publisher domain (for
+    example `reuters.com`) is displayed separately when GDELT returns it.
+  - Daily and personalised briefing prompts produce an English synthesis and
+    explicitly require faithful translation of non-English evidence. No separate
+    translation API key is required. If the briefing model is unavailable, the
+    deterministic fallback leaves non-English titles untranslated and records a
+    data-quality note rather than silently transforming the evidence.
 - Transport intelligence combines AISstream maritime data with keyless adsb.lol
   flight positions and plausible routes. See
   [transport intelligence](docs/transport-intelligence.md) for sampling,
@@ -258,24 +274,19 @@ npm run dev
     `AISSTREAM_API_KEY`; the deployment writes it to Kubernetes secret
     `claritas-aisstream` under the same key.
   - adsb.lol requires no API key. Its published data is ODbL 1.0.
-- TheNewsAPI integration notes:
-  - Base API URL: `https://api.thenewsapi.com/v1`
-  - `publishedAfter` (when provided in admin ingestion payload) must be `YYYY-MM-DD`
 - Kubernetes deployment env wiring:
   - `infra/k8s/api-deployment.yaml`
 - Recommended secret names/keys in cluster:
-  - `claritas-newsapi` / `NEWSAPI_API_KEY`
-  - `claritas-thenewsapi` / `THENEWSAPI_API_TOKEN`
   - `claritas-openweather` / `OPENWEATHER_API_KEY`
-  - `claritas-openmeteo` / `OPEN_METEO_API_KEY` (optional)
   - `claritas-podcastindex` / `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`
   - `claritas-aisstream` / `AISSTREAM_API_KEY`
 - Production secret source (recommended):
-  - GitHub repository secrets: `THENEWSAPI_API_TOKEN`, `OPEN_METEO_API_KEY` (optional), `PODCASTINDEX_API_KEY`,
+  - GitHub repository secrets: `OPENWEATHER_API_KEY`, `PODCASTINDEX_API_KEY`,
     `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`
   - GitHub repository variables: `PODCAST_DISCOVERY_TERMS`, `PODCAST_FEED_IDS`,
     `PODCAST_MAX_FEEDS`, `PODCAST_MAX_EPISODES_PER_FEED`,
-    `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`, `PODCASTINDEX_USER_AGENT`
+    `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`, `PODCASTINDEX_USER_AGENT`,
+    `SEC_EDGAR_USER_AGENT`, `NWS_USER_AGENT`
   - Used by deploy workflow: `.github/workflows/gke-deploy.yml` (`Ensure API provider secrets exist`)
 
 ### 4. Daily Briefing AI Backend

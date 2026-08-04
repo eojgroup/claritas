@@ -14,7 +14,6 @@ import { getGdeltEvents, getGdeltSignals, ingestGdelt } from "./connectors/gdelt
 import { getMarketFilings, getMarketIndicators, ingestSecEdgar } from "./connectors/sec-edgar";
 import { getLatestFxRates, getLatestPolicyRates, ingestEcbData } from "./connectors/ecb";
 import { ingestOecdSharePrices } from "./connectors/oecd";
-import { ingestBisEffectiveExchangeRates } from "./connectors/bis";
 import { getCountryMarketDetail, getCountryMarketOverview } from "./connectors/market-overview";
 import {
   getCountryLeadershipLatest,
@@ -2756,11 +2755,6 @@ app.post("/api/ingest/ecb", requireIngestionAccess, async (req, res) => {
 
 app.post("/api/ingest/oecd", requireIngestionAccess, async (_req, res) => {
   try { return res.json(await ingestOecdSharePrices()); }
-  catch (error) { return res.status(502).json({ error: error instanceof Error ? error.message : String(error) }); }
-});
-
-app.post("/api/ingest/bis", requireIngestionAccess, async (_req, res) => {
-  try { return res.json(await ingestBisEffectiveExchangeRates()); }
   catch (error) { return res.status(502).json({ error: error instanceof Error ? error.message : String(error) }); }
 });
 

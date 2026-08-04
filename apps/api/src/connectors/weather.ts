@@ -9,7 +9,8 @@ export type DailyForecast = {
 };
 
 export type AirQuality = {
-  observed_at: string; european_aqi: number | null; us_aqi: number | null; pm10: number | null;
+  observed_at: string; european_aqi: number | null; us_aqi: number | null;
+  provider_aqi: number | null; aqi_scale: string | null; pm10: number | null;
   pm2_5: number | null; carbon_monoxide: number | null; nitrogen_dioxide: number | null;
   sulphur_dioxide: number | null; ozone: number | null; label: string;
 };
@@ -48,8 +49,11 @@ function weatherMain(code: number | null): string | null {
   return null;
 }
 
-function airLabel(value: number | null): string {
+function airLabel(value: number | null, scale?: string | null): string {
   if (value == null) return "Unknown";
+  if (scale?.toLowerCase().startsWith("openweather")) {
+    return ["Unknown", "Good", "Fair", "Moderate", "Poor", "Very poor"][Math.trunc(value)] ?? "Unknown";
+  }
   if (value <= 25) return "Good";
   if (value <= 50) return "Fair";
   if (value <= 75) return "Moderate";
@@ -85,7 +89,8 @@ export async function getCountryWeatherLatest(): Promise<EnhancedCountryWeather[
      ) f ON true
      LEFT JOIN LATERAL (
        SELECT jsonb_build_object('observed_at',a.observed_at,'european_aqi',a.european_aqi,
-         'us_aqi',a.us_aqi,'pm10',a.pm10,'pm2_5',a.pm2_5,'carbon_monoxide',a.carbon_monoxide,
+         'us_aqi',a.us_aqi,'provider_aqi',a.provider_aqi,'aqi_scale',a.aqi_scale,
+         'pm10',a.pm10,'pm2_5',a.pm2_5,'carbon_monoxide',a.carbon_monoxide,
          'nitrogen_dioxide',a.nitrogen_dioxide,'sulphur_dioxide',a.sulphur_dioxide,'ozone',a.ozone,'label','') AS air_quality
        FROM air_quality_snapshot a WHERE a.country_iso2=r.country_iso2 ORDER BY a.observed_at DESC LIMIT 1
      ) aq ON true
@@ -104,7 +109,13 @@ export async function getCountryWeatherLatest(): Promise<EnhancedCountryWeather[
   return rows.map((row) => ({
     ...row,
     forecast: (Array.isArray(row.forecast) ? row.forecast : []).map((forecast) => ({ ...forecast, weather_main: weatherMain(forecast.weather_code) })),
-    air_quality: row.air_quality ? { ...row.air_quality, label: airLabel(row.air_quality.european_aqi ?? row.air_quality.us_aqi) } : null,
+    air_quality: row.air_quality ? {
+      ...row.air_quality,
+      label: airLabel(
+        row.air_quality.provider_aqi ?? row.air_quality.european_aqi ?? row.air_quality.us_aqi,
+        row.air_quality.aqi_scale,
+      ),
+    } : null,
     alerts: Array.isArray(row.alerts) ? row.alerts : [], alert_count: Number(row.alert_count ?? 0),
   }));
 }
@@ -135,7 +146,7 @@ export async function getCountryWeatherForecast(countryIso2: string, hours=48): 
          AND forecast_time >= date_trunc('day',now()) ORDER BY forecast_time LIMIT 8`, [preferred.source_id,country]
     ),
     query<AirQuality>(
-      `SELECT observed_at,european_aqi,us_aqi,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,
+      `SELECT observed_at,european_aqi,us_aqi,provider_aqi,aqi_scale,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,
         sulphur_dioxide,ozone,''::text AS label FROM air_quality_snapshot
        WHERE upper(country_iso2::text)=$1 ORDER BY observed_at DESC LIMIT 1`, [country]
     ),
@@ -146,7 +157,13 @@ export async function getCountryWeatherForecast(countryIso2: string, hours=48): 
        ORDER BY CASE w.severity WHEN 'Extreme' THEN 0 WHEN 'Severe' THEN 1 WHEN 'Moderate' THEN 2 ELSE 3 END,w.starts_at`, [country]
     ),
   ]);
-  const airRow = air.rows[0] ? { ...air.rows[0], label: airLabel(air.rows[0].european_aqi ?? air.rows[0].us_aqi) } : null;
+  const airRow = air.rows[0] ? {
+    ...air.rows[0],
+    label: airLabel(
+      air.rows[0].provider_aqi ?? air.rows[0].european_aqi ?? air.rows[0].us_aqi,
+      air.rows[0].aqi_scale,
+    ),
+  } : null;
   return { country,generated_at:new Date().toISOString(),source_name:preferred.source_name,
     attribution:preferred.attribution ?? preferred.source_name,hourly:hourly.rows,
     daily:daily.rows.map((row) => ({ ...row,weather_main:weatherMain(row.weather_code) })),air_quality:airRow,alerts:alerts.rows };

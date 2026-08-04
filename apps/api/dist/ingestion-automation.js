@@ -34,29 +34,8 @@ const RULE_DEFAULTS = {
         failure_backoff_minutes: 20,
         default_payload: {
             providers: {
-                newsapi: Boolean(process.env.NEWSAPI_API_KEY),
-                thenewsapi: Boolean(process.env.THENEWSAPI_API_TOKEN),
                 gdelt: true,
-            },
-            everything: {
-                q: "OpenAI",
-                language: "en",
-                pageSize: 50,
-                maxPages: 2,
-            },
-            topHeadlines: {
-                country: "us",
-                category: "technology",
-                q: "OpenAI",
-                pageSize: 50,
-                maxPages: 2,
-            },
-            theNewsApi: {
-                search: "OpenAI",
-                language: "en",
-                locale: "us",
-                pageSize: 50,
-                maxPages: 2,
+                institutionalRss: true,
             },
         },
     },
@@ -64,28 +43,28 @@ const RULE_DEFAULTS = {
         pipeline: "weather",
         enabled: true,
         schedule_enabled: true,
-        schedule_interval_minutes: 120,
+        schedule_interval_minutes: 240,
         intelligent_enabled: true,
         min_spacing_minutes: 30,
-        freshness_sla_minutes: 180,
+        freshness_sla_minutes: 300,
         demand_window_minutes: 20,
         demand_threshold: 10,
         failure_backoff_minutes: 30,
-        default_payload: { providers: { openmeteo: true, openweather: false } },
+        default_payload: { providers: { openweather: true, nws: true } },
     },
     market: {
         pipeline: "market",
         enabled: true,
         schedule_enabled: true,
-        schedule_interval_minutes: 15,
+        schedule_interval_minutes: 60,
         intelligent_enabled: true,
         min_spacing_minutes: 5,
-        freshness_sla_minutes: 20,
+        freshness_sla_minutes: 180,
         demand_window_minutes: 10,
         demand_threshold: 15,
         failure_backoff_minutes: 10,
         default_payload: {
-            providers: { secEdgar: true, ecb: true },
+            providers: { secEdgar: true, ecb: true, oecd: true },
         },
     },
     podcasts: {
@@ -445,7 +424,8 @@ async function getLatestDataTimestamp(pipeline) {
         const { rows } = await (0, db_1.query)(`SELECT MAX(i.created_at) AS latest_data_at
        FROM item i
        JOIN source s ON s.id = i.source_id
-       WHERE s.name IN ('newsapi', 'thenewsapi')`);
+       WHERE s.name IN ('gdelt', 'institutional_rss')
+         AND COALESCE(s.metadata->>'retired','false') <> 'true'`);
         return timestampToString(rows[0]?.latest_data_at ?? null);
     }
     if (pipeline === "weather") {
@@ -453,6 +433,7 @@ async function getLatestDataTimestamp(pipeline) {
          SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot
          UNION ALL SELECT MAX(updated_at) FROM weather_forecast
          UNION ALL SELECT MAX(observed_at) FROM air_quality_snapshot
+         UNION ALL SELECT MAX(updated_at) FROM weather_alert
        ) weather_sources`);
         return timestampToString(rows[0]?.latest_data_at ?? null);
     }

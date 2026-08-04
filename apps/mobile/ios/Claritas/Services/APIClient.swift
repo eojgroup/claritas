@@ -340,7 +340,7 @@ final class APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let payload: [String: Any] = [
-            "providers": ["secEdgar": true, "ecb": true, "oecd": true, "bis": true]
+            "providers": ["secEdgar": true, "ecb": true, "oecd": true]
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
         return try await request(req, as: AdminIngestionRunDetail.self)

@@ -39,6 +39,7 @@ type NewsContextRow = {
   summary: string | null;
   url: string | null;
   country_iso2: string | null;
+  language_code: string | null;
   event_time: string | Date | null;
 };
 
@@ -140,7 +141,7 @@ export class BriefingGenerationError extends Error {
   }
 }
 
-const PROMPT_VERSION = "daily-signal-briefing.v6";
+const PROMPT_VERSION = "daily-signal-briefing.v7";
 
 const BRIEFING_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -249,6 +250,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
          i.summary,
          i.url,
          i.country_iso2,
+         i.language_code,
          COALESCE(i.event_time, i.created_at) AS event_time
        FROM item i
        JOIN source s ON s.id = i.source_id
@@ -361,6 +363,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     title: row.title,
     summary: row.summary,
     country: row.country_iso2,
+    original_language: row.language_code,
     event_time: timestampToIso(row.event_time),
     url: row.url,
   }));
@@ -428,13 +431,6 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
         percent_change: row.fx_change_percent,
         period_end: row.fx_period_end,
       } : null,
-      broad_effective_fx: row.effective_fx_symbol ? {
-        symbol: row.effective_fx_symbol,
-        index_value: row.effective_fx_rate,
-        percent_change: row.effective_fx_change_percent,
-        period_end: row.effective_fx_period_end,
-        source: row.effective_fx_source,
-      } : null,
       sec_filings_7d: row.filing_count_7d,
       composite_change_percent: row.composite_change_percent,
       composite_basis: row.composite_basis,
@@ -453,12 +449,16 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     source: row.source_name,
   }));
 
+  const airQualitySeverity = (row: (typeof weatherResult)[number]): number =>
+    row.air_quality?.provider_aqi != null
+      ? (row.air_quality.provider_aqi / 5) * 25
+      : (row.air_quality?.european_aqi ?? row.air_quality?.us_aqi ?? 0) / 4;
   const weatherSeverity = (row: (typeof weatherResult)[number]): number =>
     Math.max(
       row.temp_c == null ? 0 : Math.abs(row.temp_c - 20),
       (row.precipitation_mm ?? 0) * 2,
       (row.wind_gust ?? row.wind_speed ?? 0) / 2,
-      (row.air_quality?.european_aqi ?? row.air_quality?.us_aqi ?? 0) / 4,
+      airQualitySeverity(row),
       row.alert_count > 0 ? 40 + row.alert_count : 0
     );
   const weatherRows = [...weatherResult].sort((left, right) => weatherSeverity(right) - weatherSeverity(left));
@@ -486,7 +486,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
   const coldest = [...weatherResult].filter((row) => row.temp_c != null).sort((a, b) => (a.temp_c ?? Infinity) - (b.temp_c ?? Infinity))[0];
   const wettest = [...weatherResult].sort((a, b) => (b.precipitation_mm ?? 0) - (a.precipitation_mm ?? 0))[0];
   const windiest = [...weatherResult].sort((a, b) => (b.wind_gust ?? b.wind_speed ?? 0) - (a.wind_gust ?? a.wind_speed ?? 0))[0];
-  const worstAir = [...weatherResult].sort((a, b) => (b.air_quality?.european_aqi ?? 0) - (a.air_quality?.european_aqi ?? 0))[0];
+  const worstAir = [...weatherResult].sort((a, b) => airQualitySeverity(b) - airQualitySeverity(a))[0];
   const mostAlerted = [...weatherResult].sort((a, b) => b.alert_count - a.alert_count)[0];
   const weatherAnalysis = {
     countries_covered: weatherResult.length,
@@ -580,6 +580,7 @@ function buildSystemPrompt(): string {
     "Use only the supplied evidence. Do not invent facts, numbers, sources, causal links, or forecasts.",
     "Cover News, Podcast Intelligence, Markets, Weather, and Transport when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
     "For news, name the publisher when supplied and distinguish it from the aggregation provider. Do not imply that an aggregation provider is the publisher.",
+    "Write the briefing in English. Translate and summarize non-English news faithfully for comprehension, preserve publisher attribution, identify the original language when it is material, and never add context that is absent from the supplied evidence. The stored source title and text remain the auditable original evidence.",
     "GDELT Event records are machine-coded indicators, and GKG themes and tone are analytical metadata. Use them to identify coverage patterns and corroboration candidates; do not present an uncorroborated coded event, theme, or tone score as confirmed fact or public sentiment.",
     "For markets, distinguish country-index direction, local-currency performance versus EUR, SEC filing activity, and the composite methodology. A filing count is activity, not positive or negative performance. Do not imply index coverage where the country-index component is missing.",
     "For weather, explain the overall regime and material extrema using temperature, apparent temperature, precipitation, wind or gusts, air quality, and the supplied forecast horizon. Clearly distinguish current observations from forecasts.",

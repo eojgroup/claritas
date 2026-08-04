@@ -15,46 +15,40 @@ exports.listRuns = listRuns;
 exports.getRunDetail = getRunDetail;
 exports.getRunLogs = getRunLogs;
 exports.getMetrics = getMetrics;
-const newsapi_1 = require("./connectors/newsapi");
-const thenewsapi_1 = require("./connectors/thenewsapi");
 const openweather_1 = require("./connectors/openweather");
-const openmeteo_1 = require("./connectors/openmeteo");
+const nws_1 = require("./connectors/nws");
 const gdelt_1 = require("./connectors/gdelt");
+const institutional_rss_1 = require("./connectors/institutional-rss");
 const sec_edgar_1 = require("./connectors/sec-edgar");
 const ecb_1 = require("./connectors/ecb");
+const oecd_1 = require("./connectors/oecd");
 const podcastindex_1 = require("./connectors/podcastindex");
 const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
 const db_1 = require("./db");
 const SOURCE_CONFIG = {
-    newsapi: {
-        sourceName: "newsapi",
-        apiBaseUrl: "https://newsapi.org/v2",
-        provider: "newsapi",
-        authType: "api_key",
-    },
-    thenewsapi: {
-        sourceName: "thenewsapi",
-        apiBaseUrl: "https://api.thenewsapi.com/v1",
-        provider: "thenewsapi",
-        authType: "api_key",
-    },
     gdelt: {
         sourceName: "gdelt",
         apiBaseUrl: "https://api.gdeltproject.org/api/v2",
         provider: "gdelt",
         authType: "none",
     },
-    openmeteo: {
-        sourceName: "openmeteo",
-        apiBaseUrl: "https://api.open-meteo.com",
-        provider: "openmeteo",
-        authType: process.env.OPEN_METEO_API_KEY ? "api_key" : "none",
+    institutionalRss: {
+        sourceName: "institutional_rss",
+        apiBaseUrl: "https://claritas.info/sources/institutional-rss",
+        provider: "institutional_rss",
+        authType: "none",
     },
     openweather: {
         sourceName: "openweather",
         apiBaseUrl: "https://api.openweathermap.org",
         provider: "openweather",
         authType: "api_key",
+    },
+    nws: {
+        sourceName: "nws",
+        apiBaseUrl: "https://api.weather.gov",
+        provider: "nws",
+        authType: "none",
     },
     secEdgar: {
         sourceName: "sec_edgar",
@@ -66,6 +60,12 @@ const SOURCE_CONFIG = {
         sourceName: "ecb",
         apiBaseUrl: "https://data-api.ecb.europa.eu/service/data",
         provider: "ecb",
+        authType: "none",
+    },
+    oecd: {
+        sourceName: "oecd",
+        apiBaseUrl: "https://sdmx.oecd.org/public/rest/data",
+        provider: "oecd",
         authType: "none",
     },
     podcastindex: {
@@ -83,32 +83,20 @@ const SOURCE_CONFIG = {
 };
 const PIPELINE_SOURCE_DEFAULT = {
     news: "gdelt",
-    weather: "openmeteo",
+    weather: "openweather",
     market: "secEdgar",
     podcasts: "podcastindex",
     leadership: "wikidata",
 };
-const DEFAULT_NEWS_EVERYTHING = {
-    q: "OpenAI",
-    pageSize: 50,
-    maxPages: 2,
-};
-const DEFAULT_NEWS_TOP_HEADLINES = {
-    country: "us",
-    category: "technology",
-    pageSize: 50,
-    maxPages: 2,
-};
 const activeRunPromises = new Map();
 const INGESTION_SOURCE_NAMES = [
-    "newsapi",
-    "thenewsapi",
     "gdelt",
+    "institutional_rss",
     "openweather",
-    "openmeteo",
-    "finnhub", // Historical run records remain visible after provider retirement.
+    "nws",
     "sec_edgar",
     "ecb",
+    "oecd",
     "podcastindex",
     "wikidata",
 ];
@@ -202,18 +190,6 @@ function normalizeIso2(value, allowEmpty = false) {
     }
     return text.toLowerCase();
 }
-function normalizeDateOnly(value) {
-    const text = asString(value);
-    if (!text)
-        return undefined;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(text))
-        return text;
-    const parsed = Date.parse(text);
-    if (Number.isNaN(parsed)) {
-        throw new IngestionValidationError("TheNewsAPI publishedAfter must be a valid date (YYYY-MM-DD).");
-    }
-    return new Date(parsed).toISOString().slice(0, 10);
-}
 function toErrorMessage(err) {
     if (err instanceof Error)
         return err.message;
@@ -283,19 +259,15 @@ function resolvePipeline(pipeline, sourceName) {
         pipeline === "leadership") {
         return pipeline;
     }
-    if (sourceName === "newsapi")
-        return "news";
-    if (sourceName === "thenewsapi")
-        return "news";
     if (sourceName === "gdelt")
+        return "news";
+    if (sourceName === "institutional_rss")
         return "news";
     if (sourceName === "openweather")
         return "weather";
-    if (sourceName === "openmeteo")
+    if (sourceName === "nws")
         return "weather";
-    if (sourceName === "finnhub")
-        return "market";
-    if (sourceName === "sec_edgar" || sourceName === "ecb")
+    if (sourceName === "sec_edgar" || sourceName === "ecb" || sourceName === "oecd")
         return "market";
     if (sourceName === "podcastindex")
         return "podcasts";
@@ -415,97 +387,25 @@ function startRunTask(runId, task) {
 }
 function buildNewsRunPlan(rawBody) {
     const body = asRecord(rawBody);
-    const everythingRaw = body.everything;
-    const topRaw = body.topHeadlines;
-    const theNewsApiRaw = body.theNewsApi;
     const providersRaw = asRecord(body.providers);
     const providers = {
-        newsapi: asBoolean(providersRaw.newsapi, Boolean(process.env.NEWSAPI_API_KEY)),
-        thenewsapi: asBoolean(providersRaw.thenewsapi, Boolean(process.env.THENEWSAPI_API_TOKEN)),
         gdelt: asBoolean(providersRaw.gdelt, true),
+        institutionalRss: asBoolean(providersRaw.institutionalRss ?? providersRaw.institutional_rss, true),
     };
-    if (!providers.newsapi && !providers.thenewsapi && !providers.gdelt) {
+    if (!providers.gdelt && !providers.institutionalRss) {
         throw new IngestionValidationError("Select at least one news provider.");
     }
-    if (providers.newsapi && !process.env.NEWSAPI_API_KEY) {
-        throw new IngestionValidationError("NewsAPI selected but NEWSAPI_API_KEY is not configured.");
-    }
-    if (providers.thenewsapi && !process.env.THENEWSAPI_API_TOKEN) {
-        throw new IngestionValidationError("TheNewsAPI selected but THENEWSAPI_API_TOKEN is not configured.");
-    }
-    let everything = null;
-    if (providers.newsapi && everythingRaw !== false) {
-        const cfg = asRecord(everythingRaw);
-        const q = asString(cfg.q) || DEFAULT_NEWS_EVERYTHING.q;
-        const language = asString(cfg.language);
-        everything = {
-            q,
-            language,
-            pageSize: clampInt(cfg.pageSize, 1, 100, DEFAULT_NEWS_EVERYTHING.pageSize ?? 50),
-            maxPages: clampInt(cfg.maxPages, 1, 10, DEFAULT_NEWS_EVERYTHING.maxPages ?? 2),
-        };
-    }
-    let topHeadlines = null;
-    if (providers.newsapi && topRaw !== false) {
-        const cfg = asRecord(topRaw);
-        const country = normalizeIso2(cfg.country, true) || DEFAULT_NEWS_TOP_HEADLINES.country;
-        const category = asString(cfg.category) || DEFAULT_NEWS_TOP_HEADLINES.category;
-        const q = asString(cfg.q);
-        topHeadlines = {
-            country,
-            category,
-            q,
-            pageSize: clampInt(cfg.pageSize, 1, 100, DEFAULT_NEWS_TOP_HEADLINES.pageSize ?? 50),
-            maxPages: clampInt(cfg.maxPages, 1, 10, DEFAULT_NEWS_TOP_HEADLINES.maxPages ?? 2),
-        };
-    }
-    if (providers.newsapi && !everything && !topHeadlines) {
-        throw new IngestionValidationError("Enable at least one NewsAPI step or disable NewsAPI.");
-    }
-    let theNewsApi = null;
-    if (providers.thenewsapi) {
-        const cfg = asRecord(theNewsApiRaw);
-        const everythingCfg = asRecord(everythingRaw);
-        const topCfg = asRecord(topRaw);
-        const publishedAfter = normalizeDateOnly(cfg.publishedAfter);
-        theNewsApi = {
-            search: asString(cfg.search) ||
-                asString(cfg.q) ||
-                asString(everythingCfg.q) ||
-                asString(topCfg.q) ||
-                DEFAULT_NEWS_EVERYTHING.q,
-            language: asString(cfg.language) || asString(everythingCfg.language),
-            locale: normalizeIso2(cfg.locale, true) ||
-                normalizeIso2(cfg.country, true) ||
-                normalizeIso2(topCfg.country, true) ||
-                DEFAULT_NEWS_TOP_HEADLINES.country,
-            pageSize: clampInt(cfg.pageSize, 1, 100, DEFAULT_NEWS_EVERYTHING.pageSize ?? 50),
-            maxPages: clampInt(cfg.maxPages, 1, 10, DEFAULT_NEWS_EVERYTHING.maxPages ?? 2),
-            publishedAfter,
-        };
-    }
-    return {
-        providers,
-        everything,
-        topHeadlines,
-        theNewsApi,
-        requestPayload: {
-            providers,
-            everything: everything ?? false,
-            topHeadlines: topHeadlines ?? false,
-            theNewsApi: theNewsApi ?? false,
-        },
-    };
+    return { providers, requestPayload: { providers } };
 }
 function buildWeatherRunPlan(rawBody) {
     const body = asRecord(rawBody);
     const country = normalizeIso2(body.country, true);
     const providerInput = asRecord(body.providers);
     const providers = {
-        openmeteo: asBoolean(providerInput.openmeteo, true),
-        openweather: asBoolean(providerInput.openweather, Boolean(process.env.OPENWEATHER_API_KEY)),
+        openweather: asBoolean(providerInput.openweather, true),
+        nws: asBoolean(providerInput.nws, true),
     };
-    if (!providers.openmeteo && !providers.openweather) {
+    if (!providers.openweather && !providers.nws) {
         throw new IngestionValidationError("Select at least one weather provider.");
     }
     if (providers.openweather && !process.env.OPENWEATHER_API_KEY) {
@@ -523,8 +423,9 @@ function buildMarketRunPlan(rawBody) {
     const providers = {
         secEdgar: asBoolean(providerInput.secEdgar ?? providerInput.sec_edgar, true),
         ecb: asBoolean(providerInput.ecb, true),
+        oecd: asBoolean(providerInput.oecd, true),
     };
-    if (!providers.secEdgar && !providers.ecb) {
+    if (!providers.secEdgar && !providers.ecb && !providers.oecd) {
         throw new IngestionValidationError("Select at least one market provider.");
     }
     return {
@@ -615,139 +516,11 @@ async function executeNewsRun(runId, plan) {
         await safeAppendRunLog(runId, "info", "News ingestion run started.", {
             request: plan.requestPayload,
         });
-        if (!plan.providers.newsapi) {
-            await safeAppendRunLog(runId, "info", "Skipping NewsAPI steps (provider not selected).");
-        }
-        if (plan.providers.newsapi && plan.everything) {
-            const stepStartedAt = Date.now();
-            await safeAppendRunLog(runId, "info", "Running NewsAPI everything ingest.", {
-                params: plan.everything,
-            });
-            try {
-                const result = (await (0, newsapi_1.ingestNewsApiEverything)(plan.everything));
-                const stepTotals = extractTotals(result);
-                mergeTotals(totals, stepTotals);
-                steps.push({
-                    step: "newsapi/everything",
-                    status: "success",
-                    started_at: new Date(stepStartedAt).toISOString(),
-                    finished_at: toIsoNow(),
-                    duration_ms: Date.now() - stepStartedAt,
-                    result,
-                });
-                await safeAppendRunLog(runId, "info", "NewsAPI everything ingest completed.", {
-                    result,
-                });
-            }
-            catch (err) {
-                const message = toErrorMessage(err);
-                steps.push({
-                    step: "newsapi/everything",
-                    status: "failed",
-                    started_at: new Date(stepStartedAt).toISOString(),
-                    finished_at: toIsoNow(),
-                    duration_ms: Date.now() - stepStartedAt,
-                    error: message,
-                });
-                await safeAppendRunLog(runId, "error", "NewsAPI everything ingest failed.", {
-                    error: message,
-                });
-                // Continue: mixed-provider runs are successful when another selected source succeeds.
-            }
-        }
-        if (plan.providers.newsapi && plan.topHeadlines) {
-            const stepStartedAt = Date.now();
-            await safeAppendRunLog(runId, "info", "Running NewsAPI top-headlines ingest.", {
-                params: plan.topHeadlines,
-            });
-            try {
-                const result = (await (0, newsapi_1.ingestNewsApiTopHeadlines)(plan.topHeadlines));
-                const stepTotals = extractTotals(result);
-                mergeTotals(totals, stepTotals);
-                steps.push({
-                    step: "newsapi/top-headlines",
-                    status: "success",
-                    started_at: new Date(stepStartedAt).toISOString(),
-                    finished_at: toIsoNow(),
-                    duration_ms: Date.now() - stepStartedAt,
-                    result,
-                });
-                await safeAppendRunLog(runId, "info", "NewsAPI top-headlines ingest completed.", {
-                    result,
-                });
-            }
-            catch (err) {
-                const message = toErrorMessage(err);
-                steps.push({
-                    step: "newsapi/top-headlines",
-                    status: "failed",
-                    started_at: new Date(stepStartedAt).toISOString(),
-                    finished_at: toIsoNow(),
-                    duration_ms: Date.now() - stepStartedAt,
-                    error: message,
-                });
-                await safeAppendRunLog(runId, "error", "NewsAPI top-headlines ingest failed.", {
-                    error: message,
-                });
-                // Continue: mixed-provider runs are successful when another selected source succeeds.
-            }
-        }
-        if (plan.providers.thenewsapi) {
-            if (!process.env.THENEWSAPI_API_TOKEN) {
-                throw new Error("TheNewsAPI selected but THENEWSAPI_API_TOKEN not set.");
-            }
-            const stepStartedAt = Date.now();
-            const params = {
-                search: plan.theNewsApi?.search || DEFAULT_NEWS_EVERYTHING.q,
-                language: plan.theNewsApi?.language,
-                locale: plan.theNewsApi?.locale,
-                pageSize: Math.min(Math.max(plan.theNewsApi?.pageSize || 50, 1), 100),
-                maxPages: Math.min(Math.max(plan.theNewsApi?.maxPages || 2, 1), 10),
-                publishedAfter: plan.theNewsApi?.publishedAfter,
-            };
-            await safeAppendRunLog(runId, "info", "Running TheNewsAPI /news/top ingest.", {
-                params: params,
-            });
-            try {
-                const result = (await (0, thenewsapi_1.ingestTheNewsApiNews)(params));
-                const stepTotals = extractTotals(result);
-                mergeTotals(totals, stepTotals);
-                steps.push({
-                    step: "thenewsapi/news-top",
-                    status: "success",
-                    started_at: new Date(stepStartedAt).toISOString(),
-                    finished_at: toIsoNow(),
-                    duration_ms: Date.now() - stepStartedAt,
-                    result,
-                });
-                await safeAppendRunLog(runId, "info", "TheNewsAPI /news/top ingest completed.", {
-                    result,
-                });
-            }
-            catch (err) {
-                const message = toErrorMessage(err);
-                steps.push({
-                    step: "thenewsapi/news-top",
-                    status: "failed",
-                    started_at: new Date(stepStartedAt).toISOString(),
-                    finished_at: toIsoNow(),
-                    duration_ms: Date.now() - stepStartedAt,
-                    error: message,
-                });
-                await safeAppendRunLog(runId, "error", "TheNewsAPI /news/top ingest failed.", {
-                    error: message,
-                });
-                // Continue: mixed-provider runs are successful when another selected source succeeds.
-            }
-        }
-        else {
-            await safeAppendRunLog(runId, "info", "Skipping TheNewsAPI step (provider not selected).");
-        }
         if (plan.providers.gdelt) {
             await executeProviderStep(runId, steps, totals, "gdelt/doc-event-gkg", async () => (0, gdelt_1.ingestGdelt)());
         }
-        else {
-            await safeAppendRunLog(runId, "info", "Skipping GDELT step (provider not selected).");
+        if (plan.providers.institutionalRss) {
+            await executeProviderStep(runId, steps, totals, "institutional-rss/primary-source-releases", institutional_rss_1.ingestInstitutionalRss);
         }
         const succeeded = steps.filter((step) => step.status === "success").length;
         if (succeeded === 0)
@@ -791,11 +564,11 @@ async function executeWeatherRun(runId, plan) {
         await safeAppendRunLog(runId, "info", "Weather ingestion run started.", {
             request: plan.requestPayload,
         });
-        if (plan.providers.openmeteo) {
-            await executeProviderStep(runId, steps, totals, "openmeteo/current-forecast-air-quality", async () => (0, openmeteo_1.ingestOpenMeteoCountryWeather)(plan.country));
-        }
         if (plan.providers.openweather) {
-            await executeProviderStep(runId, steps, totals, "openweather/country-current", async () => (0, openweather_1.ingestOpenWeatherCountryCurrent)(plan.country));
+            await executeProviderStep(runId, steps, totals, "openweather/one-call-forecast-air-alerts", async () => (0, openweather_1.ingestOpenWeatherCountryWeather)(plan.country));
+        }
+        if (plan.providers.nws && (!plan.country || plan.country === "US")) {
+            await executeProviderStep(runId, steps, totals, "nws/active-alerts", nws_1.ingestNwsAlerts);
         }
         const succeeded = steps.filter((step) => step.status === "success").length;
         if (succeeded === 0)
@@ -844,6 +617,9 @@ async function executeMarketRun(runId, plan) {
         }
         if (plan.providers.ecb) {
             await executeProviderStep(runId, steps, totals, "ecb/fx-rates", async () => (0, ecb_1.ingestEcbData)());
+        }
+        if (plan.providers.oecd) {
+            await executeProviderStep(runId, steps, totals, "oecd/monthly-share-price-indices", oecd_1.ingestOecdSharePrices);
         }
         const succeeded = steps.filter((step) => step.status === "success").length;
         if (succeeded === 0)
@@ -954,9 +730,7 @@ async function executeLeadershipRun(runId, plan) {
     }
 }
 async function triggerNewsRun(input) {
-    const sourceNameOverride = input.plan.providers.gdelt
-        ? "gdelt"
-        : input.plan.providers.thenewsapi && !input.plan.providers.newsapi ? "thenewsapi" : "newsapi";
+    const sourceNameOverride = input.plan.providers.gdelt ? "gdelt" : "institutionalRss";
     const run = await createRun({
         pipeline: "news",
         actor: input.actor,
@@ -974,7 +748,7 @@ async function triggerWeatherRun(input) {
         pipeline: "weather",
         actor: input.actor,
         requestPayload: input.plan.requestPayload,
-        sourceNameOverride: input.plan.providers.openmeteo ? "openmeteo" : "openweather",
+        sourceNameOverride: input.plan.providers.openweather ? "openweather" : "nws",
     });
     await safeAppendRunLog(run.id, "info", "Weather ingestion run queued.", {
         requested_by: input.actor.email || input.actor.userId,
@@ -987,7 +761,8 @@ async function triggerMarketRun(input) {
         pipeline: "market",
         actor: input.actor,
         requestPayload: input.plan.requestPayload,
-        sourceNameOverride: input.plan.providers.secEdgar ? "secEdgar" : "ecb",
+        sourceNameOverride: input.plan.providers.secEdgar
+            ? "secEdgar" : input.plan.providers.ecb ? "ecb" : "oecd",
     });
     await safeAppendRunLog(run.id, "info", "Market ingestion run queued.", {
         requested_by: input.actor.email || input.actor.userId,
@@ -1031,14 +806,13 @@ async function listRuns(options) {
     if (options.pipeline) {
         const pipelineIdx = params.push(options.pipeline);
         where.push(`(r.pipeline = $${pipelineIdx}
-        OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
-        OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'gdelt')
+        OR ($${pipelineIdx} = 'news' AND s.name = 'institutional_rss')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
-        OR ($${pipelineIdx} = 'weather' AND s.name = 'openmeteo')
-        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub')
+        OR ($${pipelineIdx} = 'weather' AND s.name = 'nws')
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
         OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'oecd')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`);
     }
@@ -1117,14 +891,13 @@ async function getMetrics(options) {
     if (options?.pipeline) {
         const pipelineIdx = params.push(options.pipeline);
         where.push(`(r.pipeline = $${pipelineIdx}
-        OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
-        OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'gdelt')
+        OR ($${pipelineIdx} = 'news' AND s.name = 'institutional_rss')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
-        OR ($${pipelineIdx} = 'weather' AND s.name = 'openmeteo')
-        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub')
+        OR ($${pipelineIdx} = 'weather' AND s.name = 'nws')
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
         OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'oecd')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`);
     }

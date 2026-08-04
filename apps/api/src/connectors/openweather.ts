@@ -200,19 +200,21 @@ async function storeTarget(sourceId: number, target: Target, data: OneCallRespon
     const airPoint = air?.list?.[0];
     if (airPoint) {
       const component = airPoint.components ?? {};
-      const usAqi = airPoint.main?.aqi == null ? null : airPoint.main.aqi * 25;
+      const providerAqi = airPoint.main?.aqi == null ? null : airPoint.main.aqi;
       await client.query(
         `INSERT INTO air_quality_snapshot (
-           source_id,country_iso2,observed_at,european_aqi,us_aqi,pm10,pm2_5,
+           source_id,country_iso2,observed_at,european_aqi,us_aqi,provider_aqi,aqi_scale,pm10,pm2_5,
            carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,payload
-         ) VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8,$9,$10,$11)
+         ) VALUES ($1,$2,$3,NULL,NULL,$4,'OpenWeather 1-5',$5,$6,$7,$8,$9,$10,$11)
          ON CONFLICT (source_id,country_iso2) DO UPDATE SET observed_at=EXCLUDED.observed_at,
-           european_aqi=EXCLUDED.european_aqi,us_aqi=EXCLUDED.us_aqi,pm10=EXCLUDED.pm10,pm2_5=EXCLUDED.pm2_5,
+           european_aqi=EXCLUDED.european_aqi,us_aqi=EXCLUDED.us_aqi,
+           provider_aqi=EXCLUDED.provider_aqi,aqi_scale=EXCLUDED.aqi_scale,
+           pm10=EXCLUDED.pm10,pm2_5=EXCLUDED.pm2_5,
            carbon_monoxide=EXCLUDED.carbon_monoxide,nitrogen_dioxide=EXCLUDED.nitrogen_dioxide,
            sulphur_dioxide=EXCLUDED.sulphur_dioxide,ozone=EXCLUDED.ozone,payload=EXCLUDED.payload,updated_at=now()`,
-        [sourceId,target.iso2,unix(airPoint.dt),usAqi,number(component.pm10),number(component.pm2_5),
+        [sourceId,target.iso2,unix(airPoint.dt),providerAqi,number(component.pm10),number(component.pm2_5),
          number(component.co),number(component.no2),number(component.so2),number(component.o3),
-         JSON.stringify({ provider: "openweather", scale: "OpenWeather 1-5 category mapped to a display index", raw_aqi: airPoint.main?.aqi ?? null })]
+         JSON.stringify({ provider: "openweather", scale: "OpenWeather 1-5", raw_aqi: providerAqi })]
       );
     }
 

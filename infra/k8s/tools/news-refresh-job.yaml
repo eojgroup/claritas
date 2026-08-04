@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: news-refresh
+  namespace: claritas
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: curl
+          image: curlimages/curl:8.10.1
+          env:
+            - name: BASE
+              value: http://claritas-api.claritas.svc.cluster.local:8080
+            - name: INGEST_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: claritas-auth
+                  key: INGEST_API_TOKEN
+                  optional: true
+          args:
+            - /bin/sh
+            - -ceu
+            - |
+              echo "Refreshing GDELT DOC, Event and GKG data ..."
+              curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 300 \
+                -H 'content-type: application/json' \
+                -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
+                -d '{"timespan":"24h","maxRecords":250}' \
+                "$BASE/api/ingest/gdelt"
+              echo
+              echo "Refreshing official institutional feeds ..."
+              curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
+                -H 'content-type: application/json' \
+                -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
+                -d '{}' \
+                "$BASE/api/ingest/institutional-rss"
+              echo
+              echo "News refresh completed."

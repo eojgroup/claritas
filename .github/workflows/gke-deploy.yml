@@ -298,7 +298,8 @@ jobs:
           PODCAST_MAX_EPISODES_PER_FEED: ${{ vars.PODCAST_MAX_EPISODES_PER_FEED }}
           PODCAST_INTELLIGENCE_EXTRACTION_ENABLED: ${{ vars.PODCAST_INTELLIGENCE_EXTRACTION_ENABLED }}
           PODCASTINDEX_USER_AGENT: ${{ vars.PODCASTINDEX_USER_AGENT }}
-          SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT }}
+          SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT || secrets.SEC_EDGAR_USER_AGENT }}
+          NWS_USER_AGENT: ${{ vars.NWS_USER_AGENT || secrets.NWS_USER_AGENT }}
         run: |
           # Ensure claritas-config (DB + auth settings) exists
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
@@ -327,6 +328,7 @@ jobs:
             "PODCAST_INTELLIGENCE_EXTRACTION_ENABLED",
             "PODCASTINDEX_USER_AGENT",
             "SEC_EDGAR_USER_AGENT",
+            "NWS_USER_AGENT",
           ]) {
             const value = process.env[key];
             if (value && value.trim()) data[key] = value.trim();
@@ -401,33 +403,12 @@ jobs:
       - name: 🔐 Ensure API provider secrets exist
         env:
           NS: ${{ env.NAMESPACE }}
-          NEWSAPI_API_KEY: ${{ secrets.NEWSAPI_API_KEY }}
-          THENEWSAPI_API_TOKEN: ${{ secrets.THENEWSAPI_API_TOKEN }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-          OPEN_METEO_API_KEY: ${{ secrets.OPEN_METEO_API_KEY }}
           PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
           PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
         run: |
           set -euo pipefail
-          # Upsert NewsAPI secret if provided
-          if [ -n "${NEWSAPI_API_KEY:-}" ]; then
-            kubectl -n "$NS" create secret generic claritas-newsapi \
-              --from-literal=NEWSAPI_API_KEY="$NEWSAPI_API_KEY" \
-              --dry-run=client -o yaml | kubectl apply -f -
-          else
-            echo "::warning::NEWSAPI_API_KEY secret not provided; skipping claritas-newsapi upsert"
-          fi
-
-          # Upsert TheNewsAPI secret if provided
-          if [ -n "${THENEWSAPI_API_TOKEN:-}" ]; then
-            kubectl -n "$NS" create secret generic claritas-thenewsapi \
-              --from-literal=THENEWSAPI_API_TOKEN="$THENEWSAPI_API_TOKEN" \
-              --dry-run=client -o yaml | kubectl apply -f -
-          else
-            echo "::warning::THENEWSAPI_API_TOKEN secret not provided; skipping claritas-thenewsapi upsert"
-          fi
-
           # Upsert OpenWeather secret if provided
           if [ -n "${OPENWEATHER_API_KEY:-}" ]; then
             kubectl -n "$NS" create secret generic claritas-openweather \
@@ -437,15 +418,12 @@ jobs:
             echo "::warning::OPENWEATHER_API_KEY secret not provided; skipping claritas-openweather upsert"
           fi
 
-          # Open-Meteo is keyless for eligible public-API use. A customer key
-          # switches the connector to the commercial customer endpoints.
-          if [ -n "${OPEN_METEO_API_KEY:-}" ]; then
-            kubectl -n "$NS" create secret generic claritas-openmeteo \
-              --from-literal=OPEN_METEO_API_KEY="$OPEN_METEO_API_KEY" \
-              --dry-run=client -o yaml | kubectl apply -f -
-          else
-            echo "OPEN_METEO_API_KEY not provided; using the keyless public endpoint"
-          fi
+          # Remove credentials for providers that are no longer part of the
+          # production source model. GitHub repository secrets are removed
+          # manually because Actions does not grant workflows that authority.
+          kubectl -n "$NS" delete secret \
+            claritas-finnhub claritas-newsapi claritas-thenewsapi claritas-openmeteo \
+            --ignore-not-found
 
           # PodcastIndex uses a key and secret to sign each API request.
           if [ -n "${PODCASTINDEX_API_KEY:-}" ] && [ -n "${PODCASTINDEX_API_SECRET:-}" ]; then

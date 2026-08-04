@@ -255,13 +255,13 @@ const getLeadershipDisplayName = (value: string | null | undefined): string =>
 
 const prettySourceName = (value: string): string => {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "newsapi") return "NewsAPI";
-  if (normalized === "thenewsapi") return "TheNewsAPI";
   if (normalized === "gdelt") return "GDELT";
-  if (normalized === "openmeteo") return "Open-Meteo";
+  if (normalized === "institutional_rss") return "Institutional RSS";
   if (normalized === "openweather") return "OpenWeather";
+  if (normalized === "nws") return "NOAA/NWS";
   if (normalized === "sec_edgar") return "SEC EDGAR";
   if (normalized === "ecb") return "ECB";
+  if (normalized === "oecd") return "OECD";
   return value.trim();
 };
 
@@ -2117,6 +2117,17 @@ export default function ClaritasDashboard() {
   ]);
 
   const highestSignalCountry = crossSourceMapData[0] ?? null;
+  const highestMapNewsCountry = useMemo(
+    () => [...mapBubbleData].sort((left, right) => right.count - left.count)[0] ?? null,
+    [mapBubbleData],
+  );
+  const mostExtremeWeatherCountry = useMemo(
+    () =>
+      [...mapWeatherData].sort(
+        (left, right) => Math.abs((right.value ?? 20) - 20) - Math.abs((left.value ?? 20) - 20),
+      )[0] ?? null,
+    [mapWeatherData],
+  );
 
   const activeMapData =
     mapMode === "signals"
@@ -2537,6 +2548,33 @@ export default function ClaritasDashboard() {
       };
     });
   }, [countryMarkets, marketMapLayer]);
+
+  const featuredMarketCountry = useMemo(
+    () =>
+      [...marketIndexMapData].sort(
+        (left, right) => Math.abs(right.value ?? right.count) - Math.abs(left.value ?? left.count),
+      )[0] ?? null,
+    [marketIndexMapData],
+  );
+  const newsMarketContextData = useMemo(
+    () => marketIndexMapData.filter((row) => newsPageCountryStats.has(row.country.toUpperCase())),
+    [marketIndexMapData, newsPageCountryStats],
+  );
+  const featuredNewsMarketCountry = useMemo(
+    () =>
+      [...newsMarketContextData].sort(
+        (left, right) => Math.abs(right.value ?? right.count) - Math.abs(left.value ?? left.count),
+      )[0] ?? null,
+    [newsMarketContextData],
+  );
+  const marketMapDescription =
+    marketMapLayer === "filings"
+      ? "SEC filing activity · trailing 7 days"
+      : marketMapLayer === "index"
+        ? "OECD share-price index direction · latest monthly observation"
+        : marketMapLayer === "fx"
+          ? "Local-currency direction versus EUR · latest daily reference rate"
+          : "Mixed-frequency market regime · OECD index 75% + ECB FX 25%";
 
   const selectedCountryMarket = useMemo(() => {
     const country = (selectedCountry ?? pinnedCountry ?? "").toUpperCase();
@@ -4746,22 +4784,34 @@ export default function ClaritasDashboard() {
                             featuredCountry={
                               mapMode === "signals"
                                 ? highestSignalCountry?.country
-                                : null
+                                : mapMode === "news"
+                                  ? highestMapNewsCountry?.country
+                                  : mostExtremeWeatherCountry?.country
                             }
-                            featuredLabel="Highest signal relevance"
+                            featuredLabel={
+                              mapMode === "signals"
+                                ? "Highest signal relevance"
+                                : mapMode === "news"
+                                  ? "Highest story concentration"
+                                  : "Most extreme temperature"
+                            }
                             scale={
                               mapMode === "news" || mapMode === "signals"
                                 ? "log"
                                 : "linear"
                             }
                             fillMode={
-                              mapMode === "signals" ? "relevance" : "default"
+                              mapMode === "weather" ? "temperature" : "relevance"
                             }
                             valueDomain={
-                              mapMode === "signals" ? [0, 100] : undefined
+                              mapMode === "signals"
+                                ? [0, 100]
+                                : mapMode === "news"
+                                  ? [0, Math.max(1, ...mapBubbleData.map((row) => row.count))]
+                                  : [-30, 45]
                             }
-                            valueUnit={mapMode === "signals" ? "/100" : ""}
-                            showBubbles={mapMode !== "signals"}
+                            valueUnit={mapMode === "signals" ? "/100" : mapMode === "weather" ? "°C" : ""}
+                            showBubbles={false}
                             showLabels
                             legendLabel={activeMapLegendLabel}
                           />
@@ -5747,22 +5797,34 @@ export default function ClaritasDashboard() {
                             featuredCountry={
                               mapMode === "signals"
                                 ? highestSignalCountry?.country
-                                : null
+                                : mapMode === "news"
+                                  ? highestMapNewsCountry?.country
+                                  : mostExtremeWeatherCountry?.country
                             }
-                            featuredLabel="Highest signal relevance"
+                            featuredLabel={
+                              mapMode === "signals"
+                                ? "Highest signal relevance"
+                                : mapMode === "news"
+                                  ? "Highest story concentration"
+                                  : "Most extreme temperature"
+                            }
                             scale={
                               mapMode === "news" || mapMode === "signals"
                                 ? "log"
                                 : "linear"
                             }
                             fillMode={
-                              mapMode === "signals" ? "relevance" : "default"
+                              mapMode === "weather" ? "temperature" : "relevance"
                             }
                             valueDomain={
-                              mapMode === "signals" ? [0, 100] : undefined
+                              mapMode === "signals"
+                                ? [0, 100]
+                                : mapMode === "news"
+                                  ? [0, Math.max(1, ...mapBubbleData.map((row) => row.count))]
+                                  : [-30, 45]
                             }
-                            valueUnit={mapMode === "signals" ? "/100" : ""}
-                            showBubbles={mapMode !== "signals"}
+                            valueUnit={mapMode === "signals" ? "/100" : mapMode === "weather" ? "°C" : ""}
+                            showBubbles={false}
                             legendLabel={activeMapLegendLabel}
                           />
                         </div>
@@ -5957,6 +6019,9 @@ export default function ClaritasDashboard() {
                           featuredCountry={highestNewsCountry?.country}
                           featuredLabel="Highest story concentration"
                           scale="log"
+                          fillMode="relevance"
+                          valueDomain={[0, Math.max(1, ...newsPageMapData.map((row) => row.count))]}
+                          showBubbles={false}
                           legendLabel="Story concentration"
                         />
                       </div>
@@ -6300,13 +6365,19 @@ export default function ClaritasDashboard() {
                     <div className="h-[min(48vh,420px)] min-h-[18rem] p-3">
                       <div className="app-map-frame">
                         <WorldMapBubbles
-                          data={marketIndexMapData}
+                          data={newsMarketContextData}
                           onSelect={(iso) => setSelectedCountry(iso)}
                           dark={dark}
                           primaryCountry={selectedCountry}
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
+                          featuredCountry={featuredNewsMarketCountry?.country}
+                          featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : "Strongest market move"}
                           scale="linear"
+                          fillMode={marketMapLayer === "filings" ? "sequential" : "diverging"}
+                          valueDomain={marketMapLayer === "filings" ? [0, Math.max(1, ...newsMarketContextData.map((row) => row.value ?? 0))] : [-3, 3]}
+                          valueUnit={marketMapLayer === "filings" ? "" : "%"}
+                          showBubbles={false}
                           legendLabel="Market pressure"
                         />
                       </div>
@@ -7057,6 +7128,8 @@ export default function ClaritasDashboard() {
                           primaryCountry={selectedCountry}
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
+                          featuredCountry={weatherSummary.hottestCountry !== "—" ? weatherSummary.hottestCountry : null}
+                          featuredLabel="Highest observed temperature"
                           scale="linear"
                           legendLabel="Air temperature °C"
                           fillMode="temperature"
@@ -7137,7 +7210,10 @@ export default function ClaritasDashboard() {
                               <span>Feels {entry.apparent_temp_c ?? "—"}°C</span>
                               <span>Precip {entry.precipitation_mm ?? "—"} mm</span>
                               <span>Gust {entry.wind_gust ?? "—"} m/s</span>
-                              <span>AQI {entry.air_quality?.european_aqi ?? "—"} · {entry.air_quality?.label ?? "Unknown"}</span>
+                              <span>
+                                AQI {entry.air_quality?.provider_aqi ?? entry.air_quality?.european_aqi ?? entry.air_quality?.us_aqi ?? "—"}
+                                {entry.air_quality?.aqi_scale ? ` (${entry.air_quality.aqi_scale})` : ""} · {entry.air_quality?.label ?? "Unknown"}
+                              </span>
                             </div>
                             {entry.forecast && entry.forecast.length > 0 && (
                               <div className="mt-2 grid grid-cols-3 gap-1">
@@ -7296,7 +7372,7 @@ export default function ClaritasDashboard() {
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Market workspace</div>
                     <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                      {countryMarketCoverage.countries} country regimes · ECB FX + SEC primary events
+                      {countryMarketCoverage.countries} country regimes · OECD indices + ECB FX + SEC primary events
                     </div>
                   </div>
                   <div className="ml-auto inline-flex flex-wrap rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
@@ -7318,7 +7394,7 @@ export default function ClaritasDashboard() {
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country market regime map</div>
                       <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                        {marketMapLayer === "filings" ? "SEC filing activity by country" : `${marketMapLayer} daily direction — red negative, green positive`}
+                        {marketMapDescription}
                       </div>
                     </div>
                     <div className="h-[min(58vh,540px)] min-h-[22rem] p-3">
@@ -7330,6 +7406,8 @@ export default function ClaritasDashboard() {
                           primaryCountry={selectedCountry}
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
+                          featuredCountry={featuredMarketCountry?.country}
+                          featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : "Strongest market move"}
                           fillMode={marketMapLayer === "filings" ? "sequential" : "diverging"}
                           valueDomain={marketMapLayer === "filings" ? [0, Math.max(1, ...countryMarkets.map((row) => row.filing_count_7d))] : [-3, 3]}
                           valueUnit={marketMapLayer === "filings" ? "" : "%"}
@@ -7373,9 +7451,9 @@ export default function ClaritasDashboard() {
                     </div>
                     <div className={`${cardBase} p-4 text-xs`}>
                       <div className="font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Connected context</div>
-                      <div className="mt-2 text-[color:var(--shell-ink)]">Weather: {relatedWeather ? `${relatedWeather.temp_c ?? "—"}°C · ${relatedWeather.weather_main ?? "—"} · AQI ${relatedWeather.air_quality?.european_aqi ?? "—"}` : "select a covered country"}</div>
+                      <div className="mt-2 text-[color:var(--shell-ink)]">Weather: {relatedWeather ? `${relatedWeather.temp_c ?? "—"}°C · ${relatedWeather.weather_main ?? "—"} · AQI ${relatedWeather.air_quality?.provider_aqi ?? relatedWeather.air_quality?.european_aqi ?? relatedWeather.air_quality?.us_aqi ?? "—"}${relatedWeather.air_quality?.aqi_scale ? ` (${relatedWeather.air_quality.aqi_scale})` : ""}` : "select a covered country"}</div>
                       <div className="mt-1 text-[color:var(--shell-ink)]">News: {relatedNews.length} recent mapped stories</div>
-                      <div className="mt-1 text-[color:var(--shell-muted)]">Composite = 75% licensed country index + 25% local currency vs EUR when both exist; otherwise the available component is shown. Missing values are not imputed.</div>
+                      <div className="mt-1 text-[color:var(--shell-muted)]">Composite = 75% OECD monthly share-price direction + 25% ECB daily local-currency direction versus EUR when both exist; otherwise the available component is shown. Missing values are not imputed.</div>
                     </div>
                   </div>
                 </section>

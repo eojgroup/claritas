@@ -91,7 +91,7 @@ private struct NewsRow: View {
     }
 
     private func proxiedImageURL() -> URL? {
-        // Try NewsAPI + TheNewsAPI image fields.
+        // Try provider-specific image fields before falling back to the URL.
         guard let payload = item.payload else { return nil }
         let urlStr: String? = {
             if case .object(let dict) = payload {
@@ -139,12 +139,10 @@ private struct NewsRow: View {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return nil }
         switch trimmed.lowercased() {
-        case "newsapi":
-            return "NewsAPI"
-        case "thenewsapi":
-            return "TheNewsAPI"
         case "gdelt":
             return "GDELT"
+        case "institutional_rss":
+            return "Institutional RSS"
         default:
             return trimmed
         }

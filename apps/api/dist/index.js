@@ -38,14 +38,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const crypto_1 = require("crypto");
-const newsapi_1 = require("./connectors/newsapi");
-const thenewsapi_1 = require("./connectors/thenewsapi");
 const podcastindex_1 = require("./connectors/podcastindex");
 const openweather_1 = require("./connectors/openweather");
-const openmeteo_1 = require("./connectors/openmeteo");
+const nws_1 = require("./connectors/nws");
+const weather_1 = require("./connectors/weather");
+const institutional_rss_1 = require("./connectors/institutional-rss");
 const gdelt_1 = require("./connectors/gdelt");
 const sec_edgar_1 = require("./connectors/sec-edgar");
 const ecb_1 = require("./connectors/ecb");
+const oecd_1 = require("./connectors/oecd");
 const market_overview_1 = require("./connectors/market-overview");
 const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
 const transport_1 = require("./connectors/transport");
@@ -2246,20 +2247,6 @@ app.get("/api/admin/ingestion/metrics", requireAdminRole, async (req, res) => {
         return res.status(500).json({ error: e.message || String(e) });
     }
 });
-// Ingest NewsAPI 'everything'
-app.post("/api/ingest/newsapi/everything", requireIngestionAccess, async (req, res) => {
-    try {
-        const { q, language, pageSize, maxPages } = req.body || {};
-        if (!q || typeof q !== "string") {
-            return res.status(400).json({ error: "Missing body.q (string)" });
-        }
-        const result = await (0, newsapi_1.ingestNewsApiEverything)({ q, language, pageSize, maxPages });
-        res.json(result);
-    }
-    catch (e) {
-        res.status(500).json({ error: e.message || String(e) });
-    }
-});
 app.post("/api/ingest/podcastindex", requireIngestionAccess, async (req, res) => {
     try {
         return res.json(await (0, podcastindex_1.ingestPodcastIndex)(parsePodcastIngestParams(req.body)));
@@ -2276,35 +2263,6 @@ app.post("/api/ingest/wikidata/leadership", requireIngestionAccess, async (_req,
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return res.status(502).json({ error: message });
-    }
-});
-// Ingest NewsAPI 'top-headlines'
-app.post("/api/ingest/newsapi/top-headlines", requireIngestionAccess, async (req, res) => {
-    try {
-        const { country, category, q, pageSize, maxPages } = req.body || {};
-        const result = await (0, newsapi_1.ingestNewsApiTopHeadlines)({ country, category, q, pageSize, maxPages });
-        res.json(result);
-    }
-    catch (e) {
-        res.status(500).json({ error: e.message || String(e) });
-    }
-});
-// Ingest TheNewsAPI '/news/top'
-app.post("/api/ingest/thenewsapi/news", requireIngestionAccess, async (req, res) => {
-    try {
-        const { q, search, language, locale, pageSize, maxPages, publishedAfter } = req.body || {};
-        const result = await (0, thenewsapi_1.ingestTheNewsApiNews)({
-            search: typeof search === "string" && search.trim() ? search : (typeof q === "string" ? q : undefined),
-            language,
-            locale,
-            pageSize,
-            maxPages,
-            publishedAfter,
-        });
-        res.json(result);
-    }
-    catch (e) {
-        res.status(500).json({ error: e.message || String(e) });
     }
 });
 // GDELT DOC + latest Event/GKG archives. All three feeds are keyless.
@@ -2325,22 +2283,28 @@ app.post("/api/ingest/gdelt", requireIngestionAccess, async (req, res) => {
         return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
     }
 });
-// Ingest OpenWeather current weather for countries (centroid-based)
+app.post("/api/ingest/institutional-rss", requireIngestionAccess, async (_req, res) => {
+    try {
+        return res.json(await (0, institutional_rss_1.ingestInstitutionalRss)());
+    }
+    catch (error) {
+        return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+});
+// OpenWeather One Call current conditions, forecasts, alerts and air quality.
 app.post("/api/ingest/openweather/country-current", requireIngestionAccess, async (req, res) => {
     try {
         const { country } = req.body || {};
-        const result = await (0, openweather_1.ingestOpenWeatherCountryCurrent)(typeof country === 'string' ? country : undefined);
+        const result = await (0, openweather_1.ingestOpenWeatherCountryWeather)(typeof country === 'string' ? country : undefined);
         res.json(result);
     }
     catch (e) {
         res.status(500).json({ error: e.message || String(e) });
     }
 });
-// Open-Meteo current conditions, hourly/daily forecasts and air quality.
-app.post("/api/ingest/openmeteo/country-weather", requireIngestionAccess, async (req, res) => {
+app.post("/api/ingest/nws/alerts", requireIngestionAccess, async (_req, res) => {
     try {
-        const country = typeof req.body?.country === "string" ? req.body.country : undefined;
-        return res.json(await (0, openmeteo_1.ingestOpenMeteoCountryWeather)(country));
+        return res.json(await (0, nws_1.ingestNwsAlerts)());
     }
     catch (error) {
         return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
@@ -2381,11 +2345,19 @@ app.post("/api/ingest/ecb", requireIngestionAccess, async (req, res) => {
         return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
     }
 });
+app.post("/api/ingest/oecd", requireIngestionAccess, async (_req, res) => {
+    try {
+        return res.json(await (0, oecd_1.ingestOecdSharePrices)());
+    }
+    catch (error) {
+        return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+    }
+});
 // Latest weather per country for map overlay
 app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) => {
     try {
         (0, ingestion_automation_1.trackDemandSignal)("weather");
-        const rows = await (0, openmeteo_1.getCountryWeatherLatest)();
+        const rows = await (0, weather_1.getCountryWeatherLatest)();
         res.json({ stats: rows });
     }
     catch (e) {
@@ -2399,47 +2371,13 @@ app.get("/api/weather/forecast", requireAuthenticated, async (req, res) => {
         if (!/^[A-Z]{2}$/.test(country))
             return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
         const hours = typeof req.query.hours === "string" ? Number(req.query.hours) : 48;
-        const forecast = await (0, openmeteo_1.getCountryWeatherForecast)(country, Number.isFinite(hours) ? hours : 48);
+        const forecast = await (0, weather_1.getCountryWeatherForecast)(country, Number.isFinite(hours) ? hours : 48);
         if (!forecast)
             return res.status(404).json({ error: "No forecast is available for this country." });
         return res.json(forecast);
     }
     catch (error) {
         return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
-    }
-});
-app.get("/api/weather/history", requireAuthenticated, async (req, res) => {
-    try {
-        (0, ingestion_automation_1.trackDemandSignal)("weather");
-        const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
-        if (!/^[A-Z]{2}$/.test(country))
-            return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
-        const defaultEnd = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
-        const defaultStart = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
-        const history = await (0, openmeteo_1.getHistoricalWeather)(country, typeof req.query.start_date === "string" ? req.query.start_date : defaultStart, typeof req.query.end_date === "string" ? req.query.end_date : defaultEnd);
-        if (!history)
-            return res.status(404).json({ error: "Historical weather is unavailable for this country." });
-        return res.json(history);
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return res.status(message.includes("must") ? 400 : 502).json({ error: message });
-    }
-});
-app.get("/api/weather/marine", requireAuthenticated, async (req, res) => {
-    try {
-        (0, ingestion_automation_1.trackDemandSignal)("weather");
-        const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
-        if (!/^[A-Z]{2}$/.test(country))
-            return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
-        const hours = typeof req.query.hours === "string" ? Number(req.query.hours) : 48;
-        const marine = await (0, openmeteo_1.getMarineWeather)(country, Number.isFinite(hours) ? hours : 48);
-        if (!marine)
-            return res.status(404).json({ error: "Marine weather is unavailable for this country." });
-        return res.json(marine);
-    }
-    catch (error) {
-        return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
     }
 });
 app.get("/api/leadership/countries", requireAuthenticated, async (_req, res) => {

@@ -1516,7 +1516,7 @@ private struct AdminIngestionPanelView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("SEC EDGAR, ECB, OECD national share-price indices and BIS effective exchange rates. All four market sources are keyless.")
+                        Text("SEC EDGAR, ECB and OECD national share-price indices. All three market sources are keyless.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
@@ -2230,18 +2230,12 @@ private struct AdminIngestionPanelView: View {
 
     private func prettySourceName(_ value: String) -> String {
         switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "newsapi":
-            return "NewsAPI"
-        case "thenewsapi":
-            return "TheNewsAPI"
         case "gdelt":
             return "GDELT"
         case "institutional_rss":
             return "Institutional RSS"
         case "openweather":
             return "OpenWeather"
-        case "openmeteo":
-            return "Open-Meteo"
         case "nws":
             return "NOAA/NWS"
         case "sec_edgar":
@@ -2250,8 +2244,6 @@ private struct AdminIngestionPanelView: View {
             return "ECB"
         case "oecd":
             return "OECD"
-        case "bis":
-            return "BIS"
         default:
             return value
         }

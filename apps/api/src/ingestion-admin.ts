@@ -5,7 +5,6 @@ import { ingestInstitutionalRss } from "./connectors/institutional-rss";
 import { ingestSecEdgar } from "./connectors/sec-edgar";
 import { ingestEcbData } from "./connectors/ecb";
 import { ingestOecdSharePrices } from "./connectors/oecd";
-import { ingestBisEffectiveExchangeRates } from "./connectors/bis";
 import { ingestPodcastIndex, podcastParamsFromEnv, type PodcastIngestParams } from "./connectors/podcastindex";
 import { ingestWikidataLeadership } from "./connectors/wikidata-leadership";
 import { query } from "./db";
@@ -137,7 +136,7 @@ type WeatherRunPlan = {
 };
 
 type MarketRunPlan = {
-  providers: { secEdgar: boolean; ecb: boolean; oecd: boolean; bis: boolean };
+  providers: { secEdgar: boolean; ecb: boolean; oecd: boolean };
   requestPayload: Record<string, unknown>;
 };
 
@@ -174,7 +173,6 @@ type SourceConfigKey =
   | "secEdgar"
   | "ecb"
   | "oecd"
-  | "bis"
   | "podcastindex"
   | "wikidata";
 
@@ -224,12 +222,6 @@ const SOURCE_CONFIG: Record<
     provider: "oecd",
     authType: "none",
   },
-  bis: {
-    sourceName: "bis",
-    apiBaseUrl: "https://stats.bis.org/api/v2",
-    provider: "bis",
-    authType: "none",
-  },
   podcastindex: {
     sourceName: "podcastindex",
     apiBaseUrl: "https://api.podcastindex.org/api/1.0",
@@ -255,17 +247,13 @@ const PIPELINE_SOURCE_DEFAULT: Record<IngestionPipeline, SourceConfigKey> = {
 const activeRunPromises = new Map<number, Promise<void>>();
 
 const INGESTION_SOURCE_NAMES = [
-  "newsapi",
-  "thenewsapi",
   "gdelt",
   "institutional_rss",
   "openweather",
   "nws",
-  "finnhub", // Historical run records remain visible after provider retirement.
   "sec_edgar",
   "ecb",
   "oecd",
-  "bis",
   "podcastindex",
   "wikidata",
 ] as const;
@@ -357,17 +345,6 @@ function normalizeIso2(value: unknown, allowEmpty = false): string | undefined {
   return text.toLowerCase();
 }
 
-function normalizeDateOnly(value: unknown): string | undefined {
-  const text = asString(value);
-  if (!text) return undefined;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  const parsed = Date.parse(text);
-  if (Number.isNaN(parsed)) {
-    throw new IngestionValidationError("TheNewsAPI publishedAfter must be a valid date (YYYY-MM-DD).");
-  }
-  return new Date(parsed).toISOString().slice(0, 10);
-}
-
 function toErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
@@ -440,15 +417,11 @@ function resolvePipeline(pipeline: string | null, sourceName: string): Ingestion
   ) {
     return pipeline;
   }
-  if (sourceName === "newsapi") return "news";
-  if (sourceName === "thenewsapi") return "news";
   if (sourceName === "gdelt") return "news";
   if (sourceName === "institutional_rss") return "news";
   if (sourceName === "openweather") return "weather";
-  if (sourceName === "openmeteo") return "weather";
   if (sourceName === "nws") return "weather";
-  if (sourceName === "finnhub") return "market";
-  if (sourceName === "sec_edgar" || sourceName === "ecb" || sourceName === "oecd" || sourceName === "bis") return "market";
+  if (sourceName === "sec_edgar" || sourceName === "ecb" || sourceName === "oecd") return "market";
   if (sourceName === "podcastindex") return "podcasts";
   if (sourceName === "wikidata") return "leadership";
   return "news";
@@ -640,9 +613,8 @@ export function buildMarketRunPlan(rawBody: unknown): MarketRunPlan {
     secEdgar: asBoolean(providerInput.secEdgar ?? providerInput.sec_edgar, true),
     ecb: asBoolean(providerInput.ecb, true),
     oecd: asBoolean(providerInput.oecd, true),
-    bis: asBoolean(providerInput.bis, true),
   };
-  if (!providers.secEdgar && !providers.ecb && !providers.oecd && !providers.bis) {
+  if (!providers.secEdgar && !providers.ecb && !providers.oecd) {
     throw new IngestionValidationError("Select at least one market provider.");
   }
 
@@ -862,10 +834,6 @@ async function executeMarketRun(runId: number, plan: MarketRunPlan): Promise<voi
     if (plan.providers.oecd) {
       await executeProviderStep(runId, steps, totals, "oecd/monthly-share-price-indices", ingestOecdSharePrices);
     }
-    if (plan.providers.bis) {
-      await executeProviderStep(runId, steps, totals, "bis/daily-effective-exchange-rates", ingestBisEffectiveExchangeRates);
-    }
-
     const succeeded = steps.filter((step) => step.status === "success").length;
     if (succeeded === 0) throw new Error("All selected market providers failed.");
 
@@ -1019,7 +987,7 @@ export async function triggerMarketRun(input: {
     actor: input.actor,
     requestPayload: input.plan.requestPayload,
     sourceNameOverride: input.plan.providers.secEdgar
-      ? "secEdgar" : input.plan.providers.ecb ? "ecb" : input.plan.providers.oecd ? "oecd" : "bis",
+      ? "secEdgar" : input.plan.providers.ecb ? "ecb" : "oecd",
   });
   await safeAppendRunLog(run.id, "info", "Market ingestion run queued.", {
     requested_by: input.actor.email || input.actor.userId,
@@ -1077,18 +1045,13 @@ export async function listRuns(options: {
     const pipelineIdx = params.push(options.pipeline);
     where.push(
       `(r.pipeline = $${pipelineIdx}
-        OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
-        OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'gdelt')
         OR ($${pipelineIdx} = 'news' AND s.name = 'institutional_rss')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
-        OR ($${pipelineIdx} = 'weather' AND s.name = 'openmeteo')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'nws')
-        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub')
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
         OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
         OR ($${pipelineIdx} = 'market' AND s.name = 'oecd')
-        OR ($${pipelineIdx} = 'market' AND s.name = 'bis')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`
     );
@@ -1192,18 +1155,13 @@ export async function getMetrics(options?: {
     const pipelineIdx = params.push(options.pipeline);
     where.push(
       `(r.pipeline = $${pipelineIdx}
-        OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
-        OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'gdelt')
         OR ($${pipelineIdx} = 'news' AND s.name = 'institutional_rss')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
-        OR ($${pipelineIdx} = 'weather' AND s.name = 'openmeteo')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'nws')
-        OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub')
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
         OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
         OR ($${pipelineIdx} = 'market' AND s.name = 'oecd')
-        OR ($${pipelineIdx} = 'market' AND s.name = 'bis')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`
     );

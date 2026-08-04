@@ -43,12 +43,12 @@ spec:
                     -d '{"timespan":"24h","maxRecords":100}' \
                     "$BASE_URL/api/ingest/gdelt"
                   echo
-                  echo "> /api/ingest/openmeteo/country-weather (global sample set)"
+                  echo "> /api/ingest/institutional-rss (official institutional feeds)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 300 \
                     -H 'content-type: application/json' \
                     -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
                     -d '{}' \
-                    "$BASE_URL/api/ingest/openmeteo/country-weather"
+                    "$BASE_URL/api/ingest/institutional-rss"
                   echo
                   echo "> /api/ingest/sec-edgar (filings + company facts)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 300 \
@@ -64,26 +64,19 @@ spec:
                     -d '{}' \
                     "$BASE_URL/api/ingest/ecb"
                   echo
-                  echo "> /api/ingest/newsapi/everything (q=OpenAI)"
+                  echo "> /api/ingest/oecd (country share-price indices)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
                     -H 'content-type: application/json' \
                     -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
-                    -d '{"q":"OpenAI","pageSize":50,"maxPages":2}' \
-                    "$BASE_URL/api/ingest/newsapi/everything"
+                    -d '{}' \
+                    "$BASE_URL/api/ingest/oecd"
                   echo
-                  echo "> /api/ingest/newsapi/top-headlines (country=us, category=technology)"
+                  echo "> /api/ingest/nws/alerts (official US alerts)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
                     -H 'content-type: application/json' \
                     -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
-                    -d '{"country":"us","category":"technology","pageSize":50,"maxPages":2}' \
-                    "$BASE_URL/api/ingest/newsapi/top-headlines"
-                  echo
-                  echo "> /api/ingest/thenewsapi/news (search=OpenAI, locale=us)"
-                  curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \
-                    -H 'content-type: application/json' \
-                    -H "x-ingest-token: ${INGEST_API_TOKEN:-}" \
-                    -d '{"search":"OpenAI","locale":"us","language":"en","pageSize":50,"maxPages":2}' \
-                    "$BASE_URL/api/ingest/thenewsapi/news" || echo "TheNewsAPI ingest skipped or unavailable."
+                    -d '{}' \
+                    "$BASE_URL/api/ingest/nws/alerts"
                   echo
                   echo "> /api/ingest/openweather/country-current (global sample set)"
                   curl --fail --show-error --silent --retry 3 --retry-all-errors --max-time 180 \

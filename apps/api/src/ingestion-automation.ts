@@ -183,7 +183,7 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
     demand_threshold: 15,
     failure_backoff_minutes: 10,
     default_payload: {
-      providers: { secEdgar: true, ecb: true, oecd: true, bis: true },
+      providers: { secEdgar: true, ecb: true, oecd: true },
     },
   },
   podcasts: {

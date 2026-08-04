@@ -2168,18 +2168,20 @@ private func trimmed(_ value: String?) -> String? {
 private func normalizedProviderName(_ value: String?) -> String? {
     guard let value = trimmed(value) else { return nil }
     switch value.lowercased() {
-    case "newsapi":
-        return "NewsAPI"
-    case "thenewsapi":
-        return "TheNewsAPI"
+    case "gdelt":
+        return "GDELT"
+    case "institutional_rss":
+        return "Institutional RSS"
     case "openweather":
         return "OpenWeather"
-    case "openmeteo":
-        return "Open-Meteo"
+    case "nws":
+        return "NOAA/NWS"
     case "sec_edgar":
         return "SEC EDGAR"
     case "ecb":
         return "ECB"
+    case "oecd":
+        return "OECD"
     default:
         return value
     }

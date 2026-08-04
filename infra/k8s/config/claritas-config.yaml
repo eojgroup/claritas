@@ -32,6 +32,7 @@ data:
   GDELT_USER_AGENT: "Claritas/1.0 (+https://app.claritas.info; engineering@claritas.info)"
   GDELT_MAX_RAW_ROWS: "750"
   SEC_EDGAR_USER_AGENT: "Claritas engineering@claritas.info"
+  NWS_USER_AGENT: "Claritas engineering@claritas.info"
   SEC_EDGAR_SYMBOLS: "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM"
   # Keep client pools well below Cloud SQL capacity across all replicas.
   DB_CONNECTION_TIMEOUT_MS: "2500"
