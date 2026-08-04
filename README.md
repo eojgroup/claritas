@@ -262,7 +262,9 @@ npm run dev
     series. Third-party series such as proprietary indices and LBMA metals are
     intentionally excluded. The original public-institution publisher and the
     required FRED notice and API terms link are stored and shown alongside FRED
-    provenance on web and iOS.
+    provenance on web and iOS. Scheduled market ingestion includes FRED only
+    when `FRED_API_KEY` is configured; keyless deployments continue with the
+    remaining providers instead of failing the run.
   - Frankfurter is not added because it republishes the ECB reference rates
     already ingested directly. IMF data is not enabled: the IMF's current terms
     ask potential commercial reusers to request permission, which does not meet

@@ -631,7 +631,7 @@ export function buildMarketRunPlan(rawBody: unknown): MarketRunPlan {
     secEdgar: asBoolean(providerInput.secEdgar ?? providerInput.sec_edgar, true),
     ecb: asBoolean(providerInput.ecb, true),
     oecd: asBoolean(providerInput.oecd, true),
-    fred: asBoolean(providerInput.fred, false),
+    fred: asBoolean(providerInput.fred, Boolean(process.env.FRED_API_KEY?.trim())),
     worldBank: asBoolean(providerInput.worldBank ?? providerInput.world_bank, true),
   };
   if (!providers.secEdgar && !providers.ecb && !providers.oecd && !providers.fred && !providers.worldBank) {
