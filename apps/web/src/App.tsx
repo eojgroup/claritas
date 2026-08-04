@@ -2247,8 +2247,12 @@ export default function ClaritasDashboard() {
   const newsPageSourceData = useMemo(() => {
     const bySource = new Map<string, number>();
     newsPageItems.forEach((item) => {
-      const source = getSourceLabel(item) ?? "Unknown";
-      bySource.set(source, (bySource.get(source) ?? 0) + 1);
+      // This chart ranks publishers, not ingestion providers. Keeping the
+      // publisher separate makes recognisable outlets such as reuters.com
+      // visible instead of burying them in a long "via GDELT" label.
+      const sourceLabel = getSourceLabel(item) ?? "Unknown";
+      const publisher = sourceLabel.split(" · via ")[0] || sourceLabel;
+      bySource.set(publisher, (bySource.get(publisher) ?? 0) + 1);
     });
     return Array.from(bySource.entries())
       .map(([source, stories]) => ({ source, stories }))

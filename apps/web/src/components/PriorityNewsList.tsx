@@ -67,6 +67,17 @@ export default function PriorityNewsList({
         const img = getImageUrl(item);
         const sourceLabel = getSourceLabel(item);
         const iso = item.country_iso2?.toUpperCase();
+        const payload =
+          item.payload && typeof item.payload === "object" && !Array.isArray(item.payload)
+            ? (item.payload as Record<string, unknown>)
+            : null;
+        const countryAttribution =
+          typeof payload?.country_attribution === "string"
+            ? payload.country_attribution
+            : null;
+        const isPublisherCountryFallback =
+          countryAttribution === "publisher_country_fallback";
+        const [publisherLabel, providerLabel] = sourceLabel?.split(" · via ") ?? [];
         const selectedStory = selectedId === item.id;
         const isPrimary = Boolean(iso && primaryIso === iso);
         const isSecondary = Boolean(iso && secondaryIso === iso);
@@ -111,7 +122,19 @@ export default function PriorityNewsList({
                     : "No time"}
                 </small>
               </span>
-              <span className="dashboard-news-country">{iso ?? "—"}</span>
+              <span
+                className="dashboard-news-country"
+                data-inferred={isPublisherCountryFallback || undefined}
+                title={
+                  isPublisherCountryFallback
+                    ? "Low-confidence geography fallback: publisher country; the story location was not resolved"
+                    : iso
+                      ? "Resolved story geography"
+                      : "Story geography is not resolved"
+                }
+              >
+                {iso ?? "—"}{isPublisherCountryFallback ? "~" : ""}
+              </span>
               <span className="dashboard-news-headline">
                 <strong>{item.title || item.url || "Untitled"}</strong>
                 {item.language_code && (
@@ -130,9 +153,17 @@ export default function PriorityNewsList({
                 <small>
                   {item.summary ?? "Select for source and country context."}
                 </small>
+                <span className="dashboard-news-mobile-source">
+                  {publisherLabel || sourceLabel || "Unknown"}
+                  {providerLabel ? ` · via ${providerLabel}` : ""}
+                </span>
               </span>
-              <span className="dashboard-news-source">
-                {sourceLabel ?? "Unknown"}
+              <span
+                className="dashboard-news-source"
+                title={sourceLabel ?? "Unknown source"}
+              >
+                <strong>{publisherLabel || sourceLabel || "Unknown"}</strong>
+                {providerLabel && <small>via {providerLabel}</small>}
               </span>
               <ChevronDown
                 className={`h-4 w-4 ${selectedStory ? "rotate-180" : ""}`}
@@ -160,6 +191,9 @@ export default function PriorityNewsList({
                     <span>{sourceLabel ?? "Unknown source"}</span>
                     {item.language_code && <span>Language {item.language_code.toUpperCase()}</span>}
                     {item.source_country_iso2 && <span>Published in {item.source_country_iso2}</span>}
+                    {isPublisherCountryFallback && (
+                      <span>Geography inferred from publisher country · low confidence</span>
+                    )}
                     {typeof item.tone === "number" && <span>Tone {item.tone.toFixed(1)}</span>}
                     <span>
                       {iso

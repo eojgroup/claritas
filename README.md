@@ -239,7 +239,10 @@ npm run dev
     `GDELT_MAX_RAW_ROWS`, and an identifying `GDELT_USER_AGENT`.
   - SEC EDGAR submissions and company facts are keyless. Set
     `SEC_EDGAR_USER_AGENT` to an application name plus monitored contact email,
-    and optionally set `SEC_EDGAR_SYMBOLS` (comma-separated equities).
+    and optionally set `SEC_EDGAR_SYMBOLS` (comma-separated equities). For the
+    GitHub deployment workflows, create a repository **Actions variable** named
+    `SEC_EDGAR_USER_AGENT` (not a secret); the exact spelling is `EDGAR`, not
+    `EDGARE`.
   - ECB Data API FX and policy-rate series are keyless.
   - Open-Meteo public APIs are keyless for eligible use. For a commercial
     customer plan, create `OPEN_METEO_API_KEY` at `https://open-meteo.com/en/pricing`;

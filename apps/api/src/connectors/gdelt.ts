@@ -145,8 +145,13 @@ function normalizeLanguage(value?: string | null): string | null {
 function countryNameToIso2(value?: string | null): string | null {
   const name = value?.trim().toLowerCase();
   if (!name) return null;
-  const match = worldCountries.find((country) =>
-    country.name.common.toLowerCase() === name || country.name.official.toLowerCase() === name
+  const match = worldCountries.find(
+    (country) =>
+      country.cca2.toLowerCase() === name ||
+      country.cca3.toLowerCase() === name ||
+      country.name.common.toLowerCase() === name ||
+      country.name.official.toLowerCase() === name ||
+      country.altSpellings?.some((spelling) => spelling.toLowerCase() === name)
   );
   return match?.cca2 ?? null;
 }
@@ -419,12 +424,21 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   for (const article of articles) {
     const url = nonEmpty(article.url);
     if (!url) continue;
+    const publisherDomain = nonEmpty(article.domain) ?? hostnameFromUrl(url);
     const languageCode = normalizeLanguage(article.language);
     const sourceCountry = countryNameToIso2(article.sourcecountry);
     const signal = signalsByUrl.get(url);
     const locations = Array.isArray(signal?.locations) ? signal.locations as Array<Record<string, unknown>> : [];
     const gkgCountry = locations.map((location) => location.country_iso2).find((value) => typeof value === "string") as string | undefined;
-    const inference = inferNewsCountry({ title: article.title, url, feedCountryHint: gkgCountry ?? null });
+    // DOC exposes the publisher's country, while GKG exposes locations found in
+    // the article. Prefer a matched GKG location, then use the publisher country
+    // only as a low-confidence fallback when the headline and URL do not resolve
+    // a subject geography. The inference metadata keeps that distinction visible.
+    const inference = inferNewsCountry({
+      title: article.title,
+      url,
+      feedCountryHint: gkgCountry ?? sourceCountry,
+    });
     const countryIso2 = inference.iso2 ?? gkgCountry ?? null;
     await ensureCountry(countryIso2);
     await ensureCountry(sourceCountry);
@@ -432,10 +446,17 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
     const externalId = url;
     const payload = {
       provider: "gdelt", product: "doc-2.0", attribution: ATTRIBUTION,
-      source: article.domain || null, source_country: article.sourcecountry || null,
+      source: publisherDomain, publisher: publisherDomain,
+      domain: publisherDomain, source_country: article.sourcecountry || null,
       source_country_iso2: sourceCountry, language: article.language || null,
       language_code: languageCode, image_url: article.socialimage || null,
       mobile_url: article.url_mobile || null, country_inference: inference,
+      country_attribution:
+        inference.source === "feed_hint" && !gkgCountry && sourceCountry
+          ? "publisher_country_fallback"
+          : gkgCountry && inference.iso2 === gkgCountry
+            ? "gkg_location"
+            : inference.source,
       gkg: signal ? {
         tone: signal.tone, themes: signal.themes, persons: signal.persons,
         organizations: signal.organizations, locations: signal.locations,

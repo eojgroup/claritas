@@ -174,6 +174,8 @@ jobs:
       # ConfigMap + Secret (idempotent upsert)
       ############################################
       - name: 🧩 Upsert ConfigMap (claritas-config)
+        env:
+          SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT }}
         run: |
           ns="${{ env.K8S_NAMESPACE }}"
           base="${{ env.DOMAIN }}"
@@ -182,6 +184,10 @@ jobs:
           fi
           kubectl -n "$ns" apply -f infra/k8s/config/claritas-config.yaml
           kubectl -n "$ns" patch configmap claritas-config --type merge -p "{\"data\":{\"INSTANCE_CONNECTION_NAME\":\"${{ steps.tf_out.outputs.icn }}\",\"DB_NAME\":\"${{ steps.tf_out.outputs.db_name }}\",\"DB_USER\":\"${{ steps.tf_out.outputs.db_user }}\",\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${base},claritas://\",\"AUTH_ALLOWED_REDIRECT_SCHEMES\":\"claritas\"}}"
+          if [ -n "${SEC_EDGAR_USER_AGENT:-}" ]; then
+            sec_patch=$(node -e 'process.stdout.write(JSON.stringify({data:{SEC_EDGAR_USER_AGENT:process.env.SEC_EDGAR_USER_AGENT.trim()}}))')
+            kubectl -n "$ns" patch configmap claritas-config --type merge -p "$sec_patch"
+          fi
 
       - name: 🔐 Upsert Secret (claritas-db)
         run: |
