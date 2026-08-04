@@ -3,10 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.normalizeStandardWeather = normalizeStandardWeather;
 exports.ingestOpenWeatherCountryWeather = ingestOpenWeatherCountryWeather;
 const world_countries_1 = __importDefault(require("world-countries"));
 const db_1 = require("../db");
-const ONE_CALL_BASE = "https://api.openweathermap.org/data/3.0/onecall";
+const CURRENT_BASE = "https://api.openweathermap.org/data/2.5/weather";
+const FORECAST_BASE = "https://api.openweathermap.org/data/2.5/forecast";
 const AIR_BASE = "https://api.openweathermap.org/data/2.5/air_pollution";
 const ATTRIBUTION = "Weather data provided by OpenWeather";
 const DEFAULT_COUNTRIES = [
@@ -46,12 +48,12 @@ async function ensureSource() {
      VALUES ('openweather', $1, 'api_key', $2::jsonb)
      ON CONFLICT (name) DO UPDATE SET api_base_url = EXCLUDED.api_base_url,
        auth_type = EXCLUDED.auth_type, metadata = EXCLUDED.metadata
-     RETURNING id`, [ONE_CALL_BASE, JSON.stringify({
-            provider: "openweather", product: "One Call API 3.0", source_kind: "forecast_model",
+     RETURNING id`, [CURRENT_BASE, JSON.stringify({
+            provider: "openweather", product: "Current Weather + 5 day / 3 hour Forecast", source_kind: "forecast_model",
             attribution: ATTRIBUTION, attribution_url: "https://openweathermap.org/",
-            license: "ODbL for self-service API subscriptions; attribution required",
+            license: "CC BY-SA 4.0 and ODbL open licence; commercial derivative use is allowed with ShareAlike and visible attribution",
             license_url: "https://openweathermap.org/terms", update_interval: "10 minutes",
-            coverage: ["current", "hourly_48h", "daily_8d", "government_alerts", "air_pollution"],
+            coverage: ["current", "three_hourly_5d", "derived_daily_5d", "air_pollution", "nws_us_alerts"],
         })]);
     return rows[0].id;
 }
@@ -69,6 +71,82 @@ function openWeatherUrl(base, target, apiKey) {
     url.searchParams.set("units", "metric");
     url.searchParams.set("lang", "en");
     return url;
+}
+function normalizeStandardWeather(current, forecast) {
+    const hourly = (forecast.list ?? []).map((point) => ({
+        dt: point.dt,
+        temp: point.main?.temp,
+        feels_like: point.main?.feels_like,
+        pressure: point.main?.pressure,
+        humidity: point.main?.humidity,
+        clouds: point.clouds?.all,
+        wind_speed: point.wind?.speed,
+        wind_deg: point.wind?.deg,
+        wind_gust: point.wind?.gust,
+        visibility: point.visibility,
+        pop: point.pop,
+        rain: point.rain?.["3h"] == null ? undefined : { "1h": point.rain["3h"] },
+        snow: point.snow?.["3h"] == null ? undefined : { "1h": point.snow["3h"] },
+        weather: point.weather,
+    }));
+    const dailyGroups = new Map();
+    for (const point of forecast.list ?? []) {
+        if (point.dt == null)
+            continue;
+        const offset = forecast.city?.timezone ?? current.timezone ?? 0;
+        const day = new Date((point.dt + offset) * 1000).toISOString().slice(0, 10);
+        const group = dailyGroups.get(day) ?? [];
+        group.push(point);
+        dailyGroups.set(day, group);
+    }
+    const daily = Array.from(dailyGroups.values()).map((points) => {
+        const temps = points.flatMap((point) => point.main?.temp == null ? [] : [point.main.temp]);
+        const feels = points.flatMap((point) => point.main?.feels_like == null ? [] : [point.main.feels_like]);
+        const representative = [...points].sort((left, right) => {
+            const leftHour = left.dt == null ? 0 : new Date((left.dt + (forecast.city?.timezone ?? 0)) * 1000).getUTCHours();
+            const rightHour = right.dt == null ? 0 : new Date((right.dt + (forecast.city?.timezone ?? 0)) * 1000).getUTCHours();
+            return Math.abs(leftHour - 12) - Math.abs(rightHour - 12);
+        })[0];
+        return {
+            dt: points[0]?.dt,
+            temp: { min: temps.length ? Math.min(...temps) : undefined, max: temps.length ? Math.max(...temps) : undefined },
+            feels_like: { day: feels.length ? Math.max(...feels) : undefined, night: feels.length ? Math.min(...feels) : undefined },
+            pop: Math.max(0, ...points.map((point) => point.pop ?? 0)),
+            rain: points.reduce((sum, point) => sum + (point.rain?.["3h"] ?? 0), 0),
+            snow: points.reduce((sum, point) => sum + (point.snow?.["3h"] ?? 0), 0),
+            wind_speed: Math.max(0, ...points.map((point) => point.wind?.speed ?? 0)),
+            wind_gust: Math.max(0, ...points.map((point) => point.wind?.gust ?? 0)),
+            humidity: representative?.main?.humidity,
+            clouds: representative?.clouds?.all,
+            weather: representative?.weather,
+        };
+    });
+    return {
+        lat: current.coord?.lat ?? forecast.city?.coord?.lat,
+        lon: current.coord?.lon ?? forecast.city?.coord?.lon,
+        timezone: forecast.city?.name ?? current.name,
+        timezone_offset: forecast.city?.timezone ?? current.timezone,
+        current: {
+            dt: current.dt,
+            sunrise: current.sys?.sunrise,
+            sunset: current.sys?.sunset,
+            temp: current.main?.temp,
+            feels_like: current.main?.feels_like,
+            pressure: current.main?.pressure,
+            humidity: current.main?.humidity,
+            clouds: current.clouds?.all,
+            wind_speed: current.wind?.speed,
+            wind_deg: current.wind?.deg,
+            wind_gust: current.wind?.gust,
+            visibility: current.visibility,
+            rain: current.rain,
+            snow: current.snow,
+            weather: current.weather,
+        },
+        hourly,
+        daily,
+        alerts: [],
+    };
 }
 async function fetchJson(url, label) {
     const response = await fetch(url, { headers: { accept: "application/json" } });
@@ -99,8 +177,8 @@ async function storeTarget(sourceId, target, data, air) {
          is_day=EXCLUDED.is_day, source_kind=EXCLUDED.source_kind, updated_at=now()`, [sourceId, target.iso2, data.lat ?? target.lat, data.lon ?? target.lon, number(current.temp),
             number(current.feels_like), integer(current.humidity), integer(current.pressure), number(current.wind_speed),
             condition.main ?? null, condition.description ?? null, observedAt,
-            JSON.stringify({ provider: "openweather", product: "one-call-3.0", attribution: ATTRIBUTION,
-                timezone: data.timezone ?? null, timezone_offset: data.timezone_offset ?? null, current }),
+            JSON.stringify({ provider: "openweather", product: "current+forecast5+air", attribution: ATTRIBUTION,
+                location_name: data.timezone ?? null, timezone_offset: data.timezone_offset ?? null, current }),
             `${target.iso2}|${observedAt}|${current.temp ?? ""}|${condition.id ?? ""}`,
             number(current.rain?.["1h"] ?? current.snow?.["1h"]), integer(condition.id), integer(current.clouds),
             integer(current.wind_deg), number(current.wind_gust),
@@ -189,10 +267,12 @@ async function ingestOpenWeatherCountryWeather(countryIso2) {
     const failures = [];
     for (const target of selected) {
         try {
-            const [weather, air] = await Promise.all([
-                fetchJson(openWeatherUrl(ONE_CALL_BASE, target, apiKey), "OpenWeather One Call"),
+            const [current, forecast, air] = await Promise.all([
+                fetchJson(openWeatherUrl(CURRENT_BASE, target, apiKey), "OpenWeather current weather"),
+                fetchJson(openWeatherUrl(FORECAST_BASE, target, apiKey), "OpenWeather 5-day forecast"),
                 fetchJson(openWeatherUrl(AIR_BASE, target, apiKey), "OpenWeather air pollution").catch(() => null),
             ]);
+            const weather = normalizeStandardWeather(current, forecast);
             await storeTarget(sourceId, target, weather, air);
             inserted += 1;
         }
@@ -204,5 +284,5 @@ async function ingestOpenWeatherCountryWeather(countryIso2) {
     }
     if (inserted === 0)
         throw new Error(`OpenWeather failed for every target: ${failures.slice(0, 3).map((failure) => `${failure.country}: ${failure.error}`).join("; ")}`);
-    return { provider: "openweather", product: "one-call-3.0", inserted, updated: 0, skipped, http_failures, targets: selected.length, failures };
+    return { provider: "openweather", product: "current+forecast5+air", inserted, updated: 0, skipped, http_failures, targets: selected.length, failures };
 }

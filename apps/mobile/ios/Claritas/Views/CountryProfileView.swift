@@ -33,11 +33,9 @@ struct CountryProfileView: View {
         return model.leadership.first { $0.country.uppercased() == iso }
     }
 
-    private var marketQuotes: [MarketQuote] {
-        guard let iso else { return [] }
-        return model.marketQuotes
-            .filter { ($0.country ?? "").uppercased() == iso }
-            .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
+    private var marketOverview: CountryMarketOverview? {
+        guard let iso else { return nil }
+        return model.countryMarkets.first { $0.country.uppercased() == iso }
     }
 
     private var transportCountry: TransportCountryAggregate? {
@@ -80,15 +78,59 @@ struct CountryProfileView: View {
                             detail: latestWeather?.weather_main ?? "No recent snapshot"
                         )
                         CountryMetric(
-                            label: "Top mover",
-                            value: marketQuotes.first.map { $0.symbol } ?? "—",
-                            detail: marketQuotes.first.map { signedPercent($0.percent_change) } ?? "No market quote"
+                            label: "Market regime",
+                            value: signedPercent(marketOverview?.composite_change_percent),
+                            detail: marketOverview.map { "OECD + ECB · \($0.freshness)" } ?? "No mapped regime"
                         )
                         CountryMetric(
                             label: "Transport",
                             value: "\(transportCountry?.active_count ?? 0)",
                             detail: "Active country links"
                         )
+                    }
+
+                    if let marketOverview {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Market context")
+                                .font(.headline)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
+                                CountryMetric(
+                                    label: "OECD index",
+                                    value: signedPercent(marketOverview.index_change_percent),
+                                    detail: marketOverview.index_period_end ?? "No monthly period"
+                                )
+                                CountryMetric(
+                                    label: "\(marketOverview.currency ?? "FX") vs EUR",
+                                    value: signedPercent(marketOverview.fx_change_percent),
+                                    detail: marketOverview.fx_period_end ?? "No daily period"
+                                )
+                                CountryMetric(
+                                    label: "SEC filings",
+                                    value: "\(marketOverview.filing_count_7d)",
+                                    detail: "Trailing seven days"
+                                )
+                            }
+                            Text("OECD is monthly and ECB FX is daily; the composite is contextual rather than a live quote.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let latestWeather {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Weather outlook")
+                                .font(.headline)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
+                                CountryMetric(label: "Feels like", value: "\(format(latestWeather.apparent_temp_c))°C", detail: latestWeather.weather_desc ?? "Current condition")
+                                CountryMetric(label: "Wind / gust", value: "\(format(latestWeather.wind_speed)) / \(format(latestWeather.wind_gust))", detail: "m/s")
+                                CountryMetric(label: "Air quality", value: latestWeather.air_quality?.label ?? "—", detail: "OpenWeather provider scale")
+                                CountryMetric(
+                                    label: "Next day",
+                                    value: latestWeather.forecast?.first.map { "\(format($0.temp_min_c))–\(format($0.temp_max_c))°C" } ?? "—",
+                                    detail: latestWeather.forecast?.first?.precipitation_probability.map { "\(Int($0))% precipitation" } ?? "No forecast"
+                                )
+                            }
+                        }
                     }
 
                     if let trend = transportCountry?.trend {

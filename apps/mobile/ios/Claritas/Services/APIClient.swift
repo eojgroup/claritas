@@ -252,6 +252,11 @@ final class APIClient {
         return try await request(URLRequest(url: comps.url!), as: [MarketQuote].self, rootKey: "quotes")
     }
 
+    func fetchCountryMarkets() async throws -> CountryMarketOverviewResponse {
+        let url = baseURL.appendingPathComponent("/api/market/countries")
+        return try await request(URLRequest(url: url), as: CountryMarketOverviewResponse.self)
+    }
+
     func fetchTransportOverview(
         detail: String = "aggregate",
         mode: TransportMode? = nil,

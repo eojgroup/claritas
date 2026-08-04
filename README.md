@@ -247,11 +247,14 @@ npm run dev
   - ECB Data API FX and policy-rate series and OECD share-price indices are
     keyless. Source and series identifiers remain
     attached to market records and API responses.
-  - OpenWeather One Call supplies global current conditions, hourly/daily
-    forecasts, alerts and air quality. Create `OPENWEATHER_API_KEY` at
-    `https://home.openweathermap.org/users/sign_up` and activate the One Call
-    subscription. Claritas targets the free daily-call allowance by default;
-    review OpenWeather attribution and plan terms for the production audience.
+  - OpenWeather Current Weather, 5 day / 3 hour Forecast and Air Pollution APIs
+    supply global conditions, forecasts and air quality. Create
+    `OPENWEATHER_API_KEY` at `https://home.openweathermap.org/users/sign_up`;
+    no separate One Call subscription is required. Claritas targets the free
+    plan allowance by default. The Free plan permits commercial derivative use
+    under OpenWeather's open licence, including visible attribution and
+    ShareAlike requirements; confirm that those terms fit the product's
+    distribution model before launch.
   - NOAA/NWS alerts are keyless and cover the United States. Configure an
     identifying `NWS_USER_AGENT` as a GitHub Actions variable (or same-named
     secret), for example `Claritas engineering@claritas.info`.

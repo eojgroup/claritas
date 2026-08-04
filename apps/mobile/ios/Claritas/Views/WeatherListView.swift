@@ -113,11 +113,26 @@ private struct WeatherRow: View {
                     if let feels = item.apparent_temp_c {
                         Text("Feels \(String(format: "%.0f", feels))°")
                     }
-                    if let precipitation = item.precipitation_mm {
-                        Text("Rain \(String(format: "%.1f", precipitation)) mm")
+                    if let gust = item.wind_gust {
+                        Text("Gust \(String(format: "%.1f", gust)) m/s")
                     }
                     if let air = item.air_quality {
-                        Text("AQI \(air.european_aqi.map { String(format: "%.0f", $0) } ?? "—") · \(air.label)")
+                        Text("AQI \(air.provider_aqi.map { String(format: "%.0f", $0) } ?? air.european_aqi.map { String(format: "%.0f", $0) } ?? air.us_aqi.map { String(format: "%.0f", $0) } ?? "—") · \(air.label)")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    if let pressure = item.pressure_hpa {
+                        Text("Pressure \(String(format: "%.0f", pressure)) hPa")
+                    }
+                    if let visibility = item.visibility_m {
+                        Text("Visibility \(String(format: "%.1f", visibility / 1_000)) km")
+                    }
+                    if let alerts = item.alert_count, alerts > 0 {
+                        Label("\(alerts) alert\(alerts == 1 ? "" : "s")", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
                     }
                 }
                 .font(.caption)
@@ -131,6 +146,9 @@ private struct WeatherRow: View {
                                     .font(.caption2.weight(.semibold))
                                 Text("\(day.temp_min_c.map { String(format: "%.0f", $0) } ?? "—")–\(day.temp_max_c.map { String(format: "%.0f", $0) } ?? "—")°")
                                 Text("Rain \(day.precipitation_probability.map { String(format: "%.0f", $0) } ?? "—")%")
+                                if let gust = day.wind_gust {
+                                    Text("Gust \(String(format: "%.0f", gust)) m/s")
+                                }
                             }
                             .font(.caption2)
                             .padding(6)

@@ -903,7 +903,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               Weather run
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenWeatherProvider} onChange={(event) => setRunOpenWeatherProvider(event.currentTarget.checked)} />OpenWeather One Call</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenWeatherProvider} onChange={(event) => setRunOpenWeatherProvider(event.currentTarget.checked)} />OpenWeather current + 5-day forecast + air</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runNwsProvider} onChange={(event) => setRunNwsProvider(event.currentTarget.checked)} />NOAA/NWS alerts (US)</label>
             </div>
             <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">

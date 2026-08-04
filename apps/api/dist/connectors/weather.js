@@ -46,6 +46,10 @@ async function getCountryWeatherLatest() {
        WHERE COALESCE(s.metadata->>'retired','false') <> 'true'
      )
      SELECT upper(r.country_iso2::text) AS country, r.temp_c, r.apparent_temp_c, r.humidity,
+       r.pressure AS pressure_hpa,
+       CASE WHEN (r.payload->'current'->>'visibility') ~ '^[0-9]+(\\.[0-9]+)?$'
+            THEN (r.payload->'current'->>'visibility')::double precision ELSE NULL END AS visibility_m,
+       COALESCE(r.payload->>'location_name', r.payload->>'timezone') AS location_name,
        r.precipitation_mm, r.observed_at, r.weather_main, r.weather_desc, r.weather_code,
        r.cloud_cover, r.wind_speed, r.wind_direction, r.wind_gust, r.is_day,
        r.source_name, r.source_kind, r.metadata->>'attribution' AS attribution,

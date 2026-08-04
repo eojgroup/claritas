@@ -453,17 +453,25 @@ struct CountryWeather: Codable, Identifiable {
     let temp_c: Double?
     let humidity: Double?
     let apparent_temp_c: Double?
+    let pressure_hpa: Double?
+    let visibility_m: Double?
+    let location_name: String?
     let precipitation_mm: Double?
     let observed_at: String
     let weather_main: String?
     let weather_desc: String?
+    let cloud_cover: Double?
     let wind_speed: Double?
+    let wind_direction: Double?
     let wind_gust: Double?
+    let is_day: Bool?
     let source_name: String?
+    let source_kind: String?
     let icon_code: String?
     let attribution: String?
     let forecast: [DailyWeatherForecast]?
     let air_quality: AirQuality?
+    let alert_count: Int?
     var id: String { country + observed_at }
     var observedDate: Date? { APIDateParser.parse(observed_at) }
 }
@@ -472,6 +480,8 @@ struct DailyWeatherForecast: Codable, Identifiable {
     let forecast_time: String
     let temp_min_c: Double?
     let temp_max_c: Double?
+    let apparent_temp_min_c: Double?
+    let apparent_temp_max_c: Double?
     let precipitation_probability: Double?
     let precipitation_mm: Double?
     let weather_main: String?
@@ -485,6 +495,8 @@ struct AirQuality: Codable {
     let observed_at: String
     let european_aqi: Double?
     let us_aqi: Double?
+    let provider_aqi: Double?
+    let aqi_scale: String?
     let pm10: Double?
     let pm2_5: Double?
     let label: String
@@ -752,6 +764,55 @@ struct MarketQuote: Codable, Identifiable {
         case observed_at
         case payload
     }
+}
+
+struct CountryMarketOverview: Codable, Identifiable {
+    let country: String
+    let country_name: String
+    let region: String?
+    let currency: String?
+    let index_symbol: String?
+    let index_name: String?
+    let index_value: Double?
+    let index_previous_value: Double?
+    let index_change_percent: Double?
+    let index_period_end: String?
+    let index_source: String?
+    let fx_symbol: String?
+    let fx_rate: Double?
+    let fx_previous_rate: Double?
+    let fx_change_percent: Double?
+    let fx_period_end: String?
+    let filing_count_7d: Int
+    let composite_change_percent: Double?
+    let composite_basis: [String]
+    let freshness: String
+
+    var id: String { country }
+}
+
+struct CountryMarketCoverage: Codable {
+    let countries: Int
+    let with_index: Int
+    let with_fx: Int
+    let with_filings: Int
+    let current: Int
+    let stale: Int
+}
+
+struct CountryMarketMethodology: Codable {
+    let index: String
+    let fx: String
+    let composite: String
+    let filings: String
+}
+
+struct CountryMarketOverviewResponse: Codable {
+    let generated_at: String
+    let countries: [CountryMarketOverview]
+    let coverage: CountryMarketCoverage
+    let methodology: CountryMarketMethodology
+    let sources: [String]
 }
 
 enum TransportMode: String, Codable, CaseIterable, Identifiable {

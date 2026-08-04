@@ -598,7 +598,7 @@ struct DailyBriefingWorkspaceView: View {
             BrandMetricCard(title: "News", value: "\(model.news.count)", detail: "Signals in scope", tone: ClaritasPalette.dataBlue(for: colorScheme))
             BrandMetricCard(title: "Podcasts", value: "\(model.podcasts.count)", detail: "Evidence sources", tone: ClaritasPalette.shellAccentSecondary(for: colorScheme))
             BrandMetricCard(title: "Weather", value: "\(model.weather.count)", detail: "Current observations", tone: ClaritasPalette.shellAccent(for: colorScheme))
-            BrandMetricCard(title: "Markets", value: "\(model.marketQuotes.count)", detail: "Tracked symbols", tone: ClaritasPalette.positiveText(for: colorScheme))
+            BrandMetricCard(title: "Markets", value: "\(model.countryMarkets.count)", detail: "OECD/ECB country regimes", tone: ClaritasPalette.positiveText(for: colorScheme))
         }
     }
 
@@ -1501,7 +1501,7 @@ private struct AdminIngestionPanelView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("OpenWeather One Call supplies global current conditions, forecasts, air quality and alerts. NOAA/NWS adds authoritative US alerts.")
+                        Text("OpenWeather standard APIs supply global current conditions, five-day forecasts and air quality. NOAA/NWS adds authoritative US alerts.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         TextField("Weather country (optional ISO2)", text: $weatherCountry)

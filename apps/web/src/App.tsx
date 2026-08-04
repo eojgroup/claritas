@@ -705,6 +705,7 @@ import {
   fetchCountryLeadership,
   fetchCountryStats,
   fetchCountryWeather,
+  fetchCountryWeatherForecast,
   fetchDailyBriefingSchedule,
   fetchDailyBriefingEmailStatus,
   fetchDailyBriefingPreferenceOptions,
@@ -714,7 +715,6 @@ import {
   fetchFxRates,
   fetchMarketFilings,
   fetchMarketIndicators,
-  fetchMarketQuotes,
   fetchNews,
   fetchPodcasts,
   fetchPolicyRates,
@@ -736,6 +736,7 @@ import {
   type CountryStat,
   type CountryStatsCoverage,
   type CountryWeather,
+  type CountryWeatherForecastDetail,
   type DailyBriefingSchedule,
   type DailyBriefingEmailStatus,
   type DailyBriefingPreferenceOptions,
@@ -828,8 +829,10 @@ export default function ClaritasDashboard() {
   const [countryStats, setCountryStats] = useState<CountryStat[]>([]);
   const [countryStatsCoverage, setCountryStatsCoverage] = useState<CountryStatsCoverage | null>(null);
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
+  const [weatherForecastDetail, setWeatherForecastDetail] = useState<CountryWeatherForecastDetail | null>(null);
+  const [weatherForecastLoading, setWeatherForecastLoading] = useState(false);
   const [leadershipStats, setLeadershipStats] = useState<CountryLeadership[]>([]);
-  const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
+  const [marketQuotes] = useState<MarketQuote[]>([]);
   const [countryMarkets, setCountryMarkets] = useState<CountryMarketOverview[]>([]);
   const [countryMarketDetail, setCountryMarketDetail] = useState<CountryMarketDetail | null>(null);
   const [countryMarketMethodology, setCountryMarketMethodology] = useState<CountryMarketOverviewResponse["methodology"] | null>(null);
@@ -1164,9 +1167,6 @@ export default function ClaritasDashboard() {
     fetchCountryLeadership()
       .then(setLeadershipStats)
       .catch(() => setLeadershipStats([]));
-    fetchMarketQuotes({ refresh: false })
-      .then(setMarketQuotes)
-      .catch(() => setMarketQuotes([]));
     fetchCountryMarketOverview()
       .then((overview) => {
         setCountryMarkets(overview.countries);
@@ -1268,26 +1268,6 @@ export default function ClaritasDashboard() {
       cancelled = true;
     };
   }, [authStatus, hasPaidAccess, mapWindowDays]);
-
-  useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) return;
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const quotes = await fetchMarketQuotes({ refresh: true });
-        if (!cancelled) setMarketQuotes(quotes);
-      } catch {
-        // keep last successful market snapshot on transient failures
-      }
-    };
-    const id = window.setInterval(() => {
-      void refresh();
-    }, 60_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [authStatus, hasPaidAccess]);
 
   const cardBase = "app-card operational-panel rounded-xl";
   const chartGridColor = "var(--viz-grid)";
@@ -1993,19 +1973,7 @@ export default function ClaritasDashboard() {
     const weatherByIso = new Map(
       weatherStats.map((row) => [row.country.toUpperCase(), row] as const),
     );
-    const marketByIso = new Map<string, MarketQuote>();
-    marketQuotes.forEach((quote) => {
-      const iso = normalizeIso2(quote.country);
-      if (!iso) return;
-      const current = marketByIso.get(iso);
-      if (
-        !current ||
-        Math.abs(quote.percent_change ?? quote.change ?? 0) >
-          Math.abs(current.percent_change ?? current.change ?? 0)
-      ) {
-        marketByIso.set(iso, quote);
-      }
-    });
+    const marketByIso = new Map(countryMarkets.map((row) => [row.country.toUpperCase(), row] as const));
     const countries = new Set<string>([
       ...newsByCountry.keys(),
       ...weatherByIso.keys(),
@@ -2018,8 +1986,8 @@ export default function ClaritasDashboard() {
     );
     const maxMarketMove = Math.max(
       1,
-      ...Array.from(marketByIso.values()).map((quote) =>
-        Math.abs(quote.percent_change ?? quote.change ?? 0),
+      ...Array.from(marketByIso.values()).map((row) =>
+        Math.abs(row.composite_change_percent ?? row.index_change_percent ?? row.fx_change_percent ?? 0),
       ),
     );
 
@@ -2051,7 +2019,7 @@ export default function ClaritasDashboard() {
           windSeverity,
         );
         const marketMove = Math.abs(
-          market?.percent_change ?? market?.change ?? 0,
+          market?.composite_change_percent ?? market?.index_change_percent ?? market?.fx_change_percent ?? 0,
         );
         const marketRelevance = market ? marketMove / maxMarketMove : 0;
         const podcastRelevance = podcast
@@ -2085,8 +2053,8 @@ export default function ClaritasDashboard() {
             ? `Weather: ${weather.temp_c ?? "—"}°C · ${weather.weather_main ?? "condition"}`
             : null,
           market
-            ? `Markets: ${market.symbol} ${formatSignedMetric(
-                market.percent_change ?? market.change,
+            ? `Markets: ${market.index_symbol ?? market.currency ?? market.country} ${formatSignedMetric(
+                market.composite_change_percent ?? market.index_change_percent ?? market.fx_change_percent,
                 2,
                 "%",
               )}`
@@ -2110,7 +2078,7 @@ export default function ClaritasDashboard() {
       .sort((a, b) => b.count - a.count);
   }, [
     mapBubbleData,
-    marketQuotes,
+    countryMarkets,
     podcastCountryLinks,
     regionCountries,
     weatherStats,
@@ -2354,9 +2322,11 @@ export default function ClaritasDashboard() {
     () =>
       weatherPageRows.filter(
         (row) =>
+          (row.alert_count ?? row.alerts?.length ?? 0) > 0 ||
           (typeof row.temp_c === "number" && (row.temp_c >= 35 || row.temp_c <= 0)) ||
           (typeof row.humidity === "number" && row.humidity >= 85) ||
-          (typeof row.wind_speed === "number" && row.wind_speed >= 15),
+          (typeof (row.wind_gust ?? row.wind_speed) === "number" && (row.wind_gust ?? row.wind_speed ?? 0) >= 15) ||
+          (row.forecast?.[0]?.precipitation_probability ?? 0) >= 70,
       ),
     [weatherPageRows],
   );
@@ -2377,11 +2347,12 @@ export default function ClaritasDashboard() {
     return weatherPageRows
       .filter((row) => row.temp_c != null)
       .slice()
-      .sort((a, b) => (b.temp_c ?? -999) - (a.temp_c ?? -999))
-      .slice(0, 12)
+      .sort((a, b) => Math.abs((b.temp_c ?? 20) - 20) - Math.abs((a.temp_c ?? 20) - 20))
+      .slice(0, 16)
       .map((row) => ({
         country: (row.country || "—").toUpperCase(),
         temp_c: row.temp_c ?? null,
+        apparent_temp_c: row.apparent_temp_c ?? null,
         humidity: row.humidity ?? null,
       }));
   }, [weatherPageRows]);
@@ -2395,6 +2366,67 @@ export default function ClaritasDashboard() {
         humidity: Number(row.humidity),
       }));
   }, [weatherPageRows]);
+
+  const weatherOperationalRows = useMemo(() => {
+    return weatherPageRows
+      .map((row) => {
+        const forecast = row.forecast?.[0];
+        const actualAlerts = row.alert_count ?? row.alerts?.length ?? 0;
+        const aqi = row.air_quality?.provider_aqi ?? row.air_quality?.european_aqi ?? row.air_quality?.us_aqi ?? null;
+        const heat = row.temp_c == null ? 0 : Math.max(0, row.temp_c - 30) * 3;
+        const cold = row.temp_c == null ? 0 : Math.max(0, 5 - row.temp_c) * 2;
+        const wind = Math.max(0, (row.wind_gust ?? row.wind_speed ?? 0) - 10) * 2;
+        const rain = Math.max(0, (forecast?.precipitation_probability ?? 0) - 50) * 0.35;
+        const air = aqi == null ? 0 : row.air_quality?.aqi_scale?.toLowerCase().startsWith("openweather")
+          ? Math.max(0, aqi - 2) * 12
+          : Math.max(0, aqi - 50) * 0.4;
+        const score = Math.min(100, Math.round(Math.max(heat, cold) + wind + rain + air + actualAlerts * 35));
+        const reasons = [
+          actualAlerts ? `${actualAlerts} active official alert${actualAlerts === 1 ? "" : "s"}` : null,
+          row.temp_c != null && row.temp_c >= 35 ? `extreme heat ${formatMetricNumber(row.temp_c)}°C` : null,
+          row.temp_c != null && row.temp_c <= 0 ? `freezing ${formatMetricNumber(row.temp_c)}°C` : null,
+          (row.wind_gust ?? row.wind_speed ?? 0) >= 15 ? `wind ${formatMetricNumber(row.wind_gust ?? row.wind_speed)} m/s` : null,
+          (forecast?.precipitation_probability ?? 0) >= 60 ? `${forecast?.precipitation_probability}% precipitation risk` : null,
+          aqi != null && air > 0 ? `air quality ${row.air_quality?.label ?? aqi}` : null,
+        ].filter((reason): reason is string => Boolean(reason));
+        return { ...row, score, reasons, aqi, forecast };
+      })
+      .sort((left, right) => right.score - left.score || (right.temp_c ?? -999) - (left.temp_c ?? -999));
+  }, [weatherPageRows]);
+
+  const weatherForecastChartData = useMemo(() =>
+    (weatherForecastDetail?.hourly ?? []).map((point) => ({
+      time: new Date(point.forecast_time).toLocaleString(undefined, { weekday: "short", hour: "2-digit" }),
+      temperature: point.temp_c,
+      feels_like: point.apparent_temp_c,
+      rain_probability: point.precipitation_probability,
+      wind_gust: point.wind_gust,
+    })), [weatherForecastDetail]);
+
+  const marketCountryRows = useMemo(() => {
+    const terms = searchAppliesToMarkets ? searchTerms : [];
+    return countryMarkets
+      .filter((row) => !regionCountries || regionCountries.has(row.country.toUpperCase()))
+      .filter((row) => terms.length === 0 || terms.every((term) => [row.country, row.country_name, row.currency, row.index_name, row.index_symbol]
+        .filter(Boolean).join(" ").toLowerCase().includes(term)))
+      .sort((left, right) => Math.abs(right.composite_change_percent ?? 0) - Math.abs(left.composite_change_percent ?? 0));
+  }, [countryMarkets, regionCountries, searchAppliesToMarkets, searchTerms]);
+
+  const marketIndexMoversData = useMemo(() => marketCountryRows
+    .filter((row) => row.index_change_percent != null)
+    .sort((left, right) => Math.abs(right.index_change_percent ?? 0) - Math.abs(left.index_change_percent ?? 0))
+    .slice(0, 14)
+    .map((row) => ({ country: row.country, country_name: row.country_name, change: row.index_change_percent ?? 0, level: row.index_value })), [marketCountryRows]);
+
+  const marketFxMoversData = useMemo(() => marketCountryRows
+    .filter((row) => row.fx_change_percent != null && row.currency !== "EUR")
+    .sort((left, right) => Math.abs(right.fx_change_percent ?? 0) - Math.abs(left.fx_change_percent ?? 0))
+    .slice(0, 14)
+    .map((row) => ({ country: row.country, currency: row.currency, change: row.fx_change_percent ?? 0, rate: row.fx_rate })), [marketCountryRows]);
+
+  const marketRelationshipData = useMemo(() => marketCountryRows
+    .filter((row) => row.index_change_percent != null && row.fx_change_percent != null && row.currency !== "EUR")
+    .map((row) => ({ country: row.country, index: row.index_change_percent, fx: row.fx_change_percent, filings: row.filing_count_7d })), [marketCountryRows]);
 
   const marketPageRows = useMemo(() => {
     return [...filteredMarket].sort(
@@ -2556,6 +2588,11 @@ export default function ClaritasDashboard() {
       )[0] ?? null,
     [marketIndexMapData],
   );
+  const marketMapDomain = useMemo<[number, number]>(() => {
+    if (marketMapLayer === "filings") return [0, Math.max(1, ...marketIndexMapData.map((row) => row.value ?? 0))];
+    const extent = Math.max(0.25, ...marketIndexMapData.map((row) => Math.abs(row.value ?? 0)));
+    return [-extent, extent];
+  }, [marketIndexMapData, marketMapLayer]);
   const newsMarketContextData = useMemo(
     () => marketIndexMapData.filter((row) => newsPageCountryStats.has(row.country.toUpperCase())),
     [marketIndexMapData, newsPageCountryStats],
@@ -2598,6 +2635,41 @@ export default function ClaritasDashboard() {
       cancelled = true;
     };
   }, [authStatus, hasPaidAccess, selectedCountryMarket]);
+
+  const weatherFocusCountry = useMemo(() => {
+    const selected = normalizeIso2(selectedCountry ?? pinnedCountry);
+    if (selected && weatherStats.some((row) => row.country.toUpperCase() === selected)) return selected;
+    return [...weatherStats]
+      .sort((left, right) => {
+        const severity = (row: CountryWeather) =>
+          Math.abs((row.temp_c ?? 20) - 20) +
+          (row.wind_gust ?? row.wind_speed ?? 0) * 0.8 +
+          (row.alert_count ?? row.alerts?.length ?? 0) * 20;
+        return severity(right) - severity(left);
+      })[0]?.country.toUpperCase() ?? null;
+  }, [pinnedCountry, selectedCountry, weatherStats]);
+
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess || !weatherFocusCountry) {
+      setWeatherForecastDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setWeatherForecastLoading(true);
+    fetchCountryWeatherForecast(weatherFocusCountry, 120)
+      .then((detail) => {
+        if (!cancelled) setWeatherForecastDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setWeatherForecastDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setWeatherForecastLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, hasPaidAccess, weatherFocusCountry]);
 
   const countryMarketCoverage = useMemo(() => ({
     countries: countryMarkets.length,
@@ -2681,6 +2753,11 @@ export default function ClaritasDashboard() {
     return (marketByCountry.get(relationCountry) ?? []).slice(0, 6);
   }, [marketByCountry, relationCountry]);
 
+  const relatedMarketCountry = useMemo(() => {
+    if (!relationCountry) return null;
+    return countryMarkets.find((row) => row.country.toUpperCase() === relationCountry) ?? null;
+  }, [countryMarkets, relationCountry]);
+
   const relatedTransport = useMemo(() => {
     if (!relationCountry) return null;
     return (
@@ -2722,7 +2799,7 @@ export default function ClaritasDashboard() {
           .sort((a, b) => b[1] - a[1])
           .map(([name]) => name)[0];
         const weather = weatherByCountry.get(country);
-        const market = marketByCountry.get(country)?.[0];
+        const market = countryMarkets.find((row) => row.country.toUpperCase() === country);
         return {
           country,
           count: value.count,
@@ -2731,16 +2808,16 @@ export default function ClaritasDashboard() {
             weather && typeof weather.temp_c === "number"
               ? `${formatMetricNumber(weather.temp_c)}°C`
               : "—",
-          topSymbol: market?.symbol ?? "—",
+          topSymbol: market?.index_symbol ?? market?.currency ?? "—",
           topMove:
-            typeof market?.percent_change === "number"
-              ? formatSignedMetric(market.percent_change, 2, "%")
+            typeof market?.composite_change_percent === "number"
+              ? formatSignedMetric(market.composite_change_percent, 2, "%")
               : "—",
         };
       })
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
-  }, [marketByCountry, newsPageCountryStats, weatherByCountry]);
+  }, [countryMarkets, newsPageCountryStats, weatherByCountry]);
 
   const weatherSummary = useMemo(() => {
     const tempRows = weatherPageRows.filter((row) => typeof row.temp_c === "number");
@@ -2763,28 +2840,35 @@ export default function ClaritasDashboard() {
       dominantCondition: weatherConditionChartData[0]?.condition ?? "—",
       hottestCountry: hottest?.country?.toUpperCase() ?? "—",
       hottestTemp: hottest?.temp_c ?? null,
+      officialAlerts: weatherPageRows.reduce((sum, row) => sum + (row.alert_count ?? row.alerts?.length ?? 0), 0),
+      poorAir: weatherPageRows.filter((row) => {
+        const value = row.air_quality?.provider_aqi ?? row.air_quality?.european_aqi ?? row.air_quality?.us_aqi;
+        return value != null && (row.air_quality?.aqi_scale?.toLowerCase().startsWith("openweather") ? value >= 4 : value > 75);
+      }).length,
+      highRainRisk: weatherPageRows.filter((row) => (row.forecast?.[0]?.precipitation_probability ?? 0) >= 70).length,
     };
   }, [weatherConditionChartData, weatherPageRows]);
 
   const marketSummary = useMemo(() => {
-    const gainers = marketPageRows.filter((quote) => (quote.percent_change ?? 0) > 0).length;
-    const losers = marketPageRows.filter((quote) => (quote.percent_change ?? 0) < 0).length;
+    const directional = marketCountryRows.filter((row) => row.composite_change_percent != null);
+    const gainers = directional.filter((row) => (row.composite_change_percent ?? 0) > 0).length;
+    const losers = directional.filter((row) => (row.composite_change_percent ?? 0) < 0).length;
     const avgAbsMove =
-      marketPageRows.length > 0
-        ? marketPageRows.reduce(
-            (sum, quote) => sum + Math.abs(quote.percent_change ?? quote.change ?? 0),
+      directional.length > 0
+        ? directional.reduce(
+            (sum, row) => sum + Math.abs(row.composite_change_percent ?? 0),
             0,
-          ) / marketPageRows.length
+          ) / directional.length
         : null;
     return {
-      quotes: marketPageRows.length,
+      countries: marketCountryRows.length,
       gainers,
       losers,
       avgAbsMove,
-      topMover: marketPageRows[0] ?? null,
-      strongestBenchmark: marketIndexPerfData[0] ?? null,
+      topMover: marketCountryRows[0] ?? null,
+      filings: marketCountryRows.reduce((sum, row) => sum + row.filing_count_7d, 0),
     };
-  }, [marketIndexPerfData, marketPageRows]);
+  }, [marketCountryRows]);
 
   const podcastSummary = useMemo(() => {
     const signalRows = podcasts.flatMap((episode) =>
@@ -2951,19 +3035,12 @@ export default function ClaritasDashboard() {
             ]
           : []),
       ],
-      maxMarketMove: Math.max(
-        1,
-        ...relatedMarkets.map((quote) =>
-          Math.abs(quote.percent_change ?? quote.change ?? 0),
-        ),
-      ),
     };
   }, [
     countryMeta,
     crossSourceMapData,
     mapBubbleData,
     mapCountryStats,
-    relatedMarkets,
     relatedNews.length,
     relatedTransport,
     relatedWeather,
@@ -2982,9 +3059,12 @@ export default function ClaritasDashboard() {
       const time = Date.parse(item.observed_at);
       if (!Number.isNaN(time)) times.push(time);
     });
-    filteredMarket.forEach((quote) => {
-      const time = Date.parse(quote.observed_at);
-      if (!Number.isNaN(time)) times.push(time);
+    countryMarkets.forEach((row) => {
+      [row.fx_period_end, row.index_period_end].forEach((period) => {
+        if (!period) return;
+        const time = Date.parse(period);
+        if (!Number.isNaN(time)) times.push(time);
+      });
     });
     if (times.length === 0) return "Awaiting new syncs";
     const latest = new Date(Math.max(...times));
@@ -2994,7 +3074,7 @@ export default function ClaritasDashboard() {
       hour: "numeric",
       minute: "2-digit",
     }).format(latest);
-  }, [filteredNews, filteredWeather, filteredMarket]);
+  }, [countryMarkets, filteredNews, filteredWeather]);
 
   const focusLabel = useMemo(() => {
     if (selectedCountry && comparisonCountry) {
@@ -3058,22 +3138,22 @@ export default function ClaritasDashboard() {
       country: null,
       symbol: null,
     }));
-    const markets = marketSearchScope.slice(0, 8).map((quote, idx) => ({
-      key: `market-${quote.symbol}-${quote.observed_at}-${idx}`,
-      kind: "Market",
+    const markets = marketCountryRows.slice(0, 8).map((row) => ({
+      key: `market-${row.country}`,
+      kind: "Country market regime",
       view: "markets" as const,
-      title: `${quote.symbol} · ${quote.price ?? "—"}`,
+      title: `${row.country_name} · ${formatSignedMetric(row.composite_change_percent, 2, "%")}`,
       subtitle: [
-        quote.company_name ?? null,
-        quote.exchange ?? null,
-        quote.percent_change != null ? `${quote.percent_change.toFixed(2)}%` : null,
-        quote.observed_at ? new Date(quote.observed_at).toLocaleString() : null,
+        row.index_name ?? null,
+        row.index_change_percent != null ? `OECD ${formatSignedMetric(row.index_change_percent, 2, "%")}` : null,
+        row.fx_change_percent != null ? `${row.currency ?? "FX"} ${formatSignedMetric(row.fx_change_percent, 2, "%")} vs EUR` : null,
+        `${row.filing_count_7d} SEC filings / 7d`,
       ]
         .filter(Boolean)
         .join(" · "),
       href: null,
-      country: quote.country?.toUpperCase() ?? null,
-      symbol: quote.symbol,
+      country: row.country,
+      symbol: null,
     }));
 
     if (effectiveSearchTopic === "news") {
@@ -3089,7 +3169,7 @@ export default function ClaritasDashboard() {
       return markets;
     }
     return [...news.slice(0, 3), ...podcastRows.slice(0, 3), ...weather.slice(0, 1), ...markets.slice(0, 1)];
-  }, [effectiveSearchTopic, marketSearchScope, newsSearchScope, podcastSearchScope, weatherSearchScope]);
+  }, [effectiveSearchTopic, marketCountryRows, newsSearchScope, podcastSearchScope, weatherSearchScope]);
 
   const signalNotifications = useMemo<SignalNotification[]>(() => {
     const items: SignalNotification[] = [];
@@ -3192,23 +3272,21 @@ export default function ClaritasDashboard() {
       });
     }
 
-    const topMover = [...marketQuotes]
-      .filter((quote) => typeof quote.percent_change === "number")
+    const topMover = [...countryMarkets]
+      .filter((row) => typeof row.composite_change_percent === "number")
       .sort(
         (a, b) =>
-          Math.abs(b.percent_change ?? 0) - Math.abs(a.percent_change ?? 0),
+          Math.abs(b.composite_change_percent ?? 0) - Math.abs(a.composite_change_percent ?? 0),
       )[0];
-    if (topMover && Math.abs(topMover.percent_change ?? 0) >= 2) {
+    if (topMover && Math.abs(topMover.composite_change_percent ?? 0) >= 2) {
       items.push({
-        id: `market-move-${topMover.symbol}-${getDateKey(topMover.observed_at) ?? "current"}`,
-        title: `${topMover.symbol} moved ${formatSignedMetric(topMover.percent_change, 2, "%")}`,
-        description:
-          topMover.company_name ??
-          `${topMover.exchange ?? "Market"} price movement requires review.`,
-        timeLabel: formatTime(topMover.observed_at),
+        id: `market-regime-${topMover.country}-${topMover.index_period_end ?? topMover.fx_period_end ?? "current"}`,
+        title: `${topMover.country_name} regime ${formatSignedMetric(topMover.composite_change_percent, 2, "%")}`,
+        description: `OECD ${formatSignedMetric(topMover.index_change_percent, 2, "%")} · ${topMover.currency ?? "FX"} ${formatSignedMetric(topMover.fx_change_percent, 2, "%")} vs EUR.`,
+        timeLabel: topMover.index_period_end ?? topMover.fx_period_end ?? "Current",
         tone: "attention",
         view: "markets",
-        symbol: topMover.symbol,
+        country: topMover.country,
       });
     }
 
@@ -3218,7 +3296,7 @@ export default function ClaritasDashboard() {
     dailyBriefingError,
     countryMeta,
     highestSignalCountry,
-    marketQuotes,
+    countryMarkets,
     newsLoadError,
     podcastLoadError,
     podcasts,
@@ -4158,7 +4236,7 @@ export default function ClaritasDashboard() {
                     <span>{newsSearchScope.length} news</span>
                     <span>{podcastSearchScope.length} podcasts</span>
                     <span>{weatherSearchScope.length} weather</span>
-                    <span>{marketSearchScope.length} markets</span>
+                    <span>{marketCountryRows.length} markets</span>
                   </div>
                 </div>
 
@@ -5061,8 +5139,8 @@ export default function ClaritasDashboard() {
                               </div>
                               <div>
                                 <span>Markets</span>
-                                <strong>{relatedMarkets.length}</strong>
-                                <small>linked instruments</small>
+                                <strong>{formatSignedMetric(relatedMarketCountry?.composite_change_percent, 1, "%")}</strong>
+                                <small>{relatedMarketCountry ? `${relatedMarketCountry.composite_basis.length} regime inputs` : "No country regime"}</small>
                               </div>
                               <div>
                                 <span>Transport</span>
@@ -5214,6 +5292,37 @@ export default function ClaritasDashboard() {
                                   </strong>
                                 </div>
                               </div>
+                              {relatedWeather && (
+                                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Feels like</span><strong className="mt-1 block">{formatMetricNumber(relatedWeather.apparent_temp_c)}°C</strong></div>
+                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Wind / gust</span><strong className="mt-1 block">{formatMetricNumber(relatedWeather.wind_speed)} / {formatMetricNumber(relatedWeather.wind_gust)} m/s</strong></div>
+                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Air quality</span><strong className="mt-1 block">{relatedWeather.air_quality?.label ?? "—"}</strong></div>
+                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Next-day range</span><strong className="mt-1 block">{relatedWeather.forecast?.[0] ? `${formatMetricNumber(relatedWeather.forecast[0].temp_min_c)}–${formatMetricNumber(relatedWeather.forecast[0].temp_max_c)}°C` : "—"}</strong></div>
+                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Rain risk</span><strong className="mt-1 block">{relatedWeather.forecast?.[0]?.precipitation_probability ?? "—"}%</strong></div>
+                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Official alerts</span><strong className="mt-1 block">{relatedWeather.alert_count ?? relatedWeather.alerts?.length ?? 0}</strong></div>
+                                </div>
+                              )}
+                            </section>
+
+                            <section className="country-profile-section">
+                              <div className="country-profile-section-heading">
+                                <ChartNoAxesCombined className="h-4 w-4" />
+                                <span>Market regime</span>
+                                <small>{relatedMarketCountry?.freshness ?? "unavailable"} · OECD / ECB / SEC</small>
+                              </div>
+                              {relatedMarketCountry ? (
+                                <>
+                                  <div className="country-transport-grid">
+                                    <div><span>OECD share prices</span><strong>{formatSignedMetric(relatedMarketCountry.index_change_percent, 2, "%")}</strong><small>{relatedMarketCountry.index_period_end ?? "No period"}</small></div>
+                                    <div><span>{relatedMarketCountry.currency ?? "FX"} vs EUR</span><strong>{formatSignedMetric(relatedMarketCountry.fx_change_percent, 2, "%")}</strong><small>{relatedMarketCountry.fx_period_end ?? "No period"}</small></div>
+                                    <div><span>SEC activity</span><strong>{relatedMarketCountry.filing_count_7d}</strong><small>filings · trailing 7d</small></div>
+                                  </div>
+                                  <p className="country-transport-note">OECD is a monthly national share-price index; ECB FX is daily. The mixed-frequency composite is contextual, not a live tradable quote.</p>
+                                  <button type="button" className="country-transport-open" onClick={() => setActiveView("markets")}>Open market analysis <ArrowUpRight className="h-3.5 w-3.5" /></button>
+                                </>
+                              ) : (
+                                <div className="product-state">No OECD index, ECB currency or SEC country event is mapped for this country yet.</div>
+                              )}
                             </section>
 
                             {relatedTransport && (
@@ -5312,53 +5421,6 @@ export default function ClaritasDashboard() {
                               </div>
                             </section>
 
-                            {relatedMarkets.length > 0 && (
-                              <section className="country-profile-section">
-                                <div className="country-profile-section-heading">
-                                  <ChartNoAxesCombined className="h-4 w-4" />
-                                  <span>Market movement</span>
-                                  <small>Linked country instruments</small>
-                                </div>
-                                <div className="country-market-list">
-                                  {relatedMarkets.slice(0, 3).map((quote) => {
-                                    const move =
-                                      quote.percent_change ??
-                                      quote.change ??
-                                      0;
-                                    return (
-                                      <button
-                                        key={`country-profile-${quote.symbol}`}
-                                        type="button"
-                                        onClick={() => {
-                                          setSelectedSymbol(quote.symbol);
-                                          setActiveView("markets");
-                                        }}
-                                      >
-                                        <span>{quote.symbol}</span>
-                                        <i>
-                                          <span
-                                            className={
-                                              move < 0 ? "is-negative" : ""
-                                            }
-                                            style={{
-                                              width: `${Math.max(
-                                                4,
-                                                (Math.abs(move) /
-                                                  selectedCountryContext.maxMarketMove) *
-                                                  100,
-                                              )}%`,
-                                            }}
-                                          />
-                                        </i>
-                                        <strong>
-                                          {formatSignedMetric(move, 2, "%")}
-                                        </strong>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </section>
-                            )}
                           </div>
 
                           <div className="country-profile-actions">
@@ -5672,48 +5734,44 @@ export default function ClaritasDashboard() {
                             
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <div className="text-[color:var(--shell-muted)]">
-                                Licensed market snapshots (when configured)
+                                Country regimes from OECD, ECB and SEC
                               </div>
                               <div className="ml-auto text-xs text-[color:var(--shell-muted)]">
-                                {filteredMarket.length} symbols
+                                {marketCountryRows.length} countries
                               </div>
                             </div>
                             <ul className="list-none divide-y divide-[color:var(--shell-border)]">
-                              {filteredMarket.length === 0 && (
+                              {marketCountryRows.length === 0 && (
                                 <li className="text-sm text-[color:var(--shell-muted)] py-3">
-                                  No market rows.
+                                  No country market regimes match this scope.
                                 </li>
                               )}
-                              {filteredMarket.map((quote) => {
+                              {marketCountryRows.map((row) => {
                                 const isPositive =
-                                  typeof quote.change === "number" && quote.change > 0;
+                                  typeof row.composite_change_percent === "number" && row.composite_change_percent > 0;
                                 const isNegative =
-                                  typeof quote.change === "number" && quote.change < 0;
+                                  typeof row.composite_change_percent === "number" && row.composite_change_percent < 0;
                                 return (
                                   <li
-                                    key={`${quote.symbol}-${quote.observed_at}`}
-                                    className="py-3 flex flex-col gap-2"
+                                    key={`dashboard-market-${row.country}`}
+                                    className="cursor-pointer py-3 flex flex-col gap-2"
+                                    onClick={() => setSelectedCountry(row.country)}
                                   >
                                     <div className="flex items-start justify-between gap-3">
                                       <div className="flex flex-col">
                                         <div className="flex items-center gap-2">
                                           <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-muted)]">
-                                            {quote.symbol}
+                                            {row.country}
                                           </span>
-                                          {quote.exchange && (
-                                            <span className="text-xs text-[color:var(--shell-muted)]">
-                                              {quote.exchange}
-                                            </span>
-                                          )}
+                                          <span className="text-xs text-[color:var(--shell-muted)]">{row.country_name}</span>
                                         </div>
                                         <div className="text-xs text-[color:var(--shell-muted)] mt-1">
-                                          {quote.company_name ?? "—"}
+                                          {row.index_name ?? "No OECD national series"}
                                         </div>
                                       </div>
                                       <div className="text-right">
                                         <div className="text-base font-semibold text-[color:var(--shell-ink)]">
-                                          {quote.price ?? "—"}
-                                          {quote.currency ? ` ${quote.currency}` : ""}
+                                          {formatSignedMetric(row.composite_change_percent, 2, "%")}
                                         </div>
                                         <div
                                           className={`text-xs ${
@@ -5724,21 +5782,16 @@ export default function ClaritasDashboard() {
                                                 : "text-[color:var(--shell-muted)]"
                                           }`}
                                         >
-                                          {quote.change != null ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(2)}` : "—"}
-                                          {" · "}
-                                          {quote.percent_change != null
-                                            ? `${quote.percent_change >= 0 ? "+" : ""}${quote.percent_change.toFixed(2)}%`
-                                            : "—"}
+                                          OECD {formatSignedMetric(row.index_change_percent, 2, "%")} · {row.currency ?? "FX"} {formatSignedMetric(row.fx_change_percent, 2, "%")}
                                         </div>
                                       </div>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
-                                      <span>Open {quote.open_price ?? "—"}</span>
-                                      <span>High {quote.high_price ?? "—"}</span>
-                                      <span>Low {quote.low_price ?? "—"}</span>
-                                      <span>Prev {quote.previous_close ?? "—"}</span>
+                                      <span>OECD period {row.index_period_end ?? "—"}</span>
+                                      <span>ECB period {row.fx_period_end ?? "—"}</span>
+                                      <span>SEC filings 7d {row.filing_count_7d}</span>
                                       <span className="ml-auto">
-                                        {new Date(quote.observed_at).toLocaleString()}
+                                        {row.freshness}
                                       </span>
                                     </div>
                                   </li>
@@ -5946,7 +5999,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-6">
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Stories
@@ -6375,7 +6428,7 @@ export default function ClaritasDashboard() {
                           featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : "Strongest market move"}
                           scale="linear"
                           fillMode={marketMapLayer === "filings" ? "sequential" : "diverging"}
-                          valueDomain={marketMapLayer === "filings" ? [0, Math.max(1, ...newsMarketContextData.map((row) => row.value ?? 0))] : [-3, 3]}
+                          valueDomain={marketMapDomain}
                           valueUnit={marketMapLayer === "filings" ? "" : "%"}
                           showBubbles={false}
                           legendLabel="Market pressure"
@@ -6959,6 +7012,20 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
                   <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+                    <a
+                      href="https://openweathermap.org/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-2 py-1 text-white"
+                      title="OpenWeather source and licence information"
+                    >
+                      <img
+                        src="https://openweathermap.org/themes/openweathermap/assets/img/logo_white_cropped.png"
+                        alt="OpenWeather"
+                        className="h-5 w-auto max-w-24 object-contain"
+                      />
+                      <span>Weather data provided by OpenWeather</span>
+                    </a>
                     <button
                       onClick={() => setMinTemp(undefined)}
                       className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
@@ -7037,13 +7104,13 @@ export default function ClaritasDashboard() {
                 <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-4">
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Threshold breaches
+                      Official alerts
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {weatherAlerts.length}
+                      {weatherSummary.officialAlerts}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      Locations outside operating range
+                      Active provider alerts
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
@@ -7059,13 +7126,13 @@ export default function ClaritasDashboard() {
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Avg humidity
+                      Coverage
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {formatMetricNumber(weatherSummary.avgHumidity)}%
+                      {weatherSummary.observations}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      Moisture posture
+                      Country centroid observations
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
@@ -7079,15 +7146,25 @@ export default function ClaritasDashboard() {
                       {formatMetricNumber(weatherSummary.hottestTemp)}°C · {weatherSummary.dominantCondition}
                     </div>
                   </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Elevated air</div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{weatherSummary.poorAir}</div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">Poor / very poor provider category</div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Rain risk</div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{weatherSummary.highRainRisk}</div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">Countries ≥70% next-day probability</div>
+                  </div>
                 </section>
 
                 <section className={`threshold-summary ${weatherAlerts.length > 0 ? "has-alerts" : ""}`}>
                   <div>
-                    <span className="status-label">Operational thresholds</span>
+                    <span className="status-label">Weather exceptions</span>
                     <strong>
                       {weatherAlerts.length > 0
                         ? `${weatherAlerts.length} locations require review`
-                        : "All observed locations within thresholds"}
+                        : "No official alerts or material forecast thresholds"}
                     </strong>
                   </div>
                   <div className="threshold-rules">
@@ -7095,6 +7172,7 @@ export default function ClaritasDashboard() {
                     <span>Freeze ≤ 0°C</span>
                     <span>Humidity ≥ 85%</span>
                     <span>Wind ≥ 15 m/s</span>
+                    <span>Rain probability ≥ 70%</span>
                   </div>
                   {weatherAlerts.slice(0, 4).map((alert) => (
                     <button
@@ -7103,7 +7181,7 @@ export default function ClaritasDashboard() {
                       onClick={() => setSelectedCountry(alert.country.toUpperCase())}
                     >
                       <b>{alert.country.toUpperCase()}</b>
-                      <span>{alert.temp_c ?? "—"}° · {alert.humidity ?? "—"}% · {alert.wind_speed ?? "—"} m/s</span>
+                      <span>{weatherOperationalRows.find((row) => row.country === alert.country)?.reasons.join(" · ") || `${alert.temp_c ?? "—"}°C · ${alert.wind_gust ?? alert.wind_speed ?? "—"} m/s`}</span>
                     </button>
                   ))}
                 </section>
@@ -7210,11 +7288,18 @@ export default function ClaritasDashboard() {
                               <span>Feels {entry.apparent_temp_c ?? "—"}°C</span>
                               <span>Precip {entry.precipitation_mm ?? "—"} mm</span>
                               <span>Gust {entry.wind_gust ?? "—"} m/s</span>
+                              <span>Pressure {entry.pressure_hpa ?? "—"} hPa</span>
+                              <span>Visibility {entry.visibility_m != null ? `${formatMetricNumber(entry.visibility_m / 1000)} km` : "—"}</span>
                               <span>
                                 AQI {entry.air_quality?.provider_aqi ?? entry.air_quality?.european_aqi ?? entry.air_quality?.us_aqi ?? "—"}
                                 {entry.air_quality?.aqi_scale ? ` (${entry.air_quality.aqi_scale})` : ""} · {entry.air_quality?.label ?? "Unknown"}
                               </span>
                             </div>
+                            {(entry.alert_count ?? entry.alerts?.length ?? 0) > 0 && (
+                              <div className="mt-2 rounded-lg border border-rose-400/40 bg-rose-500/10 px-2 py-1 text-rose-200">
+                                {entry.alert_count ?? entry.alerts?.length} active official alert{(entry.alert_count ?? entry.alerts?.length ?? 0) === 1 ? "" : "s"}: {entry.alerts?.[0]?.event ?? "review details"}
+                              </div>
+                            )}
                             {entry.forecast && entry.forecast.length > 0 && (
                               <div className="mt-2 grid grid-cols-3 gap-1">
                                 {entry.forecast.slice(0, 3).map((day) => (
@@ -7230,6 +7315,7 @@ export default function ClaritasDashboard() {
                             )}
                             <div className="mt-1 text-[color:var(--shell-muted)]">
                               {new Date(entry.observed_at).toLocaleString()}
+                              {entry.location_name ? ` · representative point ${entry.location_name}` : " · representative country-centroid point"}
                               {entry.attribution ? ` · ${entry.attribution}` : ""}
                             </div>
                           </article>
@@ -7240,6 +7326,63 @@ export default function ClaritasDashboard() {
                           No weather rows available.
                         </div>
                       )}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Five-day outlook · {weatherFocusCountry ?? "—"}</div>
+                        <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Three-hour temperature, rain probability and wind</div>
+                      </div>
+                      <div className="text-right text-[10px] text-[color:var(--shell-muted)]">{weatherForecastDetail?.attribution ?? (weatherForecastLoading ? "Loading forecast…" : "Select a covered country")}</div>
+                    </div>
+                    <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      <div className="h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart data={weatherForecastChartData}>
+                            <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                            <XAxis dataKey="time" minTickGap={28} />
+                            <YAxis unit="°" />
+                            <Tooltip />
+                            <Legend />
+                            <Area type="monotone" dataKey="temperature" name="Temperature °C" stroke="var(--viz-weather)" fill="var(--signal-amber-soft)" />
+                            <Line type="monotone" dataKey="feels_like" name="Feels like °C" stroke="var(--signal-sky)" dot={false} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div className="h-56">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={weatherForecastChartData}>
+                            <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                            <XAxis dataKey="time" minTickGap={28} />
+                            <YAxis yAxisId="rain" domain={[0, 100]} unit="%" />
+                            <YAxis yAxisId="wind" orientation="right" unit="m/s" />
+                            <Tooltip />
+                            <Legend />
+                            <Bar yAxisId="rain" dataKey="rain_probability" name="Rain probability" fill="var(--signal-sky)" radius={[4, 4, 0, 0]} />
+                            <Line yAxisId="wind" type="monotone" dataKey="wind_gust" name="Wind gust" stroke="var(--viz-negative)" dot={false} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                    {weatherForecastChartData.length === 0 && !weatherForecastLoading && <div className="product-state mt-3">No stored forecast is available for this country. Run weather ingestion to populate the standard OpenWeather forecast feed.</div>}
+                  </div>
+                  <div className={`${cardBase} min-w-0 overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Global exception ranking</div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">Where conditions deserve attention</div>
+                    </div>
+                    <div className="app-scroll-panel max-h-[29rem] overflow-y-auto">
+                      {weatherOperationalRows.slice(0, 16).map((row, index) => (
+                        <button key={`weather-risk-${row.country}`} type="button" onClick={() => setSelectedCountry(row.country.toUpperCase())} className="flex w-full items-start gap-3 border-b border-[color:var(--shell-border)] px-4 py-3 text-left hover:bg-[color:var(--shell-surface)]">
+                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[color:var(--shell-border)] text-xs font-semibold">{index + 1}</span>
+                          <span className="min-w-0 flex-1"><strong className="block text-sm text-[color:var(--shell-ink)]">{row.country} · {row.temp_c ?? "—"}°C</strong><small className="mt-1 block text-[color:var(--shell-muted)]">{row.reasons.join(" · ") || `${row.weather_main ?? "Current conditions"} · no material threshold`}</small></span>
+                          <span className={`text-sm font-semibold ${row.score >= 50 ? "text-rose-400" : "text-[color:var(--shell-muted)]"}`}>{row.score}/100</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </section>
@@ -7295,10 +7438,10 @@ export default function ClaritasDashboard() {
 
                 <section className={`${cardBase} p-4`}>
                   <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                    Temperature ranking
+                    Temperature departures
                   </div>
                   <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                    Warmest countries in current filter set
+                    Largest departures from a 20°C reference · actual versus perceived
                   </div>
                   <div className="mt-3 h-64">
                     <ResponsiveContainer width="100%" height="100%">
@@ -7307,7 +7450,9 @@ export default function ClaritasDashboard() {
                         <XAxis dataKey="country" />
                         <YAxis />
                         <Tooltip />
-                        <Bar dataKey="temp_c" fill={ANALYTICS_COLORS[0]} radius={[6, 6, 0, 0]} />
+                        <Legend />
+                        <Bar dataKey="temp_c" name="Actual °C" fill={ANALYTICS_COLORS[0]} radius={[6, 6, 0, 0]} />
+                        <Bar dataKey="apparent_temp_c" name="Feels like °C" fill={ANALYTICS_COLORS[1]} radius={[6, 6, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -7409,10 +7554,10 @@ export default function ClaritasDashboard() {
                           featuredCountry={featuredMarketCountry?.country}
                           featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : "Strongest market move"}
                           fillMode={marketMapLayer === "filings" ? "sequential" : "diverging"}
-                          valueDomain={marketMapLayer === "filings" ? [0, Math.max(1, ...countryMarkets.map((row) => row.filing_count_7d))] : [-3, 3]}
+                          valueDomain={marketMapDomain}
                           valueUnit={marketMapLayer === "filings" ? "" : "%"}
                           showBubbles={false}
-                          legendLabel={marketMapLayer === "filings" ? "7-day filing count" : "Daily percentage change"}
+                          legendLabel={marketMapLayer === "filings" ? "7-day filing count" : marketMapLayer === "index" ? "Latest monthly change" : marketMapLayer === "fx" ? "Latest daily FX change" : "Mixed-frequency regime change"}
                         />
                       </div>
                     </div>
@@ -7431,14 +7576,38 @@ export default function ClaritasDashboard() {
                             <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><dt className="text-[color:var(--shell-muted)]">Currency vs EUR</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.fx_symbol ?? "—"} · {formatSignedMetric(selectedCountryMarket.fx_change_percent, 2, "%")}</dd></div>
                             <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><dt className="text-[color:var(--shell-muted)]">SEC activity</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.filing_count_7d} filings / 7d</dd></div>
                           </dl>
-                          {countryMarketDetail && countryMarketDetail.fx_history.length > 1 && (
-                            <div className="mt-3 h-24" aria-label={`${selectedCountryMarket.fx_symbol ?? "Currency"} 90-day ECB history`}>
-                              <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={countryMarketDetail.fx_history}>
-                                  <Tooltip labelFormatter={(label) => new Date(String(label)).toLocaleDateString()} />
-                                  <Area type="monotone" dataKey="value" stroke="var(--signal-sky)" fill="var(--signal-sky-soft)" strokeWidth={2} />
-                                </AreaChart>
-                              </ResponsiveContainer>
+                          {countryMarketDetail && (countryMarketDetail.index_history.length > 1 || countryMarketDetail.fx_history.length > 1) && (
+                            <div className="mt-3 grid grid-cols-1 gap-3">
+                              {countryMarketDetail.index_history.length > 1 && (
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">OECD index level · 36 months</div>
+                                  <div className="h-36" aria-label={`${selectedCountryMarket.index_name ?? "OECD share-price index"} history`}>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                      <AreaChart data={countryMarketDetail.index_history}>
+                                        <XAxis dataKey="period_end" minTickGap={24} tickFormatter={(value) => String(value).slice(0, 7)} />
+                                        <YAxis domain={["auto", "auto"]} width={42} />
+                                        <Tooltip labelFormatter={(label) => new Date(String(label)).toLocaleDateString()} />
+                                        <Area type="monotone" dataKey="value" name="Index level" stroke="var(--viz-market)" fill="var(--signal-amber-soft)" strokeWidth={2} />
+                                      </AreaChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </div>
+                              )}
+                              {countryMarketDetail.fx_history.length > 1 && (
+                                <div>
+                                  <div className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">ECB units per EUR · 90 observations</div>
+                                  <div className="h-36" aria-label={`${selectedCountryMarket.fx_symbol ?? "Currency"} ECB history`}>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                      <AreaChart data={countryMarketDetail.fx_history}>
+                                        <XAxis dataKey="period_end" minTickGap={28} tickFormatter={(value) => String(value).slice(5)} />
+                                        <YAxis domain={["auto", "auto"]} width={42} />
+                                        <Tooltip labelFormatter={(label) => new Date(String(label)).toLocaleDateString()} />
+                                        <Area type="monotone" dataKey="value" name="Units per EUR" stroke="var(--signal-sky)" fill="var(--signal-sky-soft)" strokeWidth={2} />
+                                      </AreaChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                           {countryMarketDetail && countryMarketDetail.filings.length > 0 && (
@@ -7535,7 +7704,7 @@ export default function ClaritasDashboard() {
                       {countryMarketCoverage.indices}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      Licensed benchmarks available
+                      OECD monthly share-price series
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
@@ -7571,6 +7740,91 @@ export default function ClaritasDashboard() {
                   </section>
                 </section>
 
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">OECD national share-price direction</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Largest latest-month moves · not live quotes</div>
+                    <div className="mt-3 h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={marketIndexMoversData} layout="vertical" margin={{ left: 8, right: 18 }}>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis type="number" unit="%" />
+                          <YAxis type="category" dataKey="country" width={36} />
+                          <Tooltip formatter={(value) => [`${Number(value).toFixed(2)}%`, "Monthly change"]} />
+                          <Bar dataKey="change" radius={[0, 5, 5, 0]}>
+                            {marketIndexMoversData.map((entry) => <Cell key={`oecd-mover-${entry.country}`} fill={entry.change >= 0 ? "var(--viz-positive)" : "var(--viz-negative)"} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {marketIndexMoversData.length === 0 && <div className="product-state">No OECD observations are loaded. The market ingestion must complete before this chart can render.</div>}
+                  </div>
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">ECB currency direction</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Largest daily local-currency moves versus EUR</div>
+                    <div className="mt-3 h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={marketFxMoversData} layout="vertical" margin={{ left: 8, right: 18 }}>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis type="number" unit="%" />
+                          <YAxis type="category" dataKey="currency" width={38} />
+                          <Tooltip formatter={(value) => [`${Number(value).toFixed(3)}%`, "Daily change"]} />
+                          <Bar dataKey="change" radius={[0, 5, 5, 0]}>
+                            {marketFxMoversData.map((entry) => <Cell key={`fx-mover-${entry.country}`} fill={entry.change >= 0 ? "var(--viz-positive)" : "var(--viz-negative)"} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {marketFxMoversData.length === 0 && <div className="product-state">No ECB reference-rate changes are loaded.</div>}
+                  </div>
+                </section>
+
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Cross-market relationship</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Monthly equity direction versus daily FX direction</div>
+                    <div className="mt-3 h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ScatterChart>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis type="number" dataKey="index" name="OECD monthly" unit="%" />
+                          <YAxis type="number" dataKey="fx" name="FX daily" unit="%" />
+                          <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+                          <Scatter name="Countries" data={marketRelationshipData} fill="var(--viz-market)" />
+                        </ScatterChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <p className="mt-2 text-[11px] text-[color:var(--shell-muted)]">Quadrants show whether national share prices and the local currency point in the same or opposing directions. Frequencies differ, so this is context—not correlation or causation.</p>
+                  </div>
+                  <div className={`${cardBase} min-w-0 overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country regime ledger</div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">Every mapped OECD, ECB and SEC component</div>
+                    </div>
+                    <div className="app-scroll-panel max-h-[31rem] overflow-auto">
+                      <table className="min-w-full text-xs">
+                        <thead className="sticky top-0 bg-[color:var(--shell-surface)] text-left text-[color:var(--shell-muted)]">
+                          <tr><th className="px-3 py-2">Country</th><th className="px-3 py-2">OECD index</th><th className="px-3 py-2">ECB FX</th><th className="px-3 py-2">Composite</th><th className="px-3 py-2">SEC 7d</th><th className="px-3 py-2">Freshness</th></tr>
+                        </thead>
+                        <tbody>
+                          {marketCountryRows.map((row) => (
+                            <tr key={`country-regime-${row.country}`} onClick={() => setSelectedCountry(row.country)} className="cursor-pointer border-t border-[color:var(--shell-border)] text-[color:var(--shell-ink)] hover:bg-[color:var(--shell-surface)]">
+                              <td className="px-3 py-2"><strong>{row.country}</strong><span className="ml-2 text-[color:var(--shell-muted)]">{row.country_name}</span></td>
+                              <td className="px-3 py-2"><strong>{formatSignedMetric(row.index_change_percent, 2, "%")}</strong><small className="block text-[color:var(--shell-muted)]">{row.index_value == null ? "No OECD series" : `${formatMetricNumber(row.index_value, { maximumFractionDigits: 2 })} · ${row.index_period_end ?? "—"}`}</small></td>
+                              <td className="px-3 py-2"><strong>{row.currency ?? "—"} {formatSignedMetric(row.fx_change_percent, 3, "%")}</strong><small className="block text-[color:var(--shell-muted)]">{row.fx_rate == null ? "No ECB rate" : `${formatMetricNumber(row.fx_rate, { maximumFractionDigits: 4 })} per EUR · ${row.fx_period_end ?? "—"}`}</small></td>
+                              <td className={`px-3 py-2 font-semibold ${(row.composite_change_percent ?? 0) >= 0 ? "text-[color:var(--viz-positive)]" : "text-[color:var(--viz-negative)]"}`}>{formatSignedMetric(row.composite_change_percent, 2, "%")}</td>
+                              <td className="px-3 py-2">{row.filing_count_7d}</td>
+                              <td className="px-3 py-2 capitalize text-[color:var(--shell-muted)]">{row.freshness}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {marketCountryRows.length === 0 && <div className="product-state m-3">No country market regimes match the active scope.</div>}
+                    </div>
+                  </div>
+                </section>
+
+                {marketPageRows.length > 0 && <>
                 <section className="market-primary-grid grid grid-cols-1 gap-4 xl:grid-cols-[0.82fr_1.18fr]">
                   <div className={`${cardBase} watchlist-panel overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -7932,6 +8186,7 @@ export default function ClaritasDashboard() {
                     </table>
                   </div>
                 </section>
+                </>}
               </div>
             )}
             {activeView === "transport" && (

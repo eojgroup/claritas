@@ -7,22 +7,18 @@ struct PadOverviewView: View {
     @Binding var destination: RootView.Tab?
 
     private var marketAverage: Double {
-        let moves = scopedMarketQuotes.compactMap(\.percent_change)
+        let moves = scopedCountryMarkets.compactMap(\.composite_change_percent)
         guard !moves.isEmpty else { return 0 }
         return moves.reduce(0, +) / Double(moves.count)
     }
 
     private var trackedMarkets: Int {
-        Set(
-            scopedMarketQuotes.compactMap { quote in
-                quote.market_code ?? quote.exchange ?? quote.market_name
-            }
-        ).count
+        scopedCountryMarkets.count
     }
 
-    private var topMarkets: [MarketQuote] {
-        scopedMarketQuotes
-            .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
+    private var topMarkets: [CountryMarketOverview] {
+        scopedCountryMarkets
+            .sorted { abs($0.composite_change_percent ?? 0) > abs($1.composite_change_percent ?? 0) }
             .prefix(7)
             .map { $0 }
     }
@@ -34,11 +30,11 @@ struct PadOverviewView: View {
             .map { $0 }
     }
 
-    private var scopedMarketQuotes: [MarketQuote] {
+    private var scopedCountryMarkets: [CountryMarketOverview] {
         guard let selected = model.selectedCountry?.uppercased() else {
-            return model.marketQuotes
+            return model.countryMarkets
         }
-        return model.marketQuotes.filter { ($0.country ?? "").uppercased() == selected }
+        return model.countryMarkets.filter { $0.country.uppercased() == selected }
     }
 
     private var scopedWeather: [CountryWeather] {
@@ -176,7 +172,7 @@ struct PadOverviewView: View {
             metricCell(
                 title: "Market pulse",
                 value: String(format: "%+.2f%%", marketAverage),
-                detail: "\(trackedMarkets) tracked market venues",
+                detail: "\(trackedMarkets) OECD/ECB country regimes",
                 tone: marketAverage >= 0
                     ? ClaritasPalette.positiveText(for: colorScheme)
                     : ClaritasPalette.negativeText(for: colorScheme)
@@ -289,19 +285,18 @@ struct PadOverviewView: View {
     private var marketPanel: some View {
         BrandCard(title: "Market movers", icon: "chart.line.uptrend.xyaxis") {
             VStack(spacing: 8) {
-                ForEach(topMarkets) { quote in
+                ForEach(topMarkets) { market in
                     Button {
-                        model.selectedSymbol = quote.symbol
-                        model.selectedCountry = quote.country?.uppercased()
+                        model.selectedCountry = market.country.uppercased()
                         destination = .markets
                     } label: {
                         HStack {
-                            Text(quote.symbol)
+                            Text(market.country)
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
-                            Text(quote.percent_change.map { String(format: "%+.2f%%", $0) } ?? "—")
+                            Text(market.composite_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")
                                 .font(.subheadline.monospacedDigit())
-                                .foregroundStyle((quote.percent_change ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
+                                .foregroundStyle((market.composite_change_percent ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
                         }
                     }
                     .buttonStyle(.plain)

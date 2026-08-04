@@ -26,6 +26,7 @@ final class AppModel: ObservableObject {
     @Published var weather: [CountryWeather] = []
     @Published var leadership: [CountryLeadership] = []
     @Published var marketQuotes: [MarketQuote] = []
+    @Published var countryMarkets: [CountryMarketOverview] = []
     @Published var transportOverview: TransportOverview? = nil
     @Published var isRefreshingNews: Bool = false
     @Published var isRefreshingPodcasts: Bool = false
@@ -293,8 +294,8 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchPodcasts(limit: 40)) }
             catch { return .failure(error) }
         }()
-        async let marketResult: Result<[MarketQuote], Error> = {
-            do { return .success(try await api.fetchMarketQuotes(refresh: true)) }
+        async let marketResult: Result<CountryMarketOverviewResponse, Error> = {
+            do { return .success(try await api.fetchCountryMarkets()) }
             catch { return .failure(error) }
         }()
         async let transportResult: Result<TransportOverview, Error> = {
@@ -390,8 +391,9 @@ final class AppModel: ObservableObject {
         if case .failure(let error) = resolvedPodcasts {
             podcastLoadError = (error as? APIError)?.message ?? error.localizedDescription
         }
-        if case .success(let quotes) = resolvedMarket {
-            marketQuotes = quotes
+        if case .success(let overview) = resolvedMarket {
+            countryMarkets = overview.countries
+            marketQuotes = []
         }
         if case .success(let transport) = resolvedTransport {
             transportOverview = transport
@@ -402,7 +404,7 @@ final class AppModel: ObservableObject {
         }
         WidgetSnapshotStore.save(
             newsCount: news.count,
-            marketQuotes: marketQuotes,
+            countryMarkets: countryMarkets,
             weather: weather
         )
     }
@@ -419,6 +421,7 @@ final class AppModel: ObservableObject {
         news = []
         podcasts = []
         marketQuotes = []
+        countryMarkets = []
         transportOverview = nil
         newsLoadError = nil
         podcastLoadError = nil
@@ -558,7 +561,9 @@ final class AppModel: ObservableObject {
         isRefreshingMarketQuotes = true
         defer { isRefreshingMarketQuotes = false }
         do {
-            marketQuotes = try await api.fetchMarketQuotes(refresh: forceRefresh)
+            let overview = try await api.fetchCountryMarkets()
+            countryMarkets = overview.countries
+            marketQuotes = []
         } catch {
             if isPaymentRequired(error) {
                 clearAppData()

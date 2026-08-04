@@ -147,17 +147,12 @@ struct DashboardView: View {
                                         }
                                     )
                                 } else {
-                                    MarketQuoteListView(
-                                        quotes: filteredMarketQuotes(),
-                                        selectedSymbol: model.selectedSymbol,
+                                    CountryMarketListView(
+                                        rows: model.countryMarkets,
+                                        selectedCountry: model.selectedCountry,
                                         isRefreshing: model.isRefreshingMarketQuotes,
                                         onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
-                                        onSelectSymbol: { symbol in
-                                            model.selectedSymbol = symbol
-                                            if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
-                                                model.selectedCountry = country.uppercased()
-                                            }
-                                        }
+                                        onSelectCountry: { model.selectedCountry = $0.uppercased() }
                                     )
                                 }
                             }
@@ -193,17 +188,12 @@ struct DashboardView: View {
                         }
                     } else {
                         DashboardCard {
-                            MarketQuoteListView(
-                                quotes: filteredMarketQuotes(),
-                                selectedSymbol: model.selectedSymbol,
+                            CountryMarketListView(
+                                rows: model.countryMarkets,
+                                selectedCountry: model.selectedCountry,
                                 isRefreshing: model.isRefreshingMarketQuotes,
                                 onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
-                                onSelectSymbol: { symbol in
-                                    model.selectedSymbol = symbol
-                                    if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
-                                        model.selectedCountry = country.uppercased()
-                                    }
-                                }
+                                onSelectCountry: { model.selectedCountry = $0.uppercased() }
                             )
                         }
                     }
@@ -390,9 +380,9 @@ struct DashboardView: View {
                         detail: mobileCountryWeather?.weather_main ?? "No update"
                     )
                     mobileFocusMetric(
-                        label: "Mover",
-                        value: mobileCountryMarkets.first?.symbol ?? "—",
-                        detail: mobileCountryMarkets.first?.percent_change.map { String(format: "%+.1f%%", $0) } ?? "No quote"
+                        label: "Markets",
+                        value: mobileCountryMarket?.composite_change_percent.map { String(format: "%+.1f%%", $0) } ?? "—",
+                        detail: mobileCountryMarket.map { "OECD + ECB · \($0.freshness)" } ?? "No regime"
                     )
                 }
 
@@ -477,17 +467,16 @@ struct DashboardView: View {
                     Divider()
                 }
 
-                if let quote = mobilePriorityMarket {
+                if let market = mobilePriorityMarket {
                     Button {
-                        model.selectedSymbol = quote.symbol
-                        model.selectedCountry = quote.country?.uppercased()
+                        model.selectedCountry = market.country.uppercased()
                     } label: {
                         mobileSignalRow(
                             icon: "chart.line.uptrend.xyaxis",
                             eyebrow: "Market mover",
-                            value: "\(quote.symbol) · \(quote.percent_change.map { String(format: "%+.2f%%", $0) } ?? "—")",
-                            detail: quote.company_name ?? quote.exchange ?? "Tracked instrument",
-                            tone: (quote.percent_change ?? 0) >= 0
+                            value: "\(market.country) · \(market.composite_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")",
+                            detail: "OECD \(market.index_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—") · \(market.currency ?? "FX") \(market.fx_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")",
+                            tone: (market.composite_change_percent ?? 0) >= 0
                                 ? ClaritasPalette.positiveText(for: colorScheme)
                                 : ClaritasPalette.negativeText(for: colorScheme)
                         )
@@ -546,7 +535,7 @@ struct DashboardView: View {
     }
 
     private var mobileMarketAverage: Double {
-        let changes = model.marketQuotes.compactMap(\.percent_change)
+        let changes = model.countryMarkets.compactMap(\.composite_change_percent)
         guard !changes.isEmpty else { return 0 }
         return changes.reduce(0, +) / Double(changes.count)
     }
@@ -557,8 +546,8 @@ struct DashboardView: View {
                 ($0.humidity.map { $0 >= 85 } ?? false) ||
                 ($0.wind_speed.map { $0 >= 15 } ?? false)
         }.count
-        let marketCount = model.marketQuotes.filter {
-            abs($0.percent_change ?? 0) >= 2
+        let marketCount = model.countryMarkets.filter {
+            abs($0.composite_change_percent ?? 0) >= 2
         }.count
         return weatherCount + marketCount
     }
@@ -587,14 +576,14 @@ struct DashboardView: View {
         return temperature + humidity + wind
     }
 
-    private var mobilePriorityMarket: MarketQuote? {
-        let rows: [MarketQuote]
+    private var mobilePriorityMarket: CountryMarketOverview? {
+        let rows: [CountryMarketOverview]
         if let selected = model.selectedCountry?.uppercased() {
-            rows = model.marketQuotes.filter { ($0.country ?? "").uppercased() == selected }
+            rows = model.countryMarkets.filter { $0.country.uppercased() == selected }
         } else {
-            rows = model.marketQuotes
+            rows = model.countryMarkets
         }
-        return rows.max { abs($0.percent_change ?? 0) < abs($1.percent_change ?? 0) }
+        return rows.max { abs($0.composite_change_percent ?? 0) < abs($1.composite_change_percent ?? 0) }
     }
 
     private var mobileCountryName: String {
@@ -614,11 +603,9 @@ struct DashboardView: View {
             .max { ($0.observedDate ?? .distantPast) < ($1.observedDate ?? .distantPast) }
     }
 
-    private var mobileCountryMarkets: [MarketQuote] {
-        guard let selected = model.selectedCountry?.uppercased() else { return [] }
-        return model.marketQuotes
-            .filter { ($0.country ?? "").uppercased() == selected }
-            .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
+    private var mobileCountryMarket: CountryMarketOverview? {
+        guard let selected = model.selectedCountry?.uppercased() else { return nil }
+        return model.countryMarkets.first { $0.country.uppercased() == selected }
     }
 
     private var mobileCountryLeadership: CountryLeadership? {
@@ -779,14 +766,16 @@ struct DashboardView: View {
             )
         }
 
-        let marketItems = filteredMarketQuotes().prefix(2).map {
+        let marketTerm = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let marketItems = model.countryMarkets.filter {
+            marketTerm.isEmpty || [$0.country, $0.country_name, $0.currency ?? "", $0.index_name ?? ""]
+                .joined(separator: " ").lowercased().contains(marketTerm)
+        }.prefix(2).map {
             SearchPreviewItem(
                 id: "market-\($0.id)",
-                kind: "Market",
-                title: "\($0.symbol) • \(valueOrDash($0.price)) \($0.currency ?? "")",
-                detail: [$0.company_name ?? "Market quote", changeLabel($0)]
-                    .filter { !$0.isEmpty }
-                    .joined(separator: " • ")
+                kind: "Market regime",
+                title: "\($0.country) • \($0.composite_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")",
+                detail: "OECD \($0.index_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—") • \($0.currency ?? "FX") \($0.fx_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")"
             )
         }
 
@@ -941,6 +930,27 @@ private struct WeatherScatterPoint: Identifiable {
     let humidity: Double
     let temp: Double
     var id: String { country }
+}
+
+private struct WeatherTemperaturePoint: Identifiable {
+    let country: String
+    let actual: Double
+    let apparent: Double?
+    var id: String { country }
+}
+
+private struct WeatherForecastRiskPoint: Identifiable {
+    let country: String
+    let rainProbability: Double
+    let windGust: Double
+    var id: String { country }
+}
+
+private struct WeatherOperationalPoint: Identifiable {
+    let weather: CountryWeather
+    let score: Int
+    let reasons: [String]
+    var id: String { weather.country }
 }
 
 private struct CountryMarketSummary: Identifiable {
@@ -1292,17 +1302,57 @@ struct WeatherWorkspaceView: View {
         }
     }
 
-    private var temperatureLeaders: [LabeledValue] {
+    private var temperatureLeaders: [WeatherTemperaturePoint] {
         rows
             .filter { $0.temp_c != nil }
+            .sorted { abs(($0.temp_c ?? 20) - 20) > abs(($1.temp_c ?? 20) - 20) }
             .prefix(12)
             .map {
-                LabeledValue(
-                    label: $0.country.uppercased(),
-                    value: $0.temp_c ?? 0,
-                    detail: "\(($0.humidity ?? 0).formatted(.number.precision(.fractionLength(0))))% humidity"
+                WeatherTemperaturePoint(
+                    country: $0.country.uppercased(),
+                    actual: $0.temp_c ?? 0,
+                    apparent: $0.apparent_temp_c
                 )
             }
+    }
+
+    private var forecastRiskRows: [WeatherForecastRiskPoint] {
+        rows.compactMap { row in
+            guard let forecast = row.forecast?.first else { return nil }
+            return WeatherForecastRiskPoint(
+                country: row.country.uppercased(),
+                rainProbability: forecast.precipitation_probability ?? 0,
+                windGust: forecast.wind_gust ?? forecast.wind_speed ?? 0
+            )
+        }
+        .sorted { max($0.rainProbability, $0.windGust * 5) > max($1.rainProbability, $1.windGust * 5) }
+        .prefix(12)
+        .map { $0 }
+    }
+
+    private var operationalRows: [WeatherOperationalPoint] {
+        rows.map { row in
+            let forecast = row.forecast?.first
+            let alerts = row.alert_count ?? 0
+            let providerAQI = row.air_quality?.provider_aqi
+            let otherAQI = row.air_quality?.european_aqi ?? row.air_quality?.us_aqi
+            let heat = max(0, (row.temp_c ?? 30) - 30) * 3
+            let cold = max(0, 5 - (row.temp_c ?? 5)) * 2
+            let wind = max(0, (row.wind_gust ?? row.wind_speed ?? 10) - 10) * 2
+            let rain = max(0, (forecast?.precipitation_probability ?? 50) - 50) * 0.35
+            let air = providerAQI.map { max(0, $0 - 2) * 12 } ?? otherAQI.map { max(0, $0 - 50) * 0.4 } ?? 0
+            let score = min(100, Int((max(heat, cold) + wind + rain + air + Double(alerts * 35)).rounded()))
+            let reasons: [String?] = [
+                alerts > 0 ? "\(alerts) active official alert\(alerts == 1 ? "" : "s")" : nil,
+                (row.temp_c ?? 0) >= 35 ? "extreme heat \(compactNumber(row.temp_c))°C" : nil,
+                (row.temp_c ?? 99) <= 0 ? "freezing \(compactNumber(row.temp_c))°C" : nil,
+                (row.wind_gust ?? row.wind_speed ?? 0) >= 15 ? "gust \(compactNumber(row.wind_gust ?? row.wind_speed)) m/s" : nil,
+                (forecast?.precipitation_probability ?? 0) >= 60 ? "\(compactNumber(forecast?.precipitation_probability))% rain risk" : nil,
+                air > 0 ? "air quality \(row.air_quality?.label ?? "elevated")" : nil
+            ]
+            return WeatherOperationalPoint(weather: row, score: score, reasons: reasons.compactMap { $0 })
+        }
+        .sorted { $0.score > $1.score || ($0.score == $1.score && ($0.weather.temp_c ?? -999) > ($1.weather.temp_c ?? -999)) }
     }
 
     private var scatterRows: [WeatherScatterPoint] {
@@ -1317,6 +1367,21 @@ struct WeatherWorkspaceView: View {
         return "\(hottest.country.uppercased()) • \(compactNumber(hottest.temp_c))°C"
     }
 
+    private var officialAlertCount: Int {
+        rows.reduce(0) { $0 + ($1.alert_count ?? 0) }
+    }
+
+    private var highRainRiskCount: Int {
+        rows.filter { ($0.forecast?.first?.precipitation_probability ?? 0) >= 70 }.count
+    }
+
+    private var elevatedAirCount: Int {
+        rows.filter { row in
+            if let provider = row.air_quality?.provider_aqi { return provider >= 4 }
+            return (row.air_quality?.european_aqi ?? row.air_quality?.us_aqi ?? 0) > 75
+        }.count
+    }
+
     var body: some View {
         BrandBackground {
             ScrollView {
@@ -1326,13 +1391,34 @@ struct WeatherWorkspaceView: View {
                             BrandSectionHeader(
                                 kicker: "Weather",
                                 title: "Country weather operations",
-                                detail: "Filter current-country snapshots and correlate temperature with humidity."
+                                detail: "Current conditions, five-day forecast risk, air quality and official alert context from representative country points."
                             )
 
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                                 BrandMetricCard(title: "Rows", value: "\(rows.count)", detail: "Country snapshots in scope", tone: nil)
                                 BrandMetricCard(title: "Hottest", value: hottestLabel, detail: "Highest observed temperature", tone: ClaritasPalette.brown)
-                                BrandMetricCard(title: "Conditions", value: "\(conditionOptions.count)", detail: "Distinct weather conditions", tone: nil)
+                                BrandMetricCard(title: "Official alerts", value: "\(officialAlertCount)", detail: "Active mapped notices", tone: officialAlertCount > 0 ? .orange : nil)
+                                BrandMetricCard(title: "Rain risk", value: "\(highRainRiskCount)", detail: "Countries at 70%+ next-day probability", tone: nil)
+                                BrandMetricCard(title: "Air quality", value: "\(elevatedAirCount)", detail: "Countries above operational threshold", tone: elevatedAirCount > 0 ? ClaritasPalette.brown : nil)
+                            }
+
+                            Link(destination: URL(string: "https://openweathermap.org/")!) {
+                                HStack(spacing: 8) {
+                                    AsyncImage(url: URL(string: "https://openweathermap.org/themes/openweathermap/assets/img/logo_white_cropped.png")) { phase in
+                                        if case .success(let image) = phase {
+                                            image.resizable().scaledToFit()
+                                        } else {
+                                            Image(systemName: "cloud.sun.fill").foregroundStyle(.white)
+                                        }
+                                    }
+                                    .frame(width: 76, height: 24)
+                                    Text("Weather data provided by OpenWeather")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.black.opacity(0.88), in: RoundedRectangle(cornerRadius: 10))
                             }
 
                             Button(model.isRefreshingWeather ? "Refreshing…" : "Refresh weather now") {
@@ -1400,18 +1486,67 @@ struct WeatherWorkspaceView: View {
                         snapshotsPanel
                     }
 
-                    if !temperatureLeaders.isEmpty || !scatterRows.isEmpty {
+                    if !operationalRows.isEmpty {
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Global exception ranking")
+                                    .font(.headline)
+                                Text("A transparent operational score combines alerts, temperature, wind, next-day rain probability and air quality.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                ForEach(operationalRows.prefix(12)) { point in
+                                    let index = operationalRows.firstIndex(where: { $0.id == point.id }) ?? 0
+                                    Button {
+                                        model.selectedCountry = point.weather.country.uppercased()
+                                    } label: {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Text("\(index + 1)")
+                                                .font(.caption.weight(.bold))
+                                                .frame(width: 26, height: 26)
+                                                .background(ClaritasPalette.shellSurface(for: colorScheme), in: Circle())
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text("\(point.weather.country.uppercased()) · \(compactNumber(point.weather.temp_c))°C")
+                                                    .font(.subheadline.weight(.semibold))
+                                                Text(point.reasons.isEmpty ? "No material operational threshold" : point.reasons.joined(separator: " · "))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            Spacer()
+                                            Text("\(point.score)/100")
+                                                .font(.subheadline.weight(.semibold).monospacedDigit())
+                                                .foregroundStyle(point.score >= 50 ? Color.orange : Color.secondary)
+                                        }
+                                        .padding(.vertical, 6)
+                                    }
+                                    .buttonStyle(.plain)
+                                    if point.id != operationalRows.prefix(12).last?.id { Divider().opacity(0.2) }
+                                }
+                            }
+                        }
+                    }
+
+                    if !temperatureLeaders.isEmpty || !scatterRows.isEmpty || !forecastRiskRows.isEmpty {
                         VStack(spacing: 12) {
                             BrandCard {
                                 VStack(alignment: .leading, spacing: 10) {
-                                    Text("Temperature leaders")
+                                    Text("Largest temperature departures")
                                         .font(.headline)
+                                    Text("Actual and perceived temperature, ranked by distance from a 20°C reference.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                     Chart(temperatureLeaders) { item in
                                         BarMark(
-                                            x: .value("Country", item.label),
-                                            y: .value("Temp", item.value)
+                                            x: .value("Country", item.country),
+                                            y: .value("Temperature", item.actual)
                                         )
                                         .foregroundStyle(ClaritasPalette.brown)
+                                        if let apparent = item.apparent {
+                                            PointMark(
+                                                x: .value("Country", item.country),
+                                                y: .value("Feels like", apparent)
+                                            )
+                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                        }
                                     }
                                     .frame(height: 180)
                                 }
@@ -1421,6 +1556,9 @@ struct WeatherWorkspaceView: View {
                                 VStack(alignment: .leading, spacing: 10) {
                                     Text("Temp vs humidity")
                                         .font(.headline)
+                                    Text("Each point is a representative country observation, not a national average.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                     Chart(scatterRows) { item in
                                         PointMark(
                                             x: .value("Humidity", item.humidity),
@@ -1429,6 +1567,39 @@ struct WeatherWorkspaceView: View {
                                         .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                                     }
                                     .frame(height: 180)
+                                }
+                            }
+
+                            if !forecastRiskRows.isEmpty {
+                                BrandCard {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Next-day rain and gust exposure")
+                                            .font(.headline)
+                                        Text("Separate scales keep precipitation probability and forecast maximum wind gust comparable.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("Precipitation probability · %")
+                                            .font(.caption.weight(.semibold))
+                                        Chart(forecastRiskRows) { item in
+                                            BarMark(
+                                                x: .value("Country", item.country),
+                                                y: .value("Rain probability", item.rainProbability)
+                                            )
+                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme).opacity(0.65))
+                                        }
+                                        .chartYScale(domain: 0...100)
+                                        .frame(height: 130)
+                                        Text("Maximum wind gust · m/s")
+                                            .font(.caption.weight(.semibold))
+                                        Chart(forecastRiskRows) { item in
+                                            BarMark(
+                                                x: .value("Country", item.country),
+                                                y: .value("Wind gust", item.windGust)
+                                            )
+                                            .foregroundStyle(Color.orange)
+                                        }
+                                        .frame(height: 130)
+                                    }
                                 }
                             }
                         }
@@ -1463,6 +1634,186 @@ struct WeatherWorkspaceView: View {
 }
 
 struct MarketsWorkspaceView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var query = ""
+
+    private var rows: [CountryMarketOverview] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return model.countryMarkets
+            .filter { row in
+                term.isEmpty || [row.country, row.country_name, row.currency ?? "", row.index_name ?? ""]
+                    .joined(separator: " ").lowercased().contains(term)
+            }
+            .sorted { abs($0.composite_change_percent ?? 0) > abs($1.composite_change_percent ?? 0) }
+    }
+
+    private var selected: CountryMarketOverview? {
+        guard let country = model.selectedCountry?.uppercased() else { return rows.first }
+        return model.countryMarkets.first { $0.country.uppercased() == country } ?? rows.first
+    }
+
+    private var indexRows: [CountryMarketOverview] {
+        rows
+            .filter { $0.index_change_percent != nil }
+            .sorted { abs($0.index_change_percent ?? 0) > abs($1.index_change_percent ?? 0) }
+            .prefix(14)
+            .map { $0 }
+    }
+
+    private var fxRows: [CountryMarketOverview] {
+        rows
+            .filter { $0.currency != "EUR" && $0.fx_change_percent != nil }
+            .sorted { abs($0.fx_change_percent ?? 0) > abs($1.fx_change_percent ?? 0) }
+            .prefix(14)
+            .map { $0 }
+    }
+
+    private var relationshipRows: [CountryMarketOverview] {
+        rows.filter { $0.currency != "EUR" && $0.index_change_percent != nil && $0.fx_change_percent != nil }
+    }
+
+    var body: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(spacing: 18) {
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 14) {
+                            BrandSectionHeader(
+                                kicker: "Markets",
+                                title: "Global country market regimes",
+                                detail: "OECD monthly share-price direction, ECB daily currency rates and SEC primary events."
+                            )
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
+                                BrandMetricCard(title: "Countries", value: "\(rows.count)", detail: "Mapped regimes", tone: nil)
+                                BrandMetricCard(title: "OECD", value: "\(rows.filter { $0.index_change_percent != nil }.count)", detail: "National index series", tone: ClaritasPalette.darkGreen)
+                                BrandMetricCard(title: "ECB FX", value: "\(rows.filter { $0.fx_change_percent != nil }.count)", detail: "Currencies vs EUR", tone: nil)
+                                BrandMetricCard(title: "SEC 7d", value: "\(rows.reduce(0) { $0 + $1.filing_count_7d })", detail: "Mapped filings", tone: nil)
+                            }
+                            HStack {
+                                TextField("Search country, currency or index", text: $query)
+                                    .textFieldStyle(.roundedBorder)
+                                Button(model.isRefreshingMarketQuotes ? "Refreshing…" : "Refresh") {
+                                    Task { await model.refreshMarketQuotes() }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(ClaritasPalette.darkGreen)
+                                .disabled(model.isRefreshingMarketQuotes)
+                            }
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Largest OECD monthly moves")
+                                .font(.headline)
+                            Chart(indexRows) { row in
+                                BarMark(x: .value("Country", row.country), y: .value("Monthly change", row.index_change_percent ?? 0))
+                                    .foregroundStyle((row.index_change_percent ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
+                            }
+                            .frame(height: 220)
+                            Text("National share-price indices; latest month-over-month change, not a live quote.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Largest ECB currency moves")
+                                .font(.headline)
+                            Chart(fxRows) { row in
+                                BarMark(x: .value("Currency", row.currency ?? row.country), y: .value("Daily change", row.fx_change_percent ?? 0))
+                                    .foregroundStyle((row.fx_change_percent ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
+                            }
+                            .frame(height: 220)
+                            Text("Daily local-currency performance against EUR; positive means the local currency strengthened.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if !relationshipRows.isEmpty {
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Equity direction vs currency direction")
+                                    .font(.headline)
+                                Chart(relationshipRows) { row in
+                                    PointMark(
+                                        x: .value("OECD monthly", row.index_change_percent ?? 0),
+                                        y: .value("ECB FX daily", row.fx_change_percent ?? 0)
+                                    )
+                                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                    .annotation(position: .top) {
+                                        Text(row.country).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(height: 220)
+                                Text("The frequencies differ, so quadrant placement is regime context—not correlation or causation.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    if let selected {
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("\(selected.country_name) · \(selected.country)")
+                                    .font(.headline)
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
+                                    BrandMetricCard(title: "Composite", value: mobileSignedPercent(selected.composite_change_percent), detail: "Mixed frequency", tone: nil)
+                                    BrandMetricCard(title: "OECD index", value: mobileSignedPercent(selected.index_change_percent), detail: selected.index_period_end ?? "No period", tone: nil)
+                                    BrandMetricCard(title: "\(selected.currency ?? "FX") vs EUR", value: mobileSignedPercent(selected.fx_change_percent), detail: selected.fx_period_end ?? "No period", tone: nil)
+                                    BrandMetricCard(title: "SEC filings", value: "\(selected.filing_count_7d)", detail: "Trailing 7 days", tone: nil)
+                                }
+                                Text("Composite = 75% OECD monthly equity direction + 25% ECB daily FX direction when both exist; missing components are not imputed.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Country regime ledger")
+                                .font(.headline)
+                            ForEach(rows) { row in
+                                Button {
+                                    model.selectedCountry = row.country.uppercased()
+                                } label: {
+                                    HStack(alignment: .top) {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text("\(row.country) · \(row.country_name)").font(.subheadline.weight(.semibold))
+                                            Text("OECD \(mobileSignedPercent(row.index_change_percent)) · \(row.currency ?? "FX") \(mobileSignedPercent(row.fx_change_percent)) · SEC \(row.filing_count_7d)")
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Text(mobileSignedPercent(row.composite_change_percent))
+                                            .font(.subheadline.weight(.semibold)).monospacedDigit()
+                                            .foregroundStyle((row.composite_change_percent ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
+                                    }
+                                    .padding(10)
+                                    .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 24)
+            }
+        }
+    }
+
+    private func mobileSignedPercent(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return String(format: "%+.2f%%", value)
+    }
+}
+
+private struct LegacyMarketsWorkspaceView: View {
     enum Direction: String, CaseIterable, Identifiable {
         case all
         case gainers
@@ -2247,6 +2598,51 @@ private func marketIdentity(for quote: MarketQuote) -> (code: String?, name: Str
     )
 }
 
+private struct CountryMarketListView: View {
+    let rows: [CountryMarketOverview]
+    let selectedCountry: String?
+    let isRefreshing: Bool
+    let onRefresh: () -> Void
+    let onSelectCountry: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Country market regimes").font(.headline)
+                Spacer()
+                Button(isRefreshing ? "Refreshing…" : "Refresh", action: onRefresh)
+                    .buttonStyle(.bordered)
+                    .disabled(isRefreshing)
+            }
+            if rows.isEmpty {
+                Text("No OECD, ECB or SEC country regimes are loaded.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            ForEach(rows.sorted { abs($0.composite_change_percent ?? 0) > abs($1.composite_change_percent ?? 0) }.prefix(20)) { row in
+                Button { onSelectCountry(row.country) } label: {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(row.country) · \(row.country_name)").font(.subheadline.weight(.semibold))
+                            Text("OECD \(percent(row.index_change_percent)) · \(row.currency ?? "FX") \(percent(row.fx_change_percent)) · SEC \(row.filing_count_7d)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(percent(row.composite_change_percent)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                    }
+                    .padding(10)
+                    .background((selectedCountry?.uppercased() == row.country.uppercased() ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06)), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func percent(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return String(format: "%+.2f%%", value)
+    }
+}
+
 private struct MarketQuoteListView: View {
     let quotes: [MarketQuote]
     let selectedSymbol: String?
@@ -2860,7 +3256,7 @@ struct SignalMapPanel: View {
             countryStats: model.countryStats,
             podcasts: model.podcasts,
             weather: model.weather,
-            marketQuotes: model.marketQuotes,
+            countryMarkets: model.countryMarkets,
             leadership: model.leadership
         )
     }
@@ -3087,7 +3483,7 @@ private enum SignalMapDataBuilder {
         countryStats: [CountryStat],
         podcasts: [PodcastEpisode],
         weather: [CountryWeather],
-        marketQuotes: [MarketQuote],
+        countryMarkets: [CountryMarketOverview],
         leadership: [CountryLeadership]
     ) -> [CountryBubblePoint] {
         let raw: [CountryBubblePoint]
@@ -3097,7 +3493,7 @@ private enum SignalMapDataBuilder {
                 countryStats: countryStats,
                 podcasts: podcasts,
                 weather: weather,
-                marketQuotes: marketQuotes
+                countryMarkets: countryMarkets
             )
         case .news:
             raw = countryStats.map { stat in
@@ -3155,7 +3551,7 @@ private enum SignalMapDataBuilder {
         countryStats: [CountryStat],
         podcasts: [PodcastEpisode],
         weather: [CountryWeather],
-        marketQuotes: [MarketQuote]
+        countryMarkets: [CountryMarketOverview]
     ) -> [CountryBubblePoint] {
         let newsByCountry = Dictionary(
             uniqueKeysWithValues: countryStats.map { ($0.country.uppercased(), $0.count) }
@@ -3169,16 +3565,7 @@ private enum SignalMapDataBuilder {
             }
             weatherByCountry[iso] = row
         }
-        var marketByCountry: [String: MarketQuote] = [:]
-        for quote in marketQuotes {
-            guard let iso = quote.country?.uppercased(), !iso.isEmpty else { continue }
-            let current = marketByCountry[iso]
-            if current == nil ||
-                abs(quote.percent_change ?? quote.change ?? 0) >
-                abs(current?.percent_change ?? current?.change ?? 0) {
-                marketByCountry[iso] = quote
-            }
-        }
+        let marketByCountry = Dictionary(uniqueKeysWithValues: countryMarkets.map { ($0.country.uppercased(), $0) })
 
         var podcastByCountry: [String: (count: Int, score: Double)] = [:]
         for episode in podcasts {
@@ -3207,7 +3594,7 @@ private enum SignalMapDataBuilder {
             .union(podcastByCountry.keys)
         let maxNews = Double(max(newsByCountry.values.max() ?? 1, 1))
         let maxMarket = max(
-            marketByCountry.values.map { abs($0.percent_change ?? $0.change ?? 0) }.max() ?? 1,
+            marketByCountry.values.map { abs($0.composite_change_percent ?? $0.index_change_percent ?? $0.fx_change_percent ?? 0) }.max() ?? 1,
             1
         )
 
@@ -3231,7 +3618,7 @@ private enum SignalMapDataBuilder {
             if weatherRelevance > 0 { domains.append("weather") }
 
             let market = marketByCountry[iso]
-            let marketMove = abs(market?.percent_change ?? market?.change ?? 0)
+            let marketMove = abs(market?.composite_change_percent ?? market?.index_change_percent ?? market?.fx_change_percent ?? 0)
             let marketRelevance = market == nil ? 0 : marketMove / maxMarket
             if market != nil { domains.append("markets") }
 
@@ -3261,7 +3648,7 @@ private enum SignalMapDataBuilder {
                 drivers.append(currentWeather.temp_c.map { String(format: "%.0f°C", $0) } ?? "weather")
             }
             if let market {
-                drivers.append("\(market.symbol) \(String(format: "%+.1f%%", market.percent_change ?? market.change ?? 0))")
+                drivers.append("\(market.country) \(String(format: "%+.1f%%", market.composite_change_percent ?? market.index_change_percent ?? market.fx_change_percent ?? 0))")
             }
             return point(
                 id: "signals-\(iso)",

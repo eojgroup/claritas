@@ -61,7 +61,7 @@ async function getCountryMarketOverview() {
          WHERE mi.category='country_equity_index' AND mi.country_iso2 IS NOT NULL
            AND COALESCE(s.metadata->>'retired','false') <> 'true'
        )
-       SELECT country,symbol,company_name,
+       SELECT country,symbol,company_name,value,previous_value,period_end,
          CASE WHEN previous_value IS NULL OR previous_value=0 THEN NULL
               ELSE ((value/previous_value)-1)*100 END AS percent_change,
          observed_at,source_name FROM values WHERE rank=1`),
@@ -110,11 +110,15 @@ async function getCountryMarketOverview() {
                 currency,
                 index_symbol: index?.symbol ?? null,
                 index_name: index?.company_name ?? null,
+                index_value: numberOrNull(index?.value),
+                index_previous_value: numberOrNull(index?.previous_value),
                 index_change_percent: indexChange,
+                index_period_end: dateOnly(index?.period_end),
                 index_observed_at: indexObservedAt,
                 index_source: index?.source_name ?? null,
                 fx_symbol: currency === "EUR" && hasFxDataset ? "EUR/EUR" : fx?.symbol ?? null,
                 fx_rate: currency === "EUR" && hasFxDataset ? 1 : numberOrNull(fx?.value),
+                fx_previous_rate: currency === "EUR" && hasFxDataset ? 1 : numberOrNull(fx?.previous_value),
                 fx_change_percent: fxChange,
                 fx_period_end: fxPeriodEnd,
                 filing_count_7d: Number(filings?.filing_count_7d ?? 0),
@@ -132,6 +136,8 @@ async function getCountryMarketOverview() {
             with_index: countries.filter((row) => row.index_change_percent != null).length,
             with_fx: countries.filter((row) => row.fx_change_percent != null).length,
             with_filings: countries.filter((row) => row.filing_count_7d > 0).length,
+            current: countries.filter((row) => row.freshness === "current").length,
+            stale: countries.filter((row) => row.freshness === "stale").length,
         },
         methodology: {
             index: "Latest monthly OECD national share-price index change. It is a broad market-direction signal, not a live tradable quote.",
@@ -152,16 +158,26 @@ async function getCountryMarketDetail(countryIso2) {
         return null;
     const [fxHistory, indexHistory, filings] = await Promise.all([
         summary.fx_symbol && summary.fx_symbol !== "EUR/EUR"
-            ? (0, db_1.query)(`SELECT period_end, value
-           FROM market_indicator
-           WHERE category = 'fx_reference' AND symbol = $1
-           ORDER BY period_end DESC
-           LIMIT 90`, [summary.fx_symbol])
+            ? (0, db_1.query)(`SELECT period_end,value,
+             CASE WHEN previous_value IS NULL OR previous_value=0 THEN NULL
+                  ELSE ((value/previous_value)-1)*100 END AS percent_change
+           FROM (
+             SELECT period_end,value,lag(value) OVER (ORDER BY period_end) AS previous_value
+             FROM market_indicator
+             WHERE category = 'fx_reference' AND symbol = $1
+             ORDER BY period_end DESC LIMIT 90
+           ) history ORDER BY period_end`, [summary.fx_symbol])
             : Promise.resolve({ rows: [] }),
         summary.index_symbol
-            ? (0, db_1.query)(`SELECT period_end,value FROM market_indicator
-           WHERE category='country_equity_index' AND series_key=$1
-           ORDER BY period_end DESC LIMIT 36`, [summary.index_symbol])
+            ? (0, db_1.query)(`SELECT period_end,value,
+             CASE WHEN previous_value IS NULL OR previous_value=0 THEN NULL
+                  ELSE ((value/previous_value)-1)*100 END AS percent_change
+           FROM (
+             SELECT period_end,value,lag(value) OVER (ORDER BY period_end) AS previous_value
+             FROM market_indicator
+             WHERE category='country_equity_index' AND series_key=$1
+             ORDER BY period_end DESC LIMIT 36
+           ) history ORDER BY period_end`, [summary.index_symbol])
             : Promise.resolve({ rows: [] }),
         (0, db_1.query)(`SELECT me.id, me.event_type, me.symbol, me.company_name, me.title,
               me.summary, me.url, me.event_time, s.name AS source_name
@@ -173,8 +189,8 @@ async function getCountryMarketDetail(countryIso2) {
     ]);
     return {
         summary,
-        fx_history: fxHistory.rows.reverse(),
-        index_history: indexHistory.rows.reverse(),
+        fx_history: fxHistory.rows,
+        index_history: indexHistory.rows,
         filings: filings.rows.map((row) => ({ ...row, event_time: iso(row.event_time) })),
         methodology: overview.methodology,
     };

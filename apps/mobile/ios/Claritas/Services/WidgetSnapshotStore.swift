@@ -7,12 +7,12 @@ enum WidgetSnapshotStore {
 
     static func save(
         newsCount: Int,
-        marketQuotes: [MarketQuote],
+        countryMarkets: [CountryMarketOverview],
         weather: [CountryWeather]
     ) {
         guard let defaults = suiteName.flatMap(UserDefaults.init(suiteName:)) else { return }
         let averageMove: Double = {
-            let moves = marketQuotes.compactMap(\.percent_change)
+            let moves = countryMarkets.compactMap(\.composite_change_percent)
             guard !moves.isEmpty else { return 0 }
             return moves.reduce(0, +) / Double(moves.count)
         }()

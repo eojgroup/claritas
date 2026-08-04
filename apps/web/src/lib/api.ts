@@ -83,6 +83,9 @@ export type CountryWeather = {
   country: string;
   temp_c: number | null;
   humidity: number | null;
+  pressure_hpa?: number | null;
+  visibility_m?: number | null;
+  location_name?: string | null;
   apparent_temp_c?: number | null;
   precipitation_mm?: number | null;
   observed_at: string;
@@ -133,6 +136,33 @@ export type DailyWeatherForecast = {
   uv_index?: number | null;
   sunrise_at?: string | null;
   sunset_at?: string | null;
+};
+
+export type HourlyWeatherForecast = {
+  forecast_time: string;
+  temp_c: number | null;
+  apparent_temp_c: number | null;
+  humidity: number | null;
+  precipitation_probability: number | null;
+  precipitation_mm: number | null;
+  rain_mm: number | null;
+  snowfall_cm: number | null;
+  weather_code: number | null;
+  wind_speed: number | null;
+  wind_gust: number | null;
+  uv_index: number | null;
+  visibility_m: number | null;
+};
+
+export type CountryWeatherForecastDetail = {
+  country: string;
+  generated_at: string;
+  source_name: string;
+  attribution: string;
+  hourly: HourlyWeatherForecast[];
+  daily: DailyWeatherForecast[];
+  air_quality: AirQuality | null;
+  alerts: WeatherAlert[];
 };
 
 export type AirQuality = {
@@ -243,11 +273,15 @@ export type CountryMarketOverview = {
   currency: string | null;
   index_symbol: string | null;
   index_name: string | null;
+  index_value: number | null;
+  index_previous_value: number | null;
   index_change_percent: number | null;
+  index_period_end: string | null;
   index_observed_at: string | null;
   index_source: string | null;
   fx_symbol: string | null;
   fx_rate: number | null;
+  fx_previous_rate: number | null;
   fx_change_percent: number | null;
   fx_period_end: string | null;
   filing_count_7d: number;
@@ -265,6 +299,8 @@ export type CountryMarketOverviewResponse = {
     with_index: number;
     with_fx: number;
     with_filings: number;
+    current: number;
+    stale: number;
   };
   methodology: {
     index: string;
@@ -277,8 +313,8 @@ export type CountryMarketOverviewResponse = {
 
 export type CountryMarketDetail = {
   summary: CountryMarketOverview;
-  fx_history: Array<{ period_end: string; value: number }>;
-  index_history: Array<{ period_end: string; value: number }>;
+  fx_history: Array<{ period_end: string; value: number; percent_change: number | null }>;
+  index_history: Array<{ period_end: string; value: number; percent_change: number | null }>;
   filings: MarketFiling[];
   methodology: CountryMarketOverviewResponse["methodology"];
 };
@@ -1095,6 +1131,16 @@ export async function fetchCountryWeather() {
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country weather"));
   const data = await resp.json();
   return (data.stats ?? []) as CountryWeather[];
+}
+
+export async function fetchCountryWeatherForecast(
+  country: string,
+  hours = 120,
+): Promise<CountryWeatherForecastDetail> {
+  const sp = new URLSearchParams({ country: country.trim().toUpperCase(), hours: String(hours) });
+  const resp = await fetch(`${API_BASE}/api/weather/forecast?${sp.toString()}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country weather forecast"));
+  return (await resp.json()) as CountryWeatherForecastDetail;
 }
 
 export async function fetchCountryLeadership() {

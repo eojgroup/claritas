@@ -2291,7 +2291,7 @@ app.post("/api/ingest/institutional-rss", requireIngestionAccess, async (_req, r
         return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
     }
 });
-// OpenWeather One Call current conditions, forecasts, alerts and air quality.
+// OpenWeather standard current conditions, 5-day forecasts and air quality.
 app.post("/api/ingest/openweather/country-current", requireIngestionAccess, async (req, res) => {
     try {
         const { country } = req.body || {};

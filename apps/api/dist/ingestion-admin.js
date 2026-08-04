@@ -565,7 +565,7 @@ async function executeWeatherRun(runId, plan) {
             request: plan.requestPayload,
         });
         if (plan.providers.openweather) {
-            await executeProviderStep(runId, steps, totals, "openweather/one-call-forecast-air-alerts", async () => (0, openweather_1.ingestOpenWeatherCountryWeather)(plan.country));
+            await executeProviderStep(runId, steps, totals, "openweather/current-forecast5-air", async () => (0, openweather_1.ingestOpenWeatherCountryWeather)(plan.country));
         }
         if (plan.providers.nws && (!plan.country || plan.country === "US")) {
             await executeProviderStep(runId, steps, totals, "nws/active-alerts", nws_1.ingestNwsAlerts);

@@ -23,6 +23,7 @@ export type WeatherAlert = {
 
 export type EnhancedCountryWeather = {
   country: string; temp_c: number | null; apparent_temp_c: number | null; humidity: number | null;
+  pressure_hpa: number | null; visibility_m: number | null; location_name: string | null;
   precipitation_mm: number | null; observed_at: string; weather_main: string | null;
   weather_desc: string | null; weather_code: number | null; cloud_cover: number | null;
   wind_speed: number | null; wind_direction: number | null; wind_gust: number | null;
@@ -70,6 +71,10 @@ export async function getCountryWeatherLatest(): Promise<EnhancedCountryWeather[
        WHERE COALESCE(s.metadata->>'retired','false') <> 'true'
      )
      SELECT upper(r.country_iso2::text) AS country, r.temp_c, r.apparent_temp_c, r.humidity,
+       r.pressure AS pressure_hpa,
+       CASE WHEN (r.payload->'current'->>'visibility') ~ '^[0-9]+(\\.[0-9]+)?$'
+            THEN (r.payload->'current'->>'visibility')::double precision ELSE NULL END AS visibility_m,
+       COALESCE(r.payload->>'location_name', r.payload->>'timezone') AS location_name,
        r.precipitation_mm, r.observed_at, r.weather_main, r.weather_desc, r.weather_code,
        r.cloud_cover, r.wind_speed, r.wind_direction, r.wind_gust, r.is_day,
        r.source_name, r.source_kind, r.metadata->>'attribution' AS attribution,

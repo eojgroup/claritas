@@ -772,7 +772,7 @@ async function executeWeatherRun(runId: number, plan: WeatherRunPlan): Promise<v
     });
 
     if (plan.providers.openweather) {
-      await executeProviderStep(runId, steps, totals, "openweather/one-call-forecast-air-alerts", async () =>
+      await executeProviderStep(runId, steps, totals, "openweather/current-forecast5-air", async () =>
         ingestOpenWeatherCountryWeather(plan.country));
     }
     if (plan.providers.nws && (!plan.country || plan.country === "US")) {
