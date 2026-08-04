@@ -304,71 +304,15 @@ final class APIClient {
     }
 
     func triggerAdminNewsIngestion(
-        runNewsApiProvider: Bool,
-        runTheNewsApiProvider: Bool,
         runGdeltProvider: Bool,
-        runEverything: Bool,
-        runTopHeadlines: Bool,
-        query: String,
-        language: String?,
-        country: String?,
-        category: String?,
-        theNewsApiPublishedAfter: String?
+        runInstitutionalRssProvider: Bool
     ) async throws -> AdminIngestionRunDetail {
-        var payload: [String: Any] = [
+        let payload: [String: Any] = [
             "providers": [
-                "newsapi": runNewsApiProvider,
-                "thenewsapi": runTheNewsApiProvider,
-                "gdelt": runGdeltProvider
+                "gdelt": runGdeltProvider,
+                "institutionalRss": runInstitutionalRssProvider
             ]
         ]
-
-        if runNewsApiProvider && runEverything {
-            var everything: [String: Any] = [
-                "q": nonEmpty(query) ?? "OpenAI",
-                "pageSize": 50,
-                "maxPages": 2
-            ]
-            if let language = nonEmpty(language) {
-                everything["language"] = language
-            }
-            payload["everything"] = everything
-        } else {
-            payload["everything"] = false
-        }
-
-        if runNewsApiProvider && runTopHeadlines {
-            var topHeadlines: [String: Any] = [
-                "country": nonEmpty(country) ?? "us",
-                "category": nonEmpty(category) ?? "technology",
-                "pageSize": 50,
-                "maxPages": 2
-            ]
-            if let query = nonEmpty(query) {
-                topHeadlines["q"] = query
-            }
-            payload["topHeadlines"] = topHeadlines
-        } else {
-            payload["topHeadlines"] = false
-        }
-
-        if runTheNewsApiProvider {
-            var theNewsApi: [String: Any] = [
-                "search": nonEmpty(query) ?? "OpenAI",
-                "locale": nonEmpty(country) ?? "us",
-                "pageSize": 50,
-                "maxPages": 2
-            ]
-            if let language = nonEmpty(language) {
-                theNewsApi["language"] = language
-            }
-            if let publishedAfter = nonEmpty(theNewsApiPublishedAfter) {
-                theNewsApi["publishedAfter"] = publishedAfter
-            }
-            payload["theNewsApi"] = theNewsApi
-        } else {
-            payload["theNewsApi"] = false
-        }
 
         var req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/ingestion/news/run"))
         req.httpMethod = "POST"
@@ -396,7 +340,7 @@ final class APIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let payload: [String: Any] = [
-            "providers": ["secEdgar": true, "ecb": true]
+            "providers": ["secEdgar": true, "ecb": true, "oecd": true, "bis": true]
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
         return try await request(req, as: AdminIngestionRunDetail.self)

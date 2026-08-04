@@ -12,8 +12,12 @@ struct PadOverviewView: View {
         return moves.reduce(0, +) / Double(moves.count)
     }
 
-    private var activeMarkets: Int {
-        model.marketStatus.filter { $0.is_open == true }.count
+    private var trackedMarkets: Int {
+        Set(
+            scopedMarketQuotes.compactMap { quote in
+                quote.market_code ?? quote.exchange ?? quote.market_name
+            }
+        ).count
     }
 
     private var topMarkets: [MarketQuote] {
@@ -172,7 +176,7 @@ struct PadOverviewView: View {
             metricCell(
                 title: "Market pulse",
                 value: String(format: "%+.2f%%", marketAverage),
-                detail: "\(activeMarkets) tracked markets open",
+                detail: "\(trackedMarkets) tracked market venues",
                 tone: marketAverage >= 0
                     ? ClaritasPalette.positiveText(for: colorScheme)
                     : ClaritasPalette.negativeText(for: colorScheme)

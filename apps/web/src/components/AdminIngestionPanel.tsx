@@ -45,7 +45,6 @@ type AdminIngestionPanelProps = {
   dark: boolean;
 };
 
-type TheNewsApiDateMode = "today" | "custom";
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -120,11 +119,15 @@ function sourceLabel(sourceName: string): string {
   if (normalized === "newsapi") return "NewsAPI";
   if (normalized === "thenewsapi") return "TheNewsAPI";
   if (normalized === "gdelt") return "GDELT";
+  if (normalized === "institutional_rss") return "Institutional RSS";
   if (normalized === "openmeteo") return "Open-Meteo";
   if (normalized === "openweather") return "OpenWeather";
+  if (normalized === "nws") return "NOAA/NWS";
   if (normalized === "finnhub") return "Retired market source";
   if (normalized === "sec_edgar") return "SEC EDGAR";
   if (normalized === "ecb") return "ECB";
+  if (normalized === "oecd") return "OECD";
+  if (normalized === "bis") return "BIS";
   if (normalized === "podcastindex") return "PodcastIndex";
   if (normalized === "wikidata") return "Wikidata";
   return sourceName;
@@ -147,16 +150,14 @@ function runSourceSummary(run: AdminIngestionRun): string {
   const providers = asObject(requestPayload?.providers);
   if (!providers) return sourceLabel(run.source_name);
 
-  const hasExplicitProviders =
-    Object.prototype.hasOwnProperty.call(providers, "newsapi") ||
-    Object.prototype.hasOwnProperty.call(providers, "thenewsapi") ||
-    Object.prototype.hasOwnProperty.call(providers, "gdelt");
+  const hasExplicitProviders = Object.prototype.hasOwnProperty.call(providers, "gdelt") ||
+    Object.prototype.hasOwnProperty.call(providers, "institutionalRss") ||
+    Object.prototype.hasOwnProperty.call(providers, "institutional_rss");
   if (!hasExplicitProviders) return sourceLabel(run.source_name);
 
   const labels: string[] = [];
-  if (providers.newsapi !== false) labels.push("NewsAPI");
-  if (providers.thenewsapi === true) labels.push("TheNewsAPI");
   if (providers.gdelt === true) labels.push("GDELT");
+  if (providers.institutionalRss === true || providers.institutional_rss === true) labels.push("Institutional RSS");
   if (labels.length === 0) return sourceLabel(run.source_name);
   return labels.join(" + ");
 }
@@ -290,24 +291,15 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [metricsDays, setMetricsDays] = useState<7 | 30 | 90>(30);
   const [pipelineFilter, setPipelineFilter] = useState<"all" | IngestionPipeline>("all");
 
-  const [runNewsApiProvider, setRunNewsApiProvider] = useState(false);
-  const [runTheNewsApiProvider, setRunTheNewsApiProvider] = useState(false);
   const [runGdeltProvider, setRunGdeltProvider] = useState(true);
-  const [runEverything, setRunEverything] = useState(true);
-  const [runTopHeadlines, setRunTopHeadlines] = useState(true);
-  const [newsQuery, setNewsQuery] = useState("OpenAI");
-  const [newsLanguage, setNewsLanguage] = useState("en");
-  const [newsCountry, setNewsCountry] = useState("us");
-  const [newsCategory, setNewsCategory] = useState("technology");
-  const [theNewsApiDateMode, setTheNewsApiDateMode] = useState<TheNewsApiDateMode>("today");
-  const [theNewsApiCustomDate, setTheNewsApiCustomDate] = useState(() =>
-    toLocalDateInputValue(new Date()),
-  );
+  const [runInstitutionalRssProvider, setRunInstitutionalRssProvider] = useState(true);
   const [weatherCountry, setWeatherCountry] = useState("");
-  const [runOpenMeteoProvider, setRunOpenMeteoProvider] = useState(true);
-  const [runOpenWeatherProvider, setRunOpenWeatherProvider] = useState(false);
+  const [runOpenWeatherProvider, setRunOpenWeatherProvider] = useState(true);
+  const [runNwsProvider, setRunNwsProvider] = useState(true);
   const [runSecEdgarProvider, setRunSecEdgarProvider] = useState(true);
   const [runEcbProvider, setRunEcbProvider] = useState(true);
+  const [runOecdProvider, setRunOecdProvider] = useState(true);
+  const [runBisProvider, setRunBisProvider] = useState(true);
   const [podcastSearchTerms, setPodcastSearchTerms] = useState(
     "geopolitics,security,technology,markets",
   );
@@ -498,56 +490,19 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   }, [briefingGenerationJob?.id, briefingGenerationJob?.status]);
 
   const handleTriggerNews = useCallback(async () => {
-    if (!runNewsApiProvider && !runTheNewsApiProvider && !runGdeltProvider) {
+    if (!runGdeltProvider && !runInstitutionalRssProvider) {
       setActionError("Select at least one news provider.");
-      return;
-    }
-    if (runNewsApiProvider && !runEverything && !runTopHeadlines) {
-      setActionError("Enable at least one NewsAPI step or disable NewsAPI.");
       return;
     }
     setIsTriggeringNews(true);
     setActionError(null);
     setActionNotice(null);
     try {
-      const resolvedTheNewsApiPublishedAfter = runTheNewsApiProvider
-        ? theNewsApiDateMode === "today"
-          ? toLocalDateInputValue(new Date())
-          : theNewsApiCustomDate || undefined
-        : undefined;
       const payload: Parameters<typeof triggerAdminNewsIngestion>[0] = {
         providers: {
-          newsapi: runNewsApiProvider,
-          thenewsapi: runTheNewsApiProvider,
           gdelt: runGdeltProvider,
+          institutionalRss: runInstitutionalRssProvider,
         },
-        everything: runNewsApiProvider && runEverything
-          ? {
-              q: newsQuery.trim() || "OpenAI",
-              language: newsLanguage.trim() || undefined,
-              pageSize: 50,
-              maxPages: 2,
-            }
-          : false,
-        topHeadlines: runNewsApiProvider && runTopHeadlines
-          ? {
-              country: newsCountry.trim() || "us",
-              category: newsCategory.trim() || "technology",
-              q: newsQuery.trim() || undefined,
-              pageSize: 50,
-              maxPages: 2,
-            }
-          : false,
-        theNewsApi: runTheNewsApiProvider
-          ? {
-              search: newsQuery.trim() || "OpenAI",
-              language: newsLanguage.trim() || undefined,
-              locale: newsCountry.trim() || "us",
-              pageSize: 50,
-              maxPages: 2,
-              publishedAfter: resolvedTheNewsApiPublishedAfter,
-            }
-          : false,
       };
       const created = await triggerAdminNewsIngestion(payload);
       setActionNotice(`News ingestion run #${created.run.id} was queued.`);
@@ -561,22 +516,13 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       setIsTriggeringNews(false);
     }
   }, [
-    newsCategory,
-    newsCountry,
-    newsLanguage,
-    newsQuery,
-    theNewsApiCustomDate,
-    theNewsApiDateMode,
     refreshOverview,
-    runNewsApiProvider,
-    runTheNewsApiProvider,
     runGdeltProvider,
-    runEverything,
-    runTopHeadlines,
+    runInstitutionalRssProvider,
   ]);
 
   const handleTriggerWeather = useCallback(async () => {
-    if (!runOpenMeteoProvider && !runOpenWeatherProvider) {
+    if (!runOpenWeatherProvider && !runNwsProvider) {
       setActionError("Select at least one weather provider.");
       return;
     }
@@ -586,7 +532,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     try {
       const country = weatherCountry.trim();
       const created = await triggerAdminWeatherIngestion(
-        { ...(country ? { country } : {}), providers: { openmeteo: runOpenMeteoProvider, openweather: runOpenWeatherProvider } },
+        { ...(country ? { country } : {}), providers: { openweather: runOpenWeatherProvider, nws: runNwsProvider } },
       );
       setActionNotice(`Weather ingestion run #${created.run.id} was queued.`);
       setSelectedRunId(created.run.id);
@@ -598,10 +544,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringWeather(false);
     }
-  }, [refreshOverview, runOpenMeteoProvider, runOpenWeatherProvider, weatherCountry]);
+  }, [refreshOverview, runNwsProvider, runOpenWeatherProvider, weatherCountry]);
 
   const handleTriggerMarket = useCallback(async () => {
-    if (!runSecEdgarProvider && !runEcbProvider) {
+    if (!runSecEdgarProvider && !runEcbProvider && !runOecdProvider && !runBisProvider) {
       setActionError("Select at least one market provider.");
       return;
     }
@@ -611,7 +557,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     try {
       const created = await triggerAdminMarketIngestion(
         {
-          providers: { secEdgar: runSecEdgarProvider, ecb: runEcbProvider },
+          providers: { secEdgar: runSecEdgarProvider, ecb: runEcbProvider, oecd: runOecdProvider, bis: runBisProvider },
         },
       );
       setActionNotice(`Market ingestion run #${created.run.id} was queued.`);
@@ -624,7 +570,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringMarket(false);
     }
-  }, [refreshOverview, runEcbProvider, runSecEdgarProvider]);
+  }, [refreshOverview, runBisProvider, runEcbProvider, runOecdProvider, runSecEdgarProvider]);
 
   const handleTriggerPodcasts = useCallback(async () => {
     const searchTerms = podcastSearchTerms
@@ -930,125 +876,22 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <label className="inline-flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={runNewsApiProvider}
-                  onChange={(event) => setRunNewsApiProvider(event.currentTarget.checked)}
-                />
-                NewsAPI
-              </label>
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={runTheNewsApiProvider}
-                  onChange={(event) => setRunTheNewsApiProvider(event.currentTarget.checked)}
-                />
-                TheNewsAPI
-              </label>
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
                   checked={runGdeltProvider}
                   onChange={(event) => setRunGdeltProvider(event.currentTarget.checked)}
                 />
                 GDELT (keyless)
               </label>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <label className="text-xs text-[color:var(--shell-muted)]">
-                Query
-                <input
-                  value={newsQuery}
-                  onChange={(event) => setNewsQuery(event.currentTarget.value)}
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
-                />
-              </label>
-              <label className="text-xs text-[color:var(--shell-muted)]">
-                Language
-                <input
-                  value={newsLanguage}
-                  onChange={(event) => setNewsLanguage(event.currentTarget.value)}
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
-                />
-              </label>
-              <label className="text-xs text-[color:var(--shell-muted)]">
-                Top country
-                <input
-                  value={newsCountry}
-                  onChange={(event) => setNewsCountry(event.currentTarget.value)}
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
-                />
-              </label>
-              <label className="text-xs text-[color:var(--shell-muted)]">
-                Top category
-                <input
-                  value={newsCategory}
-                  onChange={(event) => setNewsCategory(event.currentTarget.value)}
-                  className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
-                />
-              </label>
-              <div className="sm:col-span-2">
-                <div className="text-xs text-[color:var(--shell-muted)]">
-                  TheNewsAPI published after
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="thenewsapi-date-mode"
-                      checked={theNewsApiDateMode === "today"}
-                      onChange={() => setTheNewsApiDateMode("today")}
-                    />
-                    From today ({toLocalDateInputValue(new Date())})
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="thenewsapi-date-mode"
-                      checked={theNewsApiDateMode === "custom"}
-                      onChange={() => {
-                        setTheNewsApiDateMode("custom");
-                        if (!theNewsApiCustomDate) {
-                          setTheNewsApiCustomDate(toLocalDateInputValue(new Date()));
-                        }
-                      }}
-                    />
-                    Pick date
-                  </label>
-                  {theNewsApiDateMode === "custom" && (
-                    <input
-                      type="date"
-                      value={theNewsApiCustomDate}
-                      onChange={(event) => setTheNewsApiCustomDate(event.currentTarget.value)}
-                      className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
-                    />
-                  )}
-                </div>
-              </div>
-            </div>
-            <div
-              className={`mt-3 flex flex-wrap items-center gap-2 text-xs ${
-                runNewsApiProvider ? "" : "opacity-50"
-              }`}
-            >
               <label className="inline-flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={runEverything}
-                  disabled={!runNewsApiProvider}
-                  onChange={(event) => setRunEverything(event.currentTarget.checked)}
+                  checked={runInstitutionalRssProvider}
+                  onChange={(event) => setRunInstitutionalRssProvider(event.currentTarget.checked)}
                 />
-                Everything
+                Institutional RSS (keyless)
               </label>
-              <label className="inline-flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={runTopHeadlines}
-                  disabled={!runNewsApiProvider}
-                  onChange={(event) =>
-                    setRunTopHeadlines(event.currentTarget.checked)
-                  }
-                />
-                Top headlines
-              </label>
+            </div>
+            <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
+              GDELT supplies multilingual publisher coverage plus event and tone signals. Institutional feeds add attributable primary releases from the European Commission, Federal Reserve and SEC.
             </div>
             <button
               type="button"
@@ -1066,8 +909,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               Weather run
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenMeteoProvider} onChange={(event) => setRunOpenMeteoProvider(event.currentTarget.checked)} />Open-Meteo</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenWeatherProvider} onChange={(event) => setRunOpenWeatherProvider(event.currentTarget.checked)} />OpenWeather</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenWeatherProvider} onChange={(event) => setRunOpenWeatherProvider(event.currentTarget.checked)} />OpenWeather One Call</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runNwsProvider} onChange={(event) => setRunNwsProvider(event.currentTarget.checked)} />NOAA/NWS alerts (US)</label>
             </div>
             <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
               Country (optional ISO2)
@@ -1079,7 +922,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               />
             </label>
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
-              Blank = global sample ingest. Commercial deployments require OPEN_METEO_API_KEY; the keyless hosted endpoint is non-commercial.
+              Blank = configured global coverage. OpenWeather supplies one consistent forecast model; NWS adds authoritative US alerts without blending forecast values.
             </div>
             <button
               type="button"
@@ -1099,9 +942,11 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runSecEdgarProvider} onChange={(event) => setRunSecEdgarProvider(event.currentTarget.checked)} />SEC EDGAR (keyless)</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runEcbProvider} onChange={(event) => setRunEcbProvider(event.currentTarget.checked)} />ECB (keyless)</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOecdProvider} onChange={(event) => setRunOecdProvider(event.currentTarget.checked)} />OECD indices (keyless)</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runBisProvider} onChange={(event) => setRunBisProvider(event.currentTarget.checked)} />BIS effective FX (keyless)</label>
             </div>
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
-              SEC supplies filing events and company facts; ECB supplies FX reference and policy rates.
+              SEC supplies filing events and company facts; ECB supplies EUR FX and policy rates; OECD adds monthly national equity direction; BIS adds daily trade-weighted currency strength.
             </div>
             <button
               type="button"

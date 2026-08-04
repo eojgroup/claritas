@@ -100,6 +100,22 @@ export type CountryWeather = {
   icon_code?: string | null;
   forecast?: DailyWeatherForecast[];
   air_quality?: AirQuality | null;
+  alerts?: WeatherAlert[];
+  alert_count?: number;
+};
+
+export type WeatherAlert = {
+  source_name: string;
+  sender_name: string;
+  event: string;
+  severity: string | null;
+  urgency: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  headline: string | null;
+  description: string | null;
+  instruction: string | null;
+  area: string | null;
 };
 
 export type DailyWeatherForecast = {
@@ -232,10 +248,15 @@ export type CountryMarketOverview = {
   fx_rate: number | null;
   fx_change_percent: number | null;
   fx_period_end: string | null;
+  effective_fx_symbol: string | null;
+  effective_fx_rate: number | null;
+  effective_fx_change_percent: number | null;
+  effective_fx_period_end: string | null;
+  effective_fx_source: string | null;
   filing_count_7d: number;
   latest_filing_at: string | null;
   composite_change_percent: number | null;
-  composite_basis: Array<"country_index" | "currency_vs_eur">;
+  composite_basis: Array<"country_index" | "currency_vs_eur" | "effective_exchange_rate">;
   freshness: "current" | "stale" | "unavailable";
 };
 
@@ -246,11 +267,13 @@ export type CountryMarketOverviewResponse = {
     countries: number;
     with_index: number;
     with_fx: number;
+    with_effective_fx: number;
     with_filings: number;
   };
   methodology: {
     index: string;
     fx: string;
+    effective_fx: string;
     composite: string;
     filings: string;
   };
@@ -260,6 +283,8 @@ export type CountryMarketOverviewResponse = {
 export type CountryMarketDetail = {
   summary: CountryMarketOverview;
   fx_history: Array<{ period_end: string; value: number }>;
+  effective_fx_history: Array<{ period_end: string; value: number }>;
+  index_history: Array<{ period_end: string; value: number }>;
   filings: MarketFiling[];
   methodology: CountryMarketOverviewResponse["methodology"];
 };
@@ -1196,39 +1221,9 @@ export async function ingestWeatherNow(country?: string) {
 
 export async function triggerAdminNewsIngestion(payload?: {
   providers?: {
-    newsapi?: boolean;
-    thenewsapi?: boolean;
     gdelt?: boolean;
+    institutionalRss?: boolean;
   };
-  everything?:
-    | false
-    | {
-        q?: string;
-        language?: string;
-        pageSize?: number;
-        maxPages?: number;
-      };
-  topHeadlines?:
-    | false
-    | {
-        country?: string;
-        category?: string;
-        q?: string;
-        pageSize?: number;
-        maxPages?: number;
-      };
-  theNewsApi?:
-    | false
-    | {
-        search?: string;
-        q?: string;
-        language?: string;
-        locale?: string;
-        country?: string;
-        pageSize?: number;
-        maxPages?: number;
-        publishedAfter?: string;
-      };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/news/run`, {
     method: "POST",
@@ -1242,7 +1237,7 @@ export async function triggerAdminNewsIngestion(payload?: {
 
 export async function triggerAdminWeatherIngestion(payload?: {
   country?: string;
-  providers?: { openmeteo?: boolean; openweather?: boolean };
+  providers?: { openweather?: boolean; nws?: boolean };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/weather/run`, {
     method: "POST",
@@ -1255,7 +1250,7 @@ export async function triggerAdminWeatherIngestion(payload?: {
 }
 
 export async function triggerAdminMarketIngestion(payload?: {
-  providers?: { secEdgar?: boolean; ecb?: boolean };
+  providers?: { secEdgar?: boolean; ecb?: boolean; oecd?: boolean; bis?: boolean };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/market/run`, {
     method: "POST",

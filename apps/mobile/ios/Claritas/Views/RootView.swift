@@ -1376,22 +1376,6 @@ private struct AdminIngestionPanelView: View {
         var label: String { "\(rawValue)d" }
     }
 
-    enum TheNewsApiDateMode: String, CaseIterable, Identifiable {
-        case today
-        case custom
-
-        var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .today:
-                return "Today"
-            case .custom:
-                return "Custom"
-            }
-        }
-    }
-
     struct AutomationDraft {
         var enabled: Bool
         var scheduleEnabled: Bool
@@ -1424,17 +1408,8 @@ private struct AdminIngestionPanelView: View {
     @State private var pipelineFilter: PipelineFilter = .all
     @State private var metricsWindow: MetricsWindow = .d30
 
-    @State private var runNewsApiProvider: Bool = true
-    @State private var runTheNewsApiProvider: Bool = true
     @State private var runGdeltProvider: Bool = true
-    @State private var runEverything: Bool = true
-    @State private var runTopHeadlines: Bool = true
-    @State private var newsQuery: String = "OpenAI"
-    @State private var newsLanguage: String = "en"
-    @State private var newsCountry: String = "us"
-    @State private var newsCategory: String = "technology"
-    @State private var theNewsApiDateMode: TheNewsApiDateMode = .today
-    @State private var theNewsApiCustomDate: Date = Date()
+    @State private var runInstitutionalRssProvider: Bool = true
     @State private var weatherCountry: String = ""
 
     @State private var isLoadingOverview: Bool = false
@@ -1510,54 +1485,11 @@ private struct AdminIngestionPanelView: View {
                         Text("News providers")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Toggle("NewsAPI", isOn: $runNewsApiProvider)
-                        Toggle("TheNewsAPI", isOn: $runTheNewsApiProvider)
                         Toggle("GDELT (keyless)", isOn: $runGdeltProvider)
-
-                        Toggle("Everything", isOn: $runEverything)
-                            .disabled(!runNewsApiProvider)
-                        Toggle("Top headlines", isOn: $runTopHeadlines)
-                            .disabled(!runNewsApiProvider)
-
-                        HStack(spacing: 8) {
-                            TextField("Query", text: $newsQuery)
-                                .textFieldStyle(.roundedBorder)
-                            TextField("Language", text: $newsLanguage)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 90)
-                        }
-                        HStack(spacing: 8) {
-                            TextField("Country", text: $newsCountry)
-                                .textFieldStyle(.roundedBorder)
-                            TextField("Category", text: $newsCategory)
-                                .textFieldStyle(.roundedBorder)
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("TheNewsAPI published after")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Picker("Date mode", selection: $theNewsApiDateMode) {
-                                ForEach(TheNewsApiDateMode.allCases) { mode in
-                                    Text(mode.label).tag(mode)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-
-                            if theNewsApiDateMode == .custom {
-                                DatePicker(
-                                    "Custom date",
-                                    selection: $theNewsApiCustomDate,
-                                    displayedComponents: .date
-                                )
-                                .datePickerStyle(.compact)
-                                .labelsHidden()
-                            }
-
-                            Text("Resolved date: \(resolvedTheNewsApiPublishedAfter ?? "—")")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
+                        Toggle("Institutional RSS (keyless)", isOn: $runInstitutionalRssProvider)
+                        Text("GDELT supplies multilingual publisher coverage and event signals; institutional feeds add primary releases from the European Commission, Federal Reserve and SEC.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
                         Button(action: { Task { await queueNewsRun() } }) {
                             Label(isTriggeringNews ? "Queueing news…" : "Queue News Run", systemImage: "paperplane")
@@ -1569,6 +1501,9 @@ private struct AdminIngestionPanelView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("OpenWeather One Call supplies global current conditions, forecasts, air quality and alerts. NOAA/NWS adds authoritative US alerts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         TextField("Weather country (optional ISO2)", text: $weatherCountry)
                             .textFieldStyle(.roundedBorder)
                         Button(action: { Task { await queueWeatherRun() } }) {
@@ -1581,7 +1516,7 @@ private struct AdminIngestionPanelView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("SEC EDGAR filings/company facts and ECB FX/policy series. Both sources are keyless.")
+                        Text("SEC EDGAR, ECB, OECD national share-price indices and BIS effective exchange rates. All four market sources are keyless.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
@@ -1974,16 +1909,6 @@ private struct AdminIngestionPanelView: View {
         }
     }
 
-    private var resolvedTheNewsApiPublishedAfter: String? {
-        guard runTheNewsApiProvider else { return nil }
-        switch theNewsApiDateMode {
-        case .today:
-            return localDateInputString(Date())
-        case .custom:
-            return localDateInputString(theNewsApiCustomDate)
-        }
-    }
-
     private func refreshOverview(silent: Bool) async {
         if !silent {
             isLoadingOverview = true
@@ -2091,14 +2016,8 @@ private struct AdminIngestionPanelView: View {
     }
 
     private func queueNewsRun() async {
-        guard runNewsApiProvider || runTheNewsApiProvider || runGdeltProvider else {
+        guard runGdeltProvider || runInstitutionalRssProvider else {
             actionError = "Select at least one news provider."
-            actionNotice = nil
-            return
-        }
-
-        guard !runNewsApiProvider || runEverything || runTopHeadlines else {
-            actionError = "Enable at least one NewsAPI step or disable NewsAPI."
             actionNotice = nil
             return
         }
@@ -2108,16 +2027,8 @@ private struct AdminIngestionPanelView: View {
         actionNotice = nil
         do {
             let detail = try await model.api.triggerAdminNewsIngestion(
-                runNewsApiProvider: runNewsApiProvider,
-                runTheNewsApiProvider: runTheNewsApiProvider,
                 runGdeltProvider: runGdeltProvider,
-                runEverything: runEverything,
-                runTopHeadlines: runTopHeadlines,
-                query: newsQuery,
-                language: newsLanguage,
-                country: newsCountry,
-                category: newsCategory,
-                theNewsApiPublishedAfter: resolvedTheNewsApiPublishedAfter
+                runInstitutionalRssProvider: runInstitutionalRssProvider
             )
             selectedRunId = detail.run.id
             selectedRun = detail.run
@@ -2325,14 +2236,22 @@ private struct AdminIngestionPanelView: View {
             return "TheNewsAPI"
         case "gdelt":
             return "GDELT"
+        case "institutional_rss":
+            return "Institutional RSS"
         case "openweather":
             return "OpenWeather"
         case "openmeteo":
             return "Open-Meteo"
+        case "nws":
+            return "NOAA/NWS"
         case "sec_edgar":
             return "SEC EDGAR"
         case "ecb":
             return "ECB"
+        case "oecd":
+            return "OECD"
+        case "bis":
+            return "BIS"
         default:
             return value
         }
@@ -2345,16 +2264,12 @@ private struct AdminIngestionPanelView: View {
             return prettySourceName(run.source_name)
         }
 
-        let hasExplicitProviders = providers["newsapi"] != nil || providers["thenewsapi"] != nil
+        let hasExplicitProviders = providers["gdelt"] != nil || providers["institutionalRss"] != nil
         guard hasExplicitProviders else { return prettySourceName(run.source_name) }
 
         var labels: [String] = []
-        if providers["newsapi"]?.bool != false {
-            labels.append("NewsAPI")
-        }
-        if providers["thenewsapi"]?.bool == true {
-            labels.append("TheNewsAPI")
-        }
+        if providers["gdelt"]?.bool == true { labels.append("GDELT") }
+        if providers["institutionalRss"]?.bool == true { labels.append("Institutional RSS") }
 
         if labels.isEmpty { return prettySourceName(run.source_name) }
         return labels.joined(separator: " + ")

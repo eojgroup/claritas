@@ -10,7 +10,7 @@ import type { BriefingEmailTheme, BriefingMapCountry } from "./email-map";
 import { createLlmClientFromEnv } from "./llm";
 import { getTransportOverviewForBriefing } from "./connectors/transport";
 import { getCountryMarketOverview, type MarketOverviewResponse } from "./connectors/market-overview";
-import { getCountryWeatherLatest, type EnhancedCountryWeather } from "./connectors/openmeteo";
+import { getCountryWeatherLatest, type EnhancedCountryWeather } from "./connectors/weather";
 
 export type PersonalBriefingPreferences = {
   industries: string[];

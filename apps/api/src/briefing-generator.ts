@@ -3,7 +3,7 @@ import { createLlmClientFromEnv, getLlmRuntimeConfig, type LlmClient } from "./l
 import { getCountryLeadershipLatest } from "./connectors/wikidata-leadership";
 import { getTransportOverviewForBriefing } from "./connectors/transport";
 import { getCountryMarketOverview } from "./connectors/market-overview";
-import { getCountryWeatherLatest } from "./connectors/openmeteo";
+import { getCountryWeatherLatest } from "./connectors/weather";
 
 export type GeneratedBriefingStatus = "draft" | "published";
 
@@ -428,6 +428,13 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
         percent_change: row.fx_change_percent,
         period_end: row.fx_period_end,
       } : null,
+      broad_effective_fx: row.effective_fx_symbol ? {
+        symbol: row.effective_fx_symbol,
+        index_value: row.effective_fx_rate,
+        percent_change: row.effective_fx_change_percent,
+        period_end: row.effective_fx_period_end,
+        source: row.effective_fx_source,
+      } : null,
       sec_filings_7d: row.filing_count_7d,
       composite_change_percent: row.composite_change_percent,
       composite_basis: row.composite_basis,
@@ -451,7 +458,8 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
       row.temp_c == null ? 0 : Math.abs(row.temp_c - 20),
       (row.precipitation_mm ?? 0) * 2,
       (row.wind_gust ?? row.wind_speed ?? 0) / 2,
-      (row.air_quality?.european_aqi ?? 0) / 4
+      (row.air_quality?.european_aqi ?? row.air_quality?.us_aqi ?? 0) / 4,
+      row.alert_count > 0 ? 40 + row.alert_count : 0
     );
   const weatherRows = [...weatherResult].sort((left, right) => weatherSeverity(right) - weatherSeverity(left));
   const weather = weatherRows.slice(0, weatherLimit).map((row) => ({
@@ -465,6 +473,8 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     condition: row.weather_main,
     description: row.weather_desc,
     air_quality: row.air_quality,
+    active_alerts: row.alerts.slice(0, 5),
+    alert_count: row.alert_count,
     forecast_3d: row.forecast.slice(0, 3),
     source: row.source_name,
     attribution: row.attribution,
@@ -477,6 +487,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
   const wettest = [...weatherResult].sort((a, b) => (b.precipitation_mm ?? 0) - (a.precipitation_mm ?? 0))[0];
   const windiest = [...weatherResult].sort((a, b) => (b.wind_gust ?? b.wind_speed ?? 0) - (a.wind_gust ?? a.wind_speed ?? 0))[0];
   const worstAir = [...weatherResult].sort((a, b) => (b.air_quality?.european_aqi ?? 0) - (a.air_quality?.european_aqi ?? 0))[0];
+  const mostAlerted = [...weatherResult].sort((a, b) => b.alert_count - a.alert_count)[0];
   const weatherAnalysis = {
     countries_covered: weatherResult.length,
     hottest: hottest ? { country: hottest.country, temp_c: hottest.temp_c } : null,
@@ -484,6 +495,11 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     wettest: wettest ? { country: wettest.country, precipitation_mm: wettest.precipitation_mm } : null,
     windiest: windiest ? { country: windiest.country, wind_gust: windiest.wind_gust, wind_speed: windiest.wind_speed } : null,
     worst_air_quality: worstAir?.air_quality ? { country: worstAir.country, ...worstAir.air_quality } : null,
+    most_alerted: mostAlerted?.alert_count ? {
+      country: mostAlerted.country,
+      alert_count: mostAlerted.alert_count,
+      alerts: mostAlerted.alerts.slice(0, 5).map((alert) => ({ event: alert.event, severity: alert.severity, source: alert.source_name })),
+    } : null,
     note: "Extrema compare the latest representative country-level observations; forecasts are supplied separately and are not observed outcomes.",
   };
   const marketAnalysis = {
