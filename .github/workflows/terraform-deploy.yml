@@ -216,12 +216,6 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           fi
 
-      - name: 🧹 Remove retired provider secrets
-        run: |
-          kubectl -n "${{ env.K8S_NAMESPACE }}" delete secret \
-            claritas-finnhub claritas-newsapi claritas-thenewsapi claritas-openmeteo \
-            --ignore-not-found
-
       ############################################
       # (Optional) Redeploy API if needed
       ############################################

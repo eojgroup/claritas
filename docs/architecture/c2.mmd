@@ -1,79 +1,57 @@
-graph TB
-    subgraph Client Layer
-        W1[React Web App]
-        M1[iOS Mobile App]
-    end
+flowchart TB
+  subgraph Clients
+    WEB[React web application]
+    IOS[SwiftUI iPhone and iPad application]
+    WATCH[watchOS application]
+  end
 
-    subgraph Identity
-        K1[Keycloak (Realm + Clients)]
-        P1[Google Provider]
-        P2[Microsoft Provider]
-        P3[Apple Provider]
-        K2[Bootstrap Job (kcadm)]
-    end
+  subgraph Edge_and_identity[Edge and identity]
+    LB[GKE Ingress and managed TLS]
+    KC[Keycloak]
+  end
 
-    subgraph Edge
-        E1[GKE Ingress + TLS]
-    end
+  subgraph Cost_optimized_GKE[Cost-optimized GKE runtime]
+    API[Express API - one replica]
+    INGEST[In-process elected ingestion workers]
+    OPENCODE[OpenCode briefing service]
+    WEBPOD[Nginx web - one replica]
+    PROXY[Cloud SQL Auth Proxy sidecars]
+  end
 
-    subgraph API Layer (GKE)
-        A1[Express API]
-        A2[Auth Middleware\nissuer-aware JWT verification + auth context]
-        A3[Domain Endpoints\nnews / weather / country stats]
-        A4[Ingestion Endpoints\nadmin role or x-ingest-token]
-        A5[Personalised Briefing\nScheduler + Delivery Worker]
-    end
+  subgraph Connectors
+    NEWS[GDELT and reviewed official RSS]
+    WEATHER[OpenWeather and NOAA/NWS]
+    MARKET[ECB, OECD, SEC EDGAR, World Bank and FRED]
+    TRANSPORT[AISstream and adsb.lol]
+    OTHER[Podcast Index and Wikidata]
+  end
 
-    subgraph Data Pipeline
-        J1[CronJob / Backfill Jobs]
-        C1[Connector: News Sources]
-        C2[Connector: Weather Sources]
-        N1[Normalizer + Dedupe + Upsert]
-    end
+  subgraph PostgreSQL[Cloud SQL PostgreSQL - one vCPU baseline]
+    CORE[source, country, item and ingestion audit]
+    WX[weather snapshots, forecasts, air quality and alerts]
+    MK[market instruments, indicators and events]
+    TX[transport current state and bounded history]
+    AUTH[application identity and briefing preferences]
+  end
 
-    subgraph Data Layer (Cloud SQL Postgres)
-        D1[(app_user, auth_identity, auth_session)]
-        D2[(auth_role, auth_user_role)]
-        D3[(source, source_feed, ingestion_run)]
-        D4[(item, weather_snapshot, country)]
-    end
-
-    subgraph Platform Controls
-        S1[Secrets + Workload Identity]
-        O1[Logs / Metrics / Audit]
-    end
-
-    SMTP[External SMTP Provider]
-
-
-    W1 --> E1 --> A1
-    M1 --> E1 --> A1
-
-    W1 --> K1
-    M1 --> K1
-    K1 --> P1
-    K1 --> P2
-    K1 --> P3
-    K2 --> K1
-
-    A1 --> A2
-    A1 --> A3
-    J1 --> A4
-    A4 --> C1
-    A4 --> C2
-    C1 --> N1
-    C2 --> N1
-
-    A2 --> D1
-    A2 --> D2
-    N1 --> D3
-    N1 --> D4
-    A3 --> D4
-
-    A1 --> S1
-    J1 --> S1
-    A1 --> O1
-    J1 --> O1
-    A1 --> A5
-    A5 -->|Authenticated SMTP over TLS| SMTP
-    P5 --> P3
+  WEB --> LB
+  IOS --> LB
+  WATCH --> LB
+  LB --> WEBPOD
+  LB --> API
+  WEB --> KC
+  IOS --> KC
+  API --> PROXY
+  KC --> PROXY
+  PROXY --> CORE
+  PROXY --> WX
+  PROXY --> MK
+  PROXY --> TX
+  PROXY --> AUTH
+  API --> INGEST
+  INGEST --> NEWS
+  INGEST --> WEATHER
+  INGEST --> MARKET
+  INGEST --> TRANSPORT
+  INGEST --> OTHER
+  API --> OPENCODE

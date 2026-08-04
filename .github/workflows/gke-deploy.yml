@@ -429,13 +429,6 @@ jobs:
             echo "::warning::FRED_API_KEY not provided; FRED ingestion remains opt-in and disabled"
           fi
 
-          # Remove credentials for providers that are no longer part of the
-          # production source model. GitHub repository secrets are removed
-          # manually because Actions does not grant workflows that authority.
-          kubectl -n "$NS" delete secret \
-            claritas-finnhub claritas-newsapi claritas-thenewsapi claritas-openmeteo \
-            --ignore-not-found
-
           # PodcastIndex uses a key and secret to sign each API request.
           if [ -n "${PODCASTINDEX_API_KEY:-}" ] && [ -n "${PODCASTINDEX_API_SECRET:-}" ]; then
             kubectl -n "$NS" create secret generic claritas-podcastindex \

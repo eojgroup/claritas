@@ -68,13 +68,13 @@ Architecture and product design references:
   - normalization and idempotent upsert of provider data
 - API protection model:
   - domain/read endpoints require authenticated user context
-  - ingestion endpoints require `admin` role OR shared `x-ingest-token` for internal CronJobs
+  - ingestion endpoints require `admin` role OR shared `x-ingest-token` for approved internal jobs
 
 ### 3) Data and Ingestion
 
 - Primary operational data store: Cloud SQL for PostgreSQL.
 - Schema supports source tracking, ingestion runs, cursors, normalized items, weather snapshots, and auth tables.
-- External providers (for example NewsAPI/OpenWeather) are ingested by scheduled/manual jobs running inside cluster boundaries.
+- Reviewed providers are ingested by the elected in-process automation worker or explicit admin runs inside cluster boundaries.
 - Ingestion is designed to be repeatable and safe (dedupe hash + upsert patterns), and now uses an internal shared token path for machine-to-machine calls.
 
 ### 4) GCP Infrastructure
@@ -195,13 +195,18 @@ Architecture and product design references:
 Spin up an environment in-browser with GitHub Codespaces (preconfigured in `.devcontainer`).
 
 ### 2. Manual Dev Setup
-Clone and use the workspace:
+Clone the workspace, then install and run each application from its own package:
 ```bash
 git clone https://github.com/your-org/claritas.git
 cd claritas
-npm install
-npm run dev
+(cd apps/api && npm ci && npm run dev)
+# In a second terminal:
+(cd apps/web && npm ci && npm run dev)
 ```
+
+The API requires the database environment variables documented in
+`apps/api/src/db.ts`. Native-app setup is documented in
+[`apps/mobile/ios/README.md`](apps/mobile/ios/README.md).
 
 ### 3. Provider API Keys and Open Data
 
@@ -234,9 +239,12 @@ npm run dev
 - Open intelligence providers:
   - GDELT DOC/Event/GKG is keyless. Optional tuning: `GDELT_DOC_QUERY`,
     `GDELT_MAX_RAW_ROWS`, and an identifying `GDELT_USER_AGENT`.
-  - Official institutional RSS is keyless. Claritas currently ingests European
-    Commission Press Corner, Federal Reserve and SEC press releases while
-    preserving the publishing institution and feed URL in every item.
+  - Official institutional RSS is keyless. Claritas ingests European Commission,
+    Federal Reserve, SEC, BLS employment/CPI/PPI/JOLTS, and ECB press/statistical
+    releases while preserving the publishing institution, feed, attribution,
+    licence URL and topics in every item. See
+    [data-source governance](docs/data-source-governance.md) for the reviewed
+    commercial-use decisions and exclusions.
   - SEC EDGAR submissions and company facts are keyless. Set
     `SEC_EDGAR_USER_AGENT` to an application name plus monitored contact email,
     and optionally set `SEC_EDGAR_SYMBOLS` (comma-separated equities). For the
@@ -340,6 +348,8 @@ The daily briefing generator can use OpenCode as an internal LLM service:
 - **ADR Records**: [`docs/ADRs`](./docs/ADRs)
 - **GCP Setup Guide**: [`infra/gcp`](./infra/gcp)
 - **Cloud SQL Export IAM Transition**: [`docs/cloud-sql-export-iam.md`](./docs/cloud-sql-export-iam.md)
+- **Data-source governance**: [`docs/data-source-governance.md`](./docs/data-source-governance.md)
+- **Cost-optimized production baseline**: [`docs/operations/cost-baseline.md`](./docs/operations/cost-baseline.md)
 
 ---
 

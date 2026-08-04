@@ -339,7 +339,7 @@ function boundedIntegerFromEnv(
 
 function transportTrackSampleMilliseconds(): number {
   return (
-    boundedIntegerFromEnv("TRANSPORT_TRACK_SAMPLE_SECONDS", 300, 60, 1_800) *
+    boundedIntegerFromEnv("TRANSPORT_TRACK_SAMPLE_SECONDS", 600, 60, 1_800) *
     1_000
   );
 }
@@ -586,7 +586,7 @@ function resolveAisBoundingBoxes(): unknown[] {
 
 function aisSampleMilliseconds(): number {
   return (
-    boundedIntegerFromEnv("AISSTREAM_SAMPLE_SECONDS", 300, 60, 900) * 1_000
+    boundedIntegerFromEnv("AISSTREAM_SAMPLE_SECONDS", 600, 60, 900) * 1_000
   );
 }
 
@@ -1142,7 +1142,7 @@ async function runAviationRefresh(): Promise<{ fetched: number; stored: number }
   }
   const routeLookupLimit = boundedIntegerFromEnv(
     "ADSB_LOL_MAX_ROUTE_LOOKUPS",
-    2_000,
+    750,
     10,
     5_000,
   );
@@ -2229,7 +2229,7 @@ function transportOverviewCacheKey(options?: TransportOverviewOptions): string {
 
 function transportOverviewCacheMilliseconds(): number {
   return (
-    boundedIntegerFromEnv("TRANSPORT_OVERVIEW_CACHE_SECONDS", 60, 10, 300) *
+    boundedIntegerFromEnv("TRANSPORT_OVERVIEW_CACHE_SECONDS", 120, 10, 300) *
     1_000
   );
 }
@@ -2446,7 +2446,7 @@ async function pruneTransportTable(target: RetentionTarget): Promise<number> {
   );
   const maxBatches = boundedIntegerFromEnv(
     "TRANSPORT_RETENTION_MAX_BATCHES",
-    20,
+    10,
     1,
     100,
   );
@@ -2480,19 +2480,19 @@ async function pruneTransportTable(target: RetentionTarget): Promise<number> {
 async function pruneTransportHistory(): Promise<void> {
   const trackDays = boundedIntegerFromEnv(
     "TRANSPORT_TRACK_RETENTION_DAYS",
-    7,
+    3,
     2,
     30,
   );
   const aggregateDays = boundedIntegerFromEnv(
     "TRANSPORT_AGGREGATE_RETENTION_DAYS",
-    90,
+    60,
     7,
     730,
   );
   const snapshotDays = boundedIntegerFromEnv(
     "TRANSPORT_SNAPSHOT_RETENTION_DAYS",
-    30,
+    14,
     7,
     365,
   );
@@ -2557,7 +2557,7 @@ function startTransportRetentionWorker(): void {
   if (transportRetentionTimer) return;
   const minutes = boundedIntegerFromEnv(
     "TRANSPORT_RETENTION_INTERVAL_MINUTES",
-    60,
+    180,
     15,
     1_440,
   );
@@ -2609,7 +2609,7 @@ async function acquireTransportWorkerLock(): Promise<void> {
       const seconds = Math.max(
         60,
         Math.min(
-          Number.parseInt(process.env.ADSB_LOL_POLL_SECONDS || "300", 10) || 300,
+          Number.parseInt(process.env.ADSB_LOL_POLL_SECONDS || "600", 10) || 600,
           1_800,
         ),
       );

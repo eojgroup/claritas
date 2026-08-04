@@ -15,20 +15,20 @@ variable "zone" {
 }
 
 variable "cloud_sql_tier" {
-  description = "Dedicated-core Cloud SQL machine tier used by the production PostgreSQL instance."
+  description = "Dedicated-core Cloud SQL machine tier. The cost baseline is one vCPU and 3.75 GB memory."
   type        = string
-  default     = "db-custom-2-7680"
+  default     = "db-custom-1-3840"
 
   validation {
     condition     = can(regex("^db-custom-[1-9][0-9]*-[1-9][0-9]*$", var.cloud_sql_tier))
-    error_message = "cloud_sql_tier must be a dedicated-core custom tier such as db-custom-2-7680."
+    error_message = "cloud_sql_tier must be a dedicated-core custom tier such as db-custom-1-3840."
   }
 }
 
 variable "cloud_sql_connection_alert_threshold" {
   description = "Backend connection count that triggers the Cloud SQL connection-pressure alert."
   type        = number
-  default     = 250
+  default     = 20
 
   validation {
     condition     = var.cloud_sql_connection_alert_threshold >= 10
@@ -37,13 +37,13 @@ variable "cloud_sql_connection_alert_threshold" {
 }
 
 variable "api_egress_node_locations" {
-  description = "Zones used by the private API node pool. One node is created in each zone for availability."
+  description = "Zones used by the private API node pool. One node is created per zone; use one zone for the cost-optimized baseline."
   type        = list(string)
-  default     = ["europe-west2-b", "europe-west2-c"]
+  default     = ["europe-west2-b"]
 
   validation {
-    condition     = length(var.api_egress_node_locations) >= 2
-    error_message = "api_egress_node_locations must contain at least two zones."
+    condition     = length(var.api_egress_node_locations) >= 1 && length(var.api_egress_node_locations) <= 3
+    error_message = "api_egress_node_locations must contain between one and three zones."
   }
 }
 

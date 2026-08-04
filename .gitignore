@@ -12,3 +12,6 @@
 
 # JavaScript dependencies and build caches
 **/node_modules/
+**/dist/
+# Download Cloud SQL Auth Proxy binaries locally when needed; never commit them.
+/cloud-sql-proxy

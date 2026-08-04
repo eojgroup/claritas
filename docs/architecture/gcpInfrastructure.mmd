@@ -1,40 +1,29 @@
 flowchart TD
-  GA[GitHub Actions] -->|OIDC| WIP[Workload Identity Provider]
-  WIP --> WPool[Workload Identity Pool]
-  WPool --> TSA[Terraform Service Account]
-  TSA -->|Terraform Apply| TF[Terraform]
+  GH[GitHub Actions] -->|OIDC, no service-account key| GSA[Deployment service account]
+  GSA --> TF[Terraform]
+  GSA --> DEPLOY[Kubernetes deployment]
 
-  TF --> ST[GCS Terraform State Bucket]
-  TF --> GKE[GKE Cluster]
-  TF --> SQL[Cloud SQL PostgreSQL]
-  TF --> AR[Artifact Registry]
-  TF --> IAM[IAM + Workload Identity Bindings]
-  TF --> INFR[Ingress + Managed Certificate]
+  TF --> STATE[GCS Terraform state]
+  TF --> GKE[Regional GKE control plane]
+  TF --> SQL[Zonal Cloud SQL PostgreSQL]
+  TF --> AR[Artifact Registry with five-version retention]
+  TF --> NAT[Cloud NAT and reserved API egress IP]
+  TF --> OBS[Cloud Monitoring alerts]
 
-  subgraph Runtime on GKE
-    WEB[Web Deployment]
-    API[API Deployment]
-    JOB[Ingestion CronJobs/Jobs]
-    KC[Keycloak Deployment (Open Source IAM)]
-    KBOOT[Keycloak Bootstrap Job]
-    KCS[Keycloak Service]
-    SEC[ConfigMaps + Secrets]
+  subgraph Runtime
+    NODE[One private spot e2-small API node]
+    API[API replica and SQL proxy]
+    WEB[Web replica]
+    KC[Keycloak and SQL proxy]
+    LLM[OpenCode]
   end
 
-  AR --> WEB
+  NAT --> NODE --> API
   AR --> API
-  INFR --> WEB
-  INFR --> API
+  AR --> WEB
+  AR --> LLM
   API --> SQL
-  JOB --> API
-  API --> SEC
-  JOB --> SEC
-
-  KC --> KCS
-  INFR --> KCS
-  KCS --> SQL
-  KC --> SEC
-  SEC --> KBOOT
-  KBOOT --> KC
-
-  API -->|Authenticated SMTP over TLS| SMTP[External SMTP Provider]
+  KC --> SQL
+  DEPLOY --> API
+  DEPLOY --> WEB
+  DEPLOY --> KC

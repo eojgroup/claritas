@@ -1,15 +1,15 @@
 # Cloud SQL capacity and transport load
 
-Claritas runs PostgreSQL 15 on a dedicated-core `db-custom-2-7680` Cloud SQL
-instance. The 2-vCPU, 7.5-GB shape is the production floor for the shared
-application, Keycloak, briefing, market, and transport workloads.
+Claritas runs PostgreSQL 15 on a dedicated-core `db-custom-1-3840` Cloud SQL
+instance. The one-vCPU, 3.75-GB shape is the cost-optimized baseline for the
+shared application, Keycloak, briefing, market, and transport workloads.
 
 ## Connection budget
 
-- Two API replicas each cap their node-postgres pool at five connections.
-- The elected transport ingestion worker uses one connection from its replica's
-  five-connection budget for the PostgreSQL advisory lock.
-- Keycloak starts with one connection and caps its pool at ten.
+- One API replica caps its node-postgres pool at three connections.
+- The elected transport ingestion worker uses one connection from that
+  three-connection budget for the PostgreSQL advisory lock.
+- Keycloak starts with one connection and caps its pool at five.
 - Migrations and operational access retain capacity outside the normal
   application pools. Do not raise PostgreSQL `max_connections` to address
   slow queries; inspect pool waiters and Query Insights first.
@@ -20,23 +20,22 @@ waiting counts.
 
 ## Bounded transport workload
 
-- AIS snapshot sampling: five minutes.
-- ADS-B polling: five minutes.
-- Raw track sampling: five minutes.
-- Raw track retention: seven days.
-- Stale current-snapshot retention: 30 days.
-- Movement-event and hourly-aggregate retention: 90 days.
-- Overview cache and single-flight window: 60 seconds.
+- AIS snapshot sampling: ten minutes.
+- ADS-B polling: ten minutes.
+- Raw track sampling: ten minutes.
+- Raw track retention: three days.
+- Stale current-snapshot retention: 14 days.
+- Movement-event and hourly-aggregate retention: 60 days.
+- Overview cache and single-flight window: 120 seconds.
 
 Port transitions are written once to `transport_movement_event`; an insert
 trigger maintains `transport_movement_hour`. Deduplicated vehicle/country
 presence is stored in `transport_entity_activity_hour`. User-facing comparisons
 read these compact structures rather than sorting raw tracks.
 
-Web and iOS market polling runs once per minute. Quote refreshes are
-single-flight and limited to one upstream/database write cycle per minute per
-API replica; market-status polling uses its one-minute server cache. Explicit
-user refresh actions can still bypass the read cache.
+Web and iOS market reads can poll frequently without forcing ingestion. Scheduled
+market ingestion runs at most every four hours by default, while explicit admin
+runs remain available for fresh data.
 
 `AISSTREAM_ENABLED=false` and `ADSB_LOL_POLL_ENABLED=false` are the incident
 safety switches. Prefer pausing transport ingestion over allowing it to impair
@@ -53,8 +52,11 @@ Terraform manages Cloud Monitoring alert policies for:
 The deployment identity receives only the Monitoring AlertPolicy Editor role
 needed to manage these policies.
 
-During an alert, inspect Cloud SQL System Insights and Query Insights, then
+During an alert, inspect Cloud SQL System Insights and the bounded Query Insights sample, then
 correlate with `database_pool_pressure`, `database_slow_query`,
 `transport_overview_slow_refresh`, and `transport_retention_pruned` logs.
 Healthy operation has zero pool waiters, no sustained memory/CPU alert, and
 transport overview refreshes below the slow-query threshold.
+
+See [the cost baseline](cost-baseline.md) for availability trade-offs and
+measured scale-up triggers.

@@ -44,15 +44,15 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - `AISSTREAM_ENABLED` is the operational safety switch and defaults to `true`.
 - Default subscription covers the global bounding box and requests position, Class B position, long-range position, ship static, and static data reports.
 - `AISSTREAM_BOUNDING_BOXES` can replace global coverage with a JSON array of provider-format bounding boxes.
-- `AISSTREAM_SAMPLE_SECONDS` controls current-position sampling and defaults to 300 seconds.
+- `AISSTREAM_SAMPLE_SECONDS` controls current-position sampling and defaults to 600 seconds.
 - MMSI Maritime Identification Digits link a vessel to its flag country. Position-in-country, monitored-port geofences, the first observed voyage country and position, and recognizable AIS destination/UN LOCODE values add current, origin, and destination relationships. When a declared destination resolves to a monitored port, its coordinates are retained so the individual vessel map can draw a route from the first observed position to that port.
 
 ### adsb.lol
 
 - No API key is required.
 - `ADSB_LOL_POLL_ENABLED` enables scheduled collection and defaults to `true`.
-- `ADSB_LOL_POLL_SECONDS` defaults to 300 seconds.
-- `ADSB_LOL_MAX_ROUTE_LOOKUPS` limits plausible route candidates per cycle and defaults to 2,000. Candidates are sampled proportionally across currently observed countries, then resolved against adsb.lol's CDN-backed standing-route records so early polling areas cannot consume the global budget. Successful and unknown callsigns are cached for 20 minutes; repeated provider failures open a short circuit breaker instead of delaying the whole refresh.
+- `ADSB_LOL_POLL_SECONDS` defaults to 600 seconds.
+- `ADSB_LOL_MAX_ROUTE_LOOKUPS` limits plausible route candidates per cycle and defaults to 750. Candidates are sampled proportionally across currently observed countries, then resolved against adsb.lol's CDN-backed standing-route records so early polling areas cannot consume the global budget. Successful and unknown callsigns are cached for 20 minutes; repeated provider failures open a short circuit breaker instead of delaying the whole refresh.
 - `ADSB_LOL_POLL_POINTS` can override the built-in global hub grid with JSON objects containing `label`, `lat`, `lon`, and a radius of at most 250 nautical miles.
 - `ADSB_LOL_USER_AGENT` should identify the deployment and a monitored contact.
 
@@ -88,7 +88,7 @@ The API returns both the underlying current/previous values and concise, qualifi
 - `GET /api/transport/overview?detail=full` adds current flight and vessel records for web and iPad. Optional `mode`, `country`, and `entity_limit` filters apply consistently to aggregates and details. Country-scoped corridor results include only routes whose resolved origin or destination is that country, while the broader entity result retains explicit current/flag/registration linkage.
 - `GET /api/transport/entities/:mode/:entityId` returns the current normalized record and up to 24 hours of sampled track points.
 
-All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Equivalent overview requests are coalesced and cached for 60 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation treats transport as optional evidence: a transient transport read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
+All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Equivalent overview requests are coalesced and cached for 120 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation treats transport as optional evidence: a transient transport read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
 
 ## Presentation contract
 
@@ -96,6 +96,6 @@ All endpoints use the same authenticated paid-access boundary as the other Clari
 - iPhone shows only KPIs, qualified trend takeaways, leading countries, and leading corridors. It does not receive raw vehicles or track points during normal app bootstrap.
 - Watch shows only aggregate flight/vessel/country counts, a qualified takeaway, an aggregate country bubble map, and the leading corridor, with a handoff to the iPhone transport section.
 
-Freshness windows are 20 minutes for aviation and two hours for maritime snapshots. Historical track points are sampled at five-minute resolution and retained for seven days. Current snapshots are retained for 30 days after their last observation; movement events and hourly aggregates are retained for 90 days. The advisory-lock owner prunes expired rows in bounded batches once an hour.
+Freshness windows are 20 minutes for aviation and two hours for maritime snapshots. Historical track points are sampled at ten-minute resolution and retained for three days. Current snapshots are retained for 14 days after their last observation; movement events and hourly aggregates are retained for 60 days. The advisory-lock owner prunes expired rows in bounded batches every three hours.
 
 The operational defaults are documented in [Cloud SQL capacity and transport load](operations/cloud-sql-capacity.md).

@@ -1,64 +1,21 @@
-graph TB
-    subgraph Actors
-        U1[Web User]
-        U2[Mobile User]
-        U3[Operations Team]
-    end
+flowchart TB
+  USER[Web, iOS, iPadOS and watchOS users]
+  OPS[Claritas operators]
+  IDP[Keycloak and federated identity providers]
+  APP[Claritas web and native applications]
+  API[Claritas API and ingestion workers on GKE]
+  DB[(Cloud SQL for PostgreSQL)]
+  DATA[Reviewed public data providers]
+  LLM[Provider-neutral briefing model]
+  MAIL[SMTP delivery provider]
+  OBS[Google Cloud logging and monitoring]
 
-    subgraph Identity Platform
-        KC[Keycloak (Open Source IAM)]
-        IDP1[Google]
-        IDP2[Microsoft]
-        IDP3[Apple]
-    end
-
-    subgraph Claritas Platform (GCP)
-        WEB[Claritas Web App]
-        MOB[Claritas Mobile App]
-        ING[Ingress / HTTPS]
-        API[Claritas API Platform (GKE)]
-        JOBS[Ingestion Jobs / CronJobs]
-        KBOOT[Keycloak Bootstrap Job]
-        DB[(Cloud SQL PostgreSQL)]
-        OBS[Logging / Monitoring / Audit]
-        SEC[Secret + IAM Controls]
-        SMTP[External SMTP Provider]
-    end
-
-    subgraph External Data Providers
-        EXT1[News Data Provider APIs]
-        EXT2[Weather Data Provider APIs]
-        EXT3[Additional Domain Sources]
-    end
-
-    U1 --> WEB
-    U2 --> MOB
-    WEB --> ING
-    MOB --> ING
-    ING --> API
-
-    WEB -. OIDC PKCE .-> KC
-    MOB -. OIDC PKCE .-> KC
-    KC -. Identity Brokering .-> IDP1
-    KC -. Identity Brokering .-> IDP2
-    KC -. Identity Brokering .-> IDP3
-
-    API --> DB
-    JOBS --> API
-    KBOOT --> KC
-    KBOOT --> SEC
-    API --> OBS
-    JOBS --> OBS
-    API --> SEC
-    JOBS --> SEC
-    API -->|Personalised briefing SMTP| SMTP
-
-    EXT1 --> JOBS
-    EXT2 --> JOBS
-    EXT3 --> JOBS
-
-    SMTP -->|Email| U1
-    SMTP -->|Email| U2
-
-    U3 --> OBS
-    U3 --> SEC
+  USER --> APP
+  APP -->|OIDC| IDP
+  APP -->|HTTPS| API
+  API --> DB
+  API -->|bounded polling| DATA
+  API --> LLM
+  API --> MAIL
+  API --> OBS
+  OPS --> OBS

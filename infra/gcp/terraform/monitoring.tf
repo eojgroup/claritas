@@ -106,7 +106,7 @@ resource "google_monitoring_alert_policy" "cloud_sql_connection_pressure" {
   }
 
   documentation {
-    content = "Cloud SQL backend connections have exceeded the reserved threshold. API pools are capped at five connections per replica and Keycloak at ten; check for unexpected clients or replica growth."
+    content = "Cloud SQL backend connections have exceeded the reserved threshold. The cost baseline caps the single API pool at three connections and Keycloak at five; check for unexpected clients or replica growth."
   }
 
   user_labels = {

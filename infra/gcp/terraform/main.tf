@@ -49,6 +49,27 @@ resource "google_artifact_registry_repository" "claritas_app" {
   location      = var.region
   format        = "DOCKER"
 
+  # Every deployment creates immutable SHA tags. Retain rollback depth without
+  # paying indefinitely for build output that is no longer deployable.
+  cleanup_policy_dry_run = false
+
+  cleanup_policies {
+    id     = "delete-old-versions"
+    action = "DELETE"
+    condition {
+      tag_state  = "ANY"
+      older_than = "1209600s" # 14 days
+    }
+  }
+
+  cleanup_policies {
+    id     = "keep-recent-versions"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 5
+    }
+  }
+
   labels = {
     environment = "dev"
     purpose     = "docker-images"
@@ -287,10 +308,10 @@ resource "google_sql_database_instance" "pg" {
     }
 
     insights_config {
-      query_string_length     = 1024
-      record_application_tags = true
-      record_client_address   = true
-      query_plans_per_minute  = 5
+      query_string_length     = 512
+      record_application_tags = false
+      record_client_address   = false
+      query_plans_per_minute  = 1
     }
 
     ip_configuration {

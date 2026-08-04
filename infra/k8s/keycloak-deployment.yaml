@@ -6,6 +6,7 @@ metadata:
   labels: { app: keycloak }
 spec:
   replicas: 1
+  revisionHistoryLimit: 2
   progressDeadlineSeconds: 900
   strategy:
     type: RollingUpdate
@@ -63,7 +64,7 @@ spec:
             - name: KC_DB_POOL_MIN_SIZE
               value: "1"
             - name: KC_DB_POOL_MAX_SIZE
-              value: "10"
+              value: "5"
             - name: KEYCLOAK_ADMIN
               valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_ADMIN } }
             - name: KEYCLOAK_ADMIN_PASSWORD

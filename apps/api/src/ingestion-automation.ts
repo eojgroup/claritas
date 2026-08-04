@@ -175,7 +175,7 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
     pipeline: "market",
     enabled: true,
     schedule_enabled: true,
-    schedule_interval_minutes: 60,
+    schedule_interval_minutes: 240,
     intelligent_enabled: true,
     min_spacing_minutes: 5,
     freshness_sla_minutes: 180,
@@ -221,7 +221,7 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
 
 let automationWorkerTimer: NodeJS.Timeout | null = null;
 let automationWorkerRunning = false;
-let lastDemandSignalPruneAt = 0;
+let lastOperationalPruneAt = 0;
 
 function clampInt(raw: unknown, min: number, max: number, fallback: number): number {
   const parsed =
@@ -543,20 +543,47 @@ export async function updateAutomationRule(
   return toAutomationRule(rows[0]);
 }
 
+const demandSignalBuffer = new Map<string, { pipeline: IngestionPipeline; bucketMinuteIso: string; count: number }>();
+let demandSignalFlushTimer: NodeJS.Timeout | null = null;
+
+async function flushDemandSignalBuffer(): Promise<void> {
+  const pending = Array.from(demandSignalBuffer.values());
+  demandSignalBuffer.clear();
+  await Promise.all(
+    pending.map(({ pipeline, bucketMinuteIso, count }) =>
+      query(
+        `INSERT INTO ingestion_demand_signal_minute (pipeline, bucket_minute, request_count)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (pipeline, bucket_minute)
+         DO UPDATE SET
+           request_count = ingestion_demand_signal_minute.request_count + EXCLUDED.request_count,
+           updated_at = now()`,
+        [pipeline, bucketMinuteIso, count]
+      )
+    )
+  );
+}
+
+function ensureDemandSignalFlushTimer(): void {
+  if (demandSignalFlushTimer) return;
+  demandSignalFlushTimer = setInterval(() => {
+    void flushDemandSignalBuffer().catch((error) => {
+      console.error("Failed to flush ingestion demand signals:", error);
+    });
+  }, 60_000);
+  demandSignalFlushTimer.unref();
+}
+
 export function trackDemandSignal(pipeline: IngestionPipeline): void {
   const bucketMinuteIso = new Date(Math.floor(Date.now() / 60_000) * 60_000).toISOString();
-  void query(
-    `INSERT INTO ingestion_demand_signal_minute (pipeline, bucket_minute, request_count)
-     VALUES ($1, $2, 1)
-     ON CONFLICT (pipeline, bucket_minute)
-     DO UPDATE SET
-       request_count = ingestion_demand_signal_minute.request_count + 1,
-       updated_at = now()`,
-    [pipeline, bucketMinuteIso]
-  ).catch((error) => {
-    // eslint-disable-next-line no-console
-    console.error("Failed to record ingestion demand signal:", error);
+  const key = `${pipeline}:${bucketMinuteIso}`;
+  const buffered = demandSignalBuffer.get(key);
+  demandSignalBuffer.set(key, {
+    pipeline,
+    bucketMinuteIso,
+    count: (buffered?.count ?? 0) + 1,
   });
+  ensureDemandSignalFlushTimer();
 }
 
 async function getRunStatus(pipeline: IngestionPipeline): Promise<RunStatusRow> {
@@ -896,8 +923,18 @@ async function evaluateRule(rule: IngestionAutomationRule): Promise<void> {
   }
 }
 
-async function pruneDemandSignals(): Promise<void> {
-  await query(`DELETE FROM ingestion_demand_signal_minute WHERE bucket_minute < now() - interval '14 days'`);
+async function pruneOperationalHistory(): Promise<void> {
+  await query(`DELETE FROM ingestion_demand_signal_minute WHERE bucket_minute < now() - interval '7 days'`);
+  await query(
+    `DELETE FROM ingestion_run
+     WHERE finished_at < now() - interval '30 days'
+       AND status = 'success'`
+  );
+  await query(
+    `DELETE FROM ingestion_run
+     WHERE finished_at < now() - interval '90 days'
+       AND status = 'failed'`
+  );
 }
 
 async function runAutomationCycle(): Promise<void> {
@@ -911,9 +948,9 @@ async function runAutomationCycle(): Promise<void> {
       for (const rule of rules) {
         await evaluateRule(rule);
       }
-      if (Date.now() - lastDemandSignalPruneAt >= 6 * 3_600_000) {
-        await pruneDemandSignals();
-        lastDemandSignalPruneAt = Date.now();
+      if (Date.now() - lastOperationalPruneAt >= 6 * 3_600_000) {
+        await pruneOperationalHistory();
+        lastOperationalPruneAt = Date.now();
       }
     });
   } finally {

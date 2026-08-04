@@ -41,8 +41,10 @@ resource "google_compute_router_nat" "api_egress" {
 }
 
 # Public GKE nodes prefer their own external addresses over Cloud NAT. Keep the
-# API (which owns every SMTP connection) on private nodes so all of its outbound
-# traffic is translated through the single reserved address above.
+# API (which owns every SMTP connection) on a private node so all of its outbound
+# traffic is translated through the single reserved address above. The baseline
+# is intentionally single-zone; add zones only when availability justifies the
+# per-zone node cost.
 resource "google_container_node_pool" "api_egress" {
   name           = "claritas-api-egress"
   project        = var.project_id

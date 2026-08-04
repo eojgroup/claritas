@@ -4,7 +4,14 @@ metadata:
   name: claritas-api
   namespace: claritas
 spec:
-  replicas: 2
+  # Cost baseline: one API replica on the single private static-egress node.
+  # Scale replicas and api_egress_node_locations together when HA is required.
+  replicas: 1
+  revisionHistoryLimit: 2
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
   selector:
     matchLabels: { app: claritas-api }
   template:
@@ -207,6 +214,9 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
+          resources:
+            requests: { cpu: "150m", memory: "256Mi" }
+            limits: { cpu: "750m", memory: "768Mi" }
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
           args:
