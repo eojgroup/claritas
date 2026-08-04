@@ -143,8 +143,6 @@ private struct NewsRow: View {
             return "NewsAPI"
         case "thenewsapi":
             return "TheNewsAPI"
-        case "finnhub":
-            return "Retired market source"
         case "gdelt":
             return "GDELT"
         default:

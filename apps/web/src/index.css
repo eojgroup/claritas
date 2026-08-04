@@ -3067,6 +3067,79 @@ body {
   font-size: 13px;
 }
 
+.transport-ranking-summary {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--shell-border);
+  border-radius: 13px;
+  background:
+    linear-gradient(110deg, color-mix(in srgb, var(--signal-amber) 8%, transparent), transparent 55%),
+    var(--shell-surface);
+}
+
+.transport-ranking-summary > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.transport-ranking-summary > header span {
+  color: var(--shell-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.transport-ranking-summary h2 {
+  margin: 3px 0 0;
+  font-size: 16px;
+}
+
+.transport-ranking-summary > header svg {
+  width: 20px;
+  color: var(--signal-amber);
+}
+
+.transport-ranking-summary > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--shell-border);
+  border-radius: 10px;
+  background: var(--shell-border);
+  overflow: hidden;
+}
+
+.transport-ranking-summary article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  background: var(--shell-surface-strong);
+}
+
+.transport-ranking-summary article b {
+  color: var(--signal-amber);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.transport-ranking-summary article p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.transport-ranking-summary > small {
+  color: var(--shell-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .transport-map-stage {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(270px, 330px);
@@ -3984,6 +4057,14 @@ body {
   white-space: nowrap;
 }
 
+.transport-country-list > header > small {
+  max-width: 270px;
+  color: var(--shell-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: right;
+}
+
 .transport-table-scroll {
   overflow: auto;
 }
@@ -4117,6 +4198,7 @@ body {
   .transport-analytics-grid,
   .transport-lower-grid,
   .transport-takeaway-grid,
+  .transport-ranking-summary > div,
   .transport-port-grid {
     grid-template-columns: 1fr;
   }

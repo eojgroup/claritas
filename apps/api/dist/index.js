@@ -2535,16 +2535,6 @@ app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
         res.status(500).json({ error: e.message || String(e) });
     }
 });
-// Compatibility responses for older clients. These capabilities require a
-// licensed market-data provider and are deliberately empty after retirement.
-app.get("/api/market/status", requireAuthenticated, (_req, res) => {
-    (0, ingestion_automation_1.trackDemandSignal)("market");
-    return res.json({ status: [], count: 0, refreshed: false, provider: null });
-});
-app.get("/api/market/earnings", requireAuthenticated, (_req, res) => {
-    (0, ingestion_automation_1.trackDemandSignal)("market");
-    return res.json({ events: [], count: 0, provider: null });
-});
 app.get("/api/market/countries", requireAuthenticated, async (_req, res) => {
     try {
         (0, ingestion_automation_1.trackDemandSignal)("market");

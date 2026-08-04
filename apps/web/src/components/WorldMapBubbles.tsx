@@ -57,7 +57,12 @@ export type WorldMapBubblesProps = {
   scale?: "linear" | "log";
   showLabels?: boolean;
   legendLabel?: string;
-  fillMode?: "default" | "temperature" | "diverging" | "sequential";
+  fillMode?:
+    | "default"
+    | "temperature"
+    | "diverging"
+    | "sequential"
+    | "relevance";
   valueDomain?: [number, number];
   valueUnit?: string;
   showBubbles?: boolean;
@@ -207,7 +212,7 @@ function interpolateRgb(from: [number, number, number], to: [number, number, num
 
 function choroplethColor(
   value: number,
-  mode: "temperature" | "diverging" | "sequential",
+  mode: "temperature" | "diverging" | "sequential" | "relevance",
   domain: [number, number],
   dark: boolean,
 ) {
@@ -228,6 +233,15 @@ function choroplethColor(
       dark ? [116, 91, 184] : [99, 68, 173],
       ratio
     );
+  }
+  if (mode === "relevance") {
+    const ratio = clamp((value - min) / Math.max(max - min, 0.0001), 0, 1);
+    const low: [number, number, number] = dark ? [35, 58, 70] : [208, 221, 225];
+    const middle: [number, number, number] = dark ? [117, 104, 75] : [218, 181, 126];
+    const high: [number, number, number] = dark ? [226, 126, 66] : [188, 83, 34];
+    return ratio < 0.55
+      ? interpolateRgb(low, middle, ratio / 0.55)
+      : interpolateRgb(middle, high, (ratio - 0.55) / 0.45);
   }
   const bound = Math.max(Math.abs(min), Math.abs(max), 0.0001);
   const normalized = clamp(value / bound, -1, 1);
@@ -595,10 +609,14 @@ export default memo(function WorldMapBubbles({
                     ? fillMode === "default" ? 0.56 + intensity * 0.34 : 0.88
                     : 0.82;
             const stroke =
-              isPrimary || isSecondary || isFeatured || isHovered
+              isFeatured
                 ? isDark
-                  ? "#e6f2f5"
-                  : "#284b5a"
+                  ? "#ffd7b5"
+                  : "#713513"
+                : isPrimary || isSecondary || isHovered
+                  ? isDark
+                    ? "#e6f2f5"
+                    : "#284b5a"
                 : isDark
                   ? "#48616e"
                   : "#94a5ab";
@@ -610,7 +628,11 @@ export default memo(function WorldMapBubbles({
                 fillOpacity={opacity}
                 stroke={stroke}
                 strokeWidth={
-                  isPrimary || isSecondary || isFeatured || isHovered ? 1.4 : 0.55
+                  isFeatured
+                    ? 2.4
+                    : isPrimary || isSecondary || isHovered
+                      ? 1.4
+                      : 0.55
                 }
                 vectorEffect="non-scaling-stroke"
                 role="button"
@@ -634,6 +656,44 @@ export default memo(function WorldMapBubbles({
               />
             );
           })}
+
+          {!showBubbles && featuredMarker && (() => {
+            const point = projection(featuredMarker.coordinate);
+            if (!point) return null;
+            return (
+              <g
+                transform={`translate(${point[0]} ${point[1]})`}
+                className="world-map-featured-marker"
+                pointerEvents="none"
+              >
+                <circle
+                  r={12 / view.scale}
+                  fill="none"
+                  stroke={isDark ? "#ffd7b5" : "#713513"}
+                  strokeDasharray={`${3 / view.scale} ${2 / view.scale}`}
+                  strokeWidth={2.25 / view.scale}
+                />
+                <circle
+                  r={4 / view.scale}
+                  fill={isDark ? "#fff0d9" : "#713513"}
+                  stroke={isDark ? "#7d3514" : "#fff7ef"}
+                  strokeWidth={1.25 / view.scale}
+                />
+                <text
+                  y={-16 / view.scale}
+                  textAnchor="middle"
+                  fill={labelColor}
+                  stroke={isDark ? "#07121a" : "#eef2f3"}
+                  strokeWidth={3 / view.scale}
+                  paintOrder="stroke"
+                  fontSize={10 / view.scale}
+                  fontWeight={800}
+                >
+                  {featuredMarker.country} · #1
+                </text>
+              </g>
+            );
+          })()}
 
           {showBubbles && markers.map((marker) => {
             const point = projection(marker.coordinate);
@@ -859,6 +919,8 @@ export default memo(function WorldMapBubbles({
                   ? "linear-gradient(90deg, rgb(55,113,166), rgb(239,209,126), rgb(191,54,45))"
                   : fillMode === "sequential"
                     ? "linear-gradient(90deg, rgb(218,227,235), rgb(99,68,173))"
+                    : fillMode === "relevance"
+                      ? "linear-gradient(90deg, rgb(208,221,225), rgb(218,181,126), rgb(188,83,34))"
                     : "linear-gradient(90deg, rgb(166,48,55), rgb(189,181,164), rgb(39,121,101))",
               }}
             />

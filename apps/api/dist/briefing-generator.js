@@ -18,7 +18,7 @@ class BriefingGenerationError extends Error {
     }
 }
 exports.BriefingGenerationError = BriefingGenerationError;
-const PROMPT_VERSION = "daily-signal-briefing.v5";
+const PROMPT_VERSION = "daily-signal-briefing.v6";
 const BRIEFING_OUTPUT_SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -342,6 +342,10 @@ async function collectBriefingContext(options) {
         summary: transportResult.summary,
         trends: transportResult.trends,
         takeaways: transportResult.takeaways,
+        activity_ranking: {
+            ...transportResult.activity_ranking,
+            countries: transportResult.activity_ranking.countries.slice(0, 12),
+        },
         leading_countries: transportResult.countries.slice(0, 12),
         leading_routes: transportResult.routes.slice(0, 12),
         monitored_ports: transportResult.ports.slice(0, 12),
@@ -389,7 +393,7 @@ function buildSystemPrompt() {
         "For markets, distinguish country-index direction, local-currency performance versus EUR, SEC filing activity, and the composite methodology. A filing count is activity, not positive or negative performance. Do not imply index coverage where the country-index component is missing.",
         "For weather, explain the overall regime and material extrema using temperature, apparent temperature, precipitation, wind or gusts, air quality, and the supplied forecast horizon. Clearly distinguish current observations from forecasts.",
         "Connect weather, news, markets, filings, and transport only when the supplied geography or entity provides evidence for the relationship. Never claim causation from temporal or geographic coincidence.",
-        "Transport comparisons use tracked observations, monitored-port geofences, and 24-hour comparison windows. Describe cargo-vessel departures as a movement proxy; never present them as cargo tonnage, load, trade value, or complete port-authority counts.",
+        "Transport comparisons use tracked observations, monitored-port geofences, and 24-hour comparison windows. Surface the leading country activity rank and the strongest material acceleration when ranking evidence is available, including the underlying ship-movement, tracked-flight, and live-link counts. Describe the index as relative within Claritas coverage, not total national activity. Describe cargo-vessel departures as a movement proxy; never present them as cargo tonnage, load, trade value, or complete port-authority counts.",
         "Treat podcast claims as attributed speaker statements, not independently verified facts. Retain uncertainty and attribution.",
         "Leadership records are reference context only. Never surface current officeholders, government type, or leadership records as a standalone signal. Mention a leadership change only when a supplied news item directly reports that change; keep it within the news update and cite no inference from Wikidata as evidence of a change.",
         "Markets content is informational only. Do not give investment advice or tell users to buy, sell, or hold.",

@@ -308,6 +308,32 @@ export type TransportCountryAggregate = {
   trend: TransportCountryTrend;
 };
 
+export type TransportCountryActivityRanking = {
+  rank: number;
+  country: string;
+  country_name: string;
+  activity_index: number;
+  current: {
+    linked_entities: number;
+    ship_movements: number;
+    ship_departures: number;
+    ship_arrivals: number;
+    cargo_vessel_departures: number;
+    tracked_flights: number;
+    observed_movements: number;
+  };
+  previous: {
+    ship_movements: number;
+    tracked_flights: number;
+    observed_movements: number;
+  };
+  momentum: TransportTrendMetric;
+  mode_mix: {
+    maritime_pct: number | null;
+    aviation_pct: number | null;
+  };
+};
+
 export type TransportRouteAggregate = {
   mode: TransportMode;
   origin_country: string;
@@ -376,6 +402,17 @@ export type TransportOverview = {
     modes: Record<TransportMode, TransportModeAggregate>;
   };
   countries: TransportCountryAggregate[];
+  activity_ranking: {
+    window_hours: 24;
+    comparison: "previous_24_hours";
+    countries: TransportCountryActivityRanking[];
+    highlights: string[];
+    methodology: {
+      index: string;
+      momentum: string;
+      coverage: string;
+    };
+  };
   routes: TransportRouteAggregate[];
   trends: {
     window_hours: number;

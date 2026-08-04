@@ -10,7 +10,6 @@ struct DashboardView: View {
     @State private var listMode: ListMode = .news
     @State private var section: DashboardSection = .overview
     @State private var minTemp: String = ""
-    @State private var marketEarningsWindowDays: Int = 14
     @State private var hasAppliedStoredModes: Bool = false
 
     enum ListMode: String, CaseIterable { case news, weather, market }
@@ -194,36 +193,6 @@ struct DashboardView: View {
                         }
                     } else {
                         DashboardCard {
-                            MarketStatusPanel(
-                                rows: marketStatusRows,
-                                isRefreshing: model.isRefreshingMarketStatus,
-                                onRefresh: { Task { await model.refreshMarketStatus(forceRefresh: true) } }
-                            )
-                        }
-
-                        DashboardCard {
-                            MarketEarningsPanel(
-                                rows: marketEarningsRows,
-                                selectedSymbol: model.selectedSymbol,
-                                selectedWindowDays: marketEarningsWindowDays,
-                                isRefreshing: model.isRefreshingMarketEarnings,
-                                onSelectWindowDays: { days in
-                                    marketEarningsWindowDays = days
-                                    Task { await model.refreshMarketEarnings(windowDays: days) }
-                                },
-                                onRefresh: {
-                                    Task { await model.refreshMarketEarnings(windowDays: marketEarningsWindowDays) }
-                                },
-                                onSelectSymbol: { symbol in
-                                    model.selectedSymbol = symbol
-                                    if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
-                                        model.selectedCountry = country.uppercased()
-                                    }
-                                }
-                            )
-                        }
-
-                        DashboardCard {
                             MarketQuoteListView(
                                 quotes: filteredMarketQuotes(),
                                 selectedSymbol: model.selectedSymbol,
@@ -308,14 +277,6 @@ struct DashboardView: View {
             guard !hasAppliedStoredModes else { return }
             listMode = ListMode(rawValue: defaultListModeRaw) ?? .news
             hasAppliedStoredModes = true
-        }
-        .task {
-            if model.marketEarnings.isEmpty {
-                await model.refreshMarketEarnings(windowDays: marketEarningsWindowDays)
-            }
-        }
-        .onChange(of: marketEarningsWindowDays) { next in
-            Task { await model.refreshMarketEarnings(windowDays: next) }
         }
     }
 
@@ -773,9 +734,9 @@ struct DashboardView: View {
                         tone: nil
                     )
                     BrandMetricCard(
-                        title: "Market status",
-                        value: "\(marketStatusRows.filter { $0.is_open == true }.count)/\(marketStatusRows.count)",
-                        detail: "Tracked exchanges currently open",
+                        title: "Market coverage",
+                        value: "\(model.marketQuotes.count) quotes",
+                        detail: "Loaded watchlist observations",
                         tone: ClaritasPalette.darkGreen
                     )
                     BrandMetricCard(
@@ -908,26 +869,6 @@ struct DashboardView: View {
         return model.news
             .filter { ($0.country_iso2 ?? "").uppercased() == relationCountry }
             .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
-    }
-
-    private var marketStatusRows: [MarketStatus] {
-        model.marketStatus
-            .sorted { lhs, rhs in
-                let leftOpen = lhs.is_open == true ? 1 : 0
-                let rightOpen = rhs.is_open == true ? 1 : 0
-                if leftOpen != rightOpen { return leftOpen > rightOpen }
-                return lhs.exchange < rhs.exchange
-            }
-    }
-
-    private var marketEarningsRows: [EarningsEvent] {
-        let baseRows: [EarningsEvent]
-        if let symbol = model.selectedSymbol?.uppercased(), !symbol.isEmpty {
-            baseRows = model.marketEarnings.filter { $0.symbol.uppercased() == symbol }
-        } else {
-            baseRows = model.marketEarnings
-        }
-        return baseRows.sorted { ($0.date ?? "") < ($1.date ?? "") }
     }
 
     private func valueOrDash(_ value: Double?) -> String {
@@ -1540,7 +1481,6 @@ struct MarketsWorkspaceView: View {
     @State private var marketFilter: String = "all"
     @State private var directionFilter: Direction = .all
     @State private var minMoveText: String = "0"
-    @State private var earningsWindowDays: Int = 14
 
     private var exchangeOptions: [String] {
         Array(Set(model.marketQuotes.compactMap { $0.exchange?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
@@ -1713,12 +1653,17 @@ struct MarketsWorkspaceView: View {
                             BrandSectionHeader(
                                 kicker: "Markets",
                                 title: "Market watch and correlations",
-                                detail: "Quotes, exchange status, earnings, and country-level correlation views."
+                                detail: "Watchlist quotes and country-level correlation views."
                             )
 
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
                                 BrandMetricCard(title: "Quotes", value: "\(rows.count)", detail: "Quotes after current filters", tone: nil)
-                                BrandMetricCard(title: "Open exchanges", value: "\(model.marketStatus.filter { $0.is_open == true }.count)", detail: "Currently open", tone: ClaritasPalette.darkGreen)
+                                BrandMetricCard(
+                                    title: "Countries",
+                                    value: "\(Set(rows.compactMap { $0.country?.uppercased() }).count)",
+                                    detail: "Represented in the current quote set",
+                                    tone: ClaritasPalette.darkGreen
+                                )
                                 BrandMetricCard(
                                     title: "Focus",
                                     value: model.selectedSymbol?.uppercased() ?? relatedCountry ?? "Global",
@@ -1734,12 +1679,6 @@ struct MarketsWorkspaceView: View {
                                 .buttonStyle(.borderedProminent)
                                 .tint(ClaritasPalette.darkGreen)
                                 .disabled(model.isRefreshingMarketQuotes)
-
-                                Button(model.isRefreshingMarketStatus ? "Refreshing status…" : "Refresh status") {
-                                    Task { await model.refreshMarketStatus(forceRefresh: true) }
-                                }
-                                .buttonStyle(.bordered)
-                                .disabled(model.isRefreshingMarketStatus)
 
                                 if model.selectedSymbol != nil {
                                     Button("Clear symbol") {
@@ -1813,36 +1752,6 @@ struct MarketsWorkspaceView: View {
                                 .keyboardType(.numbersAndPunctuation)
                                 .textFieldStyle(.roundedBorder)
                         }
-                    }
-
-                    BrandCard {
-                        MarketStatusPanel(
-                            rows: model.marketStatus.sorted {
-                                let left = $0.is_open == true ? 1 : 0
-                                let right = $1.is_open == true ? 1 : 0
-                                if left != right { return left > right }
-                                return $0.exchange < $1.exchange
-                            },
-                            isRefreshing: model.isRefreshingMarketStatus,
-                            onRefresh: { Task { await model.refreshMarketStatus(forceRefresh: true) } }
-                        )
-                    }
-
-                    BrandCard {
-                        MarketEarningsPanel(
-                            rows: model.marketEarnings
-                                .filter { model.selectedSymbol == nil || $0.symbol.uppercased() == model.selectedSymbol?.uppercased() }
-                                .sorted { ($0.date ?? "") < ($1.date ?? "") },
-                            selectedSymbol: model.selectedSymbol,
-                            selectedWindowDays: earningsWindowDays,
-                            isRefreshing: model.isRefreshingMarketEarnings,
-                            onSelectWindowDays: { days in
-                                earningsWindowDays = days
-                                Task { await model.refreshMarketEarnings(windowDays: days, symbol: model.selectedSymbol) }
-                            },
-                            onRefresh: { Task { await model.refreshMarketEarnings(windowDays: earningsWindowDays, symbol: model.selectedSymbol) } },
-                            onSelectSymbol: { symbol in model.selectedSymbol = symbol }
-                        )
                     }
 
                     if horizontalSizeClass != .compact {
@@ -1994,11 +1903,6 @@ struct MarketsWorkspaceView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 24)
-            }
-        }
-        .task {
-            if model.marketEarnings.isEmpty {
-                await model.refreshMarketEarnings(windowDays: earningsWindowDays)
             }
         }
     }
@@ -2272,8 +2176,6 @@ private func normalizedProviderName(_ value: String?) -> String? {
         return "OpenWeather"
     case "openmeteo":
         return "Open-Meteo"
-    case "finnhub":
-        return "Retired market source"
     case "sec_edgar":
         return "SEC EDGAR"
     case "ecb":
@@ -2519,207 +2421,6 @@ private struct MarketQuoteListView: View {
 
     private func quoteURL(_ symbol: String) -> URL? {
         URL(string: "https://finance.yahoo.com/quote/\(symbol.uppercased())")
-    }
-}
-
-private struct MarketStatusPanel: View {
-    let rows: [MarketStatus]
-    let isRefreshing: Bool
-    let onRefresh: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var openCount: Int {
-        rows.filter { $0.is_open == true }.count
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Market status")
-                        .font(.headline)
-                    Text("\(openCount)/\(rows.count) tracked exchanges open")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button(action: onRefresh) {
-                    Text(isRefreshing ? "Refreshing…" : "Refresh")
-                }
-                .buttonStyle(.bordered)
-                .disabled(isRefreshing)
-            }
-
-            if rows.isEmpty {
-                Text("No exchange status rows available.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ForEach(rows.prefix(20)) { row in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(row.exchange)
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text(statusLabel(row))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(statusColor(row))
-                        }
-                        Text(
-                            [
-                                row.session,
-                                row.timezone,
-                                row.holiday,
-                                trimmed(shortDateTimeLabel(row.observed_at))
-                            ]
-                            .compactMap { $0 }
-                            .filter { !$0.isEmpty }
-                            .joined(separator: " • ")
-                        )
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
-                    .padding(10)
-                    .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-                    )
-                }
-            }
-        }
-    }
-
-    private func statusLabel(_ row: MarketStatus) -> String {
-        if row.is_open == true { return "Open" }
-        if row.is_open == false { return "Closed" }
-        return "Unknown"
-    }
-
-    private func statusColor(_ row: MarketStatus) -> Color {
-        if row.is_open == true { return ClaritasPalette.positiveText(for: colorScheme) }
-        if row.is_open == false { return ClaritasPalette.negativeText(for: colorScheme) }
-        return ClaritasPalette.grey
-    }
-}
-
-private struct MarketEarningsPanel: View {
-    let rows: [EarningsEvent]
-    let selectedSymbol: String?
-    let selectedWindowDays: Int
-    let isRefreshing: Bool
-    let onSelectWindowDays: (Int) -> Void
-    let onRefresh: () -> Void
-    let onSelectSymbol: (String) -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Earnings calendar")
-                        .font(.headline)
-                    Text(selectedSymbol.map { "Upcoming events for \($0)" } ?? "Upcoming events (watch scope)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                HStack(spacing: 4) {
-                    ForEach([7, 14, 30], id: \.self) { window in
-                        Button(action: { onSelectWindowDays(window) }) {
-                            Text("\(window)d")
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 6)
-                                .background(
-                                    selectedWindowDays == window
-                                        ? ClaritasPalette.darkBlue
-                                        : ClaritasPalette.offWhite,
-                                    in: Capsule()
-                                )
-                                .foregroundStyle(
-                                    selectedWindowDays == window
-                                        ? ClaritasPalette.offWhite
-                                        : ClaritasPalette.grey
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(4)
-                .background(ClaritasPalette.beige.opacity(0.55), in: Capsule())
-            }
-
-            HStack {
-                Spacer()
-                Button(action: onRefresh) {
-                    Text(isRefreshing ? "Refreshing…" : "Refresh earnings")
-                }
-                .buttonStyle(.bordered)
-                .disabled(isRefreshing)
-            }
-
-            if rows.isEmpty {
-                Text("No earnings events in the selected window.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ForEach(rows.prefix(24)) { row in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Button(action: { onSelectSymbol(row.symbol) }) {
-                                Text(row.symbol)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                            }
-                            .buttonStyle(.plain)
-                            Spacer()
-                            Text(row.date ?? "—")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Text(
-                            [
-                                row.market_code,
-                                row.market_name,
-                                row.country?.uppercased(),
-                                row.hour
-                            ]
-                            .compactMap { $0 }
-                            .filter { !$0.isEmpty }
-                            .joined(separator: " • ")
-                        )
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        Text("EPS \(value(row.eps_actual)) / \(value(row.eps_estimate)) · Rev \(value(row.revenue_actual)) / \(value(row.revenue_estimate))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(10)
-                    .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-                    )
-                }
-            }
-        }
-    }
-
-    private func value(_ number: Double?) -> String {
-        guard let number else { return "—" }
-        if abs(number) >= 1_000_000_000 {
-            return String(format: "%.2fB", number / 1_000_000_000)
-        }
-        if abs(number) >= 1_000_000 {
-            return String(format: "%.2fM", number / 1_000_000)
-        }
-        if abs(number) >= 1_000 {
-            return String(format: "%.1fK", number / 1_000)
-        }
-        return String(format: "%.2f", number)
     }
 }
 

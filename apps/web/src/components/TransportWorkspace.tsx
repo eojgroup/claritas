@@ -303,11 +303,21 @@ export default function TransportWorkspace({ initialCountry }: Props) {
 
   const countryRows = useMemo(
     () =>
-      (overview?.countries ?? []).slice(0, 12).map((entry) => ({
+      (overview?.activity_ranking?.countries ?? []).slice(0, 12).map((entry) => ({
         ...entry,
-        vessels: entry.maritime.active,
-        flights: entry.aviation.active,
+        vessels: entry.current.ship_movements,
+        flights: entry.current.tracked_flights,
       })),
+    [overview],
+  );
+  const activityRankingByCountry = useMemo(
+    () =>
+      new Map(
+        (overview?.activity_ranking?.countries ?? []).map((entry) => [
+          entry.country.trim().toUpperCase(),
+          entry,
+        ]),
+      ),
     [overview],
   );
 
@@ -686,6 +696,31 @@ export default function TransportWorkspace({ initialCountry }: Props) {
         </div>
       )}
 
+      {!selectedCorridor &&
+        (overview?.activity_ranking?.highlights?.length ?? 0) > 0 && (
+          <section
+            className="transport-ranking-summary"
+            aria-label="Current country transport ranking highlights"
+          >
+            <header>
+              <div>
+                <span>Country activity index · current 24 hours</span>
+                <h2>What stands out now</h2>
+              </div>
+              <Route />
+            </header>
+            <div>
+              {overview!.activity_ranking.highlights.slice(0, 3).map((highlight, index) => (
+                <article key={`transport-ranking-highlight-${index}`}>
+                  <b>0{index + 1}</b>
+                  <p>{highlight}</p>
+                </article>
+              ))}
+            </div>
+            <small>{overview!.activity_ranking.methodology.coverage}</small>
+          </section>
+        )}
+
       {selectedCountryInsight && (
         <section
           className="transport-country-insights"
@@ -1038,7 +1073,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             <header>
               <div>
                 <span>Country relationships</span>
-                <h2>Most connected countries</h2>
+                <h2>Most active countries · 24 hours</h2>
               </div>
             </header>
             <div className="transport-chart">
@@ -1061,7 +1096,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                 </ResponsiveContainer>
               ) : (
                 <div className="transport-chart-empty">
-                  No linked countries in the current scope.
+                  No comparable country activity in the current scope.
                 </div>
               )}
             </div>
@@ -1132,13 +1167,17 @@ export default function TransportWorkspace({ initialCountry }: Props) {
         <article className="app-card transport-country-list">
           <header>
             <div>
-              <span>Aggregation with drill-in</span>
-              <h2>Country linkage table</h2>
+              <span>Normalized activity with drill-in</span>
+              <h2>Country transport activity ranking</h2>
             </div>
+            <small title={overview?.activity_ranking?.methodology.index}>
+              Index blends live links, ship movements, and tracked flights
+            </small>
           </header>
           <div className="transport-country-scroll">
             {(overview?.countries ?? []).slice(0, 18).map((entry) => {
               const entryIso = entry.country.trim().toUpperCase();
+              const ranking = activityRankingByCountry.get(entryIso);
               const isPrimary = entryIso === country.trim().toUpperCase();
               const isCounterparty = Boolean(
                 selectedCountryInsight?.counterparties.some(
@@ -1173,20 +1212,29 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                   }
                 >
                   <span>
-                    <b>{entry.country}</b>
+                    <b>
+                      {ranking ? `#${ranking.rank} ` : ""}{entry.country}
+                    </b>
                     <small>{entry.country_name}</small>
                   </span>
                   <span>
-                    <small>Flights</small>
-                    <b>{entry.aviation.active}</b>
+                    <small>Activity index</small>
+                    <b>{ranking ? `${ranking.activity_index.toFixed(1)}/100` : "—"}</b>
                   </span>
                   <span>
-                    <small>Vessels</small>
-                    <b>{entry.maritime.active}</b>
+                    <small>24h tracked</small>
+                    <b>{ranking?.current.observed_movements ?? 0}</b>
                   </span>
                   <span>
-                    <small>Arrivals</small>
-                    <b>{entry.aviation.destinations + entry.maritime.destinations}</b>
+                    <small>vs prior 24h</small>
+                    <b>
+                      {ranking
+                        ? changeLabel(
+                            ranking.momentum.change_pct,
+                            ranking.momentum.direction,
+                          )
+                        : "—"}
+                    </b>
                   </span>
                 </button>
               );

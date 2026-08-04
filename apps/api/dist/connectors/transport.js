@@ -1405,6 +1405,107 @@ async function loadTransportOverview(options) {
             tracked_flights: transportTrendMetric(count(aviationTotal?.flights_current), count(aviationTotal?.flights_previous)),
         },
     };
+    const countryAggregates = Array.from(countries.values());
+    const maxLinkedEntities = Math.max(0, ...countryAggregates.map((entry) => entry.active_count));
+    const maxShipMovements = Math.max(0, ...countryAggregates.map((entry) => entry.trend.ship_departures.current + entry.trend.ship_arrivals.current));
+    const maxTrackedFlights = Math.max(0, ...countryAggregates.map((entry) => entry.trend.tracked_flights.current));
+    const rankingComponents = [
+        {
+            id: "linked_entities",
+            weight: 0.3,
+            available: maxLinkedEntities > 0,
+        },
+        {
+            id: "ship_movements",
+            weight: 0.35,
+            available: mode !== "aviation" && maxShipMovements > 0,
+        },
+        {
+            id: "tracked_flights",
+            weight: 0.35,
+            available: mode !== "maritime" && maxTrackedFlights > 0,
+        },
+    ].filter((component) => component.available);
+    const availableWeight = rankingComponents.reduce((total, component) => total + component.weight, 0);
+    const rankingCandidates = countryAggregates.map((entry) => {
+        const shipMovements = entry.trend.ship_departures.current + entry.trend.ship_arrivals.current;
+        const previousShipMovements = entry.trend.ship_departures.previous + entry.trend.ship_arrivals.previous;
+        const trackedFlights = entry.trend.tracked_flights.current;
+        const previousTrackedFlights = entry.trend.tracked_flights.previous;
+        const currentObservedMovements = shipMovements + trackedFlights;
+        const previousObservedMovements = previousShipMovements + previousTrackedFlights;
+        const rawIndex = availableWeight > 0
+            ? rankingComponents.reduce((total, component) => {
+                const value = component.id === "linked_entities"
+                    ? entry.active_count / maxLinkedEntities
+                    : component.id === "ship_movements"
+                        ? shipMovements / maxShipMovements
+                        : trackedFlights / maxTrackedFlights;
+                return total + value * component.weight;
+            }, 0) / availableWeight
+            : 0;
+        const mixTotal = shipMovements + trackedFlights;
+        return {
+            country: entry.country,
+            country_name: entry.country_name,
+            raw_index: rawIndex,
+            current: {
+                linked_entities: entry.active_count,
+                ship_movements: shipMovements,
+                ship_departures: entry.trend.ship_departures.current,
+                ship_arrivals: entry.trend.ship_arrivals.current,
+                cargo_vessel_departures: entry.trend.cargo_vessel_departures.current,
+                tracked_flights: trackedFlights,
+                observed_movements: currentObservedMovements,
+            },
+            previous: {
+                ship_movements: previousShipMovements,
+                tracked_flights: previousTrackedFlights,
+                observed_movements: previousObservedMovements,
+            },
+            momentum: transportTrendMetric(currentObservedMovements, previousObservedMovements),
+            mode_mix: {
+                maritime_pct: mixTotal > 0 ? Math.round((shipMovements / mixTotal) * 1_000) / 10 : null,
+                aviation_pct: mixTotal > 0 ? Math.round((trackedFlights / mixTotal) * 1_000) / 10 : null,
+            },
+        };
+    });
+    const strongestRawIndex = Math.max(0, ...rankingCandidates.map((entry) => entry.raw_index));
+    const rankedCountries = rankingCandidates
+        .sort((left, right) => right.raw_index - left.raw_index ||
+        right.current.observed_movements - left.current.observed_movements ||
+        right.current.linked_entities - left.current.linked_entities ||
+        left.country.localeCompare(right.country))
+        .map(({ raw_index, ...entry }, index) => ({
+        rank: index + 1,
+        activity_index: strongestRawIndex > 0
+            ? Math.round((raw_index / strongestRawIndex) * 1_000) / 10
+            : 0,
+        ...entry,
+    }));
+    const rankingHighlights = [];
+    const rankingLeader = rankedCountries[0];
+    if (rankingLeader) {
+        rankingHighlights.push(`${rankingLeader.country_name} ranks first for tracked transport activity (${rankingLeader.activity_index.toFixed(1)}/100): ${rankingLeader.current.ship_movements} ship movements, ${rankingLeader.current.tracked_flights} tracked flights, and ${rankingLeader.current.linked_entities} currently linked entities.`);
+    }
+    const accelerationLeader = [...rankedCountries]
+        .filter((entry) => entry.momentum.current > entry.momentum.previous &&
+        entry.momentum.current >= 3)
+        .sort((left, right) => right.momentum.current - right.momentum.previous -
+        (left.momentum.current - left.momentum.previous) ||
+        right.momentum.current - left.momentum.current)[0];
+    if (accelerationLeader) {
+        rankingHighlights.push(`${accelerationLeader.country_name} has the largest absolute 24-hour activity gain: ${accelerationLeader.momentum.current} observed movements versus ${accelerationLeader.momentum.previous} in the previous window${accelerationLeader.momentum.change_pct == null
+            ? " (new comparison baseline)"
+            : ` (${accelerationLeader.momentum.change_pct >= 0 ? "+" : ""}${accelerationLeader.momentum.change_pct.toFixed(1)}%)`}.`);
+    }
+    const maritimeLeader = [...rankedCountries].sort((left, right) => right.current.ship_movements - left.current.ship_movements)[0];
+    const aviationLeader = [...rankedCountries].sort((left, right) => right.current.tracked_flights - left.current.tracked_flights)[0];
+    if (maritimeLeader?.current.ship_movements &&
+        aviationLeader?.current.tracked_flights &&
+        maritimeLeader.country !== aviationLeader.country) {
+        rankingHighlights.push(`${maritimeLeader.country_name} leads monitored ship movements (${maritimeLeader.current.ship_movements}), while ${aviationLeader.country_name} leads tracked flights (${aviationLeader.current.tracked_flights}).`);
+    }
     const scopeName = country
         ? COUNTRY_NAME_BY_ISO.get(country) ?? country
         : "Global";
@@ -1456,7 +1557,18 @@ async function loadTransportOverview(options) {
             linked_countries: countries.size,
             modes: summaryModes,
         },
-        countries: Array.from(countries.values()).sort((left, right) => right.active_count - left.active_count),
+        countries: rankedCountries.map((ranking) => countries.get(ranking.country)),
+        activity_ranking: {
+            window_hours: 24,
+            comparison: "previous_24_hours",
+            countries: rankedCountries,
+            highlights: rankingHighlights,
+            methodology: {
+                index: "Relative country index (top country = 100) combining normalized live linked entities (30%), monitored ship departures plus arrivals (35%), and uniquely tracked flights (35%). Missing or filtered modes are excluded and remaining weights are rebalanced.",
+                momentum: "Momentum compares observed ship movements plus uniquely tracked flights with the previous 24-hour window; it is not freight volume, passenger volume, or complete national traffic.",
+                coverage: "Rankings reflect Claritas AIS geofences and configured ADS-B polling coverage, so they compare observed activity inside this system rather than total country transport activity.",
+            },
+        },
         routes: routeResult.rows.map((row) => ({
             mode: row.mode,
             origin_country: row.origin_country.trim(),
@@ -1548,6 +1660,17 @@ function emptyTransportOverview() {
             },
         },
         countries: [],
+        activity_ranking: {
+            window_hours: 24,
+            comparison: "previous_24_hours",
+            countries: [],
+            highlights: [],
+            methodology: {
+                index: "Relative country index (top country = 100) combining normalized live linked entities (30%), monitored ship departures plus arrivals (35%), and uniquely tracked flights (35%). Missing or filtered modes are excluded and remaining weights are rebalanced.",
+                momentum: "Momentum compares observed ship movements plus uniquely tracked flights with the previous 24-hour window; it is not freight volume, passenger volume, or complete national traffic.",
+                coverage: "Rankings reflect Claritas AIS geofences and configured ADS-B polling coverage, so they compare observed activity inside this system rather than total country transport activity.",
+            },
+        },
         routes: [],
         trends: {
             window_hours: 24,

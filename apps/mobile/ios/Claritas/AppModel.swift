@@ -26,15 +26,11 @@ final class AppModel: ObservableObject {
     @Published var weather: [CountryWeather] = []
     @Published var leadership: [CountryLeadership] = []
     @Published var marketQuotes: [MarketQuote] = []
-    @Published var marketStatus: [MarketStatus] = []
-    @Published var marketEarnings: [EarningsEvent] = []
     @Published var transportOverview: TransportOverview? = nil
     @Published var isRefreshingNews: Bool = false
     @Published var isRefreshingPodcasts: Bool = false
     @Published var isRefreshingWeather: Bool = false
     @Published var isRefreshingMarketQuotes: Bool = false
-    @Published var isRefreshingMarketStatus: Bool = false
-    @Published var isRefreshingMarketEarnings: Bool = false
     @Published var isRefreshingTransport: Bool = false
     @Published var newsLoadMode: NewsLoadMode = .recent
     @Published var newsLoadError: String? = nil
@@ -301,18 +297,6 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchMarketQuotes(refresh: true)) }
             catch { return .failure(error) }
         }()
-        async let marketStatusResult: Result<[MarketStatus], Error> = {
-            do { return .success(try await api.fetchMarketStatus(refresh: true)) }
-            catch { return .failure(error) }
-        }()
-        async let marketEarningsResult: Result<[EarningsEvent], Error> = {
-            do {
-                let from = Self.isoDate(Date())
-                let to = Self.isoDate(Date().addingTimeInterval(14 * 24 * 60 * 60))
-                return .success(try await api.fetchMarketEarnings(from: from, to: to, limit: 120))
-            }
-            catch { return .failure(error) }
-        }()
         async let transportResult: Result<TransportOverview, Error> = {
             do {
                 return .success(
@@ -331,8 +315,6 @@ final class AppModel: ObservableObject {
             resolvedNews,
             resolvedPodcasts,
             resolvedMarket,
-            resolvedMarketStatus,
-            resolvedMarketEarnings,
             resolvedTransport
         ) = await (
             statsResult,
@@ -343,8 +325,6 @@ final class AppModel: ObservableObject {
             newsResult,
             podcastResult,
             marketResult,
-            marketStatusResult,
-            marketEarningsResult,
             transportResult
         )
 
@@ -371,12 +351,6 @@ final class AppModel: ObservableObject {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedMarket, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedMarketStatus, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedMarketEarnings, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedTransport, isPaymentRequired(error) {
@@ -419,12 +393,6 @@ final class AppModel: ObservableObject {
         if case .success(let quotes) = resolvedMarket {
             marketQuotes = quotes
         }
-        if case .success(let statusRows) = resolvedMarketStatus {
-            marketStatus = statusRows
-        }
-        if case .success(let earningRows) = resolvedMarketEarnings {
-            marketEarnings = earningRows
-        }
         if case .success(let transport) = resolvedTransport {
             transportOverview = transport
             transportLoadError = nil
@@ -451,8 +419,6 @@ final class AppModel: ObservableObject {
         news = []
         podcasts = []
         marketQuotes = []
-        marketStatus = []
-        marketEarnings = []
         transportOverview = nil
         newsLoadError = nil
         podcastLoadError = nil
@@ -593,54 +559,6 @@ final class AppModel: ObservableObject {
         defer { isRefreshingMarketQuotes = false }
         do {
             marketQuotes = try await api.fetchMarketQuotes(refresh: forceRefresh)
-        } catch {
-            if isPaymentRequired(error) {
-                clearAppData()
-                await refreshAccess()
-            }
-            // keep current rows on transient failures
-        }
-    }
-
-    func refreshMarketStatus(forceRefresh: Bool = true) async {
-        guard !isRefreshingMarketStatus else { return }
-        guard hasPaidAccess else {
-            clearAppData()
-            return
-        }
-        isRefreshingMarketStatus = true
-        defer { isRefreshingMarketStatus = false }
-        do {
-            marketStatus = try await api.fetchMarketStatus(refresh: forceRefresh)
-        } catch {
-            if isPaymentRequired(error) {
-                clearAppData()
-                await refreshAccess()
-            }
-            // keep current rows on transient failures
-        }
-    }
-
-    func refreshMarketEarnings(windowDays: Int = 14, symbol: String? = nil) async {
-        guard !isRefreshingMarketEarnings else { return }
-        guard hasPaidAccess else {
-            clearAppData()
-            return
-        }
-        isRefreshingMarketEarnings = true
-        defer { isRefreshingMarketEarnings = false }
-
-        let safeWindow = max(1, min(windowDays, 60))
-        let from = Self.isoDate(Date())
-        let to = Self.isoDate(Date().addingTimeInterval(TimeInterval(safeWindow) * 24 * 60 * 60))
-
-        do {
-            marketEarnings = try await api.fetchMarketEarnings(
-                from: from,
-                to: to,
-                symbol: symbol,
-                limit: 160
-            )
         } catch {
             if isPaymentRequired(error) {
                 clearAppData()

@@ -4750,6 +4750,14 @@ export default function ClaritasDashboard() {
                                 ? "log"
                                 : "linear"
                             }
+                            fillMode={
+                              mapMode === "signals" ? "relevance" : "default"
+                            }
+                            valueDomain={
+                              mapMode === "signals" ? [0, 100] : undefined
+                            }
+                            valueUnit={mapMode === "signals" ? "/100" : ""}
+                            showBubbles={mapMode !== "signals"}
                             showLabels
                             legendLabel={activeMapLegendLabel}
                           />
@@ -5743,6 +5751,14 @@ export default function ClaritasDashboard() {
                                 ? "log"
                                 : "linear"
                             }
+                            fillMode={
+                              mapMode === "signals" ? "relevance" : "default"
+                            }
+                            valueDomain={
+                              mapMode === "signals" ? [0, 100] : undefined
+                            }
+                            valueUnit={mapMode === "signals" ? "/100" : ""}
+                            showBubbles={mapMode !== "signals"}
                             legendLabel={activeMapLegendLabel}
                           />
                         </div>

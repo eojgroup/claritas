@@ -86,14 +86,6 @@ struct RootView: View {
                 await model.refreshMarketQuotes(forceRefresh: true)
             }
         }
-        .task(id: marketStatusTaskKey) {
-            guard model.authStatus == .authed, model.hasPaidAccess else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 60_000_000_000)
-                guard !Task.isCancelled else { return }
-                await model.refreshMarketStatus(forceRefresh: false)
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             guard let destination = note.object as? String else { return }
             if let country = note.userInfo?["country"] as? String, !country.isEmpty {
@@ -287,9 +279,6 @@ struct RootView: View {
         "\(model.authStatus.rawValue)-\(model.hasPaidAccess)-quotes"
     }
 
-    private var marketStatusTaskKey: String {
-        "\(model.authStatus.rawValue)-\(model.hasPaidAccess)-status"
-    }
 }
 
 private struct CompactMoreView: View {
@@ -2340,8 +2329,6 @@ private struct AdminIngestionPanelView: View {
             return "OpenWeather"
         case "openmeteo":
             return "Open-Meteo"
-        case "finnhub":
-            return "Retired market source"
         case "sec_edgar":
             return "SEC EDGAR"
         case "ecb":
