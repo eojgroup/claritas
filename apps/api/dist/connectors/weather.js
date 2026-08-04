@@ -76,7 +76,7 @@ async function getCountryWeatherLatest() {
      ) aq ON true
      LEFT JOIN LATERAL (
        SELECT jsonb_agg(to_jsonb(x) ORDER BY x.starts_at) AS alerts, count(*) AS alert_count FROM (
-         SELECT s.name AS source_name,w.sender_name,w.event,w.severity,w.urgency,w.starts_at,w.ends_at,
+         SELECT upper(w.country_iso2::text) AS country,s.name AS source_name,w.sender_name,w.event,w.severity,w.urgency,w.starts_at,w.ends_at,
            w.headline,w.description,w.instruction,w.area
          FROM weather_alert w JOIN source s ON s.id=w.source_id
          WHERE w.country_iso2=r.country_iso2 AND COALESCE(w.ends_at,now()+interval '1 day') >= now()
@@ -117,7 +117,7 @@ async function getCountryWeatherForecast(countryIso2, hours = 48) {
         (0, db_1.query)(`SELECT observed_at,european_aqi,us_aqi,provider_aqi,aqi_scale,pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,
         sulphur_dioxide,ozone,''::text AS label FROM air_quality_snapshot
        WHERE upper(country_iso2::text)=$1 ORDER BY observed_at DESC LIMIT 1`, [country]),
-        (0, db_1.query)(`SELECT s.name AS source_name,w.sender_name,w.event,w.severity,w.urgency,w.starts_at,w.ends_at,
+        (0, db_1.query)(`SELECT upper(w.country_iso2::text) AS country,s.name AS source_name,w.sender_name,w.event,w.severity,w.urgency,w.starts_at,w.ends_at,
         w.headline,w.description,w.instruction,w.area FROM weather_alert w JOIN source s ON s.id=w.source_id
        WHERE upper(w.country_iso2::text)=$1 AND COALESCE(w.ends_at,now()+interval '1 day') >= now()
        ORDER BY CASE w.severity WHEN 'Extreme' THEN 0 WHEN 'Severe' THEN 1 WHEN 'Moderate' THEN 2 ELSE 3 END,w.starts_at`, [country]),

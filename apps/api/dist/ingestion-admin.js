@@ -22,6 +22,7 @@ const institutional_rss_1 = require("./connectors/institutional-rss");
 const sec_edgar_1 = require("./connectors/sec-edgar");
 const ecb_1 = require("./connectors/ecb");
 const oecd_1 = require("./connectors/oecd");
+const yahoo_markets_1 = require("./connectors/yahoo-markets");
 const podcastindex_1 = require("./connectors/podcastindex");
 const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
 const db_1 = require("./db");
@@ -620,6 +621,7 @@ async function executeMarketRun(runId, plan) {
         }
         if (plan.providers.oecd) {
             await executeProviderStep(runId, steps, totals, "oecd/monthly-share-price-indices", oecd_1.ingestOecdSharePrices);
+            await executeProviderStep(runId, steps, totals, "yahoo/major-indices-commodities", yahoo_markets_1.ingestMajorMarkets);
         }
         const succeeded = steps.filter((step) => step.status === "success").length;
         if (succeeded === 0)

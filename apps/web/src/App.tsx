@@ -7184,6 +7184,21 @@ export default function ClaritasDashboard() {
                       <span>{weatherOperationalRows.find((row) => row.country === alert.country)?.reasons.join(" · ") || `${alert.temp_c ?? "—"}°C · ${alert.wind_gust ?? alert.wind_speed ?? "—"} m/s`}</span>
                     </button>
                   ))}
+                  {weatherPageRows.flatMap((row) => (row.alerts ?? []).map((alert) => ({ ...alert, country: alert.country || row.country }))).slice(0, 8).map((alert, index) => (
+                    <button
+                      key={`official-warning-${alert.country}-${alert.starts_at}-${index}`}
+                      type="button"
+                      className="!block !h-auto !border-rose-400/60 !bg-rose-500/15 !p-3 !text-left"
+                      onClick={() => setSelectedCountry(alert.country.toUpperCase())}
+                    >
+                      <span className="mb-1 flex items-center gap-2 font-bold text-rose-200">
+                        <b className="rounded bg-rose-500 px-2 py-0.5 text-white">{alert.country.toUpperCase()}</b>
+                        {alert.severity ?? "Official warning"} · {alert.event}
+                      </span>
+                      <span className="block text-[color:var(--shell-ink)]">{alert.headline ?? alert.description ?? alert.area ?? "Open the country context for details."}</span>
+                      <span className="mt-1 block text-[color:var(--shell-muted)]">{alert.area ? `${alert.area} · ` : ""}{alert.sender_name}</span>
+                    </button>
+                  ))}
                 </section>
 
                 <section className="weather-primary-grid grid grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
