@@ -108,6 +108,7 @@ export type CountryWeather = {
 };
 
 export type WeatherAlert = {
+  country: string;
   source_name: string;
   sender_name: string;
   event: string;

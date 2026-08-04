@@ -16,6 +16,7 @@ export type AirQuality = {
 };
 
 export type WeatherAlert = {
+  country: string;
   source_name: string; sender_name: string; event: string; severity: string | null;
   urgency: string | null; starts_at: string; ends_at: string | null; headline: string | null;
   description: string | null; instruction: string | null; area: string | null;
@@ -101,7 +102,7 @@ export async function getCountryWeatherLatest(): Promise<EnhancedCountryWeather[
      ) aq ON true
      LEFT JOIN LATERAL (
        SELECT jsonb_agg(to_jsonb(x) ORDER BY x.starts_at) AS alerts, count(*) AS alert_count FROM (
-         SELECT s.name AS source_name,w.sender_name,w.event,w.severity,w.urgency,w.starts_at,w.ends_at,
+         SELECT upper(w.country_iso2::text) AS country,s.name AS source_name,w.sender_name,w.event,w.severity,w.urgency,w.starts_at,w.ends_at,
            w.headline,w.description,w.instruction,w.area
          FROM weather_alert w JOIN source s ON s.id=w.source_id
          WHERE w.country_iso2=r.country_iso2 AND COALESCE(w.ends_at,now()+interval '1 day') >= now()
@@ -156,7 +157,7 @@ export async function getCountryWeatherForecast(countryIso2: string, hours=48): 
        WHERE upper(country_iso2::text)=$1 ORDER BY observed_at DESC LIMIT 1`, [country]
     ),
     query<WeatherAlert>(
-      `SELECT s.name AS source_name,w.sender_name,w.event,w.severity,w.urgency,w.starts_at,w.ends_at,
+      `SELECT upper(w.country_iso2::text) AS country,s.name AS source_name,w.sender_name,w.event,w.severity,w.urgency,w.starts_at,w.ends_at,
         w.headline,w.description,w.instruction,w.area FROM weather_alert w JOIN source s ON s.id=w.source_id
        WHERE upper(w.country_iso2::text)=$1 AND COALESCE(w.ends_at,now()+interval '1 day') >= now()
        ORDER BY CASE w.severity WHEN 'Extreme' THEN 0 WHEN 'Severe' THEN 1 WHEN 'Moderate' THEN 2 ELSE 3 END,w.starts_at`, [country]

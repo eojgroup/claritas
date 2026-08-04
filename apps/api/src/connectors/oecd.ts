@@ -1,6 +1,7 @@
 import worldCountries from "world-countries";
 import { query } from "../db";
 import { parseCsv } from "./csv";
+import { buildOecdRequest } from "./oecd-request";
 
 const OECD_API = "https://sdmx.oecd.org/public/rest/data/OECD.SDD.STES,DSD_STES@DF_FINMARK,4.0/.M.SHARE.IX.....";
 const DATASET = "OECD Main Economic Indicators: Share prices";
@@ -40,10 +41,11 @@ export async function ingestOecdSharePrices(): Promise<Record<string, unknown>> 
   const lookbackMonths = Math.min(Math.max(Number(process.env.OECD_LOOKBACK_MONTHS) || 18, 3), 120);
   const start = new Date();
   start.setUTCMonth(start.getUTCMonth() - lookbackMonths);
-  const url = new URL(OECD_API);
-  url.searchParams.set("startPeriod", start.toISOString().slice(0, 7));
-  url.searchParams.set("dimensionAtObservation", "AllDimensions");
-  const response = await fetch(url, { headers: { accept: "text/csv" } });
+  // OECD's SDMX service currently errors with `languageTag1` while negotiating
+  // an unspecified CSV dialect/language. Request the SDMX CSV 2 dialect and an
+  // explicit label language; use the documented snake-case query parameter.
+  const request = buildOecdRequest(OECD_API, start.toISOString().slice(0, 7));
+  const response = await fetch(request.url, request.init);
   if (!response.ok) throw new Error(`OECD share-price API HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
   const rows = parseCsv(await response.text());
   const sourceId = await ensureSource();

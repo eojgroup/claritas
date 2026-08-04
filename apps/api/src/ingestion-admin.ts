@@ -5,6 +5,7 @@ import { ingestInstitutionalRss } from "./connectors/institutional-rss";
 import { ingestSecEdgar } from "./connectors/sec-edgar";
 import { ingestEcbData } from "./connectors/ecb";
 import { ingestOecdSharePrices } from "./connectors/oecd";
+import { ingestMajorMarkets } from "./connectors/yahoo-markets";
 import { ingestPodcastIndex, podcastParamsFromEnv, type PodcastIngestParams } from "./connectors/podcastindex";
 import { ingestWikidataLeadership } from "./connectors/wikidata-leadership";
 import { query } from "./db";
@@ -833,6 +834,7 @@ async function executeMarketRun(runId: number, plan: MarketRunPlan): Promise<voi
     }
     if (plan.providers.oecd) {
       await executeProviderStep(runId, steps, totals, "oecd/monthly-share-price-indices", ingestOecdSharePrices);
+      await executeProviderStep(runId, steps, totals, "yahoo/major-indices-commodities", ingestMajorMarkets);
     }
     const succeeded = steps.filter((step) => step.status === "success").length;
     if (succeeded === 0) throw new Error("All selected market providers failed.");
