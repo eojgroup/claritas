@@ -1340,8 +1340,18 @@ struct WeatherWorkspaceView: View {
             let cold = max(0, 5 - (row.temp_c ?? 5)) * 2
             let wind = max(0, (row.wind_gust ?? row.wind_speed ?? 10) - 10) * 2
             let rain = max(0, (forecast?.precipitation_probability ?? 50) - 50) * 0.35
-            let air = providerAQI.map { max(0, $0 - 2) * 12 } ?? otherAQI.map { max(0, $0 - 50) * 0.4 } ?? 0
-            let score = min(100, Int((max(heat, cold) + wind + rain + air + Double(alerts * 35)).rounded()))
+            let air: Double
+            if let providerAQI {
+                air = max(0.0, providerAQI - 2.0) * 12.0
+            } else if let otherAQI {
+                air = max(0.0, otherAQI - 50.0) * 0.4
+            } else {
+                air = 0.0
+            }
+            let temperatureRisk = max(heat, cold)
+            let alertRisk = Double(alerts * 35)
+            let rawScore = temperatureRisk + wind + rain + air + alertRisk
+            let score = min(100, Int(rawScore.rounded()))
             let reasons: [String?] = [
                 alerts > 0 ? "\(alerts) active official alert\(alerts == 1 ? "" : "s")" : nil,
                 (row.temp_c ?? 0) >= 35 ? "extreme heat \(compactNumber(row.temp_c))°C" : nil,

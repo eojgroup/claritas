@@ -202,9 +202,7 @@ private struct WatchTransportPulseView: View {
             .navigationTitle("Transport")
             .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
-        .onChange(
-            of: points.map { (point: WatchMapPoint) -> String in point.iso }
-        ) { (countryCodes: [String]) in
+        .onChange(of: points.map(\.iso)) { _, countryCodes in
             if let selectedCountry, countryCodes.contains(selectedCountry) { return }
             selectedCountry = countryCodes.first
         }
