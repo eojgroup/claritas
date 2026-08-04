@@ -22,7 +22,8 @@ const institutional_rss_1 = require("./connectors/institutional-rss");
 const sec_edgar_1 = require("./connectors/sec-edgar");
 const ecb_1 = require("./connectors/ecb");
 const oecd_1 = require("./connectors/oecd");
-const yahoo_markets_1 = require("./connectors/yahoo-markets");
+const fred_1 = require("./connectors/fred");
+const world_bank_1 = require("./connectors/world-bank");
 const podcastindex_1 = require("./connectors/podcastindex");
 const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
 const db_1 = require("./db");
@@ -69,6 +70,18 @@ const SOURCE_CONFIG = {
         provider: "oecd",
         authType: "none",
     },
+    fred: {
+        sourceName: "fred",
+        apiBaseUrl: "https://api.stlouisfed.org/fred",
+        provider: "fred",
+        authType: "api_key",
+    },
+    worldBank: {
+        sourceName: "world_bank_wdi",
+        apiBaseUrl: "https://api.worldbank.org/v2",
+        provider: "world-bank",
+        authType: "none",
+    },
     podcastindex: {
         sourceName: "podcastindex",
         apiBaseUrl: "https://api.podcastindex.org/api/1.0",
@@ -98,6 +111,8 @@ const INGESTION_SOURCE_NAMES = [
     "sec_edgar",
     "ecb",
     "oecd",
+    "fred",
+    "world_bank_wdi",
     "podcastindex",
     "wikidata",
 ];
@@ -268,7 +283,7 @@ function resolvePipeline(pipeline, sourceName) {
         return "weather";
     if (sourceName === "nws")
         return "weather";
-    if (sourceName === "sec_edgar" || sourceName === "ecb" || sourceName === "oecd")
+    if (["sec_edgar", "ecb", "oecd", "fred", "world_bank_wdi"].includes(sourceName))
         return "market";
     if (sourceName === "podcastindex")
         return "podcasts";
@@ -425,9 +440,14 @@ function buildMarketRunPlan(rawBody) {
         secEdgar: asBoolean(providerInput.secEdgar ?? providerInput.sec_edgar, true),
         ecb: asBoolean(providerInput.ecb, true),
         oecd: asBoolean(providerInput.oecd, true),
+        fred: asBoolean(providerInput.fred, false),
+        worldBank: asBoolean(providerInput.worldBank ?? providerInput.world_bank, true),
     };
-    if (!providers.secEdgar && !providers.ecb && !providers.oecd) {
+    if (!providers.secEdgar && !providers.ecb && !providers.oecd && !providers.fred && !providers.worldBank) {
         throw new IngestionValidationError("Select at least one market provider.");
+    }
+    if (providers.fred && !process.env.FRED_API_KEY?.trim()) {
+        throw new IngestionValidationError("FRED selected but FRED_API_KEY is not configured.");
     }
     return {
         providers,
@@ -621,7 +641,12 @@ async function executeMarketRun(runId, plan) {
         }
         if (plan.providers.oecd) {
             await executeProviderStep(runId, steps, totals, "oecd/monthly-share-price-indices", oecd_1.ingestOecdSharePrices);
-            await executeProviderStep(runId, steps, totals, "yahoo/major-indices-commodities", yahoo_markets_1.ingestMajorMarkets);
+        }
+        if (plan.providers.fred) {
+            await executeProviderStep(runId, steps, totals, "fred/public-institution-commodities-macro", fred_1.ingestFredMarketData);
+        }
+        if (plan.providers.worldBank) {
+            await executeProviderStep(runId, steps, totals, "world-bank/world-development-indicators", world_bank_1.ingestWorldBankIndicators);
         }
         const succeeded = steps.filter((step) => step.status === "success").length;
         if (succeeded === 0)
@@ -764,7 +789,8 @@ async function triggerMarketRun(input) {
         actor: input.actor,
         requestPayload: input.plan.requestPayload,
         sourceNameOverride: input.plan.providers.secEdgar
-            ? "secEdgar" : input.plan.providers.ecb ? "ecb" : "oecd",
+            ? "secEdgar" : input.plan.providers.ecb ? "ecb" : input.plan.providers.oecd ? "oecd"
+            : input.plan.providers.fred ? "fred" : "worldBank",
     });
     await safeAppendRunLog(run.id, "info", "Market ingestion run queued.", {
         requested_by: input.actor.email || input.actor.userId,
@@ -815,6 +841,8 @@ async function listRuns(options) {
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
         OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
         OR ($${pipelineIdx} = 'market' AND s.name = 'oecd')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'fred')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'world_bank_wdi')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`);
     }
@@ -900,6 +928,8 @@ async function getMetrics(options) {
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
         OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
         OR ($${pipelineIdx} = 'market' AND s.name = 'oecd')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'fred')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'world_bank_wdi')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`);
     }

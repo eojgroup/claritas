@@ -5,7 +5,8 @@ import { ingestInstitutionalRss } from "./connectors/institutional-rss";
 import { ingestSecEdgar } from "./connectors/sec-edgar";
 import { ingestEcbData } from "./connectors/ecb";
 import { ingestOecdSharePrices } from "./connectors/oecd";
-import { ingestMajorMarkets } from "./connectors/yahoo-markets";
+import { ingestFredMarketData } from "./connectors/fred";
+import { ingestWorldBankIndicators } from "./connectors/world-bank";
 import { ingestPodcastIndex, podcastParamsFromEnv, type PodcastIngestParams } from "./connectors/podcastindex";
 import { ingestWikidataLeadership } from "./connectors/wikidata-leadership";
 import { query } from "./db";
@@ -137,7 +138,7 @@ type WeatherRunPlan = {
 };
 
 type MarketRunPlan = {
-  providers: { secEdgar: boolean; ecb: boolean; oecd: boolean };
+  providers: { secEdgar: boolean; ecb: boolean; oecd: boolean; fred: boolean; worldBank: boolean };
   requestPayload: Record<string, unknown>;
 };
 
@@ -174,6 +175,8 @@ type SourceConfigKey =
   | "secEdgar"
   | "ecb"
   | "oecd"
+  | "fred"
+  | "worldBank"
   | "podcastindex"
   | "wikidata";
 
@@ -223,6 +226,18 @@ const SOURCE_CONFIG: Record<
     provider: "oecd",
     authType: "none",
   },
+  fred: {
+    sourceName: "fred",
+    apiBaseUrl: "https://api.stlouisfed.org/fred",
+    provider: "fred",
+    authType: "api_key",
+  },
+  worldBank: {
+    sourceName: "world_bank_wdi",
+    apiBaseUrl: "https://api.worldbank.org/v2",
+    provider: "world-bank",
+    authType: "none",
+  },
   podcastindex: {
     sourceName: "podcastindex",
     apiBaseUrl: "https://api.podcastindex.org/api/1.0",
@@ -255,6 +270,8 @@ const INGESTION_SOURCE_NAMES = [
   "sec_edgar",
   "ecb",
   "oecd",
+  "fred",
+  "world_bank_wdi",
   "podcastindex",
   "wikidata",
 ] as const;
@@ -422,7 +439,7 @@ function resolvePipeline(pipeline: string | null, sourceName: string): Ingestion
   if (sourceName === "institutional_rss") return "news";
   if (sourceName === "openweather") return "weather";
   if (sourceName === "nws") return "weather";
-  if (sourceName === "sec_edgar" || sourceName === "ecb" || sourceName === "oecd") return "market";
+  if (["sec_edgar", "ecb", "oecd", "fred", "world_bank_wdi"].includes(sourceName)) return "market";
   if (sourceName === "podcastindex") return "podcasts";
   if (sourceName === "wikidata") return "leadership";
   return "news";
@@ -614,9 +631,14 @@ export function buildMarketRunPlan(rawBody: unknown): MarketRunPlan {
     secEdgar: asBoolean(providerInput.secEdgar ?? providerInput.sec_edgar, true),
     ecb: asBoolean(providerInput.ecb, true),
     oecd: asBoolean(providerInput.oecd, true),
+    fred: asBoolean(providerInput.fred, false),
+    worldBank: asBoolean(providerInput.worldBank ?? providerInput.world_bank, true),
   };
-  if (!providers.secEdgar && !providers.ecb && !providers.oecd) {
+  if (!providers.secEdgar && !providers.ecb && !providers.oecd && !providers.fred && !providers.worldBank) {
     throw new IngestionValidationError("Select at least one market provider.");
+  }
+  if (providers.fred && !process.env.FRED_API_KEY?.trim()) {
+    throw new IngestionValidationError("FRED selected but FRED_API_KEY is not configured.");
   }
 
   return {
@@ -834,7 +856,12 @@ async function executeMarketRun(runId: number, plan: MarketRunPlan): Promise<voi
     }
     if (plan.providers.oecd) {
       await executeProviderStep(runId, steps, totals, "oecd/monthly-share-price-indices", ingestOecdSharePrices);
-      await executeProviderStep(runId, steps, totals, "yahoo/major-indices-commodities", ingestMajorMarkets);
+    }
+    if (plan.providers.fred) {
+      await executeProviderStep(runId, steps, totals, "fred/public-institution-commodities-macro", ingestFredMarketData);
+    }
+    if (plan.providers.worldBank) {
+      await executeProviderStep(runId, steps, totals, "world-bank/world-development-indicators", ingestWorldBankIndicators);
     }
     const succeeded = steps.filter((step) => step.status === "success").length;
     if (succeeded === 0) throw new Error("All selected market providers failed.");
@@ -989,7 +1016,8 @@ export async function triggerMarketRun(input: {
     actor: input.actor,
     requestPayload: input.plan.requestPayload,
     sourceNameOverride: input.plan.providers.secEdgar
-      ? "secEdgar" : input.plan.providers.ecb ? "ecb" : "oecd",
+      ? "secEdgar" : input.plan.providers.ecb ? "ecb" : input.plan.providers.oecd ? "oecd"
+        : input.plan.providers.fred ? "fred" : "worldBank",
   });
   await safeAppendRunLog(run.id, "info", "Market ingestion run queued.", {
     requested_by: input.actor.email || input.actor.userId,
@@ -1054,6 +1082,8 @@ export async function listRuns(options: {
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
         OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
         OR ($${pipelineIdx} = 'market' AND s.name = 'oecd')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'fred')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'world_bank_wdi')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`
     );
@@ -1164,6 +1194,8 @@ export async function getMetrics(options?: {
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
         OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
         OR ($${pipelineIdx} = 'market' AND s.name = 'oecd')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'fred')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'world_bank_wdi')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`
     );

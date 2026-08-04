@@ -298,6 +298,10 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchCountryMarkets()) }
             catch { return .failure(error) }
         }()
+        async let marketQuoteResult: Result<[MarketQuote], Error> = {
+            do { return .success(try await api.fetchMarketQuotes(refresh: false)) }
+            catch { return .failure(error) }
+        }()
         async let transportResult: Result<TransportOverview, Error> = {
             do {
                 return .success(
@@ -316,6 +320,7 @@ final class AppModel: ObservableObject {
             resolvedNews,
             resolvedPodcasts,
             resolvedMarket,
+            resolvedMarketQuotes,
             resolvedTransport
         ) = await (
             statsResult,
@@ -326,6 +331,7 @@ final class AppModel: ObservableObject {
             newsResult,
             podcastResult,
             marketResult,
+            marketQuoteResult,
             transportResult
         )
 
@@ -352,6 +358,9 @@ final class AppModel: ObservableObject {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedMarket, isPaymentRequired(error) {
+            paymentRequiredDetected = true
+        }
+        if case .failure(let error) = resolvedMarketQuotes, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedTransport, isPaymentRequired(error) {
@@ -393,7 +402,9 @@ final class AppModel: ObservableObject {
         }
         if case .success(let overview) = resolvedMarket {
             countryMarkets = overview.countries
-            marketQuotes = []
+        }
+        if case .success(let quotes) = resolvedMarketQuotes {
+            marketQuotes = quotes
         }
         if case .success(let transport) = resolvedTransport {
             transportOverview = transport
@@ -561,9 +572,11 @@ final class AppModel: ObservableObject {
         isRefreshingMarketQuotes = true
         defer { isRefreshingMarketQuotes = false }
         do {
-            let overview = try await api.fetchCountryMarkets()
+            async let overviewRequest = api.fetchCountryMarkets()
+            async let quotesRequest = api.fetchMarketQuotes(refresh: false)
+            let (overview, quotes) = try await (overviewRequest, quotesRequest)
             countryMarkets = overview.countries
-            marketQuotes = []
+            marketQuotes = quotes
         } catch {
             if isPaymentRequired(error) {
                 clearAppData()

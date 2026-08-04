@@ -598,7 +598,7 @@ struct DailyBriefingWorkspaceView: View {
             BrandMetricCard(title: "News", value: "\(model.news.count)", detail: "Signals in scope", tone: ClaritasPalette.dataBlue(for: colorScheme))
             BrandMetricCard(title: "Podcasts", value: "\(model.podcasts.count)", detail: "Evidence sources", tone: ClaritasPalette.shellAccentSecondary(for: colorScheme))
             BrandMetricCard(title: "Weather", value: "\(model.weather.count)", detail: "Current observations", tone: ClaritasPalette.shellAccent(for: colorScheme))
-            BrandMetricCard(title: "Markets", value: "\(model.countryMarkets.count)", detail: "OECD/ECB country regimes", tone: ClaritasPalette.positiveText(for: colorScheme))
+            BrandMetricCard(title: "Markets", value: "\(model.countryMarkets.count)", detail: "Benchmark/ECB country regimes", tone: ClaritasPalette.positiveText(for: colorScheme))
         }
     }
 
@@ -1516,7 +1516,7 @@ private struct AdminIngestionPanelView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("SEC EDGAR, ECB and OECD national share-price indices. All three market sources are keyless.")
+                        Text("SEC EDGAR, ECB, OECD national share-price indices and World Bank macro indicators are keyless. FRED public-institution series require FRED_API_KEY and can be selected from the web admin console.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
 

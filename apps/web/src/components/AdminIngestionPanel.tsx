@@ -123,6 +123,8 @@ function sourceLabel(sourceName: string): string {
   if (normalized === "sec_edgar") return "SEC EDGAR";
   if (normalized === "ecb") return "ECB";
   if (normalized === "oecd") return "OECD";
+  if (normalized === "fred") return "FRED";
+  if (normalized === "world_bank_wdi") return "World Bank WDI";
   if (normalized === "podcastindex") return "PodcastIndex";
   if (normalized === "wikidata") return "Wikidata";
   return sourceName;
@@ -294,6 +296,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [runSecEdgarProvider, setRunSecEdgarProvider] = useState(true);
   const [runEcbProvider, setRunEcbProvider] = useState(true);
   const [runOecdProvider, setRunOecdProvider] = useState(true);
+  const [runFredProvider, setRunFredProvider] = useState(false);
+  const [runWorldBankProvider, setRunWorldBankProvider] = useState(true);
   const [podcastSearchTerms, setPodcastSearchTerms] = useState(
     "geopolitics,security,technology,markets",
   );
@@ -541,7 +545,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   }, [refreshOverview, runNwsProvider, runOpenWeatherProvider, weatherCountry]);
 
   const handleTriggerMarket = useCallback(async () => {
-    if (!runSecEdgarProvider && !runEcbProvider && !runOecdProvider) {
+    if (!runSecEdgarProvider && !runEcbProvider && !runOecdProvider && !runFredProvider && !runWorldBankProvider) {
       setActionError("Select at least one market provider.");
       return;
     }
@@ -551,7 +555,13 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     try {
       const created = await triggerAdminMarketIngestion(
         {
-          providers: { secEdgar: runSecEdgarProvider, ecb: runEcbProvider, oecd: runOecdProvider },
+          providers: {
+            secEdgar: runSecEdgarProvider,
+            ecb: runEcbProvider,
+            oecd: runOecdProvider,
+            fred: runFredProvider,
+            worldBank: runWorldBankProvider,
+          },
         },
       );
       setActionNotice(`Market ingestion run #${created.run.id} was queued.`);
@@ -564,7 +574,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringMarket(false);
     }
-  }, [refreshOverview, runEcbProvider, runOecdProvider, runSecEdgarProvider]);
+  }, [refreshOverview, runEcbProvider, runFredProvider, runOecdProvider, runSecEdgarProvider, runWorldBankProvider]);
 
   const handleTriggerPodcasts = useCallback(async () => {
     const searchTerms = podcastSearchTerms
@@ -937,9 +947,11 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runSecEdgarProvider} onChange={(event) => setRunSecEdgarProvider(event.currentTarget.checked)} />SEC EDGAR (keyless)</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runEcbProvider} onChange={(event) => setRunEcbProvider(event.currentTarget.checked)} />ECB (keyless)</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOecdProvider} onChange={(event) => setRunOecdProvider(event.currentTarget.checked)} />OECD indices (keyless)</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runWorldBankProvider} onChange={(event) => setRunWorldBankProvider(event.currentTarget.checked)} />World Bank macro (keyless)</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runFredProvider} onChange={(event) => setRunFredProvider(event.currentTarget.checked)} />FRED public series (API key)</label>
             </div>
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
-              SEC supplies filing events and company facts; ECB supplies daily EUR FX and policy rates; OECD adds monthly national equity direction.
+              SEC supplies primary filings; ECB supplies daily EUR FX and policy rates; OECD supplies monthly national equity direction; World Bank adds annual country macro context. FRED is limited to allowlisted U.S.-government-origin energy and macro series and requires FRED_API_KEY.
             </div>
             <button
               type="button"

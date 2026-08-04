@@ -62,6 +62,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NWS_USER_AGENT, optional: true } }
             - name: SEC_EDGAR_SYMBOLS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: SEC_EDGAR_SYMBOLS, optional: true } }
+            - name: FRED_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-fred, key: FRED_API_KEY, optional: true } }
             - name: PODCAST_DISCOVERY_TERMS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_DISCOVERY_TERMS, optional: true } }
             - name: PODCAST_FEED_IDS

@@ -87,6 +87,7 @@ const legalPolicies = [
       "Do not attempt to bypass security controls or access data you are not permitted to see.",
       "Respect rate limits and avoid actions that could degrade service for other users.",
       "All content, dashboards, and reports remain the property of Claritas and its licensors.",
+      "By using FRED-powered market data in Claritas, you also agree to the FRED API Terms of Use linked beside those observations.",
       "We may update these terms to reflect product or regulatory changes.",
     ],
     note: "Violations may result in suspended access or termination of accounts. Continued use indicates acceptance of updated terms.",
@@ -262,6 +263,8 @@ const prettySourceName = (value: string): string => {
   if (normalized === "sec_edgar") return "SEC EDGAR";
   if (normalized === "ecb") return "ECB";
   if (normalized === "oecd") return "OECD";
+  if (normalized === "fred") return "FRED";
+  if (normalized === "world_bank_wdi") return "World Bank WDI";
   return value.trim();
 };
 
@@ -595,8 +598,12 @@ const getMarketProfile = (quote: MarketQuote): {
   };
 };
 
-const marketQuoteUrl = (symbol: string): string =>
-  `https://finance.yahoo.com/quote/${encodeURIComponent(symbol.trim().toUpperCase())}`;
+const marketQuoteUrl = (quote: MarketQuote): string | null => {
+  if (quote.source_url) return quote.source_url;
+  const payload = asObject(quote.payload);
+  const instrument = asObject(payload?.["instrument"]);
+  return asTrimmedString(instrument?.["data_url"] ?? instrument?.["quote_url"]) ?? null;
+};
 
 const COUNTRY_PRIMARY_MARKET_META: Record<string, { code: string; name: string }> = {
   US: { code: "NASDAQ", name: "NASDAQ Composite" },
@@ -715,6 +722,7 @@ import {
   fetchFxRates,
   fetchMarketFilings,
   fetchMarketIndicators,
+  fetchMarketQuotes,
   fetchNews,
   fetchPodcasts,
   fetchPolicyRates,
@@ -832,11 +840,11 @@ export default function ClaritasDashboard() {
   const [weatherForecastDetail, setWeatherForecastDetail] = useState<CountryWeatherForecastDetail | null>(null);
   const [weatherForecastLoading, setWeatherForecastLoading] = useState(false);
   const [leadershipStats, setLeadershipStats] = useState<CountryLeadership[]>([]);
-  const [marketQuotes] = useState<MarketQuote[]>([]);
+  const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [countryMarkets, setCountryMarkets] = useState<CountryMarketOverview[]>([]);
   const [countryMarketDetail, setCountryMarketDetail] = useState<CountryMarketDetail | null>(null);
   const [countryMarketMethodology, setCountryMarketMethodology] = useState<CountryMarketOverviewResponse["methodology"] | null>(null);
-  const [marketMapLayer, setMarketMapLayer] = useState<"composite" | "index" | "fx" | "filings">("composite");
+  const [marketMapLayer, setMarketMapLayer] = useState<"composite" | "index" | "fx" | "growth" | "filings">("composite");
   const [marketFilings, setMarketFilings] = useState<MarketFiling[]>([]);
   const [marketIndicators, setMarketIndicators] = useState<MarketIndicator[]>([]);
   const [fxRates, setFxRates] = useState<FxRate[]>([]);
@@ -1178,6 +1186,10 @@ export default function ClaritasDashboard() {
       });
     fetchMarketFilings({ limit: 80 }).then(setMarketFilings).catch(() => setMarketFilings([]));
     fetchMarketIndicators({ category: "company_fact", limit: 200 }).then(setMarketIndicators).catch(() => setMarketIndicators([]));
+    fetchMarketQuotes().then((rows) => {
+      setMarketQuotes(rows);
+      setSelectedSymbol((current) => current && rows.some((row) => row.symbol === current) ? current : rows[0]?.symbol ?? null);
+    }).catch(() => setMarketQuotes([]));
     fetchFxRates().then(setFxRates).catch(() => setFxRates([]));
     fetchPolicyRates().then(setPolicyRates).catch(() => setPolicyRates([]));
     fetchTransportOverview({ detail: "aggregate" })
@@ -2429,7 +2441,7 @@ export default function ClaritasDashboard() {
     .map((row) => ({ country: row.country, index: row.index_change_percent, fx: row.fx_change_percent, filings: row.filing_count_7d })), [marketCountryRows]);
 
   const marketPageRows = useMemo(() => {
-    return [...filteredMarket].sort(
+    return filteredMarket.filter((quote) => quote.instrument_type !== "macro").sort(
       (a, b) =>
         Math.abs(b.percent_change ?? b.change ?? 0) - Math.abs(a.percent_change ?? a.change ?? 0),
     );
@@ -2442,6 +2454,31 @@ export default function ClaritasDashboard() {
       change: quote.change ?? 0,
     }));
   }, [marketPageRows]);
+
+  const marketCommodityMoversData = useMemo(() => marketPageRows
+    .filter((quote) => quote.instrument_type === "commodity")
+    .slice(0, 12)
+    .map((quote) => ({
+      symbol: quote.canonical_symbol ?? quote.symbol,
+      name: quote.company_name ?? quote.symbol,
+      value: quote.price,
+      percent_change: quote.percent_change ?? 0,
+      currency: quote.currency,
+    })), [marketPageRows]);
+
+  const marketMacroGrowthData = useMemo(() => marketCountryRows
+    .filter((row) => row.gdp_growth != null)
+    .sort((left, right) => Math.abs(right.gdp_growth ?? 0) - Math.abs(left.gdp_growth ?? 0))
+    .slice(0, 20)
+    .map((row) => ({
+      country: row.country,
+      country_name: row.country_name,
+      growth: row.gdp_growth ?? 0,
+      inflation: row.inflation,
+      unemployment: row.unemployment,
+      current_account: row.current_account,
+      year: row.macro_latest_year,
+    })), [marketCountryRows]);
 
   const marketIndexPerfData = useMemo(() => {
     const byIndex = new Map<
@@ -2495,6 +2532,7 @@ export default function ClaritasDashboard() {
     >();
 
     marketPageRows.forEach((quote) => {
+      if (quote.scope === "global") return;
       const country = (asTrimmedString(quote.country)?.toUpperCase() ?? "—");
       const market = getMarketIdentity(quote);
       const marketCode = (market.code ?? "UNMAPPED").toUpperCase();
@@ -2547,7 +2585,9 @@ export default function ClaritasDashboard() {
           ? row.index_change_percent
           : marketMapLayer === "fx"
             ? row.fx_change_percent
-            : row.composite_change_percent;
+            : marketMapLayer === "growth"
+              ? row.gdp_growth
+              : row.composite_change_percent;
       const value = marketMapLayer === "filings" ? row.filing_count_7d : directionalValue;
       if (value == null || (marketMapLayer === "filings" && value <= 0)) return [];
       const scaled = Math.max(1, Math.round(Math.abs(value) * 18));
@@ -2565,7 +2605,7 @@ export default function ClaritasDashboard() {
           subtitle:
             marketMapLayer === "filings"
               ? `${row.filing_count_7d} SEC filings · trailing 7 days`
-              : `${value >= 0 ? "+" : ""}${value.toFixed(2)}% · ${marketMapLayer}`,
+              : `${value >= 0 ? "+" : ""}${value.toFixed(2)}% · ${marketMapLayer}${marketMapLayer === "growth" && row.macro_latest_year ? ` (${row.macro_latest_year})` : ""}`,
           lines: [
             row.index_symbol
               ? `${row.index_symbol}: ${formatSignedMetric(row.index_change_percent, 2, "%")}`
@@ -2574,6 +2614,7 @@ export default function ClaritasDashboard() {
               ? `${row.fx_symbol}: local currency ${formatSignedMetric(row.fx_change_percent, 2, "%")} vs EUR`
               : "FX: unavailable",
             `${row.filing_count_7d} SEC filings in 7 days`,
+            `Macro: GDP ${formatSignedMetric(row.gdp_growth, 1, "%")} · inflation ${row.inflation == null ? "unavailable" : `${formatMetricNumber(row.inflation, { maximumFractionDigits: 1 })}%`}`,
             `Freshness: ${row.freshness}`,
           ],
         },
@@ -2608,10 +2649,12 @@ export default function ClaritasDashboard() {
     marketMapLayer === "filings"
       ? "SEC filing activity · trailing 7 days"
       : marketMapLayer === "index"
-        ? "OECD share-price index direction · latest monthly observation"
+        ? "Latest configured national benchmark direction · source frequency shown per country"
         : marketMapLayer === "fx"
           ? "Local-currency direction versus EUR · latest daily reference rate"
-          : "Mixed-frequency market regime · OECD index 75% + ECB FX 25%";
+          : marketMapLayer === "growth"
+            ? "Latest World Bank annual real GDP growth · observation year shown per country"
+          : "Mixed-frequency market regime · national benchmark 75% + ECB FX 25%";
 
   const selectedCountryMarket = useMemo(() => {
     const country = (selectedCountry ?? pinnedCountry ?? "").toUpperCase();
@@ -2675,6 +2718,7 @@ export default function ClaritasDashboard() {
     countries: countryMarkets.length,
     indices: countryMarkets.filter((row) => row.index_change_percent != null).length,
     fx: countryMarkets.filter((row) => row.fx_change_percent != null).length,
+    macro: countryMarkets.filter((row) => row.gdp_growth != null || row.inflation != null || row.unemployment != null || row.current_account != null).length,
     filings: countryMarkets.reduce((sum, row) => sum + row.filing_count_7d, 0),
   }), [countryMarkets]);
 
@@ -2698,6 +2742,7 @@ export default function ClaritasDashboard() {
   const marketByCountry = useMemo(() => {
     const map = new Map<string, MarketQuote[]>();
     marketQuotes.forEach((quote) => {
+      if (quote.scope === "global" || quote.instrument_type === "macro") return;
       const iso = quote.country?.toUpperCase();
       if (!iso) return;
       const list = map.get(iso) ?? [];
@@ -2725,6 +2770,11 @@ export default function ClaritasDashboard() {
     );
   }, [marketQuotes, selectedSymbol]);
 
+  const selectedSymbolHistoryData = useMemo(() => (selectedSymbolQuote?.history ?? []).map((point) => ({
+    period: point.period_end,
+    value: point.value,
+  })), [selectedSymbolQuote]);
+
   const selectedSymbolMarket = useMemo(() => {
     if (!selectedSymbolQuote) return null;
     return getMarketIdentity(selectedSymbolQuote);
@@ -2738,7 +2788,7 @@ export default function ClaritasDashboard() {
   const relationCountry = useMemo(() => {
     const fromCountry = selectedCountry?.toUpperCase();
     if (fromCountry) return fromCountry;
-    const fromSymbol = selectedSymbolQuote?.country?.toUpperCase();
+    const fromSymbol = selectedSymbolQuote?.scope === "country" ? selectedSymbolQuote.country?.toUpperCase() : null;
     if (fromSymbol) return fromSymbol;
     return null;
   }, [selectedCountry, selectedSymbolQuote]);
@@ -3145,7 +3195,7 @@ export default function ClaritasDashboard() {
       title: `${row.country_name} · ${formatSignedMetric(row.composite_change_percent, 2, "%")}`,
       subtitle: [
         row.index_name ?? null,
-        row.index_change_percent != null ? `OECD ${formatSignedMetric(row.index_change_percent, 2, "%")}` : null,
+        row.index_change_percent != null ? `${row.index_source ?? "Benchmark"} ${formatSignedMetric(row.index_change_percent, 2, "%")}` : null,
         row.fx_change_percent != null ? `${row.currency ?? "FX"} ${formatSignedMetric(row.fx_change_percent, 2, "%")} vs EUR` : null,
         `${row.filing_count_7d} SEC filings / 7d`,
       ]
@@ -3282,7 +3332,7 @@ export default function ClaritasDashboard() {
       items.push({
         id: `market-regime-${topMover.country}-${topMover.index_period_end ?? topMover.fx_period_end ?? "current"}`,
         title: `${topMover.country_name} regime ${formatSignedMetric(topMover.composite_change_percent, 2, "%")}`,
-        description: `OECD ${formatSignedMetric(topMover.index_change_percent, 2, "%")} · ${topMover.currency ?? "FX"} ${formatSignedMetric(topMover.fx_change_percent, 2, "%")} vs EUR.`,
+        description: `${topMover.index_source ?? "Benchmark"} ${formatSignedMetric(topMover.index_change_percent, 2, "%")} · ${topMover.currency ?? "FX"} ${formatSignedMetric(topMover.fx_change_percent, 2, "%")} vs EUR.`,
         timeLabel: topMover.index_period_end ?? topMover.fx_period_end ?? "Current",
         tone: "attention",
         view: "markets",
@@ -5308,20 +5358,23 @@ export default function ClaritasDashboard() {
                               <div className="country-profile-section-heading">
                                 <ChartNoAxesCombined className="h-4 w-4" />
                                 <span>Market regime</span>
-                                <small>{relatedMarketCountry?.freshness ?? "unavailable"} · OECD / ECB / SEC</small>
+                                <small>{relatedMarketCountry?.freshness ?? "unavailable"} · market + macro context</small>
                               </div>
                               {relatedMarketCountry ? (
                                 <>
                                   <div className="country-transport-grid">
-                                    <div><span>OECD share prices</span><strong>{formatSignedMetric(relatedMarketCountry.index_change_percent, 2, "%")}</strong><small>{relatedMarketCountry.index_period_end ?? "No period"}</small></div>
+                                    <div><span>{relatedMarketCountry.index_source ?? "National benchmark"}</span><strong>{formatSignedMetric(relatedMarketCountry.index_change_percent, 2, "%")}</strong><small>{relatedMarketCountry.index_frequency ?? "unknown frequency"} · {relatedMarketCountry.index_period_end ?? "No period"}</small></div>
                                     <div><span>{relatedMarketCountry.currency ?? "FX"} vs EUR</span><strong>{formatSignedMetric(relatedMarketCountry.fx_change_percent, 2, "%")}</strong><small>{relatedMarketCountry.fx_period_end ?? "No period"}</small></div>
                                     <div><span>SEC activity</span><strong>{relatedMarketCountry.filing_count_7d}</strong><small>filings · trailing 7d</small></div>
+                                    <div><span>GDP growth</span><strong>{formatSignedMetric(relatedMarketCountry.gdp_growth, 1, "%")}</strong><small>World Bank · {relatedMarketCountry.macro_latest_year ?? "year unavailable"}</small></div>
+                                    <div><span>Inflation</span><strong>{relatedMarketCountry.inflation == null ? "—" : `${formatMetricNumber(relatedMarketCountry.inflation, { maximumFractionDigits: 1 })}%`}</strong><small>annual consumer prices</small></div>
+                                    <div><span>Current account</span><strong>{formatSignedMetric(relatedMarketCountry.current_account, 1, "% GDP")}</strong><small>external-balance context</small></div>
                                   </div>
-                                  <p className="country-transport-note">OECD is a monthly national share-price index; ECB FX is daily. The mixed-frequency composite is contextual, not a live tradable quote.</p>
+                                  <p className="country-transport-note">OECD and ECB form the directional regime; annual World Bank indicators remain a separate macro layer so unlike frequencies are never silently blended.</p>
                                   <button type="button" className="country-transport-open" onClick={() => setActiveView("markets")}>Open market analysis <ArrowUpRight className="h-3.5 w-3.5" /></button>
                                 </>
                               ) : (
-                                <div className="product-state">No OECD index, ECB currency or SEC country event is mapped for this country yet.</div>
+                                <div className="product-state">No configured benchmark, ECB currency or SEC country event is mapped for this country yet.</div>
                               )}
                             </section>
 
@@ -5734,7 +5787,7 @@ export default function ClaritasDashboard() {
                             
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <div className="text-[color:var(--shell-muted)]">
-                                Country regimes from OECD, ECB and SEC
+                                Country regimes from configured benchmarks, ECB and SEC
                               </div>
                               <div className="ml-auto text-xs text-[color:var(--shell-muted)]">
                                 {marketCountryRows.length} countries
@@ -5766,7 +5819,7 @@ export default function ClaritasDashboard() {
                                           <span className="text-xs text-[color:var(--shell-muted)]">{row.country_name}</span>
                                         </div>
                                         <div className="text-xs text-[color:var(--shell-muted)] mt-1">
-                                          {row.index_name ?? "No OECD national series"}
+                                          {row.index_name ?? "No national benchmark series"}
                                         </div>
                                       </div>
                                       <div className="text-right">
@@ -5782,12 +5835,12 @@ export default function ClaritasDashboard() {
                                                 : "text-[color:var(--shell-muted)]"
                                           }`}
                                         >
-                                          OECD {formatSignedMetric(row.index_change_percent, 2, "%")} · {row.currency ?? "FX"} {formatSignedMetric(row.fx_change_percent, 2, "%")}
+                                          {row.index_source ?? "Benchmark"} {formatSignedMetric(row.index_change_percent, 2, "%")} · {row.currency ?? "FX"} {formatSignedMetric(row.fx_change_percent, 2, "%")}
                                         </div>
                                       </div>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
-                                      <span>OECD period {row.index_period_end ?? "—"}</span>
+                                      <span>{row.index_frequency ?? "Benchmark"} period {row.index_period_end ?? "—"}</span>
                                       <span>ECB period {row.fx_period_end ?? "—"}</span>
                                       <span>SEC filings 7d {row.filing_count_7d}</span>
                                       <span className="ml-auto">
@@ -6425,7 +6478,7 @@ export default function ClaritasDashboard() {
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
                           featuredCountry={featuredNewsMarketCountry?.country}
-                          featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : "Strongest market move"}
+                          featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : marketMapLayer === "growth" ? "Largest GDP growth move" : "Strongest market move"}
                           scale="linear"
                           fillMode={marketMapLayer === "filings" ? "sequential" : "diverging"}
                           valueDomain={marketMapDomain}
@@ -7532,11 +7585,11 @@ export default function ClaritasDashboard() {
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Market workspace</div>
                     <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                      {countryMarketCoverage.countries} country regimes · OECD indices + ECB FX + SEC primary events
+                      {countryMarketCoverage.countries} country economies · OECD benchmarks + ECB FX + World Bank macro + SEC events
                     </div>
                   </div>
                   <div className="ml-auto inline-flex flex-wrap rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
-                    {(["composite", "index", "fx", "filings"] as const).map((layer) => (
+                    {(["composite", "index", "fx", "growth", "filings"] as const).map((layer) => (
                       <button
                         key={`market-layer-${layer}`}
                         type="button"
@@ -7567,12 +7620,12 @@ export default function ClaritasDashboard() {
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
                           featuredCountry={featuredMarketCountry?.country}
-                          featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : "Strongest market move"}
+                          featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : marketMapLayer === "growth" ? "Largest GDP growth move" : "Strongest market move"}
                           fillMode={marketMapLayer === "filings" ? "sequential" : "diverging"}
                           valueDomain={marketMapDomain}
                           valueUnit={marketMapLayer === "filings" ? "" : "%"}
                           showBubbles={false}
-                          legendLabel={marketMapLayer === "filings" ? "7-day filing count" : marketMapLayer === "index" ? "Latest monthly change" : marketMapLayer === "fx" ? "Latest daily FX change" : "Mixed-frequency regime change"}
+                          legendLabel={marketMapLayer === "filings" ? "7-day filing count" : marketMapLayer === "index" ? "Latest monthly change" : marketMapLayer === "fx" ? "Latest daily FX change" : marketMapLayer === "growth" ? "Annual real GDP growth" : "Mixed-frequency regime change"}
                         />
                       </div>
                     </div>
@@ -7591,12 +7644,34 @@ export default function ClaritasDashboard() {
                             <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><dt className="text-[color:var(--shell-muted)]">Currency vs EUR</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.fx_symbol ?? "—"} · {formatSignedMetric(selectedCountryMarket.fx_change_percent, 2, "%")}</dd></div>
                             <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><dt className="text-[color:var(--shell-muted)]">SEC activity</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.filing_count_7d} filings / 7d</dd></div>
                           </dl>
+                          <div className="mt-3 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
+                            <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                              <span>World Bank macro context</span>
+                              <span>{selectedCountryMarket.macro_latest_year ?? "Year unavailable"}</span>
+                            </div>
+                            <dl className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                              <div><dt className="text-[color:var(--shell-muted)]">GDP growth · {selectedCountryMarket.gdp_year ?? "—"}</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{formatSignedMetric(selectedCountryMarket.gdp_growth, 1, "%")}</dd></div>
+                              <div><dt className="text-[color:var(--shell-muted)]">Inflation · {selectedCountryMarket.inflation_year ?? "—"}</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.inflation == null ? "—" : `${formatMetricNumber(selectedCountryMarket.inflation, { maximumFractionDigits: 1 })}%`}</dd></div>
+                              <div><dt className="text-[color:var(--shell-muted)]">Unemployment · {selectedCountryMarket.unemployment_year ?? "—"}</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.unemployment == null ? "—" : `${formatMetricNumber(selectedCountryMarket.unemployment, { maximumFractionDigits: 1 })}%`}</dd></div>
+                              <div><dt className="text-[color:var(--shell-muted)]">Current account · {selectedCountryMarket.current_account_year ?? "—"}</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{formatSignedMetric(selectedCountryMarket.current_account, 1, "% GDP")}</dd></div>
+                            </dl>
+                            {countryMarketDetail?.macro_indicators?.length ? (
+                              <div className="mt-2 space-y-1 border-t border-[color:var(--shell-border)] pt-2 text-[10px] text-[color:var(--shell-muted)]">
+                                {countryMarketDetail.macro_indicators.slice(0, 8).map((indicator) => (
+                                  <div key={`country-macro-${indicator.symbol}`} className="flex items-center justify-between gap-3">
+                                    <span className="truncate">{indicator.company_name ?? indicator.canonical_symbol ?? indicator.symbol}</span>
+                                    <span className="shrink-0 font-semibold text-[color:var(--shell-ink)]">{formatMetricNumber(indicator.price, { maximumFractionDigits: 2 })} {indicator.unit ?? ""} · {prettySourceName(indicator.source_name ?? "")}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
                           {countryMarketDetail && (countryMarketDetail.index_history.length > 1 || countryMarketDetail.fx_history.length > 1) && (
                             <div className="mt-3 grid grid-cols-1 gap-3">
                               {countryMarketDetail.index_history.length > 1 && (
                                 <div>
-                                  <div className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">OECD index level · 36 months</div>
-                                  <div className="h-36" aria-label={`${selectedCountryMarket.index_name ?? "OECD share-price index"} history`}>
+                                  <div className="text-[10px] uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Benchmark level · {selectedCountryMarket.index_frequency ?? "source frequency"}</div>
+                                  <div className="h-36" aria-label={`${selectedCountryMarket.index_name ?? "National benchmark"} history`}>
                                     <ResponsiveContainer width="100%" height="100%">
                                       <AreaChart data={countryMarketDetail.index_history}>
                                         <XAxis dataKey="period_end" minTickGap={24} tickFormatter={(value) => String(value).slice(0, 7)} />
@@ -7637,7 +7712,7 @@ export default function ClaritasDashboard() {
                       <div className="font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Connected context</div>
                       <div className="mt-2 text-[color:var(--shell-ink)]">Weather: {relatedWeather ? `${relatedWeather.temp_c ?? "—"}°C · ${relatedWeather.weather_main ?? "—"} · AQI ${relatedWeather.air_quality?.provider_aqi ?? relatedWeather.air_quality?.european_aqi ?? relatedWeather.air_quality?.us_aqi ?? "—"}${relatedWeather.air_quality?.aqi_scale ? ` (${relatedWeather.air_quality.aqi_scale})` : ""}` : "select a covered country"}</div>
                       <div className="mt-1 text-[color:var(--shell-ink)]">News: {relatedNews.length} recent mapped stories</div>
-                      <div className="mt-1 text-[color:var(--shell-muted)]">Composite = 75% OECD monthly share-price direction + 25% ECB daily local-currency direction versus EUR when both exist; otherwise the available component is shown. Missing values are not imputed.</div>
+                      <div className="mt-1 text-[color:var(--shell-muted)]">Composite = 75% latest national benchmark direction + 25% ECB daily local-currency direction versus EUR when both exist; otherwise the available component is shown. Missing values are not imputed.</div>
                     </div>
                   </div>
                 </section>
@@ -7688,7 +7763,53 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-4">
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                  <div className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Global macro panorama</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Largest latest annual real-GDP growth rates</div>
+                    <div className="mt-3 h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={marketMacroGrowthData} layout="vertical" margin={{ left: 8, right: 18 }}>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis type="number" unit="%" />
+                          <YAxis type="category" dataKey="country" width={36} />
+                          <Tooltip formatter={(value, key) => [`${Number(value).toFixed(1)}%`, key === "growth" ? "Real GDP growth" : String(key)]} />
+                          <Bar dataKey="growth" radius={[0, 5, 5, 0]}>
+                            {marketMacroGrowthData.map((entry) => <Cell key={`macro-growth-${entry.country}`} fill={entry.growth >= 0 ? "var(--viz-positive)" : "var(--viz-negative)"} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    {marketMacroGrowthData.length === 0 && <div className="product-state">World Development Indicators will appear after the next market ingestion run.</div>}
+                  </div>
+                  <div className={`${cardBase} min-w-0 overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Macro comparison</div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">Growth, inflation, labour and external balance</div>
+                    </div>
+                    <div className="app-scroll-panel max-h-[22rem] overflow-auto">
+                      <table className="min-w-full text-xs">
+                        <thead className="sticky top-0 bg-[color:var(--shell-surface)] text-left text-[color:var(--shell-muted)]">
+                          <tr><th className="px-3 py-2">Country</th><th className="px-3 py-2">GDP</th><th className="px-3 py-2">Inflation</th><th className="px-3 py-2">Unemployment</th><th className="px-3 py-2">Current account</th></tr>
+                        </thead>
+                        <tbody>
+                          {marketCountryRows.filter((row) => row.gdp_growth != null || row.inflation != null).map((row) => (
+                            <tr key={`macro-ledger-${row.country}`} onClick={() => setSelectedCountry(row.country)} className="cursor-pointer border-t border-[color:var(--shell-border)] text-[color:var(--shell-ink)] hover:bg-[color:var(--shell-surface)]">
+                              <td className="px-3 py-2"><strong>{row.country}</strong><small className="block text-[color:var(--shell-muted)]">{row.macro_latest_year ?? "—"}</small></td>
+                              <td className="px-3 py-2">{formatSignedMetric(row.gdp_growth, 1, "%")}<small className="block text-[color:var(--shell-muted)]">{row.gdp_year ?? "—"}</small></td>
+                              <td className="px-3 py-2">{row.inflation == null ? "—" : `${formatMetricNumber(row.inflation, { maximumFractionDigits: 1 })}%`}<small className="block text-[color:var(--shell-muted)]">{row.inflation_year ?? "—"}</small></td>
+                              <td className="px-3 py-2">{row.unemployment == null ? "—" : `${formatMetricNumber(row.unemployment, { maximumFractionDigits: 1 })}%`}<small className="block text-[color:var(--shell-muted)]">{row.unemployment_year ?? "—"}</small></td>
+                              <td className="px-3 py-2">{formatSignedMetric(row.current_account, 1, "%")}<small className="block text-[color:var(--shell-muted)]">{row.current_account_year ?? "—"}</small></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="border-t border-[color:var(--shell-border)] px-4 py-3 text-[11px] text-[color:var(--shell-muted)]">World Bank WDI · annual values · each indicator shows its own observation year. Select a country for complete provenance and history.</p>
+                  </div>
+                </section>
+
+                <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-5">
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Country coverage
@@ -7719,7 +7840,7 @@ export default function ClaritasDashboard() {
                       {countryMarketCoverage.indices}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      OECD monthly share-price series
+                      latest configured benchmark series
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
@@ -7733,6 +7854,11 @@ export default function ClaritasDashboard() {
                       Filings in trailing 7 days
                     </div>
                   </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Macro coverage</div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">{countryMarketCoverage.macro}</div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">World Bank country profiles</div>
+                  </div>
                 </section>
 
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
@@ -7742,6 +7868,7 @@ export default function ClaritasDashboard() {
                     <dl className="mt-3 space-y-2 text-xs">
                       <div><dt className="font-semibold text-[color:var(--shell-ink)]">Index</dt><dd className="text-[color:var(--shell-muted)]">{countryMarketMethodology?.index ?? "No licensed country-index provider configured."}</dd></div>
                       <div><dt className="font-semibold text-[color:var(--shell-ink)]">Currency</dt><dd className="text-[color:var(--shell-muted)]">{countryMarketMethodology?.fx ?? "ECB reference rates are not loaded."}</dd></div>
+                      <div><dt className="font-semibold text-[color:var(--shell-ink)]">Macro</dt><dd className="text-[color:var(--shell-muted)]">{countryMarketMethodology?.macro ?? "World Bank indicators are not loaded."}</dd></div>
                     </dl>
                   </section>
 
@@ -7757,8 +7884,8 @@ export default function ClaritasDashboard() {
 
                 <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
                   <div className={`${cardBase} min-w-0 p-4`}>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">OECD national share-price direction</div>
-                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Largest latest-month moves · not live quotes</div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">National benchmark direction</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Largest latest moves · frequency and source vary by country</div>
                     <div className="mt-3 h-72">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={marketIndexMoversData} layout="vertical" margin={{ left: 8, right: 18 }}>
@@ -7772,7 +7899,7 @@ export default function ClaritasDashboard() {
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                    {marketIndexMoversData.length === 0 && <div className="product-state">No OECD observations are loaded. The market ingestion must complete before this chart can render.</div>}
+                    {marketIndexMoversData.length === 0 && <div className="product-state">No configured national benchmark observations are loaded. The market ingestion must complete before this chart can render.</div>}
                   </div>
                   <div className={`${cardBase} min-w-0 p-4`}>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">ECB currency direction</div>
@@ -7802,7 +7929,7 @@ export default function ClaritasDashboard() {
                       <ResponsiveContainer width="100%" height="100%">
                         <ScatterChart>
                           <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
-                          <XAxis type="number" dataKey="index" name="OECD monthly" unit="%" />
+                          <XAxis type="number" dataKey="index" name="National benchmark" unit="%" />
                           <YAxis type="number" dataKey="fx" name="FX daily" unit="%" />
                           <Tooltip cursor={{ strokeDasharray: "3 3" }} />
                           <Scatter name="Countries" data={marketRelationshipData} fill="var(--viz-market)" />
@@ -7814,19 +7941,20 @@ export default function ClaritasDashboard() {
                   <div className={`${cardBase} min-w-0 overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country regime ledger</div>
-                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">Every mapped OECD, ECB and SEC component</div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">Every mapped benchmark, ECB and SEC component</div>
                     </div>
                     <div className="app-scroll-panel max-h-[31rem] overflow-auto">
                       <table className="min-w-full text-xs">
                         <thead className="sticky top-0 bg-[color:var(--shell-surface)] text-left text-[color:var(--shell-muted)]">
-                          <tr><th className="px-3 py-2">Country</th><th className="px-3 py-2">OECD index</th><th className="px-3 py-2">ECB FX</th><th className="px-3 py-2">Composite</th><th className="px-3 py-2">SEC 7d</th><th className="px-3 py-2">Freshness</th></tr>
+                          <tr><th className="px-3 py-2">Country</th><th className="px-3 py-2">Benchmark</th><th className="px-3 py-2">ECB FX</th><th className="px-3 py-2">GDP / inflation</th><th className="px-3 py-2">Composite</th><th className="px-3 py-2">SEC 7d</th><th className="px-3 py-2">Freshness</th></tr>
                         </thead>
                         <tbody>
                           {marketCountryRows.map((row) => (
                             <tr key={`country-regime-${row.country}`} onClick={() => setSelectedCountry(row.country)} className="cursor-pointer border-t border-[color:var(--shell-border)] text-[color:var(--shell-ink)] hover:bg-[color:var(--shell-surface)]">
                               <td className="px-3 py-2"><strong>{row.country}</strong><span className="ml-2 text-[color:var(--shell-muted)]">{row.country_name}</span></td>
-                              <td className="px-3 py-2"><strong>{formatSignedMetric(row.index_change_percent, 2, "%")}</strong><small className="block text-[color:var(--shell-muted)]">{row.index_value == null ? "No OECD series" : `${formatMetricNumber(row.index_value, { maximumFractionDigits: 2 })} · ${row.index_period_end ?? "—"}`}</small></td>
+                              <td className="px-3 py-2"><strong>{formatSignedMetric(row.index_change_percent, 2, "%")}</strong><small className="block text-[color:var(--shell-muted)]">{row.index_value == null ? "No benchmark series" : `${row.index_source ?? "source unavailable"} · ${row.index_frequency ?? "—"} · ${row.index_period_end ?? "—"}`}</small></td>
                               <td className="px-3 py-2"><strong>{row.currency ?? "—"} {formatSignedMetric(row.fx_change_percent, 3, "%")}</strong><small className="block text-[color:var(--shell-muted)]">{row.fx_rate == null ? "No ECB rate" : `${formatMetricNumber(row.fx_rate, { maximumFractionDigits: 4 })} per EUR · ${row.fx_period_end ?? "—"}`}</small></td>
+                              <td className="px-3 py-2"><strong>{formatSignedMetric(row.gdp_growth, 1, "%")}</strong><small className="block text-[color:var(--shell-muted)]">Inflation {row.inflation == null ? "—" : `${formatMetricNumber(row.inflation, { maximumFractionDigits: 1 })}%`} · {row.macro_latest_year ?? "—"}</small></td>
                               <td className={`px-3 py-2 font-semibold ${(row.composite_change_percent ?? 0) >= 0 ? "text-[color:var(--viz-positive)]" : "text-[color:var(--viz-negative)]"}`}>{formatSignedMetric(row.composite_change_percent, 2, "%")}</td>
                               <td className="px-3 py-2">{row.filing_count_7d}</td>
                               <td className="px-3 py-2 capitalize text-[color:var(--shell-muted)]">{row.freshness}</td>
@@ -7838,6 +7966,42 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
                 </section>
+
+                {marketCommodityMoversData.length > 0 && (
+                  <section className={`${cardBase} min-w-0 p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Global commodity monitor</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Latest public-institution energy spot prices and history</div>
+                    <div className="mt-3 h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={marketCommodityMoversData} layout="vertical" margin={{ left: 16, right: 22 }}>
+                          <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                          <XAxis type="number" unit="%" />
+                          <YAxis type="category" dataKey="name" width={112} />
+                          <Tooltip formatter={(value, key, item) => key === "percent_change"
+                            ? [`${Number(value).toFixed(2)}%`, "Latest change"]
+                            : [String(value), String(item.name)]} />
+                          <Bar dataKey="percent_change" radius={[0, 5, 5, 0]}>
+                            {marketCommodityMoversData.map((entry) => (
+                              <Cell key={`commodity-${entry.symbol}`} fill={entry.percent_change >= 0 ? "var(--viz-positive)" : "var(--viz-negative)"} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="mt-2 space-y-1 text-[11px] text-[color:var(--shell-muted)]">
+                      <p>These are global energy context series; their U.S. source jurisdiction is not treated as U.S. economic performance.</p>
+                      <p>This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.</p>
+                      <a
+                        href="https://fred.stlouisfed.org/docs/api/terms_of_use.html"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-semibold text-[color:var(--signal-cyan)] hover:underline"
+                      >
+                        FRED API Terms of Use <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
+                      </a>
+                    </div>
+                  </section>
+                )}
 
                 {marketPageRows.length > 0 && <>
                 <section className="market-primary-grid grid grid-cols-1 gap-4 xl:grid-cols-[0.82fr_1.18fr]">
@@ -7865,7 +8029,7 @@ export default function ClaritasDashboard() {
                             type="button"
                             onClick={() => {
                               setSelectedSymbol(quote.symbol);
-                              if (quote.country) setSelectedCountry(quote.country.toUpperCase());
+                              if (quote.country && quote.scope === "country") setSelectedCountry(quote.country.toUpperCase());
                             }}
                             className={`analytics-row market-row w-full rounded-lg px-3 py-2 text-left transition ${
                               selected
@@ -7925,13 +8089,13 @@ export default function ClaritasDashboard() {
                                     : "—"}
                                 </div>
                                 <a
-                                  href={marketQuoteUrl(quote.symbol)}
+                                  href={marketQuoteUrl(quote) ?? undefined}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={(event) => event.stopPropagation()}
                                   className="mt-1 inline-block rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[10px] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
                                 >
-                                  Open quote
+                                  Open source
                                 </a>
                               </div>
                             </div>
@@ -8005,6 +8169,25 @@ export default function ClaritasDashboard() {
                             />
                           </div>
                         </div>
+                        {selectedSymbolHistoryData.length > 1 && (
+                          <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
+                            <div className="font-semibold text-[color:var(--shell-ink)]">Observation history</div>
+                            <div className="mt-1 text-[color:var(--shell-muted)]">
+                              {selectedSymbolQuote.frequency ?? "Unknown frequency"} · {selectedSymbolQuote.source_name ?? "source unavailable"} · {selectedSymbolHistoryData.length} observations
+                            </div>
+                            <div className="mt-2 h-40">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={selectedSymbolHistoryData}>
+                                  <CartesianGrid stroke={chartGridColor} strokeDasharray="3 3" />
+                                  <XAxis dataKey="period" minTickGap={28} />
+                                  <YAxis domain={["auto", "auto"]} width={52} />
+                                  <Tooltip formatter={(value) => [formatMetricNumber(Number(value), { maximumFractionDigits: 4 }), selectedSymbolQuote.unit ?? "Level"]} />
+                                  <Area type="monotone" dataKey="value" stroke="var(--viz-market)" fill="var(--viz-market-soft)" fillOpacity={0.38} />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </div>
+                        )}
                         <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-xs">
                           <div className="font-semibold text-[color:var(--shell-ink)]">Primary market</div>
                           <div className="mt-1 text-[color:var(--shell-muted)]">

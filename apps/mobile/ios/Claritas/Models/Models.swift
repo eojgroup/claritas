@@ -724,14 +724,27 @@ enum DailyBriefingScheduleOptions {
 }
 
 struct MarketQuote: Codable, Identifiable {
+    let instrument_id: Int?
+    let source_name: String?
+    let source_url: String?
     let symbol: String
+    let canonical_symbol: String?
     let company_name: String?
+    let instrument_type: String?
+    let asset_class: String?
+    let scope: String?
     let exchange: String?
     let country: String?
     let currency: String?
     let market_code: String?
     let market_name: String?
     let market_kind: String?
+    let unit: String?
+    let frequency: String?
+    let value_semantics: String?
+    let attribution: String?
+    let license: String?
+    let original_publisher: String?
     let price: Double?
     let change: Double?
     let percent_change: Double?
@@ -739,21 +752,37 @@ struct MarketQuote: Codable, Identifiable {
     let low_price: Double?
     let open_price: Double?
     let previous_close: Double?
+    let volume: Double?
+    let period_end: String?
     let observed_at: String
+    let history: [MarketInstrumentHistoryPoint]?
     let payload: JSONValue?
 
     var id: String { "\(symbol)-\(observed_at)" }
     var observedDate: Date? { APIDateParser.parse(observed_at) }
 
     enum CodingKeys: String, CodingKey {
+        case instrument_id
+        case source_name
+        case source_url
         case symbol
+        case canonical_symbol
         case company_name
+        case instrument_type
+        case asset_class
+        case scope
         case exchange
         case country
         case currency
         case market_code
         case market_name
         case market_kind
+        case unit
+        case frequency
+        case value_semantics
+        case attribution
+        case license
+        case original_publisher
         case price
         case change
         case percent_change
@@ -761,9 +790,18 @@ struct MarketQuote: Codable, Identifiable {
         case low_price
         case open_price
         case previous_close
+        case volume
+        case period_end
         case observed_at
+        case history
         case payload
     }
+}
+
+struct MarketInstrumentHistoryPoint: Codable, Identifiable {
+    let period_end: String
+    let value: Double
+    var id: String { period_end }
 }
 
 struct CountryMarketOverview: Codable, Identifiable {
@@ -778,12 +816,24 @@ struct CountryMarketOverview: Codable, Identifiable {
     let index_change_percent: Double?
     let index_period_end: String?
     let index_source: String?
+    let index_frequency: String?
+    let index_scope: String?
     let fx_symbol: String?
     let fx_rate: Double?
     let fx_previous_rate: Double?
     let fx_change_percent: Double?
     let fx_period_end: String?
     let filing_count_7d: Int
+    let gdp_growth: Double?
+    let gdp_year: Int?
+    let inflation: Double?
+    let inflation_year: Int?
+    let unemployment: Double?
+    let unemployment_year: Int?
+    let current_account: Double?
+    let current_account_year: Int?
+    let macro_latest_year: Int?
+    let macro_source: String?
     let composite_change_percent: Double?
     let composite_basis: [String]
     let freshness: String
@@ -796,8 +846,10 @@ struct CountryMarketCoverage: Codable {
     let with_index: Int
     let with_fx: Int
     let with_filings: Int
+    let with_macro: Int?
     let current: Int
     let stale: Int
+    let instrument_countries: Int?
 }
 
 struct CountryMarketMethodology: Codable {
@@ -805,6 +857,7 @@ struct CountryMarketMethodology: Codable {
     let fx: String
     let composite: String
     let filings: String
+    let macro: String?
 }
 
 struct CountryMarketOverviewResponse: Codable {

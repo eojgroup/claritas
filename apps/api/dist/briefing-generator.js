@@ -8,6 +8,7 @@ const llm_1 = require("./llm");
 const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
 const transport_1 = require("./connectors/transport");
 const market_overview_1 = require("./connectors/market-overview");
+const market_instruments_1 = require("./connectors/market-instruments");
 const weather_1 = require("./connectors/weather");
 class BriefingGenerationError extends Error {
     status;
@@ -98,7 +99,7 @@ async function collectBriefingContext(options) {
     const marketLimit = clampInteger(options.maxMarketItems, 16, 5, 60);
     const weatherLimit = clampInteger(options.maxWeatherItems, 16, 5, 80);
     const leadershipLimit = clampInteger(options.maxLeadershipItems, 200, 1, 250);
-    const [newsResult, gdeltEventResult, gdeltSignalResult, podcastResult, marketOverview, marketEventResult, weatherResult, leadershipResult, transportResult,] = await Promise.all([
+    const [newsResult, gdeltEventResult, gdeltSignalResult, podcastResult, marketOverview, marketInstrumentSnapshots, marketEventResult, weatherResult, leadershipResult, transportResult,] = await Promise.all([
         (0, db_1.query)(`SELECT
          i.id,
          s.name AS source_name,
@@ -178,6 +179,7 @@ async function collectBriefingContext(options) {
        ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
        LIMIT $3`, [start, end, podcastLimit]),
         (0, market_overview_1.getCountryMarketOverview)(),
+        (0, market_instruments_1.getMarketInstrumentSnapshots)({ limit: Math.min(marketLimit * 3, 120) }),
         (0, db_1.query)(`SELECT
          me.event_type,
          me.symbol,
@@ -273,9 +275,38 @@ async function collectBriefingContext(options) {
             period_end: row.fx_period_end,
         } : null,
         sec_filings_7d: row.filing_count_7d,
+        macro: {
+            gdp_growth: row.gdp_growth,
+            gdp_year: row.gdp_year,
+            inflation: row.inflation,
+            inflation_year: row.inflation_year,
+            unemployment: row.unemployment,
+            unemployment_year: row.unemployment_year,
+            current_account: row.current_account,
+            current_account_year: row.current_account_year,
+            latest_year: row.macro_latest_year,
+            source: row.macro_source,
+        },
         composite_change_percent: row.composite_change_percent,
         composite_basis: row.composite_basis,
         freshness: row.freshness,
+    }));
+    const countryMacro = [...marketOverview.countries]
+        .filter((row) => row.gdp_growth != null || row.inflation != null || row.unemployment != null || row.current_account != null)
+        .sort((left, right) => Math.abs(right.gdp_growth ?? 0) - Math.abs(left.gdp_growth ?? 0))
+        .slice(0, Math.min(marketLimit * 2, 60))
+        .map((row) => ({
+        country: row.country,
+        country_name: row.country_name,
+        gdp_growth: row.gdp_growth,
+        gdp_year: row.gdp_year,
+        inflation: row.inflation,
+        inflation_year: row.inflation_year,
+        unemployment: row.unemployment,
+        unemployment_year: row.unemployment_year,
+        current_account: row.current_account,
+        current_account_year: row.current_account_year,
+        source: row.macro_source,
     }));
     const marketPrimaryEvents = marketEventResult.rows.map((row) => ({
         event_type: row.event_type,
@@ -287,6 +318,31 @@ async function collectBriefingContext(options) {
         url: row.url,
         event_time: timestampToIso(row.event_time),
         source: row.source_name,
+    }));
+    const marketInstruments = [...marketInstrumentSnapshots]
+        .sort((left, right) => Math.abs(right.percent_change ?? 0) - Math.abs(left.percent_change ?? 0))
+        .slice(0, Math.min(marketLimit * 2, 40))
+        .map((instrument) => ({
+        symbol: instrument.symbol,
+        canonical_symbol: instrument.canonical_symbol,
+        name: instrument.company_name,
+        instrument_type: instrument.instrument_type,
+        scope: instrument.scope,
+        primary_country: instrument.country,
+        country_relationships: instrument.related_countries,
+        exchange: instrument.market_name,
+        currency: instrument.currency,
+        level: instrument.price,
+        previous_level: instrument.previous_close,
+        change: instrument.change,
+        percent_change: instrument.percent_change,
+        value_semantics: instrument.value_semantics,
+        frequency: instrument.frequency,
+        period_end: instrument.period_end,
+        source: instrument.source_name,
+        source_url: instrument.source_url,
+        attribution: instrument.attribution,
+        original_publisher: instrument.original_publisher,
     }));
     const airQualitySeverity = (row) => row.air_quality?.provider_aqi != null
         ? (row.air_quality.provider_aqi / 5) * 25
@@ -339,6 +395,9 @@ async function collectBriefingContext(options) {
         coverage: marketOverview.coverage,
         methodology: marketOverview.methodology,
         sources: marketOverview.sources,
+        largest_instrument_moves: marketInstruments.slice(0, 10),
+        commodities: marketInstruments.filter((instrument) => instrument.instrument_type === "commodity").slice(0, 10),
+        country_macro: countryMacro,
         note: "SEC filing activity is contextual rather than directional. Missing country-index data is not imputed.",
     };
     const leadership = leadershipResult.slice(0, leadershipLimit).map((row) => ({
@@ -386,6 +445,7 @@ async function collectBriefingContext(options) {
             news_signals: newsIntelligence.length,
             podcasts: podcasts.length,
             markets: markets.length,
+            market_instruments: marketInstruments.length,
             weather: weather.length,
             leadership: leadership.length,
             transport: transportResult.summary.active,
@@ -395,6 +455,7 @@ async function collectBriefingContext(options) {
         news_intelligence: newsIntelligence,
         podcasts,
         markets,
+        market_instruments: marketInstruments,
         market_primary_events: marketPrimaryEvents,
         market_analysis: marketAnalysis,
         weather,
@@ -411,7 +472,7 @@ function buildSystemPrompt() {
         "For news, name the publisher when supplied and distinguish it from the aggregation provider. Do not imply that an aggregation provider is the publisher.",
         "Write the briefing in English. Translate and summarize non-English news faithfully for comprehension, preserve publisher attribution, identify the original language when it is material, and never add context that is absent from the supplied evidence. The stored source title and text remain the auditable original evidence.",
         "GDELT Event records are machine-coded indicators, and GKG themes and tone are analytical metadata. Use them to identify coverage patterns and corroboration candidates; do not present an uncorroborated coded event, theme, or tone score as confirmed fact or public sentiment.",
-        "For markets, distinguish country-index direction, local-currency performance versus EUR, SEC filing activity, and the composite methodology. A filing count is activity, not positive or negative performance. Do not imply index coverage where the country-index component is missing.",
+        "For markets, distinguish country-index direction, local-currency performance versus EUR, public-institution commodity spot-price series, annual country macro indicators, SEC filing activity, and the composite methodology. State each series' source, frequency, period and original publisher when material. Do not describe the relative percent change of an unemployment, inflation or other rate as economic performance; use its level and percentage-point change. A commodity source-jurisdiction ISO2 is provenance, not a claim about national economic performance. A filing count is activity, not positive or negative performance. Do not imply index coverage where the country-index component is missing.",
         "For weather, explain the overall regime and material extrema using temperature, apparent temperature, precipitation, wind or gusts, air quality, and the supplied forecast horizon. Clearly distinguish current observations from forecasts.",
         "Connect weather, news, markets, filings, and transport only when the supplied geography or entity provides evidence for the relationship. Never claim causation from temporal or geographic coincidence.",
         "Transport comparisons use tracked observations, monitored-port geofences, and 24-hour comparison windows. Surface the leading country activity rank and the strongest material acceleration when ranking evidence is available, including the underlying ship-movement, tracked-flight, and live-link counts. Describe the index as relative within Claritas coverage, not total national activity. Describe cargo-vessel departures as a movement proxy; never present them as cargo tonnage, load, trade value, or complete port-authority counts.",

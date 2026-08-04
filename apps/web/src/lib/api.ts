@@ -200,15 +200,28 @@ export type CountryLeadership = {
 };
 
 export type MarketQuote = {
+  instrument_id?: number | null;
   source_name?: string | null;
+  source_url?: string | null;
   symbol: string;
+  canonical_symbol?: string;
   company_name: string | null;
+  instrument_type?: "equity_index" | "commodity" | "macro" | string;
+  asset_class?: string;
+  scope?: "country" | "regional" | "global" | string;
   exchange: string | null;
   country: string | null;
+  related_countries?: Array<{ country: string; relationship: string; is_primary: boolean }>;
   currency: string | null;
   market_code?: string | null;
   market_name?: string | null;
   market_kind?: string | null;
+  unit?: string | null;
+  frequency?: string | null;
+  value_semantics?: string | null;
+  attribution?: string | null;
+  license?: string | null;
+  original_publisher?: string | null;
   price: number | null;
   change: number | null;
   percent_change: number | null;
@@ -216,7 +229,10 @@ export type MarketQuote = {
   low_price: number | null;
   open_price: number | null;
   previous_close: number | null;
+  volume?: number | null;
+  period_end?: string;
   observed_at: string;
+  history?: Array<{ period_end: string; value: number }>;
   payload?: unknown;
 };
 
@@ -280,6 +296,8 @@ export type CountryMarketOverview = {
   index_period_end: string | null;
   index_observed_at: string | null;
   index_source: string | null;
+  index_frequency: string | null;
+  index_scope: string | null;
   fx_symbol: string | null;
   fx_rate: number | null;
   fx_previous_rate: number | null;
@@ -287,6 +305,16 @@ export type CountryMarketOverview = {
   fx_period_end: string | null;
   filing_count_7d: number;
   latest_filing_at: string | null;
+  gdp_growth: number | null;
+  gdp_year: number | null;
+  inflation: number | null;
+  inflation_year: number | null;
+  unemployment: number | null;
+  unemployment_year: number | null;
+  current_account: number | null;
+  current_account_year: number | null;
+  macro_latest_year: number | null;
+  macro_source: string | null;
   composite_change_percent: number | null;
   composite_basis: Array<"country_index" | "currency_vs_eur">;
   freshness: "current" | "stale" | "unavailable";
@@ -300,14 +328,17 @@ export type CountryMarketOverviewResponse = {
     with_index: number;
     with_fx: number;
     with_filings: number;
+    with_macro: number;
     current: number;
     stale: number;
+    instrument_countries: number;
   };
   methodology: {
     index: string;
     fx: string;
     composite: string;
     filings: string;
+    macro: string;
   };
   sources: string[];
 };
@@ -317,6 +348,8 @@ export type CountryMarketDetail = {
   fx_history: Array<{ period_end: string; value: number; percent_change: number | null }>;
   index_history: Array<{ period_end: string; value: number; percent_change: number | null }>;
   filings: MarketFiling[];
+  related_instruments: MarketQuote[];
+  macro_indicators: MarketQuote[];
   methodology: CountryMarketOverviewResponse["methodology"];
 };
 
@@ -1291,7 +1324,7 @@ export async function triggerAdminWeatherIngestion(payload?: {
 }
 
 export async function triggerAdminMarketIngestion(payload?: {
-  providers?: { secEdgar?: boolean; ecb?: boolean; oecd?: boolean };
+  providers?: { secEdgar?: boolean; ecb?: boolean; oecd?: boolean; fred?: boolean; worldBank?: boolean };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/market/run`, {
     method: "POST",

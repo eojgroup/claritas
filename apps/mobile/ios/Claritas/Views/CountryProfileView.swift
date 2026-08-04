@@ -80,7 +80,7 @@ struct CountryProfileView: View {
                         CountryMetric(
                             label: "Market regime",
                             value: signedPercent(marketOverview?.composite_change_percent),
-                            detail: marketOverview.map { "OECD + ECB · \($0.freshness)" } ?? "No mapped regime"
+                            detail: marketOverview.map { "\($0.index_source ?? "Benchmark") + ECB · \($0.freshness)" } ?? "No mapped regime"
                         )
                         CountryMetric(
                             label: "Transport",
@@ -95,9 +95,9 @@ struct CountryProfileView: View {
                                 .font(.headline)
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
                                 CountryMetric(
-                                    label: "OECD index",
+                                    label: marketOverview.index_source ?? "National benchmark",
                                     value: signedPercent(marketOverview.index_change_percent),
-                                    detail: marketOverview.index_period_end ?? "No monthly period"
+                                    detail: "\(marketOverview.index_frequency ?? "unknown frequency") · \(marketOverview.index_period_end ?? "No period")"
                                 )
                                 CountryMetric(
                                     label: "\(marketOverview.currency ?? "FX") vs EUR",
@@ -109,8 +109,28 @@ struct CountryProfileView: View {
                                     value: "\(marketOverview.filing_count_7d)",
                                     detail: "Trailing seven days"
                                 )
+                                CountryMetric(
+                                    label: "GDP growth",
+                                    value: signedPercent(marketOverview.gdp_growth),
+                                    detail: "World Bank · \(marketOverview.gdp_year.map { String($0) } ?? "year unavailable")"
+                                )
+                                CountryMetric(
+                                    label: "Inflation",
+                                    value: marketOverview.inflation.map { String(format: "%.1f%%", $0) } ?? "—",
+                                    detail: "Annual consumer prices · \(marketOverview.inflation_year.map { String($0) } ?? "—")"
+                                )
+                                CountryMetric(
+                                    label: "Unemployment",
+                                    value: marketOverview.unemployment.map { String(format: "%.1f%%", $0) } ?? "—",
+                                    detail: "Share of labour force · \(marketOverview.unemployment_year.map { String($0) } ?? "—")"
+                                )
+                                CountryMetric(
+                                    label: "Current account",
+                                    value: signedPercent(marketOverview.current_account),
+                                    detail: "Share of GDP · \(marketOverview.current_account_year.map { String($0) } ?? "—")"
+                                )
                             }
-                            Text("OECD is monthly and ECB FX is daily; the composite is contextual rather than a live quote.")
+                            Text("OECD and ECB form the directional regime. Annual World Bank indicators remain a separate macro layer so unlike frequencies are not silently blended.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }

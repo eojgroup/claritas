@@ -48,6 +48,7 @@ const sec_edgar_1 = require("./connectors/sec-edgar");
 const ecb_1 = require("./connectors/ecb");
 const oecd_1 = require("./connectors/oecd");
 const market_overview_1 = require("./connectors/market-overview");
+const market_instruments_1 = require("./connectors/market-instruments");
 const wikidata_leadership_1 = require("./connectors/wikidata-leadership");
 const transport_1 = require("./connectors/transport");
 const db_1 = require("./db");
@@ -2448,29 +2449,48 @@ app.get("/api/transport/entities/:mode/:entityId", requireAuthenticated, async (
         });
     }
 });
-// Latest market quotes from sources that remain active.
+// Compatibility endpoint backed by the standardized instrument catalogue.
 app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
     try {
         (0, ingestion_automation_1.trackDemandSignal)("market");
         const symbols = typeof req.query.symbols === "string"
             ? req.query.symbols.split(/[\s,]+/).map((value) => value.trim().toUpperCase()).filter(Boolean)
             : [];
-        if (symbols.some((symbol) => !/^[A-Z0-9.^:_-]{1,24}$/.test(symbol)) || symbols.length > 100) {
+        if (symbols.some((symbol) => !/^[A-Z0-9.^:_=-]{1,32}$/.test(symbol)) || symbols.length > 100) {
             return res.status(400).json({ error: "symbols must contain at most 100 valid market identifiers." });
         }
-        const { rows } = await (0, db_1.query)(`SELECT ms.symbol, ms.company_name, ms.exchange, ms.country, ms.currency,
-              ms.price, ms.change, ms.percent_change, ms.high_price, ms.low_price,
-              ms.open_price, ms.previous_close, ms.observed_at, ms.payload,
-              s.name AS source_name
-       FROM market_snapshot ms
-       JOIN source s ON s.id = ms.source_id
-       WHERE COALESCE(s.metadata->>'retired', 'false') <> 'true'
-         AND (cardinality($1::text[]) = 0 OR upper(ms.symbol) = ANY($1::text[]))
-       ORDER BY abs(COALESCE(ms.percent_change, 0)) DESC, ms.observed_at DESC`, [symbols]);
-        res.json({ quotes: rows, refreshed: false, count: rows.length });
+        const quotes = await (0, market_instruments_1.getMarketInstrumentSnapshots)({ symbols });
+        res.json({ quotes, refreshed: false, count: quotes.length, generated_at: new Date().toISOString() });
     }
     catch (e) {
         res.status(500).json({ error: e.message || String(e) });
+    }
+});
+app.get("/api/market/instruments", requireAuthenticated, async (req, res) => {
+    try {
+        (0, ingestion_automation_1.trackDemandSignal)("market");
+        const symbols = typeof req.query.symbols === "string"
+            ? req.query.symbols.split(/[\s,]+/).map((value) => value.trim().toUpperCase()).filter(Boolean)
+            : [];
+        const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : undefined;
+        const instrumentType = typeof req.query.type === "string" ? req.query.type.trim().toLowerCase() : undefined;
+        if (symbols.some((symbol) => !/^[A-Z0-9.^:_=-]{1,32}$/.test(symbol)) || symbols.length > 100) {
+            return res.status(400).json({ error: "symbols must contain at most 100 valid market identifiers." });
+        }
+        if (country && !/^[A-Z]{2}$/.test(country))
+            return res.status(400).json({ error: "country must be an ISO2 code." });
+        if (instrumentType && !["equity_index", "commodity", "macro"].includes(instrumentType)) {
+            return res.status(400).json({ error: "type must be equity_index, commodity, or macro." });
+        }
+        const instruments = await (0, market_instruments_1.getMarketInstrumentSnapshots)({
+            symbols, country, instrumentType,
+            limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
+        });
+        const coverage = await (0, market_instruments_1.getMarketInstrumentCoverage)();
+        return res.json({ instruments, count: instruments.length, coverage });
+    }
+    catch (error) {
+        return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
     }
 });
 app.get("/api/market/countries", requireAuthenticated, async (_req, res) => {

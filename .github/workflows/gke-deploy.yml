@@ -404,6 +404,7 @@ jobs:
         env:
           NS: ${{ env.NAMESPACE }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
           PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
@@ -416,6 +417,16 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::OPENWEATHER_API_KEY secret not provided; skipping claritas-openweather upsert"
+          fi
+
+          # FRED requires a free API key. The connector itself limits ingestion
+          # to an explicit public-institution series allowlist.
+          if [ -n "${FRED_API_KEY:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-fred \
+              --from-literal=FRED_API_KEY="$FRED_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::FRED_API_KEY not provided; FRED ingestion remains opt-in and disabled"
           fi
 
           # Remove credentials for providers that are no longer part of the

@@ -172,7 +172,7 @@ struct PadOverviewView: View {
             metricCell(
                 title: "Market pulse",
                 value: String(format: "%+.2f%%", marketAverage),
-                detail: "\(trackedMarkets) OECD/ECB country regimes",
+                detail: "\(trackedMarkets) benchmark/ECB country regimes",
                 tone: marketAverage >= 0
                     ? ClaritasPalette.positiveText(for: colorScheme)
                     : ClaritasPalette.negativeText(for: colorScheme)

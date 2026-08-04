@@ -247,6 +247,26 @@ npm run dev
   - ECB Data API FX and policy-rate series and OECD share-price indices are
     keyless. Source and series identifiers remain
     attached to market records and API responses.
+  - Market benchmarks and commodities use a normalized `market_instrument`
+    catalogue plus durable `market_indicator` observations. Every national
+    benchmark has a primary ISO2 relationship; annual macro indicators use an
+    economic-indicator ISO2 relationship; global commodities retain a separate
+    source-jurisdiction relationship that is never treated as country performance.
+  - World Bank World Development Indicators are keyless and add country-level
+    GDP growth, inflation, unemployment and current-account context. The WDI
+    dataset is listed in the World Bank Data Catalog under CC BY 4.0, with
+    provider and dataset attribution stored on every observation.
+  - FRED requires the free `FRED_API_KEY`, available from
+    `https://fredaccount.stlouisfed.org/apikeys`. Claritas uses a strict allowlist:
+    EIA WTI, Brent and Henry Hub spot prices plus BLS/Federal Reserve U.S. macro
+    series. Third-party series such as proprietary indices and LBMA metals are
+    intentionally excluded. The original public-institution publisher and the
+    required FRED notice and API terms link are stored and shown alongside FRED
+    provenance on web and iOS.
+  - Frankfurter is not added because it republishes the ECB reference rates
+    already ingested directly. IMF data is not enabled: the IMF's current terms
+    ask potential commercial reusers to request permission, which does not meet
+    the repository's unconditional free-commercial-source policy.
   - OpenWeather Current Weather, 5 day / 3 hour Forecast and Air Pollution APIs
     supply global conditions, forecasts and air quality. Create
     `OPENWEATHER_API_KEY` at `https://home.openweathermap.org/users/sign_up`;
@@ -281,11 +301,12 @@ npm run dev
   - `infra/k8s/api-deployment.yaml`
 - Recommended secret names/keys in cluster:
   - `claritas-openweather` / `OPENWEATHER_API_KEY`
+  - `claritas-fred` / `FRED_API_KEY`
   - `claritas-podcastindex` / `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`
   - `claritas-aisstream` / `AISSTREAM_API_KEY`
 - Production secret source (recommended):
-  - GitHub repository secrets: `OPENWEATHER_API_KEY`, `PODCASTINDEX_API_KEY`,
-    `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`
+  - GitHub repository secrets: `OPENWEATHER_API_KEY`, `FRED_API_KEY`,
+    `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`
   - GitHub repository variables: `PODCAST_DISCOVERY_TERMS`, `PODCAST_FEED_IDS`,
     `PODCAST_MAX_FEEDS`, `PODCAST_MAX_EPISODES_PER_FEED`,
     `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`, `PODCASTINDEX_USER_AGENT`,

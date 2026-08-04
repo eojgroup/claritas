@@ -382,7 +382,7 @@ struct DashboardView: View {
                     mobileFocusMetric(
                         label: "Markets",
                         value: mobileCountryMarket?.composite_change_percent.map { String(format: "%+.1f%%", $0) } ?? "—",
-                        detail: mobileCountryMarket.map { "OECD + ECB · \($0.freshness)" } ?? "No regime"
+                        detail: mobileCountryMarket.map { "\($0.index_source ?? "Benchmark") + ECB · \($0.freshness)" } ?? "No regime"
                     )
                 }
 
@@ -475,7 +475,7 @@ struct DashboardView: View {
                             icon: "chart.line.uptrend.xyaxis",
                             eyebrow: "Market mover",
                             value: "\(market.country) · \(market.composite_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")",
-                            detail: "OECD \(market.index_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—") · \(market.currency ?? "FX") \(market.fx_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")",
+                            detail: "\(market.index_source ?? "Benchmark") \(market.index_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—") · \(market.currency ?? "FX") \(market.fx_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")",
                             tone: (market.composite_change_percent ?? 0) >= 0
                                 ? ClaritasPalette.positiveText(for: colorScheme)
                                 : ClaritasPalette.negativeText(for: colorScheme)
@@ -640,9 +640,9 @@ struct DashboardView: View {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let baseRows: [MarketQuote] = {
             if let iso = model.selectedCountry?.uppercased(), !iso.isEmpty {
-                return model.marketQuotes.filter { ($0.country ?? "").uppercased() == iso }
+                return model.marketQuotes.filter { $0.instrument_type != "macro" && ($0.country ?? "").uppercased() == iso }
             }
-            return model.marketQuotes
+            return model.marketQuotes.filter { $0.instrument_type != "macro" }
         }()
 
         guard !term.isEmpty else { return baseRows }
@@ -775,7 +775,7 @@ struct DashboardView: View {
                 id: "market-\($0.id)",
                 kind: "Market regime",
                 title: "\($0.country) • \($0.composite_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")",
-                detail: "OECD \($0.index_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—") • \($0.currency ?? "FX") \($0.fx_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")"
+                detail: "\($0.index_source ?? "Benchmark") \($0.index_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—") • \($0.currency ?? "FX") \($0.fx_change_percent.map { String(format: "%+.2f%%", $0) } ?? "—")"
             )
         }
 
@@ -832,7 +832,8 @@ struct DashboardView: View {
         if let selected = model.selectedCountry?.uppercased(), !selected.isEmpty {
             return selected
         }
-        if let country = selectedSymbolQuote?.country?.uppercased(), !country.isEmpty {
+        if selectedSymbolQuote?.scope == "country",
+           let country = selectedSymbolQuote?.country?.uppercased(), !country.isEmpty {
             return country
         }
         return nil
@@ -849,7 +850,7 @@ struct DashboardView: View {
     private var relatedMarkets: [MarketQuote] {
         guard let relationCountry else { return [] }
         return model.marketQuotes
-            .filter { ($0.country ?? "").uppercased() == relationCountry }
+            .filter { $0.scope != "global" && $0.instrument_type != "macro" && ($0.country ?? "").uppercased() == relationCountry }
             .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
     }
 
@@ -1683,6 +1684,20 @@ struct MarketsWorkspaceView: View {
         rows.filter { $0.currency != "EUR" && $0.index_change_percent != nil && $0.fx_change_percent != nil }
     }
 
+    private var macroRows: [CountryMarketOverview] {
+        rows
+            .filter { $0.gdp_growth != nil }
+            .sorted { abs($0.gdp_growth ?? 0) > abs($1.gdp_growth ?? 0) }
+            .prefix(20)
+            .map { $0 }
+    }
+
+    private var fredCommodityRows: [MarketQuote] {
+        model.marketQuotes
+            .filter { $0.source_name == "fred" && $0.instrument_type == "commodity" }
+            .sorted { ($0.company_name ?? $0.symbol) < ($1.company_name ?? $1.symbol) }
+    }
+
     var body: some View {
         BrandBackground {
             ScrollView {
@@ -1691,13 +1706,14 @@ struct MarketsWorkspaceView: View {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(
                                 kicker: "Markets",
-                                title: "Global country market regimes",
-                                detail: "OECD monthly share-price direction, ECB daily currency rates and SEC primary events."
+                                title: "Global economy and market regimes",
+                                detail: "OECD national benchmarks, ECB daily currency rates, World Bank annual macro context and SEC primary events."
                             )
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
                                 BrandMetricCard(title: "Countries", value: "\(rows.count)", detail: "Mapped regimes", tone: nil)
-                                BrandMetricCard(title: "OECD", value: "\(rows.filter { $0.index_change_percent != nil }.count)", detail: "National index series", tone: ClaritasPalette.darkGreen)
+                                BrandMetricCard(title: "Benchmarks", value: "\(rows.filter { $0.index_change_percent != nil }.count)", detail: "National index series", tone: ClaritasPalette.darkGreen)
                                 BrandMetricCard(title: "ECB FX", value: "\(rows.filter { $0.fx_change_percent != nil }.count)", detail: "Currencies vs EUR", tone: nil)
+                                BrandMetricCard(title: "Macro", value: "\(rows.filter { $0.gdp_growth != nil || $0.inflation != nil }.count)", detail: "World Bank profiles", tone: nil)
                                 BrandMetricCard(title: "SEC 7d", value: "\(rows.reduce(0) { $0 + $1.filing_count_7d })", detail: "Mapped filings", tone: nil)
                             }
                             HStack {
@@ -1715,7 +1731,7 @@ struct MarketsWorkspaceView: View {
 
                     BrandCard {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Largest OECD monthly moves")
+                            Text("Largest national benchmark moves")
                                 .font(.headline)
                             Chart(indexRows) { row in
                                 BarMark(x: .value("Country", row.country), y: .value("Monthly change", row.index_change_percent ?? 0))
@@ -1725,6 +1741,60 @@ struct MarketsWorkspaceView: View {
                             Text("National share-price indices; latest month-over-month change, not a live quote.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Global real-GDP growth panorama")
+                                .font(.headline)
+                            Chart(macroRows) { row in
+                                BarMark(x: .value("Country", row.country), y: .value("Annual GDP growth", row.gdp_growth ?? 0))
+                                    .foregroundStyle((row.gdp_growth ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
+                            }
+                            .frame(height: 220)
+                            Text("Latest World Development Indicator per country. Observation years can differ and are retained in the country drill-down.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if !fredCommodityRows.isEmpty {
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Global energy spot monitor")
+                                    .font(.headline)
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
+                                    ForEach(fredCommodityRows) { quote in
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(quote.company_name ?? quote.symbol)
+                                                .font(.subheadline.weight(.semibold))
+                                            Text(quote.price.map { String(format: "%.2f", $0) } ?? "—")
+                                                .font(.title3.weight(.semibold))
+                                                .monospacedDigit()
+                                            Text("\(quote.unit ?? "unit unavailable") · \(quote.period_end ?? "period unavailable")")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                            Text("Latest change \(mobileSignedPercent(quote.percent_change))")
+                                                .font(.caption)
+                                                .foregroundStyle((quote.percent_change ?? 0) >= 0
+                                                    ? ClaritasPalette.positiveText(for: colorScheme)
+                                                    : ClaritasPalette.negativeText(for: colorScheme))
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(10)
+                                        .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                                    }
+                                }
+                                Text("These EIA-origin spot series provide global energy context; their U.S. source jurisdiction is not treated as U.S. economic performance.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Link("FRED API Terms of Use", destination: URL(string: "https://fred.stlouisfed.org/docs/api/terms_of_use.html")!)
+                                    .font(.caption.weight(.semibold))
+                            }
                         }
                     }
 
@@ -1750,7 +1820,7 @@ struct MarketsWorkspaceView: View {
                                     .font(.headline)
                                 Chart(relationshipRows) { row in
                                     PointMark(
-                                        x: .value("OECD monthly", row.index_change_percent ?? 0),
+                                        x: .value("Benchmark", row.index_change_percent ?? 0),
                                         y: .value("ECB FX daily", row.fx_change_percent ?? 0)
                                     )
                                     .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
@@ -1773,11 +1843,15 @@ struct MarketsWorkspaceView: View {
                                     .font(.headline)
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 10)], spacing: 10) {
                                     BrandMetricCard(title: "Composite", value: mobileSignedPercent(selected.composite_change_percent), detail: "Mixed frequency", tone: nil)
-                                    BrandMetricCard(title: "OECD index", value: mobileSignedPercent(selected.index_change_percent), detail: selected.index_period_end ?? "No period", tone: nil)
+                                    BrandMetricCard(title: selected.index_source ?? "Benchmark", value: mobileSignedPercent(selected.index_change_percent), detail: "\(selected.index_frequency ?? "frequency unavailable") · \(selected.index_period_end ?? "No period")", tone: nil)
                                     BrandMetricCard(title: "\(selected.currency ?? "FX") vs EUR", value: mobileSignedPercent(selected.fx_change_percent), detail: selected.fx_period_end ?? "No period", tone: nil)
                                     BrandMetricCard(title: "SEC filings", value: "\(selected.filing_count_7d)", detail: "Trailing 7 days", tone: nil)
+                                    BrandMetricCard(title: "GDP growth", value: mobileSignedPercent(selected.gdp_growth), detail: "World Bank · \(selected.gdp_year.map { String($0) } ?? "year unavailable")", tone: ClaritasPalette.darkGreen)
+                                    BrandMetricCard(title: "Inflation", value: selected.inflation.map { String(format: "%.1f%%", $0) } ?? "—", detail: "Annual consumer prices · \(selected.inflation_year.map { String($0) } ?? "—")", tone: nil)
+                                    BrandMetricCard(title: "Unemployment", value: selected.unemployment.map { String(format: "%.1f%%", $0) } ?? "—", detail: "Share of labour force · \(selected.unemployment_year.map { String($0) } ?? "—")", tone: nil)
+                                    BrandMetricCard(title: "Current account", value: mobileSignedPercent(selected.current_account), detail: "Share of GDP · \(selected.current_account_year.map { String($0) } ?? "—")", tone: nil)
                                 }
-                                Text("Composite = 75% OECD monthly equity direction + 25% ECB daily FX direction when both exist; missing components are not imputed.")
+                                Text("Composite = 75% latest national benchmark direction + 25% ECB daily FX direction when both exist; missing components are not imputed.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -1795,7 +1869,7 @@ struct MarketsWorkspaceView: View {
                                     HStack(alignment: .top) {
                                         VStack(alignment: .leading, spacing: 3) {
                                             Text("\(row.country) · \(row.country_name)").font(.subheadline.weight(.semibold))
-                                            Text("OECD \(mobileSignedPercent(row.index_change_percent)) · \(row.currency ?? "FX") \(mobileSignedPercent(row.fx_change_percent)) · SEC \(row.filing_count_7d)")
+                                            Text("\(row.index_source ?? "Benchmark") \(mobileSignedPercent(row.index_change_percent)) · \(row.currency ?? "FX") \(mobileSignedPercent(row.fx_change_percent)) · GDP \(mobileSignedPercent(row.gdp_growth)) · SEC \(row.filing_count_7d)")
                                                 .font(.caption).foregroundStyle(.secondary)
                                         }
                                         Spacer()
@@ -1848,12 +1922,12 @@ private struct LegacyMarketsWorkspaceView: View {
     }
 
     private var countryOptions: [String] {
-        Array(Set(model.marketQuotes.compactMap { $0.country?.uppercased() }.filter { !$0.isEmpty })).sorted()
+        Array(Set(model.marketQuotes.filter { $0.scope != "global" && $0.instrument_type != "macro" }.compactMap { $0.country?.uppercased() }.filter { !$0.isEmpty })).sorted()
     }
 
     private var marketOptions: [MarketOption] {
         var mapped: [String: String] = [:]
-        for quote in model.marketQuotes {
+        for quote in model.marketQuotes where quote.instrument_type != "macro" {
             let identity = marketIdentity(for: quote)
             guard let code = identity.code, !code.isEmpty else { continue }
             mapped[code] = identity.name ?? code
@@ -1866,7 +1940,7 @@ private struct LegacyMarketsWorkspaceView: View {
     private var rows: [MarketQuote] {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let minMove = Double(minMoveText) ?? 0
-        var filtered = model.marketQuotes
+        var filtered = model.marketQuotes.filter { $0.instrument_type != "macro" }
 
         if let selectedCountry = model.selectedCountry?.uppercased(), !selectedCountry.isEmpty {
             filtered = filtered.filter { ($0.country ?? "").uppercased() == selectedCountry }
@@ -1945,7 +2019,7 @@ private struct LegacyMarketsWorkspaceView: View {
     private var peerQuotes: [MarketQuote] {
         guard let relatedCountry else { return [] }
         return model.marketQuotes
-            .filter { ($0.country ?? "").uppercased() == relatedCountry && $0.symbol != selectedQuote?.symbol }
+            .filter { $0.instrument_type != "macro" && ($0.country ?? "").uppercased() == relatedCountry && $0.symbol != selectedQuote?.symbol }
             .sorted { abs($0.percent_change ?? 0) > abs($1.percent_change ?? 0) }
             .prefix(5)
             .map { $0 }
@@ -1984,6 +2058,7 @@ private struct LegacyMarketsWorkspaceView: View {
     private var countrySummaryRows: [CountryMarketSummary] {
         var grouped: [String: [MarketQuote]] = [:]
         for quote in rows {
+            guard quote.scope != "global" else { continue }
             guard let country = quote.country?.uppercased(), !country.isEmpty else { continue }
             grouped[country, default: []].append(quote)
         }
@@ -2127,7 +2202,8 @@ private struct LegacyMarketsWorkspaceView: View {
                                 onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
                                 onSelectSymbol: { symbol in
                                     model.selectedSymbol = symbol
-                                    if let country = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() })?.country {
+                                    if let quote = model.marketQuotes.first(where: { $0.symbol.uppercased() == symbol.uppercased() }),
+                                       quote.scope == "country", let country = quote.country {
                                         model.selectedCountry = country.uppercased()
                                     }
                                 }
@@ -2144,7 +2220,23 @@ private struct LegacyMarketsWorkspaceView: View {
                                 VStack(alignment: .leading, spacing: 10) {
                                     ProfileFactRow(label: "Primary market", value: "\(identity.name ?? "Unknown") (\(identity.code ?? "—"))")
                                     ProfileFactRow(label: "Country", value: selectedQuote.country?.uppercased() ?? "—")
+                                    ProfileFactRow(label: "Source", value: "\(normalizedProviderName(selectedQuote.source_name) ?? "Unknown") · \(selectedQuote.frequency ?? "frequency unavailable")")
                                     ProfileFactRow(label: "Weather", value: relatedWeather.map { "\(compactNumber($0.temp_c))°C • \(compactNumber($0.humidity))% • \($0.weather_main ?? "—")" } ?? "No recent snapshot")
+
+                                    if let history = selectedQuote.history, history.count > 1 {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("Observation history")
+                                                .font(.caption.weight(.semibold))
+                                            Chart(history) { point in
+                                                LineMark(
+                                                    x: .value("Period", point.period_end),
+                                                    y: .value(selectedQuote.unit ?? "Level", point.value)
+                                                )
+                                                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                            }
+                                            .frame(height: 150)
+                                        }
+                                    }
 
                                     if !relatedNews.isEmpty {
                                         VStack(alignment: .leading, spacing: 6) {
@@ -2317,9 +2409,9 @@ private struct LegacyMarketsWorkspaceView: View {
                     onRefresh: { Task { await model.refreshMarketQuotes(forceRefresh: true) } },
                     onSelectSymbol: { symbol in
                         model.selectedSymbol = symbol
-                        if let country = model.marketQuotes.first(where: {
+                        if let quote = model.marketQuotes.first(where: {
                             $0.symbol.uppercased() == symbol.uppercased()
-                        })?.country {
+                        }), quote.scope == "country", let country = quote.country {
                             model.selectedCountry = country.uppercased()
                         }
                     }
@@ -2543,6 +2635,10 @@ private func normalizedProviderName(_ value: String?) -> String? {
         return "ECB"
     case "oecd":
         return "OECD"
+    case "fred":
+        return "FRED"
+    case "world_bank_wdi":
+        return "World Bank WDI"
     default:
         return value
     }
@@ -2625,7 +2721,7 @@ private struct CountryMarketListView: View {
                     .disabled(isRefreshing)
             }
             if rows.isEmpty {
-                Text("No OECD, ECB or SEC country regimes are loaded.")
+                Text("No benchmark, ECB or SEC country regimes are loaded.")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             ForEach(rows.sorted { abs($0.composite_change_percent ?? 0) > abs($1.composite_change_percent ?? 0) }.prefix(20)) { row in
@@ -2633,7 +2729,7 @@ private struct CountryMarketListView: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("\(row.country) · \(row.country_name)").font(.subheadline.weight(.semibold))
-                            Text("OECD \(percent(row.index_change_percent)) · \(row.currency ?? "FX") \(percent(row.fx_change_percent)) · SEC \(row.filing_count_7d)")
+                            Text("\(row.index_source ?? "Benchmark") \(percent(row.index_change_percent)) · \(row.currency ?? "FX") \(percent(row.fx_change_percent)) · SEC \(row.filing_count_7d)")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -2742,9 +2838,9 @@ private struct MarketQuoteListView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
 
-                            if let profileURL = metadata.webURL ?? quoteURL(quote.symbol) {
+                            if let profileURL = metadata.webURL ?? quoteURL(quote) {
                                 Link(destination: profileURL) {
-                                    Text("Company profile")
+                                    Text("Open source")
                                         .font(.caption2.weight(.semibold))
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 5)
@@ -2827,8 +2923,10 @@ private struct MarketQuoteListView: View {
         return number + suffix
     }
 
-    private func quoteURL(_ symbol: String) -> URL? {
-        URL(string: "https://finance.yahoo.com/quote/\(symbol.uppercased())")
+    private func quoteURL(_ quote: MarketQuote) -> URL? {
+        guard let sourceURL = quote.source_url?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sourceURL.isEmpty else { return nil }
+        return URL(string: sourceURL)
     }
 }
 
@@ -3038,6 +3136,7 @@ let legalPolicies: [LegalPolicy] = [
             "Do not bypass security controls or access data without permission.",
             "Respect rate limits and avoid actions that degrade service.",
             "Claritas content and reports remain the property of Claritas and its licensors.",
+            "By using FRED-powered market data in Claritas, you also agree to the FRED API Terms of Use linked beside those observations.",
             "We may update these terms to reflect product or regulatory changes."
         ],
         note: "Violations may result in suspended access or termination of accounts."
