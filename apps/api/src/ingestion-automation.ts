@@ -153,8 +153,9 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
     failure_backoff_minutes: 20,
     default_payload: {
       providers: {
-        newsapi: true,
-        thenewsapi: true,
+        newsapi: Boolean(process.env.NEWSAPI_API_KEY),
+        thenewsapi: Boolean(process.env.THENEWSAPI_API_TOKEN),
+        gdelt: true,
       },
       everything: {
         q: "OpenAI",
@@ -189,7 +190,7 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
     demand_window_minutes: 20,
     demand_threshold: 10,
     failure_backoff_minutes: 30,
-    default_payload: {},
+    default_payload: { providers: { openmeteo: true, openweather: false } },
   },
   market: {
     pipeline: "market",
@@ -203,6 +204,7 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
     demand_threshold: 15,
     failure_backoff_minutes: 10,
     default_payload: {
+      providers: { finnhub: Boolean(process.env.FINNHUB_API_KEY), secEdgar: true, ecb: true },
       symbols: ["SPY", "QQQ", "EWQ", "EWG", "EWU", "EWJ", "MCHI", "INDA", "EWA", "EWC", "EWZ", "EZA", "EWW"],
       includeNews: true,
       newsCategory: "general",
@@ -614,7 +616,13 @@ async function getLatestDataTimestamp(pipeline: IngestionPipeline): Promise<stri
   }
 
   if (pipeline === "weather") {
-    const { rows } = await query<LatestDataRow>(`SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot`);
+    const { rows } = await query<LatestDataRow>(
+      `SELECT MAX(latest_data_at) AS latest_data_at FROM (
+         SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot
+         UNION ALL SELECT MAX(updated_at) FROM weather_forecast
+         UNION ALL SELECT MAX(observed_at) FROM air_quality_snapshot
+       ) weather_sources`
+    );
     return timestampToString(rows[0]?.latest_data_at ?? null);
   }
 
@@ -630,7 +638,13 @@ async function getLatestDataTimestamp(pipeline: IngestionPipeline): Promise<stri
     return timestampToString(rows[0]?.latest_data_at ?? null);
   }
 
-  const { rows } = await query<LatestDataRow>(`SELECT MAX(observed_at) AS latest_data_at FROM market_snapshot`);
+  const { rows } = await query<LatestDataRow>(
+    `SELECT MAX(latest_data_at) AS latest_data_at FROM (
+       SELECT MAX(observed_at) AS latest_data_at FROM market_snapshot
+       UNION ALL SELECT MAX(updated_at) FROM market_event
+       UNION ALL SELECT MAX(observed_at) FROM market_indicator
+     ) market_sources`
+  );
   return timestampToString(rows[0]?.latest_data_at ?? null);
 }
 

@@ -38,6 +38,8 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-thenewsapi, key: THENEWSAPI_API_TOKEN, optional: true } }
             - name: OPENWEATHER_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
+            - name: OPEN_METEO_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-openmeteo, key: OPEN_METEO_API_KEY, optional: true } }
             - name: FINNHUB_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-finnhub, key: FINNHUB_API_KEY, optional: true } }
             - name: PODCASTINDEX_API_KEY
@@ -58,6 +60,14 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_MAX_ROUTE_LOOKUPS, optional: true } }
             - name: ADSB_LOL_USER_AGENT
               valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_USER_AGENT, optional: true } }
+            - name: GDELT_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: GDELT_USER_AGENT, optional: true } }
+            - name: GDELT_MAX_RAW_ROWS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: GDELT_MAX_RAW_ROWS, optional: true } }
+            - name: SEC_EDGAR_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SEC_EDGAR_USER_AGENT, optional: true } }
+            - name: SEC_EDGAR_SYMBOLS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SEC_EDGAR_SYMBOLS, optional: true } }
             - name: PODCAST_DISCOVERY_TERMS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_DISCOVERY_TERMS, optional: true } }
             - name: PODCAST_FEED_IDS

@@ -34,8 +34,9 @@ const RULE_DEFAULTS = {
         failure_backoff_minutes: 20,
         default_payload: {
             providers: {
-                newsapi: true,
-                thenewsapi: true,
+                newsapi: Boolean(process.env.NEWSAPI_API_KEY),
+                thenewsapi: Boolean(process.env.THENEWSAPI_API_TOKEN),
+                gdelt: true,
             },
             everything: {
                 q: "OpenAI",
@@ -70,7 +71,7 @@ const RULE_DEFAULTS = {
         demand_window_minutes: 20,
         demand_threshold: 10,
         failure_backoff_minutes: 30,
-        default_payload: {},
+        default_payload: { providers: { openmeteo: true, openweather: false } },
     },
     market: {
         pipeline: "market",
@@ -84,6 +85,7 @@ const RULE_DEFAULTS = {
         demand_threshold: 15,
         failure_backoff_minutes: 10,
         default_payload: {
+            providers: { finnhub: Boolean(process.env.FINNHUB_API_KEY), secEdgar: true, ecb: true },
             symbols: ["SPY", "QQQ", "EWQ", "EWG", "EWU", "EWJ", "MCHI", "INDA", "EWA", "EWC", "EWZ", "EZA", "EWW"],
             includeNews: true,
             newsCategory: "general",
@@ -451,7 +453,11 @@ async function getLatestDataTimestamp(pipeline) {
         return timestampToString(rows[0]?.latest_data_at ?? null);
     }
     if (pipeline === "weather") {
-        const { rows } = await (0, db_1.query)(`SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot`);
+        const { rows } = await (0, db_1.query)(`SELECT MAX(latest_data_at) AS latest_data_at FROM (
+         SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot
+         UNION ALL SELECT MAX(updated_at) FROM weather_forecast
+         UNION ALL SELECT MAX(observed_at) FROM air_quality_snapshot
+       ) weather_sources`);
         return timestampToString(rows[0]?.latest_data_at ?? null);
     }
     if (pipeline === "podcasts") {
@@ -462,7 +468,11 @@ async function getLatestDataTimestamp(pipeline) {
         const { rows } = await (0, db_1.query)(`SELECT MAX(retrieved_at) AS latest_data_at FROM country_leadership`);
         return timestampToString(rows[0]?.latest_data_at ?? null);
     }
-    const { rows } = await (0, db_1.query)(`SELECT MAX(observed_at) AS latest_data_at FROM market_snapshot`);
+    const { rows } = await (0, db_1.query)(`SELECT MAX(latest_data_at) AS latest_data_at FROM (
+       SELECT MAX(observed_at) AS latest_data_at FROM market_snapshot
+       UNION ALL SELECT MAX(updated_at) FROM market_event
+       UNION ALL SELECT MAX(observed_at) FROM market_indicator
+     ) market_sources`);
     return timestampToString(rows[0]?.latest_data_at ?? null);
 }
 async function getDemandRequests(pipeline, minutes) {

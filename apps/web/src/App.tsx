@@ -257,8 +257,12 @@ const prettySourceName = (value: string): string => {
   const normalized = value.trim().toLowerCase();
   if (normalized === "newsapi") return "NewsAPI";
   if (normalized === "thenewsapi") return "TheNewsAPI";
+  if (normalized === "gdelt") return "GDELT";
+  if (normalized === "openmeteo") return "Open-Meteo";
   if (normalized === "openweather") return "OpenWeather";
   if (normalized === "finnhub") return "Finnhub";
+  if (normalized === "sec_edgar") return "SEC EDGAR";
+  if (normalized === "ecb") return "ECB";
   return value.trim();
 };
 
@@ -698,11 +702,15 @@ import {
   fetchDailyBriefingEmailStatus,
   fetchDailyBriefingPreferenceOptions,
   fetchDailySignalBriefingLatest,
+  fetchFxRates,
   fetchMarketEarnings,
+  fetchMarketFilings,
+  fetchMarketIndicators,
   fetchMarketQuotes,
   fetchMarketStatus,
   fetchNews,
   fetchPodcasts,
+  fetchPolicyRates,
   fetchPersonalBriefingJob,
   fetchTransportOverview,
   getAuthStartUrl,
@@ -723,12 +731,16 @@ import {
   type DailyBriefingPreferenceOptions,
   type DailySignalBriefing,
   type EarningsEvent,
+  type FxRate,
+  type MarketFiling,
+  type MarketIndicator,
   type MarketQuote,
   type MarketStatus,
   type NewsItem,
   type PodcastEpisode,
   type PodcastExternalLink,
   type PodcastSignal,
+  type PolicyRate,
   type TransportOverview,
 } from "./lib/api";
 
@@ -812,6 +824,10 @@ export default function ClaritasDashboard() {
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [marketStatusRows, setMarketStatusRows] = useState<MarketStatus[]>([]);
   const [marketEarnings, setMarketEarnings] = useState<EarningsEvent[]>([]);
+  const [marketFilings, setMarketFilings] = useState<MarketFiling[]>([]);
+  const [marketIndicators, setMarketIndicators] = useState<MarketIndicator[]>([]);
+  const [fxRates, setFxRates] = useState<FxRate[]>([]);
+  const [policyRates, setPolicyRates] = useState<PolicyRate[]>([]);
   const [transportOverview, setTransportOverview] = useState<TransportOverview | null>(null);
   const [marketEarningsWindowDays, setMarketEarningsWindowDays] = useState<7 | 14 | 30>(14);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
@@ -845,6 +861,7 @@ export default function ClaritasDashboard() {
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
   const [newsSourceFilter, setNewsSourceFilter] = useState<string>("all");
   const [newsCountryFilter, setNewsCountryFilter] = useState("");
+  const [newsLanguageFilter, setNewsLanguageFilter] = useState("all");
   const [newsHasImageOnly, setNewsHasImageOnly] = useState(false);
   const [newsSortBy, setNewsSortBy] = useState<"newest" | "oldest" | "source">("newest");
   const [weatherConditionFilter, setWeatherConditionFilter] = useState<string>("all");
@@ -1148,6 +1165,10 @@ export default function ClaritasDashboard() {
     fetchMarketQuotes({ refresh: false })
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
+    fetchMarketFilings({ limit: 80 }).then(setMarketFilings).catch(() => setMarketFilings([]));
+    fetchMarketIndicators({ category: "company_fact", limit: 200 }).then(setMarketIndicators).catch(() => setMarketIndicators([]));
+    fetchFxRates().then(setFxRates).catch(() => setFxRates([]));
+    fetchPolicyRates().then(setPolicyRates).catch(() => setPolicyRates([]));
     fetchTransportOverview({ detail: "aggregate" })
       .then(setTransportOverview)
       .catch(() => setTransportOverview(null));
@@ -2196,11 +2217,18 @@ export default function ClaritasDashboard() {
     return Array.from(sources).sort((a, b) => a.localeCompare(b));
   }, [getSourceLabel, newsSearchScope]);
 
+  const newsLanguageOptions = useMemo(() =>
+    Array.from(new Set(newsSearchScope.map((item) => item.language_code?.toLowerCase()).filter((value): value is string => Boolean(value))))
+      .sort((a, b) => a.localeCompare(b)), [newsSearchScope]);
+
   const newsPageItems = useMemo(() => {
     let items = filteredNews;
     if (newsSourceFilter !== "all") {
       const normalized = newsSourceFilter.trim().toLowerCase();
       items = items.filter((item) => (getSourceLabel(item) ?? "").toLowerCase() === normalized);
+    }
+    if (newsLanguageFilter !== "all") {
+      items = items.filter((item) => item.language_code?.toLowerCase() === newsLanguageFilter);
     }
     if (newsHasImageOnly) {
       items = items.filter((item) => Boolean(getNewsImageUrl(item)));
@@ -2227,6 +2255,7 @@ export default function ClaritasDashboard() {
     getSourceLabel,
     newsCountryFilter,
     newsHasImageOnly,
+    newsLanguageFilter,
     newsSortBy,
     newsSourceFilter,
   ]);
@@ -5848,7 +5877,7 @@ export default function ClaritasDashboard() {
                       Global
                     </button>
                   </div>
-                  <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
                     <label className="text-[color:var(--shell-muted)]">
                       Source
                       <select
@@ -5861,6 +5890,19 @@ export default function ClaritasDashboard() {
                           <option key={source} value={source}>
                             {source}
                           </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-[color:var(--shell-muted)]">
+                      Language
+                      <select
+                        value={newsLanguageFilter}
+                        onChange={(event) => setNewsLanguageFilter(event.currentTarget.value)}
+                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
+                      >
+                        <option value="all">All languages</option>
+                        {newsLanguageOptions.map((language) => (
+                          <option key={language} value={language}>{language.toUpperCase()}</option>
                         ))}
                       </select>
                     </label>
@@ -7169,8 +7211,28 @@ export default function ClaritasDashboard() {
                               Humidity {entry.humidity ?? "—"}% · Wind {entry.wind_speed ?? "—"} m/s
                               {entry.weather_desc ? ` · ${entry.weather_desc}` : ""}
                             </div>
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[color:var(--shell-muted)]">
+                              <span>Feels {entry.apparent_temp_c ?? "—"}°C</span>
+                              <span>Precip {entry.precipitation_mm ?? "—"} mm</span>
+                              <span>Gust {entry.wind_gust ?? "—"} m/s</span>
+                              <span>AQI {entry.air_quality?.european_aqi ?? "—"} · {entry.air_quality?.label ?? "Unknown"}</span>
+                            </div>
+                            {entry.forecast && entry.forecast.length > 0 && (
+                              <div className="mt-2 grid grid-cols-3 gap-1">
+                                {entry.forecast.slice(0, 3).map((day) => (
+                                  <div key={day.forecast_time} className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-1">
+                                    <div className="font-semibold text-[color:var(--shell-ink)]">
+                                      {new Date(day.forecast_time).toLocaleDateString([], { weekday: "short" })}
+                                    </div>
+                                    <div>{day.temp_min_c ?? "—"}–{day.temp_max_c ?? "—"}° · {day.weather_main ?? "—"}</div>
+                                    <div>{day.precipitation_probability ?? "—"}% rain · UV {day.uv_index ?? "—"}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             <div className="mt-1 text-[color:var(--shell-muted)]">
                               {new Date(entry.observed_at).toLocaleString()}
+                              {entry.attribution ? ` · ${entry.attribution}` : ""}
                             </div>
                           </article>
                         );
@@ -7411,6 +7473,52 @@ export default function ClaritasDashboard() {
                         className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
                       />
                     </label>
+                  </div>
+                </section>
+
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                  <div className={`${cardBase} p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">ECB macro pulse</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Euro FX reference rates and policy benchmarks</div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {fxRates.slice(0, 8).map((rate) => (
+                        <div key={rate.series_key} className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-2 text-xs">
+                          <div className="font-semibold text-[color:var(--shell-ink)]">{rate.symbol}</div>
+                          <div className="mt-1 text-base font-semibold text-[color:var(--shell-ink)]">{formatMetricNumber(rate.value, { maximumFractionDigits: 4 })}</div>
+                          <div className={(rate.percent_change ?? 0) >= 0 ? "text-[color:var(--viz-positive)]" : "text-rose-600"}>{formatSignedMetric(rate.percent_change, 2, "%")}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                      {policyRates.map((rate) => (
+                        <span key={rate.series_key} className="rounded-full border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] px-3 py-1 text-[color:var(--shell-ink)]">
+                          {rate.name}: <strong>{formatMetricNumber(rate.value, { maximumFractionDigits: 3 })}{rate.unit === "PCPA" || rate.unit === "%" ? "%" : ` ${rate.unit ?? ""}`}</strong>
+                        </span>
+                      ))}
+                    </div>
+                    {fxRates.length === 0 && policyRates.length === 0 && <div className="mt-3 text-xs text-[color:var(--shell-muted)]">ECB series will appear after the first market ingestion run.</div>}
+                  </div>
+                  <div className={`${cardBase} p-4`}>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">SEC primary-source monitor</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">{selectedSymbol ? `Recent filings for ${selectedSymbol}` : "Latest 8-K, 10-Q and 10-K filings"}</div>
+                    {selectedSymbol && (
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                        {marketIndicators.filter((indicator) => indicator.symbol?.toUpperCase() === selectedSymbol.toUpperCase()).slice(0, 4).map((indicator) => (
+                          <span key={indicator.id} className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-1 text-[color:var(--shell-muted)]" title={`${indicator.period_end} · ${indicator.source_name}`}>
+                            {indicator.name}: <strong className="text-[color:var(--shell-ink)]">{formatCompactNumber(indicator.value)} {indicator.unit ?? ""}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="app-scroll-panel mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
+                      {marketFilings.filter((filing) => !selectedSymbol || filing.symbol?.toUpperCase() === selectedSymbol.toUpperCase()).slice(0, 12).map((filing) => (
+                        <a key={filing.id} href={filing.url ?? "#"} target="_blank" rel="noopener noreferrer" className="block rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-xs hover:border-[color:var(--shell-ink)]">
+                          <div className="flex justify-between gap-3 font-semibold text-[color:var(--shell-ink)]"><span>{filing.symbol ?? "—"} · {filing.title}</span><span>{new Date(filing.event_time).toLocaleDateString()}</span></div>
+                          {filing.summary && <div className="mt-1 text-[color:var(--shell-muted)]">{filing.summary}</div>}
+                        </a>
+                      ))}
+                      {marketFilings.filter((filing) => !selectedSymbol || filing.symbol?.toUpperCase() === selectedSymbol.toUpperCase()).length === 0 && <div className="text-xs text-[color:var(--shell-muted)]">No matching SEC filing events are loaded yet.</div>}
+                    </div>
                   </div>
                 </section>
 

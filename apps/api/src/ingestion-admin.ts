@@ -6,7 +6,11 @@ import {
 } from "./connectors/newsapi";
 import { ingestTheNewsApiNews, type IngestTheNewsApiParams } from "./connectors/thenewsapi";
 import { ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
+import { ingestOpenMeteoCountryWeather } from "./connectors/openmeteo";
 import { ingestFinnhubMarketNews, ingestFinnhubQuotes, resolveMarketSymbols } from "./connectors/finnhub";
+import { ingestGdelt } from "./connectors/gdelt";
+import { ingestSecEdgar } from "./connectors/sec-edgar";
+import { ingestEcbData } from "./connectors/ecb";
 import { ingestPodcastIndex, podcastParamsFromEnv, type PodcastIngestParams } from "./connectors/podcastindex";
 import { ingestWikidataLeadership } from "./connectors/wikidata-leadership";
 import { query } from "./db";
@@ -124,6 +128,7 @@ type IngestionTotals = {
 type NewsRunProviders = {
   newsapi: boolean;
   thenewsapi: boolean;
+  gdelt: boolean;
 };
 
 type NewsRunPlan = {
@@ -136,11 +141,13 @@ type NewsRunPlan = {
 
 type WeatherRunPlan = {
   country?: string;
+  providers: { openmeteo: boolean; openweather: boolean };
   requestPayload: Record<string, unknown>;
 };
 
 type MarketRunPlan = {
   symbols: string[];
+  providers: { finnhub: boolean; secEdgar: boolean; ecb: boolean };
   includeNews: boolean;
   newsCategory?: string;
   newsMinId?: number;
@@ -176,8 +183,12 @@ type TriggerRunInput = {
 type SourceConfigKey =
   | "newsapi"
   | "thenewsapi"
+  | "gdelt"
+  | "openmeteo"
   | "openweather"
   | "finnhub"
+  | "secEdgar"
+  | "ecb"
   | "podcastindex"
   | "wikidata";
 
@@ -197,6 +208,18 @@ const SOURCE_CONFIG: Record<
     provider: "thenewsapi",
     authType: "api_key",
   },
+  gdelt: {
+    sourceName: "gdelt",
+    apiBaseUrl: "https://api.gdeltproject.org/api/v2",
+    provider: "gdelt",
+    authType: "none",
+  },
+  openmeteo: {
+    sourceName: "openmeteo",
+    apiBaseUrl: "https://api.open-meteo.com",
+    provider: "openmeteo",
+    authType: process.env.OPEN_METEO_API_KEY ? "api_key" : "none",
+  },
   openweather: {
     sourceName: "openweather",
     apiBaseUrl: "https://api.openweathermap.org",
@@ -208,6 +231,18 @@ const SOURCE_CONFIG: Record<
     apiBaseUrl: "https://api.finnhub.io/api/v1",
     provider: "finnhub",
     authType: "api_key",
+  },
+  secEdgar: {
+    sourceName: "sec_edgar",
+    apiBaseUrl: "https://data.sec.gov",
+    provider: "sec_edgar",
+    authType: "none",
+  },
+  ecb: {
+    sourceName: "ecb",
+    apiBaseUrl: "https://data-api.ecb.europa.eu/service/data",
+    provider: "ecb",
+    authType: "none",
   },
   podcastindex: {
     sourceName: "podcastindex",
@@ -224,10 +259,9 @@ const SOURCE_CONFIG: Record<
 };
 
 const PIPELINE_SOURCE_DEFAULT: Record<IngestionPipeline, SourceConfigKey> = {
-  // For mixed-source news runs we keep NewsAPI as the canonical source row.
-  news: "newsapi",
-  weather: "openweather",
-  market: "finnhub",
+  news: "gdelt",
+  weather: "openmeteo",
+  market: "secEdgar",
   podcasts: "podcastindex",
   leadership: "wikidata",
 };
@@ -579,11 +613,12 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
   const providersRaw = asRecord(body.providers);
 
   const providers: NewsRunProviders = {
-    newsapi: asBoolean(providersRaw.newsapi, true),
-    thenewsapi: asBoolean(providersRaw.thenewsapi, true),
+    newsapi: asBoolean(providersRaw.newsapi, Boolean(process.env.NEWSAPI_API_KEY)),
+    thenewsapi: asBoolean(providersRaw.thenewsapi, Boolean(process.env.THENEWSAPI_API_TOKEN)),
+    gdelt: asBoolean(providersRaw.gdelt, true),
   };
 
-  if (!providers.newsapi && !providers.thenewsapi) {
+  if (!providers.newsapi && !providers.thenewsapi && !providers.gdelt) {
     throw new IngestionValidationError("Select at least one news provider.");
   }
   if (providers.newsapi && !process.env.NEWSAPI_API_KEY) {
@@ -668,18 +703,38 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
 export function buildWeatherRunPlan(rawBody: unknown): WeatherRunPlan {
   const body = asRecord(rawBody);
   const country = normalizeIso2(body.country, true);
+  const providerInput = asRecord(body.providers);
+  const providers = {
+    openmeteo: asBoolean(providerInput.openmeteo, true),
+    openweather: asBoolean(providerInput.openweather, Boolean(process.env.OPENWEATHER_API_KEY)),
+  };
+  if (!providers.openmeteo && !providers.openweather) {
+    throw new IngestionValidationError("Select at least one weather provider.");
+  }
+  if (providers.openweather && !process.env.OPENWEATHER_API_KEY) {
+    throw new IngestionValidationError("OpenWeather selected but OPENWEATHER_API_KEY is not configured.");
+  }
   return {
     country: country ? country.toUpperCase() : undefined,
-    requestPayload: country ? { country: country.toUpperCase() } : {},
+    providers,
+    requestPayload: { providers, ...(country ? { country: country.toUpperCase() } : {}) },
   };
 }
 
 export function buildMarketRunPlan(rawBody: unknown): MarketRunPlan {
-  if (!process.env.FINNHUB_API_KEY) {
-    throw new IngestionValidationError("FINNHUB_API_KEY is not configured.");
-  }
-
   const body = asRecord(rawBody);
+  const providerInput = asRecord(body.providers);
+  const providers = {
+    finnhub: asBoolean(providerInput.finnhub, Boolean(process.env.FINNHUB_API_KEY)),
+    secEdgar: asBoolean(providerInput.secEdgar ?? providerInput.sec_edgar, true),
+    ecb: asBoolean(providerInput.ecb, true),
+  };
+  if (!providers.finnhub && !providers.secEdgar && !providers.ecb) {
+    throw new IngestionValidationError("Select at least one market provider.");
+  }
+  if (providers.finnhub && !process.env.FINNHUB_API_KEY) {
+    throw new IngestionValidationError("Finnhub selected but FINNHUB_API_KEY is not configured.");
+  }
   const rawSymbols = Object.prototype.hasOwnProperty.call(body, "symbols") ? body.symbols : undefined;
   let symbols: string[];
   try {
@@ -717,11 +772,13 @@ export function buildMarketRunPlan(rawBody: unknown): MarketRunPlan {
 
   return {
     symbols,
+    providers,
     includeNews,
     newsCategory,
     newsMinId,
     newsMaxItems,
     requestPayload: {
+      providers,
       symbols,
       includeNews,
       newsCategory,
@@ -777,6 +834,44 @@ export function buildLeadershipRunPlan(_rawBody: unknown): LeadershipRunPlan {
   return { requestPayload: {} };
 }
 
+async function executeProviderStep(
+  runId: number,
+  steps: StepResult[],
+  totals: IngestionTotals,
+  step: string,
+  action: () => Promise<Record<string, unknown>>,
+): Promise<boolean> {
+  const startedAt = Date.now();
+  await safeAppendRunLog(runId, "info", `Running ${step} ingest.`);
+  try {
+    const result = await action();
+    mergeTotals(totals, extractTotals(result));
+    steps.push({
+      step,
+      status: "success",
+      started_at: new Date(startedAt).toISOString(),
+      finished_at: toIsoNow(),
+      duration_ms: Date.now() - startedAt,
+      result,
+    });
+    await safeAppendRunLog(runId, "info", `${step} ingest completed.`, { result });
+    return true;
+  } catch (error) {
+    const message = toErrorMessage(error);
+    steps.push({
+      step,
+      status: "failed",
+      started_at: new Date(startedAt).toISOString(),
+      finished_at: toIsoNow(),
+      duration_ms: Date.now() - startedAt,
+      error: message,
+    });
+    totals.http_failures += 1;
+    await safeAppendRunLog(runId, "error", `${step} ingest failed.`, { error: message });
+    return false;
+  }
+}
+
 async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
   const runStartedAt = Date.now();
   const steps: StepResult[] = [];
@@ -825,7 +920,7 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
         await safeAppendRunLog(runId, "error", "NewsAPI everything ingest failed.", {
           error: message,
         });
-        throw err;
+        // Continue: mixed-provider runs are successful when another selected source succeeds.
       }
     }
 
@@ -862,7 +957,7 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
         await safeAppendRunLog(runId, "error", "NewsAPI top-headlines ingest failed.", {
           error: message,
         });
-        throw err;
+        // Continue: mixed-provider runs are successful when another selected source succeeds.
       }
     }
 
@@ -912,11 +1007,20 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
         await safeAppendRunLog(runId, "error", "TheNewsAPI /news/top ingest failed.", {
           error: message,
         });
-        throw err;
+        // Continue: mixed-provider runs are successful when another selected source succeeds.
       }
     } else {
       await safeAppendRunLog(runId, "info", "Skipping TheNewsAPI step (provider not selected).");
     }
+
+    if (plan.providers.gdelt) {
+      await executeProviderStep(runId, steps, totals, "gdelt/doc-event-gkg", async () => ingestGdelt());
+    } else {
+      await safeAppendRunLog(runId, "info", "Skipping GDELT step (provider not selected).");
+    }
+
+    const succeeded = steps.filter((step) => step.status === "success").length;
+    if (succeeded === 0) throw new Error("All selected news providers failed.");
 
     const stats = {
       pipeline: "news",
@@ -960,41 +1064,17 @@ async function executeWeatherRun(runId: number, plan: WeatherRunPlan): Promise<v
       request: plan.requestPayload,
     });
 
-    const stepStartedAt = Date.now();
-    await safeAppendRunLog(runId, "info", "Running OpenWeather country-current ingest.", {
-      params: plan.requestPayload,
-    });
-
-    try {
-      const result = (await ingestOpenWeatherCountryCurrent(plan.country)) as unknown as Record<string, unknown>;
-      const stepTotals = extractTotals(result);
-      mergeTotals(totals, stepTotals);
-      steps.push({
-        step: "openweather/country-current",
-        status: "success",
-        started_at: new Date(stepStartedAt).toISOString(),
-        finished_at: toIsoNow(),
-        duration_ms: Date.now() - stepStartedAt,
-        result,
-      });
-      await safeAppendRunLog(runId, "info", "OpenWeather country-current ingest completed.", {
-        result,
-      });
-    } catch (err) {
-      const message = toErrorMessage(err);
-      steps.push({
-        step: "openweather/country-current",
-        status: "failed",
-        started_at: new Date(stepStartedAt).toISOString(),
-        finished_at: toIsoNow(),
-        duration_ms: Date.now() - stepStartedAt,
-        error: message,
-      });
-      await safeAppendRunLog(runId, "error", "OpenWeather country-current ingest failed.", {
-        error: message,
-      });
-      throw err;
+    if (plan.providers.openmeteo) {
+      await executeProviderStep(runId, steps, totals, "openmeteo/current-forecast-air-quality", async () =>
+        ingestOpenMeteoCountryWeather(plan.country));
     }
+    if (plan.providers.openweather) {
+      await executeProviderStep(runId, steps, totals, "openweather/country-current", async () =>
+        ingestOpenWeatherCountryCurrent(plan.country) as unknown as Record<string, unknown>);
+    }
+
+    const succeeded = steps.filter((step) => step.status === "success").length;
+    if (succeeded === 0) throw new Error("All selected weather providers failed.");
 
     const stats = {
       pipeline: "weather",
@@ -1038,94 +1118,28 @@ async function executeMarketRun(runId: number, plan: MarketRunPlan): Promise<voi
       request: plan.requestPayload,
     });
 
-    const stepStartedAt = Date.now();
-    await safeAppendRunLog(runId, "info", "Running Finnhub quote ingest.", {
-      params: plan.requestPayload,
-    });
-
-    try {
-      const result = (await ingestFinnhubQuotes(plan.symbols)) as unknown as Record<string, unknown>;
-      const stepTotals = extractTotals(result);
-      mergeTotals(totals, stepTotals);
-      steps.push({
-        step: "finnhub/quotes",
-        status: "success",
-        started_at: new Date(stepStartedAt).toISOString(),
-        finished_at: toIsoNow(),
-        duration_ms: Date.now() - stepStartedAt,
-        result,
-      });
-      await safeAppendRunLog(runId, "info", "Finnhub quote ingest completed.", {
-        result,
-      });
-    } catch (err) {
-      const message = toErrorMessage(err);
-      steps.push({
-        step: "finnhub/quotes",
-        status: "failed",
-        started_at: new Date(stepStartedAt).toISOString(),
-        finished_at: toIsoNow(),
-        duration_ms: Date.now() - stepStartedAt,
-        error: message,
-      });
-      await safeAppendRunLog(runId, "error", "Finnhub quote ingest failed.", {
-        error: message,
-      });
-      throw err;
+    if (plan.providers.finnhub) {
+      await executeProviderStep(runId, steps, totals, "finnhub/quotes", async () =>
+        ingestFinnhubQuotes(plan.symbols) as unknown as Record<string, unknown>);
+      if (plan.includeNews) {
+        await executeProviderStep(runId, steps, totals, "finnhub/market-news", async () =>
+          ingestFinnhubMarketNews({
+            category: plan.newsCategory,
+            minId: plan.newsMinId,
+            maxItems: plan.newsMaxItems,
+          }) as unknown as Record<string, unknown>);
+      }
+    }
+    if (plan.providers.secEdgar) {
+      await executeProviderStep(runId, steps, totals, "sec-edgar/filings-companyfacts", async () =>
+        ingestSecEdgar());
+    }
+    if (plan.providers.ecb) {
+      await executeProviderStep(runId, steps, totals, "ecb/fx-rates", async () => ingestEcbData());
     }
 
-    if (plan.includeNews) {
-      const newsStepStartedAt = Date.now();
-      const newsParams: Record<string, unknown> = {
-        category: plan.newsCategory ?? "general",
-      };
-      if (typeof plan.newsMinId === "number") {
-        newsParams.newsMinId = plan.newsMinId;
-      }
-      if (typeof plan.newsMaxItems === "number") {
-        newsParams.newsMaxItems = plan.newsMaxItems;
-      }
-      await safeAppendRunLog(runId, "info", "Running Finnhub market-news ingest.", {
-        params: newsParams,
-      });
-
-      try {
-        const result = (await ingestFinnhubMarketNews({
-          category: plan.newsCategory,
-          minId: plan.newsMinId,
-          maxItems: plan.newsMaxItems,
-        })) as unknown as Record<string, unknown>;
-        const stepTotals = extractTotals(result);
-        mergeTotals(totals, stepTotals);
-        steps.push({
-          step: "finnhub/market-news",
-          status: "success",
-          started_at: new Date(newsStepStartedAt).toISOString(),
-          finished_at: toIsoNow(),
-          duration_ms: Date.now() - newsStepStartedAt,
-          result,
-        });
-        await safeAppendRunLog(runId, "info", "Finnhub market-news ingest completed.", {
-          result,
-        });
-      } catch (err) {
-        const message = toErrorMessage(err);
-        steps.push({
-          step: "finnhub/market-news",
-          status: "failed",
-          started_at: new Date(newsStepStartedAt).toISOString(),
-          finished_at: toIsoNow(),
-          duration_ms: Date.now() - newsStepStartedAt,
-          error: message,
-        });
-        await safeAppendRunLog(runId, "error", "Finnhub market-news ingest failed.", {
-          error: message,
-        });
-        throw err;
-      }
-    } else {
-      await safeAppendRunLog(runId, "info", "Skipping Finnhub market-news ingest (includeNews=false).");
-    }
+    const succeeded = steps.filter((step) => step.status === "success").length;
+    if (succeeded === 0) throw new Error("All selected market providers failed.");
 
     const stats = {
       pipeline: "market",
@@ -1237,8 +1251,9 @@ export async function triggerNewsRun(input: {
   actor: TriggerActor;
   plan: NewsRunPlan;
 }): Promise<{ runId: number }> {
-  const sourceNameOverride =
-    input.plan.providers.thenewsapi && !input.plan.providers.newsapi ? "thenewsapi" : "newsapi";
+  const sourceNameOverride: SourceConfigKey = input.plan.providers.gdelt
+    ? "gdelt"
+    : input.plan.providers.thenewsapi && !input.plan.providers.newsapi ? "thenewsapi" : "newsapi";
   const run = await createRun({
     pipeline: "news",
     actor: input.actor,
@@ -1260,7 +1275,7 @@ export async function triggerWeatherRun(input: {
     pipeline: "weather",
     actor: input.actor,
     requestPayload: input.plan.requestPayload,
-    sourceNameOverride: "openweather",
+    sourceNameOverride: input.plan.providers.openmeteo ? "openmeteo" : "openweather",
   });
   await safeAppendRunLog(run.id, "info", "Weather ingestion run queued.", {
     requested_by: input.actor.email || input.actor.userId,
@@ -1277,7 +1292,7 @@ export async function triggerMarketRun(input: {
     pipeline: "market",
     actor: input.actor,
     requestPayload: input.plan.requestPayload,
-    sourceNameOverride: "finnhub",
+    sourceNameOverride: input.plan.providers.secEdgar ? "secEdgar" : input.plan.providers.ecb ? "ecb" : "finnhub",
   });
   await safeAppendRunLog(run.id, "info", "Market ingestion run queued.", {
     requested_by: input.actor.email || input.actor.userId,

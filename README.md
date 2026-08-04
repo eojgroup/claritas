@@ -209,6 +209,7 @@ npm run dev
   - `NEWSAPI_API_KEY`
   - `THENEWSAPI_API_TOKEN`
   - `OPENWEATHER_API_KEY`
+  - `OPEN_METEO_API_KEY` (optional; required for commercial customer endpoints)
   - `PODCASTINDEX_API_KEY`
   - `PODCASTINDEX_API_SECRET`
   - `AISSTREAM_API_KEY`
@@ -233,6 +234,19 @@ npm run dev
     product URL and monitored contact address.
   - Example: `Claritas/1.0 (https://claritas.info; engineering@claritas.info)`
   - Structured Wikidata content is consumed under CC0.
+- Open intelligence providers:
+  - GDELT DOC/Event/GKG is keyless. Optional tuning: `GDELT_DOC_QUERY`,
+    `GDELT_MAX_RAW_ROWS`, and an identifying `GDELT_USER_AGENT`.
+  - SEC EDGAR submissions and company facts are keyless. Set
+    `SEC_EDGAR_USER_AGENT` to an application name plus monitored contact email,
+    and optionally set `SEC_EDGAR_SYMBOLS` (comma-separated equities).
+  - ECB Data API FX and policy-rate series are keyless.
+  - Open-Meteo public APIs are keyless for eligible use. For a commercial
+    customer plan, create `OPEN_METEO_API_KEY` at `https://open-meteo.com/en/pricing`;
+    the connector then selects the customer endpoints automatically. Optional
+    target control: `OPEN_METEO_COUNTRIES` (comma-separated ISO alpha-2 codes).
+  - Attribution is stored with provider records and returned by the relevant API
+    responses; keep it visible in redistributed data and user-facing exports.
 - Transport intelligence combines AISstream maritime data with keyless adsb.lol
   flight positions and plausible routes. See
   [transport intelligence](docs/transport-intelligence.md) for sampling,
@@ -250,10 +264,11 @@ npm run dev
   - `claritas-newsapi` / `NEWSAPI_API_KEY`
   - `claritas-thenewsapi` / `THENEWSAPI_API_TOKEN`
   - `claritas-openweather` / `OPENWEATHER_API_KEY`
+  - `claritas-openmeteo` / `OPEN_METEO_API_KEY` (optional)
   - `claritas-podcastindex` / `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`
   - `claritas-aisstream` / `AISSTREAM_API_KEY`
 - Production secret source (recommended):
-  - GitHub repository secrets: `THENEWSAPI_API_TOKEN`, `PODCASTINDEX_API_KEY`,
+  - GitHub repository secrets: `THENEWSAPI_API_TOKEN`, `OPEN_METEO_API_KEY` (optional), `PODCASTINDEX_API_KEY`,
     `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`
   - GitHub repository variables: `PODCAST_DISCOVERY_TERMS`, `PODCAST_FEED_IDS`,
     `PODCAST_MAX_FEEDS`, `PODCAST_MAX_EPISODES_PER_FEED`,

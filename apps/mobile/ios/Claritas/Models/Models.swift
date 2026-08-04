@@ -101,6 +101,9 @@ struct NewsItem: Codable, Identifiable {
     let summary: String?
     let url: String?
     let country_iso2: String?
+    let language_code: String?
+    let source_country_iso2: String?
+    let tone: Double?
     let event_time: String?
     let payload: JSONValue?
 
@@ -117,6 +120,9 @@ struct NewsItem: Codable, Identifiable {
         case summary
         case url
         case country_iso2
+        case language_code
+        case source_country_iso2
+        case tone
         case event_time
         case payload
     }
@@ -130,6 +136,9 @@ struct NewsItem: Codable, Identifiable {
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         url = try container.decodeIfPresent(String.self, forKey: .url)
         country_iso2 = try container.decodeIfPresent(String.self, forKey: .country_iso2)
+        language_code = try container.decodeIfPresent(String.self, forKey: .language_code)
+        source_country_iso2 = try container.decodeIfPresent(String.self, forKey: .source_country_iso2)
+        tone = try container.decodeIfPresent(Double.self, forKey: .tone)
         event_time = try container.decodeIfPresent(String.self, forKey: .event_time)
         payload = try container.decodeIfPresent(JSONValue.self, forKey: .payload)
     }
@@ -443,14 +452,42 @@ struct CountryWeather: Codable, Identifiable {
     let country: String
     let temp_c: Double?
     let humidity: Double?
+    let apparent_temp_c: Double?
+    let precipitation_mm: Double?
     let observed_at: String
     let weather_main: String?
     let weather_desc: String?
     let wind_speed: Double?
+    let wind_gust: Double?
     let source_name: String?
     let icon_code: String?
+    let attribution: String?
+    let forecast: [DailyWeatherForecast]?
+    let air_quality: AirQuality?
     var id: String { country + observed_at }
     var observedDate: Date? { APIDateParser.parse(observed_at) }
+}
+
+struct DailyWeatherForecast: Codable, Identifiable {
+    let forecast_time: String
+    let temp_min_c: Double?
+    let temp_max_c: Double?
+    let precipitation_probability: Double?
+    let precipitation_mm: Double?
+    let weather_main: String?
+    let wind_speed: Double?
+    let wind_gust: Double?
+    let uv_index: Double?
+    var id: String { forecast_time }
+}
+
+struct AirQuality: Codable {
+    let observed_at: String
+    let european_aqi: Double?
+    let us_aqi: Double?
+    let pm10: Double?
+    let pm2_5: Double?
+    let label: String
 }
 
 struct CountryLeadershipRole: Codable, Identifiable {

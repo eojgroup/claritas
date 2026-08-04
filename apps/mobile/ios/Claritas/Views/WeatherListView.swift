@@ -108,6 +108,41 @@ private struct WeatherRow: View {
                     }
                 }
                 .foregroundStyle(.secondary)
+
+                HStack(spacing: 12) {
+                    if let feels = item.apparent_temp_c {
+                        Text("Feels \(String(format: "%.0f", feels))°")
+                    }
+                    if let precipitation = item.precipitation_mm {
+                        Text("Rain \(String(format: "%.1f", precipitation)) mm")
+                    }
+                    if let air = item.air_quality {
+                        Text("AQI \(air.european_aqi.map { String(format: "%.0f", $0) } ?? "—") · \(air.label)")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if let forecast = item.forecast, !forecast.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(Array(forecast.prefix(3))) { day in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(day.forecast_time.prefix(10))
+                                    .font(.caption2.weight(.semibold))
+                                Text("\(day.temp_min_c.map { String(format: "%.0f", $0) } ?? "—")–\(day.temp_max_c.map { String(format: "%.0f", $0) } ?? "—")°")
+                                Text("Rain \(day.precipitation_probability.map { String(format: "%.0f", $0) } ?? "—")%")
+                            }
+                            .font(.caption2)
+                            .padding(6)
+                            .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 7))
+                        }
+                    }
+                }
+                if let attribution = item.attribution, !attribution.isEmpty {
+                    Text(attribution)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
         }

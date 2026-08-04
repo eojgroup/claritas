@@ -54,6 +54,13 @@ private struct NewsRow: View {
                             .background(ClaritasPalette.darkGreen.opacity(0.16), in: Capsule())
                             .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
                     }
+                    if let language = item.language_code, !language.isEmpty {
+                        Text(language.uppercased())
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(ClaritasPalette.darkBlue.opacity(0.12), in: Capsule())
+                    }
                     if let iso = item.country_iso2?.uppercased(), !iso.isEmpty {
                         Button(action: { onSelectCountry(iso) }) {
                             Text(iso)
@@ -133,6 +140,8 @@ private struct NewsRow: View {
             return "TheNewsAPI"
         case "finnhub":
             return "Finnhub"
+        case "gdelt":
+            return "GDELT"
         default:
             return trimmed
         }

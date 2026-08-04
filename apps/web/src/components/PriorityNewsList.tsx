@@ -114,6 +114,11 @@ export default function PriorityNewsList({
               <span className="dashboard-news-country">{iso ?? "—"}</span>
               <span className="dashboard-news-headline">
                 <strong>{item.title || item.url || "Untitled"}</strong>
+                {item.language_code && (
+                  <span className="news-leadership-change" title="Original article language">
+                    {item.language_code.toUpperCase()}
+                  </span>
+                )}
                 {isLeadershipChange && (
                   <span
                     className="news-leadership-change"
@@ -153,6 +158,9 @@ export default function PriorityNewsList({
                 <div>
                   <div className="dashboard-news-detail-meta">
                     <span>{sourceLabel ?? "Unknown source"}</span>
+                    {item.language_code && <span>Language {item.language_code.toUpperCase()}</span>}
+                    {item.source_country_iso2 && <span>Published in {item.source_country_iso2}</span>}
+                    {typeof item.tone === "number" && <span>Tone {item.tone.toFixed(1)}</span>}
                     <span>
                       {iso
                         ? `${getCountryName(iso)} · ${iso}`

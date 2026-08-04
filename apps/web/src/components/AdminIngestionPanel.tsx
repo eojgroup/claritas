@@ -119,8 +119,12 @@ function sourceLabel(sourceName: string): string {
   const normalized = sourceName.trim().toLowerCase();
   if (normalized === "newsapi") return "NewsAPI";
   if (normalized === "thenewsapi") return "TheNewsAPI";
+  if (normalized === "gdelt") return "GDELT";
+  if (normalized === "openmeteo") return "Open-Meteo";
   if (normalized === "openweather") return "OpenWeather";
   if (normalized === "finnhub") return "Finnhub";
+  if (normalized === "sec_edgar") return "SEC EDGAR";
+  if (normalized === "ecb") return "ECB";
   if (normalized === "podcastindex") return "PodcastIndex";
   if (normalized === "wikidata") return "Wikidata";
   return sourceName;
@@ -145,12 +149,14 @@ function runSourceSummary(run: AdminIngestionRun): string {
 
   const hasExplicitProviders =
     Object.prototype.hasOwnProperty.call(providers, "newsapi") ||
-    Object.prototype.hasOwnProperty.call(providers, "thenewsapi");
+    Object.prototype.hasOwnProperty.call(providers, "thenewsapi") ||
+    Object.prototype.hasOwnProperty.call(providers, "gdelt");
   if (!hasExplicitProviders) return sourceLabel(run.source_name);
 
   const labels: string[] = [];
   if (providers.newsapi !== false) labels.push("NewsAPI");
   if (providers.thenewsapi === true) labels.push("TheNewsAPI");
+  if (providers.gdelt === true) labels.push("GDELT");
   if (labels.length === 0) return sourceLabel(run.source_name);
   return labels.join(" + ");
 }
@@ -284,8 +290,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [metricsDays, setMetricsDays] = useState<7 | 30 | 90>(30);
   const [pipelineFilter, setPipelineFilter] = useState<"all" | IngestionPipeline>("all");
 
-  const [runNewsApiProvider, setRunNewsApiProvider] = useState(true);
-  const [runTheNewsApiProvider, setRunTheNewsApiProvider] = useState(true);
+  const [runNewsApiProvider, setRunNewsApiProvider] = useState(false);
+  const [runTheNewsApiProvider, setRunTheNewsApiProvider] = useState(false);
+  const [runGdeltProvider, setRunGdeltProvider] = useState(true);
   const [runEverything, setRunEverything] = useState(true);
   const [runTopHeadlines, setRunTopHeadlines] = useState(true);
   const [newsQuery, setNewsQuery] = useState("OpenAI");
@@ -297,8 +304,13 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     toLocalDateInputValue(new Date()),
   );
   const [weatherCountry, setWeatherCountry] = useState("");
+  const [runOpenMeteoProvider, setRunOpenMeteoProvider] = useState(true);
+  const [runOpenWeatherProvider, setRunOpenWeatherProvider] = useState(false);
   const [marketSymbols, setMarketSymbols] = useState("SPY,QQQ,EWQ,EWG,EWU,EWJ,MCHI,INDA,EWA,EWC,EWZ,EZA,EWW");
   const [marketIncludeNews, setMarketIncludeNews] = useState(true);
+  const [runFinnhubProvider, setRunFinnhubProvider] = useState(false);
+  const [runSecEdgarProvider, setRunSecEdgarProvider] = useState(true);
+  const [runEcbProvider, setRunEcbProvider] = useState(true);
   const [marketNewsCategory, setMarketNewsCategory] = useState<"general" | "forex" | "crypto" | "merger">(
     "general",
   );
@@ -492,7 +504,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   }, [briefingGenerationJob?.id, briefingGenerationJob?.status]);
 
   const handleTriggerNews = useCallback(async () => {
-    if (!runNewsApiProvider && !runTheNewsApiProvider) {
+    if (!runNewsApiProvider && !runTheNewsApiProvider && !runGdeltProvider) {
       setActionError("Select at least one news provider.");
       return;
     }
@@ -513,6 +525,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         providers: {
           newsapi: runNewsApiProvider,
           thenewsapi: runTheNewsApiProvider,
+          gdelt: runGdeltProvider,
         },
         everything: runNewsApiProvider && runEverything
           ? {
@@ -563,18 +576,23 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     refreshOverview,
     runNewsApiProvider,
     runTheNewsApiProvider,
+    runGdeltProvider,
     runEverything,
     runTopHeadlines,
   ]);
 
   const handleTriggerWeather = useCallback(async () => {
+    if (!runOpenMeteoProvider && !runOpenWeatherProvider) {
+      setActionError("Select at least one weather provider.");
+      return;
+    }
     setIsTriggeringWeather(true);
     setActionError(null);
     setActionNotice(null);
     try {
       const country = weatherCountry.trim();
       const created = await triggerAdminWeatherIngestion(
-        country ? { country } : undefined,
+        { ...(country ? { country } : {}), providers: { openmeteo: runOpenMeteoProvider, openweather: runOpenWeatherProvider } },
       );
       setActionNotice(`Weather ingestion run #${created.run.id} was queued.`);
       setSelectedRunId(created.run.id);
@@ -586,9 +604,13 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringWeather(false);
     }
-  }, [refreshOverview, weatherCountry]);
+  }, [refreshOverview, runOpenMeteoProvider, runOpenWeatherProvider, weatherCountry]);
 
   const handleTriggerMarket = useCallback(async () => {
+    if (!runFinnhubProvider && !runSecEdgarProvider && !runEcbProvider) {
+      setActionError("Select at least one market provider.");
+      return;
+    }
     setIsTriggeringMarket(true);
     setActionError(null);
     setActionNotice(null);
@@ -600,6 +622,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       const created = await triggerAdminMarketIngestion(
         {
           ...(parsedSymbols.length > 0 ? { symbols: parsedSymbols } : {}),
+          providers: { finnhub: runFinnhubProvider, secEdgar: runSecEdgarProvider, ecb: runEcbProvider },
           includeNews: marketIncludeNews,
           newsCategory: marketNewsCategory,
         },
@@ -614,7 +637,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringMarket(false);
     }
-  }, [marketIncludeNews, marketNewsCategory, marketSymbols, refreshOverview]);
+  }, [marketIncludeNews, marketNewsCategory, marketSymbols, refreshOverview, runEcbProvider, runFinnhubProvider, runSecEdgarProvider]);
 
   const handleTriggerPodcasts = useCallback(async () => {
     const searchTerms = podcastSearchTerms
@@ -933,6 +956,14 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
                 />
                 TheNewsAPI
               </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={runGdeltProvider}
+                  onChange={(event) => setRunGdeltProvider(event.currentTarget.checked)}
+                />
+                GDELT (keyless)
+              </label>
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <label className="text-xs text-[color:var(--shell-muted)]">
@@ -1047,6 +1078,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               Weather run
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenMeteoProvider} onChange={(event) => setRunOpenMeteoProvider(event.currentTarget.checked)} />Open-Meteo (keyless)</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenWeatherProvider} onChange={(event) => setRunOpenWeatherProvider(event.currentTarget.checked)} />OpenWeather</label>
+            </div>
             <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
               Country (optional ISO2)
               <input
@@ -1074,6 +1109,11 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               Market run
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runFinnhubProvider} onChange={(event) => setRunFinnhubProvider(event.currentTarget.checked)} />Finnhub</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runSecEdgarProvider} onChange={(event) => setRunSecEdgarProvider(event.currentTarget.checked)} />SEC EDGAR (keyless)</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runEcbProvider} onChange={(event) => setRunEcbProvider(event.currentTarget.checked)} />ECB (keyless)</label>
+            </div>
             <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
               Symbols (optional CSV)
               <input
@@ -1090,6 +1130,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <input
                 type="checkbox"
                 checked={marketIncludeNews}
+                disabled={!runFinnhubProvider}
                 onChange={(event) => setMarketIncludeNews(event.currentTarget.checked)}
                 className="h-3.5 w-3.5 rounded border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
               />

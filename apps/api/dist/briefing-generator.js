@@ -107,7 +107,7 @@ async function collectBriefingContext(options) {
          COALESCE(i.event_time, i.created_at) AS event_time
        FROM item i
        JOIN source s ON s.id = i.source_id
-       WHERE i.kind <> 'podcast_episode'
+       WHERE i.kind = 'news_article'
          AND COALESCE(i.event_time, i.created_at) >= $1::timestamptz
          AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
        ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC

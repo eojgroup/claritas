@@ -402,6 +402,7 @@ jobs:
           NEWSAPI_API_KEY: ${{ secrets.NEWSAPI_API_KEY }}
           THENEWSAPI_API_TOKEN: ${{ secrets.THENEWSAPI_API_TOKEN }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+          OPEN_METEO_API_KEY: ${{ secrets.OPEN_METEO_API_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
           PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
           PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
@@ -433,6 +434,16 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::OPENWEATHER_API_KEY secret not provided; skipping claritas-openweather upsert"
+          fi
+
+          # Open-Meteo is keyless for eligible public-API use. A customer key
+          # switches the connector to the commercial customer endpoints.
+          if [ -n "${OPEN_METEO_API_KEY:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-openmeteo \
+              --from-literal=OPEN_METEO_API_KEY="$OPEN_METEO_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "OPEN_METEO_API_KEY not provided; using the keyless public endpoint"
           fi
 
           # Upsert Finnhub secret if provided

@@ -8,7 +8,17 @@ import {
   podcastParamsFromEnv,
   type PodcastIngestParams,
 } from "./connectors/podcastindex";
-import { getCountryWeatherLatest, ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
+import { ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
+import {
+  getCountryWeatherForecast,
+  getCountryWeatherLatest,
+  getHistoricalWeather,
+  getMarineWeather,
+  ingestOpenMeteoCountryWeather,
+} from "./connectors/openmeteo";
+import { getGdeltEvents, getGdeltSignals, ingestGdelt } from "./connectors/gdelt";
+import { getMarketFilings, getMarketIndicators, ingestSecEdgar } from "./connectors/sec-edgar";
+import { getLatestFxRates, getLatestPolicyRates, ingestEcbData } from "./connectors/ecb";
 import {
   getCountryLeadershipLatest,
   ingestWikidataLeadership,
@@ -1732,9 +1742,12 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
+    const language = typeof req.query.language === "string" ? req.query.language.trim().toLowerCase() : "";
+    const sourceCountry = typeof req.query.source_country === "string" ? req.query.source_country.trim().toUpperCase() : "";
+    const provider = typeof req.query.provider === "string" ? req.query.provider.trim().toLowerCase() : "";
 
     const params: any[] = [];
-    const where: string[] = ["i.kind <> 'podcast_episode'"];
+    const where: string[] = ["i.kind = 'news_article'"];
     if (q) {
       const i1 = params.push(`%${q}%`); // returns new length as index
       const i2 = params.push(`%${q}%`);
@@ -1744,11 +1757,25 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       const ci = params.push(country);
       where.push(`upper(i.country_iso2) = $${ci}`);
     }
+    if (language) {
+      const li = params.push(language);
+      where.push(`lower(i.language_code) = $${li}`);
+    }
+    if (sourceCountry) {
+      const sci = params.push(sourceCountry);
+      where.push(`upper(i.source_country_iso2) = $${sci}`);
+    }
+    if (provider) {
+      const pi = params.push(provider);
+      where.push(`lower(s.name) = $${pi}`);
+    }
     const li = params.push(limit);
     const oi = params.push(offset);
 
     const sql = `
-      SELECT i.id, i.kind, i.title, i.summary, i.url, i.country_iso2, i.event_time, i.payload, s.name AS source_name
+      SELECT i.id, i.kind, i.title, i.summary, i.url, i.country_iso2,
+             i.language_code, i.source_country_iso2, i.tone,
+             i.event_time, i.payload, s.name AS source_name
       FROM item i
       JOIN source s ON s.id = i.source_id
       ${where.length ? "WHERE " + where.join(" AND ") : ""}
@@ -1759,6 +1786,56 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     res.json({ items: rows });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+// Available languages, source countries and providers for global-news discovery.
+app.get("/api/news/coverage", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("news");
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+    const { rows } = await query(
+      `SELECT COALESCE(i.language_code, 'unknown') AS language,
+              i.source_country_iso2 AS source_country, s.name AS provider,
+              COUNT(*)::int AS article_count,
+              MAX(COALESCE(i.event_time, i.created_at)) AS latest_at
+       FROM item i JOIN source s ON s.id = i.source_id
+       WHERE i.kind = 'news_article'
+         AND COALESCE(i.event_time, i.created_at) >= now() - ($1 || ' days')::interval
+       GROUP BY COALESCE(i.language_code, 'unknown'), i.source_country_iso2, s.name
+       ORDER BY article_count DESC`,
+      [days]
+    );
+    return res.json({ coverage: rows, window_days: days });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/news/events", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("news");
+    const events = await getGdeltEvents({
+      country: typeof req.query.country === "string" ? req.query.country : undefined,
+      limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
+    });
+    return res.json({ events, count: events.length, attribution: "GDELT Project" });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/news/signals", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("news");
+    const signals = await getGdeltSignals({
+      country: typeof req.query.country === "string" ? req.query.country : undefined,
+      theme: typeof req.query.theme === "string" ? req.query.theme : undefined,
+      limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
+    });
+    return res.json({ signals, count: signals.length, attribution: "GDELT Project" });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 
@@ -1948,7 +2025,7 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
         `SELECT upper(country_iso2) AS country, COUNT(*)::int AS count
          FROM item
          WHERE country_iso2 IS NOT NULL
-           AND kind <> 'podcast_episode'
+           AND kind = 'news_article'
            AND COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval
          GROUP BY upper(country_iso2)
          ORDER BY count DESC`,
@@ -1959,7 +2036,7 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
            COUNT(*)::int AS total,
            COUNT(*) FILTER (WHERE country_iso2 IS NOT NULL)::int AS mapped
          FROM item
-         WHERE kind <> 'podcast_episode'
+         WHERE kind = 'news_article'
            AND COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval`,
         params
       ),
@@ -2651,6 +2728,24 @@ app.post("/api/ingest/thenewsapi/news", requireIngestionAccess, async (req, res)
   }
 });
 
+// GDELT DOC + latest Event/GKG archives. All three feeds are keyless.
+app.post("/api/ingest/gdelt", requireIngestionAccess, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await ingestGdelt({
+      query: typeof body.query === "string" ? body.query : undefined,
+      maxRecords: Number.isFinite(Number(body.maxRecords)) ? Number(body.maxRecords) : undefined,
+      timespan: typeof body.timespan === "string" ? body.timespan : undefined,
+      includeDoc: body.includeDoc !== false,
+      includeEvents: body.includeEvents !== false,
+      includeGkg: body.includeGkg !== false,
+    });
+    return res.json(result);
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 // Ingest OpenWeather current weather for countries (centroid-based)
 app.post("/api/ingest/openweather/country-current", requireIngestionAccess, async (req, res) => {
   try {
@@ -2659,6 +2754,51 @@ app.post("/api/ingest/openweather/country-current", requireIngestionAccess, asyn
     res.json(result);
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+// Open-Meteo current conditions, hourly/daily forecasts and air quality.
+app.post("/api/ingest/openmeteo/country-weather", requireIngestionAccess, async (req, res) => {
+  try {
+    const country = typeof req.body?.country === "string" ? req.body.country : undefined;
+    return res.json(await ingestOpenMeteoCountryWeather(country));
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/ingest/sec-edgar", requireIngestionAccess, async (req, res) => {
+  try {
+    const symbols = Array.isArray(req.body?.symbols)
+      ? req.body.symbols.filter((value: unknown): value is string => typeof value === "string")
+      : typeof req.body?.symbols === "string" ? req.body.symbols.split(/[\s,]+/).filter(Boolean) : undefined;
+    const forms = Array.isArray(req.body?.forms)
+      ? req.body.forms.filter((value: unknown): value is string => typeof value === "string")
+      : typeof req.body?.forms === "string" ? req.body.forms.split(/[\s,]+/).filter(Boolean) : undefined;
+    return res.json(await ingestSecEdgar({
+      symbols,
+      forms,
+      includeCompanyFacts: req.body?.includeCompanyFacts !== false,
+      maxFilingsPerCompany: Number.isFinite(Number(req.body?.maxFilingsPerCompany))
+        ? Number(req.body.maxFilingsPerCompany) : undefined,
+    }));
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/ingest/ecb", requireIngestionAccess, async (req, res) => {
+  try {
+    const currencies = Array.isArray(req.body?.currencies)
+      ? req.body.currencies.filter((value: unknown): value is string => typeof value === "string")
+      : typeof req.body?.currencies === "string" ? req.body.currencies.split(/[\s,]+/).filter(Boolean) : undefined;
+    return res.json(await ingestEcbData({
+      currencies,
+      lookbackDays: Number.isFinite(Number(req.body?.lookbackDays)) ? Number(req.body.lookbackDays) : undefined,
+      includeInterestRates: req.body?.includeInterestRates !== false,
+    }));
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 
@@ -2739,6 +2879,54 @@ app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) =
     res.json({ stats: rows });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.get("/api/weather/forecast", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("weather");
+    const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
+    if (!/^[A-Z]{2}$/.test(country)) return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
+    const hours = typeof req.query.hours === "string" ? Number(req.query.hours) : 48;
+    const forecast = await getCountryWeatherForecast(country, Number.isFinite(hours) ? hours : 48);
+    if (!forecast) return res.status(404).json({ error: "No forecast is available for this country." });
+    return res.json(forecast);
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/weather/history", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("weather");
+    const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
+    if (!/^[A-Z]{2}$/.test(country)) return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
+    const defaultEnd = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+    const defaultStart = new Date(Date.now() - 35 * 86400000).toISOString().slice(0, 10);
+    const history = await getHistoricalWeather(
+      country,
+      typeof req.query.start_date === "string" ? req.query.start_date : defaultStart,
+      typeof req.query.end_date === "string" ? req.query.end_date : defaultEnd,
+    );
+    if (!history) return res.status(404).json({ error: "Historical weather is unavailable for this country." });
+    return res.json(history);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(message.includes("must") ? 400 : 502).json({ error: message });
+  }
+});
+
+app.get("/api/weather/marine", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("weather");
+    const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
+    if (!/^[A-Z]{2}$/.test(country)) return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
+    const hours = typeof req.query.hours === "string" ? Number(req.query.hours) : 48;
+    const marine = await getMarineWeather(country, Number.isFinite(hours) ? hours : 48);
+    if (!marine) return res.status(404).json({ error: "Marine weather is unavailable for this country." });
+    return res.json(marine);
+  } catch (error) {
+    return res.status(502).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 
@@ -2887,6 +3075,57 @@ app.get("/api/market/earnings", requireAuthenticated, async (req, res) => {
     res.json({ events, count: events.length });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+// Primary-source SEC filing events and company fundamentals.
+app.get("/api/market/filings", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("market");
+    const forms = typeof req.query.forms === "string" ? req.query.forms.split(/[\s,]+/).filter(Boolean) : undefined;
+    const filings = await getMarketFilings({
+      symbol: typeof req.query.symbol === "string" ? req.query.symbol : undefined,
+      forms,
+      limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
+    });
+    return res.json({ filings, count: filings.length, attribution: "U.S. Securities and Exchange Commission" });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/market/indicators", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("market");
+    const indicators = await getMarketIndicators({
+      category: typeof req.query.category === "string" ? req.query.category : undefined,
+      symbol: typeof req.query.symbol === "string" ? req.query.symbol : undefined,
+      series: typeof req.query.series === "string" ? req.query.series : undefined,
+      limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
+    });
+    return res.json({ indicators, count: indicators.length });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/market/fx", requireAuthenticated, async (_req, res) => {
+  try {
+    trackDemandSignal("market");
+    const rates = await getLatestFxRates();
+    return res.json({ rates, count: rates.length, attribution: "European Central Bank" });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/market/rates", requireAuthenticated, async (_req, res) => {
+  try {
+    trackDemandSignal("market");
+    const rates = await getLatestPolicyRates();
+    return res.json({ rates, count: rates.length, attribution: "European Central Bank" });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 

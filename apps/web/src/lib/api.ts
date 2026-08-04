@@ -5,6 +5,9 @@ export type NewsItem = {
   summary: string | null;
   url: string | null;
   country_iso2: string | null;
+  language_code?: string | null;
+  source_country_iso2?: string | null;
+  tone?: number | null;
   event_time: string | null;
   source_name?: string | null;
   payload?: unknown;
@@ -79,12 +82,49 @@ export type CountryWeather = {
   country: string;
   temp_c: number | null;
   humidity: number | null;
+  apparent_temp_c?: number | null;
+  precipitation_mm?: number | null;
   observed_at: string;
   weather_main: string | null;
   weather_desc?: string | null;
   wind_speed?: number | null;
+  wind_direction?: number | null;
+  wind_gust?: number | null;
+  weather_code?: number | null;
+  cloud_cover?: number | null;
+  is_day?: boolean | null;
+  source_kind?: string | null;
+  attribution?: string | null;
   source_name?: string | null;
   icon_code?: string | null;
+  forecast?: DailyWeatherForecast[];
+  air_quality?: AirQuality | null;
+};
+
+export type DailyWeatherForecast = {
+  forecast_time: string;
+  temp_min_c: number | null;
+  temp_max_c: number | null;
+  apparent_temp_min_c?: number | null;
+  apparent_temp_max_c?: number | null;
+  precipitation_probability: number | null;
+  precipitation_mm: number | null;
+  weather_code?: number | null;
+  weather_main: string | null;
+  wind_speed?: number | null;
+  wind_gust?: number | null;
+  uv_index?: number | null;
+  sunrise_at?: string | null;
+  sunset_at?: string | null;
+};
+
+export type AirQuality = {
+  observed_at: string;
+  european_aqi: number | null;
+  us_aqi: number | null;
+  pm10: number | null;
+  pm2_5: number | null;
+  label: string;
 };
 
 export type CountryLeadershipRole = {
@@ -138,6 +178,53 @@ export type MarketStatus = {
   observed_at: string | null;
   error?: string | null;
   payload?: unknown;
+};
+
+export type MarketFiling = {
+  id: number;
+  event_type: string;
+  symbol: string | null;
+  company_name: string | null;
+  title: string;
+  summary: string | null;
+  url: string | null;
+  event_time: string;
+  source_name: string;
+  payload?: unknown;
+};
+
+export type MarketIndicator = {
+  id: number;
+  category: string;
+  series_key: string;
+  symbol: string | null;
+  name: string;
+  unit: string | null;
+  period_end: string;
+  value: number;
+  source_name: string;
+};
+
+export type FxRate = {
+  series_key: string;
+  symbol: string;
+  base_currency: string;
+  quote_currency: string;
+  value: number;
+  previous_value: number | null;
+  change: number | null;
+  percent_change: number | null;
+  period_end: string;
+  source_name: string;
+};
+
+export type PolicyRate = {
+  series_key: string;
+  name: string;
+  value: number;
+  unit: string | null;
+  period_end: string;
+  source_name: string;
 };
 
 export type EarningsEvent = {
@@ -868,12 +955,15 @@ export function getAuthStartUrl(provider: AuthProviderId, redirectUrl?: string):
   return `${API_BASE}/api/auth/${provider}/start${qs ? `?${qs}` : ""}`;
 }
 
-export async function fetchNews(params?: { limit?: number; offset?: number; q?: string; country?: string }) {
+export async function fetchNews(params?: { limit?: number; offset?: number; q?: string; country?: string; language?: string; sourceCountry?: string; provider?: string }) {
   const sp = new URLSearchParams();
   if (params?.limit) sp.set("limit", String(params.limit));
   if (params?.offset) sp.set("offset", String(params.offset));
   if (params?.q) sp.set("q", params.q);
   if (params?.country) sp.set("country", params.country);
+  if (params?.language) sp.set("language", params.language);
+  if (params?.sourceCountry) sp.set("source_country", params.sourceCountry);
+  if (params?.provider) sp.set("provider", params.provider);
   const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`, { credentials: "include" });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch news"));
   const data = await resp.json();
@@ -977,6 +1067,42 @@ export async function fetchMarketEarnings(params?: {
   return (data.events ?? []) as EarningsEvent[];
 }
 
+export async function fetchMarketFilings(params?: { symbol?: string; forms?: string[]; limit?: number }) {
+  const sp = new URLSearchParams();
+  if (params?.symbol) sp.set("symbol", params.symbol);
+  if (params?.forms?.length) sp.set("forms", params.forms.join(","));
+  if (params?.limit) sp.set("limit", String(params.limit));
+  const resp = await fetch(`${API_BASE}/api/market/filings?${sp.toString()}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch SEC filings"));
+  const data = await resp.json();
+  return (data.filings ?? []) as MarketFiling[];
+}
+
+export async function fetchMarketIndicators(params?: { symbol?: string; category?: string; limit?: number }) {
+  const sp = new URLSearchParams();
+  if (params?.symbol) sp.set("symbol", params.symbol);
+  if (params?.category) sp.set("category", params.category);
+  if (params?.limit) sp.set("limit", String(params.limit));
+  const resp = await fetch(`${API_BASE}/api/market/indicators?${sp.toString()}`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch market indicators"));
+  const data = await resp.json();
+  return (data.indicators ?? []) as MarketIndicator[];
+}
+
+export async function fetchFxRates() {
+  const resp = await fetch(`${API_BASE}/api/market/fx`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch ECB FX rates"));
+  const data = await resp.json();
+  return (data.rates ?? []) as FxRate[];
+}
+
+export async function fetchPolicyRates() {
+  const resp = await fetch(`${API_BASE}/api/market/rates`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch ECB policy rates"));
+  const data = await resp.json();
+  return (data.rates ?? []) as PolicyRate[];
+}
+
 export async function fetchTransportOverview(params?: {
   detail?: "aggregate" | "full";
   mode?: TransportMode;
@@ -1029,6 +1155,7 @@ export async function triggerAdminNewsIngestion(payload?: {
   providers?: {
     newsapi?: boolean;
     thenewsapi?: boolean;
+    gdelt?: boolean;
   };
   everything?:
     | false
@@ -1072,6 +1199,7 @@ export async function triggerAdminNewsIngestion(payload?: {
 
 export async function triggerAdminWeatherIngestion(payload?: {
   country?: string;
+  providers?: { openmeteo?: boolean; openweather?: boolean };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/weather/run`, {
     method: "POST",
@@ -1084,6 +1212,7 @@ export async function triggerAdminWeatherIngestion(payload?: {
 }
 
 export async function triggerAdminMarketIngestion(payload?: {
+  providers?: { finnhub?: boolean; secEdgar?: boolean; ecb?: boolean };
   symbols?: string[] | string;
   includeNews?: boolean;
   newsCategory?: "general" | "forex" | "crypto" | "merger";
