@@ -204,11 +204,7 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
     demand_threshold: 15,
     failure_backoff_minutes: 10,
     default_payload: {
-      providers: { finnhub: Boolean(process.env.FINNHUB_API_KEY), secEdgar: true, ecb: true },
-      symbols: ["SPY", "QQQ", "EWQ", "EWG", "EWU", "EWJ", "MCHI", "INDA", "EWA", "EWC", "EWZ", "EZA", "EWW"],
-      includeNews: true,
-      newsCategory: "general",
-      newsMaxItems: 50,
+      providers: { secEdgar: true, ecb: true },
     },
   },
   podcasts: {
@@ -640,7 +636,10 @@ async function getLatestDataTimestamp(pipeline: IngestionPipeline): Promise<stri
 
   const { rows } = await query<LatestDataRow>(
     `SELECT MAX(latest_data_at) AS latest_data_at FROM (
-       SELECT MAX(observed_at) AS latest_data_at FROM market_snapshot
+       SELECT MAX(ms.observed_at) AS latest_data_at
+       FROM market_snapshot ms
+       JOIN source s ON s.id = ms.source_id
+       WHERE COALESCE(s.metadata->>'retired', 'false') <> 'true'
        UNION ALL SELECT MAX(updated_at) FROM market_event
        UNION ALL SELECT MAX(observed_at) FROM market_indicator
      ) market_sources`

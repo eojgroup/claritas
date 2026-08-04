@@ -2270,8 +2270,14 @@ private func normalizedProviderName(_ value: String?) -> String? {
         return "TheNewsAPI"
     case "openweather":
         return "OpenWeather"
+    case "openmeteo":
+        return "Open-Meteo"
     case "finnhub":
-        return "Finnhub"
+        return "Retired market source"
+    case "sec_edgar":
+        return "SEC EDGAR"
+    case "ecb":
+        return "ECB"
     default:
         return value
     }
@@ -2295,6 +2301,11 @@ private func newsHasImage(_ item: NewsItem) -> Bool {
 }
 
 private func newsSourceLabel(_ item: NewsItem) -> String? {
+    if item.source_name?.lowercased() == "gdelt",
+       let payload = item.payload?.object,
+       let publisher = trimmed(payload["source"]?.string) {
+        return "\(publisher) · via GDELT"
+    }
     if let source = normalizedProviderName(item.source_name) {
         return source
     }
@@ -2343,7 +2354,7 @@ private struct MarketQuoteListView: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("Finnhub real-time quotes")
+                Text("Licensed market snapshots (when configured)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()

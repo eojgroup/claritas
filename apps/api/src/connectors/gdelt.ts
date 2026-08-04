@@ -215,10 +215,11 @@ async function fetchRetry(url: string, attempts = 2): Promise<Response> {
     lastResponse = response;
     if (![429, 500, 502, 503, 504].includes(response.status) || attempt === attempts - 1) break;
     const retryAfter = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
-    await sleep(Number.isFinite(retryAfter) ? Math.min(retryAfter * 1000, 10_000) : 1500 * (attempt + 1));
+    const fallbackDelay = response.status === 429 ? 5_500 : 1_500 * (attempt + 1);
+    await sleep(Number.isFinite(retryAfter) ? Math.min(retryAfter * 1000, 10_000) : fallbackDelay);
   }
   const body = lastResponse ? (await lastResponse.text()).slice(0, 300) : "No response";
-  throw new Error(`GDELT HTTP ${lastResponse?.status ?? "unknown"}: ${body}`);
+  throw new Error(`GDELT HTTP ${lastResponse?.status ?? "unknown"} for ${url}: ${body}`);
 }
 
 function firstZipText(bytes: Uint8Array): string {
@@ -236,7 +237,45 @@ async function getLatestArchiveUrls(): Promise<{ event: string; gkg: string }> {
   const event = urls.find((url) => url.includes(".export.CSV.zip"));
   const gkg = urls.find((url) => url.includes(".gkg.csv.zip"));
   if (!event || !gkg) throw new Error("GDELT lastupdate.txt did not contain Event and GKG archives.");
-  return { event, gkg };
+
+  // lastupdate.txt occasionally advances before both products are available.
+  // Resolve the newest synchronized 15-minute pair so one transient 404 does
+  // not fail the entire ingestion run.
+  const stampMatch = event.match(/(\d{14})\.export\.CSV\.zip$/);
+  if (!stampMatch) return { event, gkg };
+  const stamp = stampMatch[1];
+  const stampDate = new Date(Date.UTC(
+    Number(stamp.slice(0, 4)),
+    Number(stamp.slice(4, 6)) - 1,
+    Number(stamp.slice(6, 8)),
+    Number(stamp.slice(8, 10)),
+    Number(stamp.slice(10, 12)),
+    Number(stamp.slice(12, 14))
+  ));
+  const archiveExists = async (url: string): Promise<boolean> => {
+    try {
+      const archiveResponse = await fetch(url, {
+        method: "HEAD",
+        headers: { "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)" },
+      });
+      return archiveResponse.ok;
+    } catch {
+      return false;
+    }
+  };
+  const formatStamp = (date: Date): string =>
+    date.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+  for (let offset = 0; offset <= 12; offset += 1) {
+    const candidateStamp = formatStamp(new Date(stampDate.getTime() - offset * 15 * 60_000));
+    const candidateEvent = event.replace(stamp, candidateStamp);
+    const candidateGkg = gkg.replace(/\d{14}(?=\.gkg\.csv\.zip$)/, candidateStamp);
+    const [eventReady, gkgReady] = await Promise.all([
+      archiveExists(candidateEvent),
+      archiveExists(candidateGkg),
+    ]);
+    if (eventReady && gkgReady) return { event: candidateEvent, gkg: candidateGkg };
+  }
+  throw new Error("GDELT did not expose a synchronized Event/GKG archive pair within the last three hours.");
 }
 
 function parseEnhancedList(value: string | undefined): string[] {

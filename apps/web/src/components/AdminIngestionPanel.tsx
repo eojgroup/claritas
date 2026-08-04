@@ -122,7 +122,7 @@ function sourceLabel(sourceName: string): string {
   if (normalized === "gdelt") return "GDELT";
   if (normalized === "openmeteo") return "Open-Meteo";
   if (normalized === "openweather") return "OpenWeather";
-  if (normalized === "finnhub") return "Finnhub";
+  if (normalized === "finnhub") return "Retired market source";
   if (normalized === "sec_edgar") return "SEC EDGAR";
   if (normalized === "ecb") return "ECB";
   if (normalized === "podcastindex") return "PodcastIndex";
@@ -306,14 +306,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [weatherCountry, setWeatherCountry] = useState("");
   const [runOpenMeteoProvider, setRunOpenMeteoProvider] = useState(true);
   const [runOpenWeatherProvider, setRunOpenWeatherProvider] = useState(false);
-  const [marketSymbols, setMarketSymbols] = useState("SPY,QQQ,EWQ,EWG,EWU,EWJ,MCHI,INDA,EWA,EWC,EWZ,EZA,EWW");
-  const [marketIncludeNews, setMarketIncludeNews] = useState(true);
-  const [runFinnhubProvider, setRunFinnhubProvider] = useState(false);
   const [runSecEdgarProvider, setRunSecEdgarProvider] = useState(true);
   const [runEcbProvider, setRunEcbProvider] = useState(true);
-  const [marketNewsCategory, setMarketNewsCategory] = useState<"general" | "forex" | "crypto" | "merger">(
-    "general",
-  );
   const [podcastSearchTerms, setPodcastSearchTerms] = useState(
     "geopolitics,security,technology,markets",
   );
@@ -607,7 +601,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   }, [refreshOverview, runOpenMeteoProvider, runOpenWeatherProvider, weatherCountry]);
 
   const handleTriggerMarket = useCallback(async () => {
-    if (!runFinnhubProvider && !runSecEdgarProvider && !runEcbProvider) {
+    if (!runSecEdgarProvider && !runEcbProvider) {
       setActionError("Select at least one market provider.");
       return;
     }
@@ -615,16 +609,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     setActionError(null);
     setActionNotice(null);
     try {
-      const parsedSymbols = marketSymbols
-        .split(/[,\s]+/)
-        .map((symbol) => symbol.trim())
-        .filter(Boolean);
       const created = await triggerAdminMarketIngestion(
         {
-          ...(parsedSymbols.length > 0 ? { symbols: parsedSymbols } : {}),
-          providers: { finnhub: runFinnhubProvider, secEdgar: runSecEdgarProvider, ecb: runEcbProvider },
-          includeNews: marketIncludeNews,
-          newsCategory: marketNewsCategory,
+          providers: { secEdgar: runSecEdgarProvider, ecb: runEcbProvider },
         },
       );
       setActionNotice(`Market ingestion run #${created.run.id} was queued.`);
@@ -637,7 +624,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringMarket(false);
     }
-  }, [marketIncludeNews, marketNewsCategory, marketSymbols, refreshOverview, runEcbProvider, runFinnhubProvider, runSecEdgarProvider]);
+  }, [refreshOverview, runEcbProvider, runSecEdgarProvider]);
 
   const handleTriggerPodcasts = useCallback(async () => {
     const searchTerms = podcastSearchTerms
@@ -1079,7 +1066,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               Weather run
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenMeteoProvider} onChange={(event) => setRunOpenMeteoProvider(event.currentTarget.checked)} />Open-Meteo (keyless)</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenMeteoProvider} onChange={(event) => setRunOpenMeteoProvider(event.currentTarget.checked)} />Open-Meteo</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOpenWeatherProvider} onChange={(event) => setRunOpenWeatherProvider(event.currentTarget.checked)} />OpenWeather</label>
             </div>
             <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
@@ -1092,7 +1079,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               />
             </label>
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
-              Blank = global sample ingest.
+              Blank = global sample ingest. Commercial deployments require OPEN_METEO_API_KEY; the keyless hosted endpoint is non-commercial.
             </div>
             <button
               type="button"
@@ -1110,49 +1097,12 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               Market run
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3 text-xs">
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runFinnhubProvider} onChange={(event) => setRunFinnhubProvider(event.currentTarget.checked)} />Finnhub</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runSecEdgarProvider} onChange={(event) => setRunSecEdgarProvider(event.currentTarget.checked)} />SEC EDGAR (keyless)</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runEcbProvider} onChange={(event) => setRunEcbProvider(event.currentTarget.checked)} />ECB (keyless)</label>
             </div>
-            <label className="mt-3 block text-xs text-[color:var(--shell-muted)]">
-              Symbols (optional CSV)
-              <input
-                value={marketSymbols}
-                onChange={(event) => setMarketSymbols(event.currentTarget.value)}
-                placeholder="SPY,QQQ,EWQ,EWG,EWJ"
-                className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
-              />
-            </label>
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
-              Blank = default market watchlist.
+              SEC supplies filing events and company facts; ECB supplies FX reference and policy rates.
             </div>
-            <label className="mt-3 inline-flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
-              <input
-                type="checkbox"
-                checked={marketIncludeNews}
-                disabled={!runFinnhubProvider}
-                onChange={(event) => setMarketIncludeNews(event.currentTarget.checked)}
-                className="h-3.5 w-3.5 rounded border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"
-              />
-              Ingest Finnhub market news
-            </label>
-            <label className="mt-2 block text-xs text-[color:var(--shell-muted)]">
-              News category
-              <select
-                value={marketNewsCategory}
-                onChange={(event) =>
-                  setMarketNewsCategory(
-                    event.currentTarget.value as "general" | "forex" | "crypto" | "merger",
-                  )
-                }
-                className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]"
-              >
-                <option value="general">General</option>
-                <option value="forex">Forex</option>
-                <option value="crypto">Crypto</option>
-                <option value="merger">Merger</option>
-              </select>
-            </label>
             <button
               type="button"
               onClick={() => void handleTriggerMarket()}

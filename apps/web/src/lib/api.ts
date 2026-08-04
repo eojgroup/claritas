@@ -10,6 +10,7 @@ export type NewsItem = {
   tone?: number | null;
   event_time: string | null;
   source_name?: string | null;
+  publisher?: string | null;
   payload?: unknown;
 };
 
@@ -150,6 +151,7 @@ export type CountryLeadership = {
 };
 
 export type MarketQuote = {
+  source_name?: string | null;
   symbol: string;
   company_name: string | null;
   exchange: string | null;
@@ -166,17 +168,6 @@ export type MarketQuote = {
   open_price: number | null;
   previous_close: number | null;
   observed_at: string;
-  payload?: unknown;
-};
-
-export type MarketStatus = {
-  exchange: string;
-  is_open: boolean | null;
-  session: string | null;
-  holiday: string | null;
-  timezone: string | null;
-  observed_at: string | null;
-  error?: string | null;
   payload?: unknown;
 };
 
@@ -227,20 +218,50 @@ export type PolicyRate = {
   source_name: string;
 };
 
-export type EarningsEvent = {
-  symbol: string;
-  date: string | null;
-  hour: string | null;
-  quarter: number | null;
-  year: number | null;
-  eps_actual: number | null;
-  eps_estimate: number | null;
-  revenue_actual: number | null;
-  revenue_estimate: number | null;
-  country: string | null;
-  market_code: string | null;
-  market_name: string | null;
-  payload?: unknown;
+export type CountryMarketOverview = {
+  country: string;
+  country_name: string;
+  region: string | null;
+  currency: string | null;
+  index_symbol: string | null;
+  index_name: string | null;
+  index_change_percent: number | null;
+  index_observed_at: string | null;
+  index_source: string | null;
+  fx_symbol: string | null;
+  fx_rate: number | null;
+  fx_change_percent: number | null;
+  fx_period_end: string | null;
+  filing_count_7d: number;
+  latest_filing_at: string | null;
+  composite_change_percent: number | null;
+  composite_basis: Array<"country_index" | "currency_vs_eur">;
+  freshness: "current" | "stale" | "unavailable";
+};
+
+export type CountryMarketOverviewResponse = {
+  generated_at: string;
+  countries: CountryMarketOverview[];
+  coverage: {
+    countries: number;
+    with_index: number;
+    with_fx: number;
+    with_filings: number;
+  };
+  methodology: {
+    index: string;
+    fx: string;
+    composite: string;
+    filings: string;
+  };
+  sources: string[];
+};
+
+export type CountryMarketDetail = {
+  summary: CountryMarketOverview;
+  fx_history: Array<{ period_end: string; value: number }>;
+  filings: MarketFiling[];
+  methodology: CountryMarketOverviewResponse["methodology"];
 };
 
 export type TransportMode = "maritime" | "aviation";
@@ -1038,35 +1059,6 @@ export async function fetchMarketQuotes(params?: { refresh?: boolean; symbols?: 
   return (data.quotes ?? []) as MarketQuote[];
 }
 
-export async function fetchMarketStatus(params?: { refresh?: boolean; exchanges?: string[] }) {
-  const sp = new URLSearchParams();
-  if (typeof params?.refresh === "boolean") sp.set("refresh", params.refresh ? "true" : "false");
-  if (params?.exchanges && params.exchanges.length > 0) sp.set("exchanges", params.exchanges.join(","));
-  const suffix = sp.toString() ? `?${sp.toString()}` : "";
-  const resp = await fetch(`${API_BASE}/api/market/status${suffix}`, { credentials: "include" });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch market status"));
-  const data = await resp.json();
-  return (data.status ?? []) as MarketStatus[];
-}
-
-export async function fetchMarketEarnings(params?: {
-  from?: string;
-  to?: string;
-  symbol?: string;
-  limit?: number;
-}) {
-  const sp = new URLSearchParams();
-  if (params?.from) sp.set("from", params.from);
-  if (params?.to) sp.set("to", params.to);
-  if (params?.symbol) sp.set("symbol", params.symbol);
-  if (typeof params?.limit === "number") sp.set("limit", String(params.limit));
-  const suffix = sp.toString() ? `?${sp.toString()}` : "";
-  const resp = await fetch(`${API_BASE}/api/market/earnings${suffix}`, { credentials: "include" });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch market earnings"));
-  const data = await resp.json();
-  return (data.events ?? []) as EarningsEvent[];
-}
-
 export async function fetchMarketFilings(params?: { symbol?: string; forms?: string[]; limit?: number }) {
   const sp = new URLSearchParams();
   if (params?.symbol) sp.set("symbol", params.symbol);
@@ -1101,6 +1093,20 @@ export async function fetchPolicyRates() {
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch ECB policy rates"));
   const data = await resp.json();
   return (data.rates ?? []) as PolicyRate[];
+}
+
+export async function fetchCountryMarketOverview(): Promise<CountryMarketOverviewResponse> {
+  const resp = await fetch(`${API_BASE}/api/market/countries`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country market overview"));
+  return (await resp.json()) as CountryMarketOverviewResponse;
+}
+
+export async function fetchCountryMarketDetail(country: string): Promise<CountryMarketDetail> {
+  const resp = await fetch(`${API_BASE}/api/market/countries/${encodeURIComponent(country)}`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country market detail"));
+  return (await resp.json()) as CountryMarketDetail;
 }
 
 export async function fetchTransportOverview(params?: {
@@ -1212,12 +1218,7 @@ export async function triggerAdminWeatherIngestion(payload?: {
 }
 
 export async function triggerAdminMarketIngestion(payload?: {
-  providers?: { finnhub?: boolean; secEdgar?: boolean; ecb?: boolean };
-  symbols?: string[] | string;
-  includeNews?: boolean;
-  newsCategory?: "general" | "forex" | "crypto" | "merger";
-  newsMinId?: number;
-  newsMaxItems?: number;
+  providers?: { secEdgar?: boolean; ecb?: boolean };
 }): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/market/run`, {
     method: "POST",

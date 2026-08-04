@@ -260,7 +260,6 @@ const prettySourceName = (value: string): string => {
   if (normalized === "gdelt") return "GDELT";
   if (normalized === "openmeteo") return "Open-Meteo";
   if (normalized === "openweather") return "OpenWeather";
-  if (normalized === "finnhub") return "Finnhub";
   if (normalized === "sec_edgar") return "SEC EDGAR";
   if (normalized === "ecb") return "ECB";
   return value.trim();
@@ -282,8 +281,7 @@ const getNewsImageUrl = (item: NewsItem): string | undefined => {
 
 const resolveNewsSource = (item: NewsItem): string | undefined => {
   const sourceName = asTrimmedString(item.source_name);
-  if (sourceName) return prettySourceName(sourceName);
-
+  const explicitPublisher = asTrimmedString(item.publisher);
   const payload = asObject(item.payload);
   const raw = asObject(payload?.["raw"]);
 
@@ -301,6 +299,13 @@ const resolveNewsSource = (item: NewsItem): string | undefined => {
     asTrimmedString(payload?.["publisher"]) ??
     asTrimmedString(payload?.["site"])
   );
+  if (sourceName?.toLowerCase() === "gdelt" && source) {
+    return `${source.replace(/^www\./i, "")} · via GDELT`;
+  }
+  if (sourceName?.toLowerCase() === "gdelt" && explicitPublisher) {
+    return `${explicitPublisher.replace(/^www\./i, "")} · via GDELT`;
+  }
+  if (sourceName) return prettySourceName(sourceName);
   return source ? prettySourceName(source) : undefined;
 };
 
@@ -556,10 +561,12 @@ const weatherDrilldownUrl = (countryIso2?: string | null): string | undefined =>
 };
 
 const getMarketSourceLabel = (quote: MarketQuote): string => {
+  const sourceName = asTrimmedString(quote.source_name);
+  if (sourceName) return prettySourceName(sourceName);
   const payload = asObject(quote.payload);
   const provider = asTrimmedString(payload?.["provider"]);
   if (provider) return prettySourceName(provider);
-  return "Finnhub";
+  return "Market data";
 };
 
 const getMarketLogoUrl = (quote: MarketQuote): string | undefined => {
@@ -702,12 +709,12 @@ import {
   fetchDailyBriefingEmailStatus,
   fetchDailyBriefingPreferenceOptions,
   fetchDailySignalBriefingLatest,
+  fetchCountryMarketOverview,
+  fetchCountryMarketDetail,
   fetchFxRates,
-  fetchMarketEarnings,
   fetchMarketFilings,
   fetchMarketIndicators,
   fetchMarketQuotes,
-  fetchMarketStatus,
   fetchNews,
   fetchPodcasts,
   fetchPolicyRates,
@@ -723,6 +730,9 @@ import {
   type AuthProviderId,
   type AuthUser,
   type CountryLeadership,
+  type CountryMarketOverview,
+  type CountryMarketOverviewResponse,
+  type CountryMarketDetail,
   type CountryStat,
   type CountryStatsCoverage,
   type CountryWeather,
@@ -730,12 +740,10 @@ import {
   type DailyBriefingEmailStatus,
   type DailyBriefingPreferenceOptions,
   type DailySignalBriefing,
-  type EarningsEvent,
   type FxRate,
   type MarketFiling,
   type MarketIndicator,
   type MarketQuote,
-  type MarketStatus,
   type NewsItem,
   type PodcastEpisode,
   type PodcastExternalLink,
@@ -822,14 +830,15 @@ export default function ClaritasDashboard() {
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [leadershipStats, setLeadershipStats] = useState<CountryLeadership[]>([]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
-  const [marketStatusRows, setMarketStatusRows] = useState<MarketStatus[]>([]);
-  const [marketEarnings, setMarketEarnings] = useState<EarningsEvent[]>([]);
+  const [countryMarkets, setCountryMarkets] = useState<CountryMarketOverview[]>([]);
+  const [countryMarketDetail, setCountryMarketDetail] = useState<CountryMarketDetail | null>(null);
+  const [countryMarketMethodology, setCountryMarketMethodology] = useState<CountryMarketOverviewResponse["methodology"] | null>(null);
+  const [marketMapLayer, setMarketMapLayer] = useState<"composite" | "index" | "fx" | "filings">("composite");
   const [marketFilings, setMarketFilings] = useState<MarketFiling[]>([]);
   const [marketIndicators, setMarketIndicators] = useState<MarketIndicator[]>([]);
   const [fxRates, setFxRates] = useState<FxRate[]>([]);
   const [policyRates, setPolicyRates] = useState<PolicyRate[]>([]);
   const [transportOverview, setTransportOverview] = useState<TransportOverview | null>(null);
-  const [marketEarningsWindowDays, setMarketEarningsWindowDays] = useState<7 | 14 | 30>(14);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [selectedDashboardNewsId, setSelectedDashboardNewsId] = useState<
@@ -870,13 +879,6 @@ export default function ClaritasDashboard() {
   const [weatherSortBy, setWeatherSortBy] = useState<"latest" | "hottest" | "coldest" | "humidity">(
     "latest",
   );
-  const [marketExchangeFilter, setMarketExchangeFilter] = useState<string>("all");
-  const [marketCountryFilter, setMarketCountryFilter] = useState<string>("all");
-  const [marketIndexFilter, setMarketIndexFilter] = useState<string>("all");
-  const [marketDirectionFilter, setMarketDirectionFilter] = useState<"all" | "gainers" | "losers">(
-    "all",
-  );
-  const [marketMinAbsMove, setMarketMinAbsMove] = useState<number>(0);
   const [profileSection, setProfileSection] = useState<
     "overview" | "identity" | "preferences" | "security" | "policies"
   >("overview");
@@ -1165,6 +1167,15 @@ export default function ClaritasDashboard() {
     fetchMarketQuotes({ refresh: false })
       .then(setMarketQuotes)
       .catch(() => setMarketQuotes([]));
+    fetchCountryMarketOverview()
+      .then((overview) => {
+        setCountryMarkets(overview.countries);
+        setCountryMarketMethodology(overview.methodology);
+      })
+      .catch(() => {
+        setCountryMarkets([]);
+        setCountryMarketMethodology(null);
+      });
     fetchMarketFilings({ limit: 80 }).then(setMarketFilings).catch(() => setMarketFilings([]));
     fetchMarketIndicators({ category: "company_fact", limit: 200 }).then(setMarketIndicators).catch(() => setMarketIndicators([]));
     fetchFxRates().then(setFxRates).catch(() => setFxRates([]));
@@ -1277,46 +1288,6 @@ export default function ClaritasDashboard() {
       window.clearInterval(id);
     };
   }, [authStatus, hasPaidAccess]);
-
-  useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) return;
-    let cancelled = false;
-    const refreshStatus = async () => {
-      try {
-        const rows = await fetchMarketStatus({ refresh: false });
-        if (!cancelled) setMarketStatusRows(rows);
-      } catch {
-        if (!cancelled) setMarketStatusRows([]);
-      }
-    };
-    void refreshStatus();
-    const id = window.setInterval(() => {
-      void refreshStatus();
-    }, 60_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [authStatus, hasPaidAccess]);
-
-  useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) return;
-    let cancelled = false;
-    const from = new Date().toISOString().slice(0, 10);
-    const to = new Date(Date.now() + marketEarningsWindowDays * 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
-    fetchMarketEarnings({ from, to, limit: 120 })
-      .then((events) => {
-        if (!cancelled) setMarketEarnings(events);
-      })
-      .catch(() => {
-        if (!cancelled) setMarketEarnings([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [authStatus, hasPaidAccess, marketEarningsWindowDays]);
 
   const cardBase = "app-card operational-panel rounded-xl";
   const chartGridColor = "var(--viz-grid)";
@@ -1903,6 +1874,7 @@ export default function ClaritasDashboard() {
     return withTemp.map((w) => ({
       country: (w.country || "").toUpperCase(),
       count: Number(w.temp_c) - min + 1,
+      value: Number(w.temp_c),
       tone:
         (w.temp_c ?? 0) >= 28
           ? ("weather-hot" as const)
@@ -2409,70 +2381,12 @@ export default function ClaritasDashboard() {
       }));
   }, [weatherPageRows]);
 
-  const marketExchangeOptions = useMemo(() => {
-    const set = new Set<string>();
-    marketSearchScope.forEach((quote) => {
-      const exchange = asTrimmedString(quote.exchange);
-      if (exchange) set.add(exchange);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [marketSearchScope]);
-
-  const marketCountryOptions = useMemo(() => {
-    const set = new Set<string>();
-    marketSearchScope.forEach((quote) => {
-      const country = asTrimmedString(quote.country)?.toUpperCase();
-      if (country) set.add(country);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [marketSearchScope]);
-
-  const marketIndexOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    marketSearchScope.forEach((quote) => {
-      const market = getMarketIdentity(quote);
-      if (!market.code) return;
-      map.set(market.code, market.name ?? market.code);
-    });
-    return Array.from(map.entries())
-      .map(([code, name]) => ({ code, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [marketSearchScope]);
-
   const marketPageRows = useMemo(() => {
-    let rows = filteredMarket;
-    if (marketExchangeFilter !== "all") {
-      const normalized = marketExchangeFilter.trim().toLowerCase();
-      rows = rows.filter((quote) => (quote.exchange ?? "").trim().toLowerCase() === normalized);
-    }
-    if (marketCountryFilter !== "all") {
-      const normalized = marketCountryFilter.trim().toUpperCase();
-      rows = rows.filter((quote) => (quote.country ?? "").trim().toUpperCase() === normalized);
-    }
-    if (marketIndexFilter !== "all") {
-      const normalized = marketIndexFilter.trim().toUpperCase();
-      rows = rows.filter((quote) => (getMarketIdentity(quote).code ?? "").toUpperCase() === normalized);
-    }
-    if (marketDirectionFilter === "gainers") {
-      rows = rows.filter((quote) => (quote.percent_change ?? 0) > 0);
-    } else if (marketDirectionFilter === "losers") {
-      rows = rows.filter((quote) => (quote.percent_change ?? 0) < 0);
-    }
-    if (marketMinAbsMove > 0) {
-      rows = rows.filter((quote) => Math.abs(quote.percent_change ?? 0) >= marketMinAbsMove);
-    }
-    return [...rows].sort(
+    return [...filteredMarket].sort(
       (a, b) =>
         Math.abs(b.percent_change ?? b.change ?? 0) - Math.abs(a.percent_change ?? a.change ?? 0),
     );
-  }, [
-    filteredMarket,
-    marketCountryFilter,
-    marketDirectionFilter,
-    marketExchangeFilter,
-    marketIndexFilter,
-    marketMinAbsMove,
-  ]);
+  }, [filteredMarket]);
 
   const marketMoversChartData = useMemo(() => {
     return marketPageRows.slice(0, 12).map((quote) => ({
@@ -2580,51 +2494,75 @@ export default function ClaritasDashboard() {
   }, [marketPageRows]);
 
   const marketIndexMapData = useMemo(() => {
-    return marketCountryMarketRows.map((row) => {
-      const scaled = Math.max(1, Math.round(Math.abs(row.avg_change) * 18));
+    return countryMarkets.flatMap((row) => {
+      const directionalValue =
+        marketMapLayer === "index"
+          ? row.index_change_percent
+          : marketMapLayer === "fx"
+            ? row.fx_change_percent
+            : row.composite_change_percent;
+      const value = marketMapLayer === "filings" ? row.filing_count_7d : directionalValue;
+      if (value == null || (marketMapLayer === "filings" && value <= 0)) return [];
+      const scaled = Math.max(1, Math.round(Math.abs(value) * 18));
       return {
         country: row.country,
         count: scaled,
+        value,
         tone:
-          row.avg_change > 0
+          value > 0
             ? ("positive" as const)
-            : row.avg_change < 0
+            : value < 0
               ? ("negative" as const)
               : ("neutral" as const),
         meta: {
-          subtitle: `${row.market_code} · ${row.avg_change >= 0 ? "+" : ""}${row.avg_change.toFixed(2)}%`,
+          subtitle:
+            marketMapLayer === "filings"
+              ? `${row.filing_count_7d} SEC filings · trailing 7 days`
+              : `${value >= 0 ? "+" : ""}${value.toFixed(2)}% · ${marketMapLayer}`,
           lines: [
-            row.market_name,
-            `${row.count} tracked symbols`,
+            row.index_symbol
+              ? `${row.index_symbol}: ${formatSignedMetric(row.index_change_percent, 2, "%")}`
+              : "Country index: provider not configured",
+            row.fx_symbol
+              ? `${row.fx_symbol}: local currency ${formatSignedMetric(row.fx_change_percent, 2, "%")} vs EUR`
+              : "FX: unavailable",
+            `${row.filing_count_7d} SEC filings in 7 days`,
+            `Freshness: ${row.freshness}`,
           ],
         },
       };
     });
-  }, [marketCountryMarketRows]);
+  }, [countryMarkets, marketMapLayer]);
 
-  const marketStatusDisplayRows = useMemo(() => {
-    return [...marketStatusRows].sort((a, b) => {
-      const aOpen = a.is_open ? 1 : 0;
-      const bOpen = b.is_open ? 1 : 0;
-      if (aOpen !== bOpen) return bOpen - aOpen;
-      return a.exchange.localeCompare(b.exchange);
-    });
-  }, [marketStatusRows]);
+  const selectedCountryMarket = useMemo(() => {
+    const country = (selectedCountry ?? pinnedCountry ?? "").toUpperCase();
+    return countryMarkets.find((row) => row.country === country) ?? null;
+  }, [countryMarkets, pinnedCountry, selectedCountry]);
 
-  const marketStatusSummary = useMemo(() => {
-    const open = marketStatusRows.filter((row) => row.is_open).length;
-    const total = marketStatusRows.length;
-    return { open, total };
-  }, [marketStatusRows]);
-
-  const marketEarningsRows = useMemo(() => {
-    let rows = [...marketEarnings];
-    if (selectedSymbol) {
-      const normalized = selectedSymbol.toUpperCase();
-      rows = rows.filter((row) => row.symbol.toUpperCase() === normalized);
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess || !selectedCountryMarket) {
+      setCountryMarketDetail(null);
+      return;
     }
-    return rows.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""));
-  }, [marketEarnings, selectedSymbol]);
+    let cancelled = false;
+    fetchCountryMarketDetail(selectedCountryMarket.country)
+      .then((detail) => {
+        if (!cancelled) setCountryMarketDetail(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setCountryMarketDetail(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, hasPaidAccess, selectedCountryMarket]);
+
+  const countryMarketCoverage = useMemo(() => ({
+    countries: countryMarkets.length,
+    indices: countryMarkets.filter((row) => row.index_change_percent != null).length,
+    fx: countryMarkets.filter((row) => row.fx_change_percent != null).length,
+    filings: countryMarkets.reduce((sum, row) => sum + row.filing_count_7d, 0),
+  }), [countryMarkets]);
 
   const weatherByCountry = useMemo(() => {
     const map = new Map<string, CountryWeather>();
@@ -3232,26 +3170,12 @@ export default function ClaritasDashboard() {
       });
     }
 
-    const nextEarning = marketEarningsRows.find((event) => event.date);
-    if (nextEarning?.date) {
-      items.push({
-        id: `earnings-${nextEarning.symbol}-${nextEarning.date}`,
-        title: `${nextEarning.symbol} earnings approaching`,
-        description: `${nextEarning.market_name ?? nextEarning.market_code ?? "Market"} · ${nextEarning.hour ?? "Time pending"}`,
-        timeLabel: nextEarning.date,
-        tone: "info",
-        view: "markets",
-        symbol: nextEarning.symbol,
-      });
-    }
-
     return items.slice(0, 8);
   }, [
     dailyBriefing,
     dailyBriefingError,
     countryMeta,
     highestSignalCountry,
-    marketEarningsRows,
     marketQuotes,
     newsLoadError,
     podcastLoadError,
@@ -5686,7 +5610,7 @@ export default function ClaritasDashboard() {
                             
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <div className="text-[color:var(--shell-muted)]">
-                                Real-time quotes from Finnhub
+                                Licensed market snapshots (when configured)
                               </div>
                               <div className="ml-auto text-xs text-[color:var(--shell-muted)]">
                                 {filteredMarket.length} symbols
@@ -6416,57 +6340,31 @@ export default function ClaritasDashboard() {
                     </section>
 
                     <section className={`${cardBase} p-4`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Event calendar
-                          </div>
-                          <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                            Earnings and catalysts linked to the current market context
-                          </div>
-                        </div>
-                        <div className="inline-flex rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
-                          {[7, 14, 30].map((days) => (
-                            <button
-                              key={`earnings-window-${days}`}
-                              type="button"
-                              onClick={() => setMarketEarningsWindowDays(days as 7 | 14 | 30)}
-                              className={`rounded-full px-2 py-0.5 ${
-                                marketEarningsWindowDays === days
-                                  ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-bg)]"
-                                  : "text-[color:var(--shell-muted)]"
-                              }`}
-                            >
-                              {days}d
-                            </button>
-                          ))}
-                        </div>
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                        Primary-source catalysts
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                        Recent SEC filings connected to the current signal set
                       </div>
                       <div className="app-scroll-panel mt-3 max-h-52 space-y-2 overflow-y-auto pr-1">
-                        {marketEarningsRows.slice(0, 24).map((event, idx) => (
-                          <div
-                            key={`mk-earnings-${event.symbol}-${event.date}-${idx}`}
-                            className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs"
+                        {marketFilings.slice(0, 12).map((filing) => (
+                          <a
+                            key={`news-filing-${filing.id}`}
+                            href={filing.url ?? "#"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs hover:border-[color:var(--shell-ink)]"
                           >
                             <div className="flex items-center justify-between gap-3">
-                              <button
-                                type="button"
-                                onClick={() => setSelectedSymbol(event.symbol)}
-                                className="font-semibold text-[color:var(--shell-ink)] hover:underline"
-                              >
-                                {event.symbol}
-                              </button>
-                              <span className="text-[color:var(--shell-muted)]">{event.date ?? "—"}</span>
+                              <span className="font-semibold text-[color:var(--shell-ink)]">{filing.symbol ?? "SEC"} · {filing.event_type}</span>
+                              <span className="text-[color:var(--shell-muted)]">{new Date(filing.event_time).toLocaleDateString()}</span>
                             </div>
-                            <div className="mt-1 text-[color:var(--shell-muted)]">
-                              EPS {event.eps_actual ?? "—"} / {event.eps_estimate ?? "—"} · Rev{" "}
-                              {event.revenue_actual ?? "—"} / {event.revenue_estimate ?? "—"}
-                            </div>
-                          </div>
+                            <div className="mt-1 line-clamp-2 text-[color:var(--shell-muted)]">{filing.title}</div>
+                          </a>
                         ))}
-                        {marketEarningsRows.length === 0 && (
+                        {marketFilings.length === 0 && (
                           <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
-                            No earnings events in the selected window.
+                            No recent SEC filing events are loaded yet.
                           </div>
                         )}
                       </div>
@@ -7140,7 +7038,11 @@ export default function ClaritasDashboard() {
                           secondaryCountry={comparisonCountry}
                           pinnedCountry={pinnedCountry}
                           scale="linear"
-                          legendLabel="Relative temperature"
+                          legendLabel="Air temperature °C"
+                          fillMode="temperature"
+                          valueDomain={[-30, 45]}
+                          valueUnit="°C"
+                          showBubbles={false}
                         />
                       </div>
                     </div>
@@ -7327,28 +7229,21 @@ export default function ClaritasDashboard() {
                   <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
                     <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
                       <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
-                        Related symbols
+                        Related market regime
                       </div>
-                      {relatedMarkets.slice(0, 6).map((quote) => (
+                      {selectedCountryMarket ? (
                         <button
-                          key={`wx-market-${quote.symbol}`}
                           type="button"
                           onClick={() => {
-                            setSelectedSymbol(quote.symbol);
                             setActiveView("markets");
                           }}
-                          className="mt-2 flex w-full items-center justify-between rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-xs text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                          className="mt-2 w-full rounded-lg border border-[color:var(--shell-border)] px-3 py-2 text-left text-xs text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
                         >
-                          <span>{quote.symbol}</span>
-                          <span>
-                            {quote.percent_change != null
-                              ? `${quote.percent_change >= 0 ? "+" : ""}${quote.percent_change.toFixed(2)}%`
-                              : "—"}
-                          </span>
+                          <div className="flex justify-between gap-3 font-semibold"><span>{selectedCountryMarket.country_name}</span><span>{formatSignedMetric(selectedCountryMarket.composite_change_percent, 2, "%")}</span></div>
+                          <div className="mt-1 text-[color:var(--shell-muted)]">Index {selectedCountryMarket.index_symbol ?? "not configured"} · FX {formatSignedMetric(selectedCountryMarket.fx_change_percent, 2, "%")} · {selectedCountryMarket.filing_count_7d} SEC filings / 7d</div>
                         </button>
-                      ))}
-                      {relatedMarkets.length === 0 && (
-                        <p className="mt-2 text-xs text-[color:var(--shell-muted)]">No symbols mapped for this country.</p>
+                      ) : (
+                        <p className="mt-2 text-xs text-[color:var(--shell-muted)]">No ECB/SEC market context is mapped for this country.</p>
                       )}
                     </div>
                     <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
@@ -7379,100 +7274,89 @@ export default function ClaritasDashboard() {
               <div className="workspace-page markets-workspace space-y-4">
                 <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Market workspace
-                    </div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Market workspace</div>
                     <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                      {marketPageRows.length} quotes in watch scope
+                      {countryMarketCoverage.countries} country regimes · ECB FX + SEC primary events
                     </div>
                   </div>
-                  <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
-                    <button
-                      onClick={() => void fetchMarketQuotes({ refresh: true }).then(setMarketQuotes).catch(() => undefined)}
-                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
-                    >
-                      Refresh
-                    </button>
-                    {selectedSymbol && (
+                  <div className="ml-auto inline-flex flex-wrap rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
+                    {(["composite", "index", "fx", "filings"] as const).map((layer) => (
                       <button
-                        onClick={() => setSelectedSymbol(null)}
-                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)]"
+                        key={`market-layer-${layer}`}
+                        type="button"
+                        onClick={() => setMarketMapLayer(layer)}
+                        className={`rounded-full px-3 py-1 capitalize ${marketMapLayer === layer ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-bg)]" : "text-[color:var(--shell-muted)]"}`}
                       >
-                        Clear symbol
+                        {layer}
                       </button>
-                    )}
+                    ))}
                   </div>
-                  <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
-                    <label className="text-[color:var(--shell-muted)]">
-                      Exchange
-                      <select
-                        value={marketExchangeFilter}
-                        onChange={(event) => setMarketExchangeFilter(event.currentTarget.value)}
-                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
-                      >
-                        <option value="all">All exchanges</option>
-                        {marketExchangeOptions.map((exchange) => (
-                          <option key={exchange} value={exchange}>
-                            {exchange}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-[color:var(--shell-muted)]">
-                      Country
-                      <select
-                        value={marketCountryFilter}
-                        onChange={(event) => setMarketCountryFilter(event.currentTarget.value)}
-                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
-                      >
-                        <option value="all">All countries</option>
-                        {marketCountryOptions.map((country) => (
-                          <option key={country} value={country}>
-                            {country}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-[color:var(--shell-muted)]">
-                      Index/market
-                      <select
-                        value={marketIndexFilter}
-                        onChange={(event) => setMarketIndexFilter(event.currentTarget.value)}
-                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
-                      >
-                        <option value="all">All markets</option>
-                        {marketIndexOptions.map((market) => (
-                          <option key={market.code} value={market.code}>
-                            {market.code} · {market.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-[color:var(--shell-muted)]">
-                      Direction
-                      <select
-                        value={marketDirectionFilter}
-                        onChange={(event) =>
-                          setMarketDirectionFilter(event.currentTarget.value as "all" | "gainers" | "losers")
-                        }
-                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
-                      >
-                        <option value="all">All</option>
-                        <option value="gainers">Gainers</option>
-                        <option value="losers">Losers</option>
-                      </select>
-                    </label>
-                    <label className="text-[color:var(--shell-muted)]">
-                      Min |% move|
-                      <input
-                        type="number"
-                        min={0}
-                        step={0.1}
-                        value={marketMinAbsMove}
-                        onChange={(event) => setMarketMinAbsMove(Number(event.currentTarget.value) || 0)}
-                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
-                      />
-                    </label>
+                </section>
+
+                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+                  <div className={`${cardBase} overflow-hidden`}>
+                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Country market regime map</div>
+                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                        {marketMapLayer === "filings" ? "SEC filing activity by country" : `${marketMapLayer} daily direction — red negative, green positive`}
+                      </div>
+                    </div>
+                    <div className="h-[min(58vh,540px)] min-h-[22rem] p-3">
+                      <div className="app-map-frame">
+                        <WorldMapBubbles
+                          data={marketIndexMapData}
+                          onSelect={(iso) => setSelectedCountry(iso)}
+                          dark={dark}
+                          primaryCountry={selectedCountry}
+                          secondaryCountry={comparisonCountry}
+                          pinnedCountry={pinnedCountry}
+                          fillMode={marketMapLayer === "filings" ? "sequential" : "diverging"}
+                          valueDomain={marketMapLayer === "filings" ? [0, Math.max(1, ...countryMarkets.map((row) => row.filing_count_7d))] : [-3, 3]}
+                          valueUnit={marketMapLayer === "filings" ? "" : "%"}
+                          showBubbles={false}
+                          legendLabel={marketMapLayer === "filings" ? "7-day filing count" : "Daily percentage change"}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className={`${cardBase} p-4`}>
+                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Selected country drill-down</div>
+                      <div className="mt-1 text-base font-semibold text-[color:var(--shell-ink)]">
+                        {selectedCountryMarket ? `${selectedCountryMarket.country_name} · ${selectedCountryMarket.country}` : "Select a mapped country"}
+                      </div>
+                      {selectedCountryMarket ? (
+                        <>
+                          <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                            <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><dt className="text-[color:var(--shell-muted)]">Composite</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{formatSignedMetric(selectedCountryMarket.composite_change_percent, 2, "%")}</dd></div>
+                            <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><dt className="text-[color:var(--shell-muted)]">Index</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.index_symbol ?? "No provider"} · {formatSignedMetric(selectedCountryMarket.index_change_percent, 2, "%")}</dd></div>
+                            <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><dt className="text-[color:var(--shell-muted)]">Currency vs EUR</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.fx_symbol ?? "—"} · {formatSignedMetric(selectedCountryMarket.fx_change_percent, 2, "%")}</dd></div>
+                            <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><dt className="text-[color:var(--shell-muted)]">SEC activity</dt><dd className="font-semibold text-[color:var(--shell-ink)]">{selectedCountryMarket.filing_count_7d} filings / 7d</dd></div>
+                          </dl>
+                          {countryMarketDetail && countryMarketDetail.fx_history.length > 1 && (
+                            <div className="mt-3 h-24" aria-label={`${selectedCountryMarket.fx_symbol ?? "Currency"} 90-day ECB history`}>
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={countryMarketDetail.fx_history}>
+                                  <Tooltip labelFormatter={(label) => new Date(String(label)).toLocaleDateString()} />
+                                  <Area type="monotone" dataKey="value" stroke="var(--signal-sky)" fill="var(--signal-sky-soft)" strokeWidth={2} />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </div>
+                          )}
+                          {countryMarketDetail && countryMarketDetail.filings.length > 0 && (
+                            <div className="mt-2 text-[11px] text-[color:var(--shell-muted)]">
+                              Latest filing: <span className="font-semibold text-[color:var(--shell-ink)]">{countryMarketDetail.filings[0].symbol ?? "SEC"} · {countryMarketDetail.filings[0].event_type}</span> · {new Date(countryMarketDetail.filings[0].event_time).toLocaleDateString()}
+                            </div>
+                          )}
+                        </>
+                      ) : <p className="mt-3 text-xs text-[color:var(--shell-muted)]">The map preserves missing components instead of fabricating a country score.</p>}
+                    </div>
+                    <div className={`${cardBase} p-4 text-xs`}>
+                      <div className="font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Connected context</div>
+                      <div className="mt-2 text-[color:var(--shell-ink)]">Weather: {relatedWeather ? `${relatedWeather.temp_c ?? "—"}°C · ${relatedWeather.weather_main ?? "—"} · AQI ${relatedWeather.air_quality?.european_aqi ?? "—"}` : "select a covered country"}</div>
+                      <div className="mt-1 text-[color:var(--shell-ink)]">News: {relatedNews.length} recent mapped stories</div>
+                      <div className="mt-1 text-[color:var(--shell-muted)]">Composite = 75% licensed country index + 25% local currency vs EUR when both exist; otherwise the available component is shown. Missing values are not imputed.</div>
+                    </div>
                   </div>
                 </section>
 
@@ -7525,164 +7409,67 @@ export default function ClaritasDashboard() {
                 <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-4">
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Quotes
+                      Country coverage
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {marketSummary.quotes}
+                      {countryMarketCoverage.countries}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      Symbols in scope
+                      Mapped market regimes
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Breadth
+                      FX coverage
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {marketSummary.gainers}/{marketSummary.losers}
+                      {countryMarketCoverage.fx}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      Gainers vs losers
+                      ECB-linked currencies
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Avg move
+                      Country indices
                     </div>
                     <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {formatMetricNumber(marketSummary.avgAbsMove)}%
+                      {countryMarketCoverage.indices}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      Absolute move per symbol
+                      Licensed benchmarks available
                     </div>
                   </div>
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Strongest regime
+                      SEC activity
                     </div>
-                    <div className="mt-2 text-base font-semibold text-[color:var(--shell-ink)]">
-                      {marketSummary.strongestBenchmark?.market_code ?? "—"}
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {countryMarketCoverage.filings}
                     </div>
                     <div className="text-xs text-[color:var(--shell-muted)]">
-                      {marketSummary.strongestBenchmark
-                        ? formatSignedMetric(marketSummary.strongestBenchmark.avg_change, 2, "%")
-                        : "Awaiting benchmark mix"}
+                      Filings in trailing 7 days
                     </div>
                   </div>
                 </section>
 
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-[0.95fr_1.05fr]">
                   <section className={`${cardBase} p-4`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          Exchange status
-                        </div>
-                        <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                          {marketStatusSummary.open}/{marketStatusSummary.total} tracked exchanges open
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void fetchMarketStatus({ refresh: true })
-                            .then(setMarketStatusRows)
-                            .catch(() => setMarketStatusRows([]))
-                        }
-                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
-                      >
-                        Refresh
-                      </button>
-                    </div>
-                    <div className="app-scroll-panel mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
-                      {marketStatusDisplayRows.map((status) => (
-                        <div
-                          key={`market-status-${status.exchange}`}
-                          className="flex items-center justify-between rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs"
-                        >
-                          <span className="font-medium text-[color:var(--shell-ink)]">
-                            {status.exchange}
-                          </span>
-                          <span
-                            className={
-                              status.is_open === true
-                                ? "text-[color:var(--viz-positive)]"
-                                : status.is_open === false
-                                  ? "text-rose-600"
-                                  : "text-[color:var(--shell-muted)]"
-                            }
-                          >
-                            {status.is_open === true
-                              ? "Open"
-                              : status.is_open === false
-                                ? "Closed"
-                                : "Unknown"}
-                          </span>
-                        </div>
-                      ))}
-                      {marketStatusDisplayRows.length === 0 && (
-                        <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
-                          No exchange status rows available.
-                        </div>
-                      )}
-                    </div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Methodology</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">How the country regime is calculated</div>
+                    <dl className="mt-3 space-y-2 text-xs">
+                      <div><dt className="font-semibold text-[color:var(--shell-ink)]">Index</dt><dd className="text-[color:var(--shell-muted)]">{countryMarketMethodology?.index ?? "No licensed country-index provider configured."}</dd></div>
+                      <div><dt className="font-semibold text-[color:var(--shell-ink)]">Currency</dt><dd className="text-[color:var(--shell-muted)]">{countryMarketMethodology?.fx ?? "ECB reference rates are not loaded."}</dd></div>
+                    </dl>
                   </section>
 
                   <section className={`${cardBase} p-4`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          Earnings calendar
-                        </div>
-                        <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                          Upcoming events {selectedSymbol ? `for ${selectedSymbol}` : "(watch scope)"}
-                        </div>
-                      </div>
-                      <div className="inline-flex rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
-                        {[7, 14, 30].map((days) => (
-                          <button
-                            key={`market-earnings-window-${days}`}
-                            type="button"
-                            onClick={() => setMarketEarningsWindowDays(days as 7 | 14 | 30)}
-                            className={`rounded-full px-2 py-0.5 ${
-                              marketEarningsWindowDays === days
-                                ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-bg)]"
-                                : "text-[color:var(--shell-muted)]"
-                            }`}
-                          >
-                            {days}d
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="app-scroll-panel mt-3 max-h-48 space-y-2 overflow-y-auto pr-1">
-                      {marketEarningsRows.slice(0, 24).map((event, idx) => (
-                        <div
-                          key={`market-earnings-${event.symbol}-${event.date}-${idx}`}
-                          className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedSymbol(event.symbol)}
-                              className="font-semibold text-[color:var(--shell-ink)] hover:underline"
-                            >
-                              {event.symbol}
-                            </button>
-                            <span className="text-[color:var(--shell-muted)]">{event.date ?? "—"}</span>
-                          </div>
-                          <div className="mt-1 text-[color:var(--shell-muted)]">
-                            EPS {event.eps_actual ?? "—"} / {event.eps_estimate ?? "—"} · Rev{" "}
-                            {event.revenue_actual ?? "—"} / {event.revenue_estimate ?? "—"}
-                          </div>
-                        </div>
-                      ))}
-                      {marketEarningsRows.length === 0 && (
-                        <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-2 text-xs text-[color:var(--shell-muted)]">
-                          No earnings events in the selected window.
-                        </div>
-                      )}
-                    </div>
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Interpretation guardrails</div>
+                    <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">Comparable signals, explicit gaps</div>
+                    <dl className="mt-3 space-y-2 text-xs">
+                      <div><dt className="font-semibold text-[color:var(--shell-ink)]">Composite</dt><dd className="text-[color:var(--shell-muted)]">{countryMarketMethodology?.composite ?? "Unavailable."}</dd></div>
+                      <div><dt className="font-semibold text-[color:var(--shell-ink)]">Filings</dt><dd className="text-[color:var(--shell-muted)]">{countryMarketMethodology?.filings ?? "Unavailable."}</dd></div>
+                    </dl>
                   </section>
                 </section>
 

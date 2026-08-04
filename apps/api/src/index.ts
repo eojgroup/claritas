@@ -19,6 +19,7 @@ import {
 import { getGdeltEvents, getGdeltSignals, ingestGdelt } from "./connectors/gdelt";
 import { getMarketFilings, getMarketIndicators, ingestSecEdgar } from "./connectors/sec-edgar";
 import { getLatestFxRates, getLatestPolicyRates, ingestEcbData } from "./connectors/ecb";
+import { getCountryMarketDetail, getCountryMarketOverview } from "./connectors/market-overview";
 import {
   getCountryLeadershipLatest,
   ingestWikidataLeadership,
@@ -29,15 +30,6 @@ import {
   startTransportIngestionWorkers,
   type TransportMode,
 } from "./connectors/transport";
-import {
-  getFinnhubEarningsCalendar,
-  getFinnhubMarketStatus,
-  getMarketQuotesLatest,
-  ingestFinnhubMarketNews,
-  ingestFinnhubQuotes,
-  parseMarketSymbolsInput,
-  refreshMarketQuotesRealtime,
-} from "./connectors/finnhub";
 import {
   getDatabasePoolStats,
   isDatabaseUnavailableError,
@@ -1775,7 +1767,8 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     const sql = `
       SELECT i.id, i.kind, i.title, i.summary, i.url, i.country_iso2,
              i.language_code, i.source_country_iso2, i.tone,
-             i.event_time, i.payload, s.name AS source_name
+             i.event_time, i.payload, s.name AS source_name,
+             COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher
       FROM item i
       JOIN source s ON s.id = i.source_id
       ${where.length ? "WHERE " + where.join(" AND ") : ""}
@@ -2802,75 +2795,6 @@ app.post("/api/ingest/ecb", requireIngestionAccess, async (req, res) => {
   }
 });
 
-// Ingest Finnhub quotes for a symbol list (or defaults)
-app.post("/api/ingest/finnhub/quotes", requireIngestionAccess, async (req, res) => {
-  try {
-    let symbols: string[] | undefined;
-    const includeNews =
-      req.body?.includeNews === true ||
-      String(req.body?.includeNews || "").trim().toLowerCase() === "true";
-    const newsCategory = typeof req.body?.newsCategory === "string" ? req.body.newsCategory : undefined;
-    const newsMinId =
-      typeof req.body?.newsMinId === "number"
-        ? req.body.newsMinId
-        : typeof req.body?.newsMinId === "string"
-          ? Number.parseInt(req.body.newsMinId, 10)
-          : undefined;
-    const newsMaxItems =
-      typeof req.body?.newsMaxItems === "number"
-        ? req.body.newsMaxItems
-        : typeof req.body?.newsMaxItems === "string"
-          ? Number.parseInt(req.body.newsMaxItems, 10)
-          : undefined;
-    try {
-      const parsed = parseMarketSymbolsInput(req.body?.symbols);
-      symbols = parsed.length > 0 ? parsed : undefined;
-    } catch (validationError) {
-      return res.status(400).json({
-        error: validationError instanceof Error ? validationError.message : String(validationError),
-      });
-    }
-    const result = await ingestFinnhubQuotes(symbols);
-    const news = includeNews
-      ? await ingestFinnhubMarketNews({
-          category: newsCategory,
-          minId: Number.isFinite(newsMinId as number) ? (newsMinId as number) : undefined,
-          maxItems: Number.isFinite(newsMaxItems as number) ? (newsMaxItems as number) : undefined,
-        })
-      : null;
-    res.json({ ...result, news });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message || String(e) });
-  }
-});
-
-// Ingest Finnhub market news into the shared news item feed
-app.post("/api/ingest/finnhub/news", requireIngestionAccess, async (req, res) => {
-  try {
-    const category = typeof req.body?.category === "string" ? req.body.category : undefined;
-    const minId =
-      typeof req.body?.minId === "number"
-        ? req.body.minId
-        : typeof req.body?.minId === "string"
-          ? Number.parseInt(req.body.minId, 10)
-          : undefined;
-    const maxItems =
-      typeof req.body?.maxItems === "number"
-        ? req.body.maxItems
-        : typeof req.body?.maxItems === "string"
-          ? Number.parseInt(req.body.maxItems, 10)
-          : undefined;
-    const result = await ingestFinnhubMarketNews({
-      category,
-      minId: Number.isFinite(minId as number) ? (minId as number) : undefined,
-      maxItems: Number.isFinite(maxItems as number) ? (maxItems as number) : undefined,
-    });
-    res.json(result);
-  } catch (e: any) {
-    res.status(500).json({ error: e.message || String(e) });
-  }
-});
-
 // Latest weather per country for map overlay
 app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) => {
   try {
@@ -3004,77 +2928,64 @@ app.get("/api/transport/entities/:mode/:entityId", requireAuthenticated, async (
   }
 });
 
-// Latest market quotes with optional on-demand refresh for near real-time views
+// Latest market quotes from sources that remain active.
 app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
   try {
     trackDemandSignal("market");
-    let symbols: string[] | undefined;
-    try {
-      const parsed = parseMarketSymbolsInput(req.query.symbols);
-      symbols = parsed.length > 0 ? parsed : undefined;
-    } catch (validationError) {
-      return res.status(400).json({
-        error: validationError instanceof Error ? validationError.message : String(validationError),
-      });
+    const symbols = typeof req.query.symbols === "string"
+      ? req.query.symbols.split(/[\s,]+/).map((value) => value.trim().toUpperCase()).filter(Boolean)
+      : [];
+    if (symbols.some((symbol) => !/^[A-Z0-9.^:_-]{1,24}$/.test(symbol)) || symbols.length > 100) {
+      return res.status(400).json({ error: "symbols must contain at most 100 valid market identifiers." });
     }
-
-    const refreshRaw = typeof req.query.refresh === "string" ? req.query.refresh.trim().toLowerCase() : "";
-    const shouldRefresh =
-      refreshRaw === "" ||
-      refreshRaw === "1" ||
-      refreshRaw === "true" ||
-      refreshRaw === "yes" ||
-      refreshRaw === "on";
-
-    if (shouldRefresh) {
-      await refreshMarketQuotesRealtime(symbols);
-    }
-    const quotes = await getMarketQuotesLatest(symbols);
-    res.json({ quotes, refreshed: shouldRefresh, count: quotes.length });
+    const { rows } = await query(
+      `SELECT ms.symbol, ms.company_name, ms.exchange, ms.country, ms.currency,
+              ms.price, ms.change, ms.percent_change, ms.high_price, ms.low_price,
+              ms.open_price, ms.previous_close, ms.observed_at, ms.payload,
+              s.name AS source_name
+       FROM market_snapshot ms
+       JOIN source s ON s.id = ms.source_id
+       WHERE COALESCE(s.metadata->>'retired', 'false') <> 'true'
+         AND (cardinality($1::text[]) = 0 OR upper(ms.symbol) = ANY($1::text[]))
+       ORDER BY abs(COALESCE(ms.percent_change, 0)) DESC, ms.observed_at DESC`,
+      [symbols]
+    );
+    res.json({ quotes: rows, refreshed: false, count: rows.length });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
   }
 });
 
-// Live market open/close status by exchange
-app.get("/api/market/status", requireAuthenticated, async (req, res) => {
+// Compatibility responses for older clients. These capabilities require a
+// licensed market-data provider and are deliberately empty after retirement.
+app.get("/api/market/status", requireAuthenticated, (_req, res) => {
+  trackDemandSignal("market");
+  return res.json({ status: [], count: 0, refreshed: false, provider: null });
+});
+
+app.get("/api/market/earnings", requireAuthenticated, (_req, res) => {
+  trackDemandSignal("market");
+  return res.json({ events: [], count: 0, provider: null });
+});
+
+app.get("/api/market/countries", requireAuthenticated, async (_req, res) => {
   try {
     trackDemandSignal("market");
-    const exchangesRaw = typeof req.query.exchanges === "string" ? req.query.exchanges : "";
-    const exchanges = exchangesRaw
-      .split(/[,\s]+/)
-      .map((value) => value.trim().toUpperCase())
-      .filter(Boolean);
-    const refreshRaw = typeof req.query.refresh === "string" ? req.query.refresh.trim().toLowerCase() : "";
-    const shouldRefresh =
-      refreshRaw === "1" ||
-      refreshRaw === "true" ||
-      refreshRaw === "yes" ||
-      refreshRaw === "on";
-    const status = await getFinnhubMarketStatus(exchanges.length > 0 ? exchanges : undefined, shouldRefresh);
-    res.json({ status, refreshed: shouldRefresh, count: status.length });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message || String(e) });
+    return res.json(await getCountryMarketOverview());
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 
-// Upcoming earnings events
-app.get("/api/market/earnings", requireAuthenticated, async (req, res) => {
+app.get("/api/market/countries/:country", requireAuthenticated, async (req, res) => {
   try {
     trackDemandSignal("market");
-    const from = typeof req.query.from === "string" ? req.query.from : undefined;
-    const to = typeof req.query.to === "string" ? req.query.to : undefined;
-    const symbol = typeof req.query.symbol === "string" ? req.query.symbol : undefined;
-    const limitRaw = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : undefined;
-    const events = await getFinnhubEarningsCalendar({
-      from,
-      to,
-      symbol,
-      limit: Number.isFinite(limitRaw as number) ? (limitRaw as number) : undefined,
-    });
-    res.json({ events, count: events.length });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message || String(e) });
+    const detail = await getCountryMarketDetail(req.params.country);
+    if (!detail) return res.status(404).json({ error: "Country market context is unavailable." });
+    return res.json(detail);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return res.status(message.includes("ISO2") ? 400 : 500).json({ error: message });
   }
 });
 

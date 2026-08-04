@@ -8,7 +8,6 @@ locals {
   k8s_auth_optional_plain = {
     AUTH_KEYCLOAK_CLIENT_SECRET    = var.auth_keycloak_client_secret
     INGEST_API_TOKEN               = var.ingest_api_token
-    FINNHUB_API_KEY                = var.finnhub_api_key
     KEYCLOAK_ADMIN                 = var.keycloak_admin
     KC_IDP_GOOGLE_CLIENT_ID        = var.auth_google_client_id
     KC_IDP_GOOGLE_CLIENT_SECRET    = var.auth_google_client_secret

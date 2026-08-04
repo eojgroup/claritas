@@ -27,6 +27,7 @@ import type {
 export type BubbleDatum = {
   country: string;
   count: number;
+  value?: number;
   tone?:
     | "signal"
     | "news"
@@ -56,6 +57,10 @@ export type WorldMapBubblesProps = {
   scale?: "linear" | "log";
   showLabels?: boolean;
   legendLabel?: string;
+  fillMode?: "default" | "temperature" | "diverging" | "sequential";
+  valueDomain?: [number, number];
+  valueUnit?: string;
+  showBubbles?: boolean;
 };
 
 type WorldCountryReference = {
@@ -74,6 +79,7 @@ type CountryProperties = {
 type BubbleMarker = {
   country: string;
   count: number;
+  value: number;
   coordinate: [number, number];
   tone?: BubbleDatum["tone"];
   meta?: BubbleDatum["meta"];
@@ -193,6 +199,44 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function interpolateRgb(from: [number, number, number], to: [number, number, number], ratio: number) {
+  const bounded = clamp(ratio, 0, 1);
+  const channels = from.map((value, index) => Math.round(value + (to[index] - value) * bounded));
+  return `rgb(${channels.join(",")})`;
+}
+
+function choroplethColor(
+  value: number,
+  mode: "temperature" | "diverging" | "sequential",
+  domain: [number, number],
+  dark: boolean,
+) {
+  const [rawMin, rawMax] = domain;
+  const min = Math.min(rawMin, rawMax);
+  const max = Math.max(rawMin, rawMax);
+  if (mode === "temperature") {
+    const ratio = (value - min) / Math.max(max - min, 0.0001);
+    if (ratio < 0.5) {
+      return interpolateRgb(dark ? [43, 91, 135] : [55, 113, 166], dark ? [211, 190, 126] : [239, 209, 126], ratio * 2);
+    }
+    return interpolateRgb(dark ? [211, 190, 126] : [239, 209, 126], dark ? [189, 65, 54] : [191, 54, 45], (ratio - 0.5) * 2);
+  }
+  if (mode === "sequential") {
+    const ratio = (value - min) / Math.max(max - min, 0.0001);
+    return interpolateRgb(
+      dark ? [43, 57, 75] : [218, 227, 235],
+      dark ? [116, 91, 184] : [99, 68, 173],
+      ratio
+    );
+  }
+  const bound = Math.max(Math.abs(min), Math.abs(max), 0.0001);
+  const normalized = clamp(value / bound, -1, 1);
+  const neutral: [number, number, number] = dark ? [111, 105, 92] : [189, 181, 164];
+  return normalized < 0
+    ? interpolateRgb(neutral, dark ? [185, 63, 68] : [166, 48, 55], -normalized)
+    : interpolateRgb(neutral, dark ? [45, 139, 117] : [39, 121, 101], normalized);
+}
+
 export default memo(function WorldMapBubbles({
   data,
   onSelect,
@@ -207,6 +251,10 @@ export default memo(function WorldMapBubbles({
   scale = "linear",
   showLabels = true,
   legendLabel = "Relative intensity",
+  fillMode = "default",
+  valueDomain,
+  valueUnit = "",
+  showBubbles = true,
 }: WorldMapBubblesProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -281,6 +329,7 @@ export default memo(function WorldMapBubbles({
       next.push({
         country: iso,
         count: datum.count,
+        value: Number.isFinite(datum.value) ? Number(datum.value) : datum.count,
         coordinate,
         tone: datum.tone,
         meta: datum.meta,
@@ -316,6 +365,14 @@ export default memo(function WorldMapBubbles({
     );
     return Number.isFinite(value) ? value : 0;
   }, [markers]);
+  const dataValueDomain = useMemo<[number, number]>(() => {
+    if (valueDomain) return valueDomain;
+    if (markers.length === 0) return [0, 1];
+    return [
+      Math.min(...markers.map((marker) => marker.value)),
+      Math.max(...markers.map((marker) => marker.value)),
+    ];
+  }, [markers, valueDomain]);
 
   const intensityFor = useCallback(
     (value: number) =>
@@ -446,7 +503,7 @@ export default memo(function WorldMapBubbles({
   };
 
   const updateTip = (
-    event: ReactPointerEvent<SVGGElement>,
+    event: ReactPointerEvent<SVGElement>,
     marker: BubbleMarker,
   ) => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -507,33 +564,35 @@ export default memo(function WorldMapBubbles({
             const isSecondary = secondaryIso === iso;
             const isFeatured = featuredIso === iso;
             const isHovered = hoveredCountry === iso;
-            const fill = isPrimary
-              ? isDark
-                ? "#b96f3d"
-                : "#d9824b"
-              : isSecondary
+            const fill = fillMode !== "default" && marker
+              ? choroplethColor(marker.value, fillMode, dataValueDomain, isDark)
+              : isPrimary
                 ? isDark
-                  ? "#3f7588"
-                  : "#77a8ba"
-                : isFeatured
+                  ? "#b96f3d"
+                  : "#d9824b"
+                : isSecondary
                   ? isDark
-                    ? "#7d5435"
-                    : "#d69a70"
-                  : marker
+                    ? "#3f7588"
+                    : "#77a8ba"
+                  : isFeatured
                     ? isDark
-                      ? "#355d6d"
-                      : "#86a6b2"
-                    : isDark
-                      ? "#1b2d38"
-                      : "#cbd6da";
+                      ? "#7d5435"
+                      : "#d69a70"
+                    : marker
+                      ? isDark
+                        ? "#355d6d"
+                        : "#86a6b2"
+                      : isDark
+                        ? "#1b2d38"
+                        : "#cbd6da";
             const opacity = isPrimary
               ? 0.95
               : isSecondary
                 ? 0.9
                 : isHovered
                   ? 0.88
-                  : marker
-                    ? 0.56 + intensity * 0.34
+              : marker
+                    ? fillMode === "default" ? 0.56 + intensity * 0.34 : 0.88
                     : 0.82;
             const stroke =
               isPrimary || isSecondary || isFeatured || isHovered
@@ -560,8 +619,9 @@ export default memo(function WorldMapBubbles({
                   marker ? `: ${marker.count}` : ": no mapped signal"
                 }`}
                 className="world-map-country"
-                onPointerEnter={() => setHoveredCountry(iso)}
-                onPointerLeave={() => setHoveredCountry(null)}
+                onPointerEnter={(event) => marker ? updateTip(event, marker) : setHoveredCountry(iso)}
+                onPointerMove={(event) => marker && updateTip(event, marker)}
+                onPointerLeave={() => { setHoveredCountry(null); setTip(null); }}
                 onClick={() => handleCountrySelect(iso)}
                 onKeyDown={(
                   event: ReactKeyboardEvent<SVGPathElement>,
@@ -575,7 +635,7 @@ export default memo(function WorldMapBubbles({
             );
           })}
 
-          {markers.map((marker) => {
+          {showBubbles && markers.map((marker) => {
             const point = projection(marker.coordinate);
             if (!point) return null;
             const isPrimary = primaryIso === marker.country;
@@ -774,7 +834,7 @@ export default memo(function WorldMapBubbles({
           <div className="map-legend-title mb-1 text-[10px] font-semibold uppercase tracking-[0.22em]">
             {legendLabel}
           </div>
-          <div className="flex items-center gap-2">
+          {fillMode === "default" ? <div className="flex items-center gap-2">
             <svg width={58} height={24} aria-hidden="true">
               {[0.2, 0.5, 1].map((factor, index) => (
                 <circle
@@ -791,11 +851,26 @@ export default memo(function WorldMapBubbles({
             <span>
               {scale === "log" ? "Log-scaled bubbles" : "Relative bubbles"}
             </span>
-          </div>
-          <div className="mt-0.5 flex justify-between gap-4 text-[10px]">
+          </div> : <div>
+            <div
+              className="h-2.5 w-40 rounded-full border border-current/20"
+              style={{
+                background: fillMode === "temperature"
+                  ? "linear-gradient(90deg, rgb(55,113,166), rgb(239,209,126), rgb(191,54,45))"
+                  : fillMode === "sequential"
+                    ? "linear-gradient(90deg, rgb(218,227,235), rgb(99,68,173))"
+                    : "linear-gradient(90deg, rgb(166,48,55), rgb(189,181,164), rgb(39,121,101))",
+              }}
+            />
+            <div className="mt-1 flex justify-between gap-4 text-[10px]">
+              <span>{dataValueDomain[0].toFixed(1)}{valueUnit}</span>
+              <span>{dataValueDomain[1].toFixed(1)}{valueUnit}</span>
+            </div>
+          </div>}
+          {fillMode === "default" && <div className="mt-0.5 flex justify-between gap-4 text-[10px]">
             <span>Min {min}</span>
             <span>Max {max}</span>
-          </div>
+          </div>}
           <div className="map-legend-coverage mt-1 border-t border-current/15 pt-1 text-[10px] opacity-75">
             {markers.length} mapped · select country for profile
           </div>

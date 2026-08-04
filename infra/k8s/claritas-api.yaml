@@ -20,8 +20,6 @@
               valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
             - name: OPEN_METEO_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-openmeteo, key: OPEN_METEO_API_KEY, optional: true } }
-            - name: FINNHUB_API_KEY
-              valueFrom: { secretKeyRef: { name: claritas-finnhub, key: FINNHUB_API_KEY, optional: true } }
             - name: PODCASTINDEX_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_KEY, optional: true } }
             - name: PODCASTINDEX_API_SECRET

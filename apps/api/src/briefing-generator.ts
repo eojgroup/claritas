@@ -2,6 +2,8 @@ import { query } from "./db";
 import { createLlmClientFromEnv, getLlmRuntimeConfig, type LlmClient } from "./llm";
 import { getCountryLeadershipLatest } from "./connectors/wikidata-leadership";
 import { getTransportOverviewForBriefing } from "./connectors/transport";
+import { getCountryMarketOverview } from "./connectors/market-overview";
+import { getCountryWeatherLatest } from "./connectors/openmeteo";
 
 export type GeneratedBriefingStatus = "draft" | "published";
 
@@ -32,6 +34,7 @@ export type DailyBriefingGenerationOptions = {
 type NewsContextRow = {
   id: number;
   source_name: string;
+  publisher: string | null;
   title: string | null;
   summary: string | null;
   url: string | null;
@@ -39,16 +42,45 @@ type NewsContextRow = {
   event_time: string | Date | null;
 };
 
-type MarketContextRow = {
-  symbol: string;
+type MarketEventContextRow = {
+  event_type: string;
+  symbol: string | null;
   company_name: string | null;
-  exchange: string | null;
   country: string | null;
-  currency: string | null;
-  price: number | null;
-  change: number | null;
-  percent_change: number | null;
-  observed_at: string | Date;
+  title: string;
+  summary: string | null;
+  url: string | null;
+  event_time: string | Date;
+  source_name: string;
+};
+
+type GdeltEventContextRow = {
+  event_code: string | null;
+  quad_class: number | null;
+  goldstein_scale: number | null;
+  avg_tone: number | null;
+  actor1_name: string | null;
+  actor2_name: string | null;
+  country: string | null;
+  location: string | null;
+  mention_count: number | null;
+  source_count: number | null;
+  article_count: number | null;
+  event_time: string | Date;
+  url: string | null;
+};
+
+type GdeltSignalContextRow = {
+  domain: string | null;
+  language_code: string | null;
+  source_country: string | null;
+  tone: number | null;
+  themes: unknown;
+  persons: unknown;
+  organizations: unknown;
+  locations: unknown;
+  event_time: string | Date;
+  url: string | null;
 };
 
 type PodcastContextRow = {
@@ -63,18 +95,6 @@ type PodcastContextRow = {
   signals: unknown;
 };
 
-type WeatherContextRow = {
-  country_iso2: string;
-  country_name: string | null;
-  temp_c: number | null;
-  feels_like_c: number | null;
-  humidity: number | null;
-  wind_speed: number | null;
-  weather_main: string | null;
-  weather_desc: string | null;
-  observed_at: string | Date;
-};
-
 type BriefingContext = {
   briefing_date: string;
   source_window_start: string;
@@ -82,6 +102,8 @@ type BriefingContext = {
   generated_at: string;
   counts: {
     news: number;
+    news_events: number;
+    news_signals: number;
     podcasts: number;
     markets: number;
     weather: number;
@@ -89,9 +111,14 @@ type BriefingContext = {
     transport: number;
   };
   news: Array<Record<string, unknown>>;
+  global_events: Array<Record<string, unknown>>;
+  news_intelligence: Array<Record<string, unknown>>;
   podcasts: Array<Record<string, unknown>>;
   markets: Array<Record<string, unknown>>;
+  market_primary_events: Array<Record<string, unknown>>;
+  market_analysis: Record<string, unknown>;
   weather: Array<Record<string, unknown>>;
+  weather_analysis: Record<string, unknown>;
   leadership: Array<Record<string, unknown>>;
   transport: Record<string, unknown>;
 };
@@ -113,7 +140,7 @@ export class BriefingGenerationError extends Error {
   }
 }
 
-const PROMPT_VERSION = "daily-signal-briefing.v4";
+const PROMPT_VERSION = "daily-signal-briefing.v5";
 
 const BRIEFING_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -204,8 +231,11 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
 
   const [
     newsResult,
+    gdeltEventResult,
+    gdeltSignalResult,
     podcastResult,
-    marketResult,
+    marketOverview,
+    marketEventResult,
     weatherResult,
     leadershipResult,
     transportResult,
@@ -214,6 +244,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
       `SELECT
          i.id,
          s.name AS source_name,
+         COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
          i.title,
          i.summary,
          i.url,
@@ -227,6 +258,26 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
        LIMIT $3`,
       [start, end, newsLimit]
+    ),
+    query<GdeltEventContextRow>(
+      `SELECT event_code, quad_class, goldstein_scale, avg_tone,
+              actor1_name, actor2_name, upper(action_country_iso2::text) AS country,
+              action_geo_name AS location, mention_count, source_count, article_count,
+              event_time, url
+       FROM global_event
+       WHERE event_time >= $1::timestamptz AND event_time < $2::timestamptz
+       ORDER BY mention_count DESC NULLS LAST, abs(COALESCE(goldstein_scale, 0)) DESC, event_time DESC
+       LIMIT $3`,
+      [start, end, Math.min(newsLimit, 24)]
+    ),
+    query<GdeltSignalContextRow>(
+      `SELECT domain, language_code, upper(source_country_iso2::text) AS source_country,
+              tone, themes, persons, organizations, locations, event_time, url
+       FROM news_signal
+       WHERE event_time >= $1::timestamptz AND event_time < $2::timestamptz
+       ORDER BY abs(COALESCE(tone, 0)) DESC, event_time DESC
+       LIMIT $3`,
+      [start, end, Math.min(newsLimit, 24)]
     ),
     query<PodcastContextRow>(
       `SELECT
@@ -278,48 +329,35 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        LIMIT $3`,
       [start, end, podcastLimit]
     ),
-    query<MarketContextRow>(
+    getCountryMarketOverview(),
+    query<MarketEventContextRow>(
       `SELECT
-         symbol,
-         company_name,
-         exchange,
-         country,
-         currency,
-         price,
-         change,
-         percent_change,
-         observed_at
-       FROM market_snapshot
-       WHERE observed_at <= $1::timestamptz
-       ORDER BY ABS(COALESCE(percent_change, 0)) DESC, observed_at DESC, symbol ASC
-       LIMIT $2`,
-      [end, marketLimit]
+         me.event_type,
+         me.symbol,
+         me.company_name,
+         upper(me.country_iso2::text) AS country,
+         me.title,
+         me.summary,
+         me.url,
+         me.event_time,
+         s.name AS source_name
+       FROM market_event me
+       JOIN source s ON s.id = me.source_id
+       WHERE me.event_time >= $1::timestamptz
+         AND me.event_time < $2::timestamptz
+       ORDER BY me.event_time DESC
+       LIMIT $3`,
+      [start, end, marketLimit]
     ),
-    query<WeatherContextRow>(
-      `SELECT
-         ws.country_iso2,
-         c.name AS country_name,
-         ws.temp_c,
-         ws.feels_like_c,
-         ws.humidity,
-         ws.wind_speed,
-         ws.weather_main,
-         ws.weather_desc,
-         ws.observed_at
-       FROM weather_snapshot ws
-       LEFT JOIN country c ON c.iso2 = ws.country_iso2
-       WHERE ws.observed_at <= $1::timestamptz
-       ORDER BY ws.observed_at DESC, ws.country_iso2 ASC
-       LIMIT $2`,
-      [end, weatherLimit]
-    ),
+    getCountryWeatherLatest(),
     getCountryLeadershipLatest(),
     getTransportOverviewForBriefing(),
   ]);
 
   const news = newsResult.rows.map((row) => ({
     id: Number(row.id),
-    source: row.source_name,
+    publisher: row.publisher,
+    provider: row.source_name,
     title: row.title,
     summary: row.summary,
     country: row.country_iso2,
@@ -339,31 +377,121 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     external_links: row.external_links && typeof row.external_links === "object" ? row.external_links : {},
   }));
 
-  const markets = marketResult.rows.map((row) => ({
+  const globalEvents = gdeltEventResult.rows.map((row) => ({
+    event_code: row.event_code,
+    quad_class: row.quad_class,
+    goldstein_scale: row.goldstein_scale,
+    avg_tone: row.avg_tone,
+    actors: [row.actor1_name, row.actor2_name].filter(Boolean),
+    country: row.country,
+    location: row.location,
+    mentions: row.mention_count,
+    sources: row.source_count,
+    articles: row.article_count,
+    event_time: timestampToIso(row.event_time),
+    url: row.url,
+    methodology: "Machine-coded GDELT event; corroborate with supplied publisher stories before presenting as confirmed fact.",
+  }));
+  const newsIntelligence = gdeltSignalResult.rows.map((row) => ({
+    publisher_domain: row.domain,
+    language: row.language_code,
+    source_country: row.source_country,
+    tone: row.tone,
+    themes: Array.isArray(row.themes) ? row.themes : [],
+    persons: Array.isArray(row.persons) ? row.persons : [],
+    organizations: Array.isArray(row.organizations) ? row.organizations : [],
+    locations: Array.isArray(row.locations) ? row.locations : [],
+    event_time: timestampToIso(row.event_time),
+    url: row.url,
+  }));
+
+  const markets = [...marketOverview.countries]
+    .sort((left, right) =>
+      Math.abs(right.composite_change_percent ?? 0) - Math.abs(left.composite_change_percent ?? 0) ||
+      right.filing_count_7d - left.filing_count_7d
+    )
+    .slice(0, marketLimit)
+    .map((row) => ({
+      country: row.country,
+      country_name: row.country_name,
+      currency: row.currency,
+      country_index: row.index_symbol ? {
+        symbol: row.index_symbol,
+        name: row.index_name,
+        percent_change: row.index_change_percent,
+        source: row.index_source,
+        observed_at: row.index_observed_at,
+      } : null,
+      currency_vs_eur: row.fx_symbol ? {
+        symbol: row.fx_symbol,
+        rate: row.fx_rate,
+        percent_change: row.fx_change_percent,
+        period_end: row.fx_period_end,
+      } : null,
+      sec_filings_7d: row.filing_count_7d,
+      composite_change_percent: row.composite_change_percent,
+      composite_basis: row.composite_basis,
+      freshness: row.freshness,
+    }));
+
+  const marketPrimaryEvents = marketEventResult.rows.map((row) => ({
+    event_type: row.event_type,
     symbol: row.symbol,
     company_name: row.company_name,
-    exchange: row.exchange,
     country: row.country,
-    currency: row.currency,
-    price: row.price,
-    change: row.change,
-    percent_change: row.percent_change,
+    title: row.title,
+    summary: row.summary,
+    url: row.url,
+    event_time: timestampToIso(row.event_time),
+    source: row.source_name,
+  }));
+
+  const weatherSeverity = (row: (typeof weatherResult)[number]): number =>
+    Math.max(
+      row.temp_c == null ? 0 : Math.abs(row.temp_c - 20),
+      (row.precipitation_mm ?? 0) * 2,
+      (row.wind_gust ?? row.wind_speed ?? 0) / 2,
+      (row.air_quality?.european_aqi ?? 0) / 4
+    );
+  const weatherRows = [...weatherResult].sort((left, right) => weatherSeverity(right) - weatherSeverity(left));
+  const weather = weatherRows.slice(0, weatherLimit).map((row) => ({
+    country: row.country,
+    temp_c: row.temp_c,
+    apparent_temp_c: row.apparent_temp_c,
+    humidity: row.humidity,
+    precipitation_mm: row.precipitation_mm,
+    wind_speed: row.wind_speed,
+    wind_gust: row.wind_gust,
+    condition: row.weather_main,
+    description: row.weather_desc,
+    air_quality: row.air_quality,
+    forecast_3d: row.forecast.slice(0, 3),
+    source: row.source_name,
+    attribution: row.attribution,
     observed_at: timestampToIso(row.observed_at),
     stale_for_window: new Date(row.observed_at).getTime() < new Date(start).getTime(),
   }));
 
-  const weather = weatherResult.rows.map((row) => ({
-    country: row.country_iso2,
-    country_name: row.country_name,
-    temp_c: row.temp_c,
-    feels_like_c: row.feels_like_c,
-    humidity: row.humidity,
-    wind_speed: row.wind_speed,
-    condition: row.weather_main,
-    description: row.weather_desc,
-    observed_at: timestampToIso(row.observed_at),
-    stale_for_window: new Date(row.observed_at).getTime() < new Date(start).getTime(),
-  }));
+  const hottest = [...weatherResult].filter((row) => row.temp_c != null).sort((a, b) => (b.temp_c ?? -Infinity) - (a.temp_c ?? -Infinity))[0];
+  const coldest = [...weatherResult].filter((row) => row.temp_c != null).sort((a, b) => (a.temp_c ?? Infinity) - (b.temp_c ?? Infinity))[0];
+  const wettest = [...weatherResult].sort((a, b) => (b.precipitation_mm ?? 0) - (a.precipitation_mm ?? 0))[0];
+  const windiest = [...weatherResult].sort((a, b) => (b.wind_gust ?? b.wind_speed ?? 0) - (a.wind_gust ?? a.wind_speed ?? 0))[0];
+  const worstAir = [...weatherResult].sort((a, b) => (b.air_quality?.european_aqi ?? 0) - (a.air_quality?.european_aqi ?? 0))[0];
+  const weatherAnalysis = {
+    countries_covered: weatherResult.length,
+    hottest: hottest ? { country: hottest.country, temp_c: hottest.temp_c } : null,
+    coldest: coldest ? { country: coldest.country, temp_c: coldest.temp_c } : null,
+    wettest: wettest ? { country: wettest.country, precipitation_mm: wettest.precipitation_mm } : null,
+    windiest: windiest ? { country: windiest.country, wind_gust: windiest.wind_gust, wind_speed: windiest.wind_speed } : null,
+    worst_air_quality: worstAir?.air_quality ? { country: worstAir.country, ...worstAir.air_quality } : null,
+    note: "Extrema compare the latest representative country-level observations; forecasts are supplied separately and are not observed outcomes.",
+  };
+  const marketAnalysis = {
+    coverage: marketOverview.coverage,
+    methodology: marketOverview.methodology,
+    sources: marketOverview.sources,
+    note: "SEC filing activity is contextual rather than directional. Missing country-index data is not imputed.",
+  };
 
   const leadership = leadershipResult.slice(0, leadershipLimit).map((row) => ({
     country: row.country,
@@ -404,6 +532,8 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     generated_at: new Date().toISOString(),
     counts: {
       news: news.length,
+      news_events: globalEvents.length,
+      news_signals: newsIntelligence.length,
       podcasts: podcasts.length,
       markets: markets.length,
       weather: weather.length,
@@ -411,9 +541,14 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
       transport: transportResult.summary.active,
     },
     news,
+    global_events: globalEvents,
+    news_intelligence: newsIntelligence,
     podcasts,
     markets,
+    market_primary_events: marketPrimaryEvents,
+    market_analysis: marketAnalysis,
     weather,
+    weather_analysis: weatherAnalysis,
     leadership,
     transport,
   };
@@ -424,6 +559,11 @@ function buildSystemPrompt(): string {
     "You generate Claritas daily signal briefings from supplied JSON evidence.",
     "Use only the supplied evidence. Do not invent facts, numbers, sources, causal links, or forecasts.",
     "Cover News, Podcast Intelligence, Markets, Weather, and Transport when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
+    "For news, name the publisher when supplied and distinguish it from the aggregation provider. Do not imply that an aggregation provider is the publisher.",
+    "GDELT Event records are machine-coded indicators, and GKG themes and tone are analytical metadata. Use them to identify coverage patterns and corroboration candidates; do not present an uncorroborated coded event, theme, or tone score as confirmed fact or public sentiment.",
+    "For markets, distinguish country-index direction, local-currency performance versus EUR, SEC filing activity, and the composite methodology. A filing count is activity, not positive or negative performance. Do not imply index coverage where the country-index component is missing.",
+    "For weather, explain the overall regime and material extrema using temperature, apparent temperature, precipitation, wind or gusts, air quality, and the supplied forecast horizon. Clearly distinguish current observations from forecasts.",
+    "Connect weather, news, markets, filings, and transport only when the supplied geography or entity provides evidence for the relationship. Never claim causation from temporal or geographic coincidence.",
     "Transport comparisons use tracked observations, monitored-port geofences, and 24-hour comparison windows. Describe cargo-vessel departures as a movement proxy; never present them as cargo tonnage, load, trade value, or complete port-authority counts.",
     "Treat podcast claims as attributed speaker statements, not independently verified facts. Retain uncertainty and attribution.",
     "Leadership records are reference context only. Never surface current officeholders, government type, or leadership records as a standalone signal. Mention a leadership change only when a supplied news item directly reports that change; keep it within the news update and cite no inference from Wikidata as evidence of a change.",

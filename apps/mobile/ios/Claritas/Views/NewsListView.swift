@@ -109,6 +109,11 @@ private struct NewsRow: View {
     }
 
     private var sourceLabel: String? {
+        if item.source_name?.lowercased() == "gdelt",
+           let payload = item.payload?.object,
+           let publisher = normalizedSourceName(payload["source"]?.string) {
+            return "\(publisher) · via GDELT"
+        }
         if let explicit = normalizedSourceName(item.source_name) {
             return explicit
         }
@@ -139,7 +144,7 @@ private struct NewsRow: View {
         case "thenewsapi":
             return "TheNewsAPI"
         case "finnhub":
-            return "Finnhub"
+            return "Retired market source"
         case "gdelt":
             return "GDELT"
         default:

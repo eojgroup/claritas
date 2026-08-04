@@ -7,7 +7,6 @@ import {
 import { ingestTheNewsApiNews, type IngestTheNewsApiParams } from "./connectors/thenewsapi";
 import { ingestOpenWeatherCountryCurrent } from "./connectors/openweather";
 import { ingestOpenMeteoCountryWeather } from "./connectors/openmeteo";
-import { ingestFinnhubMarketNews, ingestFinnhubQuotes, resolveMarketSymbols } from "./connectors/finnhub";
 import { ingestGdelt } from "./connectors/gdelt";
 import { ingestSecEdgar } from "./connectors/sec-edgar";
 import { ingestEcbData } from "./connectors/ecb";
@@ -146,12 +145,7 @@ type WeatherRunPlan = {
 };
 
 type MarketRunPlan = {
-  symbols: string[];
-  providers: { finnhub: boolean; secEdgar: boolean; ecb: boolean };
-  includeNews: boolean;
-  newsCategory?: string;
-  newsMinId?: number;
-  newsMaxItems?: number;
+  providers: { secEdgar: boolean; ecb: boolean };
   requestPayload: Record<string, unknown>;
 };
 
@@ -186,7 +180,6 @@ type SourceConfigKey =
   | "gdelt"
   | "openmeteo"
   | "openweather"
-  | "finnhub"
   | "secEdgar"
   | "ecb"
   | "podcastindex"
@@ -224,12 +217,6 @@ const SOURCE_CONFIG: Record<
     sourceName: "openweather",
     apiBaseUrl: "https://api.openweathermap.org",
     provider: "openweather",
-    authType: "api_key",
-  },
-  finnhub: {
-    sourceName: "finnhub",
-    apiBaseUrl: "https://api.finnhub.io/api/v1",
-    provider: "finnhub",
     authType: "api_key",
   },
   secEdgar: {
@@ -279,9 +266,22 @@ const DEFAULT_NEWS_TOP_HEADLINES: IngestTopHeadlinesParams = {
   maxPages: 2,
 };
 
-const FINNHUB_NEWS_CATEGORIES = new Set(["general", "forex", "crypto", "merger"]);
-
 const activeRunPromises = new Map<number, Promise<void>>();
+
+const INGESTION_SOURCE_NAMES = [
+  "newsapi",
+  "thenewsapi",
+  "gdelt",
+  "openweather",
+  "openmeteo",
+  "finnhub", // Historical run records remain visible after provider retirement.
+  "sec_edgar",
+  "ecb",
+  "podcastindex",
+  "wikidata",
+] as const;
+
+const INGESTION_SOURCE_SQL = `('${INGESTION_SOURCE_NAMES.join("', '")}')`;
 
 export class IngestionValidationError extends Error {
   constructor(message: string) {
@@ -453,8 +453,11 @@ function resolvePipeline(pipeline: string | null, sourceName: string): Ingestion
   }
   if (sourceName === "newsapi") return "news";
   if (sourceName === "thenewsapi") return "news";
+  if (sourceName === "gdelt") return "news";
   if (sourceName === "openweather") return "weather";
+  if (sourceName === "openmeteo") return "weather";
   if (sourceName === "finnhub") return "market";
+  if (sourceName === "sec_edgar" || sourceName === "ecb") return "market";
   if (sourceName === "podcastindex") return "podcasts";
   if (sourceName === "wikidata") return "leadership";
   return "news";
@@ -725,66 +728,16 @@ export function buildMarketRunPlan(rawBody: unknown): MarketRunPlan {
   const body = asRecord(rawBody);
   const providerInput = asRecord(body.providers);
   const providers = {
-    finnhub: asBoolean(providerInput.finnhub, Boolean(process.env.FINNHUB_API_KEY)),
     secEdgar: asBoolean(providerInput.secEdgar ?? providerInput.sec_edgar, true),
     ecb: asBoolean(providerInput.ecb, true),
   };
-  if (!providers.finnhub && !providers.secEdgar && !providers.ecb) {
+  if (!providers.secEdgar && !providers.ecb) {
     throw new IngestionValidationError("Select at least one market provider.");
   }
-  if (providers.finnhub && !process.env.FINNHUB_API_KEY) {
-    throw new IngestionValidationError("Finnhub selected but FINNHUB_API_KEY is not configured.");
-  }
-  const rawSymbols = Object.prototype.hasOwnProperty.call(body, "symbols") ? body.symbols : undefined;
-  let symbols: string[];
-  try {
-    symbols = resolveMarketSymbols(rawSymbols);
-  } catch (error) {
-    throw new IngestionValidationError(toErrorMessage(error));
-  }
-
-  const includeNewsRaw = body.includeNews;
-  const includeNews =
-    includeNewsRaw === undefined
-      ? true
-      : includeNewsRaw === true ||
-        (typeof includeNewsRaw === "string" && includeNewsRaw.trim().toLowerCase() === "true");
-  const newsCategoryRaw =
-    typeof body.newsCategory === "string" ? body.newsCategory.trim().toLowerCase() : "";
-  const newsCategory = FINNHUB_NEWS_CATEGORIES.has(newsCategoryRaw) ? newsCategoryRaw : "general";
-  const newsMinIdRaw =
-    typeof body.newsMinId === "number"
-      ? Math.trunc(body.newsMinId)
-      : typeof body.newsMinId === "string" && body.newsMinId.trim()
-        ? Number.parseInt(body.newsMinId, 10)
-        : Number.NaN;
-  const newsMaxItemsRaw =
-    typeof body.newsMaxItems === "number"
-      ? Math.trunc(body.newsMaxItems)
-      : typeof body.newsMaxItems === "string" && body.newsMaxItems.trim()
-        ? Number.parseInt(body.newsMaxItems, 10)
-        : Number.NaN;
-  const newsMinId = Number.isFinite(newsMinIdRaw) && newsMinIdRaw > 0 ? newsMinIdRaw : undefined;
-  const newsMaxItems =
-    Number.isFinite(newsMaxItemsRaw) && newsMaxItemsRaw > 0
-      ? Math.min(Math.max(newsMaxItemsRaw, 1), 100)
-      : undefined;
 
   return {
-    symbols,
     providers,
-    includeNews,
-    newsCategory,
-    newsMinId,
-    newsMaxItems,
-    requestPayload: {
-      providers,
-      symbols,
-      includeNews,
-      newsCategory,
-      ...(newsMinId ? { newsMinId } : {}),
-      ...(newsMaxItems ? { newsMaxItems } : {}),
-    },
+    requestPayload: { providers },
   };
 }
 
@@ -1118,18 +1071,6 @@ async function executeMarketRun(runId: number, plan: MarketRunPlan): Promise<voi
       request: plan.requestPayload,
     });
 
-    if (plan.providers.finnhub) {
-      await executeProviderStep(runId, steps, totals, "finnhub/quotes", async () =>
-        ingestFinnhubQuotes(plan.symbols) as unknown as Record<string, unknown>);
-      if (plan.includeNews) {
-        await executeProviderStep(runId, steps, totals, "finnhub/market-news", async () =>
-          ingestFinnhubMarketNews({
-            category: plan.newsCategory,
-            minId: plan.newsMinId,
-            maxItems: plan.newsMaxItems,
-          }) as unknown as Record<string, unknown>);
-      }
-    }
     if (plan.providers.secEdgar) {
       await executeProviderStep(runId, steps, totals, "sec-edgar/filings-companyfacts", async () =>
         ingestSecEdgar());
@@ -1292,7 +1233,7 @@ export async function triggerMarketRun(input: {
     pipeline: "market",
     actor: input.actor,
     requestPayload: input.plan.requestPayload,
-    sourceNameOverride: input.plan.providers.secEdgar ? "secEdgar" : input.plan.providers.ecb ? "ecb" : "finnhub",
+    sourceNameOverride: input.plan.providers.secEdgar ? "secEdgar" : "ecb",
   });
   await safeAppendRunLog(run.id, "info", "Market ingestion run queued.", {
     requested_by: input.actor.email || input.actor.userId,
@@ -1344,7 +1285,7 @@ export async function listRuns(options: {
   const offset = Math.max(options.offset ?? 0, 0);
   const params: any[] = [];
   const where: string[] = [
-    "s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub', 'podcastindex', 'wikidata')",
+    `s.name IN ${INGESTION_SOURCE_SQL}`,
   ];
   if (options.pipeline) {
     const pipelineIdx = params.push(options.pipeline);
@@ -1352,8 +1293,12 @@ export async function listRuns(options: {
       `(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
+        OR ($${pipelineIdx} = 'news' AND s.name = 'gdelt')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
+        OR ($${pipelineIdx} = 'weather' AND s.name = 'openmeteo')
         OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`
     );
@@ -1415,7 +1360,7 @@ export async function getRunDetail(
      FROM ingestion_run r
      JOIN source s ON s.id = r.source_id
      WHERE r.id = $1
-       AND s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub', 'podcastindex', 'wikidata')
+       AND s.name IN ${INGESTION_SOURCE_SQL}
      LIMIT 1`,
     [runId]
   );
@@ -1451,7 +1396,7 @@ export async function getMetrics(options?: {
   const params: any[] = [days];
   const where: string[] = [
     "r.started_at >= now() - make_interval(days => $1::int)",
-    "s.name IN ('newsapi', 'thenewsapi', 'openweather', 'finnhub', 'podcastindex', 'wikidata')",
+    `s.name IN ${INGESTION_SOURCE_SQL}`,
   ];
   if (options?.pipeline) {
     const pipelineIdx = params.push(options.pipeline);
@@ -1459,8 +1404,12 @@ export async function getMetrics(options?: {
       `(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'newsapi')
         OR ($${pipelineIdx} = 'news' AND s.name = 'thenewsapi')
+        OR ($${pipelineIdx} = 'news' AND s.name = 'gdelt')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
+        OR ($${pipelineIdx} = 'weather' AND s.name = 'openmeteo')
         OR ($${pipelineIdx} = 'market' AND s.name = 'finnhub')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
+        OR ($${pipelineIdx} = 'market' AND s.name = 'ecb')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
         OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`
     );

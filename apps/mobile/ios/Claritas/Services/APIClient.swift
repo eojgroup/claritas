@@ -340,6 +340,7 @@ final class APIClient {
     func triggerAdminNewsIngestion(
         runNewsApiProvider: Bool,
         runTheNewsApiProvider: Bool,
+        runGdeltProvider: Bool,
         runEverything: Bool,
         runTopHeadlines: Bool,
         query: String,
@@ -351,7 +352,8 @@ final class APIClient {
         var payload: [String: Any] = [
             "providers": [
                 "newsapi": runNewsApiProvider,
-                "thenewsapi": runTheNewsApiProvider
+                "thenewsapi": runTheNewsApiProvider,
+                "gdelt": runGdeltProvider
             ]
         ]
 
@@ -422,32 +424,14 @@ final class APIClient {
         return try await request(req, as: AdminIngestionRunDetail.self)
     }
 
-    func triggerAdminMarketIngestion(
-        symbols: [String]?,
-        includeNews: Bool = true,
-        newsCategory: String? = nil,
-        newsMinId: Int? = nil,
-        newsMaxItems: Int? = nil
-    ) async throws -> AdminIngestionRunDetail {
+    func triggerAdminMarketIngestion() async throws -> AdminIngestionRunDetail {
         var req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/ingestion/market/run"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        var payload: [String: Any] = [
-            "includeNews": includeNews
+        let payload: [String: Any] = [
+            "providers": ["secEdgar": true, "ecb": true]
         ]
-        if let symbols, !symbols.isEmpty {
-            payload["symbols"] = symbols
-        }
-        if let newsCategory = nonEmpty(newsCategory) {
-            payload["newsCategory"] = newsCategory
-        }
-        if let newsMinId {
-            payload["newsMinId"] = newsMinId
-        }
-        if let newsMaxItems {
-            payload["newsMaxItems"] = newsMaxItems
-        }
         req.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
         return try await request(req, as: AdminIngestionRunDetail.self)
     }

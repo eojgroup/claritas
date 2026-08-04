@@ -1437,6 +1437,7 @@ private struct AdminIngestionPanelView: View {
 
     @State private var runNewsApiProvider: Bool = true
     @State private var runTheNewsApiProvider: Bool = true
+    @State private var runGdeltProvider: Bool = true
     @State private var runEverything: Bool = true
     @State private var runTopHeadlines: Bool = true
     @State private var newsQuery: String = "OpenAI"
@@ -1446,10 +1447,6 @@ private struct AdminIngestionPanelView: View {
     @State private var theNewsApiDateMode: TheNewsApiDateMode = .today
     @State private var theNewsApiCustomDate: Date = Date()
     @State private var weatherCountry: String = ""
-    @State private var marketSymbols: String = "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM"
-    @State private var marketIncludeNews: Bool = true
-    @State private var marketNewsCategory: String = "general"
-    @State private var marketNewsMaxItems: String = "50"
 
     @State private var isLoadingOverview: Bool = false
     @State private var isTriggeringNews: Bool = false
@@ -1526,6 +1523,7 @@ private struct AdminIngestionPanelView: View {
                             .foregroundStyle(.secondary)
                         Toggle("NewsAPI", isOn: $runNewsApiProvider)
                         Toggle("TheNewsAPI", isOn: $runTheNewsApiProvider)
+                        Toggle("GDELT (keyless)", isOn: $runGdeltProvider)
 
                         Toggle("Everything", isOn: $runEverything)
                             .disabled(!runNewsApiProvider)
@@ -1594,27 +1592,9 @@ private struct AdminIngestionPanelView: View {
                     Divider()
 
                     VStack(alignment: .leading, spacing: 8) {
-                        TextField("Market symbols (optional CSV)", text: $marketSymbols)
-                            .textFieldStyle(.roundedBorder)
-
-                        Toggle("Ingest Finnhub market news", isOn: $marketIncludeNews)
-
-                        Picker("News category", selection: $marketNewsCategory) {
-                            Text("General").tag("general")
-                            Text("Forex").tag("forex")
-                            Text("Crypto").tag("crypto")
-                            Text("Merger").tag("merger")
-                        }
-                        .pickerStyle(.segmented)
-
-                        HStack(spacing: 8) {
-                            TextField("News max items", text: $marketNewsMaxItems)
-                                .keyboardType(.numberPad)
-                                .textFieldStyle(.roundedBorder)
-                            Text("1-100")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        Text("SEC EDGAR filings/company facts and ECB FX/policy series. Both sources are keyless.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
                         Button(action: { Task { await queueMarketRun() } }) {
                             Label(isTriggeringMarket ? "Queueing market…" : "Queue Market Run", systemImage: "chart.line.uptrend.xyaxis")
@@ -2122,7 +2102,7 @@ private struct AdminIngestionPanelView: View {
     }
 
     private func queueNewsRun() async {
-        guard runNewsApiProvider || runTheNewsApiProvider else {
+        guard runNewsApiProvider || runTheNewsApiProvider || runGdeltProvider else {
             actionError = "Select at least one news provider."
             actionNotice = nil
             return
@@ -2141,6 +2121,7 @@ private struct AdminIngestionPanelView: View {
             let detail = try await model.api.triggerAdminNewsIngestion(
                 runNewsApiProvider: runNewsApiProvider,
                 runTheNewsApiProvider: runTheNewsApiProvider,
+                runGdeltProvider: runGdeltProvider,
                 runEverything: runEverything,
                 runTopHeadlines: runTopHeadlines,
                 query: newsQuery,
@@ -2182,23 +2163,7 @@ private struct AdminIngestionPanelView: View {
         actionError = nil
         actionNotice = nil
         do {
-            let symbols = marketSymbols
-                .split(whereSeparator: { $0 == "," || $0.isWhitespace })
-                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            let parsedMaxItems = Int(marketNewsMaxItems.trimmingCharacters(in: .whitespacesAndNewlines))
-            let newsMaxItems: Int? = {
-                guard let parsedMaxItems else { return nil }
-                guard parsedMaxItems > 0 else { return nil }
-                return min(max(parsedMaxItems, 1), 100)
-            }()
-            let detail = try await model.api.triggerAdminMarketIngestion(
-                symbols: symbols.isEmpty ? nil : symbols,
-                includeNews: marketIncludeNews,
-                newsCategory: marketNewsCategory,
-                newsMinId: nil,
-                newsMaxItems: newsMaxItems
-            )
+            let detail = try await model.api.triggerAdminMarketIngestion()
             selectedRunId = detail.run.id
             selectedRun = detail.run
             logs = detail.logs
@@ -2369,10 +2334,18 @@ private struct AdminIngestionPanelView: View {
             return "NewsAPI"
         case "thenewsapi":
             return "TheNewsAPI"
+        case "gdelt":
+            return "GDELT"
         case "openweather":
             return "OpenWeather"
+        case "openmeteo":
+            return "Open-Meteo"
         case "finnhub":
-            return "Finnhub"
+            return "Retired market source"
+        case "sec_edgar":
+            return "SEC EDGAR"
+        case "ecb":
+            return "ECB"
         default:
             return value
         }
