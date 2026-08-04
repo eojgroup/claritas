@@ -54,29 +54,14 @@ spec:
 
               psql "host=127.0.0.1 port=5432 dbname=${DB_NAME} user=${DB_USER} sslmode=disable" -v ON_ERROR_STOP=1 <<'SQL'
               \set ON_ERROR_STOP on
-              -- Ensure core tables exist
-              SELECT count(*) AS missing_tables
-              FROM (VALUES
-                ('flyway_schema_history'),
-                ('source'),
-                ('source_feed'),
-                ('ingestion_run'),
-                ('country'),
-                ('item'),
-                ('weather_snapshot'),
-                ('market_snapshot'),
-                ('app_user'),
-                ('auth_identity'),
-                ('auth_session'),
-                ('auth_role'),
-                ('auth_user_role'),
-                ('auth_state')
-              ) AS t(name)
-              WHERE to_regclass('public.' || t.name) IS NULL;
-              \gset
-              \if :missing_tables != 0
-                \echo 'Missing required tables:'
-                SELECT array_agg(t.name)
+              -- Raise server-side exceptions so verification cannot silently
+              -- pass because of psql meta-command expression parsing.
+              DO $verify_tables$
+              DECLARE
+                missing_tables text[];
+              BEGIN
+                SELECT array_agg(t.name ORDER BY t.name)
+                INTO missing_tables
                 FROM (VALUES
                   ('flyway_schema_history'),
                   ('source'),
@@ -94,24 +79,32 @@ spec:
                   ('auth_state')
                 ) AS t(name)
                 WHERE to_regclass('public.' || t.name) IS NULL;
-                \quit 1
-              \endif
+
+                IF COALESCE(cardinality(missing_tables), 0) > 0 THEN
+                  RAISE EXCEPTION 'Missing required tables: %', missing_tables;
+                END IF;
+                RAISE NOTICE 'All required tables are present.';
+              END
+              $verify_tables$;
 
               -- Flyway migrate/validate has already checked the repository's
               -- current scripts. Independently reject any failed history row
               -- without duplicating a version list that becomes stale.
-              SELECT count(*) AS failed_migrations
-              FROM flyway_schema_history
-              WHERE success IS DISTINCT FROM true;
-              \gset
-              \if :failed_migrations != 0
-                \echo 'Unsuccessful Flyway history entries:'
-                SELECT installed_rank, version, description, success
+              DO $verify_history$
+              DECLARE
+                failed_migrations integer;
+              BEGIN
+                SELECT count(*)
+                INTO failed_migrations
                 FROM flyway_schema_history
-                WHERE success IS DISTINCT FROM true
-                ORDER BY installed_rank;
-                \quit 1
-              \endif
+                WHERE success IS DISTINCT FROM true;
+
+                IF failed_migrations > 0 THEN
+                  RAISE EXCEPTION 'Flyway history contains % unsuccessful migration(s).', failed_migrations;
+                END IF;
+                RAISE NOTICE 'Flyway history contains no unsuccessful migrations.';
+              END
+              $verify_history$;
               SQL
 
           env:
