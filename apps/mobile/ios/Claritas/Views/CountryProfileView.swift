@@ -187,10 +187,15 @@ struct CountryProfileView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if let latestHeadline = countryNews.first?.title {
-                        Text("Latest headline: \(latestHeadline)")
+                    if let latestHeadline = countryNews.first {
+                        Text("Latest headline: \(latestHeadline.presentationTitle)")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                        if let disclosure = latestHeadline.translationDisclosure {
+                            Text(disclosure)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Divider()

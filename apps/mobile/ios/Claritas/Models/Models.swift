@@ -93,6 +93,25 @@ struct AuthUser: Codable {
     let billing: BillingAccessState?
 }
 
+enum ClaritasInterfaceLanguage {
+    // Keep the presentation language in one place so adding another supported
+    // interface language does not change the source-news data model.
+    static let current = "en"
+}
+
+struct NewsTranslation: Codable {
+    let target_language_code: String
+    let headline_kind: String?
+    let summary_kind: String?
+    let summary_status: String
+    let provider: String
+    let model: String?
+    let title_generated_at: String?
+    let summary_generated_at: String?
+    let source_content_preserved: Bool?
+    let article_body_used: Bool?
+}
+
 struct NewsItem: Codable, Identifiable {
     let id: Int
     let kind: String?
@@ -106,6 +125,35 @@ struct NewsItem: Codable, Identifiable {
     let tone: Double?
     let event_time: String?
     let payload: JSONValue?
+    let translated_title: String?
+    let ai_summary: String?
+    let translation: NewsTranslation?
+
+    var presentationTitle: String {
+        nonBlank(translated_title) ?? nonBlank(title) ?? nonBlank(url) ?? "Untitled"
+    }
+
+    var presentationSummary: String? {
+        if let generated = nonBlank(ai_summary) { return generated }
+        return requiresTranslation ? nil : nonBlank(summary)
+    }
+
+    var requiresTranslation: Bool {
+        guard let source = normalizedLanguage(language_code) else { return false }
+        guard let target = normalizedLanguage(ClaritasInterfaceLanguage.current) else { return false }
+        return source.split(separator: "-").first != target.split(separator: "-").first
+    }
+
+    var hasAITranslatedHeadline: Bool {
+        requiresTranslation && nonBlank(translated_title) != nil && translation != nil
+    }
+
+    var translationDisclosure: String? {
+        guard hasAITranslatedHeadline, let translation else { return nil }
+        let source = language_code?.uppercased() ?? "SOURCE"
+        let target = translation.target_language_code.uppercased()
+        return "AI translation · \(source)→\(target)"
+    }
 
     var eventDate: Date? {
         guard let s = event_time else { return nil }
@@ -125,6 +173,9 @@ struct NewsItem: Codable, Identifiable {
         case tone
         case event_time
         case payload
+        case translated_title
+        case ai_summary
+        case translation
     }
 
     init(from decoder: Decoder) throws {
@@ -141,6 +192,23 @@ struct NewsItem: Codable, Identifiable {
         tone = try container.decodeIfPresent(Double.self, forKey: .tone)
         event_time = try container.decodeIfPresent(String.self, forKey: .event_time)
         payload = try container.decodeIfPresent(JSONValue.self, forKey: .payload)
+        translated_title = try container.decodeIfPresent(String.self, forKey: .translated_title)
+        ai_summary = try container.decodeIfPresent(String.self, forKey: .ai_summary)
+        translation = try container.decodeIfPresent(NewsTranslation.self, forKey: .translation)
+    }
+
+    private func nonBlank(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private func normalizedLanguage(_ value: String?) -> String? {
+        guard let value = nonBlank(value)?.lowercased().replacingOccurrences(of: "_", with: "-") else {
+            return nil
+        }
+        return value
     }
 }
 

@@ -724,6 +724,7 @@ import {
   fetchMarketIndicators,
   fetchMarketQuotes,
   fetchNews,
+  ensureNewsTranslationSummary,
   fetchPodcasts,
   fetchPolicyRates,
   fetchPersonalBriefingJob,
@@ -731,6 +732,8 @@ import {
   getAuthStartUrl,
   logoutAuth,
   imageProxy,
+  isNewsTranslationRequired,
+  newsDisplayTitle,
   requestEmailVerification,
   sendPersonalBriefingPreview,
   updateDailyBriefingSchedule,
@@ -865,6 +868,9 @@ export default function ClaritasDashboard() {
   );
   const [isLoadingNews, setIsLoadingNews] = useState(false);
   const [newsLoadError, setNewsLoadError] = useState<string | null>(null);
+  const [newsTranslationPendingIds, setNewsTranslationPendingIds] = useState<Set<number>>(
+    () => new Set(),
+  );
   const [dailyBriefing, setDailyBriefing] = useState<DailySignalBriefing | null>(null);
   const [dailyBriefingError, setDailyBriefingError] = useState<string | null>(null);
   const [dataWindowPreset, setDataWindowPreset] =
@@ -1146,6 +1152,46 @@ export default function ClaritasDashboard() {
     }
   }, []);
 
+  const requestNewsTranslationSummary = useCallback(async (item: NewsItem) => {
+    if (
+      !isNewsTranslationRequired(item) ||
+      item.translation?.summary_status === "generated" ||
+      item.translation?.summary_status === "insufficient"
+    ) {
+      return;
+    }
+    setNewsTranslationPendingIds((current) => new Set(current).add(item.id));
+    try {
+      const translation = await ensureNewsTranslationSummary(item.id);
+      setNews((current) =>
+        current.map((entry) =>
+          entry.id === item.id
+            ? {
+                ...entry,
+                translated_title:
+                  translation.translated_title ?? entry.translated_title ?? null,
+                ai_summary: translation.generated_summary ?? null,
+                translation: {
+                  ...translation,
+                  headline_kind: "ai_translation",
+                  summary_kind:
+                    translation.summary_status === "generated" ? "ai_generated" : null,
+                },
+              }
+            : entry,
+        ),
+      );
+    } catch {
+      // The original source remains usable when optional AI enrichment is unavailable.
+    } finally {
+      setNewsTranslationPendingIds((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }, []);
+
   const loadPodcastData = useCallback(async (q = "", signalType: PodcastSignal["type"] | "all" = "all") => {
     const requestId = podcastRequestIdRef.current + 1;
     podcastRequestIdRef.current = requestId;
@@ -1400,6 +1446,8 @@ export default function ClaritasDashboard() {
       const haystack = [
         item.title ?? "",
         item.summary ?? "",
+        item.translated_title ?? "",
+        item.ai_summary ?? "",
         item.url ?? "",
         item.country_iso2 ?? "",
         source,
@@ -3165,8 +3213,9 @@ export default function ClaritasDashboard() {
       key: `news-${item.id}`,
       kind: "News",
       view: "news" as const,
-      title: item.title ?? item.url ?? "Untitled",
+      title: newsDisplayTitle(item),
       subtitle: [
+        item.translated_title ? "AI translation" : null,
         item.country_iso2 ? item.country_iso2.toUpperCase() : null,
         item.event_time ? new Date(item.event_time).toLocaleString() : null,
       ]
@@ -5701,6 +5750,8 @@ export default function ClaritasDashboard() {
                                 setSelectedDashboardNewsId(nextId);
                                 if (nextId && iso) setSelectedCountry(iso);
                               }}
+                              onRequestTranslation={requestNewsTranslationSummary}
+                              translationPendingIds={newsTranslationPendingIds}
                               onSelectCountry={setSelectedCountry}
                               onOpenWorkspace={() => setActiveView("news")}
                               emptyState={
@@ -6186,6 +6237,8 @@ export default function ClaritasDashboard() {
                           setSelectedDashboardNewsId(nextId);
                           if (nextId && iso) setSelectedCountry(iso);
                         }}
+                        onRequestTranslation={requestNewsTranslationSummary}
+                        translationPendingIds={newsTranslationPendingIds}
                         onSelectCountry={(iso) => {
                           setSelectedCountry(iso);
                           setMapMode("signals");
@@ -6641,7 +6694,7 @@ export default function ClaritasDashboard() {
                             rel="noopener noreferrer"
                             className="mt-2 block rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
                           >
-                            {item.title ?? item.url ?? "Untitled"}
+                            {item.translated_title ? "AI translation · " : ""}{newsDisplayTitle(item)}
                           </a>
                         ))}
                         {relatedNews.length === 0 && <div className="mt-2">No related stories.</div>}
@@ -7588,7 +7641,7 @@ export default function ClaritasDashboard() {
                           rel="noopener noreferrer"
                           className="mt-2 block rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-xs text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
                         >
-                          {item.title ?? item.url ?? "Untitled"}
+                          {item.translated_title ? "AI translation · " : ""}{newsDisplayTitle(item)}
                         </a>
                       ))}
                       {relatedNews.length === 0 && (
@@ -8245,7 +8298,7 @@ export default function ClaritasDashboard() {
                               rel="noopener noreferrer"
                               className="mt-2 block rounded-lg border border-[color:var(--shell-border)] px-2 py-1 text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
                             >
-                              {item.title ?? item.url ?? "Untitled"}
+                              {item.translated_title ? "AI translation · " : ""}{newsDisplayTitle(item)}
                             </a>
                           ))}
                           {relatedNews.length === 0 && (

@@ -294,11 +294,16 @@ The API requires the database environment variables documented in
   - Ingestion preserves the original publisher title, summary and language code.
     GDELT remains the aggregation provider while the publisher domain (for
     example `reuters.com`) is displayed separately when GDELT returns it.
-  - Daily and personalised briefing prompts produce an English synthesis and
-    explicitly require faithful translation of non-English evidence. No separate
-    translation API key is required. If the briefing model is unavailable, the
-    deterministic fallback leaves non-English titles untranslated and records a
-    data-quality note rather than silently transforming the evidence.
+  - Non-English headlines are translated automatically into the configured
+    interface language after ingestion. A short summary is generated only when
+    a user expands a story and only from the already-ingested headline/excerpt.
+    Original source fields remain unchanged; AI text and provider/model
+    provenance are stored separately. Claritas does not retrieve or translate
+    full article bodies. See [lightweight news translation](docs/news-translation.md).
+  - Daily and personalised briefings prefer valid cached translations while
+    preserving original publisher evidence. Their prompts can still translate
+    uncached evidence, and deterministic fallbacks identify any untranslated
+    non-English title instead of silently transforming it.
 - Transport intelligence combines AISstream maritime data with keyless adsb.lol
   flight positions and plausible routes. See
   [transport intelligence](docs/transport-intelligence.md) for sampling,
@@ -349,6 +354,7 @@ The daily briefing generator can use OpenCode as an internal LLM service:
 - **GCP Setup Guide**: [`infra/gcp`](./infra/gcp)
 - **Cloud SQL Export IAM Transition**: [`docs/cloud-sql-export-iam.md`](./docs/cloud-sql-export-iam.md)
 - **Data-source governance**: [`docs/data-source-governance.md`](./docs/data-source-governance.md)
+- **Lightweight news translation**: [`docs/news-translation.md`](./docs/news-translation.md)
 - **Cost-optimized production baseline**: [`docs/operations/cost-baseline.md`](./docs/operations/cost-baseline.md)
 
 ---

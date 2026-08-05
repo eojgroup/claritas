@@ -254,13 +254,18 @@ struct PadOverviewView: View {
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 5) {
-                                Text(item.title ?? "Untitled")
+                                Text(item.presentationTitle)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                     .lineLimit(2)
                                 Text(item.source_name ?? "News")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if let disclosure = item.translationDisclosure {
+                                    Text(disclosure)
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                }
                             }
                             Spacer()
                             Text(item.country_iso2?.uppercased() ?? "GL")

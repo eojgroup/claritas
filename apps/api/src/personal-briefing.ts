@@ -47,10 +47,14 @@ type CandidateItemRow = {
   source_name: string;
   publisher: string | null;
   title: string | null;
+  original_title: string | null;
   summary: string | null;
   url: string | null;
   country_iso2: string | null;
   language_code: string | null;
+  translation_provider: string | null;
+  translation_model: string | null;
+  summary_kind: string | null;
   event_time: string | Date;
   payload: unknown;
 };
@@ -74,10 +78,18 @@ type SelectedSignal = {
   source_name: string;
   publisher: string | null;
   title: string;
+  original_title: string | null;
   summary: string | null;
   url: string | null;
   country_iso2: string | null;
   original_language: string | null;
+  translation: {
+    kind: "ai_translation";
+    target_language: string;
+    provider: string;
+    model: string | null;
+    summary_kind: string | null;
+  } | null;
   event_time: string;
   relevance_score: number;
   reasons: string[];
@@ -152,7 +164,8 @@ type PersonalMacroContext = {
 const JOB_MAX_ATTEMPTS = 3;
 const DELIVERY_MAX_ATTEMPTS = 3;
 const WORKER_POLL_MS = 10_000;
-const PROMPT_VERSION = "personal-daily-briefing.v5";
+const PROMPT_VERSION = "personal-daily-briefing.v6";
+const BRIEFING_OUTPUT_LANGUAGE = "en";
 const DEFAULT_INDUSTRIES = [
   "Aerospace & Defense",
   "Automotive",
@@ -727,20 +740,29 @@ async function selectSignals(
          i.kind,
          s.name AS source_name,
          COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
-         i.title,
-         i.summary,
+         COALESCE(translation.translated_title, i.title) AS title,
+         i.title AS original_title,
+         COALESCE(translation.generated_summary, i.summary) AS summary,
          i.url,
          upper(i.country_iso2::text) AS country_iso2,
          i.language_code,
          COALESCE(i.event_time, i.created_at) AS event_time,
-         i.payload
+         i.payload,
+         translation.provider AS translation_provider,
+         translation.model AS translation_model,
+         CASE WHEN translation.generated_summary IS NOT NULL THEN 'ai_generated' ELSE NULL END AS summary_kind
        FROM item i
        JOIN source s ON s.id = i.source_id
+       LEFT JOIN item_translation translation
+         ON translation.item_id = i.id
+        AND translation.target_language_code = $3
+        AND translation.source_title_hash = md5(COALESCE(i.title, ''))
+        AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
        WHERE COALESCE(i.event_time, i.created_at) >= $1::timestamptz
          AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
        ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
        LIMIT 400`,
-      [sourceWindowStart, sourceWindowEnd]
+      [sourceWindowStart, sourceWindowEnd, BRIEFING_OUTPUT_LANGUAGE]
     ),
     query<{ iso2: string; name: string; region: string | null }>(
       `SELECT upper(iso2::text) AS iso2, name, region FROM country`
@@ -816,10 +838,20 @@ async function selectSignals(
         source_name: row.source_name,
         publisher: row.publisher,
         title,
+        original_title: boundedText(row.original_title, 300) || null,
         summary,
         url: boundedText(row.url, 2_000) || null,
         country_iso2: row.country_iso2,
         original_language: row.language_code,
+        translation: row.translation_provider
+          ? {
+              kind: "ai_translation",
+              target_language: BRIEFING_OUTPUT_LANGUAGE,
+              provider: row.translation_provider,
+              model: row.translation_model,
+              summary_kind: row.summary_kind,
+            }
+          : null,
         event_time: eventIso,
         relevance_score: Math.round(relevanceScore * 100) / 100,
         reasons,
@@ -908,9 +940,14 @@ function deterministicBriefing(
       })
     );
   }
-  const hasNonEnglishSource = signals.some((signal) => {
+  const hasUntranslatedNonEnglishSource = signals.some((signal) => {
     const language = signal.original_language?.trim().toLowerCase();
-    return Boolean(language && language !== "en" && language !== "english");
+    return Boolean(
+      language &&
+      language !== "en" &&
+      language !== "english" &&
+      !signal.translation
+    );
   });
   return {
     title,
@@ -918,8 +955,8 @@ function deterministicBriefing(
     key_takeaways: keyTakeaways,
     data_quality_notes: [
       ...(signals.length === 0 ? ["No source items matched the saved filters."] : []),
-      ...(hasNonEnglishSource
-        ? ["The language model was unavailable, so non-English source titles remain untranslated in this fallback briefing."]
+      ...(hasUntranslatedNonEnglishSource
+        ? ["Some non-English source titles did not yet have a cached AI translation and remain in their original language in this fallback briefing."]
         : []),
     ],
     generated_by: "deterministic",

@@ -972,8 +972,9 @@ private struct WatchPulseView: View {
                         pulseCard(
                             label: "Headline",
                             icon: "newspaper",
-                            title: headline.title ?? "Untitled",
+                            title: headline.presentationTitle,
                             detail: [
+                                headline.translationDisclosure,
                                 headline.country_iso2?.uppercased(),
                                 headline.source_name
                             ].compactMap { $0 }.joined(separator: " · "),
@@ -1163,9 +1164,14 @@ private struct WatchNewsView: View {
                 Section {
                     ForEach(model.news.prefix(6)) { item in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(item.title ?? "Untitled")
+                            Text(item.presentationTitle)
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(3)
+                            if let disclosure = item.translationDisclosure {
+                                Text(disclosure)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(WatchPalette.orange)
+                            }
                             HStack {
                                 Text(item.source_name ?? "News")
                                 Spacer()

@@ -36,14 +36,19 @@ private struct NewsRow: View {
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
             VStack(alignment: .leading, spacing: 6) {
                 if let u = item.url, let url = URL(string: u) {
-                    Link(item.title ?? u, destination: url)
+                    Link(item.presentationTitle, destination: url)
                         .font(.headline)
                         .foregroundStyle(colorScheme == .dark ? ClaritasPalette.sage : ClaritasPalette.darkBlue)
                         .lineLimit(2)
                 } else {
-                    Text(item.title ?? "Untitled")
+                    Text(item.presentationTitle)
                         .font(.headline)
                         .lineLimit(2)
+                }
+                if let disclosure = item.translationDisclosure {
+                    Text(disclosure)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                 }
                 HStack(spacing: 8) {
                     if let source = sourceLabel {
@@ -77,11 +82,27 @@ private struct NewsRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                if let s = item.summary, !s.isEmpty {
+                if let s = item.presentationSummary {
+                    if item.ai_summary != nil {
+                        Text("AI-generated English summary · source headline/excerpt only")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                     Text(s)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
+                }
+                if item.requiresTranslation {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Original publisher headline · \(item.language_code?.uppercased() ?? "unknown language")")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(item.title ?? item.url ?? "Untitled")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                 }
             }
             Spacer(minLength: 0)

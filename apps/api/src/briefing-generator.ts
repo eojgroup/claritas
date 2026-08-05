@@ -37,10 +37,14 @@ type NewsContextRow = {
   source_name: string;
   publisher: string | null;
   title: string | null;
+  original_title: string | null;
   summary: string | null;
   url: string | null;
   country_iso2: string | null;
   language_code: string | null;
+  translation_provider: string | null;
+  translation_model: string | null;
+  summary_kind: string | null;
   event_time: string | Date | null;
 };
 
@@ -144,7 +148,8 @@ export class BriefingGenerationError extends Error {
   }
 }
 
-const PROMPT_VERSION = "daily-signal-briefing.v7";
+const PROMPT_VERSION = "daily-signal-briefing.v8";
+const BRIEFING_OUTPUT_LANGUAGE = "en";
 
 const BRIEFING_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -250,20 +255,29 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
          i.id,
          s.name AS source_name,
          COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
-         i.title,
-         i.summary,
+         COALESCE(translation.translated_title, i.title) AS title,
+         i.title AS original_title,
+         COALESCE(translation.generated_summary, i.summary) AS summary,
          i.url,
          i.country_iso2,
          i.language_code,
-         COALESCE(i.event_time, i.created_at) AS event_time
+         COALESCE(i.event_time, i.created_at) AS event_time,
+         translation.provider AS translation_provider,
+         translation.model AS translation_model,
+         CASE WHEN translation.generated_summary IS NOT NULL THEN 'ai_generated' ELSE NULL END AS summary_kind
        FROM item i
        JOIN source s ON s.id = i.source_id
+       LEFT JOIN item_translation translation
+         ON translation.item_id = i.id
+        AND translation.target_language_code = $4
+        AND translation.source_title_hash = md5(COALESCE(i.title, ''))
+        AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
        WHERE i.kind = 'news_article'
          AND COALESCE(i.event_time, i.created_at) >= $1::timestamptz
          AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
        ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
        LIMIT $3`,
-      [start, end, newsLimit]
+      [start, end, newsLimit, BRIEFING_OUTPUT_LANGUAGE]
     ),
     query<GdeltEventContextRow>(
       `SELECT event_code, quad_class, goldstein_scale, avg_tone,
@@ -366,9 +380,19 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     publisher: row.publisher,
     provider: row.source_name,
     title: row.title,
+    original_title: row.original_title,
     summary: row.summary,
     country: row.country_iso2,
     original_language: row.language_code,
+    translation: row.translation_provider
+      ? {
+          kind: "ai_translation",
+          target_language: BRIEFING_OUTPUT_LANGUAGE,
+          provider: row.translation_provider,
+          model: row.translation_model,
+          summary_kind: row.summary_kind,
+        }
+      : null,
     event_time: timestampToIso(row.event_time),
     url: row.url,
   }));

@@ -26,6 +26,12 @@ data:
   # Daily briefings are text-only. Disabling OpenCode tools allows routing to
   # free/non-tool-capable models and prevents unnecessary container access.
   OPENCODE_DISABLE_TOOLS: "true"
+  # Non-English headlines are translated during news ingestion. Summaries stay
+  # opt-in and are generated only when a user opens a story.
+  NEWS_TRANSLATION_ENABLED: "true"
+  NEWS_TRANSLATION_TARGET_LANGUAGES: "en"
+  NEWS_TRANSLATION_BATCH_SIZE: "48"
+  NEWS_TRANSLATION_SUMMARY_MAX_WORDS: "55"
   # Used when repository variables do not provide explicit PodcastIndex targets.
   PODCAST_DISCOVERY_TERMS: "geopolitics,security,technology,markets"
   # Keyless open-data provider controls and identifying user agents.

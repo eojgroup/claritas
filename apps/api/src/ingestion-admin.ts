@@ -9,6 +9,11 @@ import { ingestFredMarketData } from "./connectors/fred";
 import { ingestWorldBankIndicators } from "./connectors/world-bank";
 import { ingestPodcastIndex, podcastParamsFromEnv, type PodcastIngestParams } from "./connectors/podcastindex";
 import { ingestWikidataLeadership } from "./connectors/wikidata-leadership";
+import {
+  configuredNewsTranslationTargets,
+  newsTranslationEnabled,
+  runPendingNewsHeadlineTranslations,
+} from "./news-translation";
 import { query } from "./db";
 
 export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership";
@@ -749,8 +754,23 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
       await executeProviderStep(runId, steps, totals, "institutional-rss/primary-source-releases", ingestInstitutionalRss);
     }
 
-    const succeeded = steps.filter((step) => step.status === "success").length;
-    if (succeeded === 0) throw new Error("All selected news providers failed.");
+    const providerSucceeded = steps.filter((step) => step.status === "success").length;
+    if (providerSucceeded === 0) throw new Error("All selected news providers failed.");
+
+    if (newsTranslationEnabled()) {
+      await executeProviderStep(runId, steps, totals, "news-translation/headlines", async () => {
+        const targets = [];
+        for (const targetLanguage of configuredNewsTranslationTargets()) {
+          targets.push(await runPendingNewsHeadlineTranslations({ targetLanguage }));
+        }
+        return {
+          provider: "claritas_ai_translation",
+          content_scope: "headline_only",
+          article_bodies_used: false,
+          targets,
+        };
+      });
+    }
 
     const stats = {
       pipeline: "news",

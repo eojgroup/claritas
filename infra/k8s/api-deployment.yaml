@@ -97,6 +97,14 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_MODEL_ID, optional: true } }
             - name: OPENCODE_DISABLE_TOOLS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: OPENCODE_DISABLE_TOOLS, optional: true } }
+            - name: NEWS_TRANSLATION_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_ENABLED, optional: true } }
+            - name: NEWS_TRANSLATION_TARGET_LANGUAGES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_TARGET_LANGUAGES, optional: true } }
+            - name: NEWS_TRANSLATION_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_BATCH_SIZE, optional: true } }
+            - name: NEWS_TRANSLATION_SUMMARY_MAX_WORDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_SUMMARY_MAX_WORDS, optional: true } }
             - name: OPENCODE_SERVER_USERNAME
               valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENCODE_SERVER_USERNAME, optional: true } }
             - name: OPENCODE_SERVER_PASSWORD

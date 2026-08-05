@@ -160,7 +160,8 @@ final class APIClient {
     func fetchNews(limit: Int = 20, offset: Int = 0, q: String? = nil, country: String? = nil) async throws -> [NewsItem] {
         var comps = URLComponents(url: baseURL.appendingPathComponent("/api/news"), resolvingAgainstBaseURL: false)!
         var items: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit)),
-                                     URLQueryItem(name: "offset", value: String(offset))]
+                                     URLQueryItem(name: "offset", value: String(offset)),
+                                     URLQueryItem(name: "display_language", value: ClaritasInterfaceLanguage.current)]
         if let q { items.append(URLQueryItem(name: "q", value: q)) }
         if let country { items.append(URLQueryItem(name: "country", value: country)) }
         comps.queryItems = items

@@ -12,7 +12,56 @@ export type NewsItem = {
   source_name?: string | null;
   publisher?: string | null;
   payload?: unknown;
+  translated_title?: string | null;
+  ai_summary?: string | null;
+  translation?: NewsTranslation | null;
 };
+
+export type NewsTranslation = {
+  item_id?: number;
+  target_language_code: string;
+  translated_title?: string | null;
+  generated_summary?: string | null;
+  headline_kind?: "ai_translation";
+  summary_kind?: "ai_generated" | null;
+  summary_status: "not_requested" | "generated" | "insufficient";
+  provider: string;
+  model?: string | null;
+  title_generated_at?: string | null;
+  summary_generated_at?: string | null;
+  source_content_preserved?: boolean;
+  article_body_used?: boolean;
+  generation_metadata?: Record<string, unknown>;
+};
+
+export const CURRENT_INTERFACE_LANGUAGE = "en";
+
+function baseLanguage(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/_/g, "-").split("-")[0] ?? "";
+}
+
+export function isNewsTranslationRequired(
+  item: NewsItem,
+  targetLanguage = CURRENT_INTERFACE_LANGUAGE,
+) {
+  const source = baseLanguage(item.language_code);
+  const target = baseLanguage(targetLanguage);
+  return Boolean(source && target && source !== target);
+}
+
+export function newsDisplayTitle(item: NewsItem) {
+  return item.translated_title?.trim() || item.title?.trim() || item.url || "Untitled";
+}
+
+export function newsDisplaySummary(
+  item: NewsItem,
+  targetLanguage = CURRENT_INTERFACE_LANGUAGE,
+) {
+  if (item.ai_summary?.trim()) return item.ai_summary.trim();
+  return isNewsTranslationRequired(item, targetLanguage)
+    ? null
+    : item.summary?.trim() || null;
+}
 
 export type PodcastSignal = {
   id: number;
@@ -1102,8 +1151,9 @@ export function getAuthStartUrl(provider: AuthProviderId, redirectUrl?: string):
   return `${API_BASE}/api/auth/${provider}/start${qs ? `?${qs}` : ""}`;
 }
 
-export async function fetchNews(params?: { limit?: number; offset?: number; q?: string; country?: string; language?: string; sourceCountry?: string; provider?: string }) {
+export async function fetchNews(params?: { limit?: number; offset?: number; q?: string; country?: string; language?: string; sourceCountry?: string; provider?: string; displayLanguage?: string }) {
   const sp = new URLSearchParams();
+  sp.set("display_language", params?.displayLanguage ?? CURRENT_INTERFACE_LANGUAGE);
   if (params?.limit) sp.set("limit", String(params.limit));
   if (params?.offset) sp.set("offset", String(params.offset));
   if (params?.q) sp.set("q", params.q);
@@ -1115,6 +1165,21 @@ export async function fetchNews(params?: { limit?: number; offset?: number; q?: 
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch news"));
   const data = await resp.json();
   return (data.items ?? []) as NewsItem[];
+}
+
+export async function ensureNewsTranslationSummary(
+  itemId: number,
+  targetLanguage = CURRENT_INTERFACE_LANGUAGE,
+): Promise<NewsTranslation> {
+  const resp = await fetch(`${API_BASE}/api/news/${encodeURIComponent(itemId)}/translation`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ target_language: targetLanguage }),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to generate translated news summary"));
+  const data = await resp.json();
+  return data.translation as NewsTranslation;
 }
 
 export async function fetchPodcasts(params?: {

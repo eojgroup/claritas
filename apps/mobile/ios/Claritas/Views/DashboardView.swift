@@ -243,9 +243,16 @@ struct DashboardView: View {
                                         Text("Related headlines")
                                             .font(.caption.weight(.semibold))
                                         ForEach(relatedNews.prefix(3)) { item in
-                                            Text(item.title ?? item.url ?? "Untitled")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(item.presentationTitle)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                if let disclosure = item.translationDisclosure {
+                                                    Text(disclosure)
+                                                        .font(.caption2.weight(.semibold))
+                                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -439,8 +446,9 @@ struct DashboardView: View {
                         mobileSignalRow(
                             icon: "newspaper",
                             eyebrow: "Headline",
-                            value: headline.title ?? "Untitled",
+                            value: headline.presentationTitle,
                             detail: [
+                                headline.translationDisclosure,
                                 headline.country_iso2?.uppercased(),
                                 headline.source_name
                             ].compactMap { $0 }.joined(separator: " · "),
@@ -629,8 +637,8 @@ struct DashboardView: View {
         }
         guard !term.isEmpty else { return rows }
         return rows.filter { item in
-            let title = item.title?.lowercased() ?? ""
-            let summary = item.summary?.lowercased() ?? ""
+            let title = "\(item.presentationTitle) \(item.title ?? "")".lowercased()
+            let summary = "\(item.presentationSummary ?? "") \(item.summary ?? "")".lowercased()
             let country = item.country_iso2?.lowercased() ?? ""
             return title.contains(term) || summary.contains(term) || country.contains(term)
         }
@@ -748,7 +756,7 @@ struct DashboardView: View {
             SearchPreviewItem(
                 id: "news-\($0.id)",
                 kind: "News",
-                title: $0.title ?? $0.url ?? "Untitled",
+                title: $0.presentationTitle,
                 detail: [($0.country_iso2 ?? "").uppercased(), shortDateTimeLabel($0.event_time)]
                     .filter { !$0.isEmpty }
                     .joined(separator: " • ")
@@ -1019,7 +1027,9 @@ struct NewsWorkspaceView: View {
         if !term.isEmpty {
             filtered = filtered.filter { item in
                 [
+                    item.presentationTitle,
                     item.title ?? "",
+                    item.presentationSummary ?? "",
                     item.summary ?? "",
                     item.country_iso2 ?? "",
                     newsSourceLabel(item) ?? ""
@@ -2243,9 +2253,16 @@ private struct LegacyMarketsWorkspaceView: View {
                                             Text("Related stories")
                                                 .font(.caption.weight(.semibold))
                                             ForEach(relatedNews) { item in
-                                                Text(item.title ?? item.url ?? "Untitled")
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(item.presentationTitle)
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                    if let disclosure = item.translationDisclosure {
+                                                        Text(disclosure)
+                                                            .font(.caption2.weight(.semibold))
+                                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -2392,11 +2409,18 @@ private struct LegacyMarketsWorkspaceView: View {
                         value: "\(selectedQuote.country?.uppercased() ?? "—") · \(relatedWeather.map { "\(compactNumber($0.temp_c))°C \($0.weather_main ?? "")" } ?? "No weather")"
                     )
 
-                    if let headline = relatedNews.first?.title {
-                        Text(headline)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                    if let headline = relatedNews.first {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(headline.presentationTitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                            if let disclosure = headline.translationDisclosure {
+                                Text(disclosure)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                            }
+                        }
                     }
 
                     Divider()

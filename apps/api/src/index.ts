@@ -63,6 +63,10 @@ import {
 } from "./ingestion-automation";
 import { getBillingPublicUrls } from "./billing";
 import {
+  ensureNewsSummaryTranslation,
+  normalizeNewsLanguageCode,
+} from "./news-translation";
+import {
   BriefingGenerationError,
   generateDailySignalBriefing,
   getDailyBriefingGeneratorConfig,
@@ -1733,13 +1737,27 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     const language = typeof req.query.language === "string" ? req.query.language.trim().toLowerCase() : "";
     const sourceCountry = typeof req.query.source_country === "string" ? req.query.source_country.trim().toUpperCase() : "";
     const provider = typeof req.query.provider === "string" ? req.query.provider.trim().toLowerCase() : "";
+    const displayLanguage = normalizeNewsLanguageCode(
+      typeof req.query.display_language === "string" ? req.query.display_language : "en",
+    );
+    if (!displayLanguage) {
+      return res.status(400).json({ error: "display_language must be a valid BCP 47 language code." });
+    }
 
-    const params: any[] = [];
+    const params: any[] = [displayLanguage];
+    const displayLanguageIndex = 1;
     const where: string[] = ["i.kind = 'news_article'"];
     if (q) {
       const i1 = params.push(`%${q}%`); // returns new length as index
       const i2 = params.push(`%${q}%`);
-      where.push(`(i.title ILIKE $${i1} OR i.summary ILIKE $${i2})`);
+      const i3 = params.push(`%${q}%`);
+      const i4 = params.push(`%${q}%`);
+      where.push(`(
+        i.title ILIKE $${i1}
+        OR i.summary ILIKE $${i2}
+        OR translation.translated_title ILIKE $${i3}
+        OR translation.generated_summary ILIKE $${i4}
+      )`);
     }
     if (country) {
       const ci = params.push(country);
@@ -1764,9 +1782,31 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       SELECT i.id, i.kind, i.title, i.summary, i.url, i.country_iso2,
              i.language_code, i.source_country_iso2, i.tone,
              i.event_time, i.payload, s.name AS source_name,
-             COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher
+             COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
+             translation.translated_title,
+             translation.generated_summary AS ai_summary,
+             CASE WHEN translation.item_id IS NULL THEN NULL ELSE jsonb_build_object(
+               'target_language_code', translation.target_language_code,
+               'headline_kind', 'ai_translation',
+               'summary_kind', CASE
+                 WHEN translation.summary_status = 'generated' THEN 'ai_generated'
+                 ELSE NULL
+               END,
+               'summary_status', translation.summary_status,
+               'provider', translation.provider,
+               'model', translation.model,
+               'title_generated_at', translation.title_generated_at,
+               'summary_generated_at', translation.summary_generated_at,
+               'source_content_preserved', true,
+               'article_body_used', false
+             ) END AS translation
       FROM item i
       JOIN source s ON s.id = i.source_id
+      LEFT JOIN item_translation translation
+        ON translation.item_id = i.id
+       AND translation.target_language_code = $${displayLanguageIndex}
+       AND translation.source_title_hash = md5(COALESCE(i.title, ''))
+       AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
       ${where.length ? "WHERE " + where.join(" AND ") : ""}
       ORDER BY i.event_time DESC NULLS LAST, i.id DESC
       LIMIT $${li} OFFSET $${oi}
@@ -1775,6 +1815,36 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     res.json({ items: rows });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
+app.post("/api/news/:id/translation", requireAuthenticated, async (req, res) => {
+  try {
+    const itemId = Number(req.params.id);
+    if (!Number.isSafeInteger(itemId) || itemId <= 0) {
+      return res.status(400).json({ error: "News item id must be a positive integer." });
+    }
+    const targetLanguage = normalizeNewsLanguageCode(
+      typeof req.body?.target_language === "string" ? req.body.target_language : "en",
+    );
+    if (!targetLanguage) {
+      return res.status(400).json({ error: "target_language must be a valid BCP 47 language code." });
+    }
+    const translation = await ensureNewsSummaryTranslation({
+      itemId,
+      targetLanguage,
+    });
+    if (!translation) {
+      return res.status(404).json({
+        error: "A non-English news item with source text was not found.",
+      });
+    }
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.json({ translation });
+  } catch (error) {
+    return res.status(503).json({
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 

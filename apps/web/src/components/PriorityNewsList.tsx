@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 import { ArrowUpRight, ChevronDown } from "lucide-react";
-import type { NewsItem } from "../lib/api";
+import {
+  isNewsTranslationRequired,
+  newsDisplaySummary,
+  newsDisplayTitle,
+  type NewsItem,
+} from "../lib/api";
 
 const LEADERSHIP_ROLE_PATTERN =
   "(?:president|prime minister|premier|chancellor|monarch|king|queen|head of state|head of government)";
@@ -12,7 +17,7 @@ const LEADERSHIP_CHANGE_PATTERN = new RegExp(
 );
 
 function isLeadershipChangeStory(item: NewsItem): boolean {
-  const text = `${item.title ?? ""} ${item.summary ?? ""}`;
+  const text = `${newsDisplayTitle(item)} ${newsDisplaySummary(item) ?? ""} ${item.title ?? ""} ${item.summary ?? ""}`;
   return (
     /\bleadership (?:change|transition|succession)\b/i.test(text) ||
     /\b(?:new president|new prime minister|president-elect)\b/i.test(text) ||
@@ -30,6 +35,8 @@ type PriorityNewsListProps = {
   getSourceLabel: (item: NewsItem) => string | undefined;
   getCountryName: (iso: string) => string;
   onToggle: (item: NewsItem, iso?: string) => void;
+  onRequestTranslation?: (item: NewsItem) => void | Promise<void>;
+  translationPendingIds?: Set<number>;
   onSelectCountry: (iso: string) => void;
   onOpenWorkspace?: () => void;
 };
@@ -44,6 +51,8 @@ export default function PriorityNewsList({
   getSourceLabel,
   getCountryName,
   onToggle,
+  onRequestTranslation,
+  translationPendingIds,
   onSelectCountry,
   onOpenWorkspace,
 }: PriorityNewsListProps) {
@@ -83,6 +92,11 @@ export default function PriorityNewsList({
         const isSecondary = Boolean(iso && secondaryIso === iso);
         const priorityBand = index < 3 ? "P1" : index < 10 ? "P2" : "P3";
         const isLeadershipChange = isLeadershipChangeStory(item);
+        const translationRequired = isNewsTranslationRequired(item);
+        const translated = Boolean(item.translated_title?.trim());
+        const displayTitle = newsDisplayTitle(item);
+        const displaySummary = newsDisplaySummary(item);
+        const translationPending = translationPendingIds?.has(item.id) ?? false;
 
         return (
           <article
@@ -93,7 +107,12 @@ export default function PriorityNewsList({
           >
             <button
               type="button"
-              onClick={() => onToggle(item, iso)}
+              onClick={() => {
+                if (!selectedStory && translationRequired) {
+                  void onRequestTranslation?.(item);
+                }
+                onToggle(item, iso);
+              }}
               className="dashboard-news-summary"
               aria-expanded={selectedStory}
             >
@@ -136,12 +155,19 @@ export default function PriorityNewsList({
                 {iso ?? "—"}{isPublisherCountryFallback ? "~" : ""}
               </span>
               <span className="dashboard-news-headline">
-                <strong>{item.title || item.url || "Untitled"}</strong>
-                {item.language_code && (
-                  <span className="news-leadership-change" title="Original article language">
-                    {item.language_code.toUpperCase()}
+                <strong>{displayTitle}</strong>
+                {translated && item.translation ? (
+                  <span
+                    className="news-leadership-change"
+                    title={`AI-translated headline · ${item.translation.provider}${item.translation.model ? ` / ${item.translation.model}` : ""}`}
+                  >
+                    AI translation · {item.language_code?.toUpperCase() ?? "SOURCE"}→{item.translation.target_language_code.toUpperCase()}
                   </span>
-                )}
+                ) : item.language_code ? (
+                  <span className="news-leadership-change" title="Original article language">
+                    {item.language_code.toUpperCase()}{translationRequired ? " · translation pending" : ""}
+                  </span>
+                ) : null}
                 {isLeadershipChange && (
                   <span
                     className="news-leadership-change"
@@ -151,7 +177,12 @@ export default function PriorityNewsList({
                   </span>
                 )}
                 <small>
-                  {item.summary ?? "Select for source and country context."}
+                  {translationPending
+                    ? "Generating a short English summary from the available source excerpt…"
+                    : displaySummary ??
+                      (translationRequired
+                        ? "Select to request a short English summary."
+                        : "Select for source and country context.")}
                 </small>
                 <span className="dashboard-news-mobile-source">
                   {publisherLabel || sourceLabel || "Unknown"}
@@ -190,6 +221,12 @@ export default function PriorityNewsList({
                   <div className="dashboard-news-detail-meta">
                     <span>{sourceLabel ?? "Unknown source"}</span>
                     {item.language_code && <span>Language {item.language_code.toUpperCase()}</span>}
+                    {translated && item.translation && (
+                      <span>
+                        AI translation · {item.translation.provider}
+                        {item.translation.model ? ` / ${item.translation.model}` : ""}
+                      </span>
+                    )}
                     {item.source_country_iso2 && <span>Published in {item.source_country_iso2}</span>}
                     {isPublisherCountryFallback && (
                       <span>Geography inferred from publisher country · low confidence</span>
@@ -206,10 +243,32 @@ export default function PriorityNewsList({
                         : "Timestamp unavailable"}
                     </span>
                   </div>
-                  <p>
-                    {item.summary ??
-                      "No publisher summary is available. Open the source for the full story."}
-                  </p>
+                  {item.ai_summary && item.translation?.summary_status === "generated" && (
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                      AI-generated English summary · based only on source headline/excerpt
+                    </div>
+                  )}
+                  <p>{
+                    translationPending
+                      ? "Generating a short English summary…"
+                      : displaySummary ??
+                        (item.translation?.summary_status === "insufficient"
+                          ? "No English summary was generated because the available source excerpt was insufficient."
+                          : "No English summary is available. Open the publisher source for the full story.")
+                  }</p>
+                  {translationRequired && (
+                    <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface-muted)] p-3">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                        Original publisher text · {item.language_code?.toUpperCase() ?? "unknown language"}
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-[color:var(--shell-ink)]">
+                        {item.title ?? item.url ?? "Untitled"}
+                      </p>
+                      {item.summary && (
+                        <p className="mt-1 text-xs text-[color:var(--shell-muted)]">{item.summary}</p>
+                      )}
+                    </div>
+                  )}
                   {iso && isPrimary && (
                     <div className="dashboard-news-link-state">
                       <span className="live-dot" />
