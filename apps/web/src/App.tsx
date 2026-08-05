@@ -1192,9 +1192,6 @@ export default function ClaritasDashboard() {
     }).catch(() => setMarketQuotes([]));
     fetchFxRates().then(setFxRates).catch(() => setFxRates([]));
     fetchPolicyRates().then(setPolicyRates).catch(() => setPolicyRates([]));
-    fetchTransportOverview({ detail: "aggregate" })
-      .then(setTransportOverview)
-      .catch(() => setTransportOverview(null));
     fetchDailySignalBriefingLatest()
       .then((briefing) => {
         setDailyBriefing(briefing);
@@ -2097,6 +2094,30 @@ export default function ClaritasDashboard() {
   ]);
 
   const highestSignalCountry = crossSourceMapData[0] ?? null;
+  const transportFocusCountry =
+    normalizeIso2(selectedCountry) ?? normalizeIso2(highestSignalCountry?.country);
+
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess || !transportFocusCountry) {
+      setTransportOverview(null);
+      return;
+    }
+    let cancelled = false;
+    setTransportOverview(null);
+    fetchTransportOverview({
+      country: transportFocusCountry,
+      detail: "aggregate",
+    })
+      .then((overview) => {
+        if (!cancelled) setTransportOverview(overview);
+      })
+      .catch(() => {
+        if (!cancelled) setTransportOverview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, hasPaidAccess, transportFocusCountry]);
   const highestMapNewsCountry = useMemo(
     () => [...mapBubbleData].sort((left, right) => right.count - left.count)[0] ?? null,
     [mapBubbleData],
@@ -8388,7 +8409,7 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "transport" && (
-              <TransportWorkspace initialCountry={selectedCountry} />
+              <TransportWorkspace initialCountry={transportFocusCountry} />
             )}
             {activeView === "admin" && isAdmin && (
               <div className="workspace-page control-room-page min-w-0 space-y-4">

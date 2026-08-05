@@ -13,6 +13,7 @@ struct TransportWorkspaceView: View {
     @State private var isLoadingDetails = false
     @State private var isLoadingEntity = false
     @State private var detailError: String?
+    @State private var detailRequestID = UUID()
     @State private var selectionRequestID = UUID()
 
     private var isPad: Bool {
@@ -40,7 +41,7 @@ struct TransportWorkspaceView: View {
                 }
             }
         }
-        .task(id: isPad) {
+        .task(id: "\(isPad)-\(model.transportFocusCountry ?? "")-\(mode?.rawValue ?? "all")") {
             if isPad {
                 await loadDetails(forceRefresh: false)
             }
@@ -68,7 +69,10 @@ struct TransportWorkspaceView: View {
             takeawayStrip
 
             HStack(alignment: .top, spacing: 16) {
-                BrandCard(title: "Global movement map", icon: "map.fill") {
+                BrandCard(
+                    title: "\(model.transportFocusCountry ?? "Country") movement map",
+                    icon: "map.fill"
+                ) {
                     TransportCanvasMap(
                         entities: filteredEntities,
                         selectedID: selectedEntity?.id,
@@ -752,23 +756,38 @@ struct TransportWorkspaceView: View {
     }
 
     private func loadDetails(forceRefresh: Bool) async {
-        guard !isLoadingDetails else { return }
+        guard let country = model.transportFocusCountry else {
+            detailedOverview = nil
+            detailError = "Choose a country to load transport intelligence."
+            return
+        }
+        let requestID = UUID()
+        detailRequestID = requestID
         isLoadingDetails = true
         detailError = nil
-        defer { isLoadingDetails = false }
+        defer {
+            if detailRequestID == requestID {
+                isLoadingDetails = false
+            }
+        }
         do {
             let value = try await model.api.fetchTransportOverview(
                 detail: "full",
+                mode: mode,
+                country: country,
                 entityLimit: 1_200,
                 refresh: forceRefresh
             )
+            guard detailRequestID == requestID else { return }
             detailedOverview = value
             if let selectedEntity,
                !value.entities.contains(where: { $0.id == selectedEntity.id }) {
                 clearSelection()
             }
         } catch {
-            detailError = error.localizedDescription
+            if detailRequestID == requestID, !Task.isCancelled {
+                detailError = error.localizedDescription
+            }
         }
     }
 

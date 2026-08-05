@@ -16,7 +16,12 @@ final class AppModel: ObservableObject {
         case archive
     }
 
-    @Published var selectedCountry: String? = nil
+    @Published var selectedCountry: String? = nil {
+        didSet {
+            guard normalizedCountry(selectedCountry) != normalizedCountry(oldValue) else { return }
+            scheduleTransportRefresh()
+        }
+    }
     @Published var selectedSymbol: String? = nil
     @Published var dailyBriefing: DailySignalBriefing? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
@@ -59,6 +64,8 @@ final class AppModel: ObservableObject {
     private let recentNewsLimit = 120
     private let archiveNewsPageSize = 100
     private let archiveNewsMaxPages = 4
+    private var transportRefreshTask: Task<Void, Never>?
+    private var transportRequestID = UUID()
 
     var isAdmin: Bool {
         (authUser?.roles ?? []).contains { $0.lowercased() == "admin" }
@@ -70,6 +77,15 @@ final class AppModel: ObservableObject {
 
     var billingState: BillingAccessState? {
         authUser?.billing
+    }
+
+    var transportFocusCountry: String? {
+        normalizedCountry(selectedCountry) ?? CountryRelevanceResolver.ranked(
+            countryStats: countryStats,
+            podcasts: podcasts,
+            weather: weather,
+            countryMarkets: countryMarkets
+        ).first?.country
     }
 
     init() {
@@ -302,15 +318,6 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchMarketQuotes(refresh: false)) }
             catch { return .failure(error) }
         }()
-        async let transportResult: Result<TransportOverview, Error> = {
-            do {
-                return .success(
-                    try await api.fetchTransportOverview(detail: "aggregate", refresh: false)
-                )
-            }
-            catch { return .failure(error) }
-        }()
-
         let (
             resolvedStats,
             resolvedBriefing,
@@ -320,8 +327,7 @@ final class AppModel: ObservableObject {
             resolvedNews,
             resolvedPodcasts,
             resolvedMarket,
-            resolvedMarketQuotes,
-            resolvedTransport
+            resolvedMarketQuotes
         ) = await (
             statsResult,
             briefingResult,
@@ -331,8 +337,7 @@ final class AppModel: ObservableObject {
             newsResult,
             podcastResult,
             marketResult,
-            marketQuoteResult,
-            transportResult
+            marketQuoteResult
         )
 
         var paymentRequiredDetected = false
@@ -361,9 +366,6 @@ final class AppModel: ObservableObject {
             paymentRequiredDetected = true
         }
         if case .failure(let error) = resolvedMarketQuotes, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedTransport, isPaymentRequired(error) {
             paymentRequiredDetected = true
         }
         if paymentRequiredDetected {
@@ -406,13 +408,7 @@ final class AppModel: ObservableObject {
         if case .success(let quotes) = resolvedMarketQuotes {
             marketQuotes = quotes
         }
-        if case .success(let transport) = resolvedTransport {
-            transportOverview = transport
-            transportLoadError = nil
-        }
-        if case .failure(let error) = resolvedTransport {
-            transportLoadError = (error as? APIError)?.message ?? error.localizedDescription
-        }
+        await refreshTransport(forceRefresh: false)
         WidgetSnapshotStore.save(
             newsCount: news.count,
             countryMarkets: countryMarkets,
@@ -422,6 +418,9 @@ final class AppModel: ObservableObject {
 
     func clearAppData() {
         clearSelection()
+        transportRefreshTask?.cancel()
+        transportRefreshTask = nil
+        transportRequestID = UUID()
         dailyBriefing = nil
         dailyBriefingSchedule = nil
         dailyBriefingScheduleError = nil
@@ -587,21 +586,36 @@ final class AppModel: ObservableObject {
     }
 
     func refreshTransport(forceRefresh: Bool = false) async {
-        guard !isRefreshingTransport else { return }
         guard hasPaidAccess else {
             clearAppData()
             return
         }
+        let requestID = UUID()
+        transportRequestID = requestID
         isRefreshingTransport = true
         transportLoadError = nil
-        defer { isRefreshingTransport = false }
+        defer {
+            if transportRequestID == requestID {
+                isRefreshingTransport = false
+            }
+        }
+
+        guard let country = transportFocusCountry else {
+            transportOverview = nil
+            transportLoadError = "Transport intelligence is waiting for a highlighted country."
+            return
+        }
 
         do {
-            transportOverview = try await api.fetchTransportOverview(
+            let overview = try await api.fetchTransportOverview(
                 detail: "aggregate",
+                country: country,
                 refresh: forceRefresh
             )
+            guard transportRequestID == requestID, transportFocusCountry == country else { return }
+            transportOverview = overview
         } catch {
+            if Task.isCancelled || transportRequestID != requestID { return }
             if isPaymentRequired(error) {
                 clearAppData()
                 await refreshAccess()
@@ -609,6 +623,28 @@ final class AppModel: ObservableObject {
             }
             transportLoadError = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+
+    private func scheduleTransportRefresh() {
+        guard authStatus == .authed, hasPaidAccess else { return }
+        transportRefreshTask?.cancel()
+        transportRefreshTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 100_000_000)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await self?.refreshTransport(forceRefresh: false)
+        }
+    }
+
+    private func normalizedCountry(_ value: String?) -> String? {
+        guard let country = value?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return country
     }
 
     private func synchronizeBillingState() async {

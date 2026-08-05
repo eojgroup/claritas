@@ -523,73 +523,17 @@ private enum WatchMapData {
                 )
             }
         case .signals:
-            var weatherByCountry: [String: CountryWeather] = [:]
-            for row in weather {
-                let iso = row.country.uppercased()
-                if let current = weatherByCountry[iso],
-                   (current.observedDate ?? .distantPast) >= (row.observedDate ?? .distantPast) {
-                    continue
-                }
-                weatherByCountry[iso] = row
-            }
-            var marketByCountry: [String: MarketQuote] = [:]
-            for quote in markets {
-                guard let iso = quote.country?.uppercased() else { continue }
-                let current = marketByCountry[iso]
-                if current == nil ||
-                    abs(quote.percent_change ?? quote.change ?? 0) >
-                    abs(current?.percent_change ?? current?.change ?? 0) {
-                    marketByCountry[iso] = quote
-                }
-            }
-            var podcastCounts: [String: Int] = [:]
-            for episode in podcasts {
-                for signal in episode.signals {
-                    for iso in signal.countries where iso.count == 2 {
-                        podcastCounts[iso.uppercased(), default: 0] += 1
-                    }
-                }
-            }
-            let countries = Set(newsCounts.keys)
-                .union(weatherByCountry.keys)
-                .union(marketByCountry.keys)
-                .union(podcastCounts.keys)
-            let maxNews = Double(max(newsCounts.values.max() ?? 1, 1))
-            let maxMarket = max(
-                marketByCountry.values.map { abs($0.percent_change ?? $0.change ?? 0) }.max() ?? 1,
-                1
-            )
-
-            values = countries.map { iso in
-                let count = newsCounts[iso] ?? 0
-                let newsScore = count > 0 ? log1p(Double(count)) / log1p(maxNews) : 0
-                let weatherRow = weatherByCountry[iso]
-                let weatherScore = weatherRow?.temp_c.map {
-                    min(1, max(0, (abs($0 - 20) - 8) / 24))
-                } ?? 0
-                let market = marketByCountry[iso]
-                let marketScore = market == nil
-                    ? 0
-                    : abs(market?.percent_change ?? market?.change ?? 0) / maxMarket
-                let podcastCount = podcastCounts[iso] ?? 0
-                let podcastScore = min(1, Double(podcastCount) / 4)
-                let domainCount = [count > 0, weatherScore > 0, market != nil, podcastCount > 0]
-                    .filter { $0 }.count
-                let relevance = min(
-                    100,
-                    round(
-                        newsScore * 40 +
-                        podcastScore * 25 +
-                        weatherScore * 15 +
-                        marketScore * 15 +
-                        Double(max(0, domainCount - 1) * 2)
-                    )
-                )
+            values = CountryRelevanceResolver.ranked(
+                news: news,
+                podcasts: podcasts,
+                weather: weather,
+                marketQuotes: markets
+            ).map { score in
                 return (
-                    iso,
-                    "\(Int(relevance))/100",
-                    "\(domainCount) linked \(domainCount == 1 ? "domain" : "domains")",
-                    relevance
+                    score.country,
+                    "\(Int(score.relevance))/100",
+                    "\(score.domainCount) linked \(score.domainCount == 1 ? "domain" : "domains")",
+                    score.relevance
                 )
             }
         }
@@ -610,7 +554,11 @@ private enum WatchMapData {
                 rank: 0
             )
         }
-        .sorted { $0.magnitude > $1.magnitude }
+        .sorted {
+            $0.magnitude == $1.magnitude
+                ? $0.iso < $1.iso
+                : $0.magnitude > $1.magnitude
+        }
         .enumerated()
         .map { index, item in
             WatchMapPoint(

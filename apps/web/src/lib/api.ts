@@ -1245,23 +1245,26 @@ export async function fetchCountryMarketDetail(country: string): Promise<Country
   return (await resp.json()) as CountryMarketDetail;
 }
 
-export async function fetchTransportOverview(params?: {
+export async function fetchTransportOverview(params: {
+  country: string;
   detail?: "aggregate" | "full";
   mode?: TransportMode;
-  country?: string;
   entityLimit?: number;
   refresh?: boolean;
 }): Promise<TransportOverview> {
+  const country = params.country.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(country)) {
+    throw new Error("Transport intelligence requires an ISO alpha-2 country.");
+  }
   const sp = new URLSearchParams();
-  if (params?.detail) sp.set("detail", params.detail);
-  if (params?.mode) sp.set("mode", params.mode);
-  if (params?.country) sp.set("country", params.country);
-  if (typeof params?.entityLimit === "number") {
+  sp.set("country", country);
+  if (params.detail) sp.set("detail", params.detail);
+  if (params.mode) sp.set("mode", params.mode);
+  if (typeof params.entityLimit === "number") {
     sp.set("entity_limit", String(params.entityLimit));
   }
-  if (params?.refresh) sp.set("refresh", "true");
-  const suffix = sp.toString() ? `?${sp.toString()}` : "";
-  const resp = await fetch(`${API_BASE}/api/transport/overview${suffix}`, {
+  if (params.refresh) sp.set("refresh", "true");
+  const resp = await fetch(`${API_BASE}/api/transport/overview?${sp.toString()}`, {
     credentials: "include",
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch transport intelligence"));

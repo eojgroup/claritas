@@ -89,9 +89,6 @@ final class WatchAppModel: ObservableObject {
         async let weatherResult = result { try await api.fetchCountryWeather() }
         async let leadershipResult = result { try await api.fetchCountryLeadership() }
         async let marketResult = result { try await api.fetchMarketQuotes(refresh: false) }
-        async let transportResult = result {
-            try await api.fetchTransportOverview(detail: "aggregate", refresh: false)
-        }
         async let scheduleResult = result { try await api.fetchDailyBriefingSchedule() }
 
         let results = await (
@@ -101,7 +98,6 @@ final class WatchAppModel: ObservableObject {
             weatherResult,
             leadershipResult,
             marketResult,
-            transportResult,
             scheduleResult
         )
         var errors: [Error] = []
@@ -131,13 +127,6 @@ final class WatchAppModel: ObservableObject {
         case .failure(let error): errors.append(error)
         }
         switch results.6 {
-        case .success(let value): transport = value
-        case .failure(let error):
-            if isUnauthorized(error) {
-                errors.append(error)
-            }
-        }
-        switch results.7 {
         case .success(let value):
             briefingSchedule = value
             briefingScheduleError = nil
@@ -146,6 +135,27 @@ final class WatchAppModel: ObservableObject {
             if isUnauthorized(error) {
                 errors.append(error)
             }
+        }
+
+        if let country = CountryRelevanceResolver.ranked(
+            news: news,
+            podcasts: podcasts,
+            weather: weather,
+            marketQuotes: markets
+        ).first?.country {
+            do {
+                transport = try await api.fetchTransportOverview(
+                    detail: "aggregate",
+                    country: country,
+                    refresh: false
+                )
+            } catch {
+                if isUnauthorized(error) {
+                    errors.append(error)
+                }
+            }
+        } else {
+            transport = nil
         }
 
         if errors.isEmpty {

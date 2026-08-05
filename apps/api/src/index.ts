@@ -2804,8 +2804,8 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
       return res.status(400).json({ error: "mode must be maritime or aviation." });
     }
     const country =
-      typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : undefined;
-    if (country && !/^[A-Z]{2}$/.test(country)) {
+      typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
+    if (!/^[A-Z]{2}$/.test(country)) {
       return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
     }
     const entityLimitRaw =

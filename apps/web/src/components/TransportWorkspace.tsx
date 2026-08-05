@@ -40,6 +40,11 @@ type Props = {
   initialCountry?: string | null;
 };
 
+function normalizedCountry(value: string | null | undefined) {
+  const country = value?.trim().toUpperCase() ?? "";
+  return /^[A-Z]{2}$/.test(country) ? country : "";
+}
+
 function timeLabel(value: string | null | undefined) {
   if (!value) return "Awaiting data";
   const timestamp = new Date(value).getTime();
@@ -171,7 +176,7 @@ function countryConnection(entity: TransportEntity, country: string) {
 export default function TransportWorkspace({ initialCountry }: Props) {
   const [overview, setOverview] = useState<TransportOverview | null>(null);
   const [mode, setMode] = useState<ModeFilter>("all");
-  const [country, setCountry] = useState<string>(() => initialCountry?.toUpperCase() ?? "");
+  const [country, setCountry] = useState<string>(() => normalizedCountry(initialCountry));
   const [corridorCountry, setCorridorCountry] = useState("");
   const [selected, setSelected] = useState<TransportEntity | null>(null);
   const [track, setTrack] = useState<TransportTrackPoint[]>([]);
@@ -179,35 +184,50 @@ export default function TransportWorkspace({ initialCountry }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingEntity, setLoadingEntity] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const overviewRequestRef = useRef(0);
   const selectionRequestRef = useRef(0);
   const selectedRef = useRef<TransportEntity | null>(null);
 
   useEffect(() => {
-    if (initialCountry) {
-      setCountry(initialCountry.toUpperCase());
+    const nextCountry = normalizedCountry(initialCountry);
+    if (nextCountry) {
+      setCountry(nextCountry);
       setCorridorCountry("");
     }
   }, [initialCountry]);
 
   const load = useCallback(
     async (force = false) => {
+      const requestId = overviewRequestRef.current + 1;
+      overviewRequestRef.current = requestId;
+      if (!country) {
+        setOverview(null);
+        setError("Choose a country to load transport intelligence.");
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
       if (force) setRefreshing(true);
       else setLoading(true);
       try {
         const value = await fetchTransportOverview({
           detail: "full",
           mode: mode === "all" ? undefined : mode,
-          country: country || undefined,
-          entityLimit: country ? 2_500 : 1_200,
+          country,
+          entityLimit: 1_200,
           refresh: force,
         });
+        if (overviewRequestRef.current !== requestId) return;
         setOverview(value);
         setError(null);
       } catch (reason) {
+        if (overviewRequestRef.current !== requestId) return;
         setError(reason instanceof Error ? reason.message : String(reason));
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        if (overviewRequestRef.current === requestId) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [country, mode],
@@ -263,7 +283,9 @@ export default function TransportWorkspace({ initialCountry }: Props) {
   const selectCountry = useCallback(
     (nextCountry: string) => {
       clearSelection();
-      setCountry(nextCountry);
+      const normalized = normalizedCountry(nextCountry);
+      if (!normalized) return;
+      setCountry(normalized);
       setCorridorCountry("");
     },
     [clearSelection],
@@ -543,7 +565,6 @@ export default function TransportWorkspace({ initialCountry }: Props) {
               selectCountry(event.currentTarget.value);
             }}
           >
-            <option value="">Global network</option>
             {(overview?.countries ?? []).map((entry) => (
               <option key={entry.country} value={entry.country}>
                 {entry.country_name} ({entry.country})
@@ -833,7 +854,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                   ? `${selectedCountryInsight?.countryName ?? country} ↔ ${selectedCorridor.countryName}`
                   : selectedCountryInsight
                     ? `${selectedCountryInsight.countryName} (${country}) connections`
-                    : "Global movement map"}
+                    : `${country} connections`}
               </h2>
             </div>
             <small>
@@ -1191,7 +1212,6 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                   onClick={() => {
                     if (isPrimary) {
                       if (corridorCountry) selectCorridorCountry("");
-                      else selectCountry("");
                       return;
                     }
                     if (country && !isPrimary && isCounterparty) {
@@ -1205,7 +1225,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                     isPrimary && corridorCountry
                       ? `Return to all ${country} connections`
                       : isPrimary
-                        ? "Return to the global network"
+                        ? `${country} is the current country scope`
                         : country && isCounterparty
                           ? `View ${country} ↔ ${entryIso} corridor`
                           : `Select ${entry.country_name}`

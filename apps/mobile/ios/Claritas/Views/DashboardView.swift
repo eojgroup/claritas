@@ -3641,7 +3641,11 @@ private enum SignalMapDataBuilder {
 
         return raw
             .filter { region.contains($0.iso) && CountryCentroidLookup.coordinate(for: $0.iso) != nil }
-            .sorted { $0.magnitude > $1.magnitude }
+            .sorted {
+                $0.magnitude == $1.magnitude
+                    ? $0.iso < $1.iso
+                    : $0.magnitude > $1.magnitude
+            }
             .enumerated()
             .map { index, item in
                 CountryBubblePoint(

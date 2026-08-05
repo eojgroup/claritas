@@ -260,10 +260,14 @@ final class APIClient {
     func fetchTransportOverview(
         detail: String = "aggregate",
         mode: TransportMode? = nil,
-        country: String? = nil,
+        country: String,
         entityLimit: Int? = nil,
         refresh: Bool = false
     ) async throws -> TransportOverview {
+        let normalizedCountry = country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard normalizedCountry.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            throw APIError(status: 400, message: "Transport intelligence requires an ISO alpha-2 country.")
+        }
         var comps = URLComponents(
             url: baseURL.appendingPathComponent("/api/transport/overview"),
             resolvingAgainstBaseURL: false
@@ -272,9 +276,7 @@ final class APIClient {
         if let mode {
             items.append(URLQueryItem(name: "mode", value: mode.rawValue))
         }
-        if let country = nonEmpty(country) {
-            items.append(URLQueryItem(name: "country", value: country.uppercased()))
-        }
+        items.append(URLQueryItem(name: "country", value: normalizedCountry))
         if let entityLimit {
             items.append(URLQueryItem(name: "entity_limit", value: String(entityLimit)))
         }

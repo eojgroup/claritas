@@ -868,6 +868,173 @@ struct CountryMarketOverviewResponse: Codable {
     let sources: [String]
 }
 
+struct CountryRelevanceScore {
+    let country: String
+    let relevance: Double
+    let domainCount: Int
+}
+
+enum CountryRelevanceResolver {
+    static func ranked(
+        countryStats: [CountryStat],
+        podcasts: [PodcastEpisode],
+        weather: [CountryWeather],
+        countryMarkets: [CountryMarketOverview]
+    ) -> [CountryRelevanceScore] {
+        var newsCounts: [String: Int] = [:]
+        countryStats.forEach { row in
+            guard let country = iso2(row.country) else { return }
+            newsCounts[country, default: 0] += row.count
+        }
+        var marketMoves: [String: Double] = [:]
+        countryMarkets.forEach { row in
+            guard let country = iso2(row.country) else { return }
+            marketMoves[country] = abs(
+                row.composite_change_percent ?? row.index_change_percent ?? row.fx_change_percent ?? 0
+            )
+        }
+        return ranked(
+            newsCounts: newsCounts,
+            podcastSignals: podcastSignals(podcasts),
+            weather: weather,
+            marketMoves: marketMoves
+        )
+    }
+
+    static func ranked(
+        news: [NewsItem],
+        podcasts: [PodcastEpisode],
+        weather: [CountryWeather],
+        marketQuotes: [MarketQuote]
+    ) -> [CountryRelevanceScore] {
+        var newsCounts: [String: Int] = [:]
+        news.forEach { row in
+            guard let country = iso2(row.country_iso2) else { return }
+            newsCounts[country, default: 0] += 1
+        }
+        var marketMoves: [String: Double] = [:]
+        marketQuotes.forEach { row in
+            guard let country = iso2(row.country) else { return }
+            marketMoves[country] = max(
+                marketMoves[country] ?? 0,
+                abs(row.percent_change ?? row.change ?? 0)
+            )
+        }
+        return ranked(
+            newsCounts: newsCounts,
+            podcastSignals: podcastSignals(podcasts),
+            weather: weather,
+            marketMoves: marketMoves
+        )
+    }
+
+    private static func ranked(
+        newsCounts: [String: Int],
+        podcastSignals: [String: (count: Int, score: Double)],
+        weather: [CountryWeather],
+        marketMoves: [String: Double]
+    ) -> [CountryRelevanceScore] {
+        var latestWeather: [String: CountryWeather] = [:]
+        weather.forEach { row in
+            guard let country = iso2(row.country) else { return }
+            if let current = latestWeather[country],
+               (current.observedDate ?? .distantPast) >= (row.observedDate ?? .distantPast) {
+                return
+            }
+            latestWeather[country] = row
+        }
+
+        let countries = Set(newsCounts.keys)
+            .union(latestWeather.keys)
+            .union(marketMoves.keys)
+            .union(podcastSignals.keys)
+        let maxNews = Double(max(newsCounts.values.max() ?? 1, 1))
+        let maxMarket = max(marketMoves.values.max() ?? 1, 1)
+
+        return countries.compactMap { country -> CountryRelevanceScore? in
+            let newsCount = newsCounts[country] ?? 0
+            let newsRelevance = newsCount > 0
+                ? log1p(Double(newsCount)) / log1p(maxNews)
+                : 0
+            let weatherRow = latestWeather[country]
+            let temperatureSeverity = weatherRow?.temp_c.map {
+                min(1, max(0, (abs($0 - 20) - 8) / 24))
+            } ?? 0
+            let humiditySeverity = weatherRow?.humidity.map {
+                min(1, max(0, ($0 - 75) / 25))
+            } ?? 0
+            let windSeverity = weatherRow?.wind_speed.map { min(1, $0 / 25) } ?? 0
+            let weatherRelevance = max(temperatureSeverity, max(humiditySeverity, windSeverity))
+            let marketRelevance = marketMoves[country].map { $0 / maxMarket } ?? 0
+            let podcast = podcastSignals[country]
+            let podcastRelevance = podcast.map {
+                min(1, ($0.score + min(18, Double($0.count * 3))) / 100)
+            } ?? 0
+            let domainCount = [
+                newsCount > 0,
+                weatherRelevance > 0,
+                marketMoves[country] != nil,
+                podcast != nil,
+            ].filter { $0 }.count
+            let breadthBonus = Double(max(0, domainCount - 1) * 2)
+            let relevance = min(
+                100,
+                round(
+                    newsRelevance * 40 +
+                    podcastRelevance * 25 +
+                    weatherRelevance * 15 +
+                    marketRelevance * 15 +
+                    breadthBonus
+                )
+            )
+            guard relevance > 0 else { return nil }
+            return CountryRelevanceScore(
+                country: country,
+                relevance: relevance,
+                domainCount: domainCount
+            )
+        }
+        .sorted {
+            $0.relevance == $1.relevance
+                ? $0.country < $1.country
+                : $0.relevance > $1.relevance
+        }
+    }
+
+    private static func podcastSignals(
+        _ podcasts: [PodcastEpisode]
+    ) -> [String: (count: Int, score: Double)] {
+        var signals: [String: (count: Int, score: Double)] = [:]
+        podcasts.forEach { episode in
+            episode.signals.forEach { signal in
+                let riskBase: Double
+                switch signal.risk_level?.lowercased() {
+                case "critical": riskBase = 100
+                case "high": riskBase = 82
+                case "medium": riskBase = 60
+                case "low": riskBase = 38
+                default: riskBase = 32
+                }
+                let score = riskBase * (0.65 + (signal.confidence ?? 0.55) * 0.35)
+                signal.countries.forEach { value in
+                    guard let country = iso2(value) else { return }
+                    let current = signals[country] ?? (count: 0, score: 0)
+                    signals[country] = (current.count + 1, max(current.score, score))
+                }
+            }
+        }
+        return signals
+    }
+
+    private static func iso2(_ value: String?) -> String? {
+        guard let country = value?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return country
+    }
+}
+
 enum TransportMode: String, Codable, CaseIterable, Identifiable {
     case maritime
     case aviation
