@@ -12,7 +12,7 @@ import {
   triggerWeatherRun,
   type IngestionPipeline,
 } from "./ingestion-admin";
-import { query, withTransaction } from "./db";
+import { query, withWorkerLease } from "./db";
 
 type DbTimestamp = string | Date;
 
@@ -50,10 +50,6 @@ type DemandRow = {
 
 type LatestDataRow = {
   latest_data_at: DbTimestamp | null;
-};
-
-type AdvisoryLockRow = {
-  locked: boolean;
 };
 
 export type IngestionAutomationRule = {
@@ -124,8 +120,6 @@ type RuleDefaults = Omit<
   | "updated_at"
 >;
 
-const AUTOMATION_LOCK_NAMESPACE = 9432;
-const AUTOMATION_LOCK_KEY = 1;
 const AUTOMATION_POLL_SECONDS = clampInt(
   process.env.INGEST_AUTOMATION_POLL_SECONDS,
   10,
@@ -221,6 +215,7 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
 
 let automationWorkerTimer: NodeJS.Timeout | null = null;
 let automationWorkerRunning = false;
+let automationRulesEnsured = false;
 let lastOperationalPruneAt = 0;
 
 function clampInt(raw: unknown, min: number, max: number, fallback: number): number {
@@ -288,10 +283,34 @@ function toAutomationRule(row: AutomationRuleRow): IngestionAutomationRule {
 }
 
 async function ensureAutomationRulesExist(): Promise<void> {
-  for (const pipeline of ["news", "weather", "market", "podcasts", "leadership"] as IngestionPipeline[]) {
+  if (automationRulesEnsured) return;
+  const pipelines = ["news", "weather", "market", "podcasts", "leadership"] as IngestionPipeline[];
+  const values: string[] = [];
+  const params: unknown[] = [];
+  pipelines.forEach((pipeline, index) => {
     const defaults = RULE_DEFAULTS[pipeline];
-    await query(
-      `INSERT INTO ingestion_automation_rule (
+    const offset = index * 11;
+    values.push(
+      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4},
+        $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8},
+        $${offset + 9}, $${offset + 10}, now(), $${offset + 11})`,
+    );
+    params.push(
+      defaults.pipeline,
+      defaults.enabled,
+      defaults.schedule_enabled,
+      defaults.schedule_interval_minutes,
+      defaults.intelligent_enabled,
+      defaults.min_spacing_minutes,
+      defaults.freshness_sla_minutes,
+      defaults.demand_window_minutes,
+      defaults.demand_threshold,
+      defaults.failure_backoff_minutes,
+      JSON.stringify(defaults.default_payload),
+    );
+  });
+  await query(
+    `INSERT INTO ingestion_automation_rule (
          pipeline,
          enabled,
          schedule_enabled,
@@ -305,23 +324,11 @@ async function ensureAutomationRulesExist(): Promise<void> {
          next_scheduled_at,
          default_payload
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), $11)
+       VALUES ${values.join(", ")}
        ON CONFLICT (pipeline) DO NOTHING`,
-      [
-        defaults.pipeline,
-        defaults.enabled,
-        defaults.schedule_enabled,
-        defaults.schedule_interval_minutes,
-        defaults.intelligent_enabled,
-        defaults.min_spacing_minutes,
-        defaults.freshness_sla_minutes,
-        defaults.demand_window_minutes,
-        defaults.demand_threshold,
-        defaults.failure_backoff_minutes,
-        JSON.stringify(defaults.default_payload),
-      ]
-    );
-  }
+    params,
+  );
+  automationRulesEnsured = true;
 }
 
 async function getRule(pipeline: IngestionPipeline): Promise<IngestionAutomationRule | null> {
@@ -586,86 +593,6 @@ export function trackDemandSignal(pipeline: IngestionPipeline): void {
   ensureDemandSignalFlushTimer();
 }
 
-async function getRunStatus(pipeline: IngestionPipeline): Promise<RunStatusRow> {
-  const { rows } = await query<RunStatusRow>(
-    `SELECT
-       MAX(started_at) AS last_run_at,
-       MAX(started_at) FILTER (WHERE status = 'success') AS last_success_at,
-       MAX(started_at) FILTER (WHERE status = 'failed') AS last_failure_at,
-       COUNT(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active_runs
-     FROM ingestion_run
-     WHERE pipeline = $1`,
-    [pipeline]
-  );
-
-  return {
-    last_run_at: rows[0]?.last_run_at ?? null,
-    last_success_at: rows[0]?.last_success_at ?? null,
-    last_failure_at: rows[0]?.last_failure_at ?? null,
-    active_runs: Number(rows[0]?.active_runs || 0),
-  };
-}
-
-async function getLatestDataTimestamp(pipeline: IngestionPipeline): Promise<string | null> {
-  if (pipeline === "news") {
-    const { rows } = await query<LatestDataRow>(
-      `SELECT MAX(i.created_at) AS latest_data_at
-       FROM item i
-       JOIN source s ON s.id = i.source_id
-       WHERE s.name IN ('gdelt', 'institutional_rss')
-         AND COALESCE(s.metadata->>'retired','false') <> 'true'`
-    );
-    return timestampToString(rows[0]?.latest_data_at ?? null);
-  }
-
-  if (pipeline === "weather") {
-    const { rows } = await query<LatestDataRow>(
-      `SELECT MAX(latest_data_at) AS latest_data_at FROM (
-         SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot
-         UNION ALL SELECT MAX(updated_at) FROM weather_forecast
-         UNION ALL SELECT MAX(observed_at) FROM air_quality_snapshot
-         UNION ALL SELECT MAX(updated_at) FROM weather_alert
-       ) weather_sources`
-    );
-    return timestampToString(rows[0]?.latest_data_at ?? null);
-  }
-
-  if (pipeline === "podcasts") {
-    const { rows } = await query<LatestDataRow>(`SELECT MAX(last_synced_at) AS latest_data_at FROM podcast_feed`);
-    return timestampToString(rows[0]?.latest_data_at ?? null);
-  }
-
-  if (pipeline === "leadership") {
-    const { rows } = await query<LatestDataRow>(
-      `SELECT MAX(retrieved_at) AS latest_data_at FROM country_leadership`
-    );
-    return timestampToString(rows[0]?.latest_data_at ?? null);
-  }
-
-  const { rows } = await query<LatestDataRow>(
-    `SELECT MAX(latest_data_at) AS latest_data_at FROM (
-       SELECT MAX(ms.observed_at) AS latest_data_at
-       FROM market_snapshot ms
-       JOIN source s ON s.id = ms.source_id
-       WHERE COALESCE(s.metadata->>'retired', 'false') <> 'true'
-       UNION ALL SELECT MAX(updated_at) FROM market_event
-       UNION ALL SELECT MAX(observed_at) FROM market_indicator
-     ) market_sources`
-  );
-  return timestampToString(rows[0]?.latest_data_at ?? null);
-}
-
-async function getDemandRequests(pipeline: IngestionPipeline, minutes: number): Promise<number> {
-  const { rows } = await query<DemandRow>(
-    `SELECT COALESCE(SUM(request_count), 0)::int AS demand_requests
-     FROM ingestion_demand_signal_minute
-     WHERE pipeline = $1
-       AND bucket_minute >= now() - make_interval(mins => $2::int)`,
-    [pipeline, Math.max(minutes, 1)]
-  );
-  return Number(rows[0]?.demand_requests || 0);
-}
-
 function computeDataAgeMinutes(latestDataAt: string | null): number | null {
   if (!latestDataAt) return null;
   const parsed = Date.parse(latestDataAt);
@@ -673,48 +600,102 @@ function computeDataAgeMinutes(latestDataAt: string | null): number | null {
   return Math.max(Math.round((Date.now() - parsed) / 60_000), 0);
 }
 
-async function getPipelineEvaluationState(
-  rule: IngestionAutomationRule
-): Promise<PipelineEvaluationState> {
-  const runStatus = await getRunStatus(rule.pipeline);
-  const latestDataAt = await getLatestDataTimestamp(rule.pipeline);
-  const demandRequests = await getDemandRequests(rule.pipeline, rule.demand_window_minutes);
+async function getPipelineEvaluationStates(): Promise<PipelineEvaluationState[]> {
+  const { rows } = await query<
+    RunStatusRow & DemandRow & LatestDataRow & { pipeline: string }
+  >(
+    `WITH run_status AS (
+       SELECT
+         pipeline,
+         MAX(started_at) AS last_run_at,
+         MAX(started_at) FILTER (WHERE status = 'success') AS last_success_at,
+         MAX(started_at) FILTER (WHERE status = 'failed') AS last_failure_at,
+         COUNT(*) FILTER (WHERE status IN ('queued', 'running'))::int AS active_runs
+       FROM ingestion_run
+       GROUP BY pipeline
+     ), latest_data AS (
+       SELECT 'news'::text AS pipeline, MAX(i.created_at) AS latest_data_at
+       FROM item i
+       JOIN source s ON s.id = i.source_id
+       WHERE s.name IN ('gdelt', 'institutional_rss')
+         AND COALESCE(s.metadata->>'retired', 'false') <> 'true'
+       UNION ALL
+       SELECT 'weather', MAX(latest_data_at) FROM (
+         SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot
+         UNION ALL SELECT MAX(updated_at) FROM weather_forecast
+         UNION ALL SELECT MAX(observed_at) FROM air_quality_snapshot
+         UNION ALL SELECT MAX(updated_at) FROM weather_alert
+       ) weather_sources
+       UNION ALL
+       SELECT 'market', MAX(latest_data_at) FROM (
+         SELECT MAX(ms.observed_at) AS latest_data_at
+         FROM market_snapshot ms
+         JOIN source s ON s.id = ms.source_id
+         WHERE COALESCE(s.metadata->>'retired', 'false') <> 'true'
+         UNION ALL SELECT MAX(updated_at) FROM market_event
+         UNION ALL SELECT MAX(observed_at) FROM market_indicator
+       ) market_sources
+       UNION ALL
+       SELECT 'podcasts', MAX(last_synced_at) FROM podcast_feed
+       UNION ALL
+       SELECT 'leadership', MAX(retrieved_at) FROM country_leadership
+     ), demand AS (
+       SELECT
+         rule.pipeline,
+         COALESCE(SUM(signal.request_count), 0)::int AS demand_requests
+       FROM ingestion_automation_rule rule
+       LEFT JOIN ingestion_demand_signal_minute signal
+         ON signal.pipeline = rule.pipeline
+        AND signal.bucket_minute >= now() - make_interval(mins => rule.demand_window_minutes)
+       GROUP BY rule.pipeline
+     )
+     SELECT
+       rule.pipeline,
+       run.last_run_at,
+       run.last_success_at,
+       run.last_failure_at,
+       COALESCE(run.active_runs, 0)::int AS active_runs,
+       latest.latest_data_at,
+       COALESCE(demand.demand_requests, 0)::int AS demand_requests
+     FROM ingestion_automation_rule rule
+     LEFT JOIN run_status run ON run.pipeline = rule.pipeline
+     LEFT JOIN latest_data latest ON latest.pipeline = rule.pipeline
+     LEFT JOIN demand ON demand.pipeline = rule.pipeline
+     ORDER BY rule.pipeline ASC`,
+  );
 
-  return {
-    pipeline: rule.pipeline,
-    last_run_at: timestampToString(runStatus.last_run_at),
-    last_success_at: timestampToString(runStatus.last_success_at),
-    last_failure_at: timestampToString(runStatus.last_failure_at),
-    latest_data_at: latestDataAt,
-    data_age_minutes: computeDataAgeMinutes(latestDataAt),
-    demand_requests: demandRequests,
-    active_runs: runStatus.active_runs,
-  };
+  return rows.map((row) => {
+    const latestDataAt = timestampToString(row.latest_data_at);
+    return {
+      pipeline: parsePipeline(row.pipeline),
+      last_run_at: timestampToString(row.last_run_at),
+      last_success_at: timestampToString(row.last_success_at),
+      last_failure_at: timestampToString(row.last_failure_at),
+      latest_data_at: latestDataAt,
+      data_age_minutes: computeDataAgeMinutes(latestDataAt),
+      demand_requests: Number(row.demand_requests || 0),
+      active_runs: Number(row.active_runs || 0),
+    };
+  });
 }
 
 export async function getAutomationOverview(): Promise<{
   poll_seconds: number;
   rules: IngestionAutomationRule[];
   status: IngestionAutomationPipelineStatus[];
+  providers: { fred: { configured: boolean; default_enabled: boolean } };
 }> {
   const rules = await listAutomationRules();
-  const status = await Promise.all(rules.map((rule) => getPipelineEvaluationState(rule)));
+  const status = await getPipelineEvaluationStates();
+  const fredConfigured = Boolean(process.env.FRED_API_KEY?.trim());
   return {
     poll_seconds: AUTOMATION_POLL_SECONDS,
     rules,
     status,
+    providers: {
+      fred: { configured: fredConfigured, default_enabled: fredConfigured },
+    },
   };
-}
-
-async function withAutomationLock(task: () => Promise<void>): Promise<void> {
-  await withTransaction(async (client) => {
-    const { rows } = await client.query<AdvisoryLockRow>(
-      `SELECT pg_try_advisory_xact_lock($1::int, $2::int) AS locked`,
-      [AUTOMATION_LOCK_NAMESPACE, AUTOMATION_LOCK_KEY]
-    );
-    if (!rows[0]?.locked) return;
-    await task();
-  });
 }
 
 function isWithinMinutes(iso: string | null, minutes: number): boolean {
@@ -862,10 +843,10 @@ async function failStaleActiveRuns(rule: IngestionAutomationRule): Promise<void>
   );
 }
 
-async function evaluateRule(rule: IngestionAutomationRule): Promise<void> {
-  await failStaleActiveRuns(rule);
-  const state = await getPipelineEvaluationState(rule);
-
+async function evaluateRule(
+  rule: IngestionAutomationRule,
+  state: PipelineEvaluationState,
+): Promise<void> {
   if (!rule.enabled) {
     await persistRuleEvaluation(rule, { error: null, triggered: false });
     return;
@@ -942,11 +923,18 @@ async function runAutomationCycle(): Promise<void> {
   automationWorkerRunning = true;
 
   try {
-    await withAutomationLock(async () => {
+    await withWorkerLease("ingestion-automation", 120, async () => {
       await ensureAutomationRulesExist();
       const rules = await listAutomationRules();
       for (const rule of rules) {
-        await evaluateRule(rule);
+        await failStaleActiveRuns(rule);
+      }
+      const states = new Map(
+        (await getPipelineEvaluationStates()).map((state) => [state.pipeline, state]),
+      );
+      for (const rule of rules) {
+        const state = states.get(rule.pipeline);
+        if (state) await evaluateRule(rule, state);
       }
       if (Date.now() - lastOperationalPruneAt >= 6 * 3_600_000) {
         await pruneOperationalHistory();

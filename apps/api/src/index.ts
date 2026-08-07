@@ -33,6 +33,7 @@ import {
   query,
   startDatabasePoolMonitoring,
   withTransaction,
+  withWorkerLease,
 } from "./db";
 import authRouter, { requireAuth, requirePaidAccess, requireRole } from "./auth";
 import {
@@ -87,8 +88,6 @@ import {
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
-const DAILY_BRIEFING_SCHEDULER_LOCK_NAMESPACE = 9433;
-const DAILY_BRIEFING_SCHEDULER_LOCK_KEY = 1;
 const DAILY_BRIEFING_SCHEDULER_POLL_SECONDS = parseBoundedIntEnv(
   process.env.DAILY_BRIEFING_SCHEDULER_POLL_SECONDS,
   30,
@@ -100,6 +99,12 @@ const DAILY_BRIEFING_SCHEDULER_BATCH_SIZE = parseBoundedIntEnv(
   1,
   500,
   100
+);
+const DAILY_BRIEFING_SCHEDULER_RETRY_MINUTES = parseBoundedIntEnv(
+  process.env.DAILY_BRIEFING_SCHEDULER_RETRY_MINUTES,
+  5,
+  240,
+  15,
 );
 
 app.set("trust proxy", 1);
@@ -791,6 +796,15 @@ async function runDailyBriefingGenerationJob(jobId: string): Promise<void> {
        WHERE id = $1`,
       [jobId, briefing.id, JSON.stringify(generated.generation)]
     );
+    await query(
+      `UPDATE user_daily_briefing_schedule
+       SET last_scheduled_for = pending_scheduled_for,
+           pending_scheduled_for = NULL,
+           updated_at = now()
+       WHERE last_job_id = $1
+         AND pending_scheduled_for IS NOT NULL`,
+      [jobId],
+    );
   } catch (error) {
     const message = describeGenerationError(error);
     console.error(`[daily-briefing-generation] job ${jobId} failed: ${message}`);
@@ -1119,9 +1133,22 @@ async function getDueDailyBriefingSchedules(): Promise<DueDailyBriefingScheduleR
          last_scheduled_for IS NULL
          OR last_scheduled_for < timezone(schedule_timezone, now())::date
        )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM daily_signal_briefing_generation_job active_job
+         WHERE active_job.id = user_daily_briefing_schedule.last_job_id
+           AND active_job.status IN ('queued', 'running')
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM daily_signal_briefing_generation_job recent_failure
+         WHERE recent_failure.id = user_daily_briefing_schedule.last_job_id
+           AND recent_failure.status = 'failed'
+           AND recent_failure.finished_at > now() - make_interval(mins => $2::int)
+       )
      ORDER BY schedule_timezone ASC, scheduled_time ASC, user_id ASC
      LIMIT $1`,
-    [DAILY_BRIEFING_SCHEDULER_BATCH_SIZE]
+    [DAILY_BRIEFING_SCHEDULER_BATCH_SIZE, DAILY_BRIEFING_SCHEDULER_RETRY_MINUTES]
   );
   return rows;
 }
@@ -1169,12 +1196,13 @@ async function ensurePublishedDailyBriefingGenerationJob(briefingDate: string): 
 async function markDailyBriefingSchedulesTriggered(
   userIds: number[],
   localScheduleDate: string,
-  jobId: string | null
+  jobId: string | null,
 ): Promise<void> {
   if (userIds.length === 0) return;
   await query(
     `UPDATE user_daily_briefing_schedule
-     SET last_scheduled_for = $2::date,
+     SET last_scheduled_for = CASE WHEN $3::text IS NULL THEN $2::date ELSE last_scheduled_for END,
+         pending_scheduled_for = CASE WHEN $3::text IS NULL THEN NULL ELSE $2::date END,
          last_triggered_at = now(),
          last_job_id = COALESCE($3, last_job_id),
          updated_at = now()
@@ -1183,15 +1211,16 @@ async function markDailyBriefingSchedulesTriggered(
   );
 }
 
-async function withDailyBriefingSchedulerLock(task: () => Promise<void>): Promise<void> {
-  await withTransaction(async (client) => {
-    const { rows } = await client.query<{ locked: boolean }>(
-      `SELECT pg_try_advisory_xact_lock($1::int, $2::int) AS locked`,
-      [DAILY_BRIEFING_SCHEDULER_LOCK_NAMESPACE, DAILY_BRIEFING_SCHEDULER_LOCK_KEY]
-    );
-    if (!rows[0]?.locked) return;
-    await task();
-  });
+async function recoverStaleDailyBriefingGenerationJobs(): Promise<void> {
+  await query(
+    `UPDATE daily_signal_briefing_generation_job
+     SET status = 'failed',
+         error = COALESCE(error, 'Recovered abandoned generation job after worker timeout.'),
+         finished_at = COALESCE(finished_at, now()),
+         updated_at = now()
+     WHERE (status = 'queued' AND updated_at < now() - interval '5 minutes')
+        OR (status = 'running' AND updated_at < now() - interval '30 minutes')`,
+  );
 }
 
 async function runDailyBriefingSchedulerCycle(): Promise<void> {
@@ -1199,7 +1228,8 @@ async function runDailyBriefingSchedulerCycle(): Promise<void> {
   dailyBriefingSchedulerRunning = true;
 
   try {
-    await withDailyBriefingSchedulerLock(async () => {
+    await withWorkerLease("daily-briefing-scheduler", 120, async () => {
+      await recoverStaleDailyBriefingGenerationJobs();
       const dueSchedules = await getDueDailyBriefingSchedules();
       const scheduleGroups = new Map<string, {
         localScheduleDate: string;
@@ -3050,15 +3080,25 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
     if (!url || !/^https?:\/\//i.test(url)) {
       return res.status(400).send("invalid url");
     }
-    const r = await fetch(url, { redirect: "follow" as any });
+    const r = await fetch(url, {
+      redirect: "follow" as any,
+      signal: AbortSignal.timeout(10_000),
+    });
     if (!r.ok) {
       return res.status(r.status).send("upstream error");
     }
     const ct = r.headers.get("content-type") || "image/jpeg";
+    const contentLength = Number(r.headers.get("content-length") || 0);
+    if (contentLength > 5_000_000) {
+      return res.status(413).send("image too large");
+    }
     res.setHeader("content-type", ct);
     res.setHeader("cache-control", "public, max-age=86400, s-maxage=86400, immutable");
     res.setHeader("access-control-allow-origin", "*");
     const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > 5_000_000) {
+      return res.status(413).send("image too large");
+    }
     res.status(200).send(buf);
   } catch (e: any) {
     res.status(500).send("proxy error");

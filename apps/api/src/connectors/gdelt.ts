@@ -215,6 +215,7 @@ async function fetchRetry(url: string, attempts = 2): Promise<Response> {
         accept: "application/json, text/plain;q=0.9, */*;q=0.8",
         "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
       },
+      signal: AbortSignal.timeout(20_000),
     });
     if (response.ok) return response;
     lastResponse = response;
@@ -262,6 +263,7 @@ async function getLatestArchiveUrls(): Promise<{ event: string; gkg: string }> {
       const archiveResponse = await fetch(url, {
         method: "HEAD",
         headers: { "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)" },
+        signal: AbortSignal.timeout(10_000),
       });
       return archiveResponse.ok;
     } catch {

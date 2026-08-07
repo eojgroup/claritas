@@ -590,6 +590,11 @@ export type TransportOverview = {
       source: "AISstream";
       transport: "WebSocket";
       configured: boolean;
+      connected: boolean;
+      status: "disabled" | "connecting" | "reconnecting" | "receiving" | "live";
+      last_message_at: string | null;
+      last_snapshot_at: string | null;
+      last_error: string | null;
       freshness_minutes: number;
       movement_method: string;
       cargo_method: string;
@@ -943,6 +948,13 @@ export type AdminIngestionAutomationStatus = {
   data_age_minutes: number | null;
   demand_requests: number;
   active_runs: number;
+};
+
+export type AdminIngestionProviderCapabilities = {
+  fred: {
+    configured: boolean;
+    default_enabled: boolean;
+  };
 };
 
 const API_BASE = "";
@@ -1509,6 +1521,7 @@ export async function fetchAdminIngestionAutomation(): Promise<{
   poll_seconds: number;
   rules: AdminIngestionAutomationRule[];
   status: AdminIngestionAutomationStatus[];
+  providers: AdminIngestionProviderCapabilities;
 }> {
   const resp = await fetch(`${API_BASE}/api/admin/ingestion/automation`, {
     credentials: "include",
@@ -1518,6 +1531,7 @@ export async function fetchAdminIngestionAutomation(): Promise<{
     poll_seconds: number;
     rules: AdminIngestionAutomationRule[];
     status: AdminIngestionAutomationStatus[];
+    providers: AdminIngestionProviderCapabilities;
   };
 }
 

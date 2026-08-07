@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, FileText, Play, RefreshCw, Sparkles } from "lucide-react";
 import {
   Area,
@@ -35,6 +35,7 @@ import {
   type AdminIngestionLog,
   type AdminIngestionMetricsPoint,
   type AdminIngestionMetricsTotal,
+  type AdminIngestionProviderCapabilities,
   type AdminIngestionRun,
   type AdminDailyBriefingGenerationJob,
   type DailySignalBriefing,
@@ -297,6 +298,9 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [runEcbProvider, setRunEcbProvider] = useState(true);
   const [runOecdProvider, setRunOecdProvider] = useState(true);
   const [runFredProvider, setRunFredProvider] = useState(false);
+  const [providerCapabilities, setProviderCapabilities] =
+    useState<AdminIngestionProviderCapabilities | null>(null);
+  const providerDefaultsApplied = useRef(false);
   const [runWorldBankProvider, setRunWorldBankProvider] = useState(true);
   const [podcastSearchTerms, setPodcastSearchTerms] = useState(
     "geopolitics,security,technology,markets",
@@ -350,13 +354,15 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   }, []);
 
   const refreshOverview = useCallback(
-    async (silent = false) => {
+    async (silent = false, includeMetrics = true) => {
       if (!silent) setIsLoadingOverview(true);
       if (!silent) setOverviewError(null);
       const selectedPipeline = pipelineFilter === "all" ? undefined : pipelineFilter;
       const [runsRes, metricsRes, automationRes] = await Promise.allSettled([
         fetchAdminIngestionRuns({ pipeline: selectedPipeline, limit: 100 }),
-        fetchAdminIngestionMetrics({ pipeline: selectedPipeline, days: metricsDays }),
+        includeMetrics
+          ? fetchAdminIngestionMetrics({ pipeline: selectedPipeline, days: metricsDays })
+          : Promise.resolve(null),
         fetchAdminIngestionAutomation(),
       ]);
 
@@ -372,16 +378,21 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
         errors.push(`Runs: ${toErrorMessage(runsRes.reason)}`);
       }
 
-      if (metricsRes.status === "fulfilled") {
+      if (metricsRes.status === "fulfilled" && metricsRes.value) {
         setPoints(metricsRes.value.points);
         setTotals(metricsRes.value.totals);
-      } else {
+      } else if (metricsRes.status === "rejected") {
         errors.push(`Metrics: ${toErrorMessage(metricsRes.reason)}`);
       }
 
       if (automationRes.status === "fulfilled") {
         setAutomationRules(automationRes.value.rules);
         setAutomationStatus(automationRes.value.status);
+        setProviderCapabilities(automationRes.value.providers);
+        if (!providerDefaultsApplied.current) {
+          setRunFredProvider(automationRes.value.providers.fred.default_enabled);
+          providerDefaultsApplied.current = true;
+        }
         setAutomationDrafts((previous) => {
           const next = { ...previous };
           automationRes.value.rules.forEach((rule) => {
@@ -426,8 +437,8 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      void refreshOverview(true);
-    }, 8000);
+      void refreshOverview(true, false);
+    }, 20_000);
     return () => window.clearInterval(id);
   }, [refreshOverview]);
 
@@ -442,13 +453,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
 
   useEffect(() => {
     if (!selectedRunId) return;
-    const intervalMs =
-      selectedRun?.status === "running" || selectedRun?.status === "queued"
-        ? 2000
-        : 8000;
+    if (selectedRun?.status !== "running" && selectedRun?.status !== "queued") return;
     const id = window.setInterval(() => {
       void refreshSelectedRun(selectedRunId, true);
-    }, intervalMs);
+    }, 2500);
     return () => window.clearInterval(id);
   }, [refreshSelectedRun, selectedRun?.status, selectedRunId]);
 
@@ -559,7 +567,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             secEdgar: runSecEdgarProvider,
             ecb: runEcbProvider,
             oecd: runOecdProvider,
-            fred: runFredProvider,
+            ...(providerCapabilities ? { fred: runFredProvider } : {}),
             worldBank: runWorldBankProvider,
           },
         },
@@ -574,7 +582,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     } finally {
       setIsTriggeringMarket(false);
     }
-  }, [refreshOverview, runEcbProvider, runFredProvider, runOecdProvider, runSecEdgarProvider, runWorldBankProvider]);
+  }, [providerCapabilities, refreshOverview, runEcbProvider, runFredProvider, runOecdProvider, runSecEdgarProvider, runWorldBankProvider]);
 
   const handleTriggerPodcasts = useCallback(async () => {
     const searchTerms = podcastSearchTerms
@@ -948,7 +956,21 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runEcbProvider} onChange={(event) => setRunEcbProvider(event.currentTarget.checked)} />ECB (keyless)</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runOecdProvider} onChange={(event) => setRunOecdProvider(event.currentTarget.checked)} />OECD indices (keyless)</label>
               <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runWorldBankProvider} onChange={(event) => setRunWorldBankProvider(event.currentTarget.checked)} />World Bank macro (keyless)</label>
-              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={runFredProvider} onChange={(event) => setRunFredProvider(event.currentTarget.checked)} />FRED public series (API key)</label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={runFredProvider}
+                  disabled={!providerCapabilities?.fred.configured}
+                  onChange={(event) => setRunFredProvider(event.currentTarget.checked)}
+                />
+                FRED public series (
+                {providerCapabilities == null
+                  ? "checking configuration"
+                  : providerCapabilities.fred.configured
+                    ? "configured"
+                    : "API key required"}
+                )
+              </label>
             </div>
             <div className="mt-2 text-xs text-[color:var(--shell-muted)]">
               SEC supplies primary filings; ECB supplies daily EUR FX and policy rates; OECD supplies monthly national equity direction; World Bank adds annual country macro context. FRED is limited to allowlisted U.S.-government-origin energy and macro series and requires FRED_API_KEY.

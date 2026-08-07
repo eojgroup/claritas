@@ -51,6 +51,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_ENABLED, optional: true } }
             - name: AISSTREAM_SAMPLE_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_SAMPLE_SECONDS, optional: true } }
+            - name: AISSTREAM_IDLE_TIMEOUT_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_IDLE_TIMEOUT_SECONDS, optional: true } }
             - name: ADSB_LOL_POLL_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_POLL_ENABLED, optional: true } }
             - name: ADSB_LOL_POLL_SECONDS

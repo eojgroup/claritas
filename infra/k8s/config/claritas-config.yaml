@@ -40,9 +40,10 @@ data:
   SEC_EDGAR_USER_AGENT: "Claritas engineering@claritas.info"
   NWS_USER_AGENT: "Claritas engineering@claritas.info"
   SEC_EDGAR_SYMBOLS: "AAPL,MSFT,NVDA,AMZN,GOOGL,META,TSLA,JPM"
-  # The single API replica uses a deliberately small pool on the one-vCPU SQL tier.
-  DB_CONNECTION_TIMEOUT_MS: "2500"
-  DB_POOL_MAX: "3"
+  # One slot is reserved by the transport leader. Four remaining slots keep
+  # API reads and short background leases from starving one another.
+  DB_CONNECTION_TIMEOUT_MS: "5000"
+  DB_POOL_MAX: "5"
   DB_POOL_IDLE_TIMEOUT_MS: "30000"
   DB_POOL_MAX_LIFETIME_SECONDS: "1800"
   DB_POOL_MONITOR_INTERVAL_SECONDS: "30"
@@ -53,6 +54,7 @@ data:
   # keyless; AISstream remains disabled until AISSTREAM_API_KEY is supplied.
   AISSTREAM_ENABLED: "true"
   AISSTREAM_SAMPLE_SECONDS: "600"
+  AISSTREAM_IDLE_TIMEOUT_SECONDS: "120"
   ADSB_LOL_POLL_ENABLED: "true"
   ADSB_LOL_POLL_SECONDS: "600"
   ADSB_LOL_MAX_ROUTE_LOOKUPS: "750"

@@ -706,6 +706,12 @@ struct TransportWorkspaceView: View {
                     systemImage: "key"
                 )
                 .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+            } else if let maritimeRuntimeMessage {
+                Label(
+                    maritimeRuntimeMessage,
+                    systemImage: "arrow.clockwise"
+                )
+                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
             }
         }
         .font(.caption)
@@ -715,6 +721,19 @@ struct TransportWorkspaceView: View {
     private var filteredEntities: [TransportEntity] {
         guard let mode else { return overview?.entities ?? [] }
         return (overview?.entities ?? []).filter { $0.mode == mode }
+    }
+
+    private var maritimeRuntimeMessage: String? {
+        switch overview?.coverage.maritime.status {
+        case "receiving":
+            return "AIS messages are being received and processed."
+        case "connecting":
+            return "AISstream is connected and awaiting vessel messages."
+        case "reconnecting":
+            return "AISstream is reconnecting after an idle or interrupted stream."
+        default:
+            return nil
+        }
     }
 
     private func detailRow(label: String, value: String) -> some View {

@@ -309,7 +309,12 @@ const routeCache = new Map<string, { expiresAt: number; value: AdsbRoute | null 
 let aisSocket: WebSocket | null = null;
 let aisReconnectTimer: NodeJS.Timeout | null = null;
 let aisFlushTimer: NodeJS.Timeout | null = null;
+let aisWatchdogTimer: NodeJS.Timeout | null = null;
 let aisReconnectAttempt = 0;
+let aisConnectedAt: number | null = null;
+let aisLastMessageAt: number | null = null;
+let aisLastSnapshotAt: number | null = null;
+let aisLastError: string | null = null;
 let aviationRefresh: Promise<{ fetched: number; stored: number }> | null = null;
 let lastAviationRefreshAt = 0;
 let aviationRouteLookupGeneration = 0;
@@ -401,6 +406,38 @@ function isoDate(value: unknown, fallback = new Date()): string {
 function count(value: string | number | null | undefined): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function maritimeCoverageRuntime(latestObservedAt: string | null) {
+  const configured =
+    enabledFromEnv("AISSTREAM_ENABLED") &&
+    Boolean(process.env.AISSTREAM_API_KEY?.trim());
+  const latestObservedMilliseconds = latestObservedAt
+    ? Date.parse(latestObservedAt)
+    : Number.NaN;
+  const hasFreshStoredData =
+    Number.isFinite(latestObservedMilliseconds) &&
+    Date.now() - latestObservedMilliseconds <= 5 * 60_000;
+  const connected = aisSocket?.readyState === WebSocket.OPEN;
+  const recentlyReceiving =
+    aisLastSnapshotAt != null && Date.now() - aisLastSnapshotAt <= 5 * 60_000;
+  const status = !configured
+    ? "disabled"
+    : hasFreshStoredData
+      ? "live"
+      : recentlyReceiving
+        ? "receiving"
+        : connected
+          ? "connecting"
+          : "reconnecting";
+  return {
+    configured,
+    connected,
+    status,
+    last_message_at: aisLastMessageAt ? isoDate(aisLastMessageAt) : null,
+    last_snapshot_at: aisLastSnapshotAt ? isoDate(aisLastSnapshotAt) : null,
+    last_error: aisLastError,
+  };
 }
 
 function boundsForGeometry(geometry: Polygon | MultiPolygon): [number, number, number, number] {
@@ -590,6 +627,33 @@ function aisSampleMilliseconds(): number {
   );
 }
 
+function aisIdleTimeoutMilliseconds(): number {
+  return (
+    boundedIntegerFromEnv("AISSTREAM_IDLE_TIMEOUT_SECONDS", 120, 45, 900) *
+    1_000
+  );
+}
+
+function startAisWatchdog(): void {
+  if (aisWatchdogTimer) return;
+  aisWatchdogTimer = setInterval(() => {
+    const socket = aisSocket;
+    if (!socket || socket.readyState !== WebSocket.OPEN || !aisConnectedAt) return;
+    const lastActivity = aisLastSnapshotAt ?? aisConnectedAt;
+    const idleMilliseconds = Date.now() - lastActivity;
+    if (idleMilliseconds <= aisIdleTimeoutMilliseconds()) return;
+    aisLastError = `No AIS messages received for ${Math.round(idleMilliseconds / 1_000)} seconds`;
+    console.warn(
+      JSON.stringify({
+        event: "aisstream_idle_reconnect",
+        idle_seconds: Math.round(idleMilliseconds / 1_000),
+      }),
+    );
+    socket.terminate();
+  }, 30_000);
+  aisWatchdogTimer.unref();
+}
+
 function queueMaritimeMessage(message: unknown): void {
   const envelope = asRecord(message);
   if (!envelope) return;
@@ -748,6 +812,7 @@ function queueMaritimeMessage(message: unknown): void {
   };
 
   maritimeQueue.set(mmsi, snapshot);
+  aisLastSnapshotAt = now;
   if (isPosition) lastMaritimeQueuedAt.set(mmsi, now);
   const maximumQueue = Math.max(
     500,
@@ -783,6 +848,10 @@ function connectAisStream(): void {
 
   socket.on("open", () => {
     aisReconnectAttempt = 0;
+    aisConnectedAt = Date.now();
+    aisLastMessageAt = null;
+    aisLastSnapshotAt = null;
+    aisLastError = null;
     socket.send(
       JSON.stringify({
         APIKey: apiKey,
@@ -801,6 +870,8 @@ function connectAisStream(): void {
   });
 
   socket.on("message", (raw) => {
+    aisLastMessageAt = Date.now();
+    aisLastError = null;
     try {
       queueMaritimeMessage(JSON.parse(raw.toString()));
     } catch (error) {
@@ -811,11 +882,15 @@ function connectAisStream(): void {
   });
 
   socket.on("error", (error) => {
+    aisLastError = error.message;
     console.warn(`AISstream connection error: ${error.message}`);
   });
 
   socket.on("close", () => {
-    if (aisSocket === socket) aisSocket = null;
+    if (aisSocket === socket) {
+      aisSocket = null;
+      aisConnectedAt = null;
+    }
     scheduleAisReconnect();
   });
 }
@@ -2184,9 +2259,7 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
       maritime: {
         source: "AISstream",
         transport: "WebSocket",
-        configured:
-          enabledFromEnv("AISSTREAM_ENABLED") &&
-          Boolean(process.env.AISSTREAM_API_KEY?.trim()),
+        ...maritimeCoverageRuntime(summaryModes.maritime.latest_observed_at),
         freshness_minutes: 120,
         movement_method:
           "Monitored-port geofences with 24-hour comparison windows.",
@@ -2294,9 +2367,7 @@ function emptyTransportOverview(): TransportOverviewResult {
       maritime: {
         source: "AISstream",
         transport: "WebSocket",
-        configured:
-          enabledFromEnv("AISSTREAM_ENABLED") &&
-          Boolean(process.env.AISSTREAM_API_KEY?.trim()),
+        ...maritimeCoverageRuntime(null),
         freshness_minutes: 120,
         movement_method:
           "Monitored-port geofences with 24-hour comparison windows.",
@@ -2593,6 +2664,7 @@ async function acquireTransportWorkerLock(): Promise<void> {
       return;
     }
     connectAisStream();
+    startAisWatchdog();
     startTransportRetentionWorker();
     aisFlushTimer = setInterval(() => {
       void flushMaritimeQueue();

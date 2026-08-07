@@ -1392,6 +1392,18 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             AISstream <ExternalLink />
           </a>
         </span>
+        {overview?.coverage.maritime.status !== "live" && (
+          <span>
+            <RefreshCw /> Maritime feed:{" "}
+            {overview?.coverage.maritime.status === "disabled"
+              ? "server credential not configured"
+              : overview?.coverage.maritime.status === "receiving"
+                ? "receiving AIS messages; snapshots are processing"
+                : overview?.coverage.maritime.status === "connecting"
+                  ? "connected and awaiting AIS messages"
+                  : "reconnecting after an idle or interrupted stream"}
+          </span>
+        )}
         <span>
           <Plane /> Flight positions, callsigns, and plausible airport routes:{" "}
           <a href="https://api.adsb.lol/docs" target="_blank" rel="noreferrer">

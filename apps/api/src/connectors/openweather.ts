@@ -218,7 +218,10 @@ export function normalizeStandardWeather(current: CurrentWeatherResponse, foreca
 }
 
 async function fetchJson<T>(url: URL, label: string): Promise<T> {
-  const response = await fetch(url, { headers: { accept: "application/json" } });
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!response.ok) throw new Error(`${label} HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
   return await response.json() as T;
 }

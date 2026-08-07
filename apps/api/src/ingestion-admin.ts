@@ -867,6 +867,11 @@ async function executeMarketRun(runId: number, plan: MarketRunPlan): Promise<voi
       request: plan.requestPayload,
     });
 
+    // FRED is a small, allowlisted request set. Run it first so slower bulk
+    // providers cannot delay configured energy and macro observations.
+    if (plan.providers.fred) {
+      await executeProviderStep(runId, steps, totals, "fred/public-institution-commodities-macro", ingestFredMarketData);
+    }
     if (plan.providers.secEdgar) {
       await executeProviderStep(runId, steps, totals, "sec-edgar/filings-companyfacts", async () =>
         ingestSecEdgar());
@@ -876,9 +881,6 @@ async function executeMarketRun(runId: number, plan: MarketRunPlan): Promise<voi
     }
     if (plan.providers.oecd) {
       await executeProviderStep(runId, steps, totals, "oecd/monthly-share-price-indices", ingestOecdSharePrices);
-    }
-    if (plan.providers.fred) {
-      await executeProviderStep(runId, steps, totals, "fred/public-institution-commodities-macro", ingestFredMarketData);
     }
     if (plan.providers.worldBank) {
       await executeProviderStep(runId, steps, totals, "world-bank/world-development-indicators", ingestWorldBankIndicators);

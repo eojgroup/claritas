@@ -6,9 +6,13 @@ shared application, Keycloak, briefing, market, and transport workloads.
 
 ## Connection budget
 
-- One API replica caps its node-postgres pool at three connections.
+- One API replica caps its node-postgres pool at five connections.
 - The elected transport ingestion worker uses one connection from that
-  three-connection budget for the PostgreSQL advisory lock.
+  five-connection budget for the PostgreSQL advisory lock. Four connections
+  remain available for request and background work.
+- Ingestion automation and the daily briefing scheduler coordinate through
+  renewable rows in `background_worker_lease`. They no longer hold a pool
+  connection while running queries through the same pool.
 - Keycloak starts with one connection and caps its pool at five.
 - Migrations and operational access retain capacity outside the normal
   application pools. Do not raise PostgreSQL `max_connections` to address
@@ -35,7 +39,9 @@ read these compact structures rather than sorting raw tracks.
 
 Web and iOS market reads can poll frequently without forcing ingestion. Scheduled
 market ingestion runs at most every four hours by default, while explicit admin
-runs remain available for fresh data.
+runs remain available for fresh data. The admin control room refreshes run and
+automation state every 20 seconds but reloads historical metrics only on entry,
+filter changes, explicit refresh, or a completed mutation.
 
 `AISSTREAM_ENABLED=false` and `ADSB_LOL_POLL_ENABLED=false` are the incident
 safety switches. Prefer pausing transport ingestion over allowing it to impair

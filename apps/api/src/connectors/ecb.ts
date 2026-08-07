@@ -93,7 +93,10 @@ async function fetchSeries(config: EcbSeriesConfig, startPeriod: string): Promis
   const url = new URL(`${base}/${config.flow}/${config.key}`);
   url.searchParams.set("startPeriod", startPeriod);
   url.searchParams.set("format", "csvdata");
-  const response = await fetch(url, { headers: { accept: "text/csv", "user-agent": "Claritas/1.0 (https://claritas.info)" } });
+  const response = await fetch(url, {
+    headers: { accept: "text/csv", "user-agent": "Claritas/1.0 (https://claritas.info)" },
+    signal: AbortSignal.timeout(20_000),
+  });
   if (!response.ok) {
     const body = (await response.text()).slice(0, 300);
     throw new Error(`ECB Data API HTTP ${response.status}: ${body}`);

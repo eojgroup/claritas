@@ -1277,6 +1277,11 @@ struct MaritimeTransportCoverage: Codable {
     let source: String
     let transport: String
     let configured: Bool
+    let connected: Bool?
+    let status: String?
+    let last_message_at: String?
+    let last_snapshot_at: String?
+    let last_error: String?
     let freshness_minutes: Int
     let movement_method: String?
     let cargo_method: String?

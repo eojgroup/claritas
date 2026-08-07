@@ -70,7 +70,10 @@ export async function ingestOecdSharePrices(): Promise<Record<string, unknown>> 
   // an unspecified CSV dialect/language. Request the SDMX CSV 2 dialect and an
   // explicit label language; use the documented snake-case query parameter.
   const request = buildOecdRequest(OECD_API, start.toISOString().slice(0, 7));
-  const response = await fetch(request.url, request.init);
+  const response = await fetch(request.url, {
+    ...request.init,
+    signal: AbortSignal.timeout(20_000),
+  });
   if (!response.ok) throw new Error(`OECD share-price API HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
   const rows = parseCsv(await response.text());
   const sourceId = await ensureSource();

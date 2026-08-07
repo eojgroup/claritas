@@ -771,6 +771,36 @@ jobs:
           wait_rollout opencode
           wait_rollout keycloak
 
+      - name: 🩺 Verify ingestion and scheduler runtime configuration
+        run: |
+          set -euo pipefail
+          kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
+            const missing = [];
+            if (!process.env.FRED_API_KEY?.trim()) missing.push("FRED_API_KEY");
+            if (!process.env.AISSTREAM_API_KEY?.trim()) missing.push("AISSTREAM_API_KEY");
+            if (["0", "false", "no", "off"].includes((process.env.AISSTREAM_ENABLED || "true").toLowerCase())) {
+              missing.push("AISSTREAM_ENABLED=true");
+            }
+            if (["0", "false", "no", "off"].includes((process.env.DAILY_BRIEFING_SCHEDULER_ENABLED || "true").toLowerCase())) {
+              missing.push("DAILY_BRIEFING_SCHEDULER_ENABLED=true");
+            }
+            if (missing.length) {
+              console.error(`Required production runtime configuration missing: ${missing.join(", ")}`);
+              process.exit(1);
+            }
+            fetch("http://127.0.0.1:8080/readyz")
+              .then((response) => {
+                if (!response.ok) throw new Error(`readiness returned ${response.status}`);
+                console.log("FRED, AISstream, daily scheduler, and API readiness are configured.");
+              })
+              .catch((error) => {
+                console.error(error);
+                process.exit(1);
+              });
+          '
+          kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
+            grep -E "(Ingestion automation worker started|Daily briefing scheduler started|AISstream transport subscription connected|aisstream_idle_reconnect)" || true
+
       - name: 🌐 Verify API pods use the reserved egress IP
         run: |
           set -euo pipefail

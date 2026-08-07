@@ -31,6 +31,7 @@ export async function ingestNwsAlerts(): Promise<Record<string, unknown>> {
   const userAgent = process.env.NWS_USER_AGENT?.trim() || process.env.SEC_EDGAR_USER_AGENT?.trim() || "Claritas contact@claritas.info";
   const response = await fetch(NWS_ALERTS_URL, {
     headers: { accept: "application/geo+json", "user-agent": userAgent },
+    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`NWS alerts API HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
   const data = await response.json() as { features?: NwsFeature[] };

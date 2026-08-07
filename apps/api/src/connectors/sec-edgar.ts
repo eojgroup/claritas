@@ -142,6 +142,7 @@ function userAgent(): string {
 async function secFetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, {
     headers: { accept: "application/json", "user-agent": userAgent() },
+    signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) {
     const body = (await response.text()).slice(0, 300);

@@ -4,6 +4,15 @@ Claritas generates daily briefings by collecting news, markets, weather, podcast
 
 The API is provider-neutral internally, with an OpenCode adapter as the first runtime backend.
 
+Scheduled generation uses a short renewable database lease rather than holding
+an advisory-lock connection while collecting data. A schedule records a
+`pending_scheduled_for` date when generation starts and advances
+`last_scheduled_for` only after the shared briefing is published. Failed jobs
+remain due and retry after a 15-minute backoff; abandoned queued jobs are
+recovered after 5 minutes and abandoned running jobs after 30 minutes. This
+keeps a transient LLM, database, or pod failure from silently suppressing that
+day's briefing.
+
 ## Runtime Flow
 
 ```text

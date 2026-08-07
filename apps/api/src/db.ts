@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { randomUUID } from "crypto";
 
 const required = (name: string): string => {
   const v = process.env[name];
@@ -182,5 +183,77 @@ export async function withTransaction<T>(fn: (client: import("pg").PoolClient) =
     throw err;
   } finally {
     client.release();
+  }
+}
+
+const workerLeaseOwnerId = `${process.pid}-${randomUUID()}`;
+
+/**
+ * Coordinates short background cycles without holding a pool connection while
+ * the cycle performs its own database work. The lease is renewed for longer
+ * cycles and expires automatically if the process terminates.
+ */
+export async function withWorkerLease(
+  workerName: string,
+  leaseSeconds: number,
+  task: () => Promise<void>,
+): Promise<boolean> {
+  const boundedLeaseSeconds = Math.max(30, Math.min(Math.trunc(leaseSeconds), 600));
+  const { rows } = await query<{ acquired: boolean }>(
+    `INSERT INTO background_worker_lease (worker_name, owner_id, lease_until, updated_at)
+     VALUES ($1, $2, now() + make_interval(secs => $3::int), now())
+     ON CONFLICT (worker_name)
+     DO UPDATE SET
+       owner_id = EXCLUDED.owner_id,
+       lease_until = EXCLUDED.lease_until,
+       updated_at = now()
+     WHERE background_worker_lease.lease_until <= now()
+        OR background_worker_lease.owner_id = EXCLUDED.owner_id
+     RETURNING true AS acquired`,
+    [workerName, workerLeaseOwnerId, boundedLeaseSeconds],
+  );
+  if (!rows[0]?.acquired) return false;
+
+  const renewal = setInterval(() => {
+    void query(
+      `UPDATE background_worker_lease
+       SET lease_until = now() + make_interval(secs => $3::int),
+           updated_at = now()
+       WHERE worker_name = $1
+         AND owner_id = $2`,
+      [workerName, workerLeaseOwnerId, boundedLeaseSeconds],
+    ).catch((error) => {
+      console.warn(
+        JSON.stringify({
+          event: "background_worker_lease_renewal_failed",
+          worker: workerName,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    });
+  }, Math.max(10_000, Math.floor((boundedLeaseSeconds * 1_000) / 3)));
+  renewal.unref();
+
+  try {
+    await task();
+    return true;
+  } finally {
+    clearInterval(renewal);
+    await query(
+      `UPDATE background_worker_lease
+       SET lease_until = now(),
+           updated_at = now()
+       WHERE worker_name = $1
+         AND owner_id = $2`,
+      [workerName, workerLeaseOwnerId],
+    ).catch((error) => {
+      console.warn(
+        JSON.stringify({
+          event: "background_worker_lease_release_failed",
+          worker: workerName,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    });
   }
 }
