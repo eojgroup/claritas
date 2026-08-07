@@ -353,6 +353,7 @@ let aviationRouteLookupGeneration = 0;
 let adsbRouteProviderFailures = 0;
 let adsbRouteProviderUnavailableUntil = 0;
 let transportWorkerStarted = false;
+let transportWorkerLockRetryTimer: NodeJS.Timeout | null = null;
 let transportRetentionTimer: NodeJS.Timeout | null = null;
 
 function enabledFromEnv(name: string, fallback = true): boolean {
@@ -3084,6 +3085,15 @@ function startTransportRetentionWorker(): void {
   transportRetentionTimer.unref();
 }
 
+function scheduleTransportWorkerLockRetry(delayMilliseconds: number): void {
+  if (transportWorkerLockRetryTimer) return;
+  transportWorkerLockRetryTimer = setTimeout(() => {
+    transportWorkerLockRetryTimer = null;
+    void acquireTransportWorkerLock();
+  }, delayMilliseconds);
+  transportWorkerLockRetryTimer.unref();
+}
+
 async function acquireTransportWorkerLock(): Promise<void> {
   try {
     const client = await pool.connect();
@@ -3093,7 +3103,13 @@ async function acquireTransportWorkerLock(): Promise<void> {
     );
     if (!lock.rows[0]?.acquired) {
       client.release();
-      console.info("Transport ingestion worker is active on another API replica.");
+      console.info(
+        "Transport ingestion worker is active on another API replica; retrying lock transfer.",
+      );
+      scheduleTransportWorkerLockRetry(
+        boundedIntegerFromEnv("TRANSPORT_WORKER_LOCK_RETRY_SECONDS", 10, 5, 60) *
+          1_000,
+      );
       return;
     }
     connectAisStream();
@@ -3138,10 +3154,7 @@ async function acquireTransportWorkerLock(): Promise<void> {
         error instanceof Error ? error.message : String(error)
       }`
     );
-    const timer = setTimeout(() => {
-      void acquireTransportWorkerLock();
-    }, 30_000);
-    timer.unref();
+    scheduleTransportWorkerLockRetry(30_000);
   }
 }
 

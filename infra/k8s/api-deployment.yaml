@@ -69,6 +69,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_POLL_SECONDS, optional: true } }
             - name: DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES, optional: true } }
+            - name: TRANSPORT_WORKER_LOCK_RETRY_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_WORKER_LOCK_RETRY_SECONDS, optional: true } }
             - name: ADSB_LOL_POLL_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_POLL_ENABLED, optional: true } }
             - name: ADSB_LOL_POLL_SECONDS

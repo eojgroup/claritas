@@ -33,7 +33,7 @@ flowchart LR
   Aggregate --> Compact[iPhone + Watch pulse]
 ```
 
-Only one API replica holds the PostgreSQL advisory lock for scheduled transport ingestion. This prevents duplicate global WebSocket subscriptions and polling loops while keeping the API itself horizontally scalable. HTTP refresh requests only bypass the short-lived overview cache; they never launch ingestion work from a request-serving replica.
+Only one API replica holds the PostgreSQL advisory lock for scheduled transport ingestion. This prevents duplicate global WebSocket subscriptions and polling loops while keeping the API itself horizontally scalable. A new rolling-update pod retries lock acquisition every ten seconds until the terminating pod releases the session lock; it cannot permanently start without transport workers after losing the initial race. HTTP refresh requests only bypass the short-lived overview cache; they never launch ingestion work from a request-serving replica.
 
 ## Sources and configuration
 
