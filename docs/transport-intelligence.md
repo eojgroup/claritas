@@ -49,6 +49,18 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - Vessel snapshots drain through one flush at a time, in bounded batches. The production defaults persist at most two 250-vessel batches per five-second cycle, retain newer queued positions while a write is in flight, and requeue failed writes without allowing overlapping flushes to exhaust the database pool.
 - MMSI Maritime Identification Digits link a vessel to its flag country. Position-in-country, monitored-port geofences, the first observed voyage country and position, and recognizable AIS destination/UN LOCODE values add current, origin, and destination relationships. When a declared destination resolves to a monitored port, its coordinates are retained so the individual vessel map can draw a route from the first observed position to that port.
 
+### Fintraffic Digitraffic fallback
+
+- The official keyless Digitraffic marine API supplies a secondary AIS position
+  and vessel-metadata baseline for Baltic and Northern European waters when the
+  global AISstream feed is silent.
+- `DIGITRAFFIC_MARITIME_ENABLED` defaults to `true`; production polls the
+  `locations` and `vessels` endpoints once per minute with a 15-second request
+  timeout and accepts positions observed in the latest 15 minutes.
+- Requests use the provider-required compression and application-identification
+  headers. Data is attributed to Fintraffic / digitraffic.fi under CC BY 4.0,
+  and normalized records retain the source and license in their payload.
+
 ### adsb.lol
 
 - No API key is required.
@@ -90,7 +102,7 @@ The API returns both the underlying current/previous values and concise, qualifi
 - `GET /api/transport/overview?country=SE&detail=full` adds current flight and vessel records for web and iPad. Optional `mode` and `entity_limit` filters apply consistently to aggregates and details. Corridor results include only routes whose resolved origin or destination is the selected country, while the broader entity result retains explicit current/flag/registration linkage.
 - `GET /api/transport/entities/:mode/:entityId` returns the current normalized record and up to 24 hours of sampled track points.
 
-All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Runtime coverage reports distinguish disabled, connecting, reconnecting, receiving, and live states, plus message, accepted-snapshot, persisted-snapshot, queue, drop, malformed-frame, subscription-batch, and write-error diagnostics. This separates a configured but silent upstream stream from parsing or database persistence failures. Web, iPhone, and iPad resolve an explicit selection first and otherwise use the same highest-relevance country highlighted by the cross-source signal map; Watch uses that same highlighted-country fallback. Interactive clients never request a global overview. Equivalent country overview requests are coalesced and cached for 120 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation retains a private aggregate-only global ranking path because its purpose is to compare country activity; it never loads raw entities, and a transient read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
+All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Runtime coverage reports distinguish disabled, connecting, reconnecting, receiving, and live states, plus message, accepted-snapshot, persisted-snapshot, queue, drop, malformed-frame, subscription-batch, primary-source, fallback-source, and write-error diagnostics. This separates a configured but silent upstream stream from parsing or database persistence failures and shows whether the official regional fallback is active. Web, iPhone, and iPad resolve an explicit selection first and otherwise use the same highest-relevance country highlighted by the cross-source signal map; Watch uses that same highlighted-country fallback. Interactive clients never request a global overview. Equivalent country overview requests are coalesced and cached for 120 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation retains a private aggregate-only global ranking path because its purpose is to compare country activity; it never loads raw entities, and a transient read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
 
 ## Presentation contract
 

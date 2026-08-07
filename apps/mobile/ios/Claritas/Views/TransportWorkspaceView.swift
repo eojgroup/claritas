@@ -700,6 +700,10 @@ struct TransportWorkspaceView: View {
                 "Flight positions, callsigns, and plausible airport routes: adsb.lol (ODbL).",
                 systemImage: "airplane"
             )
+            Label(
+                "Baltic AIS fallback: Fintraffic Digitraffic (CC BY 4.0).",
+                systemImage: "ferry"
+            )
             if overview?.coverage.maritime.configured == false {
                 Label(
                     "Maritime feed is awaiting its server-side AISstream credential.",
@@ -731,11 +735,15 @@ struct TransportWorkspaceView: View {
         if maritime.persistence_error == true {
             return "AIS database writes are retrying; \(maritime.queue_depth ?? 0) vessel snapshots remain queued."
         }
-        if maritime.connected == true && (maritime.messages_received ?? 0) == 0 {
-            return "AISstream is connected on coverage batch \(maritime.subscription_batch ?? 1)/\(maritime.subscription_batches ?? 1), but no vessel frames have arrived yet."
-        }
+        if maritime.status == "live" { return nil }
         if (maritime.queue_depth ?? 0) > 0 {
             return "Incrementally persisting \(maritime.queue_depth ?? 0) queued vessel snapshots."
+        }
+        if maritime.fallback_error == true && (maritime.messages_received ?? 0) == 0 {
+            return "Global AIS is silent and the official Baltic fallback is retrying."
+        }
+        if maritime.connected == true && (maritime.messages_received ?? 0) == 0 {
+            return "AISstream is connected on coverage batch \(maritime.subscription_batch ?? 1)/\(maritime.subscription_batches ?? 1), but no vessel frames have arrived yet."
         }
         switch maritime.status {
         case "receiving":

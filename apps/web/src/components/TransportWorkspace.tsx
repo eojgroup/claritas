@@ -76,11 +76,14 @@ function maritimeRuntimeLabel(
     return `database write retry active · ${coverage.queue_depth.toLocaleString()} snapshots queued`;
   }
   if (coverage.status === "live") return null;
-  if (coverage.connected && coverage.messages_received === 0) {
-    return `connected on coverage batch ${coverage.subscription_batch}/${coverage.subscription_batches}; provider has not delivered AIS frames yet`;
-  }
   if (coverage.queue_depth > 0) {
     return `incrementally persisting ${coverage.queue_depth.toLocaleString()} queued vessel snapshots`;
+  }
+  if (coverage.fallback_error && coverage.messages_received === 0) {
+    return "global AIS is silent and the official Baltic fallback is retrying";
+  }
+  if (coverage.connected && coverage.messages_received === 0) {
+    return `connected on coverage batch ${coverage.subscription_batch}/${coverage.subscription_batches}; global provider has not delivered AIS frames yet`;
   }
   if (coverage.messages_received > 0 && coverage.snapshots_accepted === 0) {
     return `${coverage.messages_received.toLocaleString()} AIS frames received; awaiting a usable vessel position`;
@@ -1414,6 +1417,16 @@ export default function TransportWorkspace({ initialCountry }: Props) {
           <Ship /> Maritime positions, voyage metadata, and vessel identifiers:{" "}
           <a href="https://aisstream.io" target="_blank" rel="noreferrer">
             AISstream <ExternalLink />
+          </a>
+        </span>
+        <span>
+          <Ship /> Baltic AIS fallback: {" "}
+          <a
+            href="https://www.digitraffic.fi/en/marine-traffic/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Fintraffic Digitraffic (CC BY 4.0) <ExternalLink />
           </a>
         </span>
         {maritimeRuntimeLabel(overview?.coverage.maritime) && (

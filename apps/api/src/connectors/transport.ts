@@ -15,6 +15,10 @@ import {
   normalizeAisBoundingBoxes,
   type AisBoundingBox,
 } from "./ais-subscription";
+import {
+  parseDigitrafficMaritimeObservations,
+  type DigitrafficMaritimeObservation,
+} from "./digitraffic-maritime";
 
 export type TransportMode = "maritime" | "aviation";
 export type TransportDetailLevel = "aggregate" | "full";
@@ -67,7 +71,7 @@ type TransportSnapshotInput = {
   linkage_confidence?: "high" | "medium" | "low" | "none";
   status?: string | null;
   is_alert?: boolean;
-  source_name: "aisstream" | "adsb_lol";
+  source_name: "aisstream" | "digitraffic" | "adsb_lol";
   observed_at: string;
   payload: JsonRecord;
 };
@@ -199,6 +203,7 @@ type MaritimePort = {
 };
 
 const AIS_STREAM_URL = "wss://stream.aisstream.io/v0/stream";
+const DIGITRAFFIC_MARITIME_BASE_URL = "https://meri.digitraffic.fi/api/ais/v1";
 const ADSB_BASE_URL = "https://api.adsb.lol";
 const ADSB_STANDING_DATA_BASE_URL = "https://vrs-standing-data.adsb.lol";
 const WORKER_LOCK_NAMESPACE = 9433;
@@ -335,6 +340,13 @@ let aisSnapshotsStored = 0;
 let aisSnapshotsDropped = 0;
 let aisMalformedMessages = 0;
 let aisLastProgressLogAt = 0;
+let digitrafficRefresh: Promise<{ fetched: number; queued: number }> | null = null;
+let digitrafficTimer: NodeJS.Timeout | null = null;
+let digitrafficLastSnapshotAt: number | null = null;
+let digitrafficLastStoredAt: number | null = null;
+let digitrafficLastError: string | null = null;
+let digitrafficSnapshotsAccepted = 0;
+let digitrafficSnapshotsStored = 0;
 let aviationRefresh: Promise<{ fetched: number; stored: number }> | null = null;
 let lastAviationRefreshAt = 0;
 let aviationRouteLookupGeneration = 0;
@@ -429,9 +441,11 @@ function count(value: string | number | null | undefined): number {
 }
 
 function maritimeCoverageRuntime(latestObservedAt: string | null) {
-  const configured =
+  const primaryConfigured =
     enabledFromEnv("AISSTREAM_ENABLED") &&
     Boolean(process.env.AISSTREAM_API_KEY?.trim());
+  const fallbackConfigured = enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED");
+  const configured = primaryConfigured || fallbackConfigured;
   const latestObservedMilliseconds = latestObservedAt
     ? Date.parse(latestObservedAt)
     : Number.NaN;
@@ -441,18 +455,22 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
   const connected = aisSocket?.readyState === WebSocket.OPEN;
   const recentlyReceiving =
     aisLastMessageAt != null && Date.now() - aisLastMessageAt <= 5 * 60_000;
+  const fallbackRecentlyReceiving =
+    digitrafficLastSnapshotAt != null &&
+    Date.now() - digitrafficLastSnapshotAt <= 5 * 60_000;
   const subscriptionBatches = getAisSubscriptionBatches();
   const status = !configured
     ? "disabled"
     : hasFreshStoredData
       ? "live"
-      : recentlyReceiving
+      : recentlyReceiving || fallbackRecentlyReceiving
         ? "receiving"
         : connected
           ? "connecting"
           : "reconnecting";
   return {
     configured,
+    primary_configured: primaryConfigured,
     connected,
     status,
     last_message_at: aisLastMessageAt ? isoDate(aisLastMessageAt) : null,
@@ -469,6 +487,18 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     malformed_messages: aisMalformedMessages,
     subscription_batch: aisActiveSubscriptionBatch + 1,
     subscription_batches: subscriptionBatches.length,
+    fallback_source: "Fintraffic Digitraffic",
+    fallback_configured: fallbackConfigured,
+    fallback_last_snapshot_at: digitrafficLastSnapshotAt
+      ? isoDate(digitrafficLastSnapshotAt)
+      : null,
+    fallback_last_stored_at: digitrafficLastStoredAt
+      ? isoDate(digitrafficLastStoredAt)
+      : null,
+    fallback_error: Boolean(digitrafficLastError),
+    fallback_snapshots_accepted: digitrafficSnapshotsAccepted,
+    fallback_snapshots_stored: digitrafficSnapshotsStored,
+    fallback_license: "CC BY 4.0",
   };
 }
 
@@ -1046,6 +1076,9 @@ function logAisProgressIfDue(): void {
       subscription_batches: getAisSubscriptionBatches().length,
       last_stream_error: aisLastError,
       last_flush_error: aisLastFlushError,
+      digitraffic_snapshots_accepted: digitrafficSnapshotsAccepted,
+      digitraffic_snapshots_stored: digitrafficSnapshotsStored,
+      digitraffic_last_error: digitrafficLastError,
     }),
   );
 }
@@ -1064,9 +1097,18 @@ async function flushMaritimeQueue(): Promise<void> {
       const snapshots = entries.map(([, snapshot]) => snapshot);
       try {
         await storeTransportSnapshots(snapshots);
-        aisSnapshotsStored += snapshots.length;
-        aisLastStoredAt = Date.now();
-        aisLastFlushAt = aisLastStoredAt;
+        const storedAt = Date.now();
+        const aisStored = snapshots.filter(
+          (snapshot) => snapshot.source_name === "aisstream",
+        ).length;
+        const digitrafficStored = snapshots.filter(
+          (snapshot) => snapshot.source_name === "digitraffic",
+        ).length;
+        aisSnapshotsStored += aisStored;
+        digitrafficSnapshotsStored += digitrafficStored;
+        if (aisStored > 0) aisLastStoredAt = storedAt;
+        if (digitrafficStored > 0) digitrafficLastStoredAt = storedAt;
+        aisLastFlushAt = storedAt;
         aisLastFlushError = null;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1088,6 +1130,235 @@ async function flushMaritimeQueue(): Promise<void> {
   } finally {
     aisFlushRunning = false;
   }
+}
+
+function queueDigitrafficObservation(
+  observation: DigitrafficMaritimeObservation,
+): boolean {
+  const now = Date.now();
+  if (now - (lastMaritimeQueuedAt.get(observation.mmsi) ?? 0) < aisSampleMilliseconds()) {
+    return false;
+  }
+  const destinationPort = destinationPortFromText(observation.destination);
+  const destinationCountry =
+    destinationPort?.iso2 ?? destinationCountryFromText(observation.destination);
+  const registration = getCountryFromMMSI(observation.mmsi);
+  const registrationCountry = registration.valid
+    ? normalizeIso2(registration.alpha2)
+    : null;
+  const currentPort = maritimePortAtPosition(
+    observation.latitude,
+    observation.longitude,
+  );
+  const currentCountry =
+    currentPort?.iso2 ??
+    countryAtPosition(observation.latitude, observation.longitude);
+  if (currentCountry && !firstMaritimeCountry.has(observation.mmsi)) {
+    firstMaritimeCountry.set(observation.mmsi, currentCountry);
+  }
+  if (!firstMaritimePosition.has(observation.mmsi)) {
+    firstMaritimePosition.set(observation.mmsi, {
+      latitude: observation.latitude,
+      longitude: observation.longitude,
+    });
+  }
+  const originCountry =
+    destinationCountry && firstMaritimeCountry.get(observation.mmsi) !== destinationCountry
+      ? firstMaritimeCountry.get(observation.mmsi) ?? null
+      : null;
+  const originPosition = firstMaritimePosition.get(observation.mmsi);
+  const navigationStatus = observation.navigationStatus == null
+    ? null
+    : Math.round(observation.navigationStatus);
+  const linkageBasis = [
+    currentCountry && !currentPort ? "position_country" : null,
+    currentPort ? "port_geofence" : null,
+    originCountry ? "voyage_origin" : null,
+    destinationCountry ? "declared_destination" : null,
+    registrationCountry ? "mmsi_flag" : null,
+  ].filter((value): value is string => Boolean(value));
+  maritimeStatic.set(observation.mmsi, {
+    ...maritimeStatic.get(observation.mmsi),
+    display_name:
+      observation.displayName ?? maritimeStatic.get(observation.mmsi)?.display_name,
+    callsign: observation.callsign ?? maritimeStatic.get(observation.mmsi)?.callsign,
+    vehicle_type:
+      observation.shipType == null
+        ? maritimeStatic.get(observation.mmsi)?.vehicle_type
+        : String(observation.shipType),
+    vehicle_category:
+      maritimeCategory(
+        observation.shipType == null ? null : String(observation.shipType),
+      ) ?? maritimeStatic.get(observation.mmsi)?.vehicle_category,
+    destination_name:
+      observation.destination ?? maritimeStatic.get(observation.mmsi)?.destination_name,
+    destination_country_iso2:
+      destinationCountry ??
+      maritimeStatic.get(observation.mmsi)?.destination_country_iso2,
+    destination_latitude:
+      destinationPort?.latitude ??
+      maritimeStatic.get(observation.mmsi)?.destination_latitude,
+    destination_longitude:
+      destinationPort?.longitude ??
+      maritimeStatic.get(observation.mmsi)?.destination_longitude,
+    route_label: observation.destination
+      ? `Destination ${observation.destination}`
+      : maritimeStatic.get(observation.mmsi)?.route_label,
+  });
+  const staticData = maritimeStatic.get(observation.mmsi);
+  const snapshot: TransportSnapshotInput = {
+    mode: "maritime",
+    entity_id: observation.mmsi,
+    display_name: observation.displayName ?? staticData?.display_name,
+    callsign: observation.callsign ?? staticData?.callsign,
+    registration: observation.mmsi,
+    vehicle_type:
+      observation.shipType == null
+        ? staticData?.vehicle_type ?? registration.type
+        : String(observation.shipType),
+    vehicle_category:
+      maritimeCategory(
+        observation.shipType == null ? null : String(observation.shipType),
+      ) ?? staticData?.vehicle_category,
+    latitude: observation.latitude,
+    longitude: observation.longitude,
+    heading: normalizedHeading(observation.heading, observation.course),
+    speed: normalizedTransportSpeed("maritime", observation.speed),
+    current_country_iso2: currentCountry,
+    origin_country_iso2: originCountry,
+    destination_country_iso2: destinationCountry,
+    registration_country_iso2: registrationCountry,
+    origin_name: originCountry
+      ? COUNTRY_NAME_BY_ISO.get(originCountry) ?? originCountry
+      : null,
+    destination_name: observation.destination,
+    origin_latitude: originPosition?.latitude,
+    origin_longitude: originPosition?.longitude,
+    destination_latitude: destinationPort?.latitude,
+    destination_longitude: destinationPort?.longitude,
+    current_location_name: currentPort?.name,
+    route_label: staticData?.route_label,
+    linkage_basis: linkageBasis,
+    linkage_confidence:
+      currentCountry || destinationCountry
+        ? "high"
+        : registrationCountry
+          ? "medium"
+          : "none",
+    status:
+      navigationStatus == null
+        ? null
+        : NAVIGATION_STATUS[navigationStatus] ??
+          `Navigation status ${navigationStatus}`,
+    is_alert: navigationStatus != null && [2, 6, 14].includes(navigationStatus),
+    source_name: "digitraffic",
+    observed_at: observation.observedAt,
+    payload: {
+      provider: "Fintraffic Digitraffic",
+      license: "CC BY 4.0",
+      source_url: "https://www.digitraffic.fi/en/marine-traffic/",
+      mmsi_type: registration.type,
+    },
+  };
+  maritimeQueue.set(observation.mmsi, snapshot);
+  lastMaritimeQueuedAt.set(observation.mmsi, now);
+  digitrafficLastSnapshotAt = Math.max(
+    digitrafficLastSnapshotAt ?? 0,
+    Date.parse(observation.observedAt),
+  );
+  digitrafficSnapshotsAccepted += 1;
+  const maximumQueue = Math.max(
+    500,
+    Math.min(
+      Number.parseInt(process.env.AISSTREAM_MAX_QUEUE || "5000", 10) || 5_000,
+      25_000,
+    ),
+  );
+  if (maritimeQueue.size > maximumQueue) {
+    const oldest = maritimeQueue.keys().next().value;
+    if (oldest) {
+      maritimeQueue.delete(oldest);
+      aisSnapshotsDropped += 1;
+    }
+  }
+  return true;
+}
+
+async function fetchDigitrafficJson(path: string): Promise<unknown> {
+  const response = await fetch(`${DIGITRAFFIC_MARITIME_BASE_URL}/${path}`, {
+    headers: {
+      accept: "application/json",
+      "accept-encoding": "gzip",
+      "digitraffic-user": "Claritas/1.0",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(`Digitraffic maritime API HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+async function runDigitrafficMaritimeRefresh(): Promise<{
+  fetched: number;
+  queued: number;
+}> {
+  if (!enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED")) {
+    return { fetched: 0, queued: 0 };
+  }
+  try {
+    const [locations, vessels] = await Promise.all([
+      fetchDigitrafficJson("locations"),
+      fetchDigitrafficJson("vessels"),
+    ]);
+    const observations = parseDigitrafficMaritimeObservations(
+      locations,
+      vessels,
+      Date.now(),
+      boundedIntegerFromEnv(
+        "DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES",
+        15,
+        5,
+        120,
+      ) * 60_000,
+    );
+    let queued = 0;
+    for (const observation of observations) {
+      if (queueDigitrafficObservation(observation)) queued += 1;
+    }
+    digitrafficLastError = null;
+    console.info(
+      JSON.stringify({
+        event: "digitraffic_maritime_refresh",
+        fetched: observations.length,
+        queued,
+        queue_depth: maritimeQueue.size,
+      }),
+    );
+    return { fetched: observations.length, queued };
+  } catch (error) {
+    digitrafficLastError = error instanceof Error ? error.message : String(error);
+    console.warn(`Digitraffic maritime refresh failed: ${digitrafficLastError}`);
+    return { fetched: 0, queued: 0 };
+  }
+}
+
+function refreshDigitrafficMaritime(): Promise<{ fetched: number; queued: number }> {
+  if (!digitrafficRefresh) {
+    digitrafficRefresh = runDigitrafficMaritimeRefresh().finally(() => {
+      digitrafficRefresh = null;
+    });
+  }
+  return digitrafficRefresh;
+}
+
+function startDigitrafficMaritimeWorker(): void {
+  if (!enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED") || digitrafficTimer) return;
+  void refreshDigitrafficMaritime();
+  digitrafficTimer = setInterval(() => {
+    void refreshDigitrafficMaritime();
+  }, boundedIntegerFromEnv("DIGITRAFFIC_MARITIME_POLL_SECONDS", 60, 60, 900) * 1_000);
+  digitrafficTimer.unref();
 }
 
 function configuredAdsbPollPoints(): typeof ADSB_POLL_POINTS {
@@ -2827,6 +3098,7 @@ async function acquireTransportWorkerLock(): Promise<void> {
     }
     connectAisStream();
     startAisWatchdog();
+    startDigitrafficMaritimeWorker();
     startTransportRetentionWorker();
     aisFlushTimer = setInterval(() => {
       void flushMaritimeQueue();

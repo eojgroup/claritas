@@ -63,6 +63,12 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_FLUSH_BATCH_SIZE, optional: true } }
             - name: AISSTREAM_FLUSH_BATCHES_PER_CYCLE
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_FLUSH_BATCHES_PER_CYCLE, optional: true } }
+            - name: DIGITRAFFIC_MARITIME_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_ENABLED, optional: true } }
+            - name: DIGITRAFFIC_MARITIME_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_POLL_SECONDS, optional: true } }
+            - name: DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES, optional: true } }
             - name: ADSB_LOL_POLL_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_POLL_ENABLED, optional: true } }
             - name: ADSB_LOL_POLL_SECONDS
