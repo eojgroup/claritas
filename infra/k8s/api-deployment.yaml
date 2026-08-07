@@ -53,6 +53,16 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_SAMPLE_SECONDS, optional: true } }
             - name: AISSTREAM_IDLE_TIMEOUT_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_IDLE_TIMEOUT_SECONDS, optional: true } }
+            - name: AISSTREAM_SUBSCRIPTION_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_SUBSCRIPTION_BATCH_SIZE, optional: true } }
+            - name: AISSTREAM_SUBSCRIPTION_ROTATION_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_SUBSCRIPTION_ROTATION_SECONDS, optional: true } }
+            - name: AISSTREAM_FLUSH_INTERVAL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_FLUSH_INTERVAL_SECONDS, optional: true } }
+            - name: AISSTREAM_FLUSH_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_FLUSH_BATCH_SIZE, optional: true } }
+            - name: AISSTREAM_FLUSH_BATCHES_PER_CYCLE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_FLUSH_BATCHES_PER_CYCLE, optional: true } }
             - name: ADSB_LOL_POLL_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-config, key: ADSB_LOL_POLL_ENABLED, optional: true } }
             - name: ADSB_LOL_POLL_SECONDS

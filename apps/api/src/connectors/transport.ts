@@ -9,6 +9,12 @@ import {
   prioritizeAdsbRouteLookups,
   type AdsbRouteLookup,
 } from "./transport-route-enrichment";
+import {
+  batchAisBoundingBoxes,
+  incrementalWorldAisBoundingBoxes,
+  normalizeAisBoundingBoxes,
+  type AisBoundingBox,
+} from "./ais-subscription";
 
 export type TransportMode = "maritime" | "aviation";
 export type TransportDetailLevel = "aggregate" | "full";
@@ -310,11 +316,25 @@ let aisSocket: WebSocket | null = null;
 let aisReconnectTimer: NodeJS.Timeout | null = null;
 let aisFlushTimer: NodeJS.Timeout | null = null;
 let aisWatchdogTimer: NodeJS.Timeout | null = null;
+let aisSubscriptionTimer: NodeJS.Timeout | null = null;
+let aisSubscriptionBatches: AisBoundingBox[][] | null = null;
+let aisNextSubscriptionBatch = 0;
+let aisActiveSubscriptionBatch = 0;
 let aisReconnectAttempt = 0;
 let aisConnectedAt: number | null = null;
 let aisLastMessageAt: number | null = null;
 let aisLastSnapshotAt: number | null = null;
+let aisLastStoredAt: number | null = null;
+let aisLastFlushAt: number | null = null;
 let aisLastError: string | null = null;
+let aisLastFlushError: string | null = null;
+let aisFlushRunning = false;
+let aisMessagesReceived = 0;
+let aisSnapshotsAccepted = 0;
+let aisSnapshotsStored = 0;
+let aisSnapshotsDropped = 0;
+let aisMalformedMessages = 0;
+let aisLastProgressLogAt = 0;
 let aviationRefresh: Promise<{ fetched: number; stored: number }> | null = null;
 let lastAviationRefreshAt = 0;
 let aviationRouteLookupGeneration = 0;
@@ -420,7 +440,8 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     Date.now() - latestObservedMilliseconds <= 5 * 60_000;
   const connected = aisSocket?.readyState === WebSocket.OPEN;
   const recentlyReceiving =
-    aisLastSnapshotAt != null && Date.now() - aisLastSnapshotAt <= 5 * 60_000;
+    aisLastMessageAt != null && Date.now() - aisLastMessageAt <= 5 * 60_000;
+  const subscriptionBatches = getAisSubscriptionBatches();
   const status = !configured
     ? "disabled"
     : hasFreshStoredData
@@ -436,7 +457,18 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     status,
     last_message_at: aisLastMessageAt ? isoDate(aisLastMessageAt) : null,
     last_snapshot_at: aisLastSnapshotAt ? isoDate(aisLastSnapshotAt) : null,
+    last_stored_at: aisLastStoredAt ? isoDate(aisLastStoredAt) : null,
+    last_flush_at: aisLastFlushAt ? isoDate(aisLastFlushAt) : null,
     last_error: aisLastError,
+    persistence_error: Boolean(aisLastFlushError),
+    queue_depth: maritimeQueue.size,
+    messages_received: aisMessagesReceived,
+    snapshots_accepted: aisSnapshotsAccepted,
+    snapshots_stored: aisSnapshotsStored,
+    snapshots_dropped: aisSnapshotsDropped,
+    malformed_messages: aisMalformedMessages,
+    subscription_batch: aisActiveSubscriptionBatch + 1,
+    subscription_batches: subscriptionBatches.length,
   };
 }
 
@@ -608,17 +640,95 @@ function maritimePortAtPosition(
   return nearest?.port ?? null;
 }
 
-function resolveAisBoundingBoxes(): unknown[] {
+function getAisSubscriptionBatches(): AisBoundingBox[][] {
+  if (aisSubscriptionBatches) return aisSubscriptionBatches;
   const configured = process.env.AISSTREAM_BOUNDING_BOXES?.trim();
   if (configured) {
     try {
-      const parsed = JSON.parse(configured);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const boxes = normalizeAisBoundingBoxes(JSON.parse(configured));
+      if (boxes.length > 0) {
+        aisSubscriptionBatches = batchAisBoundingBoxes(
+          boxes,
+          boundedIntegerFromEnv("AISSTREAM_SUBSCRIPTION_BATCH_SIZE", 2, 1, 12),
+        );
+        return aisSubscriptionBatches;
+      }
     } catch {
-      console.warn("AISSTREAM_BOUNDING_BOXES is not valid JSON; using global coverage.");
+      // The warning below covers both malformed JSON and malformed boxes.
     }
+    console.warn(
+      "AISSTREAM_BOUNDING_BOXES is invalid; using incremental world coverage.",
+    );
   }
-  return [[[-90, -180], [90, 180]]];
+  aisSubscriptionBatches = batchAisBoundingBoxes(
+    incrementalWorldAisBoundingBoxes(),
+    boundedIntegerFromEnv("AISSTREAM_SUBSCRIPTION_BATCH_SIZE", 2, 1, 12),
+  );
+  return aisSubscriptionBatches;
+}
+
+function aisSubscriptionRotationMilliseconds(): number {
+  return (
+    boundedIntegerFromEnv(
+      "AISSTREAM_SUBSCRIPTION_ROTATION_SECONDS",
+      20,
+      10,
+      300,
+    ) * 1_000
+  );
+}
+
+function aisFlushBatchSize(): number {
+  return boundedIntegerFromEnv("AISSTREAM_FLUSH_BATCH_SIZE", 250, 50, 1_000);
+}
+
+function aisFlushBatchesPerCycle(): number {
+  return boundedIntegerFromEnv("AISSTREAM_FLUSH_BATCHES_PER_CYCLE", 2, 1, 10);
+}
+
+function sendNextAisSubscription(socket: WebSocket, apiKey: string): void {
+  if (socket !== aisSocket || socket.readyState !== WebSocket.OPEN) return;
+  const batches = getAisSubscriptionBatches();
+  const batchIndex = aisNextSubscriptionBatch % batches.length;
+  const boundingBoxes = batches[batchIndex];
+  socket.send(
+    JSON.stringify({
+      APIKey: apiKey,
+      BoundingBoxes: boundingBoxes,
+      FilterMessageTypes: [
+        "PositionReport",
+        "StandardClassBPositionReport",
+        "ExtendedClassBPositionReport",
+        "LongRangeAisBroadcastMessage",
+        "ShipStaticData",
+        "StaticDataReport",
+      ],
+    }),
+  );
+  aisActiveSubscriptionBatch = batchIndex;
+  aisNextSubscriptionBatch = (batchIndex + 1) % batches.length;
+}
+
+function startAisSubscriptionRotation(socket: WebSocket, apiKey: string): void {
+  if (aisSubscriptionTimer) clearInterval(aisSubscriptionTimer);
+  sendNextAisSubscription(socket, apiKey);
+  const batches = getAisSubscriptionBatches();
+  if (batches.length > 1) {
+    aisSubscriptionTimer = setInterval(() => {
+      sendNextAisSubscription(socket, apiKey);
+    }, aisSubscriptionRotationMilliseconds());
+    aisSubscriptionTimer.unref();
+  } else {
+    aisSubscriptionTimer = null;
+  }
+  console.info(
+    JSON.stringify({
+      event: "aisstream_subscription_started",
+      batches: batches.length,
+      boxes_per_batch: batches[0]?.length ?? 0,
+      rotation_seconds: aisSubscriptionRotationMilliseconds() / 1_000,
+    }),
+  );
 }
 
 function aisSampleMilliseconds(): number {
@@ -639,10 +749,10 @@ function startAisWatchdog(): void {
   aisWatchdogTimer = setInterval(() => {
     const socket = aisSocket;
     if (!socket || socket.readyState !== WebSocket.OPEN || !aisConnectedAt) return;
-    const lastActivity = aisLastSnapshotAt ?? aisConnectedAt;
+    const lastActivity = Math.max(aisLastSnapshotAt ?? 0, aisConnectedAt);
     const idleMilliseconds = Date.now() - lastActivity;
     if (idleMilliseconds <= aisIdleTimeoutMilliseconds()) return;
-    aisLastError = `No AIS messages received for ${Math.round(idleMilliseconds / 1_000)} seconds`;
+    aisLastError = `No usable AIS vessel snapshots received for ${Math.round(idleMilliseconds / 1_000)} seconds`;
     console.warn(
       JSON.stringify({
         event: "aisstream_idle_reconnect",
@@ -657,8 +767,15 @@ function startAisWatchdog(): void {
 function queueMaritimeMessage(message: unknown): void {
   const envelope = asRecord(message);
   if (!envelope) return;
-  if (typeof envelope.error === "string") {
-    console.warn(`AISstream subscription error: ${envelope.error}`);
+  const providerError = envelope.error ?? envelope.Error;
+  if (providerError != null) {
+    const message =
+      asString(providerError) ??
+      (typeof providerError === "object"
+        ? JSON.stringify(providerError).slice(0, 500)
+        : "Unknown subscription error");
+    aisLastError = message;
+    console.warn(`AISstream subscription error: ${message}`);
     return;
   }
   const messageType = asString(envelope.MessageType);
@@ -812,6 +929,7 @@ function queueMaritimeMessage(message: unknown): void {
   };
 
   maritimeQueue.set(mmsi, snapshot);
+  aisSnapshotsAccepted += 1;
   aisLastSnapshotAt = now;
   if (isPosition) lastMaritimeQueuedAt.set(mmsi, now);
   const maximumQueue = Math.max(
@@ -820,7 +938,10 @@ function queueMaritimeMessage(message: unknown): void {
   );
   if (maritimeQueue.size > maximumQueue) {
     const oldest = maritimeQueue.keys().next().value;
-    if (oldest) maritimeQueue.delete(oldest);
+    if (oldest) {
+      maritimeQueue.delete(oldest);
+      aisSnapshotsDropped += 1;
+    }
   }
 }
 
@@ -843,38 +964,27 @@ function connectAisStream(): void {
 
   const socket = new WebSocket(AIS_STREAM_URL, {
     handshakeTimeout: 15_000,
+    perMessageDeflate: false,
+    maxPayload: 2 * 1024 * 1024,
   });
   aisSocket = socket;
 
   socket.on("open", () => {
     aisReconnectAttempt = 0;
     aisConnectedAt = Date.now();
-    aisLastMessageAt = null;
-    aisLastSnapshotAt = null;
     aisLastError = null;
-    socket.send(
-      JSON.stringify({
-        APIKey: apiKey,
-        BoundingBoxes: resolveAisBoundingBoxes(),
-        FilterMessageTypes: [
-          "PositionReport",
-          "StandardClassBPositionReport",
-          "ExtendedClassBPositionReport",
-          "LongRangeAisBroadcastMessage",
-          "ShipStaticData",
-          "StaticDataReport",
-        ],
-      })
-    );
+    startAisSubscriptionRotation(socket, apiKey);
     console.info("AISstream transport subscription connected.");
   });
 
   socket.on("message", (raw) => {
+    aisMessagesReceived += 1;
     aisLastMessageAt = Date.now();
     aisLastError = null;
     try {
       queueMaritimeMessage(JSON.parse(raw.toString()));
     } catch (error) {
+      aisMalformedMessages += 1;
       console.warn(
         `Skipped malformed AISstream message: ${error instanceof Error ? error.message : String(error)}`
       );
@@ -886,10 +996,17 @@ function connectAisStream(): void {
     console.warn(`AISstream connection error: ${error.message}`);
   });
 
-  socket.on("close", () => {
+  socket.on("close", (code, reason) => {
     if (aisSocket === socket) {
       aisSocket = null;
       aisConnectedAt = null;
+      if (aisSubscriptionTimer) {
+        clearInterval(aisSubscriptionTimer);
+        aisSubscriptionTimer = null;
+      }
+      if (code !== 1000 && !aisLastError) {
+        aisLastError = `AISstream closed with code ${code}${reason.length ? `: ${reason.toString()}` : ""}`;
+      }
     }
     scheduleAisReconnect();
   });
@@ -912,19 +1029,64 @@ function scheduleAisReconnect(): void {
   aisReconnectTimer.unref();
 }
 
+function logAisProgressIfDue(): void {
+  if (Date.now() - aisLastProgressLogAt < 60_000) return;
+  aisLastProgressLogAt = Date.now();
+  console.info(
+    JSON.stringify({
+      event: "aisstream_ingestion_progress",
+      connected: aisSocket?.readyState === WebSocket.OPEN,
+      messages_received: aisMessagesReceived,
+      snapshots_accepted: aisSnapshotsAccepted,
+      snapshots_stored: aisSnapshotsStored,
+      snapshots_dropped: aisSnapshotsDropped,
+      malformed_messages: aisMalformedMessages,
+      queue_depth: maritimeQueue.size,
+      subscription_batch: aisActiveSubscriptionBatch + 1,
+      subscription_batches: getAisSubscriptionBatches().length,
+      last_stream_error: aisLastError,
+      last_flush_error: aisLastFlushError,
+    }),
+  );
+}
+
 async function flushMaritimeQueue(): Promise<void> {
-  if (maritimeQueue.size === 0) return;
-  const snapshots = Array.from(maritimeQueue.values());
-  maritimeQueue.clear();
+  logAisProgressIfDue();
+  if (aisFlushRunning || maritimeQueue.size === 0) return;
+  aisFlushRunning = true;
   try {
-    await storeTransportSnapshots(snapshots);
-  } catch (error) {
-    console.error(
-      `AISstream flush failed for ${snapshots.length} snapshots: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-    snapshots.slice(-2000).forEach((snapshot) => maritimeQueue.set(snapshot.entity_id, snapshot));
+    for (let batchNumber = 0; batchNumber < aisFlushBatchesPerCycle(); batchNumber += 1) {
+      const entries = Array.from(maritimeQueue.entries()).slice(0, aisFlushBatchSize());
+      if (entries.length === 0) break;
+      for (const [entityId, snapshot] of entries) {
+        if (maritimeQueue.get(entityId) === snapshot) maritimeQueue.delete(entityId);
+      }
+      const snapshots = entries.map(([, snapshot]) => snapshot);
+      try {
+        await storeTransportSnapshots(snapshots);
+        aisSnapshotsStored += snapshots.length;
+        aisLastStoredAt = Date.now();
+        aisLastFlushAt = aisLastStoredAt;
+        aisLastFlushError = null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        aisLastFlushAt = Date.now();
+        aisLastFlushError = message;
+        console.error(
+          `AISstream flush failed for ${snapshots.length} snapshots: ${message}`,
+        );
+        for (const snapshot of snapshots) {
+          const queued = maritimeQueue.get(snapshot.entity_id);
+          if (!queued || Date.parse(snapshot.observed_at) > Date.parse(queued.observed_at)) {
+            maritimeQueue.set(snapshot.entity_id, snapshot);
+          }
+        }
+        break;
+      }
+    }
+    logAisProgressIfDue();
+  } finally {
+    aisFlushRunning = false;
   }
 }
 
@@ -2668,7 +2830,7 @@ async function acquireTransportWorkerLock(): Promise<void> {
     startTransportRetentionWorker();
     aisFlushTimer = setInterval(() => {
       void flushMaritimeQueue();
-    }, 5_000);
+    }, boundedIntegerFromEnv("AISSTREAM_FLUSH_INTERVAL_SECONDS", 5, 2, 30) * 1_000);
     aisFlushTimer.unref();
 
     const aviationEnabled = enabledFromEnv("ADSB_LOL_POLL_ENABLED");

@@ -799,7 +799,7 @@ jobs:
               });
           '
           kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
-            grep -E "(Ingestion automation worker started|Daily briefing scheduler started|AISstream transport subscription connected|aisstream_idle_reconnect)" || true
+            grep -E "(Ingestion automation worker started|Daily briefing scheduler started|AISstream transport subscription connected|aisstream_subscription_started|aisstream_ingestion_progress|aisstream_idle_reconnect)" || true
 
       - name: 🌐 Verify API pods use the reserved egress IP
         run: |

@@ -594,7 +594,18 @@ export type TransportOverview = {
       status: "disabled" | "connecting" | "reconnecting" | "receiving" | "live";
       last_message_at: string | null;
       last_snapshot_at: string | null;
+      last_stored_at: string | null;
+      last_flush_at: string | null;
       last_error: string | null;
+      persistence_error: boolean;
+      queue_depth: number;
+      messages_received: number;
+      snapshots_accepted: number;
+      snapshots_stored: number;
+      snapshots_dropped: number;
+      malformed_messages: number;
+      subscription_batch: number;
+      subscription_batches: number;
       freshness_minutes: number;
       movement_method: string;
       cargo_method: string;

@@ -47,6 +47,10 @@ filter changes, explicit refresh, or a completed mutation.
 safety switches. Prefer pausing transport ingestion over allowing it to impair
 authentication, news, weather, market, or briefing requests.
 
+AISstream uses rotating geographic subscriptions and a single bounded queue
+drain. Its five-second flush never overlaps a previous flush and writes at most
+500 vessel snapshots per cycle with the production defaults.
+
 ## Monitoring
 
 Terraform manages Cloud Monitoring alert policies for:
@@ -60,7 +64,8 @@ needed to manage these policies.
 
 During an alert, inspect Cloud SQL System Insights and the bounded Query Insights sample, then
 correlate with `database_pool_pressure`, `database_slow_query`,
-`transport_overview_slow_refresh`, and `transport_retention_pruned` logs.
+`transport_overview_slow_refresh`, `aisstream_ingestion_progress`,
+`aisstream_idle_reconnect`, and `transport_retention_pruned` logs.
 Healthy operation has zero pool waiters, no sustained memory/CPU alert, and
 transport overview refreshes below the slow-query threshold.
 

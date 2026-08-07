@@ -66,6 +66,30 @@ function changeLabel(value: number | null, direction: "up" | "down" | "flat" | "
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
+function maritimeRuntimeLabel(
+  coverage: TransportOverview["coverage"]["maritime"] | undefined,
+): string | null {
+  if (!coverage) return null;
+  if (coverage.status === "disabled") return "server credential not configured";
+  if (coverage.last_error) return "provider stream error detected; reconnecting automatically";
+  if (coverage.persistence_error) {
+    return `database write retry active · ${coverage.queue_depth.toLocaleString()} snapshots queued`;
+  }
+  if (coverage.status === "live") return null;
+  if (coverage.connected && coverage.messages_received === 0) {
+    return `connected on coverage batch ${coverage.subscription_batch}/${coverage.subscription_batches}; provider has not delivered AIS frames yet`;
+  }
+  if (coverage.queue_depth > 0) {
+    return `incrementally persisting ${coverage.queue_depth.toLocaleString()} queued vessel snapshots`;
+  }
+  if (coverage.messages_received > 0 && coverage.snapshots_accepted === 0) {
+    return `${coverage.messages_received.toLocaleString()} AIS frames received; awaiting a usable vessel position`;
+  }
+  if (coverage.status === "receiving") return "receiving and processing AIS messages";
+  if (coverage.status === "connecting") return "connected and awaiting AIS messages";
+  return "reconnecting after an idle or interrupted stream";
+}
+
 function entityLinksCountry(entity: TransportEntity, country: string) {
   const iso = country.trim().toUpperCase();
   return entity.country_links.some(
@@ -1392,16 +1416,10 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             AISstream <ExternalLink />
           </a>
         </span>
-        {overview?.coverage.maritime.status !== "live" && (
+        {maritimeRuntimeLabel(overview?.coverage.maritime) && (
           <span>
             <RefreshCw /> Maritime feed:{" "}
-            {overview?.coverage.maritime.status === "disabled"
-              ? "server credential not configured"
-              : overview?.coverage.maritime.status === "receiving"
-                ? "receiving AIS messages; snapshots are processing"
-                : overview?.coverage.maritime.status === "connecting"
-                  ? "connected and awaiting AIS messages"
-                  : "reconnecting after an idle or interrupted stream"}
+            {maritimeRuntimeLabel(overview?.coverage.maritime)}
           </span>
         )}
         <span>

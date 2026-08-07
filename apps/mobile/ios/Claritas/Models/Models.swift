@@ -1281,7 +1281,18 @@ struct MaritimeTransportCoverage: Codable {
     let status: String?
     let last_message_at: String?
     let last_snapshot_at: String?
+    let last_stored_at: String?
+    let last_flush_at: String?
     let last_error: String?
+    let persistence_error: Bool?
+    let queue_depth: Int?
+    let messages_received: Int?
+    let snapshots_accepted: Int?
+    let snapshots_stored: Int?
+    let snapshots_dropped: Int?
+    let malformed_messages: Int?
+    let subscription_batch: Int?
+    let subscription_batches: Int?
     let freshness_minutes: Int
     let movement_method: String?
     let cargo_method: String?

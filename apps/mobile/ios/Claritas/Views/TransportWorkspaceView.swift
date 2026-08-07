@@ -724,7 +724,20 @@ struct TransportWorkspaceView: View {
     }
 
     private var maritimeRuntimeMessage: String? {
-        switch overview?.coverage.maritime.status {
+        guard let maritime = overview?.coverage.maritime else { return nil }
+        if maritime.last_error != nil {
+            return "AISstream reported a stream error; Claritas is reconnecting automatically."
+        }
+        if maritime.persistence_error == true {
+            return "AIS database writes are retrying; \(maritime.queue_depth ?? 0) vessel snapshots remain queued."
+        }
+        if maritime.connected == true && (maritime.messages_received ?? 0) == 0 {
+            return "AISstream is connected on coverage batch \(maritime.subscription_batch ?? 1)/\(maritime.subscription_batches ?? 1), but no vessel frames have arrived yet."
+        }
+        if (maritime.queue_depth ?? 0) > 0 {
+            return "Incrementally persisting \(maritime.queue_depth ?? 0) queued vessel snapshots."
+        }
+        switch maritime.status {
         case "receiving":
             return "AIS messages are being received and processed."
         case "connecting":
