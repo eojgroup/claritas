@@ -25,7 +25,7 @@ export function earthObservationProductLabel(product: string) {
 }
 
 export function isAnalyticalEarthProduct(product: string) {
-  return ["ndvi", "ndwi", "burn_index"].includes(product);
+  return ["false_color", "sar", "ndvi", "ndwi", "burn_index"].includes(product);
 }
 
 export function sortEarthObservationsForDisplay(observations: EarthObservation[]) {

@@ -1193,6 +1193,13 @@ export type IntelligenceEventDetail = {
     why_interesting: string;
     linked_news_count: number;
     physical_observation_count: number;
+    location_basis?: "source_observed" | "estimated_mapped" | "named_location" | "unresolved";
+    coordinates?: {
+      latitude: number;
+      longitude: number;
+      label: string;
+      basis: "source_observed" | "estimated_mapped";
+    } | null;
   };
   linked_news?: Array<{
     id: string;
@@ -1202,6 +1209,7 @@ export type IntelligenceEventDetail = {
     summary?: string | null;
     url?: string | null;
     publisher?: string | null;
+    published_at?: string | null;
     observed_at: string;
     confidence: number;
   }>;
@@ -1339,19 +1347,38 @@ export type IntelligenceAdminStatus = {
 const API_BASE = "";
 
 async function readError(resp: Response, fallback: string): Promise<string> {
+  const transient = [408, 425, 429, 500, 502, 503, 504].includes(resp.status);
+  const statusSuffix = resp.status > 0 ? ` (HTTP ${resp.status})` : "";
+  const safeMessage = (value: unknown) => {
+    if (typeof value !== "string") return null;
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (!normalized || /<\/?(?:!doctype|html|head|body|title|script|style|h\d|p)\b/i.test(normalized)) {
+      return null;
+    }
+    return normalized.slice(0, 280);
+  };
   const textResponse = resp.clone();
   try {
     const data = await resp.json();
-    if (typeof data?.error === "string" && data.error.trim()) return data.error;
+    const message = safeMessage(data?.error) ?? safeMessage(data?.message);
+    if (message && !transient) return message;
   } catch {
     try {
-      const text = await textResponse.text();
-      if (text.trim()) return `${fallback}: ${resp.status} ${text.trim()}`;
+      const contentType = textResponse.headers.get("content-type")?.toLowerCase() ?? "";
+      // Reverse proxies often return an HTML error document. It is neither useful
+      // nor safe to place that document in the product UI. Plain-text provider
+      // messages remain available when they are short and non-markup.
+      if (!contentType.includes("text/html")) {
+        const text = safeMessage(await textResponse.text());
+        if (text && !transient) return `${fallback}: ${text}${statusSuffix}`;
+      }
     } catch {
       // ignore parse errors
     }
   }
-  return `${fallback}: ${resp.status}`;
+  return transient
+    ? `${fallback}. The service is temporarily unavailable; retry shortly.${statusSuffix}`
+    : `${fallback}.${statusSuffix}`;
 }
 
 export async function fetchAuthProviders(): Promise<AuthProvider[]> {

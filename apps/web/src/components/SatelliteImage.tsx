@@ -44,10 +44,19 @@ export default function SatelliteImage({
   const source = available[sourceIndex];
   if (!source || failed) {
     return (
-      <div className={fallbackClassName} role="status">
-        <div className="p-4 text-center text-xs text-[color:var(--shell-muted)]">
-          <ImageOff className="mx-auto h-6 w-6" />
-          <div className="mt-2">Satellite image temporarily unavailable.</div>
+      <div
+        className={`${fallbackClassName} overflow-hidden text-[color:var(--shell-muted)]`}
+        style={{ backgroundColor: "var(--shell-sidebar)" }}
+        role="status"
+      >
+        <div className="mx-auto max-w-64 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)]/85 px-3 py-2.5 text-center text-[11px] leading-4 shadow-sm">
+          <ImageOff className="mx-auto h-4 w-4" />
+          {alt && (
+            <>
+              <div className="mt-1 font-semibold text-[color:var(--shell-ink)]">Imagery unavailable</div>
+              <div className="mt-0.5">{available.length ? "The visual asset could not be decoded." : "No visual asset is attached to this observation."}</div>
+            </>
+          )}
           {available.length > 0 && (
             <button
               type="button"
@@ -56,7 +65,7 @@ export default function SatelliteImage({
                 setFailed(false);
                 setRetry((value) => value + 1);
               }}
-              className="mt-2 inline-flex items-center gap-1 rounded-full border border-current px-2 py-1 font-semibold"
+              className="mt-1.5 inline-flex items-center gap-1 rounded-full border border-current px-2 py-0.5 font-semibold"
             >
               <RotateCcw className="h-3 w-3" /> Retry image
             </button>

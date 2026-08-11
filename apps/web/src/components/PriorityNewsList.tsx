@@ -16,6 +16,35 @@ const LEADERSHIP_CHANGE_PATTERN = new RegExp(
   "i",
 );
 
+const newsTimestampParts = (value: string | null | undefined) => {
+  if (!value) return { date: "No date", time: "—", zone: "Zone unavailable", exact: "Timestamp unavailable" };
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { date: value, time: "—", zone: "Zone unavailable", exact: value };
+  const exactFormatter = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  });
+  return {
+    date: new Intl.DateTimeFormat("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    }).format(date),
+    time: new Intl.DateTimeFormat("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(date),
+    zone: exactFormatter.formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? "Local time",
+    exact: exactFormatter.format(date),
+  };
+};
+
 function isLeadershipChangeStory(item: NewsItem): boolean {
   const text = `${newsDisplayTitle(item)} ${newsDisplaySummary(item) ?? ""} ${item.title ?? ""} ${item.summary ?? ""}`;
   return (
@@ -100,6 +129,7 @@ export default function PriorityNewsList({
         const displaySummary = newsDisplaySummary(item);
         const translationPending = translationPendingIds?.has(item.id) ?? false;
         const linkedEvents = item.linked_events ?? [];
+        const timestamp = newsTimestampParts(item.event_time);
         const satelliteState = linkedEvents.find((event) => (
           event.earth_observation_state && event.earth_observation_state !== "not_requested"
         ))?.earth_observation_state;
@@ -136,24 +166,15 @@ export default function PriorityNewsList({
                 <small>{priorityBand}</small>
                 {String(index + 1).padStart(2, "0")}
               </span>
-              <span className="dashboard-news-time">
-                <strong>
-                  {item.event_time
-                    ? new Date(item.event_time).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "—"}
-                </strong>
-                <small>
-                  {item.event_time
-                    ? new Date(item.event_time).toLocaleDateString([], {
-                        month: "short",
-                        day: "numeric",
-                      })
-                    : "No time"}
-                </small>
-              </span>
+              <time
+                className="dashboard-news-time"
+                dateTime={item.event_time ?? undefined}
+                title={timestamp.exact}
+              >
+                <strong>{timestamp.time}</strong>
+                <small>{timestamp.date}</small>
+                <small>{timestamp.zone}</small>
+              </time>
               <span
                 className="dashboard-news-country"
                 data-inferred={isPublisherCountryFallback || undefined}
@@ -260,9 +281,7 @@ export default function PriorityNewsList({
                         : "Unmapped geography"}
                     </span>
                     <span>
-                      {item.event_time
-                        ? new Date(item.event_time).toLocaleString()
-                        : "Timestamp unavailable"}
+                      {timestamp.exact}
                     </span>
                   </div>
                   {item.ai_summary && item.translation?.summary_status === "generated" && (

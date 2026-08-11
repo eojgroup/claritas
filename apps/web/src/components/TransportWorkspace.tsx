@@ -1,17 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import worldCountries from "world-countries";
 import {
   AlertTriangle,
   Anchor,
   ArrowRight,
   ExternalLink,
   LocateFixed,
-  Minus,
   Plane,
   RefreshCw,
   Route,
   Ship,
-  TrendingDown,
-  TrendingUp,
 } from "lucide-react";
 import {
   Area,
@@ -27,6 +25,10 @@ import {
 } from "recharts";
 import TransportTrackingMap from "./TransportTrackingMap";
 import {
+  buildTransportScopeSignals,
+  transportTimestamp,
+} from "./transportWorkspacePresentation";
+import {
   fetchTransportEntity,
   fetchTransportOverview,
   type TransportEntity,
@@ -40,19 +42,30 @@ type Props = {
   initialCountry?: string | null;
 };
 
+type WorldCountryReference = {
+  cca2?: string;
+  name?: { common?: string };
+};
+
+const transportCountryOptions = (worldCountries as WorldCountryReference[])
+  .flatMap((entry) => {
+    const code = entry.cca2?.trim().toUpperCase();
+    const name = entry.name?.common?.trim();
+    return code && name ? [{ code, name }] : [];
+  })
+  .sort((left, right) => left.name.localeCompare(right.name));
+
 function normalizedCountry(value: string | null | undefined) {
   const country = value?.trim().toUpperCase() ?? "";
   return /^[A-Z]{2}$/.test(country) ? country : "";
 }
 
 function timeLabel(value: string | null | undefined) {
-  if (!value) return "Awaiting data";
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "Awaiting data";
-  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1_000));
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3_600) return `${Math.round(seconds / 60)}m ago`;
-  return `${Math.round(seconds / 3_600)}h ago`;
+  return transportTimestamp(value)?.relative ?? "Awaiting data";
+}
+
+function exactTimeLabel(value: string | null | undefined) {
+  return transportTimestamp(value)?.exact ?? "No timestamp received";
 }
 
 function formatNumber(value: number | null | undefined, suffix = "") {
@@ -234,7 +247,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
       overviewRequestRef.current = requestId;
       if (!country) {
         setOverview(null);
-        setError("Choose a country to load transport intelligence.");
+        setError(null);
         setLoading(false);
         setRefreshing(false);
         return;
@@ -567,6 +580,72 @@ export default function TransportWorkspace({ initialCountry }: Props) {
   const aviation = summary?.modes.aviation;
   const displayedEntities = selectedCorridor?.entities ?? entities;
   const displayedRoutes = selectedCorridor?.routes ?? overview?.routes ?? [];
+  const scopeSignals = useMemo(
+    () => buildTransportScopeSignals(overview, country, corridorCountry),
+    [corridorCountry, country, overview],
+  );
+  const generatedTimestamp = transportTimestamp(overview?.generated_at);
+  const aviationTimestamp = transportTimestamp(aviation?.latest_observed_at);
+  const maritimeTimestamp = transportTimestamp(maritime?.latest_observed_at);
+  const maritimeCoverage = overview?.coverage.maritime;
+  const primaryMaritimeTimestamp = transportTimestamp(
+    maritimeCoverage?.last_message_at ?? maritimeCoverage?.last_snapshot_at,
+  );
+  const fallbackMaritimeTimestamp = transportTimestamp(
+    maritimeCoverage?.fallback_last_snapshot_at,
+  );
+
+  if (!country) {
+    return (
+      <section className="transport-workspace" aria-busy={false}>
+        <div className="app-card-hero rounded-xl p-5 sm:p-7">
+          <div className="max-w-3xl">
+            <div className="text-xs font-semibold uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">
+              Transport intelligence · scoped observations
+            </div>
+            <h1 className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+              Start with a country, then inspect its corridors and live positions
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-[color:var(--shell-muted)]">
+              Claritas does not present provider samples as a global traffic total. Choose a country to load vehicles with a current, origin, destination, flag, or registration relationship; then narrow to a two-country corridor or an individual location.
+            </p>
+          </div>
+          <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(16rem,24rem)_1fr]">
+            <label className="app-card rounded-xl p-4 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-muted)]">
+              Country scope
+              <select
+                aria-label="Choose transport country scope"
+                value=""
+                onChange={(event) => selectCountry(event.currentTarget.value)}
+                className="mt-3 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-3 text-sm normal-case tracking-normal text-[color:var(--shell-ink)]"
+              >
+                <option value="">Choose a country…</option>
+                {transportCountryOptions.map((entry) => (
+                  <option key={entry.code} value={entry.code}>
+                    {entry.name} ({entry.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid gap-3 sm:grid-cols-3" aria-label="Transport investigation workflow">
+              <article className="app-card rounded-xl p-4">
+                <strong className="text-sm text-[color:var(--shell-ink)]">1 · Country relationship</strong>
+                <p className="mt-2 text-xs leading-5 text-[color:var(--shell-muted)]">See why each aircraft or vessel belongs in the selected scope.</p>
+              </article>
+              <article className="app-card rounded-xl p-4">
+                <strong className="text-sm text-[color:var(--shell-ink)]">2 · Corridor signal</strong>
+                <p className="mt-2 text-xs leading-5 text-[color:var(--shell-muted)]">Compare directional activity and distinguish observed origins from proxy evidence.</p>
+              </article>
+              <article className="app-card rounded-xl p-4">
+                <strong className="text-sm text-[color:var(--shell-ink)]">3 · Vehicle evidence</strong>
+                <p className="mt-2 text-xs leading-5 text-[color:var(--shell-muted)]">Open the latest position, exact timestamp, route basis, and sampled trail.</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="transport-workspace" aria-busy={loading}>
@@ -597,9 +676,9 @@ export default function TransportWorkspace({ initialCountry }: Props) {
               selectCountry(event.currentTarget.value);
             }}
           >
-            {(overview?.countries ?? []).map((entry) => (
-              <option key={entry.country} value={entry.country}>
-                {entry.country_name} ({entry.country})
+            {transportCountryOptions.map((entry) => (
+              <option key={entry.code} value={entry.code}>
+                {entry.name} ({entry.code})
               </option>
             ))}
           </select>
@@ -641,6 +720,54 @@ export default function TransportWorkspace({ initialCountry }: Props) {
           <div>
             <strong>Transport intelligence is temporarily unavailable</strong>
             <span>{error}</span>
+          </div>
+        </div>
+      )}
+
+      {overview && (
+        <div className="transport-notice" role="status">
+          <LocateFixed />
+          <div>
+            <strong>
+              Observed scope: {selectedCountryInsight?.countryName ?? country}
+              {selectedCorridor ? ` ↔ ${selectedCorridor.countryName}` : " and its resolved relationships"}
+            </strong>
+            <span>
+              Snapshot {generatedTimestamp?.relative ?? "time unavailable"}
+              {generatedTimestamp ? ` · ${generatedTimestamp.exact}` : ""}. Counts represent provider records linked to this scope, not complete national or global traffic.
+            </span>
+            <span>
+              Aviation samples {overview.coverage.aviation.poll_areas} configured poll {overview.coverage.aviation.poll_areas === 1 ? "area" : "areas"}; maritime uses AISstream with Fintraffic as a regional fallback. Missing positions can reflect provider coverage, freshness limits, unresolved routes, or vessels outside the fallback region.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {maritimeCoverage && maritimeRuntimeLabel(maritimeCoverage) && (
+        <div className="transport-notice" role="status">
+          <Ship />
+          <div>
+            <strong>Maritime coverage is limited</strong>
+            <span>{maritimeRuntimeLabel(maritimeCoverage)}.</span>
+            <span>
+              AISstream: {primaryMaritimeTimestamp ? `${primaryMaritimeTimestamp.relative} · ${primaryMaritimeTimestamp.exact}` : "no usable timestamp"}
+              {fallbackMaritimeTimestamp ? ` · Fintraffic fallback: ${fallbackMaritimeTimestamp.relative} · ${fallbackMaritimeTimestamp.exact}` : ""}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {!loading && overview && (summary?.active ?? 0) === 0 && (
+        <div className="transport-notice" role="status">
+          <AlertTriangle />
+          <div>
+            <strong>No fresh drawable vehicles are linked to {country}</strong>
+            <span>
+              This is a coverage result, not evidence that transport has stopped. Try Combined mode, refresh the provider snapshot, or choose another country; routes can also remain unresolved until origin and destination metadata arrive.
+            </span>
+            <span>
+              Aircraft latest: {aviationTimestamp ? `${aviationTimestamp.relative} · ${aviationTimestamp.exact}` : "not observed"} · vessel latest: {maritimeTimestamp ? `${maritimeTimestamp.relative} · ${maritimeTimestamp.exact}` : "not observed"}.
+            </span>
           </div>
         </div>
       )}
@@ -722,30 +849,22 @@ export default function TransportWorkspace({ initialCountry }: Props) {
         )}
       </div>
 
-      {!selectedCorridor && (
-        <div className="transport-takeaway-grid" aria-label="Transport takeaways">
-          {(overview?.takeaways ?? []).map((takeaway) => {
-            const DirectionIcon =
-              takeaway.direction === "up"
-                ? TrendingUp
-                : takeaway.direction === "down"
-                  ? TrendingDown
-                  : Minus;
-            return (
-              <article key={takeaway.id} data-direction={takeaway.direction}>
-                <div>
-                  {takeaway.mode === "aviation" ? <Plane /> : <Ship />}
-                  <span>{takeaway.title}</span>
-                  <strong>
-                    <DirectionIcon />
-                    {changeLabel(takeaway.change_pct, takeaway.direction)}
-                  </strong>
-                </div>
-                <p>{takeaway.summary}</p>
-                <small>{takeaway.qualifier}</small>
-              </article>
-            );
-          })}
+      {scopeSignals.length > 0 && (
+        <div className="transport-takeaway-grid" aria-label="Actionable scoped transport signals">
+          {scopeSignals.map((signal) => (
+            <article
+              key={signal.id}
+              data-direction={signal.emphasis === "attention" ? "up" : signal.emphasis === "change" ? "new" : "flat"}
+            >
+              <div>
+                {signal.emphasis === "attention" ? <AlertTriangle /> : <Route />}
+                <span>{signal.title}</span>
+                <strong>{selectedCorridor ? `${country} ↔ ${selectedCorridor.country}` : country}</strong>
+              </div>
+              <p>{signal.summary}</p>
+              <small>Investigative lead · validate against timestamp, route basis, and provider coverage below</small>
+            </article>
+          ))}
         </div>
       )}
 
@@ -895,7 +1014,9 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                 : selectedCountryInsight
                   ? `${selectedCountryInsight.linkedEntities.length} linked vehicles · ${selectedCountryInsight.inbound} inbound · ${selectedCountryInsight.outbound} outbound · `
                   : ""}
-              Flights {timeLabel(aviation?.latest_observed_at)} · vessels {timeLabel(maritime?.latest_observed_at)}
+              Flights {aviationTimestamp?.relative ?? "awaiting data"}
+              {aviationTimestamp ? ` (${aviationTimestamp.exact})` : ""} · vessels {maritimeTimestamp?.relative ?? "awaiting data"}
+              {maritimeTimestamp ? ` (${maritimeTimestamp.exact})` : ""}
             </small>
           </header>
           <TransportTrackingMap
@@ -984,7 +1105,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                 ) : (
                   <>
                     <LocateFixed /> Last observed {timeLabel(selected.observed_at)} ·{" "}
-                    {track.length} sampled trail points
+                    {exactTimeLabel(selected.observed_at)} · {track.length} sampled trail points
                   </>
                 )}
               </p>
@@ -1024,7 +1145,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                           <small>{connection.description}</small>
                           <small>
                             {entity.mode === "aviation" ? "Flight" : "Vessel"} · seen{" "}
-                            {timeLabel(entity.observed_at)}
+                            {timeLabel(entity.observed_at)} · {exactTimeLabel(entity.observed_at)}
                           </small>
                         </span>
                         <em data-role={connection.role}>{connection.label}</em>
@@ -1211,7 +1332,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             ))}
             {displayedRoutes.length === 0 && (
               <div className="transport-chart-empty">
-                Routes appear as AIS destinations and plausible flight airport pairs resolve.
+                No resolved {selectedCorridor ? `${country} ↔ ${selectedCorridor.country}` : country} route is available in this snapshot. AIS destinations and plausible flight airport pairs appear only after both endpoints resolve; flag-state links remain contextual rather than a route.
               </div>
             )}
           </div>
@@ -1221,7 +1342,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
           <header>
             <div>
               <span>Normalized activity with drill-in</span>
-              <h2>Country transport activity ranking</h2>
+              <h2>Countries connected to this observed scope</h2>
             </div>
             <small title={overview?.activity_ranking?.methodology.index}>
               Index blends live links, ship movements, and tracked flights
@@ -1409,9 +1530,19 @@ export default function TransportWorkspace({ initialCountry }: Props) {
                       ? formatNumber(entity.altitude, " ft")
                       : entity.status ?? "Under way"}
                   </td>
-                  <td>{timeLabel(entity.observed_at)}</td>
+                  <td>
+                    {timeLabel(entity.observed_at)}
+                    <small>{exactTimeLabel(entity.observed_at)}</small>
+                  </td>
                 </tr>
               ))}
+              {displayedEntities.length === 0 && (
+                <tr>
+                  <td colSpan={7}>
+                    No fresh vehicle records match {selectedCorridor ? `${country} ↔ ${selectedCorridor.country}` : country}. This can reflect provider silence, geographic sampling, route-resolution delay, or the selected mode—not a confirmed absence of traffic.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

@@ -93,7 +93,16 @@ const relationshipLabels: Record<string, { label: string; explanation: string; c
 
 function dateLabel(value: string) {
   const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
+  if (Number.isNaN(parsed)) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(parsed));
 }
 
 function confidenceLabel(value: number) {
@@ -255,7 +264,8 @@ export default function IntelligenceWorkspace({
       summary: evidenceSummary(item),
       url: evidenceUrl(item),
       publisher: item.source_name,
-      observed_at: item.published_at || item.observed_at,
+      published_at: item.published_at,
+      observed_at: item.observed_at,
       confidence: item.confidence,
     }));
   }, [detail?.linked_news, linkedReporting]);
@@ -338,7 +348,7 @@ export default function IntelligenceWorkspace({
       <section className="app-card-hero rounded-xl p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">Signal Desk · shared event graph</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">Event investigation · shared evidence graph</div>
             <h1 className="mt-1 text-2xl font-semibold text-[color:var(--shell-ink)]">Investigate the event, then trace every source</h1>
             <p className="mt-2 max-w-3xl text-sm text-[color:var(--shell-muted)]">
               News, official observations, transport, markets, and satellite context are organized as one time-ordered evidence thread. Relationship labels distinguish reporting from observation and analysis.
@@ -347,7 +357,7 @@ export default function IntelligenceWorkspace({
           <div className="flex flex-wrap gap-2">
             {onOpenImagery && (
               <button type="button" onClick={() => onOpenImagery(selectedId ?? undefined)} className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] px-3 py-2 text-sm text-[color:var(--shell-ink)]">
-                <Satellite className="h-4 w-4" /> Imagery library
+                <Satellite className="h-4 w-4" /> Satellite assessment
               </button>
             )}
             <button type="button" onClick={() => void loadEvents()} className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] px-3 py-2 text-sm text-[color:var(--shell-ink)]">
@@ -401,6 +411,9 @@ export default function IntelligenceWorkspace({
                     <span>{event.evidence_count} linked</span>
                     {event.earth_observation_available && <span className="inline-flex items-center gap-1 text-[color:var(--signal-emerald)]"><Satellite className="h-3 w-3" />Imagery</span>}
                   </div>
+                  <time dateTime={event.last_activity_time} className="mt-2 block text-[10px] tabular-nums text-[color:var(--shell-muted)]">
+                    Latest evidence {dateLabel(event.last_activity_time)}
+                  </time>
                 </button>
               );
             })}
@@ -444,6 +457,14 @@ export default function IntelligenceWorkspace({
                   <article className="event-answer-card">
                     <div className="event-answer-label">Where</div>
                     <p className="inline-flex items-start gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--shell-accent-2)]" /><span>{detail.understanding?.where || detailPresentation?.locationLabel}{detail.event.primary_country_iso2 && !detail.understanding?.where && detailPresentation?.locationLabel !== detail.event.primary_country_iso2 ? ` · ${detail.event.primary_country_iso2}` : ""}{detail.locations.length ? ` · ${detail.locations.length} linked ${detail.locations.length === 1 ? "location" : "locations"}` : ""}</span></p>
+                    {detail.understanding?.coordinates && (
+                      <p className="mt-2 text-xs text-[color:var(--shell-muted)]">
+                        {detail.understanding.coordinates.label} · {detail.understanding.coordinates.basis === "source_observed" ? "source-observed geography" : "estimated mapped geography"}
+                      </p>
+                    )}
+                    {!detail.understanding?.coordinates && detail.understanding?.location_basis === "unresolved" && (
+                      <p className="mt-2 text-xs text-[color:var(--shell-muted)]">No defensible event coordinate is available yet.</p>
+                    )}
                   </article>
                   <article className="event-answer-card">
                     <div className="event-answer-label">Why it matters</div>
@@ -469,7 +490,13 @@ export default function IntelligenceWorkspace({
                     {linkedNews.slice(0, 6).map((item) => {
                       return (
                         <article key={`report-${item.id}`} className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-4">
-                          <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.12em] text-[color:var(--shell-muted)]"><span>{item.publisher || "Reporting source"}</span><span>{dateLabel(item.observed_at)}</span></div>
+                          <div className="flex items-start justify-between gap-3 text-[10px] uppercase tracking-[0.12em] text-[color:var(--shell-muted)]">
+                            <span>{item.publisher || "Reporting source"}</span>
+                            <span className="text-right normal-case tracking-normal">
+                              {item.published_at ? <>Published {dateLabel(item.published_at)}<br /></> : null}
+                              <span>Received {dateLabel(item.observed_at)}</span>
+                            </span>
+                          </div>
                           <h4 className="mt-2 text-sm font-semibold leading-5 text-[color:var(--shell-ink)]">{item.title}</h4>
                           {item.summary && <p className="mt-1 line-clamp-3 text-xs leading-5 text-[color:var(--shell-muted)]">{item.summary}</p>}
                           <div className="mt-3 flex items-center justify-between gap-3 text-[10px] text-[color:var(--shell-muted)]"><span>{confidenceLabel(item.confidence)} linkage confidence</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[color:var(--signal-sky)]">Read report <ExternalLink className="h-3 w-3" /></a>}</div>
@@ -484,7 +511,7 @@ export default function IntelligenceWorkspace({
 
               <section aria-labelledby="evidence-thread-heading">
                 <div className="flex items-end justify-between gap-3">
-                  <div><div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Red thread</div><h3 id="evidence-thread-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">Evidence in chronological order</h3></div>
+                  <div><div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Evidence timeline</div><h3 id="evidence-thread-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">Sources and observations in chronological order</h3></div>
                   <span className="text-xs text-[color:var(--shell-muted)]">{evidenceThread.length} items · {detail.event.domain_count} domains</span>
                 </div>
                 <ol className="mt-4 space-y-3 border-l border-[color:var(--shell-border)] pl-4">
@@ -497,7 +524,10 @@ export default function IntelligenceWorkspace({
                         <div className="flex flex-wrap items-center gap-2">
                           <span title={relationship.explanation} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${relationship.className}`}>{relationship.label}</span>
                           <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">{item.domain.replace(/_/g, " ")}</span>
-                          <span className="ml-auto text-[10px] text-[color:var(--shell-muted)]">{dateLabel(item.observed_at)}</span>
+                          <span className="ml-auto text-right text-[10px] leading-4 text-[color:var(--shell-muted)]">
+                            {item.published_at ? <>Published {dateLabel(item.published_at)}<br /></> : null}
+                            Evidence received {dateLabel(item.observed_at)}
+                          </span>
                         </div>
                         <h4 className="mt-2 text-sm font-semibold capitalize text-[color:var(--shell-ink)]">{evidenceTitle(item)}</h4>
                         {summary && <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">{summary}</p>}

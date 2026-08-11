@@ -44,4 +44,44 @@ describe("presentEvent", () => {
     expect(result.headline).toBe("Geopolitical Development in Russia");
     expect(result.focus).toBeNull();
   });
+
+  it("does not let a generic Global label override known geography", () => {
+    const result = presentEvent({
+      ...baseEvent,
+      location_name: "Global",
+      primary_country_iso2: "CO",
+      location_type: "city",
+      latitude: 4.12345,
+      longitude: -73.98765,
+      metadata: { exact_geography: true },
+    });
+    expect(result.locationLabel).toBe("Colombia");
+    expect(result.locationBasis).toBe("Source-observed coordinates");
+    expect(result.coordinateLabel).toBe("4.1235° N, 73.9877° W");
+  });
+
+  it("does not present a country reference point as an event coordinate", () => {
+    const result = presentEvent({
+      ...baseEvent,
+      location_name: "Global",
+      location_type: "country",
+      latitude: 61.52,
+      longitude: 105.31,
+    });
+    expect(result.locationLabel).toBe("Russia");
+    expect(result.coordinateLabel).toBeNull();
+  });
+
+  it("does not coerce missing coordinates to Null Island", () => {
+    const result = presentEvent({
+      ...baseEvent,
+      primary_country_iso2: null,
+      location_name: "Global",
+      latitude: null,
+      longitude: null,
+    });
+    expect(result.locationLabel).toBe("Global");
+    expect(result.coordinateLabel).toBeNull();
+    expect(result.locationBasis).toBeNull();
+  });
 });

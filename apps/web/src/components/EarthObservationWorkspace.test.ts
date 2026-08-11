@@ -68,6 +68,26 @@ describe("findDefensibleComparisonPair", () => {
     }, "event-a")).toBeNull();
   });
 
+  it("prefers a natural-colour comparison over a newer radar pair", () => {
+    const rows = [
+      observation("natural-before", "event-a", "location-a", "2026-08-08T08:00:00Z"),
+      observation("natural-after", "event-a", "location-a", "2026-08-09T08:00:00Z"),
+      { ...observation("radar-before", "event-a", "location-a", "2026-08-10T08:00:00Z"), product_type: "sar" },
+      { ...observation("radar-after", "event-a", "location-a", "2026-08-11T08:00:00Z"), product_type: "sar" },
+    ];
+    const pair = findDefensibleComparisonPair(rows, "event-a");
+    expect(pair?.before.id).toBe("natural-before");
+    expect(pair?.after.id).toBe("natural-after");
+  });
+
+  it("does not promote false-colour composites into the generic comparison canvas", () => {
+    const rows = [
+      { ...observation("before", "event-a", "location-a", "2026-08-10T08:00:00Z"), product_type: "false_color" },
+      { ...observation("after", "event-a", "location-a", "2026-08-11T08:00:00Z"), product_type: "false_color" },
+    ];
+    expect(findDefensibleComparisonPair(rows, "event-a")).toBeNull();
+  });
+
   it("fails closed when the backend rejects or selects a different comparison", () => {
     const before = observation("before", "event-a", "location-a", "2026-08-10T08:00:00Z");
     const after = observation("after", "event-a", "location-a", "2026-08-11T08:00:00Z");

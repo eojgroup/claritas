@@ -53,15 +53,16 @@ describe("IntelligenceEventStrip", () => {
     expect(await screen.findByText("No material correlated changes")).toBeTruthy();
   });
 
-  it("renders priority, confidence, provenance counts, and opens the workspace", async () => {
+  it("renders priority, exact freshness, provenance counts, and opens the investigation", async () => {
     const onOpen = vi.fn();
     vi.mocked(fetchIntelligenceEvents).mockResolvedValue([event]);
     render(<IntelligenceEventStrip country="SG" onOpen={onOpen} />);
     expect(await screen.findByText(event.title)).toBeTruthy();
     expect(screen.getByText("96% confidence")).toBeTruthy();
-    expect(screen.getByText("4 linked")).toBeTruthy();
+    expect(screen.getByText("4 evidence")).toBeTruthy();
     expect(screen.getByText("94% relevance")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Open workspace/i }));
+    expect(screen.getByText(/Updated .*2026.*09:05:00/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /View all investigations/i }));
     expect(onOpen).toHaveBeenLastCalledWith();
     fireEvent.click(screen.getByRole("button", { name: `Investigate ${event.title}` }));
     expect(onOpen).toHaveBeenLastCalledWith(event.id);

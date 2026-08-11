@@ -1,6 +1,11 @@
 import type { EarthObservation } from "../lib/api";
 
-const READABLE_COMPARISON_PRODUCTS = new Set(["true_color", "false_color", "sar"]);
+// Default comparison is intentionally conservative: natural colour is easiest
+// to interpret, while radar remains useful when no optical pair exists. False
+// colour and derived indices require specialist interpretation and must not be
+// promoted into the generic before/after canvas.
+const READABLE_COMPARISON_PRODUCTS = new Set(["true_color", "sar"]);
+const COMPARISON_PRODUCT_RANK: Record<string, number> = { true_color: 0, sar: 1 };
 
 function hasPreview(observation: EarthObservation) {
   return Boolean(observation.assets?.find((asset) => asset.asset_type === "preview") ?? observation.assets?.[0]);
@@ -16,7 +21,11 @@ export function findDefensibleComparisonPair(
       && READABLE_COMPARISON_PRODUCTS.has(item.product_type)
       && (eventId ? item.event_id === eventId : Boolean(item.location_id))
     ))
-    .sort((left, right) => Date.parse(right.capture_start) - Date.parse(left.capture_start));
+    .sort((left, right) => (
+      (COMPARISON_PRODUCT_RANK[left.product_type] ?? 99)
+      - (COMPARISON_PRODUCT_RANK[right.product_type] ?? 99)
+      || Date.parse(right.capture_start) - Date.parse(left.capture_start)
+    ));
 
   for (const after of candidates) {
     if (eventId && after.event_id !== eventId) continue;

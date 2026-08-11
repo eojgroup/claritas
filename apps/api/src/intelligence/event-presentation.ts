@@ -44,6 +44,49 @@ function count(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : null;
 }
 
+const GENERIC_LOCATIONS = new Set([
+  "global",
+  "international",
+  "location not yet resolved",
+  "unknown",
+  "unspecified",
+  "world",
+  "worldwide",
+]);
+
+function countryName(value: unknown): string | null {
+  const iso2 = boundedText(value, 2)?.toUpperCase();
+  if (!iso2 || !/^[A-Z]{2}$/.test(iso2)) return null;
+  try {
+    return new Intl.DisplayNames(["en"], { type: "region" }).of(iso2) || iso2;
+  } catch {
+    return iso2;
+  }
+}
+
+function eventCoordinate(event: Record<string, unknown>) {
+  if (event.latitude == null || event.longitude == null
+    || event.latitude === "" || event.longitude === "") return null;
+  const latitude = Number(event.latitude);
+  const longitude = Number(event.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
+    || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  const metadata = event.metadata && typeof event.metadata === "object"
+    ? event.metadata as Record<string, unknown>
+    : {};
+  const exact = metadata.exact_geography === true;
+  if (!exact && boundedText(event.location_type, 30)?.toLowerCase() === "country") return null;
+  const part = (coordinate: number, positive: string, negative: string) => (
+    `${Math.abs(coordinate).toFixed(4)}° ${coordinate >= 0 ? positive : negative}`
+  );
+  return {
+    latitude,
+    longitude,
+    label: `${part(latitude, "N", "S")}, ${part(longitude, "E", "W")}`,
+    basis: exact ? "source_observed" as const : "estimated_mapped" as const,
+  };
+}
+
 function actionRoot(input: GdeltPresentationInput): string | null {
   const root = boundedText(input.eventRootCode, 2);
   if (root && /^\d{2}$/.test(root)) return root;
@@ -95,9 +138,16 @@ export function buildGdeltEventPresentation(input: GdeltPresentationInput) {
 }
 
 export function buildEventUnderstanding(event: Record<string, unknown>, evidence: Array<Record<string, unknown>>) {
-  const location = boundedText(event.location_name)
-    || boundedText(event.primary_country_iso2, 2)
-    || "Location not yet resolved";
+  const rawLocation = boundedText(event.location_name);
+  const specificRawLocation = rawLocation && !GENERIC_LOCATIONS.has(rawLocation.toLowerCase())
+    ? rawLocation
+    : null;
+  const coordinate = eventCoordinate(event);
+  const location = specificRawLocation
+    ? specificRawLocation
+    : countryName(event.primary_country_iso2)
+      || (coordinate ? "Mapped event location" : null)
+      || "Location not yet resolved";
   const domainCount = Math.max(0, count(event.domain_count) ?? 0);
   const evidenceCount = Math.max(0, count(event.evidence_count) ?? evidence.length);
   const newsCount = evidence.filter((item) => (
@@ -119,8 +169,27 @@ export function buildEventUnderstanding(event: Record<string, unknown>, evidence
   return {
     what_happened: boundedText(event.summary, 1_800) || boundedText(event.title, 300) || "Event details are still emerging.",
     where: location,
+    location_basis: coordinate?.basis ?? (location === "Location not yet resolved" ? "unresolved" : "named_location"),
+    coordinates: coordinate,
     why_interesting: `${interestParts.join("; ")}. Correlation supplies context and does not establish causation.`,
     linked_news_count: newsCount,
     physical_observation_count: physicalCount,
+  };
+}
+
+export function buildLinkedNewsPresentation(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    evidence_type: row.evidence_type,
+    relationship: row.relationship,
+    title: row.source_title,
+    summary: row.source_summary,
+    url: row.source_url,
+    publisher: row.attribution ?? row.source_name,
+    // Publication and evidence receipt are intentionally separate. The latter
+    // can lag well behind the article and must not be presented as news time.
+    published_at: row.published_at ?? null,
+    observed_at: row.observed_at,
+    confidence: row.confidence,
   };
 }

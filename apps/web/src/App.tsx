@@ -17,6 +17,7 @@ import {
   Sun,
   LogOut,
   ChevronLeft,
+  ChevronDown,
   Menu,
   LayoutGrid,
   FileText,
@@ -27,8 +28,6 @@ import {
   Podcast,
   RefreshCw,
   Route,
-  Radar,
-  Satellite,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -133,6 +132,15 @@ type AppView =
   | "admin"
   | "profile"
   | "legal";
+const OVERVIEW_DRILLDOWN_VIEWS = new Set<AppView>([
+  "news",
+  "podcasts",
+  "weather",
+  "markets",
+  "transport",
+  "intelligence",
+  "earth-observation",
+]);
 type SignalNotification = {
   id: string;
   title: string;
@@ -460,6 +468,31 @@ const formatSignedMetric = (
   return `${value >= 0 ? "+" : "-"}${abs}${suffix}`;
 };
 
+const formatExactTimestamp = (
+  value: string | number | Date | null | undefined,
+): string => {
+  if (value == null || value === "") return "Timestamp unavailable";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+};
+
+const friendlyWorkspaceError = (value: string | null | undefined): string => {
+  if (!value) return "";
+  if (/\b(?:502|503|504)\b|<!doctype|<html|server error/i.test(value)) {
+    return "The live event service is temporarily unavailable. The map remains usable; retry shortly.";
+  }
+  return value.length > 180 ? `${value.slice(0, 177)}…` : value;
+};
+
 const getBrowserTimeZone = (): string => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -714,6 +747,7 @@ import EarthObservationWorkspace from "./components/EarthObservationWorkspace";
 import IntelligenceEventStrip from "./components/IntelligenceEventStrip";
 import AdminWorkspace from "./components/AdminWorkspace";
 import SatelliteContextPanel from "./components/SatelliteContextPanel";
+import { eventCoordinateContext } from "./components/eventPresentation";
 import {
   fetchAuthMe,
   fetchAuthProviders,
@@ -956,6 +990,7 @@ export default function ClaritasDashboard() {
   const [dailyBriefingScheduleNotice, setDailyBriefingScheduleNotice] = useState<string | null>(null);
   const profileSections = PROFILE_SECTIONS;
   const feedRef = useRef<HTMLDivElement | null>(null);
+  const dashboardFeedPanelRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const newsRequestIdRef = useRef(0);
   const podcastRequestIdRef = useRef(0);
@@ -1148,12 +1183,9 @@ export default function ClaritasDashboard() {
       low: 1,
     };
     return overviewEvents
-      .filter((event) =>
-        event.latitude != null &&
-        event.longitude != null &&
-        Number.isFinite(Number(event.latitude)) &&
-        Number.isFinite(Number(event.longitude)),
-      )
+      // Country reference points support choropleth context but are not event
+      // locations. Dots require defensible source or mapped event geography.
+      .filter((event) => Boolean(eventCoordinateContext(event)))
       .sort((left, right) =>
         severityRank[right.severity] - severityRank[left.severity] ||
         Number(right.relevance_score) - Number(left.relevance_score),
@@ -1176,7 +1208,7 @@ export default function ClaritasDashboard() {
           latitude: Number(event.latitude),
           longitude: Number(event.longitude),
           title: event.title,
-          subtitle: `${event.location_name || event.primary_country_iso2 || "Estimated event location"} · ${event.domain_count} domain${event.domain_count === 1 ? "" : "s"}`,
+          subtitle: `${event.location_name || event.primary_country_iso2 || "Estimated event location"} · updated ${formatExactTimestamp(event.last_activity_time)} · ${event.domain_count} domain${event.domain_count === 1 ? "" : "s"}`,
           label,
           severity: event.severity,
           hasImagery: event.earth_observation_available,
@@ -3310,13 +3342,7 @@ export default function ClaritasDashboard() {
       });
     });
     if (times.length === 0) return "Awaiting new syncs";
-    const latest = new Date(Math.max(...times));
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(latest);
+    return formatExactTimestamp(Math.max(...times));
   }, [countryMarkets, filteredNews, filteredWeather]);
 
   const focusLabel = useMemo(() => {
@@ -3421,12 +3447,7 @@ export default function ClaritasDashboard() {
       if (!value) return "Current";
       const time = Date.parse(value);
       if (Number.isNaN(time)) return value;
-      return new Intl.DateTimeFormat("en-US", {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      }).format(new Date(time));
+      return formatExactTimestamp(time);
     };
 
     intelligenceAlerts.slice(0, 4).forEach((alert) => {
@@ -3883,27 +3904,6 @@ export default function ClaritasDashboard() {
       icon: LayoutGrid,
       group: "core",
     },
-    {
-      id: "intelligence",
-      label: "Signal desk",
-      view: "intelligence" as const,
-      icon: Radar,
-      group: "core",
-    },
-    {
-      id: "earth-observation",
-      label: "Satellite imagery",
-      view: "earth-observation" as const,
-      icon: Satellite,
-      group: "core",
-    },
-    {
-      id: "transport",
-      label: "Live transport",
-      view: "transport" as const,
-      icon: Route,
-      group: "explore",
-    },
     ...(isAdmin
       ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings, group: "operations" }]
       : []),
@@ -3943,14 +3943,14 @@ export default function ClaritasDashboard() {
       summary: "Live tracks, flight numbers, corridors, and country relationships",
     },
     intelligence: {
-      kicker: "Unified event workspace",
-      title: "Signal desk",
-      summary: "One chronological thread across reporting, observations, operations, and impact",
+      kicker: "Overview drill-down",
+      title: "Event investigation",
+      summary: "A selected event traced across reporting, observations, operations, and impact",
     },
     "earth-observation": {
-      kicker: "Investigation evidence",
-      title: "Imagery library",
-      summary: "Event-scoped scenes, acquisition quality, provenance, and defensible comparisons",
+      kicker: "Event evidence drill-down",
+      title: "Satellite assessment",
+      summary: "Event-scoped scenes, acquisition time, quality, provenance, and defensible comparisons",
     },
     admin: {
       kicker: "Control room",
@@ -4226,7 +4226,10 @@ export default function ClaritasDashboard() {
               <nav className="flex-1 px-3 py-2 space-y-1">
                 {navItems.map((item) => {
                   const Icon = item.icon;
-                  const active = activeView === item.view;
+                  const active = activeView === item.view || (
+                    item.view === "dashboard" &&
+                    OVERVIEW_DRILLDOWN_VIEWS.has(activeView)
+                  );
                   return (
                     <button
                       key={item.id}
@@ -4303,7 +4306,10 @@ export default function ClaritasDashboard() {
           <nav className="flex-1 px-3 py-2 space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const active = activeView === item.view;
+              const active = activeView === item.view || (
+                item.view === "dashboard" &&
+                OVERVIEW_DRILLDOWN_VIEWS.has(activeView)
+              );
               return (
                 <button
                   key={item.id}
@@ -4768,15 +4774,34 @@ export default function ClaritasDashboard() {
               </div>
             )}
 
+            {OVERVIEW_DRILLDOWN_VIEWS.has(activeView) && (
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveView("dashboard")}
+                  className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm font-semibold text-[color:var(--shell-ink)] hover:border-[color:var(--shell-ink)]"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Back to overview map
+                </button>
+                {activeView === "earth-observation" && selectedIntelligenceEventId && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveView("intelligence")}
+                    className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm font-semibold text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
+                  >
+                    Back to event investigation
+                    <ArrowUpRight className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            )}
+
             {activeView === "dashboard" && (
               <div className="workspace-page dashboard-workspace relative flex flex-col gap-4">
-                <IntelligenceEventStrip
-                  country={selectedCountry}
-                  onOpen={handleOpenIntelligence}
-                />
                 <div className="relative flex flex-col gap-4">
                   <div
-                    className="kpi-strip dashboard-kpis app-card-hero dashboard-panel rounded-xl px-4 py-3"
+                    className="kpi-strip dashboard-kpis app-card-hero dashboard-panel order-[3] rounded-xl px-4 py-3"
                     style={{ animationDelay: "0ms" }}
                   >
                     <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1fr)_repeat(4,minmax(7.25rem,0.5fr))] lg:items-center">
@@ -4787,7 +4812,7 @@ export default function ClaritasDashboard() {
                         <div
                           className="mt-1 text-base font-semibold text-[color:var(--shell-ink)]"
                         >
-                          {signalNotifications.length} active signals require review
+                          {signalNotifications.length} current signals need attention
                         </div>
                         <p className="mt-1 max-w-2xl text-xs text-[color:var(--shell-muted)] sm:text-sm">
                           {activeRangeLabel} · Latest source update {latestEventLabel}
@@ -4841,7 +4866,7 @@ export default function ClaritasDashboard() {
                   </div>
 
                   <div
-                    className="operational-control-bar dashboard-panel rounded-xl px-4 py-3"
+                    className="operational-control-bar dashboard-panel order-[4] rounded-xl px-4 py-3"
                     style={{ animationDelay: "40ms" }}
                   >
                     <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -4925,86 +4950,84 @@ export default function ClaritasDashboard() {
                     </div>
                     {newsLoadError && (
                       <div className="mt-3 w-full text-xs text-[color:var(--viz-negative)]">
-                        Failed to refresh news data: {newsLoadError}
+                        {friendlyWorkspaceError(newsLoadError)}
                       </div>
                     )}
                   </div>
 
                   <section
-                    className={`${cardBase} briefing-rail dashboard-panel p-4`}
+                    className={`${cardBase} briefing-rail dashboard-panel order-[5] p-4`}
                     style={{ animationDelay: "80ms" }}
                   >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          <FileText className="h-3.5 w-3.5" />
-                          Daily briefing
-                        </div>
-                        <div
-                          className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]"
-                          style={{ fontFamily: "var(--font-display)" }}
-                        >
-                          {dailyBriefing?.title ?? "Daily signal brief"}
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
-                          <span>
-                            {dailyBriefing ? dailyBriefingDateLabel : "No published briefing"}
-                          </span>
-                          {dailyBriefing?.generated_by && (
-                            <span>{dailyBriefing.generated_by}</span>
-                          )}
-                          {dailyBriefing?.published_at && (
-                            <span>
-                              Updated {new Date(dailyBriefing.published_at).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-3 max-w-4xl text-sm leading-6 text-[color:var(--shell-muted)]">
-                          {dailyBriefing?.update_text ||
-                            (dailyBriefingError ? "Briefing unavailable." : "Awaiting briefing.")}
-                        </p>
-                        <div className="briefing-source-links mt-3">
-                          <span>Linked evidence</span>
-                          <button
-                            type="button"
-                            onClick={() => setActiveView("podcasts")}
-                          >
-                            <Podcast className="h-3.5 w-3.5" />
-                            <strong>Podcast</strong>
-                            <small>
-                              {podcastSummary.signals} signals ·{" "}
-                              {podcastSummary.evidence} excerpts
-                            </small>
-                          </button>
-                        </div>
-                      </div>
-                      <div className="w-full rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 lg:max-w-md">
-                        <div className="text-[11px] uppercase tracking-[0.25em] text-[color:var(--shell-muted)]">
-                          Key takeaways
-                        </div>
-                        {dailyBriefing?.key_takeaways?.length ? (
-                          <ul className="mt-2 space-y-2 text-sm text-[color:var(--shell-ink)]">
-                            {dailyBriefing.key_takeaways.map((item, idx) => (
-                              <li
-                                key={`${dailyBriefing.id}-takeaway-${idx}`}
-                                className="flex gap-2"
-                              >
-                                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--signal-amber)]" />
-                                <span>{item}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <div className="mt-2 text-sm text-[color:var(--shell-muted)]">
-                            Takeaways pending.
+                    <details className="group">
+                      <summary className="cursor-pointer list-none">
+                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                              <FileText className="h-3.5 w-3.5" />
+                              Daily briefing · map context
+                            </div>
+                            <div className="mt-1 truncate text-base font-semibold text-[color:var(--shell-ink)]">
+                              {dailyBriefing?.title ?? "Daily signal brief"}
+                            </div>
                           </div>
-                        )}
+                          <div className="flex min-w-0 flex-col gap-1 text-xs text-[color:var(--shell-muted)] lg:max-w-2xl lg:items-end">
+                            <span>
+                              {dailyBriefing?.published_at
+                                ? `Published ${formatExactTimestamp(dailyBriefing.published_at)}`
+                                : "No published briefing"}
+                            </span>
+                            <span className="line-clamp-1 text-[color:var(--shell-ink)]">
+                              {dailyBriefing?.key_takeaways?.[0] ??
+                                (dailyBriefingError ? "Briefing unavailable." : "Takeaways pending.")}
+                            </span>
+                            <span className="inline-flex items-center gap-1 self-start font-semibold text-[color:var(--shell-accent-2)] lg:self-auto">
+                              Open full briefing
+                              <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+                            </span>
+                          </div>
+                        </div>
+                      </summary>
+                      <div className="mt-4 grid gap-4 border-t border-[color:var(--shell-border)] pt-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.55fr)]">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
+                            <span>{dailyBriefing ? dailyBriefingDateLabel : "No published briefing"}</span>
+                            {dailyBriefing?.generated_by && <span>{dailyBriefing.generated_by}</span>}
+                          </div>
+                          <p className="mt-3 text-sm leading-6 text-[color:var(--shell-muted)]">
+                            {dailyBriefing?.update_text ||
+                              (dailyBriefingError ? "Briefing unavailable." : "Awaiting briefing.")}
+                          </p>
+                          <div className="briefing-source-links mt-3">
+                            <span>Linked evidence</span>
+                            <button type="button" onClick={() => setActiveView("podcasts")}>
+                              <Podcast className="h-3.5 w-3.5" />
+                              <strong>Podcast</strong>
+                              <small>{podcastSummary.signals} signals · {podcastSummary.evidence} excerpts</small>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
+                          <div className="text-[11px] uppercase tracking-[0.25em] text-[color:var(--shell-muted)]">Key takeaways</div>
+                          {dailyBriefing?.key_takeaways?.length ? (
+                            <ul className="mt-2 space-y-2 text-sm text-[color:var(--shell-ink)]">
+                              {dailyBriefing.key_takeaways.map((item, idx) => (
+                                <li key={`${dailyBriefing.id}-takeaway-${idx}`} className="flex gap-2">
+                                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--signal-amber)]" />
+                                  <span>{item}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <div className="mt-2 text-sm text-[color:var(--shell-muted)]">Takeaways pending.</div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    </details>
                   </section>
 
                   <section
-                    className={`analytics-workspace-grid relative grid gap-4 ${
+                    className={`analytics-workspace-grid relative order-[1] grid gap-4 ${
                       splitViewEnabled
                         ? "xl:grid-cols-12 xl:items-stretch"
                         : "grid-cols-1"
@@ -5012,8 +5035,11 @@ export default function ClaritasDashboard() {
                   >
                     <div
                       id="signal-map-feed"
-                      className={`${dashboardPanelClass} geo-panel dashboard-map-panel xl:col-span-7`}
-                      style={{ animationDelay: "0ms" }}
+                      className={`${dashboardPanelClass} geo-panel dashboard-map-panel xl:col-span-8`}
+                      style={{
+                        animationDelay: "0ms",
+                        gridColumn: splitViewEnabled ? "span 8 / span 8" : undefined,
+                      }}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
                         <div>
@@ -5023,7 +5049,7 @@ export default function ClaritasDashboard() {
                           <div className="text-sm font-semibold">
                             Map:{" "}
                             {mapMode === "signals"
-                              ? `${overviewEventPoints.length} located events with source and satellite evidence`
+                              ? `${overviewEventPoints.length} located events · ${overviewEventPoints.filter((point) => point.hasImagery).length} with imagery`
                               : mapMode === "news"
                                 ? "#News per country"
                                 : "Weather (temperature) per country"}
@@ -5149,9 +5175,9 @@ export default function ClaritasDashboard() {
                       )}
                       <div className="relative flex-1 min-h-0 p-3">
                         <div
-                          className={`app-map-frame dashboard-map-frame relative min-h-0 ${
+                          className={`app-map-frame relative min-h-0 ${
                             splitViewEnabled
-                              ? "h-[clamp(18rem,38vh,28rem)]"
+                              ? "h-[clamp(24rem,50vh,36rem)]"
                               : "h-[58vh] max-h-[30rem] min-h-[20rem]"
                           }`}
                         >
@@ -5272,7 +5298,7 @@ export default function ClaritasDashboard() {
                           )}
                         {overviewEventsError && (
                           <div className="absolute bottom-4 left-4 rounded border border-rose-400/40 bg-[color:var(--shell-surface)] px-2 py-1 text-xs text-rose-600">
-                            Event layer unavailable: {overviewEventsError}
+                            {friendlyWorkspaceError(overviewEventsError)}
                           </div>
                         )}
                         {mapMode === "news" &&
@@ -5373,8 +5399,11 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <section
-                      className={`${dashboardPanelClass} context-intelligence-band xl:col-span-5`}
-                      style={{ animationDelay: "40ms" }}
+                      className={`${dashboardPanelClass} context-intelligence-band max-h-[clamp(28rem,62vh,46rem)] xl:col-span-4`}
+                      style={{
+                        animationDelay: "40ms",
+                        gridColumn: splitViewEnabled ? "span 4 / span 4" : undefined,
+                      }}
                     >
                       {selectedCountryContext ? (
                         <>
@@ -5413,7 +5442,10 @@ export default function ClaritasDashboard() {
                               onOpenEvent={handleOpenIntelligence}
                               onOpenImagery={(eventId) => handleOpenImagery(eventId)}
                             />
-                            <div className="country-profile-metrics">
+                            <div
+                              className="country-profile-metrics"
+                              style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
+                            >
                               <div>
                                 <span>Relevance</span>
                                 <strong>
@@ -5746,10 +5778,25 @@ export default function ClaritasDashboard() {
                           <div className="country-profile-actions">
                             <button
                               type="button"
-                              onClick={() => setActiveView("news")}
+                              onClick={() => {
+                                setListMode("news");
+                                requestAnimationFrame(() => {
+                                  dashboardFeedPanelRef.current?.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "start",
+                                  });
+                                });
+                              }}
                             >
-                              Open country news
-                              <ArrowUpRight className="h-3.5 w-3.5" />
+                              View country news below
+                              <Newspaper className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveView("transport")}
+                            >
+                              Open scoped transport
+                              <Route className="h-3.5 w-3.5" />
                             </button>
                             {relatedPodcastLink && (
                               <button
@@ -5762,15 +5809,29 @@ export default function ClaritasDashboard() {
                           </div>
                         </>
                       ) : (
-                        <SatelliteContextPanel
-                          country={selectedCountry}
-                          onOpenEvent={handleOpenIntelligence}
-                          onOpenImagery={(eventId) => handleOpenImagery(eventId)}
-                        />
+                        <div className="app-scroll-panel min-h-0 flex-1 overflow-y-auto">
+                          <SatelliteContextPanel
+                            country={selectedCountry}
+                            compact
+                            onOpenEvent={handleOpenIntelligence}
+                            onOpenImagery={(eventId) => handleOpenImagery(eventId)}
+                          />
+                        </div>
                       )}
                     </section>
 
                     <div
+                      className="order-[3] xl:col-span-12"
+                      style={{ gridColumn: "1 / -1" }}
+                    >
+                      <IntelligenceEventStrip
+                        country={selectedCountry}
+                        onOpen={handleOpenIntelligence}
+                      />
+                    </div>
+
+                    <div
+                      ref={dashboardFeedPanelRef}
                       className={`${dashboardPanelClass} feed-panel xl:col-span-12`}
                       style={{ animationDelay: "80ms" }}
                     >
@@ -5783,7 +5844,7 @@ export default function ClaritasDashboard() {
                             Latest intelligence drops
                           </div>
                           <div className="text-xs text-[color:var(--shell-muted)]">
-                            {regionLabel} · {activeRangeLabel}
+                            {regionLabel} · latest source update {latestEventLabel}
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -6081,6 +6142,8 @@ export default function ClaritasDashboard() {
                             variant="default"
                             data={activeMapData}
                             onSelect={handleMapSelect}
+                            points={overviewEventPoints}
+                            onSelectPoint={(point) => handleOpenIntelligence(point.id)}
                             dark={dark}
                             primaryCountry={selectedCountry}
                             secondaryCountry={comparisonCountry}
@@ -8592,12 +8655,14 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "intelligence" && (
-              <IntelligenceWorkspace
-                initialCountry={selectedCountry}
-                initialEventId={selectedIntelligenceEventId}
-                onSelectEvent={handleOpenIntelligence}
-                onOpenImagery={handleOpenImagery}
-              />
+              <div className="space-y-3">
+                <IntelligenceWorkspace
+                  initialCountry={selectedCountry}
+                  initialEventId={selectedIntelligenceEventId}
+                  onSelectEvent={handleOpenIntelligence}
+                  onOpenImagery={handleOpenImagery}
+                />
+              </div>
             )}
             {activeView === "earth-observation" && (
               <div className="space-y-4">
@@ -9447,10 +9512,13 @@ export default function ClaritasDashboard() {
       </div>
       <nav className="mobile-ops-nav app-safe-bottom" aria-label="Primary mobile navigation">
         {navItems
-          .filter((item) => ["dashboard", "intelligence", "news", "markets", "profile"].includes(item.id))
+          .filter((item) => ["dashboard", "admin", "profile", "legal"].includes(item.id))
           .map((item) => {
             const Icon = item.icon;
-            const active = activeView === item.view;
+            const active = activeView === item.view || (
+              item.view === "dashboard" &&
+              OVERVIEW_DRILLDOWN_VIEWS.has(activeView)
+            );
             return (
               <button
                 key={`mobile-ops-${item.id}`}

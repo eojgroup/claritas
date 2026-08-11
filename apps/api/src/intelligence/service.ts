@@ -1,5 +1,9 @@
 import type { PoolClient } from "pg";
-import { buildEventUnderstanding, buildGdeltEventPresentation } from "./event-presentation";
+import {
+  buildEventUnderstanding,
+  buildGdeltEventPresentation,
+  buildLinkedNewsPresentation,
+} from "./event-presentation";
 import { query, withTransaction } from "../db";
 import {
   buildDiscoveryDedupeKey,
@@ -369,17 +373,7 @@ export async function getIntelligenceEvent(eventId: string) {
   });
   const linkedNews = evidence.filter((row: any) => (
     row.domain === "news" && row.source_record_type === "item"
-  )).map((row: any) => ({
-    id: row.id,
-    evidence_type: row.evidence_type,
-    relationship: row.relationship,
-    title: row.source_title,
-    summary: row.source_summary,
-    url: row.source_url,
-    publisher: row.attribution ?? row.source_name,
-    observed_at: row.observed_at,
-    confidence: row.confidence,
-  }));
+  )).map((row: any) => buildLinkedNewsPresentation(row));
   return {
     event: normalizedEvent,
     understanding: buildEventUnderstanding(normalizedEvent as Record<string, unknown>, evidence),

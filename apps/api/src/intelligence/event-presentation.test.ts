@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildEventUnderstanding,
   buildGdeltEventPresentation,
+  buildLinkedNewsPresentation,
   gdeltActionLabel,
   humanizeGdeltActor,
 } from "./event-presentation";
@@ -44,4 +45,49 @@ test("event understanding answers what, where, and why without claiming causatio
   assert.match(result.why_interesting, /does not establish causation/);
   assert.equal(result.linked_news_count, 1);
   assert.equal(result.physical_observation_count, 1);
+});
+
+test("generic geography yields to a known country and labels defensible coordinates", () => {
+  const result = buildEventUnderstanding({
+    title: "M7.4 earthquake",
+    location_name: "Global",
+    primary_country_iso2: "CO",
+    location_type: "city",
+    latitude: 4.12345,
+    longitude: -73.98765,
+    metadata: { exact_geography: true },
+  }, []);
+  assert.equal(result.where, "Colombia");
+  assert.equal(result.location_basis, "source_observed");
+  assert.equal(result.coordinates?.label, "4.1235° N, 73.9877° W");
+});
+
+test("missing coordinates never become a synthetic Null Island location", () => {
+  const result = buildEventUnderstanding({
+    title: "Location unresolved",
+    location_name: "Global",
+    latitude: null,
+    longitude: null,
+  }, []);
+  assert.equal(result.where, "Location not yet resolved");
+  assert.equal(result.location_basis, "unresolved");
+  assert.equal(result.coordinates, null);
+});
+
+test("linked reporting preserves publication time separately from evidence receipt time", () => {
+  const result = buildLinkedNewsPresentation({
+    id: "evidence-1",
+    evidence_type: "article",
+    relationship: "reported",
+    source_title: "Port restrictions announced",
+    source_summary: "Authorities published a navigation notice.",
+    source_url: "https://publisher.test/report",
+    attribution: "Example Publisher",
+    published_at: "2026-08-11T08:05:00.000Z",
+    observed_at: "2026-08-11T09:37:18.000Z",
+    confidence: 0.84,
+  });
+  assert.equal(result.published_at, "2026-08-11T08:05:00.000Z");
+  assert.equal(result.observed_at, "2026-08-11T09:37:18.000Z");
+  assert.notEqual(result.published_at, result.observed_at);
 });

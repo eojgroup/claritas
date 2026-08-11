@@ -260,9 +260,9 @@ function choroplethColor(
   }
   if (mode === "relevance") {
     const ratio = clamp((value - min) / Math.max(max - min, 0.0001), 0, 1);
-    const low: [number, number, number] = dark ? [35, 58, 70] : [208, 221, 225];
-    const middle: [number, number, number] = dark ? [117, 104, 75] : [218, 181, 126];
-    const high: [number, number, number] = dark ? [226, 126, 66] : [188, 83, 34];
+    const low: [number, number, number] = dark ? [28, 48, 65] : [218, 228, 237];
+    const middle: [number, number, number] = dark ? [48, 91, 109] : [112, 157, 176];
+    const high: [number, number, number] = dark ? [216, 117, 67] : [190, 82, 43];
     return ratio < 0.55
       ? interpolateRgb(low, middle, ratio / 0.55)
       : interpolateRgb(middle, high, (ratio - 0.55) / 0.45);
@@ -629,23 +629,23 @@ export default memo(function WorldMapBubbles({
               ? choroplethColor(marker.value, fillMode, dataValueDomain, isDark)
               : isPrimary
                 ? isDark
-                  ? "#b96f3d"
-                  : "#d9824b"
+                  ? "#d47b47"
+                  : "#c96735"
                 : isSecondary
                   ? isDark
-                    ? "#3f7588"
-                    : "#77a8ba"
+                    ? "#4f92ad"
+                    : "#5d91a8"
                   : isFeatured
                     ? isDark
-                      ? "#7d5435"
-                      : "#d69a70"
+                      ? "#536f80"
+                      : "#8fb1c2"
                     : marker
                       ? isDark
-                        ? "#355d6d"
-                        : "#86a6b2"
+                        ? "#36596c"
+                        : "#86a8b8"
                       : isDark
-                        ? "#1b2d38"
-                        : "#cbd6da";
+                        ? "#16283a"
+                        : "#d4dee7";
             const opacity = isPrimary
               ? 0.95
               : isSecondary
@@ -665,8 +665,8 @@ export default memo(function WorldMapBubbles({
                     ? "#e6f2f5"
                     : "#284b5a"
                 : isDark
-                  ? "#48616e"
-                  : "#94a5ab";
+                  ? "#506b80"
+                  : "#91a5b5";
             return (
               <path
                 key={iso}

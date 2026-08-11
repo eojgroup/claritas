@@ -64,7 +64,10 @@ describe("SatelliteContextPanel", () => {
       notice: "Linked-location context, not event evidence.",
     });
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
 
   it("shows linked-location browse imagery on Overview and opens the exact event", async () => {
     const onOpenEvent = vi.fn();
@@ -197,5 +200,20 @@ describe("SatelliteContextPanel", () => {
     expect(screen.getByText("Possible access-road flooding is visible.")).toBeTruthy();
     expect(screen.getByText("Observed feature:").parentElement?.textContent).toContain("Standing water is visible");
     expect(screen.getByText("Possible change:").parentElement?.textContent).toContain("Road access may have narrowed");
+    expect(fetchEventGibsContext).not.toHaveBeenCalled();
+  });
+
+  it("keeps the last complete imagery view when all fallback requests fail", async () => {
+    const view = render(<SatelliteContextPanel country="PA" onOpenEvent={vi.fn()} onOpenImagery={vi.fn()} />);
+    const priorImage = await screen.findByAltText(/NASA GIBS · linked location/i);
+    expect(priorImage.getAttribute("src")).toContain("gibs.earthdata.nasa.gov");
+
+    vi.mocked(fetchEventGibsContext).mockRejectedValueOnce(new Error("HTTP 502"));
+    view.rerender(<SatelliteContextPanel country="NL" onOpenEvent={vi.fn()} onOpenImagery={vi.fn()} />);
+
+    expect(await screen.findByText(/Satellite context is temporarily unavailable/i)).toBeTruthy();
+    expect(screen.getByText(/last successful PA context/i)).toBeTruthy();
+    expect(screen.getByAltText(/NASA GIBS · linked location/i).getAttribute("src"))
+      .toContain("gibs.earthdata.nasa.gov");
   });
 });

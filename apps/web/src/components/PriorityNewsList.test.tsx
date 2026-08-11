@@ -28,6 +28,7 @@ describe("PriorityNewsList", () => {
     };
     render(<PriorityNewsList items={[item]} selectedId={item.id} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountryName={() => "United Arab Emirates"} onToggle={() => undefined} onSelectCountry={() => undefined} onOpenEvent={onOpenEvent} />);
     expect(screen.getAllByText(/imagery available/i).length).toBeGreaterThan(0);
+    expect(screen.getByTitle(/Aug 11, 2026.*08:00:00/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Fire near energy infrastructure/i }));
     expect(onOpenEvent).toHaveBeenCalledWith(item.linked_events?.[0].id);
   });
