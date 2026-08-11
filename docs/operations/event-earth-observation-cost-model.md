@@ -29,8 +29,8 @@ The free-router response is checked for reported non-zero cost, while an exact m
 
 | Setting | Committed value | Enforcement semantics |
 |---|---:|---|
-| `EO_MAX_DAILY_PROCESSING_UNITS` | 100 | Current UTC-day usage plus the render estimate is checked before each Copernicus call. An exhausted job becomes `budget_deferred` until the next UTC day and does not consume an attempt. `0` means unlimited, not paused. |
-| `EO_MAX_MONTHLY_PROCESSING_UNITS` | 3000 | Current UTC-month usage plus the render estimate is checked before each Copernicus call. An exhausted job becomes `budget_deferred` until the next UTC month and does not consume an attempt. `0` means unlimited, not paused. |
+| `EO_MAX_DAILY_PROCESSING_UNITS` | 100 | Current UTC-day usage plus the render estimate is checked before each Copernicus call. An exhausted job becomes `budget_deferred` until the next UTC day and does not consume an attempt. `0` pauses processing. |
+| `EO_MAX_MONTHLY_PROCESSING_UNITS` | 3000 | Current UTC-month usage plus the render estimate is checked before each Copernicus call. An exhausted job becomes `budget_deferred` until the next UTC month and does not consume an attempt. `0` pauses processing. |
 | `EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER` | 4 | Pessimistic pre-request estimate added to recorded usage for both ceiling checks; runtime bounds are 1–25. This is not an atomic provider-unit reservation. Provider-returned actual units are recorded afterward, so the provider quota remains the hard backstop. |
 | `EO_MAX_REVISITS_PER_EVENT` | 2 | Schedules at most two follow-up discovery jobs after the initial event discovery; runtime bounds are 0–7. |
 | `EO_REVISIT_INTERVAL_HOURS` | 24 | Delay between bounded event revisits; runtime bounds are 6–168 hours. |
@@ -38,7 +38,7 @@ The free-router response is checked for reported non-zero cost, while an exact m
 | `EO_MAX_AOI_SQUARE_DEGREES` | 25 | Enforced by AOI validation/cropping. Automatic event discovery additionally requires finite event coordinates and never uses a country-only null geometry. |
 | `EO_RENDER_MAX_WIDTH` / `EO_RENDER_MAX_HEIGHT` | 1024 / 1024 | Runtime dimensions are bounded to 64–2048 pixels. |
 | `EO_MAX_SCENES_PER_DISCOVERY` | 4 | Runtime bounds are 1–10. |
-| `EO_ASSET_RETENTION_DAYS` | 60 | Runtime bounds are 1–365; object lifecycle and database reconciliation must stay aligned. |
+| `EO_ASSET_RETENTION_DAYS` | 60 | Runtime bounds are 1–60, never beyond the production bucket lifecycle. A reused immutable object retains its original lifecycle deadline, so database expiry cannot be extended past object deletion. |
 | `EO_VISION_MAX_IMAGE_BYTES` | 8 MiB default | Runtime bounds are 256 KiB–12 MiB; the stored preview is checked before and after download. |
 | `APNS_WORKER_BATCH_SIZE` | 10 | Runtime bounds are 1–50 per leased cycle. |
 

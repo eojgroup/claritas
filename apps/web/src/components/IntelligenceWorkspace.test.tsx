@@ -8,6 +8,7 @@ import {
   fetchIntelligenceEvent,
   fetchIntelligenceEvents,
   fetchIntelligenceWatchlist,
+  saveIntelligenceWatch,
   type EarthObservation,
   type IntelligenceEvent,
 } from "../lib/api";
@@ -105,6 +106,24 @@ describe("IntelligenceWorkspace", () => {
     vi.mocked(fetchIntelligenceAlerts).mockResolvedValue([]);
     vi.mocked(fetchIntelligenceEvent).mockResolvedValue({
       event,
+      understanding: {
+        what_happened: "A thermal anomaly was observed near energy infrastructure.",
+        where: "Port of Fujairah, United Arab Emirates",
+        why_interesting: "The location supports strategically important energy flows.",
+        linked_news_count: 1,
+        physical_observation_count: 2,
+      },
+      linked_news: [{
+        id: "linked-news-fixture",
+        evidence_type: "news_report",
+        relationship: "reported",
+        title: "Port operator responds to reported fire",
+        summary: "The operator described its initial response.",
+        url: "https://example.test/report",
+        publisher: "Example Wire",
+        observed_at: "2026-08-11T08:20:00Z",
+        confidence: 0.88,
+      }],
       evidence: [{
         id: "07882387-9088-4530-bfe5-1ac9c17aaabe",
         domain: "earth_observation",
@@ -134,7 +153,13 @@ describe("IntelligenceWorkspace", () => {
     expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
     expect((await screen.findByAltText(/Natural color observation/i)).getAttribute("loading")).toBe("lazy");
     expect((await screen.findByAltText(/NASA GIBS true-color context/i)).getAttribute("loading")).toBe("lazy");
-    expect(screen.getByText("Context · not proof")).toBeTruthy();
+    expect(screen.getByText("Regional browse context · not proof")).toBeTruthy();
+    expect(screen.getByText("What happened")).toBeTruthy();
+    expect(screen.getByText("Port of Fujairah, United Arab Emirates")).toBeTruthy();
+    expect(screen.getByText("The location supports strategically important energy flows.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "What news is connected to this event?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Port operator responds to reported fire" })).toBeTruthy();
+    expect(screen.getByText("Event-linked observation available")).toBeTruthy();
     expect(screen.getByRole("link", { name: /NASA GIBS provenance/i }).getAttribute("href")).toBe("https://gibs.earthdata.nasa.gov/wms/example.jpg");
     expect(screen.getByText("Observed")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Active fire hotspot" })).toBeTruthy();
@@ -205,5 +230,37 @@ describe("IntelligenceWorkspace", () => {
     await screen.findByRole("heading", { name: event.title });
     fireEvent.click(screen.getByRole("button", { name: "Inspect event imagery" }));
     expect(onOpenImagery).toHaveBeenCalledWith(event.id);
+  });
+
+  it("requires a separate explicit opt-in before emailing important watched events", async () => {
+    vi.mocked(fetchIntelligenceWatchlist).mockResolvedValue([{
+      id: "watch-fixture",
+      watch_type: "country",
+      watch_key: "AE",
+      minimum_severity: "high",
+      alerts_enabled: true,
+      metadata: { email_enabled: false },
+      created_at: "2026-08-11T08:00:00Z",
+      updated_at: "2026-08-11T08:00:00Z",
+    }]);
+    vi.mocked(saveIntelligenceWatch).mockResolvedValue({
+      id: "watch-fixture",
+      watch_type: "country",
+      watch_key: "AE",
+      minimum_severity: "high",
+      alerts_enabled: true,
+      metadata: { email_enabled: true },
+      created_at: "2026-08-11T08:00:00Z",
+      updated_at: "2026-08-11T09:00:00Z",
+    });
+    render(<IntelligenceWorkspace initialEventId={event.id} />);
+    const emailToggle = await screen.findByRole("button", { name: /Email important events · Off/i });
+    expect(emailToggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(emailToggle);
+    await waitFor(() => expect(saveIntelligenceWatch).toHaveBeenCalledWith(expect.objectContaining({
+      watch_type: "country",
+      watch_key: "AE",
+      metadata: { email_enabled: true },
+    })));
   });
 });

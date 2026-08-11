@@ -9,13 +9,15 @@ export type GibsLayer = {
   format: "jpg" | "png";
   attribution: string;
   temporal: boolean;
+  nativeResolutionM: number;
+  displayPriority: number;
 };
 
 export const APPROVED_GIBS_LAYERS: readonly GibsLayer[] = [
-  { id: "MODIS_Terra_CorrectedReflectance_TrueColor", title: "MODIS Terra true color", category: "true_color", matrixSet: "250m", format: "jpg", attribution: "NASA EOSDIS GIBS / MODIS Terra", temporal: true },
-  { id: "MODIS_Aqua_CorrectedReflectance_TrueColor", title: "MODIS Aqua true color", category: "true_color", matrixSet: "250m", format: "jpg", attribution: "NASA EOSDIS GIBS / MODIS Aqua", temporal: true },
-  { id: "VIIRS_NOAA20_CorrectedReflectance_TrueColor", title: "VIIRS NOAA-20 true color", category: "true_color", matrixSet: "250m", format: "jpg", attribution: "NASA EOSDIS GIBS / VIIRS NOAA-20", temporal: true },
-  { id: "MODIS_Combined_Value_Added_AOD", title: "MODIS aerosol optical depth", category: "aerosol", matrixSet: "2km", format: "png", attribution: "NASA EOSDIS GIBS / MODIS", temporal: true },
+  { id: "VIIRS_NOAA20_CorrectedReflectance_TrueColor", title: "VIIRS NOAA-20 true color", category: "true_color", matrixSet: "250m", format: "jpg", attribution: "NASA EOSDIS GIBS / VIIRS NOAA-20", temporal: true, nativeResolutionM: 375, displayPriority: 10 },
+  { id: "MODIS_Terra_CorrectedReflectance_TrueColor", title: "MODIS Terra true color", category: "true_color", matrixSet: "250m", format: "jpg", attribution: "NASA EOSDIS GIBS / MODIS Terra", temporal: true, nativeResolutionM: 500, displayPriority: 20 },
+  { id: "MODIS_Aqua_CorrectedReflectance_TrueColor", title: "MODIS Aqua true color", category: "true_color", matrixSet: "250m", format: "jpg", attribution: "NASA EOSDIS GIBS / MODIS Aqua", temporal: true, nativeResolutionM: 500, displayPriority: 30 },
+  { id: "MODIS_Combined_Value_Added_AOD", title: "MODIS aerosol optical depth", category: "aerosol", matrixSet: "2km", format: "png", attribution: "NASA EOSDIS GIBS / MODIS", temporal: true, nativeResolutionM: 2_000, displayPriority: 40 },
 ] as const;
 
 export const GIBS_ACKNOWLEDGEMENT = "We acknowledge the use of imagery provided by services from NASA's Global Imagery Browse Services (GIBS), part of NASA's Earth Science Data and Information System (ESDIS).";
@@ -31,6 +33,11 @@ export type GibsEventLayer = {
   format: GibsLayer["format"];
   matrix_set: string;
   temporal: boolean;
+  native_resolution_m: number;
+  display_priority: number;
+  quality_tier: "regional_browse_context";
+  evidence_role: "context_not_confirmation";
+  display_guidance: string;
   provenance: {
     provider: "NASA EOSDIS GIBS";
     service: "WMTS";
@@ -69,8 +76,11 @@ export function buildApprovedGibsPreviewUrl(layerId: string, date: string, bboxI
   const bbox = validateBoundingBox(bboxInput);
   const [west, south, east, north] = bbox;
   const aspect = Math.max(0.5, Math.min(2, (east - west) / (north - south)));
-  const width = Math.round(640 * Math.sqrt(aspect));
-  const height = Math.round(640 / Math.sqrt(aspect));
+  // A larger WMS canvas avoids soft browser upscaling on retina displays. It
+  // does not imply more native sensor detail; the contract below exposes the
+  // layer's actual ground resolution explicitly.
+  const width = Math.round(1_024 * Math.sqrt(aspect));
+  const height = Math.round(1_024 / Math.sqrt(aspect));
   const parameters = new URLSearchParams({
     SERVICE: "WMS",
     REQUEST: "GetMap",
@@ -82,8 +92,8 @@ export function buildApprovedGibsPreviewUrl(layerId: string, date: string, bboxI
     CRS: "EPSG:4326",
     // WMS 1.3.0 defines EPSG:4326 in latitude/longitude axis order.
     BBOX: `${south},${west},${north},${east}`,
-    WIDTH: String(Math.min(768, Math.max(256, width))),
-    HEIGHT: String(Math.min(768, Math.max(256, height))),
+    WIDTH: String(Math.min(1_280, Math.max(512, width))),
+    HEIGHT: String(Math.min(1_280, Math.max(512, height))),
     TIME: date,
   });
   return `https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi?${parameters.toString()}`;
@@ -115,6 +125,11 @@ export function buildApprovedGibsEventLayers(input: { date: string; bbox: Boundi
       format: layer.format,
       matrix_set: layer.matrixSet,
       temporal: layer.temporal,
+      native_resolution_m: layer.nativeResolutionM,
+      display_priority: layer.displayPriority,
+      quality_tier: "regional_browse_context",
+      evidence_role: "context_not_confirmation",
+      display_guidance: "Use as a regional locator while high-resolution processed Sentinel imagery is queued. Do not enlarge or present as event proof.",
       provenance: {
         provider: "NASA EOSDIS GIBS",
         service: "WMTS",

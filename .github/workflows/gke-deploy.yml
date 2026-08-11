@@ -357,6 +357,13 @@ jobs:
           APNS_MATERIALIZATION_BATCH_SIZE: ${{ vars.APNS_MATERIALIZATION_BATCH_SIZE || '500' }}
           APNS_MAX_ACTIVE_DEVICES_PER_USER: ${{ vars.APNS_MAX_ACTIVE_DEVICES_PER_USER || '8' }}
           APNS_MAX_DEVICE_RECORDS_PER_USER: ${{ vars.APNS_MAX_DEVICE_RECORDS_PER_USER || '64' }}
+          IMPORTANT_EVENT_EMAIL_ENABLED: ${{ vars.IMPORTANT_EVENT_EMAIL_ENABLED || 'true' }}
+          IMPORTANT_EVENT_EMAIL_POLL_SECONDS: ${{ vars.IMPORTANT_EVENT_EMAIL_POLL_SECONDS || '20' }}
+          IMPORTANT_EVENT_EMAIL_CYCLE_CAP: ${{ vars.IMPORTANT_EVENT_EMAIL_CYCLE_CAP || '10' }}
+          IMPORTANT_EVENT_EMAIL_MATERIALIZATION_CAP: ${{ vars.IMPORTANT_EVENT_EMAIL_MATERIALIZATION_CAP || '200' }}
+          IMPORTANT_EVENT_EMAIL_USER_DAILY_CAP: ${{ vars.IMPORTANT_EVENT_EMAIL_USER_DAILY_CAP || '5' }}
+          IMPORTANT_EVENT_EMAIL_GLOBAL_DAILY_CAP: ${{ vars.IMPORTANT_EVENT_EMAIL_GLOBAL_DAILY_CAP || '200' }}
+          IMPORTANT_EVENT_EMAIL_MAX_AGE_HOURS: ${{ vars.IMPORTANT_EVENT_EMAIL_MAX_AGE_HOURS || '48' }}
         run: |
           # Ensure claritas-config (DB + auth settings) exists
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
@@ -407,6 +414,13 @@ jobs:
             "APNS_MATERIALIZATION_BATCH_SIZE",
             "APNS_MAX_ACTIVE_DEVICES_PER_USER",
             "APNS_MAX_DEVICE_RECORDS_PER_USER",
+            "IMPORTANT_EVENT_EMAIL_ENABLED",
+            "IMPORTANT_EVENT_EMAIL_POLL_SECONDS",
+            "IMPORTANT_EVENT_EMAIL_CYCLE_CAP",
+            "IMPORTANT_EVENT_EMAIL_MATERIALIZATION_CAP",
+            "IMPORTANT_EVENT_EMAIL_USER_DAILY_CAP",
+            "IMPORTANT_EVENT_EMAIL_GLOBAL_DAILY_CAP",
+            "IMPORTANT_EVENT_EMAIL_MAX_AGE_HOURS",
           ]) {
             const value = process.env[key];
             if (value && value.trim()) data[key] = value.trim();
@@ -745,11 +759,11 @@ jobs:
           EGRESS_IP="$(terraform -chdir=infra/gcp/terraform output -raw api_egress_ip)"
           echo "::notice title=Claritas static egress IP::Authorize ${EGRESS_IP} for SMTP in Brevo."
 
-      - name: 🛠️ Apply workload deployments
+      - name: 🛠️ Apply identity deployment
         run: |
-          kubectl apply -f ./infra/k8s/web-deployment.yaml
-          kubectl apply -f ./infra/k8s/api-deployment.yaml
-          kubectl apply -f ./infra/k8s/opencode-deployment.yaml
+          # Keycloak must be available for the realm bootstrap below. Keep the
+          # application workloads on the previous image until this commit's
+          # migrations have completed and their schema has been verified.
           kubectl apply -f ./infra/k8s/keycloak-deployment.yaml
 
       - name: 🔑 Bootstrap Keycloak realm and IdPs
@@ -844,6 +858,16 @@ jobs:
             exit 1
           fi
           kubectl -n "$NS" logs "job/${job}" -c db-verify --tail=200 || true
+
+      - name: 🛠️ Apply application workload deployments
+        run: |
+          set -euo pipefail
+          # These manifests reference :latest, which already points at this
+          # commit. Applying them before Flyway could start new API code against
+          # an old schema, so application rollout is deliberately post-migrate.
+          kubectl apply -f ./infra/k8s/web-deployment.yaml
+          kubectl apply -f ./infra/k8s/api-deployment.yaml
+          kubectl apply -f ./infra/k8s/opencode-deployment.yaml
 
       - name: 📤 Set image and rollout (with diagnostics)
         run: |

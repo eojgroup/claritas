@@ -18,7 +18,9 @@ test("exact event geography takes precedence over a broad nearest-location bbox"
   });
   assert.equal(resolved.source, "event_geography");
   assert.deepEqual(resolved.center, { latitude: 35.51, longitude: 139.79 });
-  assert.ok(resolved.bbox[0] > 139 && resolved.bbox[2] < 141);
+  assert.equal(resolved.focus_radius_km, 6);
+  assert.ok(resolved.bbox[0] > 139.72 && resolved.bbox[2] < 139.86);
+  assert.ok(resolved.bbox[1] > 35.45 && resolved.bbox[3] < 35.57);
 });
 
 test("null coordinates fail closed instead of silently targeting null island", () => {
@@ -94,8 +96,10 @@ test("discovery dedupe keys make bounded revisits explicit", () => {
 
 test("event product policy survives discovery and stays sensor-compatible", () => {
   const requested = requestedCopernicusProducts(["sar", "ndwi", "sar", "unsupported"]);
-  assert.deepEqual(requested, ["sar", "ndwi"]);
+  assert.deepEqual(requested, ["true_color", "sar", "ndwi"]);
   assert.deepEqual(compatibleCopernicusProducts("sentinel-1-grd", requested), ["sar"]);
-  assert.deepEqual(compatibleCopernicusProducts("sentinel-2-l2a", requested), ["ndwi"]);
+  assert.deepEqual(compatibleCopernicusProducts("sentinel-2-l2a", requested), ["true_color", "ndwi"]);
   assert.deepEqual(requestedCopernicusProducts(undefined), ["true_color"]);
+  assert.deepEqual(requestedCopernicusProducts(["ndvi"]), ["true_color", "ndvi"]);
+  assert.deepEqual(requestedCopernicusProducts(["sar"]), ["sar"]);
 });

@@ -7,7 +7,9 @@ import {
   Eye,
   ImageOff,
   Link2,
+  Mail,
   MapPin,
+  Newspaper,
   RefreshCw,
   Satellite,
   Sparkles,
@@ -35,6 +37,7 @@ import {
   isAnalyticalEarthProduct,
   sortEarthObservationsForDisplay,
 } from "./earthObservationPresentation";
+import { presentEvent } from "./eventPresentation";
 
 const severities: Array<IntelligenceSeverity | "all"> = ["all", "critical", "high", "medium", "low"];
 
@@ -49,42 +52,42 @@ const relationshipLabels: Record<string, { label: string; explanation: string; c
   reported: {
     label: "Reported",
     explanation: "A source reported this development; it is not treated as physical confirmation.",
-    className: "border-sky-200 bg-sky-50 text-sky-800",
+    className: "evidence-relationship-reported",
   },
   observed: {
     label: "Observed",
     explanation: "A sensor or official observation recorded this signal.",
-    className: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    className: "evidence-relationship-observed",
   },
   corroborates: {
     label: "Corroborates",
     explanation: "This independently supports part of the event assessment.",
-    className: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    className: "evidence-relationship-observed",
   },
   derived: {
     label: "Derived",
     explanation: "Claritas calculated this from source data using a stated method.",
-    className: "border-violet-200 bg-violet-50 text-violet-800",
+    className: "evidence-relationship-derived",
   },
   model_interpretation: {
     label: "Model interpretation",
     explanation: "A model interpreted supplied evidence; this is not an independent observation.",
-    className: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800",
+    className: "evidence-relationship-derived",
   },
   assessment: {
     label: "Assessment",
     explanation: "Claritas synthesized the evidence into an explicitly qualified assessment.",
-    className: "border-amber-200 bg-amber-50 text-amber-900",
+    className: "evidence-relationship-assessment",
   },
   contradicts: {
     label: "Contradicts",
     explanation: "This evidence conflicts with part of the current assessment.",
-    className: "border-rose-200 bg-rose-50 text-rose-800",
+    className: "evidence-relationship-contradicts",
   },
   context: {
     label: "Context",
     explanation: "This is relevant background, not proof of cause or impact.",
-    className: "border-slate-200 bg-slate-50 text-slate-700",
+    className: "evidence-relationship-context",
   },
 };
 
@@ -123,10 +126,10 @@ function evidenceUrl(item: IntelligenceEvidence) {
 }
 
 function severityClass(severity: IntelligenceSeverity) {
-  if (severity === "critical") return "bg-rose-100 text-rose-700";
-  if (severity === "high") return "bg-amber-100 text-amber-700";
-  if (severity === "medium") return "bg-sky-100 text-sky-700";
-  return "bg-slate-100 text-slate-700";
+  if (severity === "critical") return "event-severity-critical";
+  if (severity === "high") return "event-severity-high";
+  if (severity === "medium") return "event-severity-medium";
+  return "event-severity-low";
 }
 
 export default function IntelligenceWorkspace({
@@ -234,6 +237,32 @@ export default function IntelligenceWorkspace({
     )),
     [detail],
   );
+  const linkedReporting = useMemo(
+    () => evidenceThread.filter((item) => (
+      item.domain.toLocaleLowerCase() === "news"
+      || item.source_record_type.toLocaleLowerCase().includes("news")
+      || item.evidence_type.toLocaleLowerCase().includes("news")
+    )),
+    [evidenceThread],
+  );
+  const linkedNews = useMemo(() => {
+    if (detail?.linked_news) return detail.linked_news;
+    return linkedReporting.map((item) => ({
+      id: item.id,
+      evidence_type: item.evidence_type,
+      relationship: item.relationship,
+      title: evidenceTitle(item),
+      summary: evidenceSummary(item),
+      url: evidenceUrl(item),
+      publisher: item.source_name,
+      observed_at: item.published_at || item.observed_at,
+      confidence: item.confidence,
+    }));
+  }, [detail?.linked_news, linkedReporting]);
+  const detailPresentation = useMemo(
+    () => detail ? presentEvent(detail.event) : null,
+    [detail],
+  );
   const gibsTrueColor = gibsContext?.layers.find((layer) => (
     layer.category === "true_color" && Boolean(layer.preview_url)
   ));
@@ -241,6 +270,11 @@ export default function IntelligenceWorkspace({
     () => sortEarthObservationsForDisplay(detail?.earth_observations ?? []),
     [detail],
   );
+  const satelliteAssessment = displayedEarthObservations.length > 0
+    ? "Event-linked observation available"
+    : gibsTrueColor
+      ? "Regional browse context only"
+      : "No usable scene available yet";
 
   const watchTarget = detail?.event.primary_country_iso2
     ? { type: "country", key: detail.event.primary_country_iso2 }
@@ -248,6 +282,7 @@ export default function IntelligenceWorkspace({
   const activeWatch = watchTarget
     ? watches.find((watch) => watch.watch_type === watchTarget.type && watch.watch_key === watchTarget.key)
     : undefined;
+  const watchEmailEnabled = activeWatch?.metadata?.email_enabled === true;
 
   const toggleWatch = async () => {
     if (!watchTarget || watchPending) return;
@@ -262,6 +297,25 @@ export default function IntelligenceWorkspace({
       } catch {
         // Alert delivery is optional; a successful watch mutation remains visible.
       }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setWatchPending(false);
+    }
+  };
+
+  const toggleWatchEmail = async () => {
+    if (!watchTarget || !activeWatch || watchPending) return;
+    setWatchPending(true);
+    try {
+      await saveIntelligenceWatch({
+        watch_type: watchTarget.type,
+        watch_key: watchTarget.key,
+        minimum_severity: activeWatch.minimum_severity,
+        alerts_enabled: activeWatch.alerts_enabled,
+        metadata: { email_enabled: !watchEmailEnabled },
+      });
+      setWatches(await fetchIntelligenceWatchlist());
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -310,7 +364,7 @@ export default function IntelligenceWorkspace({
         </div>
       </section>
 
-      {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>}
+      {error && <div role="alert" className="event-error rounded-xl border p-4 text-sm">{error}</div>}
 
       {alerts.length > 0 && (
         <section aria-label="Watchlist alerts" className="app-card rounded-xl p-4">
@@ -332,26 +386,30 @@ export default function IntelligenceWorkspace({
           <div className="border-b border-[color:var(--shell-border)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">Prioritized investigations · {events.length}</div>
           <div className="max-h-[72vh] overflow-y-auto">
             {!loading && events.length === 0 && <div className="p-6 text-sm text-[color:var(--shell-muted)]">No events meet this scope. Source explorers remain available without implying a cross-domain connection.</div>}
-            {events.map((event) => (
-              <button key={event.id} type="button" onClick={() => selectEvent(event.id)} aria-current={selectedId === event.id ? "true" : undefined} className={`w-full border-b border-[color:var(--shell-border)] p-4 text-left transition ${selectedId === event.id ? "bg-[color:var(--signal-sky-soft)]" : "hover:bg-[color:var(--shell-bg)]"}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">{event.event_type.replace(/_/g, " ")}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${severityClass(event.severity)}`}>{event.severity}</span>
-                </div>
-                <div className="mt-2 text-sm font-semibold text-[color:var(--shell-ink)]">{event.title}</div>
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[color:var(--shell-muted)]">
-                  <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{event.location_name || event.primary_country_iso2 || "Global"}</span>
-                  <span>{event.domain_count} domains</span><span>{event.evidence_count} evidence</span>
-                  {event.earth_observation_available && <span className="inline-flex items-center gap-1"><Satellite className="h-3 w-3" />Imagery</span>}
-                </div>
-              </button>
-            ))}
+            {events.map((event) => {
+              const presentation = presentEvent(event);
+              return (
+                <button key={event.id} type="button" onClick={() => selectEvent(event.id)} aria-current={selectedId === event.id ? "true" : undefined} className={`event-list-row w-full border-b border-[color:var(--shell-border)] p-4 text-left ${selectedId === event.id ? "is-selected" : ""}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">{presentation.typeLabel}</span>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${severityClass(event.severity)}`}>{event.severity}</span>
+                  </div>
+                  <div className="mt-2 text-sm font-semibold leading-5 text-[color:var(--shell-ink)]">{presentation.headline}</div>
+                  {presentation.focus && <div className="mt-1 line-clamp-1 text-[11px] text-[color:var(--shell-muted)]">Focus · {presentation.focus}</div>}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[color:var(--shell-muted)]">
+                    <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{presentation.locationLabel}</span>
+                    <span>{event.evidence_count} linked</span>
+                    {event.earth_observation_available && <span className="inline-flex items-center gap-1 text-[color:var(--signal-emerald)]"><Satellite className="h-3 w-3" />Imagery</span>}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </section>
 
         <section className="app-card rounded-xl p-4 sm:p-5" aria-label="Selected event investigation">
           {detailLoading && <div className="flex h-48 items-center justify-center text-sm text-[color:var(--shell-muted)]"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Loading evidence thread</div>}
-          {!detailLoading && detailError && <div role="alert" className="flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border border-rose-200 bg-rose-50 p-5 text-center text-sm text-rose-700"><span>Unable to load this event’s evidence thread: {detailError}</span><button type="button" onClick={() => setDetailRetry((value) => value + 1)} className="rounded-full border border-rose-300 px-3 py-1.5 text-xs font-semibold">Retry event</button></div>}
+          {!detailLoading && detailError && <div role="alert" className="event-error flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border p-5 text-center text-sm"><span>Unable to load this event’s evidence thread: {detailError}</span><button type="button" onClick={() => setDetailRetry((value) => value + 1)} className="rounded-full border border-current px-3 py-1.5 text-xs font-semibold">Retry event</button></div>}
           {!detailLoading && !detailError && (!detail || detail.event.id !== selectedId) && <div className="flex h-48 items-center justify-center text-sm text-[color:var(--shell-muted)]">Select an event to inspect its evidence thread.</div>}
           {!detailLoading && detail?.event.id === selectedId && (
             <div className="space-y-6">
@@ -364,19 +422,64 @@ export default function IntelligenceWorkspace({
                 </div>
                 <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-2xl font-semibold text-[color:var(--shell-ink)]">{detail.event.title}</h2>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-[color:var(--shell-muted)]"><MapPin className="h-3.5 w-3.5" />{detail.event.location_name || detail.event.primary_country_iso2 || "Global"} · Active {dateLabel(detail.event.last_activity_time)}</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-accent)]">{detailPresentation?.typeLabel}</div>
+                    <h2 className="mt-1 text-2xl font-semibold text-[color:var(--shell-ink)]">{detailPresentation?.headline}</h2>
+                    {detailPresentation?.focus && <div className="mt-1 text-xs text-[color:var(--shell-muted)]">Signal focus · {detailPresentation.focus}</div>}
+                    <div className="mt-2 flex items-center gap-2 text-xs text-[color:var(--shell-muted)]"><MapPin className="h-3.5 w-3.5" />{detailPresentation?.locationLabel} · Active {dateLabel(detail.event.last_activity_time)}</div>
                   </div>
-                  {watchTarget && <button type="button" disabled={watchPending} onClick={() => void toggleWatch()} className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] px-3 py-2 text-xs font-semibold text-[color:var(--shell-ink)] disabled:opacity-50">{activeWatch ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}{activeWatch ? "Stop watching" : `Watch ${watchTarget.key}`}</button>}
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {watchTarget && <button type="button" disabled={watchPending} onClick={() => void toggleWatch()} className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] px-3 py-2 text-xs font-semibold text-[color:var(--shell-ink)] disabled:opacity-50">{activeWatch ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}{activeWatch ? "Stop watching" : `Watch ${watchTarget.key}`}</button>}
+                    {activeWatch && <button type="button" disabled={watchPending} onClick={() => void toggleWatchEmail()} aria-pressed={watchEmailEnabled} title="Requires a verified account email and email delivery enabled in your briefing profile." className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${watchEmailEnabled ? "border-[color:var(--shell-accent-2)] bg-[color:var(--signal-emerald-soft)] text-[color:var(--shell-ink)]" : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"}`}><Mail className="h-3.5 w-3.5" />Email important events · {watchEmailEnabled ? "On" : "Off"}</button>}
+                  </div>
                 </div>
               </header>
 
-              <section className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-4" aria-labelledby="why-it-matters">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Sparkles className="h-3.5 w-3.5" /><span id="why-it-matters">Why this matters</span></div>
-                <p className="mt-2 text-sm leading-6 text-[color:var(--shell-ink)]">{detail.event.summary}</p>
-                <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                  {[["Relevance", detail.event.relevance_score], ["Urgency", detail.event.urgency_score], ["Materiality", detail.event.materiality_score]].map(([label, value]) => <div key={String(label)} className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3"><div className="text-[10px] uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">{label}</div><div className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">{confidenceLabel(Number(value))}</div></div>)}
+              <section className="event-situation-brief rounded-xl border border-[color:var(--shell-border)] p-4" aria-labelledby="situation-brief-heading">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Sparkles className="h-3.5 w-3.5 text-[color:var(--shell-accent)]" /><span id="situation-brief-heading">Situation brief</span></div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <article className="event-answer-card">
+                    <div className="event-answer-label">What happened</div>
+                    <p>{detail.understanding?.what_happened || detailPresentation?.summary}</p>
+                  </article>
+                  <article className="event-answer-card">
+                    <div className="event-answer-label">Where</div>
+                    <p className="inline-flex items-start gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--shell-accent-2)]" /><span>{detail.understanding?.where || detailPresentation?.locationLabel}{detail.event.primary_country_iso2 && !detail.understanding?.where && detailPresentation?.locationLabel !== detail.event.primary_country_iso2 ? ` · ${detail.event.primary_country_iso2}` : ""}{detail.locations.length ? ` · ${detail.locations.length} linked ${detail.locations.length === 1 ? "location" : "locations"}` : ""}</span></p>
+                  </article>
+                  <article className="event-answer-card">
+                    <div className="event-answer-label">Why it matters</div>
+                    <p>{detail.understanding?.why_interesting || detailPresentation?.why}</p>
+                  </article>
+                  <article className="event-answer-card">
+                    <div className="event-answer-label">Evidence state</div>
+                    <p>{detail.understanding?.linked_news_count ?? linkedNews.length} linked {(detail.understanding?.linked_news_count ?? linkedNews.length) === 1 ? "report" : "reports"} · {detail.understanding?.physical_observation_count ?? displayedEarthObservations.length} physical {(detail.understanding?.physical_observation_count ?? displayedEarthObservations.length) === 1 ? "observation" : "observations"} · {satelliteAssessment}.</p>
+                  </article>
                 </div>
+                <div className="mt-3 grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-border)]">
+                  {[["Relevance", detail.event.relevance_score], ["Urgency", detail.event.urgency_score], ["Materiality", detail.event.materiality_score]].map(([label, value]) => <div key={String(label)} className="bg-[color:var(--shell-surface)] p-3"><div className="text-[9px] uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">{label}</div><div className="mt-1 text-base font-semibold text-[color:var(--shell-ink)]">{confidenceLabel(Number(value))}</div></div>)}
+                </div>
+              </section>
+
+              <section aria-labelledby="linked-reporting-heading">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Newspaper className="h-3.5 w-3.5" />Linked reporting</div><h3 id="linked-reporting-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">What news is connected to this event?</h3></div>
+                  <span className="text-xs text-[color:var(--shell-muted)]">{detail.understanding?.linked_news_count ?? linkedNews.length} source {(detail.understanding?.linked_news_count ?? linkedNews.length) === 1 ? "record" : "records"}</span>
+                </div>
+                {linkedNews.length > 0 ? (
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    {linkedNews.slice(0, 6).map((item) => {
+                      return (
+                        <article key={`report-${item.id}`} className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-4">
+                          <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.12em] text-[color:var(--shell-muted)]"><span>{item.publisher || "Reporting source"}</span><span>{dateLabel(item.observed_at)}</span></div>
+                          <h4 className="mt-2 text-sm font-semibold leading-5 text-[color:var(--shell-ink)]">{item.title}</h4>
+                          {item.summary && <p className="mt-1 line-clamp-3 text-xs leading-5 text-[color:var(--shell-muted)]">{item.summary}</p>}
+                          <div className="mt-3 flex items-center justify-between gap-3 text-[10px] text-[color:var(--shell-muted)]"><span>{confidenceLabel(item.confidence)} linkage confidence</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[color:var(--signal-sky)]">Read report <ExternalLink className="h-3 w-3" /></a>}</div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded-xl border border-dashed border-[color:var(--shell-border)] p-4 text-xs leading-5 text-[color:var(--shell-muted)]">No news record is explicitly linked to this event yet. Sensor and official evidence below remain available, but Claritas does not imply a reporting connection.</div>
+                )}
               </section>
 
               <section aria-labelledby="evidence-thread-heading">
@@ -414,24 +517,27 @@ export default function IntelligenceWorkspace({
 
               <section className="rounded-xl border border-[color:var(--shell-border)] p-4" aria-labelledby="satellite-context-heading">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Satellite className="h-3.5 w-3.5" /><span id="satellite-context-heading">Satellite evidence</span></div><p className="mt-1 max-w-2xl text-xs leading-5 text-[color:var(--shell-muted)]">Imagery can confirm physical change, extent, or environmental conditions at the event location. It does not establish cause by itself.</p></div>
+                  <div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Satellite className="h-3.5 w-3.5" /><span id="satellite-context-heading">Satellite assessment</span></div><div className="mt-2 inline-flex rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--shell-ink)]">{satelliteAssessment}</div><p className="mt-2 max-w-2xl text-xs leading-5 text-[color:var(--shell-muted)]">Event-linked scenes may help assess visible conditions or change at the stated location. Browse layers provide regional context only; neither establishes cause by itself.</p></div>
                   {onOpenImagery && <button type="button" onClick={() => onOpenImagery(detail.event.id)} className="rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]">Inspect event imagery</button>}
                 </div>
                 {gibsTrueColor && (
-                  <article className="mt-3 grid overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] sm:grid-cols-[minmax(12rem,0.8fr)_minmax(0,1.2fr)]" aria-label="NASA GIBS true-color event context">
-                    <SatelliteImage
-                      sources={[gibsTrueColor.preview_url]}
-                      alt={`NASA GIBS true-color context for ${detail.event.location_name || detail.event.primary_country_iso2 || "the event location"} on ${gibsTrueColor.date}`}
-                      className="aspect-video h-full w-full bg-slate-100 object-cover"
-                      fallbackClassName="flex aspect-video h-full w-full items-center justify-center bg-slate-900"
-                    />
+                  <article className="mt-3 grid overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] sm:grid-cols-[minmax(12rem,14rem)_minmax(0,1fr)]" aria-label="NASA GIBS true-color event context">
+                    <div className="satellite-image-stage flex min-h-36 items-center justify-center p-2">
+                      <SatelliteImage
+                        sources={[gibsTrueColor.preview_url]}
+                        alt={`NASA GIBS true-color context for ${detailPresentation?.locationLabel || "the event location"} on ${gibsTrueColor.date}`}
+                        className="max-h-44 w-full rounded-md object-contain"
+                        fallbackClassName="flex min-h-36 h-full w-full items-center justify-center rounded-md bg-[color:var(--shell-sidebar)]"
+                      />
+                    </div>
                     <div className="p-3 text-xs text-[color:var(--shell-muted)]">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-700">Context · not proof</span>
+                        <span className="rounded-full border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[color:var(--shell-ink)]">Regional browse context · not proof</span>
                         <span>{gibsTrueColor.date}</span>
                       </div>
                       <div className="mt-2 font-semibold text-[color:var(--shell-ink)]">{gibsTrueColor.title}</div>
                       <p className="mt-1 leading-5">{gibsContext?.notice || "NASA GIBS browse imagery is contextual and is not proof of physical change or causation."}</p>
+                      <p className="mt-1 leading-5">This lower-detail layer is intentionally shown at a bounded size. Use the imagery workspace for event-linked processed scenes.</p>
                       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                         <span>{gibsTrueColor.provenance.attribution}</span>
                         <a href={gibsTrueColor.provenance.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[color:var(--signal-sky)]">NASA GIBS provenance <ExternalLink className="h-3 w-3" /></a>
@@ -442,11 +548,11 @@ export default function IntelligenceWorkspace({
                 {displayedEarthObservations.length > 0 ? (
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     {displayedEarthObservations.slice(0, 4).map((observation) => {
-                      const asset = observation.assets?.find((item) => item.asset_type === "preview") ?? observation.assets?.[0];
+                      const asset = observation.imagery?.preferred_asset ?? observation.assets?.find((item) => item.asset_type === "preview") ?? observation.assets?.[0];
                       const analytical = isAnalyticalEarthProduct(observation.product_type);
-                      return <article key={observation.id} className="overflow-hidden rounded-lg border border-[color:var(--shell-border)]">
-                        {asset ? <SatelliteImage sources={[asset.url]} alt={`${earthObservationProductLabel(observation.product_type)} observation at ${observation.location_name || "event location"}`} className={`aspect-video w-full bg-slate-950 ${analytical ? "object-contain" : "object-cover"}`} fallbackClassName="flex aspect-video items-center justify-center bg-slate-900" /> : <div className="flex aspect-video items-center justify-center bg-slate-100"><ImageOff className="h-6 w-6 text-slate-400" /></div>}
-                        <div className="p-3 text-xs text-[color:var(--shell-muted)]"><div className="font-semibold text-[color:var(--shell-ink)]">{earthObservationProductLabel(observation.product_type)} · {observation.mission}</div>{analytical && <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">Analytical layer · not natural color</div>}<div className="mt-1">Captured {dateLabel(observation.capture_start)}{observation.cloud_cover == null ? "" : ` · ${Math.round(observation.cloud_cover)}% cloud`}</div>{observation.analysis_summary && <p className="mt-2 leading-5">{observation.analysis_summary}</p>}<a href={observation.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a></div>
+                      return <article key={observation.id} className="overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)]">
+                        <div className="satellite-image-stage flex aspect-video items-center justify-center p-2">{asset ? <SatelliteImage sources={[asset.url]} alt={`${earthObservationProductLabel(observation.product_type)} observation at ${observation.location_name || "event location"}`} className="h-full w-full rounded-md object-contain" fallbackClassName="flex h-full w-full items-center justify-center rounded-md bg-[color:var(--shell-sidebar)]" /> : <div className="flex h-full w-full items-center justify-center"><ImageOff className="h-6 w-6 text-[color:var(--shell-muted)]" /></div>}</div>
+                        <div className="p-3 text-xs text-[color:var(--shell-muted)]"><div className="flex flex-wrap items-center justify-between gap-2"><div className="font-semibold text-[color:var(--shell-ink)]">{observation.imagery?.label || earthObservationProductLabel(observation.product_type)} · {observation.mission}</div><span className="rounded-full border border-[color:var(--signal-emerald)] bg-[color:var(--signal-emerald-soft)] px-2 py-0.5 text-[9px] font-semibold uppercase text-[color:var(--shell-ink)]">{observation.imagery?.quality_tier === "high_resolution_processed" ? "High-resolution · event linked" : "Event linked"}</span></div>{analytical && <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--signal-amber)]">Analytical layer · not natural color</div>}<div className="mt-1">Captured {dateLabel(observation.capture_start)}{observation.resolution_m == null ? "" : ` · ${observation.resolution_m} m native resolution`}{observation.imagery?.effective_pixel_size_m == null ? "" : ` · ${observation.imagery.effective_pixel_size_m} m effective pixel`}{observation.cloud_cover == null ? "" : ` · ${Math.round(observation.cloud_cover)}% cloud`}{asset ? ` · ${asset.width}×${asset.height} preview` : ""}</div>{observation.imagery?.interpretation && <p className="mt-2 leading-5 text-[color:var(--shell-ink)]">{observation.imagery.interpretation}</p>}{observation.analysis_summary && observation.analysis_summary_role !== "model_interpretation" && <p className="mt-2 leading-5">{observation.analysis_summary}</p>}{observation.model_interpretation && <div className="mt-3 rounded-lg border border-[color:var(--viz-violet)]/40 bg-[color:var(--shell-bg)] p-3"><div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[color:var(--viz-violet)]"><Sparkles className="h-3 w-3" />Model interpretation · not an independent measurement</div>{observation.model_interpretation.summary && <p className="mt-1 leading-5 text-[color:var(--shell-ink)]">{observation.model_interpretation.summary}</p>}{observation.model_interpretation.findings?.[0] && <p className="mt-1 leading-5"><span className="font-semibold text-[color:var(--shell-ink)]">Observed feature:</span> {observation.model_interpretation.findings[0]}</p>}{observation.model_interpretation.possible_changes?.[0] && <p className="mt-1 leading-5"><span className="font-semibold text-[color:var(--shell-ink)]">Possible change:</span> {observation.model_interpretation.possible_changes[0]}</p>}<p className="mt-1 text-[10px] leading-4">{observation.model_interpretation.notice}</p></div>}{observation.event_context?.linkage?.limitation && <p className="mt-2 border-l-2 border-[color:var(--shell-accent)] pl-2 leading-5">{observation.event_context.linkage.limitation}</p>}<a href={observation.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a></div>
                       </article>;
                     })}
                   </div>
@@ -463,7 +569,7 @@ export default function IntelligenceWorkspace({
                 <section aria-labelledby="related-events-heading"><h3 id="related-events-heading" className="text-sm font-semibold text-[color:var(--shell-ink)]">Related investigations</h3><p className="mt-1 text-xs text-[color:var(--shell-muted)]">Relationships are qualified context, not asserted causation.</p><div className="mt-2 grid gap-2 sm:grid-cols-2">{detail.related_events.map((event) => <button key={`${event.id}-${event.relationship}`} type="button" onClick={() => selectEvent(event.id)} className="rounded-lg border border-[color:var(--shell-border)] p-3 text-left hover:bg-[color:var(--shell-bg)]"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-semibold uppercase text-[color:var(--shell-muted)]">{event.relationship.replace(/_/g, " ")}</span><span className="text-[10px] uppercase text-[color:var(--shell-muted)]">{event.severity}</span></div><div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">{event.title}</div>{event.rationale && <div className="mt-1 text-xs text-[color:var(--shell-muted)]">{event.rationale}</div>}</button>)}</div></section>
               )}
 
-              <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{detail.epistemic_notice}</span></div>
+              <div className="event-caution flex gap-2 rounded-lg border p-3 text-xs leading-5"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{detail.epistemic_notice}</span></div>
               <div className="flex items-center gap-2 text-xs text-[color:var(--shell-muted)]"><Eye className="h-3.5 w-3.5" />Last activity {dateLabel(detail.event.last_activity_time)}</div>
             </div>
           )}

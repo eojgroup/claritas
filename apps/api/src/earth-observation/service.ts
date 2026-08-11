@@ -15,6 +15,14 @@ import {
   OpenRouterVisionError,
   normalizeVisionDailyLimit,
 } from "./openrouter-vision";
+import {
+  accountedProcessingUnits,
+  contentAddressedObservationObject,
+  earthObservationToApi,
+  earthProductPresentation,
+  renderDimensionsForAoi,
+  renderWindowForScene,
+} from "./image-quality";
 import { CopernicusProvider } from "./providers/copernicus";
 import { APPROVED_GIBS_LAYERS, buildApprovedGibsEventLayers, gibsStatus } from "./providers/nasa-gibs";
 import { NasaFirmsProvider } from "./providers/nasa-firms";
@@ -29,6 +37,11 @@ const firms = new NasaFirmsProvider();
 const vision = new OpenRouterVisionClient();
 let earthWorkerTimer: NodeJS.Timeout | null = null;
 let earthWorkerRunning = false;
+const EVENT_FOCUSED_REFRESH_POLICY = "event_focused_v3";
+// The production bucket deletes observations after 60 days (Terraform). The
+// API never advertises a later expiry, including when a content-addressed
+// object is reused by a retry.
+const EARTH_ASSET_BUCKET_LIFECYCLE_DAYS = 60;
 
 const flag = (name: string, fallback = false) => {
   const value = process.env[name]?.trim().toLowerCase();
@@ -40,30 +53,14 @@ const integerEnv = (name: string, fallback: number, min: number, max: number) =>
   return Math.min(max, Math.max(min, Number.isFinite(parsed) ? parsed : fallback));
 };
 
+const decimalEnv = (name: string, fallback: number, min: number, max: number) => {
+  const parsed = Number(process.env[name] ?? "");
+  return Math.min(max, Math.max(min, Number.isFinite(parsed) ? parsed : fallback));
+};
+
 const iso = (value: string | Date | null | undefined) => value == null
   ? null
   : (value instanceof Date ? value : new Date(value)).toISOString();
-
-function observationToApi(row: any) {
-  return {
-    ...row,
-    confidence: row.confidence == null ? null : Number(row.confidence),
-    scene_rank: row.scene_rank == null ? null : Number(row.scene_rank),
-    cloud_cover: row.cloud_cover == null ? null : Number(row.cloud_cover),
-    resolution_m: row.resolution_m == null ? null : Number(row.resolution_m),
-    captured_at: iso(row.captured_at),
-    capture_start: iso(row.capture_start),
-    capture_end: iso(row.capture_end),
-    assets: Array.isArray(row.assets) ? row.assets.map((asset: any) => ({
-      ...asset,
-      width: Number(asset.width),
-      height: Number(asset.height),
-      size_bytes: Number(asset.size_bytes),
-      generated_at: iso(asset.generated_at),
-      expires_at: iso(asset.expires_at),
-    })) : [],
-  };
-}
 
 async function recordUsage(provider: string, fields: Record<string, number>) {
   const allowed = ["scene_searches", "process_requests", "processing_units", "rendered_pixels", "cache_hits", "bytes_stored", "errors", "rate_limits"];
@@ -169,8 +166,15 @@ export async function getEarthObservationStatus() {
       vision_model: vision.model,
       max_width: integerEnv("EO_RENDER_MAX_WIDTH", 1024, 64, 2048),
       max_height: integerEnv("EO_RENDER_MAX_HEIGHT", 1024, 64, 2048),
+      event_aoi_radius_km: decimalEnv("EO_EVENT_AOI_RADIUS_KM", 6, 2, 25),
+      thumbnail_max_dimension: 640,
       max_aoi_square_degrees: Number(process.env.EO_MAX_AOI_SQUARE_DEGREES ?? 25),
-      retention_days: integerEnv("EO_ASSET_RETENTION_DAYS", 60, 1, 365),
+      retention_days: integerEnv(
+        "EO_ASSET_RETENTION_DAYS",
+        EARTH_ASSET_BUCKET_LIFECYCLE_DAYS,
+        1,
+        EARTH_ASSET_BUCKET_LIFECYCLE_DAYS,
+      ),
     },
   };
 }
@@ -204,6 +208,7 @@ export async function getGibsEventContext(eventId: string) {
   const aoi = resolveDiscoveryAoi(hasTrustedEventGeography ? {
     eventLatitude: event.event_latitude,
     eventLongitude: event.event_longitude,
+    pointRadiusKm: decimalEnv("EO_EVENT_AOI_RADIUS_KM", 6, 2, 25),
   } : {
     locationBbox: event.location_bbox,
     locationLatitude: event.location_latitude,
@@ -222,6 +227,9 @@ export async function getGibsEventContext(eventId: string) {
     bbox: aoi.bbox,
     aoi_source: aoi.source,
     context_scope: contextScope,
+    imagery_class: "regional_browse_context",
+    evidence_role: "context_not_confirmation",
+    high_resolution_processed_endpoint: `/api/earth-observation/events/${event.id}`,
     layers: buildApprovedGibsEventLayers({ date, bbox: aoi.bbox }),
     notice: contextScope === "event"
       ? "GIBS browse imagery is centered on trusted event geography. It is context, not automatic proof of physical change or causation."
@@ -250,6 +258,23 @@ export async function listEarthObservations(options: {
             scene.cloud_cover, scene.resolution_m, scene.orbit_direction,
             scene.source_url, scene.bbox,
             location.canonical_name AS location_name,
+            location.country_iso2 AS location_country_iso2,
+            event.title AS event_title,event.summary AS event_summary,
+            event.event_type,event.status AS event_status,event.severity AS event_severity,
+            event.start_time AS event_start_time,event.last_activity_time AS event_last_activity_time,
+            event.primary_country_iso2 AS event_country_iso2,
+            event.relevance_score AS event_relevance_score,event.urgency_score AS event_urgency_score,
+            event.materiality_score AS event_materiality_score,event.score_components AS event_score_components,
+            COALESCE(
+              CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,
+              location.latitude
+            ) AS event_latitude,
+            COALESCE(
+              CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,
+              location.longitude
+            ) AS event_longitude,
+            linked_news.news_count AS linked_news_count,
+            linked_news.items AS linked_news,
             COALESCE(jsonb_agg(jsonb_build_object(
               'id', asset.id, 'asset_type', asset.asset_type,
               'mime_type', asset.mime_type, 'width', asset.width, 'height', asset.height,
@@ -257,19 +282,57 @@ export async function listEarthObservations(options: {
               'expires_at', asset.expires_at,
               'url', '/api/earth-observation/assets/' || asset.id::text
                 || '?v=' || left(asset.content_hash, 16)
-            ) ORDER BY asset.width) FILTER (WHERE asset.id IS NOT NULL), '[]'::jsonb) AS assets
+            ) ORDER BY CASE asset.asset_type WHEN 'preview' THEN 0 WHEN 'thumbnail' THEN 1 ELSE 2 END,
+                       asset.width DESC) FILTER (WHERE asset.id IS NOT NULL), '[]'::jsonb) AS assets
      FROM earth_observation observation
      JOIN earth_scene scene ON scene.id = observation.scene_id
      LEFT JOIN intelligence_location location ON location.id = observation.location_id
+     LEFT JOIN intelligence_event event ON event.id=observation.event_id
+     LEFT JOIN LATERAL (
+       SELECT
+         (SELECT count(*)::int FROM intelligence_event_evidence all_news
+          WHERE all_news.event_id=event.id AND all_news.domain='news'
+            AND all_news.source_record_type='item') AS news_count,
+         (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                    'evidence_id',recent.id,
+                    'title',recent.title,
+                    'summary',recent.summary,
+                    'url',recent.url,
+                    'source_name',recent.source_name,
+                    'observed_at',recent.observed_at,
+                    'relationship',recent.relationship,
+                    'confidence',recent.confidence,
+                    'correlation_score',recent.correlation_score
+                  ) ORDER BY recent.observed_at DESC),'[]'::jsonb)
+          FROM (
+            SELECT evidence.id,evidence.observed_at,evidence.relationship,
+                   evidence.confidence,evidence.correlation_score,
+                   COALESCE(source_item.title,evidence.metadata->>'title',evidence.provenance->>'title') AS title,
+                   COALESCE(source_item.summary,evidence.metadata->>'summary') AS summary,
+                   COALESCE(source_item.url,evidence.provenance->>'url') AS url,
+                   source.name AS source_name
+            FROM intelligence_event_evidence evidence
+            LEFT JOIN item source_item ON source_item.id=CASE
+              WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
+                THEN evidence.source_record_id::bigint END
+            LEFT JOIN source ON source.id=COALESCE(evidence.source_id,source_item.source_id)
+            WHERE evidence.event_id=event.id AND evidence.domain='news'
+              AND evidence.source_record_type='item'
+            ORDER BY evidence.observed_at DESC,evidence.id
+            LIMIT 6
+          ) recent) AS items
+     ) linked_news ON event.id IS NOT NULL
      LEFT JOIN earth_observation_asset asset ON asset.observation_id = observation.id
       AND (asset.expires_at IS NULL OR asset.expires_at > now())
      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-     GROUP BY observation.id, scene.id, location.id
-     ORDER BY scene.capture_start DESC
+     GROUP BY observation.id, scene.id, location.id, event.id,
+              linked_news.news_count,linked_news.items
+     ORDER BY CASE observation.product_type WHEN 'true_color' THEN 0 WHEN 'sar' THEN 1 ELSE 2 END,
+              scene.capture_start DESC
      LIMIT ${limitRef}`,
     params,
   );
-  return rows.map(observationToApi);
+  return rows.map(earthObservationToApi);
 }
 
 export async function getEarthScene(sceneId: string) {
@@ -492,6 +555,7 @@ async function processSceneDiscovery(job: any) {
     ? resolveDiscoveryAoi({
         eventLatitude: location.event_latitude,
         eventLongitude: location.event_longitude,
+        pointRadiusKm: decimalEnv("EO_EVENT_AOI_RADIUS_KM", 6, 2, 25),
       })
     : resolveDiscoveryAoi({
         locationBbox: location.bbox,
@@ -510,6 +574,7 @@ async function processSceneDiscovery(job: any) {
     eventTime,
     maxCloudCover: Number(process.env.EO_DEFAULT_CLOUD_THRESHOLD ?? 35),
     preferredCollections: job.parameters?.prefer_sar ? ["sentinel-1-grd", "sentinel-2-l2a"] : undefined,
+    aoiBbox: bbox,
   });
   const requestedProducts = requestedCopernicusProducts(job.parameters?.requested_products);
   const maximumScenes = integerEnv("EO_MAX_SCENES_PER_DISCOVERY", 4, 1, 10);
@@ -563,6 +628,9 @@ async function processSceneDiscovery(job: any) {
            rank_components: rankedScene.components,
            aoi_source: aoi.source,
            aoi_center: aoi.center,
+           aoi_bbox: bbox,
+           focus_radius_km: aoi.focus_radius_km ?? null,
+           imagery_intent: product === "true_color" ? "human_readable_event_context" : "sensor_derived_event_signal",
            epistemic_class: "observed_physical_signal",
          }),
          rankedScene.scene.attribution, rankedScene.scene.license],
@@ -589,6 +657,8 @@ async function processSceneDiscovery(job: any) {
       count + compatibleCopernicusProducts(entry.scene.collection, requestedProducts).length
     ), 0),
     aoi_source: aoi.source,
+    aoi_bbox: bbox,
+    focus_radius_km: aoi.focus_radius_km ?? null,
     revisit_scheduled: revisitScheduled,
   };
 }
@@ -598,13 +668,16 @@ async function processRender(job: any) {
   if (!bucketName) throw new Error("EO_ASSET_BUCKET is not configured.");
   const { rows } = await query<any>(
     `SELECT observation.id, observation.event_id, observation.product_type, scene.collection,
-            scene.capture_start, scene.capture_end,
+            scene.provider_scene_id,scene.resolution_m,scene.capture_start, scene.capture_end,
             event.metadata AS event_metadata,
             location.bbox AS location_bbox,
             location.latitude AS location_latitude,
             location.longitude AS location_longitude,
             CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END AS event_latitude,
-            CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END AS event_longitude
+            CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END AS event_longitude,
+            (SELECT count(*)::int FROM intelligence_event_evidence evidence
+             WHERE evidence.event_id=observation.event_id AND evidence.domain='news'
+               AND evidence.source_record_type='item') AS linked_news_count
      FROM earth_observation observation
      JOIN earth_scene scene ON scene.id = observation.scene_id
      LEFT JOIN intelligence_location location ON location.id=observation.location_id
@@ -622,12 +695,25 @@ async function processRender(job: any) {
     ? resolveDiscoveryAoi({
         eventLatitude: target.event_latitude,
         eventLongitude: target.event_longitude,
+        pointRadiusKm: decimalEnv("EO_EVENT_AOI_RADIUS_KM", 6, 2, 25),
       })
     : resolveDiscoveryAoi({
         locationBbox: target.location_bbox,
         locationLatitude: target.location_latitude,
         locationLongitude: target.location_longitude,
       });
+  const protectedRefresh = job.parameters?.required_worker_policy === EVENT_FOCUSED_REFRESH_POLICY;
+  const configuredMaximumWidth = integerEnv("EO_RENDER_MAX_WIDTH", Number(job.parameters?.width ?? 1024), 64, 2048);
+  const configuredMaximumHeight = integerEnv("EO_RENDER_MAX_HEIGHT", Number(job.parameters?.height ?? 768), 64, 2048);
+  // Keep the migration refresh's stated 48-PU worst-case bound even if an
+  // operator raises the general render ceiling during or after rollout.
+  const maximumWidth = protectedRefresh ? Math.min(1_024, configuredMaximumWidth) : configuredMaximumWidth;
+  const maximumHeight = protectedRefresh ? Math.min(1_024, configuredMaximumHeight) : configuredMaximumHeight;
+  const renderDimensions = renderDimensionsForAoi(renderAoi.bbox, maximumWidth, maximumHeight);
+  const renderWindow = renderWindowForScene(
+    new Date(target.capture_start),
+    target.capture_end ? new Date(target.capture_end) : null,
+  );
   const { rows: usageRows } = await query<{ daily_processing_units: number; monthly_processing_units: number }>(
     `SELECT
        COALESCE(sum(processing_units) FILTER (WHERE usage_date=(now() AT TIME ZONE 'UTC')::date),0)::double precision AS daily_processing_units,
@@ -643,24 +729,44 @@ async function processRender(job: any) {
   const monthlyUsed = Number(usageRows[0]?.monthly_processing_units ?? 0);
   const dailyBudget = Math.max(0, Number(process.env.EO_MAX_DAILY_PROCESSING_UNITS ?? 100));
   const monthlyBudget = Math.max(0, Number(process.env.EO_MAX_MONTHLY_PROCESSING_UNITS ?? 3_000));
-  const estimatedUnits = integerEnv("EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER", 4, 1, 25);
+  const baseEstimatedUnits = integerEnv("EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER", 4, 1, 25);
+  const estimatedUnits = Math.min(25, Math.max(baseEstimatedUnits, Math.ceil(
+    baseEstimatedUnits * (renderDimensions.width * renderDimensions.height) / (1_024 * 768),
+  )));
   const dailyAvailable = hasProcessingBudget(dailyUsed, dailyBudget, estimatedUnits);
   const monthlyAvailable = hasProcessingBudget(monthlyUsed, monthlyBudget, estimatedUnits);
   if (!dailyAvailable || !monthlyAvailable) {
     const monthly = !monthlyAvailable;
-    const { rows: deferred } = await query<{ available_at: string | Date }>(
-      `UPDATE earth_processing_job SET
-         status='budget_deferred',attempts=GREATEST(attempts-1,0),
-         available_at=CASE WHEN $2
-           THEN (date_trunc('month',now() AT TIME ZONE 'UTC')+interval '1 month') AT TIME ZONE 'UTC'
-           ELSE (date_trunc('day',now() AT TIME ZONE 'UTC')+interval '1 day') AT TIME ZONE 'UTC'
-         END,
-         last_error=$3,started_at=NULL,finished_at=NULL,updated_at=now()
-       WHERE id=$1 RETURNING available_at`,
-      [job.id, monthly, monthly
-        ? `Monthly processing-unit ceiling (${monthlyBudget}) reached.`
-        : `Daily processing-unit ceiling (${dailyBudget}) reached.`],
-    );
+    const budgetMessage = monthly
+      ? `Monthly processing-unit ceiling (${monthlyBudget}) reached.`
+      : `Daily processing-unit ceiling (${dailyBudget}) reached.`;
+    const deferred = await withTransaction(async (client) => {
+      const { rows } = await client.query<{ available_at: string | Date }>(
+        `UPDATE earth_processing_job SET
+           status=CASE WHEN $4 THEN 'success' ELSE 'budget_deferred' END,
+           attempts=GREATEST(attempts-1,0),
+           available_at=CASE WHEN $2
+             THEN (date_trunc('month',now() AT TIME ZONE 'UTC')+interval '1 month') AT TIME ZONE 'UTC'
+             ELSE (date_trunc('day',now() AT TIME ZONE 'UTC')+interval '1 day') AT TIME ZONE 'UTC'
+           END,
+           last_error=$3,started_at=NULL,finished_at=CASE WHEN $4 THEN now() ELSE NULL END,updated_at=now()
+         WHERE id=$1 RETURNING available_at`,
+        [job.id, monthly, budgetMessage, protectedRefresh],
+      );
+      if (protectedRefresh && job.observation_id) {
+        await client.query(
+          `UPDATE earth_observation SET status='available',last_error=NULL,
+             methodology=(COALESCE(methodology,'{}'::jsonb)-'refresh_claimed')
+               || jsonb_build_object('refresh_pending',jsonb_build_object(
+                    'policy',$2::text,'deferred_until',$3::timestamptz,
+                    'reason','provider_budget'
+                  )),updated_at=now()
+           WHERE id=$1`,
+          [job.observation_id, EVENT_FOCUSED_REFRESH_POLICY, rows[0]?.available_at],
+        );
+      }
+      return rows;
+    });
     return {
       budget_deferred: true,
       budget_period: monthly ? "month" : "day",
@@ -669,29 +775,117 @@ async function processRender(job: any) {
       monthly_used: monthlyUsed,
     };
   }
-  await query(`UPDATE earth_observation SET status='processing', updated_at=now() WHERE id=$1`, [target.id]);
+  if (!protectedRefresh) {
+    await query(`UPDATE earth_observation SET status='processing',updated_at=now() WHERE id=$1`, [target.id]);
+  }
   const rendered = await copernicus.render({
     bbox: renderAoi.bbox,
-    start: new Date(target.capture_start),
-    end: target.capture_end ? new Date(target.capture_end) : new Date(new Date(target.capture_start).getTime() + 86_400_000),
+    start: renderWindow.start,
+    end: renderWindow.end,
     collection: target.collection,
     product: target.product_type,
-    width: integerEnv("EO_RENDER_MAX_WIDTH", Number(job.parameters?.width ?? 1024), 64, 2048),
-    height: integerEnv("EO_RENDER_MAX_HEIGHT", Number(job.parameters?.height ?? 768), 64, 2048),
+    width: renderDimensions.width,
+    height: renderDimensions.height,
     maxCloudCoverage: Number(process.env.EO_DEFAULT_CLOUD_THRESHOLD ?? 35),
   });
-  const retentionDays = integerEnv("EO_ASSET_RETENTION_DAYS", 60, 1, 365);
-  const expiresAt = new Date(Date.now() + retentionDays * 86_400_000);
-  const previewObject = `observations/${target.id}/preview.png`;
-  const thumbnailObject = `observations/${target.id}/thumbnail.webp`;
-  const thumbnail = await sharp(rendered.bytes).resize({ width: 480, height: 320, fit: "inside", withoutEnlargement: true }).webp({ quality: 78 }).toBuffer({ resolveWithObject: true });
-  const bucket = storage.bucket(bucketName);
-  await Promise.all([
-    bucket.file(previewObject).save(rendered.bytes, { resumable: false, contentType: rendered.mimeType, metadata: { cacheControl: "private,max-age=86400" } }),
-    bucket.file(thumbnailObject).save(thumbnail.data, { resumable: false, contentType: "image/webp", metadata: { cacheControl: "private,max-age=86400" } }),
-  ]);
+  const processingUnitsAccounted = accountedProcessingUnits(estimatedUnits, rendered.processingUnits);
+  // Account provider work immediately after a successful response. Asset
+  // processing/storage may still fail and retry, but that does not erase the
+  // processing units already consumed by this request.
+  await recordUsage("copernicus", {
+    process_requests: 1,
+    processing_units: processingUnitsAccounted,
+    rendered_pixels: rendered.width * rendered.height,
+  });
+  const retentionDays = integerEnv(
+    "EO_ASSET_RETENTION_DAYS",
+    EARTH_ASSET_BUCKET_LIFECYCLE_DAYS,
+    1,
+    EARTH_ASSET_BUCKET_LIFECYCLE_DAYS,
+  );
+  const thumbnail = await sharp(rendered.bytes)
+    .resize({ width: 640, height: 640, fit: "inside", withoutEnlargement: true })
+    .webp({ quality: 85, effort: 4 })
+    .toBuffer({ resolveWithObject: true });
   const previewHash = createHash("sha256").update(rendered.bytes).digest("hex");
   const thumbnailHash = createHash("sha256").update(thumbnail.data).digest("hex");
+  const previewObject = contentAddressedObservationObject(target.id, "preview", previewHash, "png");
+  const thumbnailObject = contentAddressedObservationObject(target.id, "thumbnail", thumbnailHash, "webp");
+  const bucket = storage.bucket(bucketName);
+  const uploadTargets = [
+    { object: previewObject, bytes: rendered.bytes, contentType: rendered.mimeType },
+    { object: thumbnailObject, bytes: thumbnail.data, contentType: "image/webp" },
+  ];
+  const saveImmutable = async (asset: typeof uploadTargets[number]): Promise<Date> => {
+    const uploadStartedAt = new Date();
+    const file = bucket.file(asset.object);
+    try {
+      await file.save(asset.bytes, {
+        resumable: false,
+        contentType: asset.contentType,
+        metadata: { cacheControl: "private,max-age=86400" },
+        preconditionOpts: { ifGenerationMatch: 0 },
+      });
+      return uploadStartedAt;
+    } catch (error) {
+      // A retry can encounter the exact content-addressed object written by an
+      // earlier partial attempt. Create-only 412 is therefore success; every
+      // other storage failure remains retryable without touching live assets.
+      const status = error && typeof error === "object" && "code" in error
+        ? Number((error as { code?: unknown }).code) : Number.NaN;
+      if (status !== 412) throw error;
+      const [metadata] = await file.getMetadata();
+      const createdAt = new Date(String(metadata.timeCreated ?? ""));
+      if (Number.isNaN(createdAt.getTime())) {
+        throw new Error(`Existing immutable asset ${asset.object} has no valid creation time.`);
+      }
+      return createdAt;
+    }
+  };
+  const objectCreatedAt = await Promise.all(uploadTargets.map(saveImmutable));
+  const retentionMs = retentionDays * 86_400_000;
+  const bucketLifecycleMs = EARTH_ASSET_BUCKET_LIFECYCLE_DAYS * 86_400_000;
+  const expiresAt = new Date(Math.min(
+    Date.now() + retentionMs,
+    ...objectCreatedAt.map((createdAt) => createdAt.getTime() + bucketLifecycleMs),
+  ));
+  const renderContext = {
+    visualization_version: "event_focused_v3",
+    aoi_source: renderAoi.source,
+    aoi_bbox: renderAoi.bbox,
+    focus_radius_km: renderAoi.focus_radius_km ?? null,
+    width: rendered.width,
+    height: rendered.height,
+    ground_width_m: renderDimensions.ground_width_m,
+    ground_height_m: renderDimensions.ground_height_m,
+    effective_pixel_size_m: renderDimensions.effective_pixel_size_m,
+    native_resolution_m: target.resolution_m == null ? null : Number(target.resolution_m),
+    acquisition_window: {
+      from: renderWindow.start.toISOString(),
+      to: renderWindow.end.toISOString(),
+      provider_scene_id: target.provider_scene_id,
+    },
+    product: earthProductPresentation(target.product_type),
+    processing_units: {
+      preflight_estimate: estimatedUnits,
+      provider_reported: rendered.processingUnits ?? null,
+      accounted: processingUnitsAccounted,
+      method: "max_of_estimate_and_valid_provider_report",
+    },
+  };
+  const committedResult = {
+    observation_id: target.id,
+    bytes_stored: rendered.bytes.length + thumbnail.data.length,
+    aoi_source: renderAoi.source,
+    render_context: {
+      width: rendered.width,
+      height: rendered.height,
+      effective_pixel_size_m: renderDimensions.effective_pixel_size_m,
+      focus_radius_km: renderAoi.focus_radius_km ?? null,
+      provider_scene_id: target.provider_scene_id,
+      processing_units_accounted: processingUnitsAccounted,
+    },
+  };
   await withTransaction(async (client) => {
     for (const asset of [
       { type: "preview", mime: rendered.mimeType, width: rendered.width, height: rendered.height, object: previewObject, hash: previewHash, size: rendered.bytes.length },
@@ -709,7 +903,13 @@ async function processRender(job: any) {
         [target.id, asset.type, asset.mime, asset.width, asset.height, asset.object, asset.hash, asset.size, expiresAt],
       );
     }
-    await client.query(`UPDATE earth_observation SET status='available', generated_at=now(), last_error=NULL, updated_at=now() WHERE id=$1`, [target.id]);
+    await client.query(
+      `UPDATE earth_observation SET status='available',generated_at=now(),last_error=NULL,
+              methodology=(COALESCE(methodology,'{}'::jsonb)-'refresh_claimed'-'refresh_pending')
+                || jsonb_build_object('render_context',$2::jsonb),updated_at=now()
+       WHERE id=$1`,
+      [target.id, JSON.stringify(renderContext)],
+    );
     await client.query(
       `INSERT INTO intelligence_event_evidence (
          event_id, domain, evidence_type, source_record_type, source_record_id,
@@ -726,15 +926,26 @@ async function processRender(job: any) {
                 'mission',scene.mission,
                 'collection',scene.collection,
                 'source_diversity_key',concat_ws(':',scene.provider,scene.mission,scene.collection),
-                'analysis_kind',observation.analysis_kind
+                'analysis_kind',observation.analysis_kind,
+                'render_context',$2::jsonb,
+                'event_linkage','canonical_event_and_trusted_geography',
+                'verification_scope','contextual_observation_not_automatic_confirmation'
               ),
               observation.license, observation.attribution,
-              jsonb_build_object('observation_id',observation.id)
+              jsonb_build_object(
+                'observation_id',observation.id,
+                'linked_news_count_at_render',$3::int,
+                'preferred_display_asset','preview'
+              )
        FROM earth_observation observation
        JOIN earth_scene scene ON scene.id=observation.scene_id
        WHERE observation.id=$1 AND observation.event_id IS NOT NULL
-       ON CONFLICT (event_id, domain, source_record_type, source_record_id) DO NOTHING`,
-      [target.id],
+       ON CONFLICT (event_id, domain, source_record_type, source_record_id) DO UPDATE SET
+         observed_at=EXCLUDED.observed_at,confidence=EXCLUDED.confidence,
+         relationship=EXCLUDED.relationship,provenance=EXCLUDED.provenance,
+         license=EXCLUDED.license,attribution=EXCLUDED.attribution,
+         metadata=intelligence_event_evidence.metadata || EXCLUDED.metadata`,
+      [target.id, JSON.stringify(renderContext), Number(target.linked_news_count ?? 0)],
     );
     if (target.event_id) await recomputeIntelligenceEventAggregateTx(client, target.event_id);
     await client.query(
@@ -746,14 +957,33 @@ async function processRender(job: any) {
        ON CONFLICT (dedupe_key) DO NOTHING`,
       [target.id, `earth-scene-available:${target.id}`],
     );
+    // Asset pointers, the available observation, and job success are one
+    // commit. A lost COMMIT acknowledgement can then be reconciled without a
+    // second paid provider call.
+    await client.query(
+      `UPDATE earth_processing_job SET status='success',result=$2::jsonb,
+              finished_at=now(),last_error=NULL,updated_at=now()
+       WHERE id=$1`,
+      [job.id, JSON.stringify(committedResult)],
+    );
   });
-  await recordUsage("copernicus", {
-    process_requests: 1,
-    processing_units: rendered.processingUnits ?? 0,
-    rendered_pixels: rendered.width * rendered.height,
-    bytes_stored: rendered.bytes.length + thumbnail.data.length,
-  });
-  await updateProviderState("copernicus", { success: true, event: true });
+  // Do not synchronously delete the prior content-addressed pair: readers may
+  // already hold its asset row. The bucket's bounded lifecycle removes old and
+  // partial objects after the same retention window used by asset metadata.
+  try {
+    await recordUsage("copernicus", {
+      bytes_stored: rendered.bytes.length + thumbnail.data.length,
+    });
+    await updateProviderState("copernicus", { success: true, event: true });
+  } catch (error) {
+    // Physical evidence is already committed. Telemetry must never trigger a
+    // second Copernicus render or hide the available image.
+    console.error(JSON.stringify({
+      event: "earth_render_telemetry_failed",
+      observation_id: target.id,
+      message: error instanceof Error ? error.message : String(error),
+    }));
+  }
   let visionEnqueued = false;
   if (providerEnabled("openrouter_vision")
       && ["true_color", "false_color", "sar"].includes(target.product_type)) {
@@ -769,12 +999,7 @@ async function processRender(job: any) {
       }));
     }
   }
-  return {
-    observation_id: target.id,
-    bytes_stored: rendered.bytes.length + thumbnail.data.length,
-    aoi_source: renderAoi.source,
-    vision_enqueued: visionEnqueued,
-  };
+  return { ...committedResult, vision_enqueued: visionEnqueued };
 }
 
 async function enqueueVisionEnrichment(job: any, observationId: string) {
@@ -979,27 +1204,234 @@ async function claimEarthJob() {
   });
 }
 
+/**
+ * A protected refresh may be interrupted after it is atomically claimed. Keep
+ * the previous asset usable: completed v3 asset transactions are finalized,
+ * while incomplete claims return to the successful/hidden staged state.
+ */
+export async function recoverStaleImageryRefreshes() {
+  const staleMinutes = integerEnv("EO_REFRESH_STALE_MINUTES", 15, 5, 120);
+  return withTransaction(async (client) => {
+    const { rows: stale } = await client.query<any>(
+      `SELECT job.id,observation.id AS observation_id,
+              observation.status AS observation_status,
+              observation.methodology->'render_context'->>'visualization_version' AS rendered_policy
+       FROM earth_processing_job job
+       JOIN earth_observation observation ON observation.id=job.observation_id
+       WHERE job.status='running'
+         AND job.parameters->>'required_worker_policy'=$1
+         AND job.started_at < now()-make_interval(mins=>$2::int)
+       ORDER BY job.started_at,job.id
+       FOR UPDATE OF job,observation SKIP LOCKED
+       LIMIT 8`,
+      [EVENT_FOCUSED_REFRESH_POLICY, staleMinutes],
+    );
+    if (!stale.length) return { recovered: 0, completed: 0, restaged: 0 };
+    let completed = 0;
+    let restaged = 0;
+    for (const candidate of stale) {
+      const renderCommitted = candidate.observation_status === "available"
+        && candidate.rendered_policy === EVENT_FOCUSED_REFRESH_POLICY;
+      await client.query(
+        `UPDATE earth_processing_job SET status='success',
+                attempts=CASE WHEN $2 THEN attempts ELSE GREATEST(attempts-1,0) END,
+                available_at=now(),started_at=NULL,finished_at=now(),last_error=NULL,
+                result=CASE WHEN $2 THEN result ELSE jsonb_build_object('refresh_recovered',true) END,
+                updated_at=now()
+         WHERE id=$1 AND status='running'`,
+        [candidate.id, renderCommitted],
+      );
+      await client.query(
+        `UPDATE earth_observation SET status='available',last_error=NULL,
+                methodology=CASE WHEN $3 THEN
+                  COALESCE(methodology,'{}'::jsonb)-'refresh_claimed'-'refresh_pending'
+                ELSE
+                  (COALESCE(methodology,'{}'::jsonb)-'refresh_claimed'-'refresh_pending')
+                    || jsonb_build_object('refresh_pending',jsonb_build_object(
+                         'policy',$2::text,'recovered_at',now(),
+                         'reason','stale_worker_claim'
+                       ))
+                END,updated_at=now()
+         WHERE id=$1`,
+        [candidate.observation_id, EVENT_FOCUSED_REFRESH_POLICY, renderCommitted],
+      );
+      if (renderCommitted) completed += 1;
+      else restaged += 1;
+    }
+    return { recovered: stale.length, completed, restaged };
+  });
+}
+
+/**
+ * A pod can terminate after claiming an ordinary discovery/render/vision job.
+ * Protected refreshes have their own stronger recovery above; all other stale
+ * claims return to the bounded retry policy instead of remaining `running`
+ * forever. Committed renders cannot enter this path because their job success
+ * is atomic with the asset/observation transaction.
+ */
+export async function recoverStaleEarthJobs() {
+  const staleMinutes = integerEnv("EO_JOB_STALE_MINUTES", 15, 5, 120);
+  return withTransaction(async (client) => {
+    const { rows: stale } = await client.query<any>(
+      `SELECT job.id,job.job_type,job.observation_id,job.attempts,job.max_attempts
+       FROM earth_processing_job job
+       WHERE job.status='running'
+         AND job.started_at < now()-make_interval(mins=>$1::int)
+         AND job.parameters->>'required_worker_policy' IS DISTINCT FROM $2
+       ORDER BY job.started_at,job.id
+       FOR UPDATE OF job SKIP LOCKED
+       LIMIT 16`,
+      [staleMinutes, EVENT_FOCUSED_REFRESH_POLICY],
+    );
+    let deadLettered = 0;
+    for (const job of stale) {
+      const dead = Number(job.attempts) >= Number(job.max_attempts);
+      if (dead) deadLettered += 1;
+      const message = "Recovered after Earth-observation worker interruption.";
+      await client.query(
+        `UPDATE earth_processing_job SET status=$2,last_error=$3,
+                available_at=now(),started_at=NULL,
+                finished_at=CASE WHEN $2='dead_letter' THEN now() ELSE NULL END,
+                updated_at=now()
+         WHERE id=$1 AND status='running'`,
+        [job.id, dead ? "dead_letter" : "failed", message],
+      );
+      if (job.job_type === "render" && job.observation_id) {
+        await client.query(
+          `UPDATE earth_observation SET status=$2,last_error=$3,updated_at=now()
+           WHERE id=$1 AND status='processing'`,
+          [job.observation_id, dead ? "failed" : "queued", message],
+        );
+      }
+    }
+    return { recovered: stale.length, dead_lettered: deadLettered };
+  });
+}
+
+/**
+ * Claims a migration-staged quality refresh directly from success to running.
+ * Previous worker versions only claim queued/failed/budget_deferred jobs, so
+ * there is no rollout interval in which they can execute this refresh.
+ */
+export async function claimPendingImageryRefresh() {
+  return withTransaction(async (client) => {
+    const { rows: candidates } = await client.query<any>(
+      `SELECT job.*,observation.id AS refresh_observation_id
+       FROM earth_observation observation
+       JOIN earth_processing_job job ON job.observation_id=observation.id
+        AND job.job_type='render' AND job.provider='copernicus'
+       WHERE observation.methodology->'refresh_pending'->>'policy'=$1
+         AND job.status='success' AND job.available_at<=now()
+         AND (job.parameters->>'required_worker_policy' IS DISTINCT FROM $1
+              OR job.attempts<job.max_attempts)
+       ORDER BY observation.updated_at,observation.id
+       FOR UPDATE OF observation,job SKIP LOCKED
+       LIMIT 1`,
+      [EVENT_FOCUSED_REFRESH_POLICY],
+    );
+    const candidate = candidates[0];
+    if (!candidate) return null;
+    const firstPolicyAttempt = candidate.parameters?.required_worker_policy !== EVENT_FOCUSED_REFRESH_POLICY;
+    const { rows: jobs } = await client.query<any>(
+      `UPDATE earth_processing_job SET status='running',
+              attempts=CASE WHEN $2 THEN 1 ELSE attempts+1 END,
+              parameters=COALESCE(parameters,'{}'::jsonb) || $3::jsonb,
+              result='{}'::jsonb,started_at=now(),finished_at=NULL,last_error=NULL,updated_at=now()
+       WHERE id=$1 AND status='success'
+       RETURNING *`,
+      [candidate.id, firstPolicyAttempt, JSON.stringify({
+        required_worker_policy: EVENT_FOCUSED_REFRESH_POLICY,
+        product: "true_color",
+        width: 1024,
+        height: 1024,
+        refresh_reason: EVENT_FOCUSED_REFRESH_POLICY,
+      })],
+    );
+    if (!jobs[0]) return null;
+    await client.query(
+      `UPDATE earth_observation SET status='available',last_error=NULL,
+              methodology=(COALESCE(methodology,'{}'::jsonb)-'refresh_pending')
+                || jsonb_build_object('refresh_claimed',jsonb_build_object(
+                     'policy',$2::text,'claimed_at',now()
+                   )),updated_at=now()
+       WHERE id=$1`,
+      [candidate.refresh_observation_id, EVENT_FOCUSED_REFRESH_POLICY],
+    );
+    return jobs[0];
+  });
+}
+
 async function finishEarthJob(jobId: string, result: Record<string, unknown>) {
   await query(`UPDATE earth_processing_job SET status='success', result=$2::jsonb, finished_at=now(), updated_at=now() WHERE id=$1`, [jobId, JSON.stringify(result)]);
 }
 
 async function failEarthJob(job: any, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
+  if (job.job_type === "render" && job.observation_id) {
+    const { rows: committed } = await query(
+      `SELECT 1
+       FROM earth_processing_job render_job
+       JOIN earth_observation observation ON observation.id=render_job.observation_id
+       WHERE render_job.id=$1 AND render_job.status='success'
+         AND observation.status='available'
+         AND jsonb_typeof(observation.methodology->'render_context')='object'
+         AND (SELECT count(*) FROM earth_observation_asset asset
+              WHERE asset.observation_id=observation.id
+                AND asset.asset_type IN ('preview','thumbnail'))=2`,
+      [job.id],
+    );
+    if (committed[0]) {
+      console.warn(JSON.stringify({
+        event: "earth_render_failure_reconciled_after_commit",
+        observation_id: job.observation_id,
+        message: message.slice(0, 500),
+      }));
+      return;
+    }
+  }
   const providerError = error instanceof EarthProviderError || error instanceof OpenRouterVisionError
     ? error
     : null;
   const dead = providerError?.retryable === false || job.attempts >= job.max_attempts;
   const backoffSeconds = Math.min(3_600, 15 * (2 ** Math.max(0, job.attempts - 1)));
-  await query(
-    `UPDATE earth_processing_job SET status=$2, last_error=$3,
-            available_at=now()+make_interval(secs=>$4), finished_at=CASE WHEN $2='dead_letter' THEN now() ELSE NULL END,
-            updated_at=now() WHERE id=$1`,
-    [job.id, dead ? "dead_letter" : "failed", message.slice(0, 2_000), backoffSeconds],
-  );
-  // A failed interpretation is secondary evidence, never a failed satellite
-  // acquisition. Preserve the already-available physical observation.
-  if (job.observation_id && job.job_type !== "vision_enrichment") {
-    await query(`UPDATE earth_observation SET status='failed',last_error=$2,updated_at=now() WHERE id=$1`, [job.observation_id, message.slice(0, 2_000)]);
+  const protectedRefresh = job.parameters?.required_worker_policy === EVENT_FOCUSED_REFRESH_POLICY;
+  if (protectedRefresh) {
+    // The previous preview remains valid. Failed optional refreshes therefore
+    // return to the legacy-invisible successful status instead of entering a
+    // queue an old worker could consume during a rollback or mixed rollout.
+    await withTransaction(async (client) => {
+      await client.query(
+        `UPDATE earth_processing_job SET status='success',last_error=$2,
+                available_at=now()+make_interval(secs=>$3),started_at=NULL,finished_at=now(),updated_at=now()
+         WHERE id=$1`,
+        [job.id, message.slice(0, 2_000), backoffSeconds],
+      );
+      if (job.observation_id) {
+        await client.query(
+          `UPDATE earth_observation SET status='available',last_error=NULL,
+             methodology=(COALESCE(methodology,'{}'::jsonb)-'refresh_claimed'-'refresh_pending')
+               || jsonb_build_object(
+                    CASE WHEN $3 THEN 'refresh_failed' ELSE 'refresh_pending' END,
+                    jsonb_build_object('policy',$2::text,'error',$4::text,'retry_after',
+                      CASE WHEN $3 THEN NULL ELSE now()+make_interval(secs=>$5) END)
+                  ),updated_at=now()
+           WHERE id=$1`,
+          [job.observation_id, EVENT_FOCUSED_REFRESH_POLICY, dead, message.slice(0, 500), backoffSeconds],
+        );
+      }
+    });
+  } else {
+    await query(
+      `UPDATE earth_processing_job SET status=$2, last_error=$3,
+              available_at=now()+make_interval(secs=>$4), finished_at=CASE WHEN $2='dead_letter' THEN now() ELSE NULL END,
+              updated_at=now() WHERE id=$1`,
+      [job.id, dead ? "dead_letter" : "failed", message.slice(0, 2_000), backoffSeconds],
+    );
+    // A failed interpretation is secondary evidence, never a failed satellite
+    // acquisition. Preserve the already-available physical observation.
+    if (job.observation_id && job.job_type !== "vision_enrichment") {
+      await query(`UPDATE earth_observation SET status='failed',last_error=$2,updated_at=now() WHERE id=$1`, [job.observation_id, message.slice(0, 2_000)]);
+    }
   }
   const rateLimited = providerError?.status === 429;
   await recordUsage(job.provider, { errors: 1, rate_limits: rateLimited ? 1 : 0 });
@@ -1015,9 +1447,17 @@ async function failEarthJob(job: any, error: unknown) {
 
 async function runEarthWorkerCycle() {
   if (!flag("EARTH_OBSERVATION_ENABLED")) return;
+  const recovery = await recoverStaleImageryRefreshes();
+  if (recovery.recovered > 0) {
+    console.warn(JSON.stringify({ event: "earth_refresh_stale_claims_recovered", ...recovery }));
+  }
+  const ordinaryRecovery = await recoverStaleEarthJobs();
+  if (ordinaryRecovery.recovered > 0) {
+    console.warn(JSON.stringify({ event: "earth_stale_jobs_recovered", ...ordinaryRecovery }));
+  }
   const maxJobs = integerEnv("EO_WORKER_BATCH_SIZE", 2, 1, 10);
   for (let index = 0; index < maxJobs; index += 1) {
-    const job = await claimEarthJob();
+    const job = await claimPendingImageryRefresh() ?? await claimEarthJob();
     if (!job) return;
     try {
       const result = job.job_type === "scene_discovery"

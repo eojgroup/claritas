@@ -79,6 +79,10 @@ import {
 import { checkLlmConnectionFromEnv, LlmConfigurationError, LlmProviderError } from "./llm";
 import { getEmailRuntimeConfig, sendEmailVerificationEmail } from "./email";
 import {
+  getImportantEventEmailStatus,
+  startImportantEventEmailWorker,
+} from "./alert-email";
+import {
   enqueueDuePersonalBriefingJobs,
   enqueuePersonalBriefingJob,
   getLatestPersonalBriefing,
@@ -1853,7 +1857,14 @@ app.get("/api/intelligence/watchlist", requireAuthenticated, async (_req, res) =
   try {
     const userId = getAuthenticatedUserId(res);
     const { rows } = await query(
-      `SELECT * FROM user_intelligence_watchlist WHERE user_id=$1 ORDER BY watch_type,watch_key`,
+      `SELECT id,user_id,watch_type,watch_key,minimum_severity,alerts_enabled,
+              (COALESCE(metadata,'{}'::jsonb)-'email_enabled')
+                || jsonb_build_object(
+                     'email_enabled',metadata->'email_enabled'='true'::jsonb
+                   ) AS metadata,
+              created_at,updated_at
+       FROM user_intelligence_watchlist
+       WHERE user_id=$1 ORDER BY watch_type,watch_key`,
       [userId],
     );
     return res.json({ watches: rows });
@@ -1868,6 +1879,11 @@ app.put("/api/intelligence/watchlist", requireAuthenticated, async (req, res) =>
     const watchType = typeof req.body?.watch_type === "string" ? req.body.watch_type.trim().toLowerCase() : "";
     const watchKey = typeof req.body?.watch_key === "string" ? req.body.watch_key.trim() : "";
     const severity = typeof req.body?.minimum_severity === "string" ? req.body.minimum_severity.trim().toLowerCase() : "high";
+    const watchMetadata = {
+      // Important-event email is a distinct, explicit opt-in. Unknown client
+      // metadata is not persisted through this public mutation endpoint.
+      email_enabled: req.body?.metadata?.email_enabled === true,
+    };
     if (!["country", "location", "port", "airport", "chokepoint", "commodity", "market_symbol", "event_type"].includes(watchType)
         || !watchKey || watchKey.length > 160 || !["low", "medium", "high", "critical"].includes(severity)) {
       return res.status(400).json({ error: "A valid watch_type, watch_key and minimum_severity are required." });
@@ -1877,9 +1893,9 @@ app.put("/api/intelligence/watchlist", requireAuthenticated, async (req, res) =>
        VALUES ($1,$2,$3,$4,$5,$6::jsonb)
        ON CONFLICT (user_id,watch_type,watch_key) DO UPDATE SET
          minimum_severity=EXCLUDED.minimum_severity,alerts_enabled=EXCLUDED.alerts_enabled,
-         metadata=EXCLUDED.metadata,updated_at=now() RETURNING *`,
+         metadata=user_intelligence_watchlist.metadata || EXCLUDED.metadata,updated_at=now() RETURNING *`,
       [userId, watchType, watchKey, severity, req.body?.alerts_enabled !== false,
-       JSON.stringify(req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {})],
+       JSON.stringify(watchMetadata)],
     );
     await query(`SELECT materialize_alert_candidate_recipients(NULL, $1)`, [userId]);
     return res.json({ watch: rows[0] });
@@ -2079,10 +2095,10 @@ app.get("/api/earth-observation/assets/:id", requireAuthenticated, async (req, r
 
 app.get("/api/admin/intelligence/status", requireAdminRole, async (_req, res) => {
   try {
-    const [backbone, earth, rapidSources, alerts, apns] = await Promise.all([
-      getEventBackboneHealth(), getEarthObservationStatus(), getRapidSourceStatus(), getAlertCandidates(50), getApnsStatus(),
+    const [backbone, earth, rapidSources, alerts, apns, alertEmail] = await Promise.all([
+      getEventBackboneHealth(), getEarthObservationStatus(), getRapidSourceStatus(), getAlertCandidates(50), getApnsStatus(), getImportantEventEmailStatus(),
     ]);
-    return res.json({ backbone, earth_observation: earth, rapid_sources: rapidSources, alert_candidates: alerts, apns, generated_at: new Date().toISOString() });
+    return res.json({ backbone, earth_observation: earth, rapid_sources: rapidSources, alert_candidates: alerts, apns, alert_email: alertEmail, generated_at: new Date().toISOString() });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -3568,6 +3584,7 @@ startDatabasePoolMonitoring();
 startIngestionAutomationWorker();
 startDailyBriefingSchedulerWorker();
 startPersonalBriefingWorker();
+startImportantEventEmailWorker();
 startTransportIngestionWorkers();
 startEventBackbone();
 startRapidSourceWorker();

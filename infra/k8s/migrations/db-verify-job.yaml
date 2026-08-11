@@ -92,6 +92,7 @@ spec:
                   ('earthquake_observation'),
                   ('alert_candidate'),
                   ('alert_candidate_recipient'),
+                  ('alert_email_delivery'),
                   ('user_intelligence_watchlist')
                 ) AS t(name)
                 WHERE to_regclass('public.' || t.name) IS NULL;
@@ -114,6 +115,17 @@ spec:
                 RAISE NOTICE 'PostGIS and pgcrypto extensions are present.';
               END
               $verify_extensions$;
+
+              DO $verify_functions$
+              BEGIN
+                IF to_regprocedure(
+                  'materialize_alert_email_deliveries(uuid,bigint,integer,integer,integer,integer)'
+                ) IS NULL THEN
+                  RAISE EXCEPTION 'Required important-event email materialization function is missing.';
+                END IF;
+                RAISE NOTICE 'Required important-event email functions are present.';
+              END
+              $verify_functions$;
 
               -- Flyway migrate/validate has already checked the repository's
               -- current scripts. Independently reject any failed history row

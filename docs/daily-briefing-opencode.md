@@ -1,6 +1,6 @@
 # Daily Briefing Generation with OpenCode
 
-Claritas generates daily briefings by collecting news, markets, weather, podcast, leadership-reference, and transport evidence from its own data layer, sending that bounded context to an LLM backend, validating structured JSON, and saving the result in `daily_signal_briefing`.
+Claritas generates daily briefings by collecting news, markets, weather, podcast, leadership-reference, transport, correlated event, and Earth-observation evidence from its own data layer, sending that bounded context to an LLM backend, validating structured JSON, and saving the result in `daily_signal_briefing`.
 
 The API is provider-neutral internally, with an OpenCode adapter as the first runtime backend.
 
@@ -31,6 +31,20 @@ describe AIS cargo/tanker departures as a vessel-movement proxy—not cargo tonn
 value—and to qualify flight totals by the configured ADS-B polling coverage.
 
 Leadership records are reference context, not a briefing category or standalone signal. The prompt permits a leadership change only when a supplied news item directly reports it, and requires that change to remain within the news update. A current officeholder, government type, or changed Wikidata record is not itself evidence that a leadership transition occurred.
+
+Briefing prompt version `daily-signal-briefing.v10` treats canonical events as the synthesis layer.
+The generated copy must state what, where, why, linked publisher coverage, and the role of any
+Earth observation. The stored metadata contains the same bounded `priority_events` profiles so
+clients do not have to reverse-engineer the LLM paragraph. Sensor observations, visual context,
+and model interpretations remain distinct; imagery is never described as automatic confirmation.
+Uncorroborated single-source machine-coded GDELT records remain raw context rather than priority
+events unless their canonical event has high relevance (at least 0.85).
+The prompt and stored `priority_events` collection are capped at 12 events, four linked publisher
+reports, two EO entries and four relevance reasons per event. Individual titles, summaries, URLs,
+locations, attributions and model interpretations are separately bounded. Duplicate raw evidence,
+entity arrays and identical `summary`/`what` prose are omitted from this projection; publisher
+links and explicitly labelled EO roles retain the auditable context needed by briefing and email
+clients.
 
 ## Claritas API Configuration
 

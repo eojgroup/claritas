@@ -1,9 +1,11 @@
 import type { PoolClient } from "pg";
+import { buildEventUnderstanding, buildGdeltEventPresentation } from "./event-presentation";
 import { query, withTransaction } from "../db";
 import {
   buildDiscoveryDedupeKey,
   resolveTrustedEventCoordinates,
 } from "../earth-observation/discovery-context";
+import { earthObservationToApi } from "../earth-observation/image-quality";
 import {
   buildAlertDedupeKey,
   buildEventDedupeKey,
@@ -198,7 +200,14 @@ export async function listIntelligenceEvents(options: {
   since?: Date;
 } = {}) {
   const params: unknown[] = [];
-  const where: string[] = [];
+  const where: string[] = [
+    `NOT (
+      event.metadata->>'canonical_evidence_key' LIKE 'news:global_event:%'
+      AND event.domain_count <= 1
+      AND event.source_diversity <= 1
+      AND event.relevance_score < 0.65
+    )`,
+  ];
   const add = (value: unknown) => { params.push(value); return `$${params.length}`; };
   if (options.status) where.push(`event.status = ${add(options.status)}`);
   if (options.severity) where.push(`event.severity = ${add(options.severity)}`);
@@ -259,7 +268,16 @@ export async function getIntelligenceEvent(eventId: string) {
                 CASE WHEN global_source.id IS NOT NULL THEN
                   'Structured GDELT event near ' || COALESCE(global_source.action_geo_name,'an unspecified location')
                 END) AS source_summary,
-              COALESCE(source_item.url,global_source.url,evidence.provenance->>'url') AS source_url
+              COALESCE(source_item.url,global_source.url,evidence.provenance->>'url') AS source_url,
+              global_source.event_code AS gdelt_event_code,
+              global_source.event_root_code AS gdelt_event_root_code,
+              global_source.actor1_name AS gdelt_actor1_name,
+              global_source.actor2_name AS gdelt_actor2_name,
+              global_source.action_geo_name AS gdelt_action_geo_name,
+              global_source.action_country_iso2 AS gdelt_country_iso2,
+              global_source.mention_count AS gdelt_mention_count,
+              global_source.source_count AS gdelt_source_count,
+              global_source.article_count AS gdelt_article_count
        FROM intelligence_event_evidence evidence
        LEFT JOIN source ON source.id = evidence.source_id
        LEFT JOIN intelligence_location location ON location.id = evidence.location_id
@@ -298,7 +316,9 @@ export async function getIntelligenceEvent(eventId: string) {
                 'height', asset.height, 'size_bytes', asset.size_bytes,
                 'generated_at', asset.generated_at, 'expires_at', asset.expires_at,
                 'url', '/api/earth-observation/assets/' || asset.id::text
-              ) ORDER BY asset.width) FILTER (WHERE asset.id IS NOT NULL), '[]'::jsonb) AS assets
+                  || '?v=' || left(asset.content_hash, 16)
+              ) ORDER BY CASE asset.asset_type WHEN 'preview' THEN 0 WHEN 'thumbnail' THEN 1 ELSE 2 END,
+                         asset.width DESC) FILTER (WHERE asset.id IS NOT NULL), '[]'::jsonb) AS assets
        FROM earth_observation observation
        JOIN earth_scene scene ON scene.id = observation.scene_id
        LEFT JOIN earth_observation_asset asset ON asset.observation_id = observation.id
@@ -322,15 +342,49 @@ export async function getIntelligenceEvent(eventId: string) {
   ]);
   const event = eventResult.rows[0];
   if (!event) return null;
-  return {
-    event: eventToApi(event),
-    evidence: evidenceResult.rows.map((row: any) => ({
+  const normalizedEvent = eventToApi(event);
+  const evidence = evidenceResult.rows.map((row: any) => {
+    const gdeltPresentation = row.source_record_type === "global_event"
+      ? buildGdeltEventPresentation({
+          eventCode: row.gdelt_event_code,
+          eventRootCode: row.gdelt_event_root_code,
+          actor1: row.gdelt_actor1_name,
+          actor2: row.gdelt_actor2_name,
+          location: row.gdelt_action_geo_name,
+          countryIso2: row.gdelt_country_iso2,
+          mentionCount: row.gdelt_mention_count,
+          sourceCount: row.gdelt_source_count,
+          articleCount: row.gdelt_article_count,
+        })
+      : null;
+    return {
       ...row,
+      source_title: gdeltPresentation?.title ?? row.source_title,
+      source_summary: gdeltPresentation?.summary ?? row.source_summary,
       confidence: Number(row.confidence),
       correlation_score: row.correlation_score == null ? null : Number(row.correlation_score),
       observed_at: iso(row.observed_at),
       published_at: iso(row.published_at),
-    })),
+    };
+  });
+  const linkedNews = evidence.filter((row: any) => (
+    row.domain === "news" && row.source_record_type === "item"
+  )).map((row: any) => ({
+    id: row.id,
+    evidence_type: row.evidence_type,
+    relationship: row.relationship,
+    title: row.source_title,
+    summary: row.source_summary,
+    url: row.source_url,
+    publisher: row.attribution ?? row.source_name,
+    observed_at: row.observed_at,
+    confidence: row.confidence,
+  }));
+  return {
+    event: normalizedEvent,
+    understanding: buildEventUnderstanding(normalizedEvent as Record<string, unknown>, evidence),
+    evidence,
+    linked_news: linkedNews,
     locations: locationsResult.rows.map((row: any) => ({
       ...row,
       distance_km: row.distance_km == null ? null : Number(row.distance_km),
@@ -341,7 +395,27 @@ export async function getIntelligenceEvent(eventId: string) {
       importance_score: Number(row.importance_score),
       monitoring_tier: Number(row.monitoring_tier),
     })),
-    earth_observations: observationsResult.rows.map(normalizeEarthObservationRow),
+    earth_observations: observationsResult.rows.map((row: any) => normalizeEarthObservationRow({
+      ...row,
+      event_title: normalizedEvent.title,
+      event_summary: normalizedEvent.summary,
+      event_type: normalizedEvent.event_type,
+      event_status: normalizedEvent.status,
+      event_severity: normalizedEvent.severity,
+      event_start_time: normalizedEvent.start_time,
+      event_last_activity_time: normalizedEvent.last_activity_time,
+      event_country_iso2: normalizedEvent.primary_country_iso2,
+      event_relevance_score: normalizedEvent.relevance_score,
+      event_urgency_score: normalizedEvent.urgency_score,
+      event_materiality_score: normalizedEvent.materiality_score,
+      event_score_components: normalizedEvent.score_components,
+      event_latitude: normalizedEvent.latitude,
+      event_longitude: normalizedEvent.longitude,
+      location_name: normalizedEvent.location_name,
+      location_country_iso2: normalizedEvent.primary_country_iso2,
+      linked_news_count: linkedNews.length,
+      linked_news: linkedNews,
+    })),
     related_events: relatedResult.rows.map((row: any) => ({
       ...row,
       confidence: Number(row.confidence),
@@ -353,24 +427,7 @@ export async function getIntelligenceEvent(eventId: string) {
 }
 
 function normalizeEarthObservationRow(row: any) {
-  return {
-    ...row,
-    confidence: row.confidence == null ? null : Number(row.confidence),
-    scene_rank: row.scene_rank == null ? null : Number(row.scene_rank),
-    cloud_cover: row.cloud_cover == null ? null : Number(row.cloud_cover),
-    resolution_m: row.resolution_m == null ? null : Number(row.resolution_m),
-    captured_at: iso(row.captured_at),
-    capture_start: iso(row.capture_start),
-    capture_end: iso(row.capture_end),
-    assets: Array.isArray(row.assets) ? row.assets.map((asset: any) => ({
-      ...asset,
-      width: Number(asset.width),
-      height: Number(asset.height),
-      size_bytes: Number(asset.size_bytes),
-      generated_at: iso(asset.generated_at),
-      expires_at: iso(asset.expires_at),
-    })) : [],
-  };
+  return earthObservationToApi(row);
 }
 
 /**

@@ -158,17 +158,52 @@ struct IntelligenceWorkspaceView: View {
                     }
                     Text(detail.event.title)
                         .font(.title3.weight(.semibold))
-                    Text(detail.event.summary)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        eventUnderstandingRow(
+                            label: "What happened",
+                            icon: "text.alignleft",
+                            text: detail.understanding?.what_happened ?? detail.event.summary
+                        )
+                        eventUnderstandingRow(
+                            label: "Where",
+                            icon: "mappin.and.ellipse",
+                            text: detail.understanding?.location
+                                ?? detail.event.location_name
+                                ?? detail.event.primary_country_iso2
+                                ?? "Location not yet resolved"
+                        )
+                        eventUnderstandingRow(
+                            label: "Why it matters",
+                            icon: "sparkles",
+                            text: detail.understanding?.why_interesting
+                                ?? "Claritas prioritised this event from its severity, relevance, recency, and linked evidence. Correlation does not establish causation."
+                        )
+                    }
                     if watchTarget != nil {
-                        Button {
-                            Task { await toggleWatch() }
-                        } label: {
-                            Label(activeWatch == nil ? "Watch this scope" : "Stop watching", systemImage: activeWatch == nil ? "bell" : "bell.slash")
+                        HStack {
+                            Button {
+                                Task { await toggleWatch() }
+                            } label: {
+                                Label(activeWatch == nil ? "Watch this scope" : "Stop watching", systemImage: activeWatch == nil ? "bell" : "bell.slash")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(watchPending)
+                            if activeWatch != nil {
+                                Button {
+                                    Task { await toggleWatchEmail() }
+                                } label: {
+                                    Label(watchEmailEnabled ? "Email alerts on" : "Email alerts off", systemImage: "envelope")
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(watchEmailEnabled ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
+                                .disabled(watchPending)
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(watchPending)
+                        if activeWatch != nil {
+                            Text("Email delivery requires a verified account email and email delivery enabled in your briefing profile.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     HStack {
                         score("Relevance", detail.event.relevance_score)
@@ -182,10 +217,26 @@ struct IntelligenceWorkspaceView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    if !detail.earth_observations.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("PROCESSED EVENT EVIDENCE", systemImage: "checkmark.seal")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(alignment: .top, spacing: 10) {
+                                    ForEach(detail.earth_observations.sortedForDisplay.prefix(5)) { observation in
+                                        EarthObservationTile(observation: observation)
+                                            .frame(width: 250)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if let layer = gibsTrueColorLayer {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
-                                Text("CONTEXT · NOT PROOF")
+                                Text("REGIONAL BROWSE FALLBACK · NOT PROOF")
                                     .font(.caption2.weight(.bold))
                                     .padding(.horizontal, 7)
                                     .padding(.vertical, 4)
@@ -195,7 +246,7 @@ struct IntelligenceWorkspaceView: View {
                             }
                             if URL(string: layer.preview_url) != nil {
                                 AuthenticatedRemoteImage(url: layer.preview_url, unavailableLabel: "NASA context preview unavailable")
-                                .frame(height: 180)
+                                .frame(height: 120)
                                 .background(.secondary.opacity(0.08))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             }
@@ -215,21 +266,44 @@ struct IntelligenceWorkspaceView: View {
                         .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
                     }
 
-                    if !detail.earth_observations.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 10) {
-                                ForEach(detail.earth_observations.sortedForDisplay.prefix(5)) { observation in
-                                    EarthObservationTile(observation: observation)
-                                        .frame(width: 250)
-                                }
-                            }
-                        }
-                    } else {
+                    if detail.earth_observations.isEmpty {
                         Label("No defensible event-specific observation is available yet", systemImage: "photo.badge.exclamationmark")
                             .font(.subheadline.weight(.semibold))
                         Text("The evidence thread remains usable without imagery. Claritas never substitutes a scene from an unrelated event or location.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !detail.linked_news.isEmpty {
+                    BrandCard(title: "Linked reporting", icon: "newspaper") {
+                        ForEach(detail.linked_news) { report in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(report.publisher ?? "Publisher record")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    Spacer()
+                                    Text(report.observed_at.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(report.title ?? report.evidence_type.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    .font(.subheadline.weight(.semibold))
+                                if let summary = report.summary, !summary.isEmpty {
+                                    Text(summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(4)
+                                }
+                                if let source = report.url, let url = URL(string: source) {
+                                    Link("Open publisher source", destination: url)
+                                        .font(.caption.weight(.semibold))
+                                }
+                            }
+                            .padding(.vertical, 6)
+                            if report.id != detail.linked_news.last?.id { Divider() }
+                        }
                     }
                 }
 
@@ -350,6 +424,24 @@ struct IntelligenceWorkspaceView: View {
         }
     }
 
+    private func eventUnderstandingRow(label: String, icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                .frame(width: 24, height: 24)
+                .background(ClaritasPalette.shellAccentSecondary(for: colorScheme).opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(label.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 9) {
             Image(systemName: "dot.radiowaves.left.and.right")
@@ -442,6 +534,10 @@ struct IntelligenceWorkspaceView: View {
         return watches.first { $0.watch_type == target.type && $0.watch_key == target.key }
     }
 
+    private var watchEmailEnabled: Bool {
+        activeWatch?.metadata?.email_enabled == true
+    }
+
     private func toggleWatch() async {
         guard let target = watchTarget, !watchPending else { return }
         watchPending = true
@@ -451,6 +547,24 @@ struct IntelligenceWorkspaceView: View {
             else { _ = try await model.api.saveIntelligenceWatch(type: target.type, key: target.key) }
             watches = try await model.api.fetchIntelligenceWatchlist()
             if let nextAlerts = try? await model.api.fetchIntelligenceAlerts() { alerts = nextAlerts }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func toggleWatchEmail() async {
+        guard let target = watchTarget, let activeWatch, !watchPending else { return }
+        watchPending = true
+        defer { watchPending = false }
+        do {
+            _ = try await model.api.saveIntelligenceWatch(
+                type: target.type,
+                key: target.key,
+                minimumSeverity: activeWatch.minimum_severity,
+                alertsEnabled: activeWatch.alerts_enabled,
+                emailEnabled: !watchEmailEnabled
+            )
+            watches = try await model.api.fetchIntelligenceWatchlist()
         } catch {
             self.error = error.localizedDescription
         }
@@ -727,13 +841,15 @@ struct IntelligenceEventPulseView: View {
 
 private struct EarthObservationTile: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     let observation: EarthObservation
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             if let asset = observation.preferredDisplayAsset {
-                AuthenticatedEarthImage(path: asset.url, contentMode: observation.isAnalyticalLayer ? .fit : .fill)
+                AuthenticatedEarthImage(path: asset.url, contentMode: .fit)
                     .frame(height: 145)
+                    .background(ClaritasPalette.shellSidebar(for: colorScheme))
                     .clipShape(RoundedRectangle(cornerRadius: 11))
             } else {
                 Image(systemName: "photo.badge.exclamationmark")
@@ -754,6 +870,33 @@ private struct EarthObservationTile: View {
                 if let cloud = observation.cloud_cover { Text("\(Int(cloud))% cloud") }
             }
             .font(.caption2).foregroundStyle(.secondary)
+            if let interpretation = observation.model_interpretation {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("MODEL INTERPRETATION · NOT A SENSOR MEASUREMENT", systemImage: "sparkles")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                    if let summary = interpretation.summary, !summary.isEmpty {
+                        Text(summary)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(4)
+                    }
+                    if let feature = interpretation.findings?.first, !feature.isEmpty {
+                        Text("Observed feature: \(feature)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                    if let change = interpretation.possible_changes?.first, !change.isEmpty {
+                        Text("Possible change: \(change)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(8)
+                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+            }
             if let url = URL(string: observation.source_url) {
                 Link("Provider provenance", destination: url).font(.caption.weight(.semibold))
             }
@@ -773,9 +916,9 @@ private struct EarthComparisonView: View {
             if let beforeAsset = before.preferredDisplayAsset,
                let afterAsset = after.preferredDisplayAsset {
                 ZStack(alignment: .leading) {
-                    AuthenticatedEarthImage(path: beforeAsset.url)
+                    AuthenticatedEarthImage(path: beforeAsset.url, contentMode: .fit)
                         .frame(width: geometry.size.width, height: geometry.size.height)
-                    AuthenticatedEarthImage(path: afterAsset.url)
+                    AuthenticatedEarthImage(path: afterAsset.url, contentMode: .fit)
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .frame(width: geometry.size.width * position, alignment: .leading)
                         .clipped()

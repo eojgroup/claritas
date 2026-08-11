@@ -263,6 +263,20 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-smtp, key: EMAIL_PUBLIC_BASE_URL, optional: true } }
             - name: PERSONAL_BRIEFING_WORKER_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-smtp, key: PERSONAL_BRIEFING_WORKER_ENABLED, optional: true } }
+            - name: IMPORTANT_EVENT_EMAIL_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: IMPORTANT_EVENT_EMAIL_ENABLED, optional: true } }
+            - name: IMPORTANT_EVENT_EMAIL_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: IMPORTANT_EVENT_EMAIL_POLL_SECONDS, optional: true } }
+            - name: IMPORTANT_EVENT_EMAIL_CYCLE_CAP
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: IMPORTANT_EVENT_EMAIL_CYCLE_CAP, optional: true } }
+            - name: IMPORTANT_EVENT_EMAIL_MATERIALIZATION_CAP
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: IMPORTANT_EVENT_EMAIL_MATERIALIZATION_CAP, optional: true } }
+            - name: IMPORTANT_EVENT_EMAIL_USER_DAILY_CAP
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: IMPORTANT_EVENT_EMAIL_USER_DAILY_CAP, optional: true } }
+            - name: IMPORTANT_EVENT_EMAIL_GLOBAL_DAILY_CAP
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: IMPORTANT_EVENT_EMAIL_GLOBAL_DAILY_CAP, optional: true } }
+            - name: IMPORTANT_EVENT_EMAIL_MAX_AGE_HOURS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: IMPORTANT_EVENT_EMAIL_MAX_AGE_HOURS, optional: true } }
             - name: SMTP_USER
               valueFrom: { secretKeyRef: { name: claritas-smtp, key: SMTP_USER, optional: true } }
             - name: SMTP_PASSWORD

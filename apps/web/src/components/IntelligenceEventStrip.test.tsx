@@ -47,7 +47,7 @@ describe("IntelligenceEventStrip", () => {
       resolveRequest = resolve;
     }));
     render(<IntelligenceEventStrip onOpen={() => undefined} />);
-    expect(screen.getByText("Loading correlated changes…")).toBeTruthy();
+    expect(screen.getByText("Linking reporting, location and observation…")).toBeTruthy();
     expect(screen.queryByText("No material correlated changes")).toBeNull();
     await act(async () => resolveRequest([]));
     expect(await screen.findByText("No material correlated changes")).toBeTruthy();
@@ -59,7 +59,8 @@ describe("IntelligenceEventStrip", () => {
     render(<IntelligenceEventStrip country="SG" onOpen={onOpen} />);
     expect(await screen.findByText(event.title)).toBeTruthy();
     expect(screen.getByText("96% confidence")).toBeTruthy();
-    expect(screen.getByText(/3 domains · 4 evidence/)).toBeTruthy();
+    expect(screen.getByText("4 linked")).toBeTruthy();
+    expect(screen.getByText("94% relevance")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Open workspace/i }));
     expect(onOpen).toHaveBeenLastCalledWith();
     fireEvent.click(screen.getByRole("button", { name: `Investigate ${event.title}` }));

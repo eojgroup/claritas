@@ -4,6 +4,7 @@ import { resolveLocationFromText, resolveNearestLocation } from "./location-reso
 import { correlateAndUpsertIntelligenceSignal } from "./service";
 import { calculateRollingBaseline, detectTransportAnomaly } from "./transport-anomaly";
 import { trustedGdeltActionCoordinate, trustedGdeltLocations } from "./gdelt-geography";
+import { buildGdeltEventPresentation } from "./event-presentation";
 import type { DomainEventEnvelope, IntelligenceSeverity } from "./types";
 
 const sourceReliability: Record<string, number> = {
@@ -171,7 +172,17 @@ async function handleGdeltEvent(event: DomainEventEnvelope) {
     ? await resolveNearestLocation(actionCoordinate.latitude, actionCoordinate.longitude, 150)
     : await resolveLocationFromText(record.action_geo_name ?? "", record.action_country_iso2)
       ?? await countryLocation(record.action_country_iso2);
-  const title = [record.actor1_name, record.actor2_name].filter(Boolean).join(" / ") || record.action_geo_name || "GDELT event signal";
+  const presentation = buildGdeltEventPresentation({
+    eventCode: record.event_code,
+    eventRootCode: record.event_root_code,
+    actor1: record.actor1_name,
+    actor2: record.actor2_name,
+    location: record.action_geo_name ?? location?.canonical_name,
+    countryIso2: record.action_country_iso2,
+    mentionCount: record.mention_count,
+    sourceCount: record.source_count,
+    articleCount: record.article_count,
+  });
   const priority = computeSignalPriority({
     sourceReliability: 0.72, sourceDiversity: Number(record.source_count ?? 1),
     freshnessHours: Math.max(0, (Date.now() - observed.getTime()) / 3_600_000), severity: "medium",
@@ -179,14 +190,20 @@ async function handleGdeltEvent(event: DomainEventEnvelope) {
   });
   await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey(["gdelt_event", record.external_id]),
-    eventType: "reported_development", title, summary: `GDELT recorded a structured event near ${record.action_geo_name ?? location?.canonical_name ?? "the reported location"}.`,
+    eventType: "reported_development", title: presentation.title, summary: presentation.summary,
     severity: "medium", confidence: 0.68, startTime: observed, lastActivityTime: observed,
     primaryLocationId: location?.id ?? null, primaryCountryIso2: location?.country_iso2 ?? record.action_country_iso2,
     latitude: actionCoordinate?.latitude ?? location?.latitude, longitude: actionCoordinate?.longitude ?? location?.longitude,
     coordinatesAreExact: Boolean(actionCoordinate),
     relevanceScore: priority.score, urgencyScore: 0.4,
     materialityScore: Math.min(1, Math.abs(Number(record.goldstein_scale ?? 0)) / 10), scoreComponents: priority.components,
-    metadata: { gdelt_event_code: record.event_code, quad_class: record.quad_class },
+    metadata: {
+      gdelt_event_code: record.event_code,
+      gdelt_event_root_code: record.event_root_code,
+      gdelt_action: presentation.action,
+      quad_class: record.quad_class,
+      presentation_version: "gdelt-event-v2",
+    },
     entityKeys: collectEntityKeys(record.actor1_name, record.actor2_name),
     evidence: {
       domain: "news", evidenceType: "structured_event", sourceRecordType: "global_event", sourceRecordId: String(id),

@@ -42,8 +42,8 @@ variable "earth_observation_asset_retention_days" {
   default     = 60
 
   validation {
-    condition     = var.earth_observation_asset_retention_days >= 30 && var.earth_observation_asset_retention_days <= 365
-    error_message = "earth_observation_asset_retention_days must be between 30 and 365."
+    condition     = var.earth_observation_asset_retention_days >= 60 && var.earth_observation_asset_retention_days <= 365
+    error_message = "earth_observation_asset_retention_days must be between 60 and 365 so it cannot undercut the API's maximum advertised asset lifetime."
   }
 }
 

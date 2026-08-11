@@ -30,6 +30,8 @@ test("GIBS previews use the reviewed WMS host and EPSG:4326 axis order", () => {
   assert.equal(url.searchParams.get("BBOX"), "20,10,21,12");
   assert.equal(url.searchParams.get("TIME"), "2026-08-11");
   assert.equal(url.searchParams.get("LAYERS"), APPROVED_GIBS_LAYERS[0].id);
+  assert.equal(url.searchParams.get("WIDTH"), "1280");
+  assert.equal(url.searchParams.get("HEIGHT"), "724");
   assert.throws(
     () => buildApprovedGibsPreviewUrl("unreviewed-layer", "2026-08-11", [10, 20, 12, 21]),
     /allowlist/,
@@ -48,6 +50,9 @@ test("GIBS event context is date-specific, bounded, allowlisted, and provenance-
     assert.equal(layer.provenance.acknowledgement, GIBS_ACKNOWLEDGEMENT);
     assert.equal(layer.provenance.source_url, layer.preview_url);
     assert.match(layer.preview_url, /^https:\/\/gibs\.earthdata\.nasa\.gov\/wms\//);
+    assert.equal(layer.quality_tier, "regional_browse_context");
+    assert.equal(layer.evidence_role, "context_not_confirmation");
+    assert.ok(layer.native_resolution_m >= 250);
   }
   assert.throws(
     () => buildApprovedGibsEventLayers({ date: "2026-02-31", bbox: [10, 20, 11, 21] }),

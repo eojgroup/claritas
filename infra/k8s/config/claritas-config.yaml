@@ -90,6 +90,15 @@ data:
   APNS_MAX_NOTIFICATION_AGE_HOURS: "24"
   APNS_MAX_ACTIVE_DEVICES_PER_USER: "8"
   APNS_MAX_DEVICE_RECORDS_PER_USER: "64"
+  # Safe-by-construction: the worker also requires a configured SMTP relay,
+  # verified recipient, daily-email opt-in and a watch-level email opt-in.
+  IMPORTANT_EVENT_EMAIL_ENABLED: "true"
+  IMPORTANT_EVENT_EMAIL_POLL_SECONDS: "20"
+  IMPORTANT_EVENT_EMAIL_CYCLE_CAP: "10"
+  IMPORTANT_EVENT_EMAIL_MATERIALIZATION_CAP: "200"
+  IMPORTANT_EVENT_EMAIL_USER_DAILY_CAP: "5"
+  IMPORTANT_EVENT_EMAIL_GLOBAL_DAILY_CAP: "200"
+  IMPORTANT_EVENT_EMAIL_MAX_AGE_HOURS: "48"
   MARKET_EVENT_PERCENT_THRESHOLD: "0.05"
   # Used when repository variables do not provide explicit PodcastIndex targets.
   PODCAST_DISCOVERY_TERMS: "geopolitics,security,technology,markets"

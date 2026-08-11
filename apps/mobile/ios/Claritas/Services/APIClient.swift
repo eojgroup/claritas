@@ -540,15 +540,22 @@ final class APIClient {
         return try await request(URLRequest(url: url), as: [IntelligenceWatch].self, rootKey: "watches")
     }
 
-    func saveIntelligenceWatch(type: String, key: String) async throws -> IntelligenceWatch {
+    func saveIntelligenceWatch(
+        type: String,
+        key: String,
+        minimumSeverity: IntelligenceSeverity = .high,
+        alertsEnabled: Bool = true,
+        emailEnabled: Bool = false
+    ) async throws -> IntelligenceWatch {
         var request = URLRequest(url: baseURL.appendingPathComponent("/api/intelligence/watchlist"))
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "watch_type": type,
             "watch_key": key,
-            "minimum_severity": "high",
-            "alerts_enabled": true,
+            "minimum_severity": minimumSeverity.rawValue,
+            "alerts_enabled": alertsEnabled,
+            "metadata": ["email_enabled": emailEnabled],
         ])
         return try await self.request(request, as: IntelligenceWatch.self, rootKey: "watch")
     }

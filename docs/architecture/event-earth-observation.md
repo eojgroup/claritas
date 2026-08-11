@@ -53,7 +53,7 @@ This boundary is the “red thread” between News and EO: a navigable news item
 - Rendered previews and thumbnails are stored in a private bucket and exposed only through authenticated UUID-addressed routes. Clients never receive provider credentials or GCS object names.
 - EO jobs are leased, retry-bounded and visible as queued/running/success/failed/dead-letter/budget-deferred state. Vision failure is secondary and cannot turn an already-available physical observation into a failed one.
 
-`EO_MAX_DAILY_PROCESSING_UNITS=100` and `EO_MAX_MONTHLY_PROCESSING_UNITS=3000` are local admission ceilings. Both check recorded usage plus `EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER=4`; exhaustion defers a job to the next UTC day/month without consuming an attempt. This preflight estimate is not an atomic provider-unit reservation. Actual usage is known only after the call, so provider-side quota remains the hard protection against a request consuming more than estimated. A non-positive ceiling means unlimited and must not be used as a pause control.
+`EO_MAX_DAILY_PROCESSING_UNITS=100` and `EO_MAX_MONTHLY_PROCESSING_UNITS=3000` are local admission ceilings. Both check recorded usage plus `EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER=4`; exhaustion defers a job to the next UTC day/month without consuming an attempt. Setting either ceiling to `0` pauses provider processing. This preflight estimate is not an atomic provider-unit reservation. Actual usage is known only after the call, so provider-side quota remains the hard protection against a request consuming more than estimated.
 
 ## GIBS boundary
 
@@ -85,6 +85,6 @@ The native push payload carries the exact `event_id`, event type, severity and o
 
 ## Data lifecycle and operator status
 
-Outbox, correlation decisions, evidence and job/delivery state remain auditable. EO object lifecycle defaults to 60 days and can be changed with `EO_ASSET_RETENTION_DAYS`; object policy and database reconciliation must remain aligned. Raw transport retention remains defined by the transport architecture. Active event records and evidence remain in Cloud SQL until an explicit product retention policy supersedes this foundation.
+Outbox, correlation decisions, evidence and job/delivery state remain auditable. The EO bucket lifecycle is 60 days and `EO_ASSET_RETENTION_DAYS` may shorten—but never extend—that lifetime. Reused immutable objects preserve their original lifecycle deadline in database expiry. Raw transport retention remains defined by the transport architecture. Active event records and evidence remain in Cloud SQL until an explicit product retention policy supersedes this foundation.
 
 `GET /api/admin/intelligence/status` is the operational source of truth for backbone state, rapid sources, EO provider readiness/usage/queue/assets and APNs readiness/devices/delivery states. A flag value alone is never a readiness assertion.

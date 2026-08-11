@@ -82,7 +82,8 @@ export type EarthProviderStatus = {
 
 export function hasProcessingBudget(used: number, dailyBudget: number, estimatedCost = 1): boolean {
   if (![used, dailyBudget, estimatedCost].every(Number.isFinite) || used < 0 || estimatedCost < 0) return false;
-  return dailyBudget <= 0 || used + estimatedCost <= dailyBudget;
+  // Zero is an operational pause, never an implicit unlimited-spend mode.
+  return dailyBudget > 0 && used + estimatedCost <= dailyBudget;
 }
 
 export function validateBoundingBox(value: unknown): BoundingBox {

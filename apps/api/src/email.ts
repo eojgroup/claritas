@@ -24,6 +24,32 @@ export type BriefingEmailSignal = {
   reasons: string[];
 };
 
+export type BriefingEmailEvent = {
+  id: string;
+  event_type: string;
+  title: string;
+  summary: string;
+  severity: string;
+  confidence: number;
+  relevance_score: number;
+  where: string;
+  why_interesting: string[];
+  profile_reasons: string[];
+  linked_news: Array<{
+    title: string;
+    publisher: string;
+    url: string | null;
+  }>;
+  earth_observation: Array<{
+    product_type: string;
+    provider: string;
+    captured_at: string;
+    imagery_available: boolean;
+    evidentiary_role: string;
+    analysis_summary: string | null;
+  }>;
+};
+
 export type BriefingEmailMarket = {
   symbol: string;
   company_name: string | null;
@@ -68,10 +94,24 @@ export type BriefingEmailContent = {
   briefing_date: string;
   update_text: string;
   key_takeaways: string[];
+  events: BriefingEmailEvent[];
   signals: BriefingEmailSignal[];
   markets: BriefingEmailMarket[];
   map_countries: BriefingMapCountry[];
   highest_relevance_country: BriefingEmailCountryProfile | null;
+  theme: BriefingEmailTheme;
+};
+
+export type ImportantEventEmailContent = {
+  event: BriefingEmailEvent;
+  recipient_name: string | null;
+  matched_watch: {
+    type: string;
+    key: string;
+    minimum_severity: string;
+  };
+  profile_topics: string[];
+  occurred_at: string;
   theme: BriefingEmailTheme;
 };
 
@@ -91,30 +131,30 @@ type BriefingEmailPalette = {
 
 const BRIEFING_EMAIL_PALETTES: Record<BriefingEmailTheme, BriefingEmailPalette> = {
   light: {
-    page: "#F3E9D7",
-    panel: "#FFFAF1",
-    surface: "#FFFAF1",
-    surfaceMuted: "#E8D9C2",
-    ink: "#172F42",
-    muted: "#53616A",
-    border: "#D5C1A4",
-    accent: "#E6A06A",
-    link: "#2A5268",
-    strong: "#172F42",
-    onStrong: "#FFFAF1",
+    page: "#F1EBDD",
+    panel: "#FAF7EF",
+    surface: "#FAF7EF",
+    surfaceMuted: "#D8C6A3",
+    ink: "#0B2028",
+    muted: "#50645F",
+    border: "#C9B58E",
+    accent: "#A97846",
+    link: "#2F6858",
+    strong: "#244D42",
+    onStrong: "#F1EBDD",
   },
   dark: {
-    page: "#081119",
-    panel: "#0C1822",
-    surface: "#152A38",
-    surfaceMuted: "#1B303E",
-    ink: "#F2EEE6",
-    muted: "#A9B5BA",
-    border: "#35566A",
-    accent: "#EDA36A",
-    link: "#9BC1CF",
-    strong: "#315F72",
-    onStrong: "#FFFAF1",
+    page: "#07151B",
+    panel: "#0B2028",
+    surface: "#15372F",
+    surfaceMuted: "#244D42",
+    ink: "#F1EBDD",
+    muted: "#AFC0B8",
+    border: "#3B6258",
+    accent: "#D1B78A",
+    link: "#8FBFAE",
+    strong: "#244D42",
+    onStrong: "#F1EBDD",
   },
 };
 
@@ -223,6 +263,78 @@ function formatMarketValue(market: BriefingEmailMarket): string {
   return move ? `${price} · ${move}` : price;
 }
 
+function eventEvidenceUrl(eventId: string): string | null {
+  const base = getEmailRuntimeConfig().public_base_url;
+  if (!base) return null;
+  try {
+    const url = new URL("/", base);
+    url.searchParams.set("event", eventId);
+    return safeWebUrl(url.toString());
+  } catch {
+    return null;
+  }
+}
+
+function eventHtml(event: BriefingEmailEvent, palette: BriefingEmailPalette): string {
+  const profileReasons = event.profile_reasons.length
+    ? `<div style="margin:10px 0 0;padding:10px 12px;border-left:3px solid ${palette.accent};background:${palette.surfaceMuted};color:${palette.ink}"><strong>Why it matches your profile</strong><br>${escapeHtml(event.profile_reasons.join(" · "))}</div>`
+    : "";
+  const why = event.why_interesting.slice(0, 6)
+    .map((reason) => `<li style="margin:0 0 5px;color:${palette.ink}">${escapeHtml(reason)}</li>`)
+    .join("");
+  const news = event.linked_news.slice(0, 6).map((item) => {
+    const url = safeWebUrl(item.url);
+    const title = url
+      ? `<a href="${escapeHtml(url)}" style="color:${palette.link};text-decoration:underline">${escapeHtml(item.title)}</a>`
+      : escapeHtml(item.title);
+    return `<li style="margin:0 0 6px;color:${palette.ink}">${title}<span style="color:${palette.muted}"> · ${escapeHtml(item.publisher)}</span></li>`;
+  }).join("");
+  const eo = event.earth_observation.slice(0, 4).map((item) => {
+    const role = item.evidentiary_role === "sensor_observation"
+      ? "sensor-derived observation"
+      : item.evidentiary_role === "model_interpretation"
+        ? "model interpretation"
+        : "visual context";
+    const details = [item.provider, item.product_type.replace(/_/g, " "), role]
+      .filter(Boolean).join(" · ");
+    return `<li style="margin:0 0 6px;color:${palette.ink}">${escapeHtml(details)}${item.captured_at ? ` · ${escapeHtml(item.captured_at.slice(0, 10))}` : ""}${item.analysis_summary ? `<div style="color:${palette.muted}">${escapeHtml(item.analysis_summary)}</div>` : ""}</li>`;
+  }).join("");
+  const eventUrl = eventEvidenceUrl(event.id);
+  const eventLink = eventUrl
+    ? `<a href="${escapeHtml(eventUrl)}" style="display:inline-block;margin-top:14px;padding:10px 14px;border-radius:8px;background:${palette.strong};color:${palette.onStrong};font-weight:700;text-decoration:none">Open event evidence/imagery</a>`
+    : "";
+  return `<div style="margin:14px 0 0;padding:16px 18px;border:1px solid ${palette.border};border-radius:12px;background:${palette.surface}">
+    <div style="font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:${palette.accent}">${escapeHtml(event.severity)} · ${escapeHtml(event.event_type.replace(/_/g, " "))} · ${Math.round(event.confidence * 100)}% confidence</div>
+    <h3 style="margin:7px 0 5px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">${escapeHtml(event.title)}</h3>
+    <div style="font-size:13px;color:${palette.muted}"><strong>Where:</strong> ${escapeHtml(event.where)}</div>
+    <p style="margin:10px 0;color:${palette.ink};line-height:1.5">${escapeHtml(event.summary)}</p>
+    ${profileReasons}
+    ${why ? `<strong style="display:block;margin-top:12px;color:${palette.ink}">Why this is interesting</strong><ul style="margin:7px 0 0;padding-left:20px">${why}</ul>` : ""}
+    ${news ? `<strong style="display:block;margin-top:12px;color:${palette.ink}">Linked news</strong><ul style="margin:7px 0 0;padding-left:20px">${news}</ul>` : ""}
+    ${eo ? `<strong style="display:block;margin-top:12px;color:${palette.ink}">Earth observation</strong><ul style="margin:7px 0 0;padding-left:20px">${eo}</ul><div style="font-size:11px;color:${palette.muted}">Imagery and model interpretations provide governed context; they are not automatic proof of causation.</div>` : ""}
+    ${eventLink}
+  </div>`;
+}
+
+function eventText(event: BriefingEmailEvent): string[] {
+  return [
+    `${event.severity.toUpperCase()} · ${event.event_type.replace(/_/g, " ")} · ${Math.round(event.confidence * 100)}% confidence`,
+    event.title,
+    `Where: ${event.where}`,
+    event.summary,
+    ...(event.profile_reasons.length ? ["Why it matches your profile:", ...event.profile_reasons.map((reason) => `- ${reason}`)] : []),
+    ...(event.why_interesting.length ? ["Why this is interesting:", ...event.why_interesting.map((reason) => `- ${reason}`)] : []),
+    ...(event.linked_news.length ? ["Linked news:", ...event.linked_news.flatMap((item) => [
+      `- ${item.title} · ${item.publisher}`,
+      ...(safeWebUrl(item.url) ? [`  ${safeWebUrl(item.url)}`] : []),
+    ])] : []),
+    ...(event.earth_observation.length ? ["Earth observation:", ...event.earth_observation.map((item) =>
+      `- ${item.provider} · ${item.product_type.replace(/_/g, " ")} · ${item.evidentiary_role.replace(/_/g, " ")}${item.analysis_summary ? ` · ${item.analysis_summary}` : ""}`
+    ), "Imagery and model interpretations provide context; they are not automatic proof of causation."] : []),
+    ...(eventEvidenceUrl(event.id) ? [`Open event evidence/imagery: ${eventEvidenceUrl(event.id)}`] : []),
+  ];
+}
+
 export function renderBriefingEmail(
   content: BriefingEmailContent,
   options: { map_cid?: string | null } = {}
@@ -241,6 +353,7 @@ export function renderBriefingEmail(
         `<li style="margin:0 0 8px;color:${palette.ink}">${escapeHtml(takeaway)}</li>`
     )
     .join("");
+  const eventsHtml = content.events.slice(0, 8).map((event) => eventHtml(event, palette)).join("");
   const signalHtml = content.signals
     .map((signal) => {
       const url = safeWebUrl(signal.url);
@@ -367,6 +480,11 @@ export function renderBriefingEmail(
             ${mapHtml}
             ${countryProfileHtml}
             ${
+              eventsHtml
+                ? `<h2 style="margin:26px 0 10px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">Priority events for your profile</h2>${eventsHtml}`
+                : ""
+            }
+            ${
               takeawayHtml
                 ? `<h2 style="margin:26px 0 10px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">Key takeaways</h2><ul style="padding-left:20px;line-height:1.5">${takeawayHtml}</ul>`
                 : ""
@@ -435,6 +553,9 @@ export function renderBriefingEmail(
     ...(content.key_takeaways.length
       ? ["KEY TAKEAWAYS", ...content.key_takeaways.map((item) => `- ${item}`), ""]
       : []),
+    ...(content.events.length
+      ? ["PRIORITY EVENTS FOR YOUR PROFILE", ...content.events.flatMap((event) => [...eventText(event), ""])]
+      : []),
     ...(content.signals.length
       ? [
           "SIGNALS SELECTED FOR YOU",
@@ -462,6 +583,87 @@ export function renderBriefingEmail(
   ];
 
   return { subject, html, text: textParts.join("\n") };
+}
+
+export function renderImportantEventEmail(content: ImportantEventEmailContent): {
+  subject: string;
+  html: string;
+  text: string;
+  preferences_url: string | null;
+} {
+  const config = getEmailRuntimeConfig();
+  const palette = BRIEFING_EMAIL_PALETTES[content.theme === "light" ? "light" : "dark"];
+  const event = content.event;
+  const severity = event.severity.toUpperCase();
+  const subject = `[${severity}] ${event.title}`.slice(0, 180);
+  const preferencesUrl = config.public_base_url
+    ? `${config.public_base_url}/?view=profile&section=notifications`
+    : null;
+  const greeting = content.recipient_name ? `For ${content.recipient_name}` : "Matched to your Claritas profile";
+  const profileTopics = content.profile_topics.length
+    ? `<p style="margin:8px 0 0;color:${palette.muted}"><strong>Profile topics:</strong> ${escapeHtml(content.profile_topics.join(" · "))}</p>`
+    : "";
+  const html = `<!doctype html><html lang="en"><head><meta name="color-scheme" content="${content.theme}"></head>
+  <body style="margin:0;background:${palette.page};color:${palette.ink};font-family:${EMAIL_FONT}">
+    <div style="display:none;max-height:0;overflow:hidden">${escapeHtml(`${event.where} · ${event.summary}`.slice(0, 180))}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${palette.page}"><tr><td align="center" style="padding:24px 12px">
+      <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;background:${palette.panel};border:1px solid ${palette.border};border-radius:14px"><tr><td style="padding:28px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.18em;color:${palette.accent};text-transform:uppercase">Claritas important event · ${escapeHtml(severity)}</div>
+        <h1 style="margin:10px 0 6px;font-family:${EMAIL_FONT};font-size:29px;line-height:1.2;color:${palette.ink}">${escapeHtml(event.title)}</h1>
+        <div style="font-size:13px;color:${palette.muted}">${escapeHtml(greeting)} · ${escapeHtml(content.occurred_at.slice(0, 16).replace("T", " "))} UTC</div>
+        ${eventHtml(event, palette)}
+        <div style="margin-top:16px;padding:14px;background:${palette.surfaceMuted};border:1px solid ${palette.border};border-radius:10px;color:${palette.ink}">
+          <strong>Notification profile</strong>
+          <p style="margin:8px 0 0">Matched watch: ${escapeHtml(content.matched_watch.type.replace(/_/g, " "))} · ${escapeHtml(content.matched_watch.key)} · minimum ${escapeHtml(content.matched_watch.minimum_severity)} severity</p>
+          ${profileTopics}
+        </div>
+        <div style="margin-top:24px;padding-top:16px;border-top:1px solid ${palette.border};font-size:12px;color:${palette.muted}">
+          You received this because event alerts and email delivery are enabled for your verified Claritas account.
+          ${preferencesUrl ? ` <a href="${escapeHtml(preferencesUrl)}" style="color:${palette.link}">Manage or disable notifications</a>.` : " Disable email delivery or this watch in your Claritas profile."}
+        </div>
+      </td></tr></table>
+    </td></tr></table>
+  </body></html>`;
+  const text = [
+    `CLARITAS IMPORTANT EVENT · ${severity}`,
+    greeting,
+    "",
+    ...eventText(event),
+    "",
+    "NOTIFICATION PROFILE",
+    `Matched watch: ${content.matched_watch.type.replace(/_/g, " ")} · ${content.matched_watch.key} · minimum ${content.matched_watch.minimum_severity} severity`,
+    ...(content.profile_topics.length ? [`Profile topics: ${content.profile_topics.join(" · ")}`] : []),
+    "",
+    preferencesUrl
+      ? `Manage or disable notifications: ${preferencesUrl}`
+      : "Manage or disable email delivery and watches in your Claritas profile.",
+  ].join("\n");
+  return { subject, html, text, preferences_url: preferencesUrl };
+}
+
+export async function sendImportantEventEmail(
+  recipient: string,
+  content: ImportantEventEmailContent,
+  options: { message_id: string },
+): Promise<{ message_id: string | null }> {
+  const config = getEmailRuntimeConfig();
+  const rendered = renderImportantEventEmail(content);
+  const headers: Record<string, string> = {
+    "X-Claritas-Message-Type": "important-intelligence-event",
+    "X-Claritas-Event-ID": content.event.id,
+  };
+  if (rendered.preferences_url) headers["List-Unsubscribe"] = `<${rendered.preferences_url}>`;
+  const info = await getTransporter().sendMail({
+    from: config.from,
+    to: recipient,
+    replyTo: config.reply_to || undefined,
+    messageId: options.message_id,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
+    headers,
+  });
+  return { message_id: typeof info.messageId === "string" ? info.messageId : null };
 }
 
 export async function sendBriefingEmail(

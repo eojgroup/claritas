@@ -1084,9 +1084,61 @@ export type EarthObservation = {
   source_url: string;
   location_name?: string | null;
   analysis_summary?: string | null;
+  analysis_summary_role?: string | null;
+  model_interpretation?: {
+    summary?: string | null;
+    findings?: string[];
+    possible_changes?: string[];
+    limitations?: string[];
+    confidence?: number | null;
+    provider?: string | null;
+    model?: string | null;
+    requested_model?: string | null;
+    prompt_version?: string | null;
+    generated_at?: string | null;
+    epistemic_class: "model_interpretation";
+    notice: string;
+  } | null;
   attribution?: string | null;
   license?: string | null;
   assets: EarthObservationAsset[];
+  imagery?: {
+    label: string;
+    visual_class: "natural" | "enhanced" | "analytical" | "radar" | "browse";
+    evidence_role: "visual_context" | "sensor_derived_signal" | "regional_browse_context";
+    natural_color: boolean;
+    interpretation: string;
+    quality_tier: "high_resolution_processed" | "standard_processed" | "regional_browse_context";
+    native_resolution_m?: number | null;
+    effective_pixel_size_m?: number | null;
+    preferred_asset?: EarthObservationAsset | null;
+    display_guidance?: string | null;
+  };
+  event_context?: {
+    id: string;
+    title?: string | null;
+    summary?: string | null;
+    event_type?: string | null;
+    status?: string | null;
+    severity?: string | null;
+    start_time?: string | null;
+    last_activity_time?: string | null;
+    relevance?: {
+      score?: number | null;
+      urgency?: number | null;
+      materiality?: number | null;
+      components?: Record<string, unknown>;
+    };
+    location?: {
+      id?: string | null;
+      name?: string | null;
+      country_iso2?: string | null;
+      latitude?: number | null;
+      longitude?: number | null;
+    };
+    news?: { count: number; items: Array<Record<string, unknown>> };
+    linkage?: { relationship: string; scope: string; limitation: string };
+  } | null;
 };
 
 export type GibsEventLayer = {
@@ -1100,6 +1152,11 @@ export type GibsEventLayer = {
   format?: "jpg" | "png";
   matrix_set?: string;
   temporal?: boolean;
+  native_resolution_m?: number;
+  display_priority?: number;
+  quality_tier?: "regional_browse_context";
+  evidence_role?: "context_not_confirmation";
+  display_guidance?: string;
   provenance: {
     provider: string;
     service?: string;
@@ -1130,6 +1187,24 @@ export type GibsEventContext = {
 export type IntelligenceEventDetail = {
   event: IntelligenceEvent;
   evidence: IntelligenceEvidence[];
+  understanding?: {
+    what_happened: string;
+    where: string;
+    why_interesting: string;
+    linked_news_count: number;
+    physical_observation_count: number;
+  };
+  linked_news?: Array<{
+    id: string;
+    evidence_type: string;
+    relationship: string;
+    title: string;
+    summary?: string | null;
+    url?: string | null;
+    publisher?: string | null;
+    observed_at: string;
+    confidence: number;
+  }>;
   locations: Array<{
     id: string;
     canonical_name: string;
@@ -1177,6 +1252,7 @@ export type IntelligenceWatch = {
   watch_key: string;
   minimum_severity: IntelligenceSeverity;
   alerts_enabled: boolean;
+  metadata?: { email_enabled?: boolean } & Record<string, unknown>;
   created_at: string;
   updated_at: string;
 };
@@ -2047,6 +2123,7 @@ export async function saveIntelligenceWatch(payload: {
   watch_key: string;
   minimum_severity?: IntelligenceSeverity;
   alerts_enabled?: boolean;
+  metadata?: { email_enabled?: boolean };
 }): Promise<IntelligenceWatch> {
   const resp = await fetch(`${API_BASE}/api/intelligence/watchlist`, {
     method: "PUT",

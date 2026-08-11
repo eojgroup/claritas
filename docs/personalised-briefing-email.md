@@ -28,6 +28,12 @@ jobs with PostgreSQL `FOR UPDATE SKIP LOCKED`, generate the briefing, persist it
 items, and create a durable delivery record. A second queue stage sends through SMTP and retries
 failed deliveries up to three times.
 
+Each stored personalised briefing also includes a bounded `priority_events` collection. Every
+event profile states what happened, where it is located, why it is interesting, the linked
+publisher titles and URLs, and Earth-observation context with an explicit evidentiary role.
+Machine-coded, single-source GDELT records do not lead this collection unless they have publisher
+evidence, cross-domain corroboration, or a relevance score of at least 0.85.
+
 Briefing generation uses the existing provider-neutral LLM adapter. If that adapter is unavailable,
 the worker produces a deterministic extractive briefing so email delivery can continue.
 
@@ -105,6 +111,49 @@ Before sending to real users:
 
 Email defaults to off for every account. The recipient must explicitly enable it, and Claritas
 suppresses delivery if the authenticated account email is absent or unverified.
+
+## Important-event email
+
+High and critical intelligence alerts can use the same provider-neutral SMTP relay. Delivery
+requires all of the following at claim time:
+
+- `IMPORTANT_EVENT_EMAIL_ENABLED=true` and a complete SMTP configuration;
+- an active account with a verified email address;
+- daily briefing email explicitly enabled for the account;
+- an enabled matching intelligence watch whose severity threshold is met and whose
+  `metadata.email_enabled` value is explicitly `true`.
+
+The schedule email preference and watch-level email control form a dual opt-in. A missing
+`metadata.email_enabled` is treated as `false`; only the exact JSON boolean `true` enables it,
+and legacy string/number values are normalized to boolean `false` by V41. Setting it to `false`, disabling the watch, disabling daily email, or deactivating
+the account suppresses unsent alert email. Each message links to notification preferences.
+
+Migration `V41__important_event_email_delivery.sql` adds a durable queue and stable uniqueness on
+`(candidate_id, user_id)`. A deterministic Message-ID is retained across retries. Billing access,
+candidate state, severity, age and event status are rechecked immediately before SMTP submission.
+Materialization is transactionally serialized across API replicas before it calculates user and
+global allowances. Defaults bound delivery to five messages per user and 200 messages globally in
+24 hours, ten sends per worker cycle, and candidates no older than 48 hours. These values can be
+lowered with:
+
+```text
+IMPORTANT_EVENT_EMAIL_CYCLE_CAP
+IMPORTANT_EVENT_EMAIL_USER_DAILY_CAP
+IMPORTANT_EVENT_EMAIL_GLOBAL_DAILY_CAP
+IMPORTANT_EVENT_EMAIL_MAX_AGE_HOURS
+IMPORTANT_EVENT_EMAIL_MATERIALIZATION_CAP
+IMPORTANT_EVENT_EMAIL_POLL_SECONDS
+```
+
+The worker does not materialize or claim alert email when `SMTP_HOST` is absent or SMTP username
+and password are incomplete. Its operational state and queue counts are exposed to administrators
+under `alert_email` in `GET /api/admin/intelligence/status`. A `ready` state means local
+configuration is complete; it does not prove provider acceptance or inbox delivery. A relay or
+worker error remains visible through idle cycles and clears only after an actual SMTP submission
+succeeds. Definite pre-acceptance failures retry with bounded exponential backoff. A stale
+pre-submission claim is recovered periodically; an interrupted `submitting` record is quarantined
+as `dead_letter` because its relay outcome is ambiguous and an automatic retry could duplicate an
+email. Operators can reconcile it with the deterministic Message-ID and SMTP relay logs.
 
 ## Data model and endpoints
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { rankScenes, selectBeforeAfterPair } from "./scene-ranking";
+import { bboxCoverageRatio, rankScenes, selectBeforeAfterPair } from "./scene-ranking";
 import { boundBoundingBox, hasProcessingBudget, validateBoundingBox, type EarthScene } from "./types";
 
 const scene = (id: string, captured: string, cloud = 5, collection = "sentinel-2-l2a"): EarthScene => ({
@@ -18,6 +18,17 @@ test("scene ranking rejects cloudy optical scenes without rejecting SAR", () => 
   ], { now: new Date("2026-08-12T00:00:00Z"), eventTime: new Date("2026-08-11T00:00:00Z"), maxCloudCover: 35 });
   assert.equal(ranked.find((entry) => entry.scene.providerSceneId === "cloudy")?.rejectedReason, "cloud_cover_above_35");
   assert.equal(ranked.find((entry) => entry.scene.providerSceneId === "sar")?.rejectedReason, undefined);
+});
+
+test("scene ranking rejects catalog scenes that only graze the focused AOI", () => {
+  assert.equal(bboxCoverageRatio([0, 0, 0.1, 1], [0, 0, 1, 1]), 0.1);
+  assert.equal(bboxCoverageRatio([-1, -1, 2, 2], [0, 0, 1, 1]), 1);
+  const ranked = rankScenes([
+    { ...scene("edge", "2026-08-11T00:00:00Z"), bbox: [0, 0, 0.1, 1] },
+    { ...scene("full", "2026-08-10T00:00:00Z"), bbox: [-1, -1, 2, 2] },
+  ], { aoiBbox: [0, 0, 1, 1], now: new Date("2026-08-12T00:00:00Z") });
+  assert.equal(ranked.find((entry) => entry.scene.providerSceneId === "edge")?.rejectedReason, "insufficient_aoi_coverage");
+  assert.equal(ranked[0].scene.providerSceneId, "full");
 });
 
 test("before/after selection exposes comparability warnings", () => {
@@ -40,6 +51,7 @@ test("oversized governed regions are deterministically cropped to the provider b
 test("processing budgets account pessimistically for the next request", () => {
   assert.equal(hasProcessingBudget(9, 10), true);
   assert.equal(hasProcessingBudget(9.1, 10), false);
-  assert.equal(hasProcessingBudget(500, 0), true);
+  assert.equal(hasProcessingBudget(0, 0), false);
+  assert.equal(hasProcessingBudget(500, 0), false);
   assert.equal(hasProcessingBudget(Number.NaN, 10), false);
 });

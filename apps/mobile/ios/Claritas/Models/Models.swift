@@ -1926,6 +1926,21 @@ struct EarthObservationAsset: Codable, Identifiable {
     let url: String
 }
 
+struct EarthObservationModelInterpretation: Codable {
+    let summary: String?
+    let findings: [String]?
+    let possible_changes: [String]?
+    let limitations: [String]?
+    let confidence: Double?
+    let provider: String?
+    let model: String?
+    let requested_model: String?
+    let prompt_version: String?
+    let generated_at: Date?
+    let epistemic_class: String
+    let notice: String
+}
+
 struct EarthObservation: Codable, Identifiable {
     let id: String
     let event_id: String?
@@ -1946,6 +1961,8 @@ struct EarthObservation: Codable, Identifiable {
     let source_url: String
     let location_name: String?
     let analysis_summary: String?
+    let analysis_summary_role: String?
+    let model_interpretation: EarthObservationModelInterpretation?
     let attribution: String?
     let license: String?
     let assets: [EarthObservationAsset]
@@ -2106,22 +2123,69 @@ struct GibsEventContext: Codable {
     let notice: String
 }
 
+struct IntelligenceEventUnderstanding: Codable {
+    let what_happened: String
+    let location: String
+    let why_interesting: String
+    let linked_news_count: Int
+    let physical_observation_count: Int
+
+    enum CodingKeys: String, CodingKey {
+        case what_happened
+        case location = "where"
+        case why_interesting, linked_news_count, physical_observation_count
+    }
+}
+
+struct IntelligenceLinkedNews: Codable, Identifiable {
+    let id: String
+    let evidence_type: String
+    let relationship: String
+    let title: String?
+    let summary: String?
+    let url: String?
+    let publisher: String?
+    let observed_at: Date
+    let confidence: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, evidence_type, relationship, title, summary, url, publisher, observed_at, confidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        evidence_type = try container.decode(String.self, forKey: .evidence_type)
+        relationship = try container.decode(String.self, forKey: .relationship)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        publisher = try container.decodeIfPresent(String.self, forKey: .publisher)
+        observed_at = try container.decode(Date.self, forKey: .observed_at)
+        confidence = try container.decodeFlexibleDouble(forKey: .confidence)
+    }
+}
+
 struct IntelligenceEventDetail: Codable {
     let event: IntelligenceEvent
+    let understanding: IntelligenceEventUnderstanding?
     let evidence: [IntelligenceEvidence]
+    let linked_news: [IntelligenceLinkedNews]
     let locations: [IntelligenceEventLocation]
     let earth_observations: [EarthObservation]
     let related_events: [IntelligenceRelatedEvent]
     let epistemic_notice: String
 
     enum CodingKeys: String, CodingKey {
-        case event, evidence, locations, earth_observations, related_events, epistemic_notice
+        case event, understanding, evidence, linked_news, locations, earth_observations, related_events, epistemic_notice
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         event = try container.decode(IntelligenceEvent.self, forKey: .event)
+        understanding = try container.decodeIfPresent(IntelligenceEventUnderstanding.self, forKey: .understanding)
         evidence = try container.decodeIfPresent([IntelligenceEvidence].self, forKey: .evidence) ?? []
+        linked_news = try container.decodeIfPresent([IntelligenceLinkedNews].self, forKey: .linked_news) ?? []
         locations = try container.decodeIfPresent([IntelligenceEventLocation].self, forKey: .locations) ?? []
         earth_observations = try container.decodeIfPresent([EarthObservation].self, forKey: .earth_observations) ?? []
         related_events = try container.decodeIfPresent([IntelligenceRelatedEvent].self, forKey: .related_events) ?? []
@@ -2130,12 +2194,17 @@ struct IntelligenceEventDetail: Codable {
     }
 }
 
+struct IntelligenceWatchMetadata: Codable {
+    let email_enabled: Bool?
+}
+
 struct IntelligenceWatch: Codable, Identifiable {
     let id: String
     let watch_type: String
     let watch_key: String
     let minimum_severity: IntelligenceSeverity
     let alerts_enabled: Bool
+    let metadata: IntelligenceWatchMetadata?
     let created_at: Date
     let updated_at: Date
 }

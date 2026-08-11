@@ -19,12 +19,12 @@ type TokenPayload = { access_token?: string; expires_in?: number };
 const EVALSCRIPTS: Record<Exclude<EarthProductType, "gibs_layer">, string> = {
   true_color: `//VERSION=3
 function setup(){return {input:["B02","B03","B04","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
-function stretch(v){return Math.min(1,Math.max(0,Math.pow(2.5*v,0.85)))}
-function evaluatePixel(s){return [stretch(s.B04),stretch(s.B03),stretch(s.B02),s.dataMask]}`,
+function tone(v){let x=Math.max(0,v-0.012)*3.2;return Math.pow(x/(1+x),0.82)}
+function evaluatePixel(s){return [tone(s.B04),tone(s.B03),tone(s.B02),s.dataMask]}`,
   false_color: `//VERSION=3
 function setup(){return {input:["B03","B04","B08","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
-function stretch(v){return Math.min(1,Math.max(0,Math.pow(2.5*v,0.85)))}
-function evaluatePixel(s){return [stretch(s.B08),stretch(s.B04),stretch(s.B03),s.dataMask]}`,
+function tone(v){let x=Math.max(0,v-0.012)*3.2;return Math.pow(x/(1+x),0.82)}
+function evaluatePixel(s){return [tone(s.B08),tone(s.B04),tone(s.B03),s.dataMask]}`,
   ndvi: `//VERSION=3
 function setup(){return {input:["B04","B08","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
 function evaluatePixel(s){if(!s.dataMask)return [0,0,0,0];let v=index(s.B08,s.B04);if(v<0)return [0.45,0.28,0.16,1];if(v<0.2)return [0.88,0.78,0.48,1];if(v<0.4)return [0.62,0.72,0.28,1];if(v<0.6)return [0.24,0.55,0.2,1];return [0.04,0.3,0.13,1]}`,
@@ -130,7 +130,7 @@ export class CopernicusProvider implements EarthObservationProvider {
           datetime: `${request.start.toISOString()}/${request.end.toISOString()}`,
           collections: [collection],
           limit: Math.min(100, Math.max(1, request.limit)),
-          fields: { include: ["id", "type", "bbox", "geometry", "properties.datetime", "properties.created", "properties.eo:cloud_cover", "properties.sat:orbit_state", "collection", "links"] },
+          fields: { include: ["id", "type", "bbox", "geometry", "properties.datetime", "properties.created", "properties.eo:cloud_cover", "properties.sat:orbit_state", "properties.s2:nodata_pixel_percentage", "properties.s2:degraded_msi_data_percentage", "collection", "links"] },
         }),
         signal: timeoutSignal(20_000),
       });
@@ -164,7 +164,14 @@ export class CopernicusProvider implements EarthObservationProvider {
         sourceUrl: feature.links?.find((link) => link.rel === "self")?.href ?? CATALOG_URL,
         license: "Copernicus Data Space Ecosystem terms; Sentinel data free, full and open access.",
         attribution: "Contains modified Copernicus Sentinel data processed by Sentinel Hub.",
-        quality: {},
+        quality: {
+          valid_pixel_coverage: Number.isFinite(Number(feature.properties?.["s2:nodata_pixel_percentage"]))
+            ? Math.max(0, Math.min(1, 1 - Number(feature.properties?.["s2:nodata_pixel_percentage"]) / 100))
+            : undefined,
+          degraded_data_percentage: Number.isFinite(Number(feature.properties?.["s2:degraded_msi_data_percentage"]))
+            ? Number(feature.properties?.["s2:degraded_msi_data_percentage"])
+            : undefined,
+        },
         rawMetadata: feature as unknown as Record<string, unknown>,
       }];
     })
@@ -197,6 +204,10 @@ export class CopernicusProvider implements EarthObservationProvider {
               timeRange: { from: request.start.toISOString(), to: request.end.toISOString() },
               ...(request.collection === "sentinel-2-l2a" ? { maxCloudCoverage: Math.min(100, Math.max(0, request.maxCloudCoverage ?? 35)) } : {}),
               mosaickingOrder: "mostRecent",
+            },
+            processing: {
+              upsampling: ["true_color", "false_color"].includes(request.product) ? "BICUBIC" : "BILINEAR",
+              downsampling: ["true_color", "false_color"].includes(request.product) ? "BICUBIC" : "BILINEAR",
             },
           }],
         },

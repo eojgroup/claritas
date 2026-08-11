@@ -1,6 +1,18 @@
-import type { EarthScene, SceneRank } from "./types";
+import type { BoundingBox, EarthScene, SceneRank } from "./types";
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
+
+/** Fraction of the requested AOI covered by the catalogued scene bbox. */
+export function bboxCoverageRatio(sceneBbox: BoundingBox, requestedBbox: BoundingBox) {
+  const requestedWidth = requestedBbox[2] - requestedBbox[0];
+  const requestedHeight = requestedBbox[3] - requestedBbox[1];
+  if (requestedWidth <= 0 || requestedHeight <= 0) return 0;
+  const overlapWidth = Math.max(0, Math.min(sceneBbox[2], requestedBbox[2])
+    - Math.max(sceneBbox[0], requestedBbox[0]));
+  const overlapHeight = Math.max(0, Math.min(sceneBbox[3], requestedBbox[3])
+    - Math.max(sceneBbox[1], requestedBbox[1]));
+  return clamp((overlapWidth * overlapHeight) / (requestedWidth * requestedHeight));
+}
 
 export function rankScene(
   scene: EarthScene,
@@ -9,6 +21,7 @@ export function rankScene(
     eventTime?: Date | null;
     maxCloudCover?: number;
     coverageRatio?: number;
+    aoiBbox?: BoundingBox;
     preferredCollections?: string[];
   } = {},
 ): SceneRank {
@@ -22,7 +35,8 @@ export function rankScene(
     ? Math.abs(scene.captureStart.getTime() - options.eventTime.getTime()) / 86_400_000
     : ageDays;
   const eventTiming = clamp(1 - eventDeltaDays / 21);
-  const coverage = clamp(options.coverageRatio ?? 1);
+  const coverage = clamp(options.coverageRatio
+    ?? (options.aoiBbox ? bboxCoverageRatio(scene.bbox, options.aoiBbox) : 1));
   const preferred = options.preferredCollections ?? ["sentinel-2-l2a", "sentinel-1-grd"];
   const sensor = preferred.includes(scene.collection)
     ? clamp(1 - preferred.indexOf(scene.collection) * 0.15)

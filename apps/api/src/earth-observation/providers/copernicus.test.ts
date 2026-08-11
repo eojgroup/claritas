@@ -20,7 +20,11 @@ test("Copernicus OAuth tokens are cached and STAC responses normalized", async (
     return new Response(JSON.stringify({ features: [{
       id: collection === "sentinel-2-l2a" ? "S2-test" : "S1-test", collection, bbox: [0, 0, 1, 1],
       geometry: { type: "Polygon", coordinates: [] },
-      properties: { datetime: collection === "sentinel-2-l2a" ? "2026-08-10T10:00:00Z" : "2026-08-11T10:00:00Z", "eo:cloud_cover": 4 },
+      properties: {
+        datetime: collection === "sentinel-2-l2a" ? "2026-08-10T10:00:00Z" : "2026-08-11T10:00:00Z",
+        "eo:cloud_cover": 4,
+        "s2:nodata_pixel_percentage": collection === "sentinel-2-l2a" ? 3 : undefined,
+      },
       links: [{ rel: "self", href: "https://example.test/scene" }],
     }] }), { status: 200, headers: { "content-type": "application/geo+json" } });
   };
@@ -36,6 +40,7 @@ test("Copernicus OAuth tokens are cached and STAC responses normalized", async (
   assert.ok(catalogBodies.every((body) => (body.collections as string[]).length === 1));
   assert.deepEqual(first.map((scene) => scene.providerSceneId), ["S1-test", "S2-test"]);
   assert.equal(first[1].cloudCover, 4);
+  assert.equal(first[1].quality.valid_pixel_coverage, 0.97);
   assert.match(first[0].attribution, /Copernicus Sentinel/);
   assert.match(first[0].license, /Copernicus Data Space/);
 });
@@ -83,7 +88,9 @@ test("Copernicus Process API output is bounded and retains provider usage metada
   assert.equal(rendered.height, 1024);
   assert.equal(rendered.processingUnits, 0.75);
   assert.equal(processBodies[0].output.width, 1024);
+  assert.equal(processBodies[0].input.data[0].processing.upsampling, "BICUBIC");
   assert.match(processBodies[0].evalscript, /B04/);
+  assert.match(processBodies[0].evalscript, /x\/\(1\+x\)/);
   assert.match(processBodies[0].evalscript, /dataMask/);
   assert.doesNotMatch(processBodies[0].evalscript, /SCL|units:\s*["']REFLECTANCE/);
 
@@ -93,5 +100,25 @@ test("Copernicus Process API output is bounded and retains provider usage metada
   });
   assert.match(processBodies[1].evalscript, /B08/);
   assert.match(processBodies[1].evalscript, /B12/);
+  assert.equal(processBodies[1].input.data[0].processing.upsampling, "BILINEAR");
   assert.doesNotMatch(processBodies[1].evalscript, /Math\.max\(0,1-v\)/);
+});
+
+test("Copernicus leaves an invalid processing-unit header for conservative service fallback", async () => {
+  const fetchMock: typeof fetch = async (input) => {
+    if (String(input).includes("openid-connect/token")) {
+      return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), { status: 200 });
+    }
+    return new Response(new Uint8Array([137, 80, 78, 71]), {
+      status: 200,
+      headers: { "content-type": "image/png", "x-processingunits-spent": "not-a-number" },
+    });
+  };
+  const provider = new CopernicusProvider("client", "secret", fetchMock);
+  const rendered = await provider.render({
+    bbox: [0, 0, 0.1, 0.1], start: new Date("2026-08-11T11:55:00Z"),
+    end: new Date("2026-08-11T12:30:00Z"), collection: "sentinel-2-l2a",
+    product: "true_color", width: 1024, height: 1024,
+  });
+  assert.equal(rendered.processingUnits, undefined);
 });
