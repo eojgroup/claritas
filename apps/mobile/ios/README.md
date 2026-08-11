@@ -128,6 +128,20 @@ When the project is regenerated, the same `MARKETING_VERSION` and `BUILD_NUMBER`
 
 For CI builds that regenerate the project, `MARKETING_VERSION`, `BUILD_NUMBER`, or `GITHUB_RUN_NUMBER` can override the file values.
 
+## Automated TestFlight delivery
+
+Every main-branch Apple change first compiles the iPhone, iPad and Watch products. When signing is configured, the same workflow then archives the universal app, exports and uploads its IPA, waits for App Store Connect processing, and assigns the build to the app's only TestFlight group. The workflow deliberately stops if more than one group exists so a future group cannot receive a build accidentally.
+
+Configure these repository secrets once. The certificate and private key values must be base64 encoded without line wrapping:
+
+- `APPLE_DISTRIBUTION_CERTIFICATE_P12`
+- `APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD`
+- `APP_STORE_CONNECT_KEY_ID`
+- `APP_STORE_CONNECT_ISSUER_ID`
+- `APP_STORE_CONNECT_PRIVATE_KEY_P8`
+
+The App Store Connect key needs access to the Claritas app and TestFlight build/group management. The distribution certificate, provisioning profiles, App ID, Push Notifications capability and both App Groups must belong to team `VTBJTFDTQY`. If credentials are absent, unsigned compile validation remains green and the TestFlight job records the missing one-time setup in its summary instead of pretending an upload occurred. Archive and export logs are retained as workflow artifacts for 14 days.
+
 ## Keep Project In Sync
 
 1. Make code/file changes under `apps/mobile/ios/Claritas/` or `apps/mobile/ios/ClaritasWatch/`.

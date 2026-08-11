@@ -116,8 +116,6 @@ data:
   AISSTREAM_IDLE_TIMEOUT_SECONDS: "120"
   # Rotate small geographic subscriptions and persist bounded batches so a
   # full-world vessel burst cannot monopolize the API database pool.
-  AISSTREAM_SUBSCRIPTION_BATCH_SIZE: "2"
-  AISSTREAM_SUBSCRIPTION_ROTATION_SECONDS: "20"
   AISSTREAM_FLUSH_INTERVAL_SECONDS: "5"
   AISSTREAM_FLUSH_BATCH_SIZE: "250"
   AISSTREAM_FLUSH_BATCHES_PER_CYCLE: "2"

@@ -43,6 +43,18 @@ export type BubbleDatum = {
   };
 };
 
+export type WorldMapPoint = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  title: string;
+  subtitle?: string;
+  label?: string;
+  severity?: "low" | "medium" | "high" | "critical";
+  hasImagery?: boolean;
+  selected?: boolean;
+};
+
 export type WorldMapBubblesProps = {
   data: BubbleDatum[];
   onSelect?: (countryIso2: string) => void;
@@ -66,6 +78,8 @@ export type WorldMapBubblesProps = {
   valueDomain?: [number, number];
   valueUnit?: string;
   showBubbles?: boolean;
+  points?: WorldMapPoint[];
+  onSelectPoint?: (point: WorldMapPoint) => void;
 };
 
 type WorldCountryReference = {
@@ -200,6 +214,16 @@ function markerPalette(
   return paletteMap[tone ?? "news"] ?? paletteMap.news;
 }
 
+function eventPointColor(
+  severity: WorldMapPoint["severity"],
+  isDark: boolean,
+) {
+  const colors = isDark
+    ? { low: "#7eb8c9", medium: "#e0b86e", high: "#ee9463", critical: "#ef625c" }
+    : { low: "#35758a", medium: "#9c7429", high: "#b9572f", critical: "#ad302e" };
+  return colors[severity ?? "low"];
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -269,6 +293,8 @@ export default memo(function WorldMapBubbles({
   valueDomain,
   valueUnit = "",
   showBubbles = true,
+  points = [],
+  onSelectPoint,
 }: WorldMapBubblesProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -289,6 +315,11 @@ export default memo(function WorldMapBubbles({
   });
   const [isDragging, setIsDragging] = useState(false);
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    point: WorldMapPoint;
+    x: number;
+    y: number;
+  } | null>(null);
   const [tip, setTip] = useState<{
     x: number;
     y: number;
@@ -351,6 +382,19 @@ export default memo(function WorldMapBubbles({
     });
     return next.sort((a, b) => a.count - b.count);
   }, [data]);
+  const eventPoints = useMemo(
+    () => points
+      .filter((point) =>
+        Number.isFinite(point.latitude) &&
+        Number.isFinite(point.longitude) &&
+        point.latitude >= -90 &&
+        point.latitude <= 90 &&
+        point.longitude >= -180 &&
+        point.longitude <= 180,
+      )
+      .slice(0, 120),
+    [points],
+  );
 
   const markerByCountry = useMemo(
     () =>
@@ -404,15 +448,18 @@ export default memo(function WorldMapBubbles({
   );
 
   useEffect(() => {
-    const points = markers
-      .map((marker) => projection(marker.coordinate))
+    const projectedPoints = [
+      ...markers.map((marker) => marker.coordinate),
+      ...eventPoints.map((point): [number, number] => [point.longitude, point.latitude]),
+    ]
+      .map((coordinate) => projection(coordinate))
       .filter((point): point is [number, number] => Boolean(point));
-    if (points.length < 2) {
+    if (projectedPoints.length < 2) {
       setView({ scale: 1, x: 0, y: 0 });
       return;
     }
-    const xs = points.map((point) => point[0]);
-    const ys = points.map((point) => point[1]);
+    const xs = projectedPoints.map((point) => point[0]);
+    const ys = projectedPoints.map((point) => point[1]);
     const minX = Math.min(...xs);
     const maxX = Math.max(...xs);
     const minY = Math.min(...ys);
@@ -434,7 +481,7 @@ export default memo(function WorldMapBubbles({
       x: size.width / 2 - centerX * fittedScale,
       y: size.height / 2 - centerY * fittedScale,
     });
-  }, [isCompact, markers, projection, size.height, size.width]);
+  }, [eventPoints, isCompact, markers, projection, size.height, size.width]);
 
   const zoomAt = useCallback(
     (nextScale: number, anchorX: number, anchorY: number) => {
@@ -812,6 +859,89 @@ export default memo(function WorldMapBubbles({
               </g>
             );
           })}
+
+          {eventPoints.map((eventPoint, index) => {
+            const point = projection([eventPoint.longitude, eventPoint.latitude]);
+            if (!point) return null;
+            const color = eventPointColor(eventPoint.severity, isDark);
+            const radius = (eventPoint.severity === "critical"
+              ? 7
+              : eventPoint.severity === "high"
+                ? 6
+                : 5) / view.scale;
+            const showPointLabel = eventPoint.selected || index < (isCompact ? 5 : 8);
+            return (
+              <g
+                key={eventPoint.id}
+                transform={`translate(${point[0]} ${point[1]})`}
+                className="world-map-event"
+                role="button"
+                tabIndex={0}
+                aria-label={`${eventPoint.title}. ${eventPoint.subtitle ?? "Mapped event"}`}
+                onPointerEnter={(event) => {
+                  const rect = containerRef.current?.getBoundingClientRect();
+                  if (!rect) return;
+                  setHoveredPoint({
+                    point: eventPoint,
+                    x: clamp(event.clientX - rect.left + 12, 8, rect.width - 280),
+                    y: clamp(event.clientY - rect.top + 12, 8, rect.height - 128),
+                  });
+                }}
+                onPointerLeave={() => setHoveredPoint(null)}
+                onClick={() => onSelectPoint?.(eventPoint)}
+                onKeyDown={(event: ReactKeyboardEvent<SVGGElement>) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectPoint?.(eventPoint);
+                  }
+                }}
+              >
+                <circle
+                  r={radius + 5 / view.scale}
+                  fill={color}
+                  fillOpacity={0.2}
+                  className="world-map-bubble-halo"
+                />
+                {eventPoint.hasImagery && (
+                  <circle
+                    r={radius + 4 / view.scale}
+                    fill="none"
+                    stroke={isDark ? "#7ed4e6" : "#176b7c"}
+                    strokeWidth={1.75 / view.scale}
+                    strokeDasharray={`${2.4 / view.scale} ${1.8 / view.scale}`}
+                  />
+                )}
+                {eventPoint.selected && (
+                  <circle
+                    r={radius + 8 / view.scale}
+                    fill="none"
+                    stroke={isDark ? "#fff0d9" : "#57290f"}
+                    strokeWidth={2.2 / view.scale}
+                  />
+                )}
+                <circle
+                  r={radius}
+                  fill={color}
+                  stroke={isDark ? "#fff7ed" : "#ffffff"}
+                  strokeWidth={1.4 / view.scale}
+                />
+                {showPointLabel && (
+                  <text
+                    y={-(radius + 6 / view.scale)}
+                    textAnchor="middle"
+                    fill={labelColor}
+                    stroke={isDark ? "#07121a" : "#eef2f3"}
+                    strokeWidth={3 / view.scale}
+                    paintOrder="stroke"
+                    fontSize={9 / view.scale}
+                    fontWeight={800}
+                  >
+                    {eventPoint.label ?? eventPoint.severity?.toUpperCase() ?? "EVENT"}
+                  </text>
+                )}
+              </g>
+            );
+          })}
         </g>
       </svg>
 
@@ -857,6 +987,28 @@ export default memo(function WorldMapBubbles({
           </strong>
           <small>Select the country to open its cross-domain profile</small>
         </div>
+      )}
+
+      {hoveredPoint && (
+        <button
+          type="button"
+          onClick={() => onSelectPoint?.(hoveredPoint.point)}
+          className="app-card absolute z-10 w-64 rounded-lg p-3 text-left shadow-xl"
+          style={{ left: hoveredPoint.x, top: hoveredPoint.y }}
+        >
+          <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">
+            {hoveredPoint.point.severity ?? "low"} event
+            {hoveredPoint.point.hasImagery ? " · satellite available" : " · reported location"}
+          </span>
+          <strong className="mt-1 line-clamp-2 block text-xs leading-5 text-[color:var(--shell-ink)]">
+            {hoveredPoint.point.title}
+          </strong>
+          {hoveredPoint.point.subtitle && (
+            <small className="mt-1 block text-[color:var(--shell-muted)]">
+              {hoveredPoint.point.subtitle}
+            </small>
+          )}
+        </button>
       )}
 
       {featuredMarker && !hoveredCountry && !tip && (

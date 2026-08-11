@@ -10,8 +10,8 @@ import {
   type AdsbRouteLookup,
 } from "./transport-route-enrichment";
 import {
-  batchAisBoundingBoxes,
-  incrementalWorldAisBoundingBoxes,
+  GLOBAL_AIS_BOUNDING_BOX,
+  buildAisSubscription,
   normalizeAisBoundingBoxes,
   type AisBoundingBox,
 } from "./ais-subscription";
@@ -321,10 +321,7 @@ let aisSocket: WebSocket | null = null;
 let aisReconnectTimer: NodeJS.Timeout | null = null;
 let aisFlushTimer: NodeJS.Timeout | null = null;
 let aisWatchdogTimer: NodeJS.Timeout | null = null;
-let aisSubscriptionTimer: NodeJS.Timeout | null = null;
-let aisSubscriptionBatches: AisBoundingBox[][] | null = null;
-let aisNextSubscriptionBatch = 0;
-let aisActiveSubscriptionBatch = 0;
+let aisSubscriptionBoxes: AisBoundingBox[] | null = null;
 let aisReconnectAttempt = 0;
 let aisConnectedAt: number | null = null;
 let aisLastMessageAt: number | null = null;
@@ -459,19 +456,37 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
   const fallbackRecentlyReceiving =
     digitrafficLastSnapshotAt != null &&
     Date.now() - digitrafficLastSnapshotAt <= 5 * 60_000;
-  const subscriptionBatches = getAisSubscriptionBatches();
+  const subscriptionBoxes = getAisSubscriptionBoxes();
+  const upstreamStalled = Boolean(
+    connected &&
+    aisConnectedAt &&
+    Date.now() - aisConnectedAt > 45_000 &&
+    (!aisLastMessageAt || aisLastMessageAt < aisConnectedAt),
+  );
+  const primaryStatus = !primaryConfigured
+    ? "disabled"
+    : recentlyReceiving
+      ? "live"
+      : upstreamStalled
+        ? "upstream_stalled"
+        : connected
+          ? "connecting"
+          : "reconnecting";
   const status = !configured
     ? "disabled"
     : hasFreshStoredData
       ? "live"
       : recentlyReceiving || fallbackRecentlyReceiving
         ? "receiving"
-        : connected
-          ? "connecting"
-          : "reconnecting";
+        : upstreamStalled
+          ? "upstream_stalled"
+          : connected
+            ? "connecting"
+            : "reconnecting";
   return {
     configured,
     primary_configured: primaryConfigured,
+    primary_status: primaryStatus,
     connected,
     status,
     last_message_at: aisLastMessageAt ? isoDate(aisLastMessageAt) : null,
@@ -486,8 +501,9 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     snapshots_stored: aisSnapshotsStored,
     snapshots_dropped: aisSnapshotsDropped,
     malformed_messages: aisMalformedMessages,
-    subscription_batch: aisActiveSubscriptionBatch + 1,
-    subscription_batches: subscriptionBatches.length,
+    subscription_batch: 1,
+    subscription_batches: 1,
+    subscription_boxes: subscriptionBoxes.length,
     fallback_source: "Fintraffic Digitraffic",
     fallback_configured: fallbackConfigured,
     fallback_last_snapshot_at: digitrafficLastSnapshotAt
@@ -671,42 +687,28 @@ function maritimePortAtPosition(
   return nearest?.port ?? null;
 }
 
-function getAisSubscriptionBatches(): AisBoundingBox[][] {
-  if (aisSubscriptionBatches) return aisSubscriptionBatches;
+function getAisSubscriptionBoxes(): AisBoundingBox[] {
+  if (aisSubscriptionBoxes) return aisSubscriptionBoxes;
   const configured = process.env.AISSTREAM_BOUNDING_BOXES?.trim();
   if (configured) {
     try {
       const boxes = normalizeAisBoundingBoxes(JSON.parse(configured));
       if (boxes.length > 0) {
-        aisSubscriptionBatches = batchAisBoundingBoxes(
-          boxes,
-          boundedIntegerFromEnv("AISSTREAM_SUBSCRIPTION_BATCH_SIZE", 2, 1, 12),
-        );
-        return aisSubscriptionBatches;
+        aisSubscriptionBoxes = boxes.slice(0, 12);
+        if (boxes.length > aisSubscriptionBoxes.length) {
+          console.warn("AISSTREAM_BOUNDING_BOXES was capped at 12 provider areas.");
+        }
+        return aisSubscriptionBoxes;
       }
     } catch {
       // The warning below covers both malformed JSON and malformed boxes.
     }
     console.warn(
-      "AISSTREAM_BOUNDING_BOXES is invalid; using incremental world coverage.",
+      "AISSTREAM_BOUNDING_BOXES is invalid; using the documented global subscription.",
     );
   }
-  aisSubscriptionBatches = batchAisBoundingBoxes(
-    incrementalWorldAisBoundingBoxes(),
-    boundedIntegerFromEnv("AISSTREAM_SUBSCRIPTION_BATCH_SIZE", 2, 1, 12),
-  );
-  return aisSubscriptionBatches;
-}
-
-function aisSubscriptionRotationMilliseconds(): number {
-  return (
-    boundedIntegerFromEnv(
-      "AISSTREAM_SUBSCRIPTION_ROTATION_SECONDS",
-      20,
-      10,
-      300,
-    ) * 1_000
-  );
+  aisSubscriptionBoxes = [GLOBAL_AIS_BOUNDING_BOX];
+  return aisSubscriptionBoxes;
 }
 
 function aisFlushBatchSize(): number {
@@ -717,47 +719,18 @@ function aisFlushBatchesPerCycle(): number {
   return boundedIntegerFromEnv("AISSTREAM_FLUSH_BATCHES_PER_CYCLE", 2, 1, 10);
 }
 
-function sendNextAisSubscription(socket: WebSocket, apiKey: string): void {
+function sendAisSubscription(socket: WebSocket, apiKey: string): void {
   if (socket !== aisSocket || socket.readyState !== WebSocket.OPEN) return;
-  const batches = getAisSubscriptionBatches();
-  const batchIndex = aisNextSubscriptionBatch % batches.length;
-  const boundingBoxes = batches[batchIndex];
-  socket.send(
-    JSON.stringify({
-      APIKey: apiKey,
-      BoundingBoxes: boundingBoxes,
-      FilterMessageTypes: [
-        "PositionReport",
-        "StandardClassBPositionReport",
-        "ExtendedClassBPositionReport",
-        "LongRangeAisBroadcastMessage",
-        "ShipStaticData",
-        "StaticDataReport",
-      ],
-    }),
-  );
-  aisActiveSubscriptionBatch = batchIndex;
-  aisNextSubscriptionBatch = (batchIndex + 1) % batches.length;
-}
-
-function startAisSubscriptionRotation(socket: WebSocket, apiKey: string): void {
-  if (aisSubscriptionTimer) clearInterval(aisSubscriptionTimer);
-  sendNextAisSubscription(socket, apiKey);
-  const batches = getAisSubscriptionBatches();
-  if (batches.length > 1) {
-    aisSubscriptionTimer = setInterval(() => {
-      sendNextAisSubscription(socket, apiKey);
-    }, aisSubscriptionRotationMilliseconds());
-    aisSubscriptionTimer.unref();
-  } else {
-    aisSubscriptionTimer = null;
-  }
+  const boundingBoxes = getAisSubscriptionBoxes();
+  socket.send(JSON.stringify(buildAisSubscription(apiKey, boundingBoxes)));
   console.info(
     JSON.stringify({
       event: "aisstream_subscription_started",
-      batches: batches.length,
-      boxes_per_batch: batches[0]?.length ?? 0,
-      rotation_seconds: aisSubscriptionRotationMilliseconds() / 1_000,
+      mode: boundingBoxes.length === 1 && boundingBoxes[0] === GLOBAL_AIS_BOUNDING_BOX
+        ? "global"
+        : "configured",
+      boxes: boundingBoxes.length,
+      rotating: false,
     }),
   );
 }
@@ -1003,8 +976,7 @@ function connectAisStream(): void {
   socket.on("open", () => {
     aisReconnectAttempt = 0;
     aisConnectedAt = Date.now();
-    aisLastError = null;
-    startAisSubscriptionRotation(socket, apiKey);
+    sendAisSubscription(socket, apiKey);
     console.info("AISstream transport subscription connected.");
   });
 
@@ -1031,10 +1003,6 @@ function connectAisStream(): void {
     if (aisSocket === socket) {
       aisSocket = null;
       aisConnectedAt = null;
-      if (aisSubscriptionTimer) {
-        clearInterval(aisSubscriptionTimer);
-        aisSubscriptionTimer = null;
-      }
       if (code !== 1000 && !aisLastError) {
         aisLastError = `AISstream closed with code ${code}${reason.length ? `: ${reason.toString()}` : ""}`;
       }
@@ -1073,8 +1041,9 @@ function logAisProgressIfDue(): void {
       snapshots_dropped: aisSnapshotsDropped,
       malformed_messages: aisMalformedMessages,
       queue_depth: maritimeQueue.size,
-      subscription_batch: aisActiveSubscriptionBatch + 1,
-      subscription_batches: getAisSubscriptionBatches().length,
+      subscription_batch: 1,
+      subscription_batches: 1,
+      subscription_boxes: getAisSubscriptionBoxes().length,
       last_stream_error: aisLastError,
       last_flush_error: aisLastFlushError,
       digitraffic_snapshots_accepted: digitrafficSnapshotsAccepted,

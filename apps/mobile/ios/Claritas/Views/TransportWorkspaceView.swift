@@ -733,6 +733,11 @@ struct TransportWorkspaceView: View {
 
     private var maritimeRuntimeMessage: String? {
         guard let maritime = overview?.coverage.maritime else { return nil }
+        if maritime.primary_status == "upstream_stalled" || maritime.status == "upstream_stalled" {
+            return maritime.fallback_last_snapshot_at == nil
+                ? "AISstream is connected but its upstream feed is silent; automatic recovery is active."
+                : "AISstream is connected but its upstream feed is silent; the official regional fallback remains active."
+        }
         if maritime.last_error != nil {
             return "AISstream reported a stream error; Claritas is reconnecting automatically."
         }
@@ -747,7 +752,7 @@ struct TransportWorkspaceView: View {
             return "Global AIS is silent and the official Baltic fallback is retrying."
         }
         if maritime.connected == true && (maritime.messages_received ?? 0) == 0 {
-            return "AISstream is connected on coverage batch \(maritime.subscription_batch ?? 1)/\(maritime.subscription_batches ?? 1), but no vessel frames have arrived yet."
+            return "AISstream is connected with \(maritime.subscription_boxes ?? 1) coverage area(s), but no vessel frames have arrived yet."
         }
         switch maritime.status {
         case "receiving":

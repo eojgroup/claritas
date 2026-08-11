@@ -28,6 +28,7 @@ import {
   RefreshCw,
   Route,
   Radar,
+  Satellite,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -728,6 +729,7 @@ import {
   fetchCountryMarketDetail,
   fetchFxRates,
   fetchIntelligenceAlerts,
+  fetchIntelligenceEvents,
   fetchMarketFilings,
   fetchMarketIndicators,
   fetchMarketQuotes,
@@ -766,6 +768,7 @@ import {
   type MarketQuote,
   type NewsItem,
   type IntelligenceAlert,
+  type IntelligenceEvent,
   type PodcastEpisode,
   type PodcastExternalLink,
   type PodcastSignal,
@@ -815,6 +818,8 @@ export default function ClaritasDashboard() {
     },
   );
   const [intelligenceAlerts, setIntelligenceAlerts] = useState<IntelligenceAlert[]>([]);
+  const [overviewEvents, setOverviewEvents] = useState<IntelligenceEvent[]>([]);
+  const [overviewEventsError, setOverviewEventsError] = useState<string | null>(null);
   const [authStatus, setAuthStatus] = useState<
     "checking" | "authed" | "unauthed"
   >("checking");
@@ -1107,6 +1112,78 @@ export default function ClaritasDashboard() {
       window.clearInterval(timer);
     };
   }, [authStatus, hasPaidAccess]);
+
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess) {
+      setOverviewEvents([]);
+      setOverviewEventsError(null);
+      return;
+    }
+    let active = true;
+    const refresh = () => {
+      void fetchIntelligenceEvents({ limit: 120 })
+        .then((events) => {
+          if (!active) return;
+          setOverviewEvents(events);
+          setOverviewEventsError(null);
+        })
+        .catch((error) => {
+          if (!active) return;
+          setOverviewEventsError(error instanceof Error ? error.message : String(error));
+        });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [authStatus, hasPaidAccess]);
+
+  const overviewEventPoints = useMemo(() => {
+    const severityRank: Record<IntelligenceEvent["severity"], number> = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1,
+    };
+    return overviewEvents
+      .filter((event) =>
+        event.latitude != null &&
+        event.longitude != null &&
+        Number.isFinite(Number(event.latitude)) &&
+        Number.isFinite(Number(event.longitude)),
+      )
+      .sort((left, right) =>
+        severityRank[right.severity] - severityRank[left.severity] ||
+        Number(right.relevance_score) - Number(left.relevance_score),
+      )
+      .map((event) => {
+        const normalizedType = event.event_type.toLowerCase();
+        const label = normalizedType.includes("earthquake")
+          ? "QUAKE"
+          : normalizedType.includes("fire")
+            ? "FIRE"
+            : normalizedType.includes("transport") || normalizedType.includes("maritime")
+              ? "MOVE"
+              : normalizedType.includes("weather")
+                ? "WX"
+                : normalizedType.includes("market")
+                  ? "MKT"
+                  : "EVENT";
+        return {
+          id: event.id,
+          latitude: Number(event.latitude),
+          longitude: Number(event.longitude),
+          title: event.title,
+          subtitle: `${event.location_name || event.primary_country_iso2 || "Estimated event location"} · ${event.domain_count} domain${event.domain_count === 1 ? "" : "s"}`,
+          label,
+          severity: event.severity,
+          hasImagery: event.earth_observation_available,
+          selected: event.id === selectedIntelligenceEventId,
+        };
+      });
+  }, [overviewEvents, selectedIntelligenceEventId]);
 
   useEffect(() => {
     if (!isAdmin && activeView === "admin") {
@@ -3814,36 +3891,15 @@ export default function ClaritasDashboard() {
       group: "core",
     },
     {
-      id: "news",
-      label: "News explorer",
-      view: "news" as const,
-      icon: Newspaper,
-      group: "explore",
-    },
-    {
-      id: "podcasts",
-      label: "Podcast explorer",
-      view: "podcasts" as const,
-      icon: Podcast,
-      group: "explore",
-    },
-    {
-      id: "weather",
-      label: "Weather explorer",
-      view: "weather" as const,
-      icon: CloudSun,
-      group: "explore",
-    },
-    {
-      id: "markets",
-      label: "Market explorer",
-      view: "markets" as const,
-      icon: ChartNoAxesCombined,
-      group: "explore",
+      id: "earth-observation",
+      label: "Satellite imagery",
+      view: "earth-observation" as const,
+      icon: Satellite,
+      group: "core",
     },
     {
       id: "transport",
-      label: "Transport explorer",
+      label: "Live transport",
       view: "transport" as const,
       icon: Route,
       group: "explore",
@@ -4962,15 +5018,20 @@ export default function ClaritasDashboard() {
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Geospatial pulse
+                            Global event picture
                           </div>
                           <div className="text-sm font-semibold">
                             Map:{" "}
                             {mapMode === "signals"
-                              ? "Cross-source signal relevance"
+                              ? `${overviewEventPoints.length} located events with source and satellite evidence`
                               : mapMode === "news"
                                 ? "#News per country"
                                 : "Weather (temperature) per country"}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">
+                            <span>Dots = canonical events</span>
+                            <span>Dashed rings = imagery available</span>
+                            <span>Country fill = context layer</span>
                           </div>
                         </div>
                         <div className="map-mode-tabs flex flex-wrap items-center gap-2 text-xs">
@@ -4982,7 +5043,7 @@ export default function ClaritasDashboard() {
                             }`}
                             onClick={() => setMapMode("signals")}
                           >
-                            Signals
+                            Event context
                           </button>
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
@@ -5098,6 +5159,8 @@ export default function ClaritasDashboard() {
                             variant="compact"
                             data={activeMapData}
                             onSelect={handleMapSelect}
+                            points={overviewEventPoints}
+                            onSelectPoint={(point) => handleOpenIntelligence(point.id)}
                             dark={dark}
                             primaryCountry={selectedCountry}
                             secondaryCountry={comparisonCountry}
@@ -5207,6 +5270,11 @@ export default function ClaritasDashboard() {
                               No linked cross-source signals in this scope.
                             </div>
                           )}
+                        {overviewEventsError && (
+                          <div className="absolute bottom-4 left-4 rounded border border-rose-400/40 bg-[color:var(--shell-surface)] px-2 py-1 text-xs text-rose-600">
+                            Event layer unavailable: {overviewEventsError}
+                          </div>
+                        )}
                         {mapMode === "news" &&
                           mapBubbleData.length === 0 && (
                             <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-[color:var(--shell-surface)] px-2 py-1 rounded border border-[color:var(--shell-border)]">
@@ -5236,11 +5304,11 @@ export default function ClaritasDashboard() {
                         {mapMode === "signals" ? (
                           <div className="flex flex-wrap items-center gap-2 text-[color:var(--shell-muted)]">
                             <span className="font-semibold text-[color:var(--shell-ink)]">
-                              Relevance model
+                              Event evidence model
                             </span>
                             <span>
-                              News 40% · podcast evidence 25% · weather 15% ·
-                              markets 15% · cross-domain confirmation bonus
+                              Select a located event to open its news, official feeds,
+                              transport, weather, market and satellite evidence as one thread.
                             </span>
                             {highestSignalCountry && (
                               <button

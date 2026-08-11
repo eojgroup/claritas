@@ -131,8 +131,8 @@ struct RootView: View {
         TabView(selection: $tab) {
             compactTab(.dashboard)
             compactTab(.intelligence)
+            compactTab(.earthObservation)
             compactTab(.news)
-            compactTab(.briefing)
             compactTab(.more)
         }
         .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
@@ -196,8 +196,8 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .intelligence, .briefing, .news, .podcasts, .weather, .markets, .transport, .admin, .profile, .policies]
-            : [.overview, .intelligence, .briefing, .news, .podcasts, .weather, .markets, .transport, .profile, .policies]
+            ? [.overview, .intelligence, .earthObservation, .briefing, .transport, .admin, .profile, .policies]
+            : [.overview, .intelligence, .earthObservation, .briefing, .transport, .profile, .policies]
     }
 
     private var sidebar: some View {
@@ -205,13 +205,10 @@ struct RootView: View {
             Section("Workspace") {
                 sidebarLink(.overview)
                 sidebarLink(.intelligence)
+                sidebarLink(.earthObservation)
                 sidebarLink(.briefing)
             }
             Section("Source lenses") {
-                sidebarLink(.news)
-                sidebarLink(.podcasts)
-                sidebarLink(.weather)
-                sidebarLink(.markets)
                 sidebarLink(.transport)
             }
             if model.isAdmin {
@@ -321,10 +318,17 @@ private struct CompactMoreView: View {
 
                     BrandCard(title: "Source lenses", icon: "waveform.path.ecg") {
                         destinationRow(
-                            title: "Imagery library",
-                            detail: "Global provenance catalogue; event imagery lives in Signal desk",
-                            icon: "sensor.tag.radiowaves.forward",
-                            destination: EarthObservationWorkspaceView()
+                            title: "Daily briefing",
+                            detail: "A concise synthesis of the current event picture",
+                            icon: "sparkles",
+                            destination: DailyBriefingWorkspaceView()
+                        )
+                        Divider()
+                        destinationRow(
+                            title: "News reporting",
+                            detail: "Original reporting linked into canonical event threads",
+                            icon: "newspaper",
+                            destination: NewsWorkspaceView()
                         )
                         Divider()
                         destinationRow(

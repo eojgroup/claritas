@@ -115,12 +115,10 @@ struct PadOverviewView: View {
     private var workspaceStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                workspaceButton(.overview, label: "Signals")
-                workspaceButton(.news, label: "News")
-                workspaceButton(.podcasts, label: "Podcasts")
-                workspaceButton(.weather, label: "Weather")
-                workspaceButton(.markets, label: "Markets")
-                workspaceButton(.transport, label: "Transport")
+                workspaceButton(.intelligence, label: "Signal desk")
+                workspaceButton(.earthObservation, label: "Satellite imagery")
+                workspaceButton(.transport, label: "Live transport")
+                workspaceButton(.briefing, label: "Daily briefing")
             }
             .padding(.horizontal, 2)
         }
@@ -139,7 +137,7 @@ struct PadOverviewView: View {
             Label(label, systemImage: item.icon)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(
-                    item == .overview
+                    item == .intelligence
                         ? ClaritasPalette.shellInk(for: colorScheme)
                         : ClaritasPalette.shellMuted(for: colorScheme)
                 )

@@ -1297,6 +1297,7 @@ struct MaritimeTransportCoverage: Codable {
     let transport: String
     let configured: Bool
     let primary_configured: Bool?
+    let primary_status: String?
     let connected: Bool?
     let status: String?
     let last_message_at: String?
@@ -1313,6 +1314,7 @@ struct MaritimeTransportCoverage: Codable {
     let malformed_messages: Int?
     let subscription_batch: Int?
     let subscription_batches: Int?
+    let subscription_boxes: Int?
     let fallback_source: String?
     let fallback_configured: Bool?
     let fallback_last_snapshot_at: String?

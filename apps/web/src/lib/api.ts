@@ -609,8 +609,9 @@ export type TransportOverview = {
       transport: "WebSocket";
       configured: boolean;
       primary_configured: boolean;
+      primary_status: "disabled" | "connecting" | "reconnecting" | "upstream_stalled" | "live";
       connected: boolean;
-      status: "disabled" | "connecting" | "reconnecting" | "receiving" | "live";
+      status: "disabled" | "connecting" | "reconnecting" | "upstream_stalled" | "receiving" | "live";
       last_message_at: string | null;
       last_snapshot_at: string | null;
       last_stored_at: string | null;
@@ -625,6 +626,7 @@ export type TransportOverview = {
       malformed_messages: number;
       subscription_batch: number;
       subscription_batches: number;
+      subscription_boxes?: number;
       fallback_source: "Fintraffic Digitraffic";
       fallback_configured: boolean;
       fallback_last_snapshot_at: string | null;

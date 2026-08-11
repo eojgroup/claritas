@@ -56,3 +56,133 @@ jobs:
             -sdk watchsimulator \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+  testflight:
+    name: Archive and distribute to TestFlight
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: macos-15
+    env:
+      APP_BUNDLE_ID: com.eojgroup.claritas
+      DEVELOPMENT_TEAM: VTBJTFDTQY
+      APP_BUILD_NUMBER: ${{ github.run_number }}
+      APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_PRIVATE_KEY_P8: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_P8 }}
+      APPLE_DISTRIBUTION_CERTIFICATE_P12: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_P12 }}
+      APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check TestFlight credentials
+        id: signing
+        shell: bash
+        run: |
+          configured=true
+          if [[ -z "$APP_STORE_CONNECT_KEY_ID" || -z "$APP_STORE_CONNECT_ISSUER_ID" || -z "$APP_STORE_CONNECT_PRIVATE_KEY_P8" || -z "$APPLE_DISTRIBUTION_CERTIFICATE_P12" || -z "$APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD" ]]; then
+            configured=false
+            echo "TestFlight automation is installed but signing credentials are incomplete. Add the five documented repository secrets once; ordinary deployments then require no manual export or group assignment." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "configured=$configured" >> "$GITHUB_OUTPUT"
+
+      - name: Select Xcode
+        if: steps.signing.outputs.configured == 'true'
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+
+      - name: Prepare isolated signing keychain
+        if: steps.signing.outputs.configured == 'true'
+        shell: bash
+        run: |
+          signing_dir="$RUNNER_TEMP/claritas-signing"
+          mkdir -p "$signing_dir" "$HOME/.private_keys"
+          printf '%s' "$APPLE_DISTRIBUTION_CERTIFICATE_P12" | base64 --decode > "$signing_dir/distribution.p12"
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_P8" | base64 --decode > "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          cp "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" "$HOME/.private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          keychain_path="$RUNNER_TEMP/claritas-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 24)"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$signing_dir/distribution.p12" -P "$APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          echo "APP_STORE_CONNECT_PRIVATE_KEY_PATH=$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
+
+      - name: Generate release project
+        if: steps.signing.outputs.configured == 'true'
+        working-directory: apps/mobile/ios
+        run: |
+          gem install xcodeproj --no-document
+          BUILD_NUMBER="$APP_BUILD_NUMBER" ruby generate_xcodeproj.rb
+          ruby validate_xcodeproj.rb
+
+      - name: Archive App Store build
+        if: steps.signing.outputs.configured == 'true'
+        working-directory: apps/mobile/ios/Claritas
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Claritas.xcodeproj \
+            -scheme Claritas \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Claritas.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            archive 2>&1 | tee "$RUNNER_TEMP/claritas-archive.log"
+
+      - name: Export signed IPA
+        if: steps.signing.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/Claritas.xcarchive" \
+            -exportPath "$RUNNER_TEMP/claritas-export" \
+            -exportOptionsPlist apps/mobile/ios/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH" \
+            -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
+            -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
+            2>&1 | tee "$RUNNER_TEMP/claritas-export.log"
+
+      - name: Upload build to App Store Connect
+        if: steps.signing.outputs.configured == 'true'
+        shell: bash
+        run: |
+          ipa_path="$(find "$RUNNER_TEMP/claritas-export" -maxdepth 1 -name '*.ipa' -print -quit)"
+          if [[ -z "$ipa_path" ]]; then
+            echo "No IPA was produced by xcodebuild -exportArchive." >&2
+            exit 1
+          fi
+          xcrun altool --upload-app --type ios --file "$ipa_path" --apiKey "$APP_STORE_CONNECT_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
+
+      - name: Assign the only TestFlight group
+        if: steps.signing.outputs.configured == 'true'
+        run: ruby apps/mobile/ios/distribute_testflight.rb
+
+      - name: Upload archive and export diagnostics
+        if: always() && steps.signing.outputs.configured == 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: apple-distribution-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/claritas-archive.log
+            ${{ runner.temp }}/claritas-export.log
+            ${{ runner.temp }}/claritas-export/*.ipa
+            ${{ runner.temp }}/Claritas.xcarchive/Info.plist
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Remove signing material
+        if: always() && steps.signing.outputs.configured == 'true'
+        shell: bash
+        run: |
+          security delete-keychain "$SIGNING_KEYCHAIN_PATH" || true
+          rm -f "$HOME/.private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"

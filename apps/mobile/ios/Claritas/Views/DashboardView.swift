@@ -3382,6 +3382,8 @@ struct SignalMapPanel: View {
     @State private var comparisonCountry: String?
     @State private var pinnedCountry: String?
     @State private var resetToken = 0
+    @State private var events: [IntelligenceEvent] = []
+    @State private var eventLoadError: String?
 
     let height: CGFloat
     let allowsComparison: Bool
@@ -3401,14 +3403,36 @@ struct SignalMapPanel: View {
 
     private var highest: CountryBubblePoint? { points.first }
 
+    private var locatedEvents: [IntelligenceEvent] {
+        let bounds = region.geographicBounds
+        return events
+            .filter { event in
+                guard let latitude = event.latitude,
+                      let longitude = event.longitude,
+                      latitude.isFinite,
+                      longitude.isFinite else { return false }
+                if let country = event.primary_country_iso2, !region.contains(country) {
+                    return false
+                }
+                return longitude >= bounds.minLon && longitude <= bounds.maxLon &&
+                    latitude >= bounds.minLat && latitude <= bounds.maxLat
+            }
+            .sorted {
+                if severityRank($0.severity) != severityRank($1.severity) {
+                    return severityRank($0.severity) > severityRank($1.severity)
+                }
+                return $0.relevance_score > $1.relevance_score
+            }
+    }
+
     var body: some View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .top, spacing: 12) {
                     BrandSectionHeader(
-                        kicker: "Geospatial pulse",
-                        title: "Map: \(mode.title)",
-                        detail: "Select a country to inspect the drivers behind its rank."
+                        kicker: "Global event picture",
+                        title: "\(locatedEvents.count) located events · \(mode.title)",
+                        detail: "Event dots open the canonical evidence thread; rings identify satellite-backed events."
                     )
                     Spacer(minLength: 0)
                 }
@@ -3483,13 +3507,15 @@ struct SignalMapPanel: View {
                 ZStack(alignment: .topLeading) {
                     InteractiveCountryBubbleMap(
                         points: points,
+                        events: locatedEvents,
                         mapRegion: region,
                         selectedCountry: model.selectedCountry,
                         comparisonCountry: comparisonCountry,
                         pinnedCountry: pinnedCountry,
                         featuredCountry: mode == .signals ? highest?.iso : nil,
                         resetToken: resetToken,
-                        onSelectCountry: selectCountry
+                        onSelectCountry: selectCountry,
+                        onSelectEvent: selectEvent
                     )
                     .frame(height: height)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -3544,6 +3570,18 @@ struct SignalMapPanel: View {
                         .foregroundStyle(.secondary)
                 }
 
+                HStack(spacing: 10) {
+                    Label("\(locatedEvents.count) events", systemImage: "dot.radiowaves.left.and.right")
+                    Label("\(locatedEvents.filter(\.earth_observation_available).count) satellite-backed", systemImage: "sensor.tag.radiowaves.forward")
+                    Spacer()
+                    if eventLoadError != nil {
+                        Text("Event layer retrying")
+                            .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
                 if mode == .signals {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Relevance model")
@@ -3589,6 +3627,9 @@ struct SignalMapPanel: View {
             mode = resolved
             storedMode = resolved.rawValue
         }
+        .task(id: model.selectedCountry ?? "global") {
+            await loadEvents()
+        }
     }
 
     private var selectedPoint: CountryBubblePoint? {
@@ -3611,6 +3652,35 @@ struct SignalMapPanel: View {
     private func clearComparison() {
         comparisonCountry = nil
         compareMode = false
+    }
+
+    private func severityRank(_ severity: IntelligenceSeverity) -> Int {
+        switch severity {
+        case .critical: return 4
+        case .high: return 3
+        case .medium: return 2
+        case .low: return 1
+        }
+    }
+
+    private func selectEvent(_ event: IntelligenceEvent) {
+        model.selectedCountry = event.primary_country_iso2?.uppercased()
+        model.selectedIntelligenceEventID = event.id
+        NotificationCenter.default.post(
+            name: .claritasWatchOpenDestination,
+            object: "intelligence",
+            userInfo: ["eventID": event.id, "country": event.primary_country_iso2 ?? ""]
+        )
+    }
+
+    @MainActor
+    private func loadEvents() async {
+        do {
+            events = try await model.api.fetchIntelligenceEvents(limit: 100, country: model.selectedCountry)
+            eventLoadError = nil
+        } catch {
+            eventLoadError = error.localizedDescription
+        }
     }
 }
 
@@ -3825,6 +3895,7 @@ private enum SignalMapDataBuilder {
 
 private struct InteractiveCountryBubbleMap: View {
     let points: [CountryBubblePoint]
+    let events: [IntelligenceEvent]
     let mapRegion: SignalMapRegion
     let selectedCountry: String?
     let comparisonCountry: String?
@@ -3832,6 +3903,7 @@ private struct InteractiveCountryBubbleMap: View {
     let featuredCountry: String?
     let resetToken: Int
     let onSelectCountry: (String) -> Void
+    let onSelectEvent: (IntelligenceEvent) -> Void
 
     @State private var committedScale: CGFloat = 1
     @GestureState private var gestureScale: CGFloat = 1
@@ -3860,6 +3932,16 @@ private struct InteractiveCountryBubbleMap: View {
                     ForEach(points.prefix(64)) { point in
                         bubbleView(for: point)
                             .position(project(point.coordinate, size: proxy.size))
+                    }
+
+                    ForEach(events.prefix(100)) { event in
+                        if let latitude = event.latitude, let longitude = event.longitude {
+                            eventView(for: event)
+                                .position(project(
+                                    CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                                    size: proxy.size
+                                ))
+                        }
                     }
                 }
                 .scaleEffect(committedScale * gestureScale)
@@ -3947,6 +4029,41 @@ private struct InteractiveCountryBubbleMap: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(point.iso), rank \(point.rank), \(point.detail)")
         .accessibilityHint("Select country")
+    }
+
+    private func eventView(for event: IntelligenceEvent) -> some View {
+        let color: Color
+        switch event.severity {
+        case .critical: color = Color(hex: "#EF625C")
+        case .high: color = Color(hex: "#EE9463")
+        case .medium: color = Color(hex: "#E0B86E")
+        case .low: color = Color(hex: "#7EB8C9")
+        }
+        let size: CGFloat = event.severity == .critical ? 18 : event.severity == .high ? 16 : 14
+        return Button(action: { onSelectEvent(event) }) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.22))
+                    .frame(width: size + 12, height: size + 12)
+                if event.earth_observation_available {
+                    Circle()
+                        .stroke(
+                            Color(hex: "#7ED4E6"),
+                            style: StrokeStyle(lineWidth: 2, dash: [3, 2])
+                        )
+                        .frame(width: size + 8, height: size + 8)
+                }
+                Circle()
+                    .fill(color)
+                    .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1.5))
+                    .frame(width: size, height: size)
+            }
+            .frame(minWidth: ClaritasLayout.minimumTouchTarget, minHeight: ClaritasLayout.minimumTouchTarget)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(event.severity.rawValue) event, \(event.title), \(event.location_name ?? event.primary_country_iso2 ?? "mapped location")")
+        .accessibilityHint("Open the evidence thread")
     }
 
     private func bubbleSize(for point: CountryBubblePoint) -> CGFloat {

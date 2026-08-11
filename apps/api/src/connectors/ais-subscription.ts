@@ -3,24 +3,30 @@ export type AisBoundingBox = [
   [latitude: number, longitude: number],
 ];
 
-const LATITUDE_BANDS: Array<[number, number]> = [
-  [30, 60],
-  [0, 30],
-  [-30, 0],
-  [60, 90],
-  [-60, -30],
-  [-90, -60],
+export const GLOBAL_AIS_BOUNDING_BOX: AisBoundingBox = [
+  [-90, -180],
+  [90, 180],
 ];
 
-const LONGITUDE_BANDS: Array<[number, number]> = [
-  [-30, 30],
-  [30, 90],
-  [90, 150],
-  [150, 180],
-  [-180, -150],
-  [-150, -90],
-  [-90, -30],
-];
+export const AIS_POSITION_MESSAGE_TYPES = [
+  "PositionReport",
+  "StandardClassBPositionReport",
+  "ExtendedClassBPositionReport",
+  "LongRangeAisBroadcastMessage",
+  "ShipStaticData",
+  "StaticDataReport",
+] as const;
+
+export function buildAisSubscription(
+  apiKey: string,
+  boundingBoxes: AisBoundingBox[],
+) {
+  return {
+    APIKey: apiKey,
+    BoundingBoxes: boundingBoxes,
+    FilterMessageTypes: [...AIS_POSITION_MESSAGE_TYPES],
+  };
+}
 
 function finiteCoordinate(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
@@ -62,28 +68,4 @@ export function normalizeAisBoundingBoxes(value: unknown): AisBoundingBox[] {
       [Math.max(firstLatitude, secondLatitude), Math.max(firstLongitude, secondLongitude)],
     ] as AisBoundingBox];
   });
-}
-
-/**
- * Covers the world in bounded subscriptions, ordered so the first batches
- * include Europe/North Atlantic and Middle East/Indian Ocean traffic.
- */
-export function incrementalWorldAisBoundingBoxes(): AisBoundingBox[] {
-  return LATITUDE_BANDS.flatMap(([south, north]) =>
-    LONGITUDE_BANDS.map(
-      ([west, east]): AisBoundingBox => [[south, west], [north, east]],
-    ),
-  );
-}
-
-export function batchAisBoundingBoxes(
-  boxes: AisBoundingBox[],
-  batchSize: number,
-): AisBoundingBox[][] {
-  const boundedBatchSize = Math.max(1, Math.min(Math.trunc(batchSize) || 1, 12));
-  const batches: AisBoundingBox[][] = [];
-  for (let offset = 0; offset < boxes.length; offset += boundedBatchSize) {
-    batches.push(boxes.slice(offset, offset + boundedBatchSize));
-  }
-  return batches;
 }
