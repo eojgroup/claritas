@@ -327,7 +327,7 @@ async function ingestEventArchive(sourceId: number, archiveUrl: string, maxRows:
       actor2_code: fields[15] || null,
       actor1_geo: { name: fields[36] || null, country_code: fields[37] || null, latitude: asNumber(fields[40]), longitude: asNumber(fields[41]) },
       actor2_geo: { name: fields[44] || null, country_code: fields[45] || null, latitude: asNumber(fields[48]), longitude: asNumber(fields[49]) },
-      action_geo: { name: fields[52] || null, country_code: fields[53] || null, country_iso2: actionCountry, latitude: asNumber(fields[56]), longitude: asNumber(fields[57]) },
+      action_geo: { type: asNumber(fields[51]), name: fields[52] || null, country_code: fields[53] || null, country_iso2: actionCountry, latitude: asNumber(fields[56]), longitude: asNumber(fields[57]) },
     };
     await query(
       `INSERT INTO global_event (

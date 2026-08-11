@@ -706,14 +706,13 @@ const safeDownload = (filename: string, data: Blob | string) => {
 import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
 import PaywallPage from "./components/PaywallPage";
-import AdminIngestionPanel from "./components/AdminIngestionPanel";
-import AdminUserManagementPanel from "./components/AdminUserManagementPanel";
 import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePreview";
 import TransportWorkspace from "./components/TransportWorkspace";
 import IntelligenceWorkspace from "./components/IntelligenceWorkspace";
 import EarthObservationWorkspace from "./components/EarthObservationWorkspace";
 import IntelligenceEventStrip from "./components/IntelligenceEventStrip";
-import AdminIntelligencePanel from "./components/AdminIntelligencePanel";
+import AdminWorkspace from "./components/AdminWorkspace";
+import SatelliteContextPanel from "./components/SatelliteContextPanel";
 import {
   fetchAuthMe,
   fetchAuthProviders,
@@ -5340,6 +5339,12 @@ export default function ClaritasDashboard() {
                           </div>
 
                           <div className="country-profile-scroll app-scroll-panel min-h-0 flex-1 overflow-y-auto">
+                            <SatelliteContextPanel
+                              country={selectedCountryContext.iso}
+                              compact
+                              onOpenEvent={handleOpenIntelligence}
+                              onOpenImagery={(eventId) => handleOpenImagery(eventId)}
+                            />
                             <div className="country-profile-metrics">
                               <div>
                                 <span>Relevance</span>
@@ -5689,96 +5694,11 @@ export default function ClaritasDashboard() {
                           </div>
                         </>
                       ) : (
-                        <>
-                          <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Source intelligence
-                            </div>
-                            <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                              Evidence and decision-makers
-                            </div>
-                            <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">
-                              Connect the headline picture to spoken-source
-                              evidence and the people shaping national decisions.
-                            </p>
-                          </div>
-                          <div className="context-signal-grid flex-1">
-                            <button
-                              type="button"
-                              onClick={() => setActiveView("podcasts")}
-                              className="context-signal"
-                              aria-label="Open podcast evidence workspace"
-                            >
-                              <span className="context-signal-icon">
-                                <Podcast className="h-4 w-4" />
-                              </span>
-                              <span className="min-w-0">
-                                <span className="context-signal-label">
-                                  Podcast intelligence
-                                </span>
-                                <strong>
-                                  {podcastSummary.prioritySignal?.signal.title ??
-                                    podcastSummary.latestEpisode?.title ??
-                                    "No extracted podcast signals yet"}
-                                </strong>
-                                <small>
-                                  {podcastSummary.prioritySignal
-                                    ? `${podcastSummary.prioritySignal.episode.feed_title} · ${podcastSummary.risks} risk signals`
-                                    : `${podcastSummary.episodes} monitored episodes`}
-                                </small>
-                              </span>
-                              <span className="context-signal-stat">
-                                <strong>{podcastSummary.signals}</strong>
-                                <small>
-                                  signals · {podcastSummary.evidence} evidence
-                                </small>
-                                <span>
-                                  Open evidence
-                                  <ArrowUpRight className="h-3.5 w-3.5" />
-                                </span>
-                              </span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => setActiveView("transport")}
-                              className="context-signal"
-                              aria-label="Open transport intelligence workspace"
-                            >
-                              <span className="context-signal-icon">
-                                <Route className="h-4 w-4" />
-                              </span>
-                              <span className="min-w-0">
-                                <span className="context-signal-label">
-                                  Transport movement
-                                </span>
-                                <strong>
-                                  {transportOverview?.takeaways[0]?.title ??
-                                    "Country-linked ship and flight activity"}
-                                </strong>
-                                <small>
-                                  {transportOverview?.takeaways[0]?.summary ??
-                                    "Comparing the latest 24 hours with the previous 24 hours"}
-                                </small>
-                              </span>
-                              <span className="context-signal-stat">
-                                <strong>
-                                  {transportOverview?.summary.active ?? "—"}
-                                </strong>
-                                <small>
-                                  active ·{" "}
-                                  {transportOverview?.summary.linked_countries ??
-                                    0}{" "}
-                                  countries
-                                </small>
-                                <span>
-                                  Open movements
-                                  <ArrowUpRight className="h-3.5 w-3.5" />
-                                </span>
-                              </span>
-                            </button>
-                          </div>
-                        </>
+                        <SatelliteContextPanel
+                          country={selectedCountry}
+                          onOpenEvent={handleOpenIntelligence}
+                          onOpenImagery={(eventId) => handleOpenImagery(eventId)}
+                        />
                       )}
                     </section>
 
@@ -8626,21 +8546,7 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "admin" && isAdmin && (
-              <div className="workspace-page control-room-page min-w-0 space-y-4">
-                <section className="control-room-intro">
-                  <div>
-                    <span>Operator safeguards</span>
-                    <strong>Health and run history stay primary; mutations remain deliberate.</strong>
-                  </div>
-                  <div className="control-room-state">
-                    <span className="live-dot" />
-                    Authenticated administrator
-                  </div>
-                </section>
-                <AdminIntelligencePanel />
-                <AdminIngestionPanel dark={dark} />
-                <AdminUserManagementPanel />
-              </div>
+              <AdminWorkspace dark={dark} />
             )}
             {activeView === "profile" && (
               <div className="settings-page space-y-6">

@@ -648,6 +648,23 @@ final class APIClient {
         return data
     }
 
+    func fetchProxiedImage(url original: String) async throws -> Data {
+        guard let remoteURL = URL(string: original), remoteURL.scheme?.lowercased() == "https" else {
+            throw APIError(status: 400, message: "Invalid remote image URL")
+        }
+        guard let proxyURL = imageProxyURL(for: remoteURL) else {
+            throw APIError(status: 400, message: "Unable to build image proxy URL")
+        }
+        let (data, response) = try await session.data(for: authedRequest(URLRequest(url: proxyURL)))
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError(status: -1, message: "No HTTP response")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
+        }
+        return data
+    }
+
     func fetchAdminIntelligenceStatus() async throws -> AdminIntelligenceStatus {
         let url = baseURL.appendingPathComponent("/api/admin/intelligence/status")
         return try await request(URLRequest(url: url), as: AdminIntelligenceStatus.self)

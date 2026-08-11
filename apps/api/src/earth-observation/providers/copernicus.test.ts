@@ -5,6 +5,7 @@ import { CopernicusProvider } from "./copernicus";
 test("Copernicus OAuth tokens are cached and STAC responses normalized", async () => {
   let tokenCalls = 0;
   let catalogCalls = 0;
+  const catalogBodies: Array<Record<string, unknown>> = [];
   const fetchMock: typeof fetch = async (input, init) => {
     const url = String(input);
     if (url.includes("openid-connect/token")) {
@@ -13,21 +14,28 @@ test("Copernicus OAuth tokens are cached and STAC responses normalized", async (
     }
     catalogCalls += 1;
     assert.equal((init?.headers as Record<string, string>).authorization, "Bearer token");
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    catalogBodies.push(body);
+    const collection = (body.collections as string[])[0];
     return new Response(JSON.stringify({ features: [{
-      id: "S2-test", collection: "sentinel-2-l2a", bbox: [0, 0, 1, 1],
+      id: collection === "sentinel-2-l2a" ? "S2-test" : "S1-test", collection, bbox: [0, 0, 1, 1],
       geometry: { type: "Polygon", coordinates: [] },
-      properties: { datetime: "2026-08-10T10:00:00Z", "eo:cloud_cover": 4 },
+      properties: { datetime: collection === "sentinel-2-l2a" ? "2026-08-10T10:00:00Z" : "2026-08-11T10:00:00Z", "eo:cloud_cover": 4 },
       links: [{ rel: "self", href: "https://example.test/scene" }],
     }] }), { status: 200, headers: { "content-type": "application/geo+json" } });
   };
   const provider = new CopernicusProvider("client", "secret", fetchMock);
-  const request = { bbox: [0, 0, 1, 1] as [number, number, number, number], start: new Date("2026-08-01"), end: new Date("2026-08-12"), collections: ["sentinel-2-l2a"], limit: 10 };
+  const request = { bbox: [0, 0, 1, 1] as [number, number, number, number], start: new Date("2026-08-01"), end: new Date("2026-08-12"), collections: ["sentinel-2-l2a", "sentinel-1-grd"], limit: 10 };
   const first = await provider.discoverScenes(request);
   await provider.discoverScenes(request);
   assert.equal(tokenCalls, 1);
-  assert.equal(catalogCalls, 2);
-  assert.equal(first[0].providerSceneId, "S2-test");
-  assert.equal(first[0].cloudCover, 4);
+  assert.equal(catalogCalls, 4);
+  assert.deepEqual(catalogBodies.map((body) => body.collections), [
+    ["sentinel-2-l2a"], ["sentinel-1-grd"], ["sentinel-2-l2a"], ["sentinel-1-grd"],
+  ]);
+  assert.ok(catalogBodies.every((body) => (body.collections as string[]).length === 1));
+  assert.deepEqual(first.map((scene) => scene.providerSceneId), ["S1-test", "S2-test"]);
+  assert.equal(first[1].cloudCover, 4);
   assert.match(first[0].attribution, /Copernicus Sentinel/);
   assert.match(first[0].license, /Copernicus Data Space/);
 });

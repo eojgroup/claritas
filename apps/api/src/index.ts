@@ -1999,7 +1999,7 @@ app.get("/api/earth-observation/events/:eventId/gibs", requireAuthenticated, asy
     return context ? res.json(context) : res.status(404).json({ error: "Intelligence event not found." });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const unavailable = /disabled|unavailable|requires valid event geography|no AOI/i.test(message);
+    const unavailable = /disabled|unavailable|requires .*geography|country centroids|no AOI/i.test(message);
     return res.status(unavailable ? 503 : 500).json({ error: message });
   }
 });

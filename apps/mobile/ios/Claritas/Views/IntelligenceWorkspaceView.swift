@@ -193,19 +193,8 @@ struct IntelligenceWorkspaceView: View {
                                 Spacer()
                                 Text(layer.date).font(.caption2).foregroundStyle(.secondary)
                             }
-                            if let previewURL = URL(string: layer.preview_url) {
-                                AsyncImage(url: previewURL) { phase in
-                                    switch phase {
-                                    case .empty:
-                                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    case .success(let image):
-                                        image.resizable().scaledToFill()
-                                    default:
-                                        Label("NASA context preview unavailable", systemImage: "photo.badge.exclamationmark")
-                                            .font(.caption)
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    }
-                                }
+                            if URL(string: layer.preview_url) != nil {
+                                AuthenticatedRemoteImage(url: layer.preview_url, unavailableLabel: "NASA context preview unavailable")
                                 .frame(height: 180)
                                 .background(.secondary.opacity(0.08))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -754,7 +743,7 @@ private struct EarthComparisonView: View {
     }
 }
 
-private struct AuthenticatedEarthImage: View {
+struct AuthenticatedEarthImage: View {
     @EnvironmentObject private var model: AppModel
     let path: String
     @State private var image: UIImage?
@@ -803,6 +792,56 @@ private struct AuthenticatedEarthImage: View {
     }
 }
 
+struct AuthenticatedRemoteImage: View {
+    @EnvironmentObject private var model: AppModel
+    let url: String
+    var unavailableLabel = "Satellite image unavailable"
+    @State private var image: UIImage?
+    @State private var loadError: String?
+    @State private var retryID = 0
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else if let loadError {
+                VStack(spacing: 8) {
+                    Label(unavailableLabel, systemImage: "photo.badge.exclamationmark")
+                        .font(.caption.weight(.semibold))
+                    Text(loadError)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                    Button("Retry image") { retryID += 1 }
+                        .buttonStyle(.bordered)
+                        .font(.caption)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.secondary.opacity(0.08))
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.secondary.opacity(0.08))
+            }
+        }
+        .task(id: "\(url)-\(retryID)") {
+            image = nil
+            loadError = nil
+            do {
+                let data = try await model.api.fetchProxiedImage(url: url)
+                guard let decoded = UIImage(data: data) else {
+                    loadError = "The returned context is not a supported image."
+                    return
+                }
+                image = decoded
+            } catch {
+                loadError = error.localizedDescription
+            }
+        }
+    }
+}
+
 struct AdminIntelligenceOperationsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var status: AdminIntelligenceStatus?
@@ -816,6 +855,20 @@ struct AdminIntelligenceOperationsView: View {
             .filter { seen.insert($0.provider).inserted }
     }
 
+    private var actionableOutboxCount: Int {
+        let actionable = Set(["pending", "queued", "processing", "running", "failed"])
+        return status?.backbone.outbox
+            .filter { actionable.contains($0.status.lowercased()) }
+            .reduce(0) { $0 + $1.count } ?? 0
+    }
+
+    private var activeEarthJobCount: Int {
+        let active = Set(["pending", "queued", "processing", "running", "budget_deferred"])
+        return status?.earth_observation.queue
+            .filter { active.contains($0.status.lowercased()) }
+            .reduce(0) { $0 + $1.count } ?? 0
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             BrandCard(title: "Event and Earth Observation", icon: "dot.radiowaves.left.and.right") {
@@ -824,10 +877,10 @@ struct AdminIntelligenceOperationsView: View {
                         .font(.caption).foregroundStyle(.red)
                 }
                 HStack {
-                    adminMetric("Outbox", status?.backbone.outbox.reduce(0) { $0 + $1.count } ?? 0)
-                    adminMetric("Dead letters", status?.backbone.unresolved_dead_letters ?? 0)
-                    adminMetric("Assets", status?.earth_observation.assets.count ?? 0)
-                    adminMetric("Alerts", status?.alert_candidates.count ?? 0)
+                    adminMetric("Backlog", actionableOutboxCount)
+                    adminMetric("Active EO", activeEarthJobCount)
+                    adminMetric("Images", status?.earth_observation.assets.count ?? 0)
+                    adminMetric("Needs attention", (status?.backbone.unresolved_dead_letters ?? 0) + (status?.earth_observation.recent_jobs.filter { ["failed", "dead_letter"].contains($0.status) }.count ?? 0))
                 }
                 ForEach(providerStatuses) { provider in
                     HStack {

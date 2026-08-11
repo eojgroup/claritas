@@ -3,6 +3,7 @@ import { buildEventDedupeKey, computeSignalPriority, evaluateMarketMove } from "
 import { resolveLocationFromText, resolveNearestLocation } from "./location-resolver";
 import { correlateAndUpsertIntelligenceSignal } from "./service";
 import { calculateRollingBaseline, detectTransportAnomaly } from "./transport-anomaly";
+import { trustedGdeltActionCoordinate, trustedGdeltLocations } from "./gdelt-geography";
 import type { DomainEventEnvelope, IntelligenceSeverity } from "./types";
 
 const sourceReliability: Record<string, number> = {
@@ -37,32 +38,6 @@ function collectEntityKeys(...values: unknown[]) {
   };
   values.forEach(visit);
   return [...new Set(collected)].slice(0, 40);
-}
-
-function firstGkgCoordinate(payload: any): { latitude: number; longitude: number; name: string | null } | null {
-  const locations = Array.isArray(payload?.gkg?.locations) ? payload.gkg.locations : [];
-  for (const candidate of locations.slice(0, 30)) {
-    const latitude = Number(candidate?.latitude);
-    const longitude = Number(candidate?.longitude);
-    if (Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
-        && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180) {
-      return {
-        latitude,
-        longitude,
-        name: typeof candidate?.name === "string" && candidate.name.trim() ? candidate.name.trim() : null,
-      };
-    }
-  }
-  return null;
-}
-
-function exactObservedCoordinate(latitudeValue: unknown, longitudeValue: unknown) {
-  const latitude = Number(latitudeValue);
-  const longitude = Number(longitudeValue);
-  return Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
-    && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
-    ? { latitude, longitude }
-    : null;
 }
 
 function classifyEventType(text: string) {
@@ -111,7 +86,7 @@ async function handleNewsStory(event: DomainEventEnvelope) {
   if (!story) return;
   const occurred = new Date(story.event_time ?? story.created_at);
   const text = `${story.title ?? ""} ${story.summary ?? ""}`;
-  const gkgCoordinate = firstGkgCoordinate(story.payload);
+  const gkgCoordinate = trustedGdeltLocations(story.payload)[0] ?? null;
   const location = (gkgCoordinate
     ? await resolveNearestLocation(gkgCoordinate.latitude, gkgCoordinate.longitude, 150)
     : null)
@@ -191,7 +166,7 @@ async function handleGdeltEvent(event: DomainEventEnvelope) {
   const record = rows[0];
   if (!record) return;
   const observed = new Date(record.event_time);
-  const actionCoordinate = exactObservedCoordinate(record.action_lat, record.action_lon);
+  const actionCoordinate = trustedGdeltActionCoordinate(record);
   const location = actionCoordinate
     ? await resolveNearestLocation(actionCoordinate.latitude, actionCoordinate.longitude, 150)
     : await resolveLocationFromText(record.action_geo_name ?? "", record.action_country_iso2)

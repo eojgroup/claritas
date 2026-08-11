@@ -1120,6 +1120,7 @@ export type GibsEventContext = {
   observation_date?: string;
   bbox?: [number, number, number, number];
   aoi_source?: string;
+  context_scope?: "event" | "location";
   layers: GibsEventLayer[];
   notice: string;
 };

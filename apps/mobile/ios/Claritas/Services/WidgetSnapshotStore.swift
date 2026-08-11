@@ -19,15 +19,17 @@ enum WidgetSnapshotStore {
         let hottest = weather.max { ($0.temp_c ?? -.infinity) < ($1.temp_c ?? -.infinity) }
         let hottestTemperature = hottest?.temp_c
         let hottestTemperatureLabel = hottestTemperature.map { String(format: "%.0f°C", $0) } ?? "—"
-        defaults.set([
+        let hottestCountry = hottest?.country.uppercased() ?? "—"
+        let snapshot: [String: Any] = [
             "dailyTitle": "Geospatial signal pulse",
-            "dailyText": "\(newsCount) news signals · markets \(String(format: "%+.1f%%", averageMove)) · \(hottest?.country.uppercased() ?? "—") \(hottestTemperatureLabel)",
+            "dailyText": "\(newsCount) news signals · markets \(String(format: "%+.1f%%", averageMove)) · \(hottestCountry) \(hottestTemperatureLabel)",
             "newsCount": newsCount,
             "marketMove": averageMove,
-            "weatherCountry": hottest?.country.uppercased() ?? "—",
-            "weatherTemp": hottest?.temp_c ?? 0,
+            "weatherCountry": hottestCountry,
+            "weatherTemp": hottestTemperature ?? 0,
             "updatedAt": Date().timeIntervalSince1970
-        ], forKey: snapshotKey)
+        ]
+        defaults.set(snapshot, forKey: snapshotKey)
         WidgetCenter.shared.reloadAllTimelines()
     }
 }

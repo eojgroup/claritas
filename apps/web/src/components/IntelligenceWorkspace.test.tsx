@@ -20,6 +20,7 @@ vi.mock("../lib/api", () => ({
   fetchIntelligenceEvent: vi.fn(),
   fetchIntelligenceEvents: vi.fn(),
   fetchIntelligenceWatchlist: vi.fn(),
+  imageProxy: (url: string) => `/api/proxy-image?url=${encodeURIComponent(url)}`,
   saveIntelligenceWatch: vi.fn(),
 }));
 

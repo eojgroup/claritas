@@ -29,6 +29,7 @@ import {
   type IntelligenceSeverity,
   type IntelligenceWatch,
 } from "../lib/api";
+import SatelliteImage from "./SatelliteImage";
 
 const severities: Array<IntelligenceSeverity | "all"> = ["all", "critical", "high", "medium", "low"];
 
@@ -409,12 +410,11 @@ export default function IntelligenceWorkspace({
                 </div>
                 {gibsTrueColor && (
                   <article className="mt-3 grid overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] sm:grid-cols-[minmax(12rem,0.8fr)_minmax(0,1.2fr)]" aria-label="NASA GIBS true-color event context">
-                    <img
-                      src={gibsTrueColor.preview_url}
+                    <SatelliteImage
+                      sources={[gibsTrueColor.preview_url]}
                       alt={`NASA GIBS true-color context for ${detail.event.location_name || detail.event.primary_country_iso2 || "the event location"} on ${gibsTrueColor.date}`}
                       className="aspect-video h-full w-full bg-slate-100 object-cover"
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
+                      fallbackClassName="flex aspect-video h-full w-full items-center justify-center bg-slate-900"
                     />
                     <div className="p-3 text-xs text-[color:var(--shell-muted)]">
                       <div className="flex flex-wrap items-center gap-2">
@@ -435,7 +435,7 @@ export default function IntelligenceWorkspace({
                     {detail.earth_observations.slice(0, 4).map((observation) => {
                       const asset = observation.assets?.find((item) => item.asset_type === "preview") ?? observation.assets?.[0];
                       return <article key={observation.id} className="overflow-hidden rounded-lg border border-[color:var(--shell-border)]">
-                        {asset ? <img src={asset.url} alt={`${observation.product_type} observation at ${observation.location_name || "event location"}`} className="aspect-video w-full bg-slate-100 object-cover" loading="lazy" /> : <div className="flex aspect-video items-center justify-center bg-slate-100"><ImageOff className="h-6 w-6 text-slate-400" /></div>}
+                        {asset ? <SatelliteImage sources={[asset.url, gibsTrueColor?.preview_url]} alt={`${observation.product_type} observation at ${observation.location_name || "event location"}`} className="aspect-video w-full bg-slate-100 object-cover" fallbackClassName="flex aspect-video items-center justify-center bg-slate-900" /> : <div className="flex aspect-video items-center justify-center bg-slate-100"><ImageOff className="h-6 w-6 text-slate-400" /></div>}
                         <div className="p-3 text-xs text-[color:var(--shell-muted)]"><div className="font-semibold capitalize text-[color:var(--shell-ink)]">{observation.product_type.replace(/_/g, " ")} · {observation.mission}</div><div className="mt-1">Captured {dateLabel(observation.capture_start)}{observation.cloud_cover == null ? "" : ` · ${Math.round(observation.cloud_cover)}% cloud`}</div>{observation.analysis_summary && <p className="mt-2 leading-5">{observation.analysis_summary}</p>}<a href={observation.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a></div>
                       </article>;
                     })}

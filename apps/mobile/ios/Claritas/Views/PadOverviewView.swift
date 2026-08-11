@@ -64,6 +64,8 @@ struct PadOverviewView: View {
                         showsCountryProfile: true
                     )
 
+                    OverviewSatelliteContextView(destination: $destination)
+
                     metrics
 
                     HStack(alignment: .top, spacing: 16) {
@@ -330,6 +332,144 @@ struct PadOverviewView: View {
                     .buttonStyle(.plain)
                 }
             }
+        }
+    }
+}
+
+struct OverviewSatelliteContextView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @Binding var destination: RootView.Tab?
+    @State private var selectedEvent: IntelligenceEvent?
+    @State private var observation: EarthObservation?
+    @State private var gibsContext: GibsEventContext?
+    @State private var isLoading = false
+    @State private var error: String?
+    @State private var retryID = 0
+
+    private var gibsLayer: GibsEventLayer? {
+        gibsContext?.layers.first { $0.category == "true_color" } ?? gibsContext?.layers.first
+    }
+
+    var body: some View {
+        BrandCard(title: "Satellite context", icon: "sensor.tag.radiowaves.forward") {
+            if isLoading && selectedEvent == nil {
+                ProgressView("Finding recent imagery")
+                    .frame(maxWidth: .infinity, minHeight: 210)
+            } else if let selectedEvent {
+                VStack(alignment: .leading, spacing: 12) {
+                    ZStack(alignment: .topLeading) {
+                        if let asset = observation?.assets.first {
+                            AuthenticatedEarthImage(path: asset.url)
+                        } else if let layer = gibsLayer {
+                            AuthenticatedRemoteImage(url: layer.preview_url, unavailableLabel: "Satellite context unavailable")
+                        } else {
+                            satellitePlaceholder
+                        }
+                        HStack(spacing: 6) {
+                            Text(observation == nil ? "BROWSE CONTEXT · NOT PROOF" : "PROCESSED OBSERVATION")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(.black.opacity(0.68), in: Capsule())
+                                .foregroundStyle(.white)
+                            Spacer()
+                        }
+                        .padding(12)
+                    }
+                    .frame(height: 270)
+                    .background(.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                    HStack(alignment: .top, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(selectedEvent.title)
+                                .font(.headline)
+                                .lineLimit(2)
+                            Text(selectedEvent.location_name ?? selectedEvent.primary_country_iso2 ?? "Global")
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            Text(observation?.attribution ?? gibsLayer?.provenance.attribution ?? "Satellite context")
+                                .font(.caption2)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        }
+                        Spacer()
+                        Button {
+                            model.selectedIntelligenceEventID = selectedEvent.id
+                            destination = .intelligence
+                        } label: {
+                            Label("Open evidence", systemImage: "arrow.up.right")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    Text(gibsContext?.notice ?? "A processed observation is linked to this exact event and location. Open the evidence thread for provenance and interpretation.")
+                        .font(.caption)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+            } else {
+                VStack(spacing: 10) {
+                    satellitePlaceholder.frame(height: 150)
+                    Text(error ?? "No satellite context is available for the current focus yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .multilineTextAlignment(.center)
+                    Button("Retry imagery") { retryID += 1 }
+                        .buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .task(id: "\(model.selectedCountry ?? "global")-\(retryID)") { await load() }
+    }
+
+    private var satellitePlaceholder: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "globe.americas.fill")
+                .font(.system(size: 36))
+                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+            Text("Satellite context is still being prepared")
+                .font(.caption.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ClaritasPalette.shellBackgroundElevated(for: colorScheme))
+    }
+
+    @MainActor
+    private func load() async {
+        isLoading = true
+        error = nil
+        selectedEvent = nil
+        observation = nil
+        gibsContext = nil
+        defer { isLoading = false }
+
+        do {
+            let events = try await model.api.fetchIntelligenceEvents(limit: 10, country: model.selectedCountry)
+                .sorted {
+                    if $0.earth_observation_available != $1.earth_observation_available {
+                        return $0.earth_observation_available
+                    }
+                    if $0.relevance_score != $1.relevance_score { return $0.relevance_score > $1.relevance_score }
+                    return $0.last_activity_time > $1.last_activity_time
+                }
+
+            for event in events.prefix(8) {
+                var eventObservation: EarthObservation?
+                if event.earth_observation_available,
+                   let detail = try? await model.api.fetchIntelligenceEvent(id: event.id) {
+                    eventObservation = detail.earth_observations.first { !$0.assets.isEmpty }
+                }
+                let eventGibs = try? await model.api.fetchEventGibsContext(id: event.id)
+                if eventObservation != nil || !(eventGibs?.layers.isEmpty ?? true) {
+                    selectedEvent = event
+                    observation = eventObservation
+                    gibsContext = eventGibs
+                    return
+                }
+            }
+            error = "No recent event has image-ready geography yet. The feed will update as new scenes are found."
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }

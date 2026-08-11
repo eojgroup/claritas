@@ -107,32 +107,39 @@ export class CopernicusProvider implements EarthObservationProvider {
     const bbox = validateBoundingBox(request.bbox);
     const collections = request.collections.filter((value) => ["sentinel-2-l2a", "sentinel-1-grd"].includes(value));
     if (!collections.length) throw new EarthProviderError(this.id, "No supported Copernicus collection was requested.", 400, false);
-    const response = await this.authorizedFetch(CATALOG_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/geo+json" },
-      body: JSON.stringify({
-        bbox,
-        datetime: `${request.start.toISOString()}/${request.end.toISOString()}`,
-        collections,
-        limit: Math.min(100, Math.max(1, request.limit)),
-        fields: { include: ["id", "type", "bbox", "geometry", "properties.datetime", "properties.created", "properties.eo:cloud_cover", "properties.sat:orbit_state", "collection", "links"] },
-      }),
-      signal: timeoutSignal(20_000),
-    });
-    if (!response.ok) {
-      throw new EarthProviderError(this.id, `Copernicus Catalog API returned HTTP ${response.status}: ${(await response.text()).slice(0, 240)}`, response.status, response.status >= 500 || response.status === 429);
+    const features: Array<{
+      id?: string;
+      collection?: string;
+      bbox?: number[];
+      geometry?: Record<string, unknown>;
+      properties?: Record<string, unknown>;
+      links?: Array<{ rel?: string; href?: string }>;
+    }> = [];
+
+    // CDSE's current Catalog contract accepts exactly one collection per
+    // search. Keep the two governed Sentinel searches explicit and bounded,
+    // then rank their combined results locally.
+    for (const collection of collections) {
+      const response = await this.authorizedFetch(CATALOG_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/geo+json" },
+        body: JSON.stringify({
+          bbox,
+          datetime: `${request.start.toISOString()}/${request.end.toISOString()}`,
+          collections: [collection],
+          limit: Math.min(100, Math.max(1, request.limit)),
+          fields: { include: ["id", "type", "bbox", "geometry", "properties.datetime", "properties.created", "properties.eo:cloud_cover", "properties.sat:orbit_state", "collection", "links"] },
+        }),
+        signal: timeoutSignal(20_000),
+      });
+      if (!response.ok) {
+        throw new EarthProviderError(this.id, `Copernicus Catalog API returned HTTP ${response.status} for ${collection}: ${(await response.text()).slice(0, 240)}`, response.status, response.status >= 500 || response.status === 429);
+      }
+      const payload = await response.json() as { features?: typeof features };
+      features.push(...(payload.features ?? []));
     }
-    const payload = await response.json() as {
-      features?: Array<{
-        id?: string;
-        collection?: string;
-        bbox?: number[];
-        geometry?: Record<string, unknown>;
-        properties?: Record<string, unknown>;
-        links?: Array<{ rel?: string; href?: string }>;
-      }>;
-    };
-    return (payload.features ?? []).flatMap((feature): EarthScene[] => {
+
+    return features.flatMap((feature): EarthScene[] => {
       const collection = feature.collection ?? "";
       const captured = String(feature.properties?.datetime ?? "");
       if (!feature.id || !collections.includes(collection) || !Array.isArray(feature.bbox)
@@ -158,7 +165,9 @@ export class CopernicusProvider implements EarthObservationProvider {
         quality: {},
         rawMetadata: feature as unknown as Record<string, unknown>,
       }];
-    });
+    })
+      .sort((left, right) => right.captureStart.getTime() - left.captureStart.getTime())
+      .slice(0, Math.min(100, Math.max(1, request.limit)));
   }
 
   async render(request: RenderRequest): Promise<RenderedObservation> {

@@ -30,7 +30,7 @@ test("outbox consumption, multi-domain evidence, alerts, and idempotency share o
      RETURNING id`,
     [sourceId, `integration-news-${suffix}`, `https://example.invalid/${suffix}`, now, JSON.stringify({
       source: "integration-test",
-      gkg: { locations: [{ name: "Singapore", latitude: 1.264, longitude: 103.84, country_iso2: "SG" }] },
+      gkg: { locations: [{ type: 4, name: "Singapore", latitude: 1.264, longitude: 103.84, country_iso2: "SG" }] },
     })],
   );
   const outbox = await query<any>(

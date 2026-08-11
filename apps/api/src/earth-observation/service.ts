@@ -180,10 +180,10 @@ export async function getGibsEventContext(eventId: string) {
   if (!status.enabled) throw new Error(status.reason ?? "NASA GIBS is disabled.");
   const { rows } = await query<any>(
     `SELECT event.id,event.event_type,event.title,event.start_time,event.last_activity_time,
-            event.primary_location_id AS location_id,
+            event.primary_location_id AS location_id,event.metadata AS event_metadata,
             CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END AS event_latitude,
             CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END AS event_longitude,
-            location.canonical_name AS location_name,location.bbox AS location_bbox,
+            location.canonical_name AS location_name,location.location_type,location.bbox AS location_bbox,
             location.latitude AS location_latitude,location.longitude AS location_longitude
      FROM intelligence_event event
      LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
@@ -192,13 +192,23 @@ export async function getGibsEventContext(eventId: string) {
   );
   const event = rows[0];
   if (!event) return null;
-  if (event.event_latitude == null || event.event_longitude == null) {
-    throw new Error("NASA GIBS requires valid event geography from an exact source observation; location and country centroids are not substituted.");
+  const hasTrustedEventGeography = event.event_metadata?.exact_geography === true
+    && event.event_latitude != null && event.event_longitude != null;
+  const hasSpecificLocation = event.location_type && event.location_type !== "country"
+    && (event.location_bbox != null
+      || (event.location_latitude != null && event.location_longitude != null));
+  if (!hasTrustedEventGeography && !hasSpecificLocation) {
+    throw new Error("NASA GIBS requires trusted event geography or a specific non-country location; country centroids are not substituted.");
   }
-  const aoi = resolveDiscoveryAoi({
+  const aoi = resolveDiscoveryAoi(hasTrustedEventGeography ? {
     eventLatitude: event.event_latitude,
     eventLongitude: event.event_longitude,
+  } : {
+    locationBbox: event.location_bbox,
+    locationLatitude: event.location_latitude,
+    locationLongitude: event.location_longitude,
   });
+  const contextScope = hasTrustedEventGeography ? "event" : "location";
   const date = new Date(event.start_time).toISOString().slice(0, 10);
   return {
     provider: "nasa_gibs",
@@ -210,8 +220,11 @@ export async function getGibsEventContext(eventId: string) {
     observation_date: date,
     bbox: aoi.bbox,
     aoi_source: aoi.source,
+    context_scope: contextScope,
     layers: buildApprovedGibsEventLayers({ date, bbox: aoi.bbox }),
-    notice: "GIBS visualizations are contextual browse imagery, not automatic proof of physical change or causation.",
+    notice: contextScope === "event"
+      ? "GIBS browse imagery is centered on trusted event geography. It is context, not automatic proof of physical change or causation."
+      : "GIBS browse imagery shows the event's linked location, not a verified event footprint. It is regional context, not event evidence or proof of causation.",
   };
 }
 
@@ -453,8 +466,9 @@ async function processSceneDiscovery(job: any) {
   const providerStatus = copernicus.status();
   if (!providerStatus.enabled || !providerStatus.configured) throw new Error(providerStatus.reason ?? "Copernicus is unavailable.");
   const { rows } = await query<any>(
-    `SELECT location.id,location.bbox,location.latitude,location.longitude,
+     `SELECT location.id,location.bbox,location.latitude,location.longitude,
             location.monitoring_tier,location.importance_score,
+            event.metadata AS event_metadata,
             CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END AS event_latitude,
             CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END AS event_longitude
      FROM (SELECT $1::uuid AS requested_location_id,$2::uuid AS event_id) requested
@@ -468,7 +482,8 @@ async function processSceneDiscovery(job: any) {
   const location = rows[0];
   if (!location) throw new Error("Earth Observation job has neither a valid event nor a valid location.");
   const eventAoiRequired = Boolean(job.event_id);
-  if (eventAoiRequired && (location.event_latitude == null || location.event_longitude == null)) {
+  if (eventAoiRequired && (location.event_metadata?.exact_geography !== true
+      || location.event_latitude == null || location.event_longitude == null)) {
     throw new Error("Event Earth Observation requires valid event geography from an exact source observation; location and country centroids are not substituted.");
   }
   const aoi = eventAoiRequired
@@ -582,6 +597,7 @@ async function processRender(job: any) {
   const { rows } = await query<any>(
     `SELECT observation.id, observation.event_id, observation.product_type, scene.collection,
             scene.capture_start, scene.capture_end,
+            event.metadata AS event_metadata,
             location.bbox AS location_bbox,
             location.latitude AS location_latitude,
             location.longitude AS location_longitude,
@@ -596,7 +612,8 @@ async function processRender(job: any) {
   );
   const target = rows[0];
   if (!target) throw new Error("Earth observation no longer exists.");
-  if (target.event_id && (target.event_latitude == null || target.event_longitude == null)) {
+  if (target.event_id && (target.event_metadata?.exact_geography !== true
+      || target.event_latitude == null || target.event_longitude == null)) {
     throw new Error("Event Earth Observation render requires valid event geography from an exact source observation; location and country centroids are not substituted.");
   }
   const renderAoi = target.event_id

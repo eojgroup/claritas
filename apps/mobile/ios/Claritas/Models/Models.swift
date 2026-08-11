@@ -2043,6 +2043,7 @@ struct GibsEventContext: Codable {
     let observation_date: String?
     let bbox: [Double]?
     let aoi_source: String?
+    let context_scope: String?
     let layers: [GibsEventLayer]
     let notice: String
 }
