@@ -76,7 +76,7 @@ function parseBooleanEnv(name: string, fallback: boolean): boolean {
   return fallback;
 }
 
-function getBypassRoles(): string[] {
+export function getPaywallBypassRoles(): string[] {
   return (optionalEnv("PAYWALL_BYPASS_ROLES") || "admin")
     .split(",")
     .map((value) => value.trim().toLowerCase())
@@ -114,7 +114,7 @@ function toSubscription(row: BillingSubscriptionRow): BillingSubscriptionSnapsho
 }
 
 function hasBypassRole(roles: string[]): boolean {
-  const bypassRoles = new Set(getBypassRoles());
+  const bypassRoles = new Set(getPaywallBypassRoles());
   return roles.some((role) => bypassRoles.has(role.trim().toLowerCase()));
 }
 

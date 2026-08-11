@@ -1090,6 +1090,7 @@ struct NewsWorkspaceView: View {
         BrandBackground {
             ScrollView {
                 VStack(spacing: 18) {
+                    IntelligenceEventPulseView()
                     BrandCard {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(
@@ -1409,6 +1410,7 @@ struct WeatherWorkspaceView: View {
         BrandBackground {
             ScrollView {
                 VStack(spacing: 18) {
+                    IntelligenceEventPulseView()
                     BrandCard {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(
@@ -1714,6 +1716,7 @@ struct MarketsWorkspaceView: View {
         BrandBackground {
             ScrollView {
                 VStack(spacing: 18) {
+                    IntelligenceEventPulseView()
                     BrandCard {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(

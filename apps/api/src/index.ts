@@ -90,6 +90,7 @@ import {
 import {
   getAlertCandidates,
   getIntelligenceEvent,
+  intelligenceEventEarthObservationStateSql,
   listIntelligenceEvents,
   listIntelligenceLocations,
 } from "./intelligence/service";
@@ -98,12 +99,22 @@ import { getRapidSourceStatus, runFirmsNow, runUsgsNow, startRapidSourceWorker }
 import {
   enqueueEarthDiscovery,
   getEarthAssetBuffer,
+  getGibsEventContext,
   getEarthObservationStatus,
   getEarthScene,
   listEarthObservations,
   requestEarthComparison,
   startEarthObservationWorker,
 } from "./earth-observation/service";
+import {
+  ApnsRegistrationError,
+  deactivateUserPushDevicesTx,
+  getApnsStatus,
+  registerPushDevice,
+  startApnsDeliveryWorker,
+  unregisterAllPushDevices,
+  unregisterPushDevice,
+} from "./apns";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -1927,6 +1938,45 @@ app.patch("/api/intelligence/alerts/:id", requireAuthenticated, async (req, res)
   }
 });
 
+app.post("/api/intelligence/devices", requireAuthenticated, async (req, res) => {
+  try {
+    const device = await registerPushDevice(getAuthenticatedUserId(res), req.body ?? {});
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.status(201).json({
+      device,
+      delivery_semantics: "APNs acceptance is tracked separately from user acknowledgement.",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof ApnsRegistrationError) {
+      return res.status(error.status).json({ error: message });
+    }
+    if (/device_token|environment|platform|installation_id|app_bundle_id/.test(message)) {
+      return res.status(400).json({ error: message });
+    }
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.delete("/api/intelligence/devices", requireSession, async (_req, res) => {
+  try {
+    await unregisterAllPushDevices(getAuthenticatedUserId(res));
+    return res.status(204).send();
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.delete("/api/intelligence/devices/:id", requireSession, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Device id must be a UUID." });
+    const removed = await unregisterPushDevice(getAuthenticatedUserId(res), req.params.id);
+    return removed ? res.status(204).send() : res.status(404).json({ error: "Push device not found." });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.delete("/api/intelligence/watchlist/:id", requireAuthenticated, async (req, res) => {
   try {
     if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Watch id must be a UUID." });
@@ -1939,6 +1989,18 @@ app.delete("/api/intelligence/watchlist/:id", requireAuthenticated, async (req, 
     return rows.length ? res.status(204).send() : res.status(404).json({ error: "Watch not found." });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/earth-observation/events/:eventId/gibs", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.eventId)) return res.status(400).json({ error: "Event id must be a UUID." });
+    const context = await getGibsEventContext(req.params.eventId);
+    return context ? res.json(context) : res.status(404).json({ error: "Intelligence event not found." });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const unavailable = /disabled|unavailable|requires valid event geography|no AOI/i.test(message);
+    return res.status(unavailable ? 503 : 500).json({ error: message });
   }
 });
 
@@ -2017,10 +2079,10 @@ app.get("/api/earth-observation/assets/:id", requireAuthenticated, async (req, r
 
 app.get("/api/admin/intelligence/status", requireAdminRole, async (_req, res) => {
   try {
-    const [backbone, earth, rapidSources, alerts] = await Promise.all([
-      getEventBackboneHealth(), getEarthObservationStatus(), getRapidSourceStatus(), getAlertCandidates(50),
+    const [backbone, earth, rapidSources, alerts, apns] = await Promise.all([
+      getEventBackboneHealth(), getEarthObservationStatus(), getRapidSourceStatus(), getAlertCandidates(50), getApnsStatus(),
     ]);
-    return res.json({ backbone, earth_observation: earth, rapid_sources: rapidSources, alert_candidates: alerts, generated_at: new Date().toISOString() });
+    return res.json({ backbone, earth_observation: earth, rapid_sources: rapidSources, alert_candidates: alerts, apns, generated_at: new Date().toISOString() });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -2132,7 +2194,8 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
                'summary_generated_at', translation.summary_generated_at,
                'source_content_preserved', true,
                'article_body_used', false
-             ) END AS translation
+             ) END AS translation,
+             COALESCE(linked.linked_events, '[]'::jsonb) AS linked_events
       FROM item i
       JOIN source s ON s.id = i.source_id
       LEFT JOIN item_translation translation
@@ -2140,6 +2203,47 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
        AND translation.target_language_code = $${displayLanguageIndex}
        AND translation.source_title_hash = md5(COALESCE(i.title, ''))
        AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
+      LEFT JOIN LATERAL (
+        SELECT jsonb_agg(jsonb_build_object(
+          'id', event.id,
+          'title', event.title,
+          'event_type', event.event_type,
+          'status', event.status,
+          'severity', event.severity,
+          'confidence', event.confidence,
+          'relevance_score', event.relevance_score,
+          'domain_count', event.domain_count,
+          'evidence_count', (
+            SELECT count(*)::int FROM intelligence_event_evidence all_evidence
+            WHERE all_evidence.event_id=event.id
+          ),
+          'domains', (
+            SELECT COALESCE(jsonb_agg(domain ORDER BY domain), '[]'::jsonb)
+            FROM (SELECT DISTINCT all_evidence.domain
+                  FROM intelligence_event_evidence all_evidence
+                  WHERE all_evidence.event_id=event.id) domains
+          ),
+          'correlation_score', evidence.correlation_score,
+          'correlation_factors', evidence.correlation_factors,
+          'earth_observation_state', (${intelligenceEventEarthObservationStateSql()}),
+          'best_thumbnail_url', (
+            SELECT '/api/earth-observation/assets/' || asset.id::text
+            FROM earth_observation observation
+            JOIN earth_observation_asset asset ON asset.observation_id=observation.id
+            WHERE observation.event_id=event.id AND observation.status='available'
+              AND (asset.expires_at IS NULL OR asset.expires_at > now())
+            ORDER BY CASE asset.asset_type WHEN 'thumbnail' THEN 0 WHEN 'preview' THEN 1 ELSE 2 END,
+                     observation.captured_at DESC
+            LIMIT 1
+          )
+        ) ORDER BY event.relevance_score DESC,event.last_activity_time DESC) AS linked_events
+        FROM intelligence_event_evidence evidence
+        JOIN intelligence_event event ON event.id=evidence.event_id
+        WHERE evidence.domain='news'
+          AND evidence.source_record_type='item'
+          AND evidence.source_record_id=i.id::text
+          AND event.status <> 'dismissed'
+      ) linked ON true
       ${where.length ? "WHERE " + where.join(" AND ") : ""}
       ORDER BY i.event_time DESC NULLS LAST, i.id DESC
       LIMIT $${li} OFFSET $${oi}
@@ -2680,6 +2784,7 @@ app.patch("/api/admin/users/:userId/status", requireAdminRole, async (req, res) 
              AND revoked_at IS NULL`,
           [userId]
         );
+        await deactivateUserPushDevicesTx(client, userId, "account_deactivated");
       }
     });
 
@@ -3467,6 +3572,7 @@ startTransportIngestionWorkers();
 startEventBackbone();
 startRapidSourceWorker();
 startEarthObservationWorker();
+startApnsDeliveryWorker();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API listening on http://0.0.0.0:${PORT}`);

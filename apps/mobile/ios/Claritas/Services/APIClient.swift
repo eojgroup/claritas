@@ -521,6 +521,20 @@ final class APIClient {
         return try await request(URLRequest(url: url), as: IntelligenceEventDetail.self)
     }
 
+    func fetchEventGibsContext(id: String) async throws -> GibsEventContext? {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let url = baseURL.appendingPathComponent("/api/earth-observation/events/\(encoded)/gibs")
+        let (data, response) = try await session.data(for: authedRequest(URLRequest(url: url)))
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError(status: -1, message: "No HTTP response")
+        }
+        if http.statusCode == 404 || http.statusCode == 503 { return nil }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
+        }
+        return try JSONDecoder.api.decode(GibsEventContext.self, from: data)
+    }
+
     func fetchIntelligenceWatchlist() async throws -> [IntelligenceWatch] {
         let url = baseURL.appendingPathComponent("/api/intelligence/watchlist")
         return try await request(URLRequest(url: url), as: [IntelligenceWatch].self, rootKey: "watches")
@@ -561,6 +575,48 @@ final class APIClient {
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "acknowledge"])
+        let (data, response) = try await session.data(for: authedRequest(request))
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw APIError(status: status, message: errorMessage(data: data, statusCode: status))
+        }
+    }
+
+    func registerPushDevice(
+        token: String,
+        environment: String,
+        bundleID: String,
+        installationID: String
+    ) async throws -> PushDeviceRegistration {
+        var request = URLRequest(url: baseURL.appendingPathComponent("/api/intelligence/devices"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "device_token": token,
+            "environment": environment,
+            "platform": "ios",
+            "installation_id": installationID,
+            "app_bundle_id": bundleID,
+            "metadata": ["client": "claritas-native"],
+        ])
+        return try await self.request(request, as: PushDeviceRegistration.self, rootKey: "device")
+    }
+
+    func unregisterPushDevice(id: String) async throws {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        var request = URLRequest(url: baseURL.appendingPathComponent("/api/intelligence/devices/\(encoded)"))
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: authedRequest(request))
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) || http.statusCode == 404 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw APIError(status: status, message: errorMessage(data: data, statusCode: status))
+        }
+    }
+
+    func unregisterAllPushDevices() async throws {
+        var request = URLRequest(url: baseURL.appendingPathComponent("/api/intelligence/devices"))
+        request.httpMethod = "DELETE"
         let (data, response) = try await session.data(for: authedRequest(request))
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1

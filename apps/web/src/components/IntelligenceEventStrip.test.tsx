@@ -41,6 +41,18 @@ describe("IntelligenceEventStrip", () => {
     expect(screen.getByRole("region", { name: "High-impact intelligence events" })).toBeTruthy();
   });
 
+  it("distinguishes loading from a true empty result", async () => {
+    let resolveRequest: (rows: IntelligenceEvent[]) => void = () => undefined;
+    vi.mocked(fetchIntelligenceEvents).mockImplementation(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    }));
+    render(<IntelligenceEventStrip onOpen={() => undefined} />);
+    expect(screen.getByText("Loading correlated changes…")).toBeTruthy();
+    expect(screen.queryByText("No material correlated changes")).toBeNull();
+    await act(async () => resolveRequest([]));
+    expect(await screen.findByText("No material correlated changes")).toBeTruthy();
+  });
+
   it("renders priority, confidence, provenance counts, and opens the workspace", async () => {
     const onOpen = vi.fn();
     vi.mocked(fetchIntelligenceEvents).mockResolvedValue([event]);
@@ -49,7 +61,9 @@ describe("IntelligenceEventStrip", () => {
     expect(screen.getByText("96% confidence")).toBeTruthy();
     expect(screen.getByText(/3 domains · 4 evidence/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Open workspace/i }));
-    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenLastCalledWith();
+    fireEvent.click(screen.getByRole("button", { name: `Investigate ${event.title}` }));
+    expect(onOpen).toHaveBeenLastCalledWith(event.id);
   });
 
   it("degrades to a bounded error message", async () => {

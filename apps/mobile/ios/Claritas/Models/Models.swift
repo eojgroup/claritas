@@ -112,6 +112,22 @@ struct NewsTranslation: Codable {
     let article_body_used: Bool?
 }
 
+struct NewsLinkedEvent: Codable, Identifiable {
+    let id: String
+    let title: String
+    let event_type: String
+    let status: String
+    let severity: String
+    let confidence: Double
+    let relevance_score: Double
+    let domain_count: Int
+    let evidence_count: Int
+    let domains: [String]
+    let correlation_score: Double?
+    let earth_observation_state: String
+    let best_thumbnail_url: String?
+}
+
 struct NewsItem: Codable, Identifiable {
     let id: Int
     let kind: String?
@@ -128,6 +144,7 @@ struct NewsItem: Codable, Identifiable {
     let translated_title: String?
     let ai_summary: String?
     let translation: NewsTranslation?
+    let linked_events: [NewsLinkedEvent]
 
     var presentationTitle: String {
         nonBlank(translated_title) ?? nonBlank(title) ?? nonBlank(url) ?? "Untitled"
@@ -176,6 +193,7 @@ struct NewsItem: Codable, Identifiable {
         case translated_title
         case ai_summary
         case translation
+        case linked_events
     }
 
     init(from decoder: Decoder) throws {
@@ -195,6 +213,7 @@ struct NewsItem: Codable, Identifiable {
         translated_title = try container.decodeIfPresent(String.self, forKey: .translated_title)
         ai_summary = try container.decodeIfPresent(String.self, forKey: .ai_summary)
         translation = try container.decodeIfPresent(NewsTranslation.self, forKey: .translation)
+        linked_events = try container.decodeIfPresent([NewsLinkedEvent].self, forKey: .linked_events) ?? []
     }
 
     private func nonBlank(_ value: String?) -> String? {
@@ -1810,6 +1829,21 @@ private extension KeyedDecodingContainer {
         }
         throw DecodingError.dataCorruptedError(forKey: key, in: self, debugDescription: "Expected integer-compatible value.")
     }
+
+    func decodeFlexibleDouble(forKey key: Key) throws -> Double {
+        if let value = try? decode(Double.self, forKey: key), value.isFinite {
+            return value
+        }
+        if let value = try? decode(Int.self, forKey: key) {
+            return Double(value)
+        }
+        if let text = try? decode(String.self, forKey: key),
+           let value = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+           value.isFinite {
+            return value
+        }
+        throw DecodingError.dataCorruptedError(forKey: key, in: self, debugDescription: "Expected number-compatible value.")
+    }
 }
 
 enum IntelligenceSeverity: String, Codable, CaseIterable {
@@ -1859,6 +1893,23 @@ struct IntelligenceEvidence: Codable, Identifiable {
     let location_name: String?
     let attribution: String?
     let license: String?
+    let source_title: String?
+    let source_summary: String?
+    let source_url: String?
+    let correlation_score: Double?
+    let provenance: JSONValue?
+}
+
+struct PushDeviceRegistration: Codable, Identifiable {
+    let id: String
+    let platform: String
+    let installation_id: String
+    let app_bundle_id: String
+    let environment: String
+    let active: Bool
+    let last_registered_at: Date
+    let created_at: Date
+    let updated_at: Date
 }
 
 struct EarthObservationAsset: Codable, Identifiable {
@@ -1898,11 +1949,126 @@ struct EarthObservation: Codable, Identifiable {
     let assets: [EarthObservationAsset]
 }
 
+struct IntelligenceEventLocation: Codable, Identifiable {
+    let id: String
+    let canonical_name: String
+    let location_type: String
+    let country_iso2: String?
+    let relationship: String
+    let confidence: Double
+    let attribution: String?
+    let license: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, canonical_name, location_type, country_iso2, relationship, confidence, attribution, license
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        canonical_name = try container.decode(String.self, forKey: .canonical_name)
+        location_type = try container.decode(String.self, forKey: .location_type)
+        country_iso2 = try container.decodeIfPresent(String.self, forKey: .country_iso2)
+        relationship = try container.decode(String.self, forKey: .relationship)
+        confidence = try container.decodeFlexibleDouble(forKey: .confidence)
+        attribution = try container.decodeIfPresent(String.self, forKey: .attribution)
+        license = try container.decodeIfPresent(String.self, forKey: .license)
+    }
+}
+
+struct IntelligenceRelatedEvent: Codable, Identifiable {
+    let id: String
+    let event_type: String
+    let title: String
+    let status: String
+    let severity: IntelligenceSeverity
+    let last_activity_time: Date
+    let relevance_score: Double
+    let relationship: String
+    let confidence: Double
+    let rationale: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, event_type, title, status, severity, last_activity_time, relevance_score, relationship, confidence, rationale
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        event_type = try container.decode(String.self, forKey: .event_type)
+        title = try container.decode(String.self, forKey: .title)
+        status = try container.decode(String.self, forKey: .status)
+        severity = try container.decode(IntelligenceSeverity.self, forKey: .severity)
+        last_activity_time = try container.decode(Date.self, forKey: .last_activity_time)
+        relevance_score = try container.decodeFlexibleDouble(forKey: .relevance_score)
+        relationship = try container.decode(String.self, forKey: .relationship)
+        confidence = try container.decodeFlexibleDouble(forKey: .confidence)
+        rationale = try container.decodeIfPresent(String.self, forKey: .rationale)
+    }
+}
+
+struct GibsEventProvenance: Codable {
+    let provider: String
+    let service: String?
+    let layer_id: String?
+    let observation_date: String?
+    let source_url: String
+    let attribution: String
+    let acknowledgement: String?
+    let license: String?
+}
+
+struct GibsEventLayer: Codable, Identifiable {
+    var id: String { "\(layer_id)-\(date)" }
+    let layer_id: String
+    let title: String
+    let category: String
+    let date: String
+    let bbox: [Double]
+    let tile_url: String
+    let preview_url: String
+    let format: String?
+    let matrix_set: String?
+    let temporal: Bool?
+    let provenance: GibsEventProvenance
+}
+
+struct GibsEventContext: Codable {
+    let provider: String?
+    let event_id: String?
+    let event_type: String?
+    let event_title: String?
+    let location_id: String?
+    let location_name: String?
+    let observation_date: String?
+    let bbox: [Double]?
+    let aoi_source: String?
+    let layers: [GibsEventLayer]
+    let notice: String
+}
+
 struct IntelligenceEventDetail: Codable {
     let event: IntelligenceEvent
     let evidence: [IntelligenceEvidence]
+    let locations: [IntelligenceEventLocation]
     let earth_observations: [EarthObservation]
+    let related_events: [IntelligenceRelatedEvent]
     let epistemic_notice: String
+
+    enum CodingKeys: String, CodingKey {
+        case event, evidence, locations, earth_observations, related_events, epistemic_notice
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        event = try container.decode(IntelligenceEvent.self, forKey: .event)
+        evidence = try container.decodeIfPresent([IntelligenceEvidence].self, forKey: .evidence) ?? []
+        locations = try container.decodeIfPresent([IntelligenceEventLocation].self, forKey: .locations) ?? []
+        earth_observations = try container.decodeIfPresent([EarthObservation].self, forKey: .earth_observations) ?? []
+        related_events = try container.decodeIfPresent([IntelligenceRelatedEvent].self, forKey: .related_events) ?? []
+        epistemic_notice = try container.decodeIfPresent(String.self, forKey: .epistemic_notice)
+            ?? "Evidence relationships are qualified. Correlation does not establish causation."
+    }
 }
 
 struct IntelligenceWatch: Codable, Identifiable {

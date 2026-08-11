@@ -338,14 +338,25 @@ jobs:
           NWS_USER_AGENT: ${{ vars.NWS_USER_AGENT || secrets.NWS_USER_AGENT }}
           EVENT_CORRELATION_ENABLED: ${{ vars.EVENT_CORRELATION_ENABLED || 'true' }}
           EVENT_ALERTS_ENABLED: ${{ vars.EVENT_ALERTS_ENABLED || 'true' }}
-          EARTH_OBSERVATION_ENABLED: ${{ vars.EARTH_OBSERVATION_ENABLED || 'false' }}
-          COPERNICUS_ENABLED: ${{ vars.COPERNICUS_ENABLED || 'false' }}
-          NASA_FIRMS_ENABLED: ${{ vars.NASA_FIRMS_ENABLED || 'false' }}
-          NASA_GIBS_ENABLED: ${{ vars.NASA_GIBS_ENABLED || 'false' }}
-          USGS_EARTHQUAKES_ENABLED: ${{ vars.USGS_EARTHQUAKES_ENABLED || 'false' }}
-          EO_VISION_ENRICHMENT_ENABLED: ${{ vars.EO_VISION_ENRICHMENT_ENABLED || 'false' }}
-          EO_MAX_DAILY_PROCESSING_UNITS: ${{ vars.EO_MAX_DAILY_PROCESSING_UNITS }}
+          EARTH_OBSERVATION_ENABLED: ${{ vars.EARTH_OBSERVATION_ENABLED || 'true' }}
+          COPERNICUS_ENABLED: ${{ vars.COPERNICUS_ENABLED || 'true' }}
+          NASA_FIRMS_ENABLED: ${{ vars.NASA_FIRMS_ENABLED || 'true' }}
+          NASA_GIBS_ENABLED: ${{ vars.NASA_GIBS_ENABLED || 'true' }}
+          USGS_EARTHQUAKES_ENABLED: ${{ vars.USGS_EARTHQUAKES_ENABLED || 'true' }}
+          EO_VISION_ENRICHMENT_ENABLED: ${{ vars.EO_VISION_ENRICHMENT_ENABLED || 'true' }}
+          EO_VISION_MODEL: ${{ vars.EO_VISION_MODEL || 'openrouter/free' }}
+          EO_VISION_MAX_DAILY_REQUESTS: ${{ vars.EO_VISION_MAX_DAILY_REQUESTS || '10' }}
+          EO_VISION_MAX_IMAGE_BYTES: ${{ vars.EO_VISION_MAX_IMAGE_BYTES || '8388608' }}
+          EO_MAX_DAILY_PROCESSING_UNITS: ${{ vars.EO_MAX_DAILY_PROCESSING_UNITS || '100' }}
+          EO_MAX_MONTHLY_PROCESSING_UNITS: ${{ vars.EO_MAX_MONTHLY_PROCESSING_UNITS || '3000' }}
+          EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER: ${{ vars.EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER || '4' }}
+          EO_MAX_REVISITS_PER_EVENT: ${{ vars.EO_MAX_REVISITS_PER_EVENT || '2' }}
+          EO_REVISIT_INTERVAL_HOURS: ${{ vars.EO_REVISIT_INTERVAL_HOURS || '24' }}
           EO_ASSET_RETENTION_DAYS: ${{ vars.EO_ASSET_RETENTION_DAYS }}
+          APNS_DELIVERY_ENABLED: ${{ vars.APNS_DELIVERY_ENABLED || 'true' }}
+          APNS_MATERIALIZATION_BATCH_SIZE: ${{ vars.APNS_MATERIALIZATION_BATCH_SIZE || '500' }}
+          APNS_MAX_ACTIVE_DEVICES_PER_USER: ${{ vars.APNS_MAX_ACTIVE_DEVICES_PER_USER || '8' }}
+          APNS_MAX_DEVICE_RECORDS_PER_USER: ${{ vars.APNS_MAX_DEVICE_RECORDS_PER_USER || '64' }}
         run: |
           # Ensure claritas-config (DB + auth settings) exists
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
@@ -383,8 +394,19 @@ jobs:
             "NASA_GIBS_ENABLED",
             "USGS_EARTHQUAKES_ENABLED",
             "EO_VISION_ENRICHMENT_ENABLED",
+            "EO_VISION_MODEL",
+            "EO_VISION_MAX_DAILY_REQUESTS",
+            "EO_VISION_MAX_IMAGE_BYTES",
             "EO_MAX_DAILY_PROCESSING_UNITS",
+            "EO_MAX_MONTHLY_PROCESSING_UNITS",
+            "EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER",
+            "EO_MAX_REVISITS_PER_EVENT",
+            "EO_REVISIT_INTERVAL_HOURS",
             "EO_ASSET_RETENTION_DAYS",
+            "APNS_DELIVERY_ENABLED",
+            "APNS_MATERIALIZATION_BATCH_SIZE",
+            "APNS_MAX_ACTIVE_DEVICES_PER_USER",
+            "APNS_MAX_DEVICE_RECORDS_PER_USER",
           ]) {
             const value = process.env[key];
             if (value && value.trim()) data[key] = value.trim();
@@ -467,6 +489,9 @@ jobs:
           COPERNICUS_CLIENT_ID: ${{ secrets.COPERNICUS_CLIENT_ID }}
           COPERNICUS_CLIENT_SECRET: ${{ secrets.COPERNICUS_CLIENT_SECRET }}
           NASA_FIRMS_MAP_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+          APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
+          APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
         run: |
           set -euo pipefail
           # Upsert OpenWeather secret if provided
@@ -521,6 +546,22 @@ jobs:
             kubectl -n "$NS" create secret generic claritas-earth-observation "${eo_args[@]}" --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::Earth Observation credentials are absent; credentialed providers remain disabled"
+          fi
+
+          apns_args=()
+          if [ -n "${APNS_PRIVATE_KEY:-}" ]; then
+            apns_args+=(--from-literal=APNS_PRIVATE_KEY="$APNS_PRIVATE_KEY")
+          fi
+          if [ -n "${APNS_KEY_ID:-}" ]; then
+            apns_args+=(--from-literal=APNS_KEY_ID="$APNS_KEY_ID")
+          fi
+          if [ -n "${APNS_TEAM_ID:-}" ]; then
+            apns_args+=(--from-literal=APNS_TEAM_ID="$APNS_TEAM_ID")
+          fi
+          if [ "${#apns_args[@]}" -eq 3 ]; then
+            kubectl -n "$NS" create secret generic claritas-apns "${apns_args[@]}" --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::APNs GitHub credentials are incomplete; any existing claritas-apns secret is preserved and may remain active. Disable APNS_DELIVERY_ENABLED or rotate/revoke explicitly."
           fi
 
       - name: 🔐 Ensure OpenCode briefing secrets exist

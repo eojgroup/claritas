@@ -28,7 +28,6 @@ import {
   RefreshCw,
   Route,
   Radar,
-  Satellite,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -143,6 +142,7 @@ type SignalNotification = {
   symbol?: string;
   dateKey?: string;
   country?: string;
+  eventId?: string;
 };
 
 const DATA_WINDOW_OPTIONS: Array<{
@@ -728,6 +728,7 @@ import {
   fetchCountryMarketOverview,
   fetchCountryMarketDetail,
   fetchFxRates,
+  fetchIntelligenceAlerts,
   fetchMarketFilings,
   fetchMarketIndicators,
   fetchMarketQuotes,
@@ -765,6 +766,7 @@ import {
   type MarketIndicator,
   type MarketQuote,
   type NewsItem,
+  type IntelligenceAlert,
   type PodcastEpisode,
   type PodcastExternalLink,
   type PodcastSignal,
@@ -813,6 +815,7 @@ export default function ClaritasDashboard() {
       }
     },
   );
+  const [intelligenceAlerts, setIntelligenceAlerts] = useState<IntelligenceAlert[]>([]);
   const [authStatus, setAuthStatus] = useState<
     "checking" | "authed" | "unauthed"
   >("checking");
@@ -838,6 +841,13 @@ export default function ClaritasDashboard() {
     }
   });
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [selectedIntelligenceEventId, setSelectedIntelligenceEventId] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get("event");
+    } catch {
+      return null;
+    }
+  });
   const [comparisonCountry, setComparisonCountry] = useState<string | null>(
     null,
   );
@@ -1024,6 +1034,17 @@ export default function ClaritasDashboard() {
   }, []);
 
   useEffect(() => {
+    const applyEventDeepLink = () => {
+      const eventId = new URLSearchParams(window.location.search).get("event");
+      setSelectedIntelligenceEventId(eventId);
+      if (eventId) setActiveView("intelligence");
+    };
+    applyEventDeepLink();
+    window.addEventListener("popstate", applyEventDeepLink);
+    return () => window.removeEventListener("popstate", applyEventDeepLink);
+  }, []);
+
+  useEffect(() => {
     const legalIds = new Set(legalPolicies.map((policy) => policy.id));
     const profileIds = new Set(profileSections.map((section) => section.id));
     const handleHash = () => {
@@ -1068,6 +1089,25 @@ export default function ClaritasDashboard() {
 
   const isAdmin = (authUser?.roles ?? []).includes("admin");
   const hasPaidAccess = authUser?.billing?.has_access ?? true;
+
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess) {
+      setIntelligenceAlerts([]);
+      return;
+    }
+    let active = true;
+    const refresh = () => {
+      void fetchIntelligenceAlerts()
+        .then((alerts) => { if (active) setIntelligenceAlerts(alerts); })
+        .catch(() => { /* Signal Desk keeps its own visible error state. */ });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [authStatus, hasPaidAccess]);
 
   useEffect(() => {
     if (!isAdmin && activeView === "admin") {
@@ -3313,6 +3353,19 @@ export default function ClaritasDashboard() {
       }).format(new Date(time));
     };
 
+    intelligenceAlerts.slice(0, 4).forEach((alert) => {
+      items.push({
+        id: `event-alert-${alert.id}`,
+        title: alert.title,
+        description: `${alert.body}${alert.location_name || alert.primary_country_iso2 ? ` · ${alert.location_name || alert.primary_country_iso2}` : ""}`,
+        timeLabel: formatTime(alert.updated_at),
+        tone: alert.severity === "critical" ? "critical" : alert.severity === "high" ? "attention" : "info",
+        view: "intelligence",
+        country: alert.primary_country_iso2 ?? undefined,
+        eventId: alert.event_id,
+      });
+    });
+
     if (newsLoadError) {
       items.push({
         id: `news-error-${newsLoadError}`,
@@ -3425,6 +3478,7 @@ export default function ClaritasDashboard() {
     countryMeta,
     highestSignalCountry,
     countryMarkets,
+    intelligenceAlerts,
     newsLoadError,
     podcastLoadError,
     podcasts,
@@ -3537,16 +3591,46 @@ export default function ClaritasDashboard() {
     setSelectedCountry(key);
   };
 
+  const handleOpenIntelligence = useCallback((eventId?: string) => {
+    if (eventId) {
+      setSelectedIntelligenceEventId(eventId);
+      const nextUrl = new URL(window.location.href);
+      if (nextUrl.searchParams.get("event") !== eventId) {
+        nextUrl.searchParams.set("event", eventId);
+        window.history.pushState({ eventId }, "", nextUrl);
+      }
+    }
+    setActiveView("intelligence");
+  }, []);
+
+  const handleOpenImagery = useCallback((eventId?: string) => {
+    if (eventId) {
+      setSelectedIntelligenceEventId(eventId);
+      const nextUrl = new URL(window.location.href);
+      if (nextUrl.searchParams.get("event") !== eventId) {
+        nextUrl.searchParams.set("event", eventId);
+        window.history.pushState({ eventId }, "", nextUrl);
+      }
+    }
+    setActiveView("earth-observation");
+  }, []);
+
   const handleClearSelection = () => {
     setSelectedCountry(null);
     setComparisonCountry(null);
     setPinnedCountry(null);
     setSelectedSymbol(null);
+    setSelectedIntelligenceEventId(null);
     setCompareMode(false);
+    const nextUrl = new URL(window.location.href);
+    if (nextUrl.searchParams.has("event")) {
+      nextUrl.searchParams.delete("event");
+      window.history.replaceState(null, "", nextUrl);
+    }
   };
 
   const hasActiveSelection = Boolean(
-    selectedCountry || comparisonCountry || pinnedCountry || selectedSymbol,
+    selectedCountry || comparisonCountry || pinnedCountry || selectedSymbol || selectedIntelligenceEventId,
   );
 
   const handleSearchTopicChange = useCallback((topic: SearchTopic) => {
@@ -3584,7 +3668,8 @@ export default function ClaritasDashboard() {
 
   const handleNotificationClick = (notification: SignalNotification) => {
     markNotificationRead(notification.id);
-    setActiveView(notification.view);
+    if (notification.eventId) handleOpenIntelligence(notification.eventId);
+    else setActiveView(notification.view);
     if (notification.symbol) {
       setSelectedSymbol(notification.symbol);
     }
@@ -3717,59 +3802,52 @@ export default function ClaritasDashboard() {
   const navItems = [
     {
       id: "dashboard",
-      label: "Dashboard",
+      label: "Overview",
       view: "dashboard" as const,
       icon: LayoutGrid,
-      group: "analysis",
-    },
-    {
-      id: "news",
-      label: "News",
-      view: "news" as const,
-      icon: Newspaper,
-      group: "analysis",
-    },
-    {
-      id: "podcasts",
-      label: "Podcasts",
-      view: "podcasts" as const,
-      icon: Podcast,
-      group: "analysis",
-    },
-    {
-      id: "weather",
-      label: "Weather",
-      view: "weather" as const,
-      icon: CloudSun,
-      group: "analysis",
-    },
-    {
-      id: "markets",
-      label: "Markets",
-      view: "markets" as const,
-      icon: ChartNoAxesCombined,
-      group: "analysis",
-    },
-    {
-      id: "transport",
-      label: "Transport",
-      view: "transport" as const,
-      icon: Route,
-      group: "analysis",
+      group: "core",
     },
     {
       id: "intelligence",
-      label: "Intelligence",
+      label: "Signal desk",
       view: "intelligence" as const,
       icon: Radar,
-      group: "analysis",
+      group: "core",
     },
     {
-      id: "earth-observation",
-      label: "Earth observation",
-      view: "earth-observation" as const,
-      icon: Satellite,
-      group: "analysis",
+      id: "news",
+      label: "News explorer",
+      view: "news" as const,
+      icon: Newspaper,
+      group: "explore",
+    },
+    {
+      id: "podcasts",
+      label: "Podcast explorer",
+      view: "podcasts" as const,
+      icon: Podcast,
+      group: "explore",
+    },
+    {
+      id: "weather",
+      label: "Weather explorer",
+      view: "weather" as const,
+      icon: CloudSun,
+      group: "explore",
+    },
+    {
+      id: "markets",
+      label: "Market explorer",
+      view: "markets" as const,
+      icon: ChartNoAxesCombined,
+      group: "explore",
+    },
+    {
+      id: "transport",
+      label: "Transport explorer",
+      view: "transport" as const,
+      icon: Route,
+      group: "explore",
     },
     ...(isAdmin
       ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings, group: "operations" }]
@@ -3780,44 +3858,44 @@ export default function ClaritasDashboard() {
 
   const viewMeta = {
     dashboard: {
-      kicker: "Signal desk",
-      title: "Operational overview",
-      summary: "What changed, where it changed, and what needs attention",
+      kicker: "Global operating picture",
+      title: "Overview",
+      summary: "Start with material events, then trace each source and observation",
     },
     news: {
-      kicker: "Analyst workspace",
+      kicker: "Source explorer",
       title: "Global news signals",
       summary: "Source, geography, significance, and recency in one stream",
     },
     podcasts: {
-      kicker: "Analyst workspace",
+      kicker: "Source explorer",
       title: "Podcast intelligence",
       summary: "Extracted claims, events, risks, and timestamped evidence",
     },
     weather: {
-      kicker: "Operations",
+      kicker: "Source explorer",
       title: "Weather conditions",
       summary: "Threshold breaches, affected locations, and distribution",
     },
     markets: {
-      kicker: "Market desk",
+      kicker: "Source explorer",
       title: "Watchlist & correlations",
       summary: "Movement, volatility, and linked contextual signals",
     },
     transport: {
-      kicker: "Movement intelligence",
+      kicker: "Source explorer",
       title: "Shipping & flight routes",
       summary: "Live tracks, flight numbers, corridors, and country relationships",
     },
     intelligence: {
-      kicker: "Cross-domain analysis",
-      title: "Intelligence events",
-      summary: "Correlated evidence, confidence, location, and materiality",
+      kicker: "Unified event workspace",
+      title: "Signal desk",
+      summary: "One chronological thread across reporting, observations, operations, and impact",
     },
     "earth-observation": {
-      kicker: "Observed context",
-      title: "Earth observation",
-      summary: "Governed scenes, acquisition quality, provenance, and comparisons",
+      kicker: "Investigation evidence",
+      title: "Imagery library",
+      summary: "Event-scoped scenes, acquisition quality, provenance, and defensible comparisons",
     },
     admin: {
       kicker: "Control room",
@@ -4614,6 +4692,16 @@ export default function ClaritasDashboard() {
                       Symbol: {selectedSymbol.toUpperCase()}
                     </span>
                   )}
+                  {selectedIntelligenceEventId && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenIntelligence(selectedIntelligenceEventId)}
+                      className="rounded-full border border-[color:var(--signal-sky)] bg-[color:var(--signal-sky-soft)] px-3 py-1 font-semibold text-[color:var(--shell-ink)]"
+                      title={selectedIntelligenceEventId}
+                    >
+                      Event investigation: {selectedIntelligenceEventId.slice(0, 8)}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleClearSelection}
@@ -4629,7 +4717,7 @@ export default function ClaritasDashboard() {
               <div className="workspace-page dashboard-workspace relative flex flex-col gap-4">
                 <IntelligenceEventStrip
                   country={selectedCountry}
-                  onOpen={() => setActiveView("intelligence")}
+                  onOpen={handleOpenIntelligence}
                 />
                 <div className="relative flex flex-col gap-4">
                   <div
@@ -5790,6 +5878,7 @@ export default function ClaritasDashboard() {
                               translationPendingIds={newsTranslationPendingIds}
                               onSelectCountry={setSelectedCountry}
                               onOpenWorkspace={() => setActiveView("news")}
+                              onOpenEvent={handleOpenIntelligence}
                               emptyState={
                                 <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
                                   <div>No news items for the current filters.</div>
@@ -6063,7 +6152,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
-                <IntelligenceEventStrip country={selectedCountry} onOpen={() => setActiveView("intelligence")} />
+                <IntelligenceEventStrip country={selectedCountry} onOpen={handleOpenIntelligence} />
                 <section
                   className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3"
                 >
@@ -6276,6 +6365,7 @@ export default function ClaritasDashboard() {
                         }}
                         onRequestTranslation={requestNewsTranslationSummary}
                         translationPendingIds={newsTranslationPendingIds}
+                        onOpenEvent={handleOpenIntelligence}
                         onSelectCountry={(iso) => {
                           setSelectedCountry(iso);
                           setMapMode("signals");
@@ -6747,6 +6837,10 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "podcasts" && (
               <div className="space-y-4">
+                <IntelligenceEventStrip
+                  country={selectedCountry}
+                  onOpen={handleOpenIntelligence}
+                />
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();
@@ -7166,7 +7260,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "weather" && (
               <div className="workspace-page weather-workspace space-y-4">
-                <IntelligenceEventStrip country={selectedCountry} onOpen={() => setActiveView("intelligence")} />
+                <IntelligenceEventStrip country={selectedCountry} onOpen={handleOpenIntelligence} />
                 <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -7693,7 +7787,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "markets" && (
               <div className="workspace-page markets-workspace space-y-4">
-                <IntelligenceEventStrip country={selectedCountry} onOpen={() => setActiveView("intelligence")} />
+                <IntelligenceEventStrip country={selectedCountry} onOpen={handleOpenIntelligence} />
                 <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Market workspace</div>
@@ -8501,13 +8595,35 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "transport" && (
-              <TransportWorkspace initialCountry={transportFocusCountry} />
+              <div className="space-y-4">
+                <IntelligenceEventStrip
+                  country={selectedCountry}
+                  onOpen={handleOpenIntelligence}
+                />
+                <TransportWorkspace initialCountry={transportFocusCountry} />
+              </div>
             )}
             {activeView === "intelligence" && (
-              <IntelligenceWorkspace initialCountry={selectedCountry} />
+              <IntelligenceWorkspace
+                initialCountry={selectedCountry}
+                initialEventId={selectedIntelligenceEventId}
+                onSelectEvent={handleOpenIntelligence}
+                onOpenImagery={handleOpenImagery}
+              />
             )}
             {activeView === "earth-observation" && (
-              <EarthObservationWorkspace />
+              <div className="space-y-4">
+                {!selectedIntelligenceEventId && (
+                  <IntelligenceEventStrip
+                    country={selectedCountry}
+                    onOpen={handleOpenIntelligence}
+                  />
+                )}
+                <EarthObservationWorkspace
+                  eventId={selectedIntelligenceEventId}
+                  onOpenEvent={handleOpenIntelligence}
+                />
+              </div>
             )}
             {activeView === "admin" && isAdmin && (
               <div className="workspace-page control-room-page min-w-0 space-y-4">
@@ -9357,7 +9473,7 @@ export default function ClaritasDashboard() {
       </div>
       <nav className="mobile-ops-nav app-safe-bottom" aria-label="Primary mobile navigation">
         {navItems
-          .filter((item) => ["dashboard", "news", "weather", "markets", "profile"].includes(item.id))
+          .filter((item) => ["dashboard", "intelligence", "news", "markets", "profile"].includes(item.id))
           .map((item) => {
             const Icon = item.icon;
             const active = activeView === item.view;

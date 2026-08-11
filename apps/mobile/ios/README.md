@@ -24,16 +24,26 @@ The project contains one App Store product with two Xcode targets:
    - Ensure `AUTH_CALLBACK_URL` matches your registered iOS URL scheme (default: `claritas://auth/callback`).
    - Or at runtime set `UserDefaults.standard.set("https://your-host.com", forKey: "API_BASE_URL")` in AppDelegate for advanced configs.
 4. Run `Claritas` on a paired iPhone + Apple Watch simulator or devices and sign in on iPhone.
-5. Run/install `Claritas Watch App`. Its three-page companion flow preserves the interactive signal map, adds a read-only published briefing glance, and condenses urgent news/weather/market context into one Pulse page. It caches the last successful update.
+5. Run/install `Claritas Watch App`. Its companion flow preserves the interactive signal map, adds a read-only published briefing glance, and condenses urgent cross-domain event context into one Pulse page. It caches the last successful update and can hand an exact event to iPhone.
 6. Run `Claritas` on an iPad simulator or device. The same universal app provides:
    - Persistent split-view navigation.
-   - A web-aligned, map-led signal desk with native analysis tabs, focus state, KPI posture, and a two-column review stage.
-   - Full news, podcast, weather, markets, admin, profile, and policies workspaces.
+   - One event-centred Signal Desk with a prioritized event list, labelled evidence timeline, source links, and event-specific satellite observations.
+   - Workspace destinations for the Signal Desk and Daily briefing; News, Podcasts, Weather, Markets, and Transport remain source lenses rather than parallel event systems.
+   - Admin, profile, and policies workspaces according to role.
    - Multi-window iPadOS support.
 7. The iPhone app will load:
-   - Five stable destinations: Pulse, News, Weather, Markets, and More.
-   - A condensed map-first Pulse with current posture, selection-driven country context, and one actionable item per urgent domain.
-   - Podcast conclusions, the published briefing, account/reference tools, and eligible admin controls under More.
+   - Five stable destinations: Dashboard, Signal desk, News, Daily briefing, and More.
+   - A condensed map-first Dashboard for posture and country context, with the Signal Desk as the canonical investigation path.
+   - News cards that open the linked canonical event when one exists; the event timeline links back to the original source URL.
+   - Podcast, weather, market, transport, imagery catalogue, account/reference tools, and eligible admin controls under More.
+
+## Unified Signal Desk contract
+
+- The source lenses explain where a signal came from. The Signal Desk explains the event assembled from those sources.
+- Selecting an event loads its grouped evidence, original news/official URLs, correlation labels, locations and available EO observations as one thread.
+- Satellite imagery is event-specific. When no defensible observation is available, the app says so and leaves the reported/official evidence intact; it does not substitute a generic country image.
+- Model-written imagery text is displayed as interpretation, not as an observation or fact. Provider/prompt provenance and limitations remain part of the API model.
+- The Imagery library is useful for provenance and asset review but is not a second Earth Observation investigation workflow.
 
 ## Watch Authentication
 
@@ -45,9 +55,26 @@ The project contains one App Store product with two Xcode targets:
 - Signing out on iPhone clears the watch token on the next sync.
 - Open the iPhone app once after installing the watch app, then tap `Connect` on watch if it does not sync automatically.
 
+## Remote notifications and APNs
+
+The iOS target now contains the Push Notifications capability, an `aps-environment` entitlement and native device registration. The backend APNs worker is separately feature-gated and credentialed.
+
+1. Use a paid Apple Developer team and an explicitly registered App ID with Push Notifications enabled. Automatic signing must produce a provisioning profile containing the matching `aps-environment` entitlement.
+2. The generator sets `APNS_ENVIRONMENT=development` for Debug and `production` for Release. `Claritas.entitlements` expands that build setting. Do not hard-code production into a Debug build or infer environment from the device token.
+3. Keep the backend `APNS_BUNDLE_TOPIC` identical to the generated `BUNDLE_ID`. If `BUNDLE_ID` changes, update the backend topic and Apple App ID before registering devices.
+4. Configure the server's `APNS_PRIVATE_KEY`, `APNS_KEY_ID` and `APNS_TEAM_ID`. Never embed the `.p8` key in the app or this repository.
+5. Test on a physical device. After a signed-in paid-access user grants notification permission, iOS obtains the token and the app registers it through `POST /api/intelligence/devices` with the build environment and bundle topic. Profile → Event alerts can retry authorization/registration.
+6. The app persists a random installation UUID and sends it with every registration, allowing token rotation to retire the previous token without accumulating active registrations. On logout it unregisters its saved device ID and falls back to account-wide revocation when needed; revocation remains available after paid access lapses. An active token cannot be reassigned to another account without explicit unregister.
+7. Tapping a Claritas alert selects the payload's exact `event_id` in the Signal Desk and applies its optional country context.
+
+Simulator UI tests can exercise permission and routing code, but they are not production APNs readiness evidence. Backend `configured_unverified` means only that the current key/topic is locally valid; `ready` requires an HTTP 200 for that credential fingerprint, while a newer provider failure reports `degraded`. Validate both a Debug/sandbox build and a signed Release/TestFlight production build when promoting delivery.
+
+Backend `accepted` means APNs returned HTTP 200 for the provider request. It does not mean iOS displayed the alert or the user saw it. In-app acknowledgement is a separate state and should be the only user-confirmation signal.
+
 ## Source Of Truth
 
 - Swift/resources under `apps/mobile/ios/Claritas/` and `apps/mobile/ios/ClaritasWatch/` are the source of truth.
+- Push behaviour lives in `Claritas/Services/PushNotificationCoordinator.swift`, registration calls in `Claritas/Services/APIClient.swift`, and the environment entitlement in `Claritas/Claritas.entitlements`.
 - `apps/mobile/ios/Claritas/Claritas.xcodeproj/project.pbxproj` is generated; avoid manual edits.
 - If files are added/moved/renamed, regenerate the project rather than editing `.pbxproj` directly.
 
@@ -113,5 +140,6 @@ For CI builds that regenerate the project, `MARKETING_VERSION`, `BUILD_NUMBER`, 
 
 - ATS is currently permissive (NSAllowsArbitraryLoads=true) to simplify dev. For production, replace with explicit domain exceptions or HTTPS endpoints.
 - Backend auth redirect validation now supports non-HTTP callback schemes via `AUTH_ALLOWED_REDIRECT_SCHEMES` (default includes `claritas`).
-- The native map uses a touch-first dark geospatial canvas, shared country-centroid relevance points, region scope, selection, ranked bubble scale, pan/zoom, and reset behavior aligned with web and Watch.
+- Country centroids support overview navigation only; they are not valid substitutes for event-specific EO coordinates.
+- The native map uses a touch-first dark geospatial canvas, shared overview relevance points, region scope, selection, ranked bubble scale, pan/zoom, and reset behavior aligned with web and Watch.
 - The structure is modular (Models, Services, Views) to ease future extensions (auth, settings, notifications, charts).

@@ -15,29 +15,26 @@ The system is dense where comparison benefits from density and quiet where readi
 
 ## Product and Data Model
 
-The clients share one API and one selection model. A selected country or symbol should carry into relevant views until the user clears it.
+The clients share one API and one selection model. A selected country, symbol or canonical event should carry into relevant views until the user clears it. Country/symbol selection supports overview exploration; event identity is the investigation anchor.
 
 ```mermaid
 flowchart LR
-  API[Claritas API] --> Brief[Newsletter briefing synthesis]
-  API --> News[News events]
-  API --> Podcasts[Podcast evidence]
-  API --> Weather[Weather conditions]
-  API --> Markets[Market movement]
-  API --> Leadership[Country leadership]
-  API --> Transport[Transport movement]
-
-  News --> Desk[Signal desk]
-  Podcasts --> Desk
-  Weather --> Desk
-  Markets --> Desk
-  Leadership --> Profile[Selected country profile]
-  Leadership -. reference for news-led briefing .-> Brief
-  Transport --> Desk
-
+  News[News records] --> Correlate[Anchored event correlation]
+  Podcasts[Podcast evidence] --> Correlate
+  Weather[Weather observations] --> Correlate
+  Markets[Market movement] --> Correlate
+  Transport[Transport movement] --> Correlate
+  Official[USGS · FIRMS] --> Correlate
+  Correlate --> Event[Canonical event + labelled evidence]
+  Event --> EO[Exact-AOI Copernicus evidence]
+  EO --> Event
+  Event -. date/AOI context .-> GIBS[NASA GIBS browse layers]
+  Event --> Desk[Signal Desk investigation]
+  Event --> Brief[Daily briefing synthesis]
+  Leadership[Country leadership] --> Profile[Selected country profile]
   Desk --> Web[Desktop workspace]
   Desk --> Pad[Tablet review workspace]
-  Desk --> Phone[Mobile triage]
+  Desk --> Phone[Mobile triage + APNs handoff]
   Desk --> Watch[Watch companion]
 ```
 
@@ -45,37 +42,45 @@ Each domain has a distinct analytical responsibility:
 
 | Domain | Primary question | Primary representation |
 | --- | --- | --- |
+| Signal Desk | What is the canonical event, which evidence supports it, and what remains uncertain? | Prioritized event queue, chronological labelled evidence, original sources and event-specific EO |
 | Daily briefing | What is the cross-domain situation? | Newsletter synthesis plus a compact, read-only Watch glance |
-| News | What events are occurring and how significant is coverage? | Dense story stream, timeline, source mix, country coverage |
+| News | Which publishers report a development, and which canonical event does each story support? | Dense story stream, source mix, country coverage and linked-event action |
 | Podcast intelligence | What claims, risks, and evidence support the signal? | Episode evidence, extracted signals, timestamps |
 | Weather | Which conditions exceed operating thresholds and where? | Threshold queue, observation feed, map, distribution charts |
 | Markets | Which instruments moved and what context may explain it? | Watchlist, symbol drilldown, session range, movers, benchmark regime |
 | Leadership | Who currently holds the principal national offices? | Selection-driven country profile reference |
 | Transport | How are flights and shipping routes connecting countries now? | Live track map, route corridors, country network, activity trends |
+| Earth Observation | What physically observable context is available for this exact event/AOI? | Ranked scenes, private previews, acquisition quality, provenance and qualified comparison |
 
 Maps and graphs are not decoration. Bubble maps answer spatial distribution questions. Graphs answer change, comparison, mix, correlation, and ranking questions. A visual is omitted when the available data cannot support a useful analytical statement.
 
 ### Cross-source linkage and provenance
 
-Claritas links domains through country, named-entity, and source provenance rather than presenting six unrelated feeds:
+Claritas links domains through a canonical event and auditable source provenance rather than presenting unrelated feeds. Country is useful context and a candidate prefilter, but country plus time is not enough to merge generic reports:
 
 ```mermaid
 flowchart LR
-  Story[News story] -->|country + publisher| Country[Country context]
-  Weather[Weather observation] -->|ISO country| Country
-  Market[Market instrument] -->|listing/country| Country
-  Transport[Aircraft or vessel] -->|position, route, registration, flag| Country
-  Podcast[Podcast finding] -->|explicit ISO or country mention| Country
-  Podcast -->|episode + timestamp| Evidence[Attributed evidence]
+  Story[News story] --> Evidence[Source-labelled evidence]
+  Weather[Weather observation] --> Evidence
+  Market[Market movement] --> Evidence
+  Transport[Transport signal] --> Evidence
+  Official[USGS · FIRMS] --> Evidence
+  Evidence --> Gate{Event family + time + specific anchor}
+  Gate -->|location · distance · shared entity| Event[Canonical event]
+  Gate --> Audit[Correlation decision audit]
+  Event --> Score[Post-aggregation relevance]
+  Score --> Queue[Signal Desk queue]
+  Score -->|supported type + exact coordinates| Satellite[EO discovery]
+  Event --> Brief[Daily briefing]
+  Event --> Country[Overview country context]
   Leader[Leadership reference] --> Profile[Country profile]
-  Country --> Score[Cross-source relevance score]
-  Score --> Map[Signal relevance map]
-  Score --> Queue[Attention signal]
-  Evidence --> Brief[Newsletter briefing]
-  Leader -. only corroborates a news-reported change .-> Brief
 ```
 
-- News retains publisher, time, and mapped-country provenance.
+- News retains publisher, time, URL and mapped-country provenance, and exposes its linked canonical event when correlation succeeds.
+- Event evidence distinguishes `reported`, `observed`, `derived`, `model_interpretation`, `assessment`, `contradicts` and contextual relationships. The timeline links back to source records where a URL exists.
+- A later weak story cannot replace a stronger canonical event title merely because it is newer.
+- EO requires event-specific finite coordinates and a supported event type/relevance. A country centroid is never substituted for missing event geography.
+- GIBS supplies allowlisted date/AOI-specific WMTS templates and bounded WMS preview URLs. Web displays the first true-colour preview directly from NASA; it is not a stored observation and does not feed model interpretation. Apple clients currently show persisted observations only.
 - Podcast claims remain attributed to the feed, episode, and timestamped evidence. They are not treated as verified facts.
 - New podcast extraction records explicitly supported ISO alpha-2 countries with each finding. Existing findings receive deterministic UI linkage when their text mentions a country name.
 - Leadership is not an urgency signal or map layer. Current records appear as reference in the selected country profile. A leadership change appears inside news and briefings only when a supplied story directly reports it.
@@ -85,13 +90,18 @@ flowchart LR
 
 ```text
 Claritas
-├── Analyze
-│   ├── Dashboard / signal desk
+├── Workspace
+│   ├── Overview
+│   ├── Signal Desk / event investigations
+│   └── Daily briefing
+├── Source lenses
 │   ├── News
 │   ├── Podcasts
 │   ├── Weather
 │   ├── Markets
 │   └── Transport
+├── Evidence tools
+│   └── Imagery library (global provenance catalogue)
 ├── Operate
 │   └── Admin
 └── Account and reference
@@ -103,7 +113,7 @@ Claritas uses four page archetypes:
 
 ### Analytics workspace
 
-Dashboard, News, Podcasts, Weather, and Markets use a compact page header, a control bar, a KPI strip, one dominant analytical surface, and explicitly secondary context. Desktop may show a comparison rail beside the hero surface. Tablet shows one or two major panels at a time. Mobile prioritizes triage and drill-in.
+Overview and the source lenses use a compact page header, a control bar, a KPI strip, one dominant analytical surface, and explicitly secondary context. The Signal Desk instead uses a master/detail investigation archetype: prioritized events on one side and the selected evidence/imagery thread on the other. Desktop may show both; tablet and phone progressively stack the same contract.
 
 ### Control room
 
@@ -123,25 +133,26 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 
 ### Web
 
-- A persistent left navigation groups analysis, operations, and account destinations.
+- A persistent left navigation puts Overview and Signal Desk first, then groups News, Podcast, Weather, Market and Transport explorers as source lenses. Operations and account destinations remain separate.
 - A sticky top bar always shows page title, scope summary, live/freshness state, search, notifications, theme, and account state.
 - The active page owns filtering and comparison controls.
-- At mobile width, global navigation becomes a drawer plus a five-item monitoring bar: Dashboard, News, Weather, Markets, and Profile.
+- At mobile width, the same destinations remain available through the navigation drawer; the Signal Desk is not hidden behind the imagery catalogue.
+- The Imagery library opens from an event investigation and remains a global acquisition/provenance catalogue. Event meaning stays in the Signal Desk.
 - Search is global and keyboard accessible with `Command/Ctrl+K` and `/`.
 
 ### iPhone
 
 - `TabView` and `NavigationStack` preserve platform-native navigation.
-- Five stable destinations keep the bottom bar predictable: Pulse, News, Weather, Markets, and More. Podcasts, briefing, account, policy, and eligible admin routes live in More instead of overflowing into an implicit system menu.
-- The dashboard is map-first. Signals, News, and Weather use the same layer and relevance contract as web.
+- Five stable destinations keep the bottom bar predictable: Dashboard, Signal desk, News, Daily briefing, and More. Podcasts, weather, markets, transport, the Imagery library, account, policy and eligible admin routes live in More.
+- The Dashboard is map-first; the Signal Desk is the canonical event investigation and is reachable directly from a linked News card or push alert.
 - Region scope, ranked bubbles, highest-relevance guidance, country selection, zoom/pan, and reset are touch-sized. Compare and pin remain tablet/desktop tools.
-- The Pulse dashboard contains the map, a compact posture strip, the active country profile, and only the most actionable current signals. Full data-domain workspaces remain available from their destinations.
+- The Dashboard contains the map, a compact posture strip, the active country profile, and only the most actionable current signals. Full source-lens workspaces remain available from their destinations.
 - Profile uses native settings controls and Policies uses a reading layout.
 
 ### iPad
 
-- `NavigationSplitView` groups Workspace, Signals, Operations, and Account.
-- The signal desk carries a native, horizontally scrollable workspace strip that mirrors the web analysis destinations while retaining the platform sidebar and keyboard/pointer behavior.
+- `NavigationSplitView` groups Workspace, Source lenses, Operations and Account.
+- Workspace puts the Signal Desk and Daily briefing before the individual source lenses. The selected event preserves the same labelled evidence and imagery contract as web.
 - The overview uses the map as its dominant surface, with region scope, country selection, compare, pin, and cross-domain drill-in.
 - The dedicated Transport workspace exposes live aircraft and vessel markers, route curves, sampled tracks, flight numbers/MMSIs, country linkage, corridor flows, and activity/country charts.
 - A compact KPI posture strip follows the map. The lower stage uses a wide intelligence stream and a narrower selection-driven context rail for focus, market movement, and weather thresholds.
@@ -155,7 +166,13 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 - A single Pulse page replaces separate domain deep dives and limits itself to the most relevant headline, weather exception, and market mover.
 - A Transport pulse page adds aggregate flight, vessel, connected-country, and leading-corridor context without sending raw tracks to Watch.
 - Dense lists, evidence, compare, schedule editing, admin, profile editing, and policy reading remain unavailable.
-- “Open on iPhone” sends the destination and selected/highest country through `WatchConnectivity`; the iPhone opens the matching workspace with that country focused.
+- “Open on iPhone” can send a destination, selected/highest country and exact event identity through `WatchConnectivity`; the iPhone opens the matching workspace selection.
+
+### APNs alert handoff
+
+- The iPhone app registers a topic- and environment-bound device token after user authorization. Debug uses APNs development; Release uses production.
+- A push carries the exact event ID and opens the Signal Desk selection, with optional country context.
+- Provider `accepted` means APNs accepted the request. It never means displayed, seen or acknowledged; in-app acknowledgement is the separate user-confirmation state.
 
 ## Visual System and Tokens
 
@@ -206,10 +223,12 @@ Light mode preserves the same roles. It is supported, but the default unconfigur
 | Control bar | Grouped filters, explicit time/scope, sort, reset, compare/export where relevant |
 | KPI strip | Value, context, optional delta/trend; separators instead of four floating cards |
 | Primary chart | Largest analytical surface, labeled axes/legend, range/compare tools, useful empty state |
-| Map | GeoJSON country layer plus scaled bubble overlay; raw domain layers and a cross-source relevance layer; intensity, rank, hover, polygon selection, legend, one aggregate coverage window, and a visible #1 recommendation turn spatial data into an analytical control |
+| Map | GeoJSON country layer plus scaled bubble overlay; raw domain layers and a cross-source relevance layer; intensity, rank, hover, polygon selection, legend, one aggregate coverage window, and a visible #1 recommendation turn spatial data into an analytical control. Country centroids support overview selection, never event EO coordinates |
 | Country profile | Selection-driven cross-domain panel combining relevance drivers, news concentration, weather and freshness, attributed podcast evidence, current leadership, linked markets, and routes to detailed workspaces |
 | Context band | Podcast evidence and transport movement; exposes the strongest available signal and routes directly to detailed evidence or live movement tracking |
-| Priority news stream | Shared compact rows with priority band/rank, aligned time/place/headline/source metadata, selected state, and imagery only in expanded detail; used on Dashboard and News |
+| Event investigation | Prioritized canonical-event list plus chronological, relationship-labelled source/observation/model evidence, original links and event-specific EO; clear empty/unavailable states preserve uncertainty |
+| Priority news stream | Shared compact rows with priority band/rank, aligned time/place/headline/source metadata, linked-event state/action, and imagery only in expanded detail; used on Dashboard and News |
+| Imagery panel/library | Event detail shows only observations for that event; the separate library is a global provenance catalogue and comparison tool, not a second event workflow |
 | Insights rail | Exceptions, anomalies, AI/briefing cues, and action destination |
 | Form section | Related controls grouped under one operational intent with clear feedback |
 | Document section | Number, heading, readable text rhythm, note treatment, stable anchor |
@@ -370,8 +389,11 @@ Shared tokens and component contracts create one product identity. Shared geomet
 | Shell/navigation | `apps/web/src/App.tsx`, `index.css` | `RootView.swift` | `WatchRootView.swift` |
 | Tokens/surfaces | `index.css` | `BrandComponents.swift` | `WatchBrand.swift` |
 | Dashboard | `App.tsx` | `DashboardView.swift`, `PadOverviewView.swift` | `WatchSignalGlanceView`, `WatchBriefingView`, `WatchPulseView` |
+| Signal Desk | `IntelligenceWorkspace.tsx` | `IntelligenceWorkspaceView.swift` | event pulse and exact-event phone handoff in `WatchRootView.swift` |
+| EO context/library | `IntelligenceWorkspace.tsx`, `EarthObservationWorkspace.tsx` | `IntelligenceWorkspaceView.swift` | event phone handoff only |
 | Maps | `WorldMapBubbles.tsx` | `SignalMapPanel`, `InteractiveCountryBubbleMap` | `WatchSignalMap` |
 | Transport | `TransportWorkspace.tsx` | `TransportWorkspaceView.swift`, `CountryProfileView.swift` | `WatchTransportPulseView` |
+| Alerts/push | in-app watchlist/alert controls in `IntelligenceWorkspace.tsx` | `PushNotificationCoordinator.swift`, `ProfileView.swift` | no direct token registration; phone handoff |
 | Admin | `AdminIngestionPanel.tsx`, `AdminUserManagementPanel.tsx` | `AdminWorkspaceView` | Intentionally unavailable |
 | Settings/documents | `App.tsx` | `ProfileView.swift`, `PoliciesWorkspaceView` | Phone handoff only |
 | Handoff | N/A | `WatchSyncCoordinator.swift` | `WatchConnectivityClient.swift` |
@@ -396,8 +418,11 @@ The current system:
 - gives Admin, Profile, and Policies separate archetypes;
 - treats tablet as a map-led two-column review workspace;
 - treats mobile as map-led triage and drill-in;
-- treats watch as a map-led companion with a briefing glance, a one-page urgent pulse, and phone handoff.
-- adds a shared event workspace on web/iPad, focused event triage on iPhone, authenticated EO previews and before/after comparison, and a concise Watch event pulse that hands off to the exact iPhone event.
+- treats watch as a map-led companion with a briefing glance, a one-page urgent pulse, and phone handoff;
+- puts one canonical-event Signal Desk ahead of the source lenses and links News cards back to the event/evidence thread;
+- adds a shared event workspace on web/iPad, focused event triage on iPhone, authenticated persisted EO previews and before/after comparison, and a concise Watch event pulse that hands off to the exact iPhone event;
+- shows bounded NASA GIBS browse context directly on web while keeping it distinct from persisted observations and model interpretation; and
+- routes eligible APNs alerts to the exact iPhone/iPad event without treating provider acceptance as user acknowledgement.
 
 Related decisions are recorded in:
 
@@ -407,4 +432,4 @@ Related decisions are recorded in:
 - [ADR-0004: News-led leadership signals](../ADRs/0004-news-led-leadership-signals.md)
 - [ADR-0005: Transactional event backbone](../ADRs/0005-transactional-event-backbone.md)
 - [ADR-0006: PostGIS location and physical-asset graph](../ADRs/0006-postgis-location-graph.md)
-- [ADR-0007: Provider-neutral Earth Observation and private assets](../ADRs/0007-earth-observation-provider-assets.md)
+- [ADR-0007: Provider-neutral Earth Observation, contextual imagery and private assets](../ADRs/0007-earth-observation-provider-assets.md)

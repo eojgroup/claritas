@@ -78,11 +78,23 @@ export type IntelligenceSignalInput = {
   primaryCountryIso2?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  /**
+   * True only when latitude/longitude came from the source observation itself
+   * (for example GKG, USGS, GDELT action geometry, or FIRMS), not from a
+   * canonical location or country centroid used for navigation/correlation.
+   */
+  coordinatesAreExact?: boolean;
   relevanceScore: number;
   urgencyScore: number;
   materialityScore: number;
   scoreComponents: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  /**
+   * Stable, normalized entity anchors used for correlation. These are not
+   * inferred causal links; they are only additional evidence that two signals
+   * may describe the same real-world event.
+   */
+  entityKeys?: string[];
   evidence: SignalEvidenceInput;
 };
 

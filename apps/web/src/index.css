@@ -851,8 +851,10 @@ body {
   border-radius: var(--radius-control);
 }
 
-.app-nav-item[data-group="operations"],
-.app-nav-item[data-group="account"]:first-of-type {
+.app-nav-item[data-group="core"] + .app-nav-item[data-group="explore"],
+.app-nav-item[data-group="explore"] + .app-nav-item[data-group="operations"],
+.app-nav-item[data-group="explore"] + .app-nav-item[data-group="account"],
+.app-nav-item[data-group="operations"] + .app-nav-item[data-group="account"] {
   margin-top: 0.75rem;
 }
 

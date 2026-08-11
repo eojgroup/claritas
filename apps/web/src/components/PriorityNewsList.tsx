@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowUpRight, ChevronDown } from "lucide-react";
+import { ArrowUpRight, ChevronDown, RadioTower, Satellite } from "lucide-react";
 import {
   isNewsTranslationRequired,
   newsDisplaySummary,
@@ -39,6 +39,7 @@ type PriorityNewsListProps = {
   translationPendingIds?: Set<number>;
   onSelectCountry: (iso: string) => void;
   onOpenWorkspace?: () => void;
+  onOpenEvent?: (eventId: string) => void;
 };
 
 export default function PriorityNewsList({
@@ -55,6 +56,7 @@ export default function PriorityNewsList({
   translationPendingIds,
   onSelectCountry,
   onOpenWorkspace,
+  onOpenEvent,
 }: PriorityNewsListProps) {
   const primaryIso = primaryCountry?.toUpperCase();
   const secondaryIso = secondaryCountry?.toUpperCase();
@@ -97,6 +99,17 @@ export default function PriorityNewsList({
         const displayTitle = newsDisplayTitle(item);
         const displaySummary = newsDisplaySummary(item);
         const translationPending = translationPendingIds?.has(item.id) ?? false;
+        const linkedEvents = item.linked_events ?? [];
+        const satelliteState = linkedEvents.find((event) => (
+          event.earth_observation_state && event.earth_observation_state !== "not_requested"
+        ))?.earth_observation_state;
+        const satelliteLabel = satelliteState === "imagery_available"
+          ? "imagery available"
+          : satelliteState === "processing"
+            ? "imagery processing"
+            : satelliteState === "queued"
+              ? "imagery queued"
+              : null;
 
         return (
           <article
@@ -174,6 +187,15 @@ export default function PriorityNewsList({
                     title="Leadership change reported by this news item"
                   >
                     Leadership change
+                  </span>
+                )}
+                {linkedEvents.length > 0 && (
+                  <span
+                    className="news-leadership-change"
+                    title={`${linkedEvents.length} event ${linkedEvents.length === 1 ? "investigation" : "investigations"} linked by the Claritas evidence graph`}
+                  >
+                    {linkedEvents.length} linked {linkedEvents.length === 1 ? "event" : "events"}
+                    {satelliteLabel ? ` · ${satelliteLabel}` : ""}
                   </span>
                 )}
                 <small>
@@ -273,6 +295,50 @@ export default function PriorityNewsList({
                     <div className="dashboard-news-link-state">
                       <span className="live-dot" />
                       Map, country profile, and analytics are linked to {iso}.
+                    </div>
+                  )}
+                  {linkedEvents.length > 0 && (
+                    <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--signal-sky-soft)] p-3">
+                      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
+                        <RadioTower className="h-3.5 w-3.5" />
+                        Event investigations
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {linkedEvents.slice(0, 3).map((linkedEvent) => (
+                          <button
+                            key={linkedEvent.id}
+                            type="button"
+                            onClick={() => onOpenEvent?.(linkedEvent.id)}
+                            className="flex w-full items-start gap-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-2 text-left hover:border-[color:var(--shell-ink)]"
+                          >
+                            <span className="mt-0.5 rounded-full border border-[color:var(--shell-border)] px-2 py-0.5 text-[9px] font-semibold uppercase text-[color:var(--shell-muted)]">
+                              {linkedEvent.severity}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <strong className="block text-xs text-[color:var(--shell-ink)]">
+                                {linkedEvent.title}
+                              </strong>
+                              <small className="mt-0.5 block text-[color:var(--shell-muted)]">
+                                {linkedEvent.correlation_score == null
+                                  ? "linked evidence"
+                                  : `${Math.round(linkedEvent.correlation_score * 100)}% correlation score`}
+                                {linkedEvent.earth_observation_state === "imagery_available"
+                                  ? " · imagery available"
+                                  : linkedEvent.earth_observation_state === "processing"
+                                    ? " · imagery processing"
+                                    : linkedEvent.earth_observation_state === "queued"
+                                      ? " · imagery queued"
+                                      : ""}
+                              </small>
+                            </span>
+                            {linkedEvent.earth_observation_state === "imagery_available" ? (
+                              <Satellite className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--signal-sky)]" />
+                            ) : (
+                              <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                   <div className="dashboard-news-actions">

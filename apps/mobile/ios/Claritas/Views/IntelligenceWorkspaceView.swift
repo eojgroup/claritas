@@ -7,20 +7,23 @@ struct IntelligenceWorkspaceView: View {
     @State private var events: [IntelligenceEvent] = []
     @State private var selectedID: String?
     @State private var detail: IntelligenceEventDetail?
+    @State private var gibsContext: GibsEventContext?
     @State private var watches: [IntelligenceWatch] = []
     @State private var alerts: [IntelligenceAlert] = []
     @State private var watchPending = false
     @State private var isLoading = false
+    @State private var detailLoading = false
     @State private var error: String?
+    @State private var detailError: String?
 
     var body: some View {
         BrandBackground {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     BrandSectionHeader(
-                        kicker: "Shared event graph",
-                        title: "Intelligence events",
-                        detail: "Cross-domain evidence with explicit confidence, provenance, and assessment boundaries."
+                        kicker: "One event · every evidence lens",
+                        title: "Signal desk",
+                        detail: "Follow a development from first report through physical observation, operational effects, market response, and assessed meaning."
                     )
 
                     if let error {
@@ -82,6 +85,12 @@ struct IntelligenceWorkspaceView: View {
         }
         .task { await load() }
         .task(id: selectedID) { await loadDetail() }
+        .task(id: selectedID) { await loadGibsContext() }
+        .onChange(of: model.selectedIntelligenceEventID) { requested in
+            guard let requested, !requested.isEmpty else { return }
+            selectedID = requested
+            model.selectedIntelligenceEventID = nil
+        }
     }
 
     private var eventList: some View {
@@ -122,7 +131,20 @@ struct IntelligenceWorkspaceView: View {
 
     @ViewBuilder
     private var eventDetail: some View {
-        if let detail {
+        if detailLoading {
+            BrandCard(title: "Event detail", icon: "scope") {
+                ProgressView("Loading evidence thread")
+                    .frame(maxWidth: .infinity, minHeight: 130)
+            }
+        } else if let detailError {
+            BrandCard(title: "Event detail unavailable", icon: "exclamationmark.triangle") {
+                Text(detailError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                Button("Retry event") { Task { await loadDetail() } }
+                    .buttonStyle(.bordered)
+            }
+        } else if let detail, detail.event.id == selectedID {
             VStack(alignment: .leading, spacing: 14) {
                 BrandCard(title: "Assessment", icon: "scope") {
                     HStack(spacing: 8) {
@@ -155,8 +177,56 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
-                if !detail.earth_observations.isEmpty {
-                    BrandCard(title: "Observed context", icon: "sensor.tag.radiowaves.forward") {
+                BrandCard(title: "Satellite context", icon: "sensor.tag.radiowaves.forward") {
+                    Text("Event-scoped imagery can show physical conditions at this area of interest. It is context—not automatic proof of a report or its cause.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let layer = gibsTrueColorLayer {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("CONTEXT · NOT PROOF")
+                                    .font(.caption2.weight(.bold))
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 4)
+                                    .background(.secondary.opacity(0.12), in: Capsule())
+                                Spacer()
+                                Text(layer.date).font(.caption2).foregroundStyle(.secondary)
+                            }
+                            if let previewURL = URL(string: layer.preview_url) {
+                                AsyncImage(url: previewURL) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    case .success(let image):
+                                        image.resizable().scaledToFill()
+                                    default:
+                                        Label("NASA context preview unavailable", systemImage: "photo.badge.exclamationmark")
+                                            .font(.caption)
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    }
+                                }
+                                .frame(height: 180)
+                                .background(.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                            Text(layer.title).font(.caption.weight(.semibold))
+                            Text(gibsContext?.notice ?? "NASA GIBS browse imagery provides context and is not proof of physical change or causation.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            if let sourceURL = URL(string: layer.provenance.source_url) {
+                                Link("NASA GIBS provenance", destination: sourceURL)
+                                    .font(.caption2.weight(.semibold))
+                            }
+                            Text(layer.provenance.attribution)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(10)
+                        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                    }
+
+                    if !detail.earth_observations.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 10) {
                                 ForEach(detail.earth_observations.prefix(5)) { observation in
@@ -165,30 +235,113 @@ struct IntelligenceWorkspaceView: View {
                                 }
                             }
                         }
+                    } else {
+                        Label("No defensible event-specific observation is available yet", systemImage: "photo.badge.exclamationmark")
+                            .font(.subheadline.weight(.semibold))
+                        Text("The evidence thread remains usable without imagery. Claritas never substitutes a scene from an unrelated event or location.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
-                BrandCard(title: "Evidence", icon: "square.stack.3d.up") {
-                    ForEach(Array(Dictionary(grouping: detail.evidence, by: \.domain).keys.sorted()), id: \.self) { domain in
-                        DisclosureGroup(domain.replacingOccurrences(of: "_", with: " ").uppercased()) {
-                            ForEach(detail.evidence.filter { $0.domain == domain }) { item in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("\(item.evidence_type.replacingOccurrences(of: "_", with: " ")) · \(item.relationship.replacingOccurrences(of: "_", with: " "))")
-                                        .font(.caption.weight(.semibold))
-                                    Text("\(item.source_name ?? item.source_record_type) · \(Int(item.confidence * 100))% confidence")
+                BrandCard(title: "Evidence thread", icon: "point.topleft.down.to.point.bottomright.curvepath") {
+                    ForEach(detail.evidence.sorted { $0.observed_at < $1.observed_at }) { item in
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: evidenceIcon(item.relationship))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                .frame(width: 22, height: 22)
+                                .background(ClaritasPalette.dataBlue(for: colorScheme).opacity(0.12), in: Circle())
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(evidenceLabel(item.relationship).uppercased())
+                                        .font(.caption2.weight(.bold))
+                                    Text(item.domain.replacingOccurrences(of: "_", with: " ").uppercased())
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
-                                    if let attribution = item.attribution {
-                                        Text("Attribution: \(attribution)")
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                    Spacer()
+                                    Text(item.observed_at.formatted(date: .abbreviated, time: .shortened))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 6)
+                                Text(item.source_title ?? item.evidence_type.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    .font(.caption.weight(.semibold))
+                                if let summary = item.source_summary, !summary.isEmpty {
+                                    Text(summary).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
+                                }
+                                Text("\(item.source_name ?? item.source_record_type) · \(Int(item.confidence * 100))% confidence")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if let attribution = item.attribution, !attribution.isEmpty {
+                                    Text("Attribution: \(attribution)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if let license = item.license, !license.isEmpty {
+                                    Text("License: \(license)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if let source = item.source_url, let url = URL(string: source) {
+                                    Link("Open source record", destination: url).font(.caption2.weight(.semibold))
+                                }
                             }
                         }
-                        .font(.caption.weight(.semibold))
-                        Divider()
+                        .padding(.vertical, 6)
+                        if item.id != detail.evidence.sorted(by: { $0.observed_at < $1.observed_at }).last?.id { Divider() }
+                    }
+                }
+
+                if !detail.locations.isEmpty {
+                    BrandCard(title: "Affected locations", icon: "mappin.and.ellipse") {
+                        ForEach(detail.locations) { location in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(location.canonical_name)
+                                    .font(.subheadline.weight(.semibold))
+                                Text("\(location.relationship.replacingOccurrences(of: "_", with: " ").capitalized) · \(location.location_type.replacingOccurrences(of: "_", with: " ")) · \(Int(location.confidence * 100))% confidence")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                if let attribution = location.attribution, !attribution.isEmpty {
+                                    Text(attribution)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            if location.id != detail.locations.last?.id { Divider() }
+                        }
+                    }
+                }
+
+                if !detail.related_events.isEmpty {
+                    BrandCard(title: "Related investigations", icon: "point.3.connected.trianglepath.dotted") {
+                        Text("Relationships are qualified context, not asserted causation.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        ForEach(detail.related_events) { event in
+                            Button { selectedID = event.id } label: {
+                                HStack(alignment: .top, spacing: 9) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(event.relationship.replacingOccurrences(of: "_", with: " ").uppercased())
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(.secondary)
+                                        Text(event.title)
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                        Text("\(Int(event.confidence * 100))% relationship confidence · \(Int(event.relevance_score * 100))% relevance")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        if let rationale = event.rationale, !rationale.isEmpty {
+                                            Text(rationale).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    severityBadge(event.severity)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            if event.id != detail.related_events.last?.id { Divider() }
+                        }
                     }
                 }
 
@@ -200,7 +353,10 @@ struct IntelligenceWorkspaceView: View {
             }
         } else {
             BrandCard(title: "Event detail", icon: "scope") {
-                ProgressView().frame(maxWidth: .infinity, minHeight: 130)
+                Text("Select an event to inspect its evidence thread.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 130)
             }
         }
     }
@@ -220,38 +376,70 @@ struct IntelligenceWorkspaceView: View {
         .padding()
     }
 
+    private var gibsTrueColorLayer: GibsEventLayer? {
+        gibsContext?.layers.first {
+            $0.category == "true_color" && URL(string: $0.preview_url) != nil
+        }
+    }
+
     private func load() async {
         isLoading = true
         defer { isLoading = false }
+        let watchTask = Task { try? await model.api.fetchIntelligenceWatchlist() }
+        let alertTask = Task { try? await model.api.fetchIntelligenceAlerts() }
         do {
-            async let eventRequest = model.api.fetchIntelligenceEvents(limit: 60, country: model.selectedCountry)
-            async let watchRequest = model.api.fetchIntelligenceWatchlist()
-            async let alertRequest = model.api.fetchIntelligenceAlerts()
-            let (rows, nextWatches, nextAlerts) = try await (eventRequest, watchRequest, alertRequest)
+            let rows = try await model.api.fetchIntelligenceEvents(limit: 60, country: model.selectedCountry)
             events = rows
-            watches = nextWatches
-            alerts = nextAlerts
-            if let requested = model.selectedIntelligenceEventID,
-               rows.contains(where: { $0.id == requested }) {
+            if let requested = model.selectedIntelligenceEventID {
                 selectedID = requested
                 model.selectedIntelligenceEventID = nil
-            }
-            if selectedID == nil || !rows.contains(where: { $0.id == selectedID }) {
+            } else if selectedID == nil {
                 selectedID = rows.first?.id
             }
             error = nil
         } catch {
             self.error = error.localizedDescription
         }
+        if let nextWatches = await watchTask.value { watches = nextWatches }
+        if let nextAlerts = await alertTask.value { alerts = nextAlerts }
     }
 
     private func loadDetail() async {
-        guard let selectedID else { detail = nil; return }
-        do {
-            detail = try await model.api.fetchIntelligenceEvent(id: selectedID)
-        } catch {
-            self.error = error.localizedDescription
+        guard let selectedID else {
+            detail = nil
+            detailError = nil
+            detailLoading = false
+            return
         }
+        detail = nil
+        detailError = nil
+        detailLoading = true
+        defer {
+            if self.selectedID == selectedID { detailLoading = false }
+        }
+        do {
+            let loaded = try await model.api.fetchIntelligenceEvent(id: selectedID)
+            guard self.selectedID == selectedID else { return }
+            detail = loaded
+            if !events.contains(where: { $0.id == loaded.event.id }) {
+                events.insert(loaded.event, at: 0)
+            }
+        } catch {
+            guard self.selectedID == selectedID else { return }
+            detail = nil
+            detailError = error.localizedDescription
+        }
+    }
+
+    private func loadGibsContext() async {
+        guard let selectedID else {
+            gibsContext = nil
+            return
+        }
+        gibsContext = nil
+        let loaded = try? await model.api.fetchEventGibsContext(id: selectedID)
+        guard self.selectedID == selectedID else { return }
+        gibsContext = loaded
     }
 
     private var watchTarget: (type: String, key: String)? {
@@ -272,11 +460,8 @@ struct IntelligenceWorkspaceView: View {
         do {
             if let activeWatch { try await model.api.deleteIntelligenceWatch(id: activeWatch.id) }
             else { _ = try await model.api.saveIntelligenceWatch(type: target.type, key: target.key) }
-            async let watchRequest = model.api.fetchIntelligenceWatchlist()
-            async let alertRequest = model.api.fetchIntelligenceAlerts()
-            let (nextWatches, nextAlerts) = try await (watchRequest, alertRequest)
-            watches = nextWatches
-            alerts = nextAlerts
+            watches = try await model.api.fetchIntelligenceWatchlist()
+            if let nextAlerts = try? await model.api.fetchIntelligenceAlerts() { alerts = nextAlerts }
         } catch {
             self.error = error.localizedDescription
         }
@@ -308,6 +493,31 @@ struct IntelligenceWorkspaceView: View {
             .foregroundStyle(severity == .critical ? Color.red : severity == .high ? Color.orange : Color.secondary)
             .background((severity == .critical ? Color.red : severity == .high ? Color.orange : Color.secondary).opacity(0.12), in: Capsule())
     }
+
+    private func evidenceLabel(_ relationship: String) -> String {
+        switch relationship {
+        case "reported": return "Reported"
+        case "observed": return "Observed"
+        case "corroborates": return "Corroborates"
+        case "derived": return "Derived"
+        case "model_interpretation": return "Model interpretation"
+        case "assessment": return "Assessment"
+        case "contradicts": return "Contradicts"
+        default: return "Context"
+        }
+    }
+
+    private func evidenceIcon(_ relationship: String) -> String {
+        switch relationship {
+        case "reported": return "newspaper"
+        case "observed", "corroborates": return "sensor.tag.radiowaves.forward"
+        case "derived": return "function"
+        case "model_interpretation": return "sparkles"
+        case "assessment": return "scope"
+        case "contradicts": return "exclamationmark.triangle"
+        default: return "link"
+        }
+    }
 }
 
 struct EarthObservationWorkspaceView: View {
@@ -319,7 +529,20 @@ struct EarthObservationWorkspaceView: View {
     @State private var error: String?
 
     private var comparable: [EarthObservation] {
-        Array(observations.filter { !$0.assets.isEmpty }.prefix(2))
+        let candidates = observations.filter { !$0.assets.isEmpty && $0.event_id != nil }
+        for after in candidates {
+            if let before = candidates.first(where: {
+                $0.id != after.id
+                    && $0.event_id == after.event_id
+                    && $0.location_id == after.location_id
+                    && $0.provider == after.provider
+                    && $0.product_type == after.product_type
+                    && $0.capture_start < after.capture_start
+            }) {
+                return [before, after]
+            }
+        }
+        return []
     }
 
     var body: some View {
@@ -327,10 +550,12 @@ struct EarthObservationWorkspaceView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     BrandSectionHeader(
-                        kicker: "Governed observation layer",
-                        title: "Earth observation",
-                        detail: "Ranked scenes, bounded areas, explicit quality, and provider provenance."
+                        kicker: "Source lens · global catalogue",
+                        title: "Imagery library",
+                        detail: "Browse governed acquisitions here. Open Signal desk to understand why an image matters to a specific event."
                     )
+
+                    IntelligenceEventPulseView()
 
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -363,7 +588,7 @@ struct EarthObservationWorkspaceView: View {
 
                     if comparable.count == 2 {
                         BrandCard(title: "Acquisition comparison", icon: "slider.horizontal.below.rectangle") {
-                            EarthComparisonView(before: comparable[1], after: comparable[0], position: $comparePosition)
+                            EarthComparisonView(before: comparable[0], after: comparable[1], position: $comparePosition)
                                 .frame(height: 260)
                             Slider(value: $comparePosition, in: 0...1)
                                 .accessibilityLabel("Before and after comparison position")
@@ -414,30 +639,54 @@ struct EarthObservationWorkspaceView: View {
 struct IntelligenceEventPulseView: View {
     @EnvironmentObject private var model: AppModel
     @State private var events: [IntelligenceEvent] = []
+    @State private var isLoading = true
 
     var body: some View {
-        if !events.isEmpty {
-            BrandCard(title: "Correlated event pulse", icon: "dot.radiowaves.left.and.right") {
-                ForEach(events.prefix(3)) { event in
-                    HStack(alignment: .top) {
-                        Circle()
-                            .fill(event.severity == .critical ? Color.red : event.severity == .high ? Color.orange : Color.blue)
-                            .frame(width: 7, height: 7)
-                            .padding(.top, 5)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(event.title).font(.caption.weight(.semibold)).lineLimit(2)
-                            Text("\(event.location_name ?? event.primary_country_iso2 ?? "Global") · \(event.evidence_count) evidence")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                    if event.id != events.prefix(3).last?.id { Divider() }
+        Group {
+            if isLoading {
+                BrandCard(title: "Correlated event pulse", icon: "dot.radiowaves.left.and.right") {
+                    ProgressView("Loading linked events")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity, minHeight: 46)
                 }
+            } else if !events.isEmpty {
+                BrandCard(title: "Correlated event pulse", icon: "dot.radiowaves.left.and.right") {
+                    ForEach(events.prefix(3)) { event in
+                        Button {
+                            model.selectedIntelligenceEventID = event.id
+                            NotificationCenter.default.post(
+                                name: .claritasWatchOpenDestination,
+                                object: "intelligence",
+                                userInfo: ["eventID": event.id]
+                            )
+                        } label: {
+                            HStack(alignment: .top) {
+                                Circle()
+                                    .fill(event.severity == .critical ? Color.red : event.severity == .high ? Color.orange : Color.blue)
+                                    .frame(width: 7, height: 7)
+                                    .padding(.top, 5)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(event.title).font(.caption.weight(.semibold)).lineLimit(2)
+                                    Text("\(event.location_name ?? event.primary_country_iso2 ?? "Global") · \(event.domain_count) lenses · \(event.evidence_count) evidence")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if event.id != events.prefix(3).last?.id { Divider() }
+                    }
+                }
+            } else {
+                Color.clear.frame(height: 0)
             }
-            .task { events = (try? await model.api.fetchIntelligenceEvents(limit: 3, country: model.selectedCountry)) ?? [] }
-        } else {
-            Color.clear.frame(height: 0)
-                .task { events = (try? await model.api.fetchIntelligenceEvents(limit: 3, country: model.selectedCountry)) ?? [] }
+        }
+        .task(id: model.selectedCountry) {
+            isLoading = true
+            events = (try? await model.api.fetchIntelligenceEvents(limit: 3, country: model.selectedCountry)) ?? []
+            isLoading = false
         }
     }
 }
@@ -509,19 +758,47 @@ private struct AuthenticatedEarthImage: View {
     @EnvironmentObject private var model: AppModel
     let path: String
     @State private var image: UIImage?
+    @State private var loadError: String?
+    @State private var retryID = 0
 
     var body: some View {
         Group {
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
+            } else if let loadError {
+                VStack(spacing: 8) {
+                    Label("Observation image unavailable", systemImage: "photo.badge.exclamationmark")
+                        .font(.caption.weight(.semibold))
+                    Text(loadError)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                    Button("Retry image") { retryID += 1 }
+                        .buttonStyle(.bordered)
+                        .font(.caption)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(.secondary.opacity(0.08))
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.secondary.opacity(0.08))
             }
         }
-        .task(id: path) {
-            guard let data = try? await model.api.fetchEarthAsset(path: path) else { return }
-            image = UIImage(data: data)
+        .task(id: "\(path)-\(retryID)") {
+            image = nil
+            loadError = nil
+            do {
+                let data = try await model.api.fetchEarthAsset(path: path)
+                guard let decoded = UIImage(data: data) else {
+                    loadError = "The returned asset is not a supported image."
+                    return
+                }
+                image = decoded
+            } catch {
+                loadError = error.localizedDescription
+            }
         }
     }
 }

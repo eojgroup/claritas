@@ -3,6 +3,13 @@ import SwiftUI
 struct NewsListView: View {
     let items: [NewsItem]
     var onSelectCountry: (String) -> Void
+    var onOpenEvent: (String) -> Void = { eventID in
+        NotificationCenter.default.post(
+            name: .claritasWatchOpenDestination,
+            object: "intelligence",
+            userInfo: ["eventID": eventID]
+        )
+    }
 
     var body: some View {
         if items.isEmpty {
@@ -15,7 +22,7 @@ struct NewsListView: View {
         } else {
             VStack(spacing: 12) {
                 ForEach(items) { n in
-                    NewsRow(item: n, onSelectCountry: onSelectCountry)
+                    NewsRow(item: n, onSelectCountry: onSelectCountry, onOpenEvent: onOpenEvent)
                 }
             }
         }
@@ -25,6 +32,7 @@ struct NewsListView: View {
 private struct NewsRow: View {
     let item: NewsItem
     var onSelectCountry: (String) -> Void
+    var onOpenEvent: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -102,6 +110,41 @@ private struct NewsRow: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
+                    }
+                }
+                if !item.linked_events.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("LINKED SIGNALS · \(item.linked_events.count)")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.secondary)
+                        ForEach(item.linked_events.prefix(3)) { event in
+                            Button {
+                                onOpenEvent(event.id)
+                            } label: {
+                                HStack(alignment: .top, spacing: 7) {
+                                    Image(systemName: event.earth_observation_state == "imagery_available"
+                                        ? "sensor.tag.radiowaves.forward"
+                                        : "dot.radiowaves.left.and.right")
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(event.title)
+                                            .font(.caption.weight(.semibold))
+                                            .lineLimit(2)
+                                        Text("\(event.domain_count) lenses · \(event.evidence_count) records · \(Int(event.confidence * 100))% confidence")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Open linked signal: \(event.title)")
+                        }
+                        if item.linked_events.count > 3 {
+                            Text("+\(item.linked_events.count - 3) more linked investigations")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

@@ -56,6 +56,8 @@ struct TransportWorkspaceView: View {
                 detail: "Live tracks, flight numbers, transport corridors, and country relationships."
             )
 
+            IntelligenceEventPulseView()
+
             if let detailError {
                 BrandCard(title: "Transport data unavailable", icon: "exclamationmark.triangle") {
                     Text(detailError)
@@ -117,6 +119,8 @@ struct TransportWorkspaceView: View {
                 title: "Routes by country",
                 detail: "Aggregate shipping and flight activity. Open Claritas on iPad or web for live vehicles and route drill-in."
             )
+
+            IntelligenceEventPulseView()
 
             if let error = model.transportLoadError {
                 BrandCard(title: "Transport data unavailable", icon: "exclamationmark.triangle") {

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import IntelligenceWorkspace from "./IntelligenceWorkspace";
 import {
+  fetchEventGibsContext,
   fetchIntelligenceAlerts,
   fetchIntelligenceEvent,
   fetchIntelligenceEvents,
@@ -14,6 +15,7 @@ import {
 vi.mock("../lib/api", () => ({
   acknowledgeIntelligenceAlert: vi.fn(),
   deleteIntelligenceWatch: vi.fn(),
+  fetchEventGibsContext: vi.fn(),
   fetchIntelligenceAlerts: vi.fn(),
   fetchIntelligenceEvent: vi.fn(),
   fetchIntelligenceEvents: vi.fn(),
@@ -76,6 +78,27 @@ const observation: EarthObservation = {
 
 describe("IntelligenceWorkspace", () => {
   beforeEach(() => {
+    vi.mocked(fetchEventGibsContext).mockResolvedValue({
+      provider: "nasa_gibs",
+      event_id: event.id,
+      location_name: "Port of Fujairah",
+      observation_date: "2026-08-11",
+      layers: [{
+        layer_id: "MODIS_Terra_CorrectedReflectance_TrueColor",
+        title: "MODIS Terra true color",
+        category: "true_color",
+        date: "2026-08-11",
+        bbox: [56.2, 25.0, 56.5, 25.3],
+        tile_url: "https://gibs.earthdata.nasa.gov/wmts/example/{z}/{y}/{x}.jpg",
+        preview_url: "https://gibs.earthdata.nasa.gov/wms/example.jpg",
+        provenance: {
+          provider: "NASA EOSDIS GIBS",
+          source_url: "https://gibs.earthdata.nasa.gov/wms/example.jpg",
+          attribution: "NASA EOSDIS GIBS / MODIS Terra",
+        },
+      }],
+      notice: "GIBS visualizations are contextual browse imagery, not automatic proof of physical change or causation.",
+    });
     vi.mocked(fetchIntelligenceEvents).mockResolvedValue([event]);
     vi.mocked(fetchIntelligenceWatchlist).mockResolvedValue([]);
     vi.mocked(fetchIntelligenceAlerts).mockResolvedValue([]);
@@ -91,6 +114,9 @@ describe("IntelligenceWorkspace", () => {
         confidence: 0.94,
         relationship: "observed",
         source_name: "nasa-firms",
+        source_title: "Active fire hotspot",
+        source_summary: "Thermal anomaly observed before the first news report.",
+        source_url: "https://firms.modaps.eosdis.nasa.gov/",
         attribution: "NASA FIRMS",
         license: "NASA Earth Science open data policy",
       }],
@@ -106,8 +132,77 @@ describe("IntelligenceWorkspace", () => {
     render(<IntelligenceWorkspace initialCountry="AE" />);
     expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
     expect((await screen.findByAltText(/true_color observation/i)).getAttribute("loading")).toBe("lazy");
-    expect(screen.getByText(/active fire hotspot · observed/i)).toBeTruthy();
+    expect((await screen.findByAltText(/NASA GIBS true-color context/i)).getAttribute("loading")).toBe("lazy");
+    expect(screen.getByText("Context · not proof")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /NASA GIBS provenance/i }).getAttribute("href")).toBe("https://gibs.earthdata.nasa.gov/wms/example.jpg");
+    expect(screen.getByText("Observed")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Active fire hotspot" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open source/i }).getAttribute("href")).toBe("https://firms.modaps.eosdis.nasa.gov/");
     expect(screen.getByText("Attribution: NASA FIRMS")).toBeTruthy();
     expect(screen.getByText(/Correlation does not establish causation/i)).toBeTruthy();
+  });
+
+  it("opens the exact event id supplied by an alert", async () => {
+    const alertEventId = "de51ed95-3a5c-4e94-8c27-52687c618471";
+    const onSelectEvent = vi.fn();
+    vi.mocked(fetchIntelligenceAlerts).mockResolvedValue([{
+      id: "f9916c1d-e54c-42dc-8ecb-ad16650a0632",
+      event_id: alertEventId,
+      severity: "high",
+      title: "New corroborating observation",
+      body: "Satellite evidence became available.",
+      event_type: "wildfire",
+      eligibility_status: "eligible",
+      created_at: "2026-08-11T09:00:00Z",
+      updated_at: "2026-08-11T09:00:00Z",
+    }]);
+    render(<IntelligenceWorkspace initialEventId={event.id} onSelectEvent={onSelectEvent} />);
+    fireEvent.click(await screen.findByRole("button", { name: /New corroborating observation/i }));
+    expect(onSelectEvent).toHaveBeenLastCalledWith(alertEventId);
+  });
+
+  it("keeps the event workspace available when optional watches and alerts fail", async () => {
+    vi.mocked(fetchIntelligenceWatchlist).mockRejectedValue(new Error("watch service unavailable"));
+    vi.mocked(fetchIntelligenceAlerts).mockRejectedValue(new Error("alert service unavailable"));
+    render(<IntelligenceWorkspace initialEventId={event.id} />);
+    expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+    expect(screen.queryByText(/watch service unavailable/i)).toBeNull();
+  });
+
+  it("clears exact-event detail when navigation removes the event id", async () => {
+    const view = render(<IntelligenceWorkspace initialEventId={event.id} />);
+    expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+    view.rerender(<IntelligenceWorkspace initialEventId={null} />);
+    expect(await screen.findByText("Select an event to inspect its evidence thread.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: event.title })).toBeNull();
+  });
+
+  it("removes stale detail and scopes a failed event request to the detail panel", async () => {
+    const missingId = "3f92373b-a9fe-422f-b640-cb48dfec43af";
+    vi.mocked(fetchIntelligenceEvent).mockImplementation(async (id) => {
+      if (id === missingId) throw new Error("event no longer available");
+      return {
+        event,
+        evidence: [],
+        locations: [],
+        earth_observations: [observation],
+        related_events: [],
+        epistemic_notice: "Correlation does not establish causation.",
+      };
+    });
+    const view = render(<IntelligenceWorkspace initialEventId={event.id} />);
+    expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+    view.rerender(<IntelligenceWorkspace initialEventId={missingId} />);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/event no longer available/i);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: event.title })).toBeNull());
+    expect(screen.getByText(event.title)).toBeTruthy();
+  });
+
+  it("opens imagery with the selected event id", async () => {
+    const onOpenImagery = vi.fn();
+    render(<IntelligenceWorkspace initialEventId={event.id} onOpenImagery={onOpenImagery} />);
+    await screen.findByRole("heading", { name: event.title });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect event imagery" }));
+    expect(onOpenImagery).toHaveBeenCalledWith(event.id);
   });
 });

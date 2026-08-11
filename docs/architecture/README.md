@@ -9,9 +9,9 @@ This directory contains architecture and product design references that should e
 - [Cloud SQL capacity and transport load](../operations/cloud-sql-capacity.md): production sizing, connection budgets, bounded transport retention, and incident controls.
 - [Cost-optimized production baseline](../operations/cost-baseline.md): resource shape, expected trade-offs, and scale-up triggers.
 - [Data-source governance](../data-source-governance.md): active providers, attribution requirements, and reviewed exclusions.
-- [Event-driven intelligence and Earth Observation](event-earth-observation.md): domain envelopes, outbox/Pub/Sub, PostGIS graph, provider boundary and client contract.
-- [Earth Observation administrator setup](../operations/earth-observation-admin-setup.md): exact secrets, flags and staged rollout.
-- [Incremental event/EO cost model](../operations/event-earth-observation-cost-model.md): small, 10× and 100× planning ranges and enforced cost controls.
+- [Unified Signal Desk, event correlation and Earth Observation](event-earth-observation.md): domain envelopes, auditable anchored correlation, EO/GIBS/vision boundaries, APNs semantics and client contract.
+- [Unified Signal Desk and Earth Observation administrator setup](../operations/earth-observation-admin-setup.md): exact secrets, active flags, readiness checks, cost guardrails and safe rollback.
+- [Incremental event/EO cost model](../operations/event-earth-observation-cost-model.md): small, 10× and 100× planning ranges plus exact enforced-versus-operational ceiling semantics.
 
 ## UI Architecture Decisions
 
@@ -20,7 +20,7 @@ This directory contains architecture and product design references that should e
 - [ADR-0003: Semantic tokens and component taxonomy](../ADRs/0003-semantic-ui-system.md)
 - [ADR-0005: Transactional event backbone](../ADRs/0005-transactional-event-backbone.md)
 - [ADR-0006: PostGIS location and physical-asset graph](../ADRs/0006-postgis-location-graph.md)
-- [ADR-0007: Provider-neutral Earth Observation and private assets](../ADRs/0007-earth-observation-provider-assets.md)
+- [ADR-0007: Provider-neutral Earth Observation, contextual imagery and private assets](../ADRs/0007-earth-observation-provider-assets.md)
 
 ## Documentation Rules
 

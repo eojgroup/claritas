@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "tsx --test src/connectors/*.test.ts src/earth-observation/*.test.ts src/earth-observation/providers/*.test.ts src/intelligence/*.test.ts",
+    "test": "tsx --test src/*.test.ts src/connectors/*.test.ts src/earth-observation/*.test.ts src/earth-observation/providers/*.test.ts src/intelligence/*.test.ts",
     "test:integration": "tsx --test src/intelligence/*.integration.ts",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts"

@@ -15,6 +15,24 @@ export type NewsItem = {
   translated_title?: string | null;
   ai_summary?: string | null;
   translation?: NewsTranslation | null;
+  linked_events?: NewsLinkedIntelligenceEvent[];
+};
+
+export type NewsLinkedIntelligenceEvent = {
+  id: string;
+  event_type: string;
+  title: string;
+  severity: IntelligenceSeverity;
+  status?: IntelligenceEvent["status"];
+  confidence?: number;
+  relevance_score?: number;
+  domain_count?: number;
+  evidence_count?: number;
+  domains?: string[];
+  correlation_score?: number | null;
+  correlation_factors?: Record<string, unknown>;
+  earth_observation_state?: "imagery_available" | "processing" | "queued" | "not_requested";
+  best_thumbnail_url?: string | null;
 };
 
 export type NewsTranslation = {
@@ -1018,10 +1036,18 @@ export type IntelligenceEvidence = {
   relationship: string;
   source_name?: string | null;
   location_name?: string | null;
+  source_title?: string | null;
+  source_summary?: string | null;
   attribution?: string | null;
   license?: string | null;
   provenance?: Record<string, unknown>;
   correlation_score?: number | null;
+  correlation_factors?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  title?: string | null;
+  summary?: string | null;
+  source_url?: string | null;
+  native_route?: string | null;
 };
 
 export type EarthObservationAsset = {
@@ -1061,6 +1087,43 @@ export type EarthObservation = {
   assets: EarthObservationAsset[];
 };
 
+export type GibsEventLayer = {
+  layer_id: string;
+  title: string;
+  category: "true_color" | "fire" | "aerosol" | "precipitation" | "snow_ice" | "temperature";
+  date: string;
+  bbox: [number, number, number, number];
+  tile_url: string;
+  preview_url: string;
+  format?: "jpg" | "png";
+  matrix_set?: string;
+  temporal?: boolean;
+  provenance: {
+    provider: string;
+    service?: string;
+    layer_id?: string;
+    observation_date?: string;
+    source_url: string;
+    attribution: string;
+    acknowledgement?: string;
+    license?: string;
+  };
+};
+
+export type GibsEventContext = {
+  provider?: string;
+  event_id?: string;
+  event_type?: string;
+  event_title?: string;
+  location_id?: string | null;
+  location_name?: string | null;
+  observation_date?: string;
+  bbox?: [number, number, number, number];
+  aoi_source?: string;
+  layers: GibsEventLayer[];
+  notice: string;
+};
+
 export type IntelligenceEventDetail = {
   event: IntelligenceEvent;
   evidence: IntelligenceEvidence[];
@@ -1075,7 +1138,18 @@ export type IntelligenceEventDetail = {
     license?: string | null;
   }>;
   earth_observations: EarthObservation[];
-  related_events: Array<IntelligenceEvent & { relationship: string; rationale?: string | null }>;
+  related_events: Array<{
+    id: string;
+    event_type: string;
+    title: string;
+    status: IntelligenceEvent["status"];
+    severity: IntelligenceSeverity;
+    last_activity_time: string;
+    relevance_score: number;
+    relationship: string;
+    confidence: number;
+    rationale?: string | null;
+  }>;
   epistemic_notice: string;
 };
 
@@ -1160,6 +1234,26 @@ export type IntelligenceAdminStatus = {
   };
   rapid_sources: EarthProviderStatus[];
   alert_candidates: Array<{ id: string; event_id: string; severity: IntelligenceSeverity; status: string; title: string }>;
+  apns?: {
+    enabled: boolean;
+    configured: boolean;
+    state: "disabled" | "not_configured" | "configured_unverified" | "ready" | "degraded";
+    reason?: string | null;
+    topic: string;
+    devices: { active: number; total: number };
+    deliveries: Array<{ status: string; count: number }>;
+    verification: {
+      last_verified_at?: string | null;
+      last_provider_failure_at?: string | null;
+      last_provider_error?: string | null;
+    };
+    limits: {
+      max_active_devices_per_user: number;
+      max_device_records_per_user: number;
+      materialization_batch_size: number;
+    };
+    semantics: string;
+  };
   generated_at: string;
 };
 
@@ -1991,20 +2085,55 @@ export async function fetchEarthObservations(params?: {
   limit?: number;
   provider?: string;
   product?: string;
-}): Promise<{ observations: EarthObservation[]; providers: EarthProviderStatus[] }> {
+  eventId?: string;
+  locationId?: string;
+}): Promise<{ observations: EarthObservation[]; providers: EarthProviderStatus[]; provider_notice?: string | null }> {
   const sp = new URLSearchParams();
   if (params?.limit) sp.set("limit", String(params.limit));
   if (params?.provider) sp.set("provider", params.provider);
   if (params?.product) sp.set("product", params.product);
-  const resp = await fetch(`${API_BASE}/api/earth-observation/observations?${sp.toString()}`, {
+  const scopedPath = params?.eventId
+    ? `/api/earth-observation/events/${encodeURIComponent(params.eventId)}`
+    : params?.locationId
+      ? `/api/earth-observation/locations/${encodeURIComponent(params.locationId)}`
+      : "/api/earth-observation/observations";
+  const resp = await fetch(`${API_BASE}${scopedPath}?${sp.toString()}`, {
     credentials: "include",
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch Earth observations"));
   const data = await resp.json();
+  let providers = (data.providers ?? []) as EarthProviderStatus[];
+  if ((params?.eventId || params?.locationId) && providers.length === 0) {
+    const statusResp = await fetch(`${API_BASE}/api/earth-observation/observations?limit=1`, {
+      credentials: "include",
+    });
+    if (statusResp.ok) {
+      const statusData = await statusResp.json();
+      providers = (statusData.providers ?? []) as EarthProviderStatus[];
+    }
+  }
   return {
     observations: (data.observations ?? []) as EarthObservation[],
-    providers: (data.providers ?? []) as EarthProviderStatus[],
+    providers,
+    provider_notice: typeof data.provider_notice === "string" ? data.provider_notice : null,
   };
+}
+
+export async function fetchEventGibsContext(eventId: string): Promise<GibsEventContext | null> {
+  const resp = await fetch(
+    `${API_BASE}/api/earth-observation/events/${encodeURIComponent(eventId)}/gibs`,
+    { credentials: "include" },
+  );
+  if (resp.status === 404 || resp.status === 503) return null;
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch NASA GIBS event context"));
+  const data = await resp.json();
+  return {
+    ...data,
+    layers: Array.isArray(data.layers) ? data.layers : [],
+    notice: typeof data.notice === "string"
+      ? data.notice
+      : "NASA GIBS browse imagery is contextual and is not proof of physical change or causation.",
+  } as GibsEventContext;
 }
 
 export async function requestEarthObservationComparison(observationId: string): Promise<Record<string, unknown>> {

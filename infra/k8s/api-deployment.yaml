@@ -81,10 +81,20 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: USGS_EARTHQUAKES_ENABLED, optional: true } }
             - name: EO_VISION_ENRICHMENT_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_VISION_ENRICHMENT_ENABLED, optional: true } }
+            - name: EO_VISION_MODEL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_VISION_MODEL, optional: true } }
+            - name: EO_VISION_MAX_DAILY_REQUESTS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_VISION_MAX_DAILY_REQUESTS, optional: true } }
+            - name: EO_VISION_MAX_IMAGE_BYTES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_VISION_MAX_IMAGE_BYTES, optional: true } }
             - name: EO_ASSET_BUCKET
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_ASSET_BUCKET, optional: true } }
             - name: EO_MAX_DAILY_PROCESSING_UNITS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_MAX_DAILY_PROCESSING_UNITS, optional: true } }
+            - name: EO_MAX_MONTHLY_PROCESSING_UNITS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_MAX_MONTHLY_PROCESSING_UNITS, optional: true } }
+            - name: EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER, optional: true } }
             - name: EO_MAX_AOI_SQUARE_DEGREES
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_MAX_AOI_SQUARE_DEGREES, optional: true } }
             - name: EO_RENDER_MAX_WIDTH
@@ -95,6 +105,10 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_DEFAULT_CLOUD_THRESHOLD, optional: true } }
             - name: EO_ASSET_RETENTION_DAYS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_ASSET_RETENTION_DAYS, optional: true } }
+            - name: EO_MAX_REVISITS_PER_EVENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_MAX_REVISITS_PER_EVENT, optional: true } }
+            - name: EO_REVISIT_INTERVAL_HOURS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_REVISIT_INTERVAL_HOURS, optional: true } }
             - name: EO_EVENT_RELEVANCE_THRESHOLD
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_EVENT_RELEVANCE_THRESHOLD, optional: true } }
             - name: EO_MAX_SCENES_PER_DISCOVERY
@@ -211,6 +225,32 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENCODE_SERVER_PASSWORD, optional: true } }
             - name: OPENROUTER_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENROUTER_API_KEY, optional: true } }
+            - name: APNS_DELIVERY_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_DELIVERY_ENABLED, optional: true } }
+            - name: APNS_BUNDLE_TOPIC
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_BUNDLE_TOPIC, optional: true } }
+            - name: APNS_WORKER_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_WORKER_BATCH_SIZE, optional: true } }
+            - name: APNS_MATERIALIZATION_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_MATERIALIZATION_BATCH_SIZE, optional: true } }
+            - name: APNS_WORKER_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_WORKER_POLL_SECONDS, optional: true } }
+            - name: APNS_REQUEST_TIMEOUT_MS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_REQUEST_TIMEOUT_MS, optional: true } }
+            - name: APNS_EXPIRATION_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_EXPIRATION_SECONDS, optional: true } }
+            - name: APNS_MAX_NOTIFICATION_AGE_HOURS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_MAX_NOTIFICATION_AGE_HOURS, optional: true } }
+            - name: APNS_MAX_ACTIVE_DEVICES_PER_USER
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_MAX_ACTIVE_DEVICES_PER_USER, optional: true } }
+            - name: APNS_MAX_DEVICE_RECORDS_PER_USER
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: APNS_MAX_DEVICE_RECORDS_PER_USER, optional: true } }
+            - name: APNS_PRIVATE_KEY
+              valueFrom: { secretKeyRef: { name: claritas-apns, key: APNS_PRIVATE_KEY, optional: true } }
+            - name: APNS_KEY_ID
+              valueFrom: { secretKeyRef: { name: claritas-apns, key: APNS_KEY_ID, optional: true } }
+            - name: APNS_TEAM_ID
+              valueFrom: { secretKeyRef: { name: claritas-apns, key: APNS_TEAM_ID, optional: true } }
             - name: SMTP_HOST
               valueFrom: { configMapKeyRef: { name: claritas-smtp, key: SMTP_HOST, optional: true } }
             - name: SMTP_PORT

@@ -108,6 +108,9 @@ configure_target(
     "TARGETED_DEVICE_FAMILY" => "1,2"
   }
 )
+ios_target.build_configurations.each do |configuration|
+  configuration.build_settings["APNS_ENVIRONMENT"] = configuration.name == "Release" ? "production" : "development"
+end
 
 configure_target(
   widget_target,
@@ -318,7 +321,11 @@ watch_product = embed_watch.add_file_reference(watch_target.product_reference)
 watch_product.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy", "CodeSignOnCopy"] }
 
 project.root_object.attributes["TargetAttributes"] = {
-  ios_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" },
+  ios_target.uuid => {
+    "DevelopmentTeam" => development_team,
+    "ProvisioningStyle" => "Automatic",
+    "SystemCapabilities" => { "com.apple.Push" => { "enabled" => 1 } }
+  },
   watch_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" },
   widget_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" },
   watch_widget_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" }

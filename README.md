@@ -316,12 +316,18 @@ The API requires the database environment variables documented in
   - `EVENT_CORRELATION_ENABLED`, `EARTH_OBSERVATION_ENABLED`,
     `COPERNICUS_ENABLED`, `NASA_FIRMS_ENABLED`, `NASA_GIBS_ENABLED`,
     `USGS_EARTHQUAKES_ENABLED`, `EVENT_ALERTS_ENABLED` and
-    `EO_VISION_ENRICHMENT_ENABLED` are repository variables. Optional providers
-    default to disabled; core ingestion and clients remain healthy in that state.
+    `EO_VISION_ENRICHMENT_ENABLED` are repository variables. The committed
+    deployment enables this complete event-to-observation path; each provider
+    still fails closed as `not_configured` when its required credential is
+    absent. Core ingestion and the Signal Desk remain available when optional
+    evidence cannot be produced.
   - Copernicus requires Actions secrets `COPERNICUS_CLIENT_ID` and
     `COPERNICUS_CLIENT_SECRET`. NASA FIRMS requires `NASA_FIRMS_MAP_KEY`.
     NASA GIBS and USGS do not require secrets.
-  - Cost/config variables include `EO_MAX_DAILY_PROCESSING_UNITS`,
+  - Vision uses `EO_VISION_MODEL=openrouter/free`, has no paid fallback, and is
+    locally capped at ten requests per UTC day. Cost/config variables include
+    `EO_MAX_DAILY_PROCESSING_UNITS`, `EO_MAX_MONTHLY_PROCESSING_UNITS`,
+    `EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER`,
     `EO_RENDER_MAX_WIDTH`, `EO_RENDER_MAX_HEIGHT`,
     `EO_MAX_AOI_SQUARE_DEGREES`, `EO_DEFAULT_CLOUD_THRESHOLD`,
     `EO_ASSET_RETENTION_DAYS`, `EO_EVENT_RELEVANCE_THRESHOLD`,
@@ -329,6 +335,11 @@ The API requires the database environment variables documented in
     `USGS_POLL_SECONDS`. Conservative Kubernetes defaults are committed.
   - Exact registration, rollout and verification steps are in
     [Earth Observation administrator setup](docs/operations/earth-observation-admin-setup.md).
+- Native event alerts:
+  - `APNS_DELIVERY_ENABLED=true` enables the bounded delivery worker, but its
+    readiness remains `not_configured` until `APNS_PRIVATE_KEY`, `APNS_KEY_ID`
+    and `APNS_TEAM_ID` are present and valid. APNs acceptance is recorded
+    separately from user acknowledgement.
 - Kubernetes deployment env wiring:
   - `infra/k8s/api-deployment.yaml`
 - Recommended secret names/keys in cluster:
@@ -338,14 +349,21 @@ The API requires the database environment variables documented in
   - `claritas-aisstream` / `AISSTREAM_API_KEY`
   - `claritas-earth-observation` / `COPERNICUS_CLIENT_ID`,
     `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY` (only configured keys are written)
+  - `claritas-apns` / `APNS_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`
 - Production secret source (recommended):
   - GitHub repository secrets: `OPENWEATHER_API_KEY`, `FRED_API_KEY`,
     `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`,
-    `COPERNICUS_CLIENT_ID`, `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY`
+    `COPERNICUS_CLIENT_ID`, `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY`,
+    `APNS_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`
   - GitHub repository variables: `PODCAST_DISCOVERY_TERMS`, `PODCAST_FEED_IDS`,
     `PODCAST_MAX_FEEDS`, `PODCAST_MAX_EPISODES_PER_FEED`,
     `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`, `PODCASTINDEX_USER_AGENT`,
-    `SEC_EDGAR_USER_AGENT`, `NWS_USER_AGENT`
+    `SEC_EDGAR_USER_AGENT`, `NWS_USER_AGENT`, `EVENT_CORRELATION_ENABLED`,
+    `EVENT_ALERTS_ENABLED`, `EARTH_OBSERVATION_ENABLED`,
+    `COPERNICUS_ENABLED`, `NASA_FIRMS_ENABLED`, `NASA_GIBS_ENABLED`,
+    `USGS_EARTHQUAKES_ENABLED`, `EO_VISION_ENRICHMENT_ENABLED`,
+    `EO_VISION_MODEL`, the bounded `EO_*` budget variables, and
+    `APNS_DELIVERY_ENABLED`
   - Used by deploy workflow: `.github/workflows/gke-deploy.yml` (`Ensure API provider secrets exist`)
 
 ### 4. Daily Briefing AI Backend

@@ -52,6 +52,7 @@ final class AppModel: ObservableObject {
     @Published var isSavingDailyBriefingSchedule: Bool = false
     @Published var dailyBriefingScheduleError: String? = nil
     @Published var dailyBriefingScheduleNotice: String? = nil
+    @Published var pushRegistrationError: String? = nil
 
     let api: APIClient
     private var authToken: String? = nil
@@ -60,6 +61,7 @@ final class AppModel: ObservableObject {
     private let watchSync = WatchSyncCoordinator.shared
 
     private let authTokenKey = "AUTH_TOKEN"
+    private let pushInstallationIDKey = "APNS_INSTALLATION_ID"
     private let authCallbackScheme: String
     private let authCallbackURL: URL
     private let recentNewsLimit = 120
@@ -104,6 +106,7 @@ final class AppModel: ObservableObject {
         if authStatus == .authed {
             if hasPaidAccess {
                 await loadInitial()
+                await configurePushNotifications()
             } else {
                 clearAppData()
             }
@@ -214,6 +217,7 @@ final class AppModel: ObservableObject {
             if authStatus == .authed {
                 if hasPaidAccess {
                     await loadInitial()
+                    await configurePushNotifications()
                 } else {
                     clearAppData()
                 }
@@ -222,6 +226,26 @@ final class AppModel: ObservableObject {
     }
 
     func logout() async {
+        var pushRevoked = false
+        if let deviceID = UserDefaults.standard.string(forKey: "APNS_DEVICE_ID") {
+            do {
+                try await api.unregisterPushDevice(id: deviceID)
+                pushRevoked = true
+            } catch {
+                do {
+                    try await api.unregisterAllPushDevices()
+                    pushRevoked = true
+                } catch { }
+            }
+        } else {
+            do {
+                try await api.unregisterAllPushDevices()
+                pushRevoked = true
+            } catch { }
+        }
+        if pushRevoked {
+            UserDefaults.standard.removeObject(forKey: "APNS_DEVICE_ID")
+        }
         do { try await api.logout() } catch { }
         setAuthToken(nil)
         authUser = nil
@@ -442,6 +466,55 @@ final class AppModel: ObservableObject {
     func clearSelection() {
         selectedCountry = nil
         selectedSymbol = nil
+        selectedIntelligenceEventID = nil
+    }
+
+    func configurePushNotifications() async {
+        guard authStatus == .authed else { return }
+        do {
+            let granted = try await PushNotificationCoordinator.requestAuthorizationAndRegister()
+            guard granted else {
+                pushRegistrationError = "Notifications are disabled in system settings. In-app alerts remain available."
+                return
+            }
+            pushRegistrationError = nil
+            if let token = UserDefaults.standard.string(forKey: "APNS_DEVICE_TOKEN") {
+                await registerPushDevice(token: token)
+            }
+        } catch {
+            pushRegistrationError = error.localizedDescription
+        }
+    }
+
+    func registerPushDevice(token: String) async {
+        guard authStatus == .authed else { return }
+        #if DEBUG
+        let environment = "development"
+        #else
+        let environment = "production"
+        #endif
+        do {
+            let registration = try await api.registerPushDevice(
+                token: token,
+                environment: environment,
+                bundleID: Bundle.main.bundleIdentifier ?? "com.eojgroup.claritas",
+                installationID: pushInstallationID()
+            )
+            UserDefaults.standard.set(registration.id, forKey: "APNS_DEVICE_ID")
+            pushRegistrationError = nil
+        } catch {
+            pushRegistrationError = error.localizedDescription
+        }
+    }
+
+    private func pushInstallationID() -> String {
+        if let stored = UserDefaults.standard.string(forKey: pushInstallationIDKey),
+           UUID(uuidString: stored) != nil {
+            return stored.lowercased()
+        }
+        let generated = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(generated, forKey: pushInstallationIDKey)
+        return generated
     }
 
     func loadDailyBriefingSchedule() async {

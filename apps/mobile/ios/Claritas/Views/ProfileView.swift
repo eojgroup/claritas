@@ -229,6 +229,26 @@ struct ProfileView: View {
 
                 Divider()
 
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Event alerts")
+                            .font(.subheadline.weight(.semibold))
+                        Text(model.pushRegistrationError ?? "Watched high-impact signals can open directly in Signal desk.")
+                            .font(.caption)
+                            .foregroundStyle(model.pushRegistrationError == nil ? Color.secondary : Color.orange)
+                    }
+                    Spacer()
+                    Button {
+                        Task { await model.configurePushNotifications() }
+                    } label: {
+                        Label("Enable", systemImage: "bell.badge")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Divider()
+
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle(isOn: $briefingScheduleEnabled) {
                         VStack(alignment: .leading, spacing: 4) {

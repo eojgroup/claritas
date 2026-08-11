@@ -1,7 +1,7 @@
 import { query, withTransaction } from "../db";
 import { buildEventDedupeKey, computeSignalPriority, evaluateMarketMove } from "./correlation";
 import { resolveLocationFromText, resolveNearestLocation } from "./location-resolver";
-import { upsertIntelligenceSignal } from "./service";
+import { correlateAndUpsertIntelligenceSignal } from "./service";
 import { calculateRollingBaseline, detectTransportAnomaly } from "./transport-anomaly";
 import type { DomainEventEnvelope, IntelligenceSeverity } from "./types";
 
@@ -17,6 +17,53 @@ const sourceReliability: Record<string, number> = {
 
 const dayKey = (date: Date) => date.toISOString().slice(0, 10);
 const sixHourKey = (date: Date) => `${date.toISOString().slice(0, 10)}T${String(Math.floor(date.getUTCHours() / 6) * 6).padStart(2, "0")}`;
+
+function collectEntityKeys(...values: unknown[]) {
+  const collected: string[] = [];
+  const visit = (value: unknown) => {
+    if (typeof value === "string") {
+      const normalized = value.trim();
+      if (normalized.length >= 2 && normalized.length <= 180) collected.push(normalized);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.slice(0, 50).forEach(visit);
+      return;
+    }
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      visit(record.name ?? record.canonical_name ?? record.label ?? record.id);
+    }
+  };
+  values.forEach(visit);
+  return [...new Set(collected)].slice(0, 40);
+}
+
+function firstGkgCoordinate(payload: any): { latitude: number; longitude: number; name: string | null } | null {
+  const locations = Array.isArray(payload?.gkg?.locations) ? payload.gkg.locations : [];
+  for (const candidate of locations.slice(0, 30)) {
+    const latitude = Number(candidate?.latitude);
+    const longitude = Number(candidate?.longitude);
+    if (Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
+        && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180) {
+      return {
+        latitude,
+        longitude,
+        name: typeof candidate?.name === "string" && candidate.name.trim() ? candidate.name.trim() : null,
+      };
+    }
+  }
+  return null;
+}
+
+function exactObservedCoordinate(latitudeValue: unknown, longitudeValue: unknown) {
+  const latitude = Number(latitudeValue);
+  const longitude = Number(longitudeValue);
+  return Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
+    && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180
+    ? { latitude, longitude }
+    : null;
+}
 
 function classifyEventType(text: string) {
   const normalized = text.toLowerCase();
@@ -64,7 +111,11 @@ async function handleNewsStory(event: DomainEventEnvelope) {
   if (!story) return;
   const occurred = new Date(story.event_time ?? story.created_at);
   const text = `${story.title ?? ""} ${story.summary ?? ""}`;
-  const location = await resolveLocationFromText(text, story.country_iso2)
+  const gkgCoordinate = firstGkgCoordinate(story.payload);
+  const location = (gkgCoordinate
+    ? await resolveNearestLocation(gkgCoordinate.latitude, gkgCoordinate.longitude, 150)
+    : null)
+    ?? await resolveLocationFromText(text, story.country_iso2)
     ?? await countryLocation(story.country_iso2);
   if (!location && !story.country_iso2) return;
   const eventType = classifyEventType(text);
@@ -77,7 +128,7 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     locationImportance: Number(location?.importance_score ?? 0.45),
     domainCount: 1,
   });
-  await upsertIntelligenceSignal({
+  await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey([eventType, location?.id ?? story.country_iso2, dayKey(occurred)]),
     eventType,
     title: String(story.title ?? "Reported development"),
@@ -89,13 +140,23 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     lastActivityTime: occurred,
     primaryLocationId: location?.id ?? null,
     primaryCountryIso2: location?.country_iso2 ?? story.country_iso2,
-    latitude: location?.latitude ?? null,
-    longitude: location?.longitude ?? null,
+    latitude: gkgCoordinate?.latitude ?? location?.latitude ?? null,
+    longitude: gkgCoordinate?.longitude ?? location?.longitude ?? null,
+    coordinatesAreExact: Boolean(gkgCoordinate),
     relevanceScore: priority.score,
     urgencyScore: eventType === "security_incident" ? 0.72 : 0.45,
     materialityScore: Number(location?.importance_score ?? 0.45),
     scoreComponents: priority.components,
-    metadata: { extraction: "deterministic-keyword-v1", source_title_preserved: true },
+    metadata: {
+      extraction: "deterministic-keyword-v2",
+      source_title_preserved: true,
+      coordinate_source: gkgCoordinate ? "gdelt_gkg_location" : location?.match_basis ?? null,
+    },
+    entityKeys: collectEntityKeys(
+      story.payload?.gkg?.persons,
+      story.payload?.gkg?.organizations,
+      story.payload?.gkg?.locations,
+    ),
     evidence: {
       domain: "news",
       evidenceType: "reported_event",
@@ -110,7 +171,12 @@ async function handleNewsStory(event: DomainEventEnvelope) {
       provenance: { provider: story.source_name, publisher: story.payload?.source ?? story.payload?.domain ?? story.source_name, url: story.url },
       license: story.source_metadata?.license ?? null,
       attribution: story.payload?.source ?? story.source_name,
-      metadata: { original_title: story.title, original_summary: story.summary, language_code: story.language_code },
+      metadata: {
+        original_title: story.title,
+        original_summary: story.summary,
+        language_code: story.language_code,
+        extracted_coordinate: gkgCoordinate,
+      },
     },
   });
 }
@@ -125,8 +191,9 @@ async function handleGdeltEvent(event: DomainEventEnvelope) {
   const record = rows[0];
   if (!record) return;
   const observed = new Date(record.event_time);
-  const location = Number.isFinite(record.action_lat) && Number.isFinite(record.action_lon)
-    ? await resolveNearestLocation(record.action_lat, record.action_lon, 150)
+  const actionCoordinate = exactObservedCoordinate(record.action_lat, record.action_lon);
+  const location = actionCoordinate
+    ? await resolveNearestLocation(actionCoordinate.latitude, actionCoordinate.longitude, 150)
     : await resolveLocationFromText(record.action_geo_name ?? "", record.action_country_iso2)
       ?? await countryLocation(record.action_country_iso2);
   const title = [record.actor1_name, record.actor2_name].filter(Boolean).join(" / ") || record.action_geo_name || "GDELT event signal";
@@ -135,15 +202,17 @@ async function handleGdeltEvent(event: DomainEventEnvelope) {
     freshnessHours: Math.max(0, (Date.now() - observed.getTime()) / 3_600_000), severity: "medium",
     locationImportance: Number(location?.importance_score ?? 0.4), domainCount: 1,
   });
-  await upsertIntelligenceSignal({
+  await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey(["gdelt_event", record.external_id]),
     eventType: "reported_development", title, summary: `GDELT recorded a structured event near ${record.action_geo_name ?? location?.canonical_name ?? "the reported location"}.`,
     severity: "medium", confidence: 0.68, startTime: observed, lastActivityTime: observed,
     primaryLocationId: location?.id ?? null, primaryCountryIso2: location?.country_iso2 ?? record.action_country_iso2,
-    latitude: record.action_lat ?? location?.latitude, longitude: record.action_lon ?? location?.longitude,
+    latitude: actionCoordinate?.latitude ?? location?.latitude, longitude: actionCoordinate?.longitude ?? location?.longitude,
+    coordinatesAreExact: Boolean(actionCoordinate),
     relevanceScore: priority.score, urgencyScore: 0.4,
     materialityScore: Math.min(1, Math.abs(Number(record.goldstein_scale ?? 0)) / 10), scoreComponents: priority.components,
     metadata: { gdelt_event_code: record.event_code, quad_class: record.quad_class },
+    entityKeys: collectEntityKeys(record.actor1_name, record.actor2_name),
     evidence: {
       domain: "news", evidenceType: "structured_event", sourceRecordType: "global_event", sourceRecordId: String(id),
       sourceId: record.source_id, observedAt: observed, publishedAt: observed, locationId: location?.id ?? null,
@@ -172,7 +241,7 @@ async function handleWeatherAlert(event: DomainEventEnvelope) {
     freshnessHours: Math.max(0, (Date.now() - start.getTime()) / 3_600_000), severity,
     locationImportance: Number(location?.importance_score ?? 0.5), domainCount: 1,
   });
-  await upsertIntelligenceSignal({
+  await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey(["weather", alert.external_id, alert.country_iso2]),
     eventType: classifyEventType(alert.event), title: alert.headline ?? alert.event,
     summary: String(alert.description ?? `${alert.event} affecting ${alert.area ?? alert.country_iso2}.`).slice(0, 1_800),
@@ -180,6 +249,7 @@ async function handleWeatherAlert(event: DomainEventEnvelope) {
     startTime: start, lastActivityTime: new Date(alert.updated_at),
     primaryLocationId: location?.id ?? null, primaryCountryIso2: alert.country_iso2,
     latitude: location?.latitude ?? null, longitude: location?.longitude ?? null,
+    coordinatesAreExact: false,
     relevanceScore: priority.score, urgencyScore: ["immediate", "expected"].includes(String(alert.urgency).toLowerCase()) ? 0.9 : 0.55,
     materialityScore: severity === "critical" ? 1 : severity === "high" ? 0.8 : 0.5, scoreComponents: priority.components,
     metadata: { ends_at: alert.ends_at, instruction: alert.instruction },
@@ -212,17 +282,19 @@ async function handleEarthquake(event: DomainEventEnvelope) {
     freshnessHours: Math.max(0, (Date.now() - observed.getTime()) / 3_600_000), severity,
     locationImportance: Number(location?.importance_score ?? 0.65), domainCount: 1,
   });
-  await upsertIntelligenceSignal({
+  await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey(["usgs", quake.usgs_event_id]), eventType: "earthquake",
     title: `${quake.magnitude == null ? "Earthquake" : `M${Number(quake.magnitude).toFixed(1)} earthquake`} — ${quake.place}`,
     summary: `USGS observed an earthquake at ${quake.place}${quake.depth_km == null ? "" : `, depth ${Number(quake.depth_km).toFixed(1)} km`}.${quake.tsunami ? " The source tsunami flag is set." : ""}`,
     severity, confidence: 0.98, startTime: observed, lastActivityTime: new Date(quake.updated_at_source),
     primaryLocationId: location?.id ?? null, primaryCountryIso2: location?.country_iso2 ?? null,
     latitude: quake.latitude, longitude: quake.longitude,
+    coordinatesAreExact: true,
     relevanceScore: Math.max(priority.score, Math.min(1, magnitude / 9)), urgencyScore: Math.min(1, magnitude / 8),
     materialityScore: Math.min(1, (Number(quake.significance ?? 0) / 1_000) + (location?.importance_score ?? 0) * 0.25),
     scoreComponents: { ...priority.components, magnitude, significance: quake.significance, proximity_radius_km: radius },
     metadata: { tsunami: quake.tsunami, depth_km: quake.depth_km, alert_level: quake.alert_level, felt: quake.felt },
+    entityKeys: collectEntityKeys(quake.place, quake.usgs_event_id),
     evidence: {
       domain: "disaster", evidenceType: "seismic_observation", sourceRecordType: "earthquake_observation", sourceRecordId: id,
       sourceId: Number(event.payload.source_id) || null, observedAt: observed, publishedAt: new Date(quake.updated_at_source), locationId: location?.id ?? null,
@@ -251,13 +323,14 @@ async function handleFire(event: DomainEventEnvelope) {
     physicalObservationAvailable: true, anomalyMagnitude: Math.min(1, frp / 200),
   });
   const spatialCell = `${Math.round(Number(fire.latitude) * 5) / 5},${Math.round(Number(fire.longitude) * 5) / 5}`;
-  const intelligenceEvent = await upsertIntelligenceSignal({
+  const intelligenceEvent = await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey(["firms-fire-cluster", spatialCell, sixHourKey(observed)]), eventType: "wildfire",
     title: `Active fire detections${location ? ` near ${location.canonical_name}` : ""}`,
     summary: `NASA FIRMS VIIRS observed an active-fire signal${frp ? ` with fire radiative power ${frp.toFixed(1)} MW` : ""}. A hotspot is an observed thermal anomaly, not by itself proof of cause or impact.`,
     severity, confidence: highConfidence ? 0.94 : 0.82, startTime: observed, lastActivityTime: observed,
     primaryLocationId: location?.id ?? null, primaryCountryIso2: location?.country_iso2 ?? null,
     latitude: fire.latitude, longitude: fire.longitude,
+    coordinatesAreExact: true,
     relevanceScore: priority.score, urgencyScore: highConfidence ? 0.75 : 0.55,
     materialityScore: Math.min(1, frp / 200 + Number(location?.importance_score ?? 0) * 0.35),
     scoreComponents: priority.components,
@@ -315,13 +388,14 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
     anomalyMagnitude: anomaly.magnitude,
   });
   const change = anomaly.percentChange == null ? "a new baseline" : `${Math.abs(anomaly.percentChange * 100).toFixed(0)}% ${anomaly.direction}`;
-  await upsertIntelligenceSignal({
+  await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey(["transport-anomaly", movement.location_name, dayKey(observed)]),
     eventType: "transport_disruption", title: `${movement.location_name} movement anomaly`,
     summary: `Observed arrivals and departures are ${change} the robust rolling baseline. Coverage reflects Claritas telemetry sources, not total port-authority traffic.`,
     severity, confidence: anomaly.confidence, startTime: observed, lastActivityTime: observed,
     primaryLocationId: location?.id ?? null, primaryCountryIso2: movement.country_iso2,
     latitude: location?.latitude ?? null, longitude: location?.longitude ?? null,
+    coordinatesAreExact: false,
     relevanceScore: priority.score, urgencyScore: anomaly.magnitude, materialityScore: anomaly.magnitude,
     scoreComponents: { ...priority.components, anomaly }, metadata: { methodology: anomaly.methodology, coverage_qualified: true },
     evidence: {
@@ -371,16 +445,18 @@ async function handleMarketIndicator(event: DomainEventEnvelope) {
     locationImportance: Number(location?.importance_score ?? 0.4), domainCount: 1, anomalyMagnitude: magnitude,
   });
   const symbol = current.canonical_symbol ?? current.symbol ?? current.series_key;
-  await upsertIntelligenceSignal({
+  await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey(["market-move", current.instrument_id ?? current.series_key, dayKey(observed)]),
     eventType: "market_move", title: `${symbol} moved ${(change * 100).toFixed(1)}%`,
     summary: `${current.instrument_name ?? current.name} changed ${(change * 100).toFixed(1)}% from the preceding ${current.frequency ?? "reported"} observation. Physical context is shown only where a sourced exposure exists.`,
     severity, confidence: 0.9, startTime: observed, lastActivityTime: observed,
     primaryLocationId: location?.id ?? null, primaryCountryIso2: location?.country_iso2 ?? current.country_iso2,
     latitude: location?.latitude ?? null, longitude: location?.longitude ?? null,
+    coordinatesAreExact: false,
     relevanceScore: priority.score, urgencyScore: Math.min(1, Math.abs(change) * 5), materialityScore: magnitude,
     scoreComponents: { ...priority.components, percent_change: change, threshold },
     metadata: { symbol, previous_value: previous, current_value: current.value, frequency: current.frequency },
+    entityKeys: collectEntityKeys(symbol, current.instrument_name),
     evidence: {
       domain: "market", evidenceType: "threshold_move", sourceRecordType: "market_indicator", sourceRecordId: String(id),
       sourceId: current.source_id, observedAt: observed, locationId: location?.id ?? null,

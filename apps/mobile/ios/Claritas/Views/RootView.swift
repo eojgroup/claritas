@@ -20,15 +20,15 @@ struct RootView: View {
 
         var title: String {
             switch self {
-            case .overview: return "Signal desk"
-            case .dashboard: return "Dashboard"
+            case .overview: return "Overview"
+            case .dashboard: return "Overview"
             case .news: return "News"
             case .podcasts: return "Podcasts"
             case .weather: return "Weather"
             case .markets: return "Markets"
             case .transport: return "Transport"
-            case .intelligence: return "Intelligence"
-            case .earthObservation: return "Earth observation"
+            case .intelligence: return "Signal desk"
+            case .earthObservation: return "Imagery library"
             case .admin: return "Admin"
             case .profile: return "Profile"
             case .policies: return "Policies"
@@ -109,8 +109,7 @@ struct RootView: View {
                 next = .more
                 compactMorePath = [.transport]
             case "intelligence":
-                next = .more
-                compactMorePath = [.intelligence]
+                next = .intelligence
             case "earth-observation":
                 next = .more
                 compactMorePath = [.earthObservation]
@@ -122,14 +121,18 @@ struct RootView: View {
             tab = next
             sidebarSelection = sidebarItems.contains(next) ? next : .overview
         }
+        .onReceive(NotificationCenter.default.publisher(for: .claritasPushTokenAvailable)) { note in
+            guard let token = note.object as? String, !token.isEmpty else { return }
+            Task { await model.registerPushDevice(token: token) }
+        }
     }
 
     private var compactShell: some View {
         TabView(selection: $tab) {
             compactTab(.dashboard)
+            compactTab(.intelligence)
             compactTab(.news)
-            compactTab(.weather)
-            compactTab(.markets)
+            compactTab(.briefing)
             compactTab(.more)
         }
         .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
@@ -193,18 +196,18 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .intelligence, .earthObservation, .news, .podcasts, .weather, .markets, .transport, .admin, .profile, .policies]
-            : [.overview, .intelligence, .earthObservation, .news, .podcasts, .weather, .markets, .transport, .profile, .policies]
+            ? [.overview, .intelligence, .briefing, .news, .podcasts, .weather, .markets, .transport, .admin, .profile, .policies]
+            : [.overview, .intelligence, .briefing, .news, .podcasts, .weather, .markets, .transport, .profile, .policies]
     }
 
     private var sidebar: some View {
         List(selection: $sidebarSelection) {
             Section("Workspace") {
                 sidebarLink(.overview)
-            }
-            Section("Signals") {
                 sidebarLink(.intelligence)
-                sidebarLink(.earthObservation)
+                sidebarLink(.briefing)
+            }
+            Section("Source lenses") {
                 sidebarLink(.news)
                 sidebarLink(.podcasts)
                 sidebarLink(.weather)
@@ -316,17 +319,10 @@ private struct CompactMoreView: View {
                         detail: "Evidence, briefing, account, and reference tools."
                     )
 
-                    BrandCard(title: "Intelligence", icon: "waveform.path.ecg") {
+                    BrandCard(title: "Source lenses", icon: "waveform.path.ecg") {
                         destinationRow(
-                            title: "Cross-domain events",
-                            detail: "Correlated evidence, confidence, and materiality",
-                            icon: "dot.radiowaves.left.and.right",
-                            destination: IntelligenceWorkspaceView()
-                        )
-                        Divider()
-                        destinationRow(
-                            title: "Earth observation",
-                            detail: "Governed imagery, acquisition quality, and provenance",
+                            title: "Imagery library",
+                            detail: "Global provenance catalogue; event imagery lives in Signal desk",
                             icon: "sensor.tag.radiowaves.forward",
                             destination: EarthObservationWorkspaceView()
                         )
@@ -339,15 +335,22 @@ private struct CompactMoreView: View {
                         )
                         Divider()
                         destinationRow(
-                            title: "Daily briefing",
-                            detail: "Published cross-domain synopsis and delivery schedule",
-                            icon: "sparkles",
-                            destination: DailyBriefingWorkspaceView()
+                            title: "Weather lens",
+                            detail: "Official alerts and environmental context",
+                            icon: "cloud.sun",
+                            destination: WeatherWorkspaceView()
                         )
                         Divider()
                         destinationRow(
-                            title: "Transport pulse",
-                            detail: "Aggregate flight, shipping, corridor, and country activity",
+                            title: "Market lens",
+                            detail: "Market response and economic exposure",
+                            icon: "chart.line.uptrend.xyaxis",
+                            destination: MarketsWorkspaceView()
+                        )
+                        Divider()
+                        destinationRow(
+                            title: "Transport lens",
+                            detail: "Flight, shipping, corridor, and country activity",
                             icon: "point.topleft.down.to.point.bottomright.curvepath",
                             destination: TransportWorkspaceView()
                         )
@@ -706,6 +709,7 @@ struct PodcastWorkspaceView: View {
         BrandBackground {
             ScrollView {
                 LazyVStack(spacing: 16) {
+                    IntelligenceEventPulseView()
                     controls
                     metrics
                     if !model.podcasts.isEmpty {
