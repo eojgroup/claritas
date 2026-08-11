@@ -30,6 +30,11 @@ import {
   type IntelligenceWatch,
 } from "../lib/api";
 import SatelliteImage from "./SatelliteImage";
+import {
+  earthObservationProductLabel,
+  isAnalyticalEarthProduct,
+  sortEarthObservationsForDisplay,
+} from "./earthObservationPresentation";
 
 const severities: Array<IntelligenceSeverity | "all"> = ["all", "critical", "high", "medium", "low"];
 
@@ -232,6 +237,10 @@ export default function IntelligenceWorkspace({
   const gibsTrueColor = gibsContext?.layers.find((layer) => (
     layer.category === "true_color" && Boolean(layer.preview_url)
   ));
+  const displayedEarthObservations = useMemo(
+    () => sortEarthObservationsForDisplay(detail?.earth_observations ?? []),
+    [detail],
+  );
 
   const watchTarget = detail?.event.primary_country_iso2
     ? { type: "country", key: detail.event.primary_country_iso2 }
@@ -430,13 +439,14 @@ export default function IntelligenceWorkspace({
                     </div>
                   </article>
                 )}
-                {detail.earth_observations.length > 0 ? (
+                {displayedEarthObservations.length > 0 ? (
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    {detail.earth_observations.slice(0, 4).map((observation) => {
+                    {displayedEarthObservations.slice(0, 4).map((observation) => {
                       const asset = observation.assets?.find((item) => item.asset_type === "preview") ?? observation.assets?.[0];
+                      const analytical = isAnalyticalEarthProduct(observation.product_type);
                       return <article key={observation.id} className="overflow-hidden rounded-lg border border-[color:var(--shell-border)]">
-                        {asset ? <SatelliteImage sources={[asset.url, gibsTrueColor?.preview_url]} alt={`${observation.product_type} observation at ${observation.location_name || "event location"}`} className="aspect-video w-full bg-slate-100 object-cover" fallbackClassName="flex aspect-video items-center justify-center bg-slate-900" /> : <div className="flex aspect-video items-center justify-center bg-slate-100"><ImageOff className="h-6 w-6 text-slate-400" /></div>}
-                        <div className="p-3 text-xs text-[color:var(--shell-muted)]"><div className="font-semibold capitalize text-[color:var(--shell-ink)]">{observation.product_type.replace(/_/g, " ")} · {observation.mission}</div><div className="mt-1">Captured {dateLabel(observation.capture_start)}{observation.cloud_cover == null ? "" : ` · ${Math.round(observation.cloud_cover)}% cloud`}</div>{observation.analysis_summary && <p className="mt-2 leading-5">{observation.analysis_summary}</p>}<a href={observation.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a></div>
+                        {asset ? <SatelliteImage sources={[asset.url]} alt={`${earthObservationProductLabel(observation.product_type)} observation at ${observation.location_name || "event location"}`} className={`aspect-video w-full bg-slate-950 ${analytical ? "object-contain" : "object-cover"}`} fallbackClassName="flex aspect-video items-center justify-center bg-slate-900" /> : <div className="flex aspect-video items-center justify-center bg-slate-100"><ImageOff className="h-6 w-6 text-slate-400" /></div>}
+                        <div className="p-3 text-xs text-[color:var(--shell-muted)]"><div className="font-semibold text-[color:var(--shell-ink)]">{earthObservationProductLabel(observation.product_type)} · {observation.mission}</div>{analytical && <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">Analytical layer · not natural color</div>}<div className="mt-1">Captured {dateLabel(observation.capture_start)}{observation.cloud_cover == null ? "" : ` · ${Math.round(observation.cloud_cover)}% cloud`}</div>{observation.analysis_summary && <p className="mt-2 leading-5">{observation.analysis_summary}</p>}<a href={observation.source_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a></div>
                       </article>;
                     })}
                   </div>

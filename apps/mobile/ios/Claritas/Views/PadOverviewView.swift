@@ -357,7 +357,7 @@ struct OverviewSatelliteContextView: View {
             } else if let selectedEvent {
                 VStack(alignment: .leading, spacing: 12) {
                     ZStack(alignment: .topLeading) {
-                        if let asset = observation?.assets.first {
+                        if let asset = observation?.preferredDisplayAsset {
                             AuthenticatedEarthImage(path: asset.url)
                         } else if let layer = gibsLayer {
                             AuthenticatedRemoteImage(url: layer.preview_url, unavailableLabel: "Satellite context unavailable")
@@ -384,6 +384,11 @@ struct OverviewSatelliteContextView: View {
                             Text(selectedEvent.title)
                                 .font(.headline)
                                 .lineLimit(2)
+                            if let observation {
+                                Text(observation.displayProductName.uppercased())
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                            }
                             Text(selectedEvent.location_name ?? selectedEvent.primary_country_iso2 ?? "Global")
                                 .font(.caption)
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -452,13 +457,19 @@ struct OverviewSatelliteContextView: View {
                 }
 
             for event in events.prefix(8) {
-                var eventObservation: EarthObservation?
+                var eventObservations: [EarthObservation] = []
                 if event.earth_observation_available,
                    let detail = try? await model.api.fetchIntelligenceEvent(id: event.id) {
-                    eventObservation = detail.earth_observations.first { !$0.assets.isEmpty }
+                    eventObservations = detail.earth_observations.sortedForDisplay
+                        .filter { $0.preferredDisplayAsset != nil }
                 }
                 let eventGibs = try? await model.api.fetchEventGibsContext(id: event.id)
-                if eventObservation != nil || !(eventGibs?.layers.isEmpty ?? true) {
+                let hasTrueColorBrowse = eventGibs?.layers.contains { $0.category == "true_color" } ?? false
+                let eventObservation = eventObservations.first { $0.product_type == "true_color" }
+                    ?? (hasTrueColorBrowse ? nil : eventObservations.first {
+                        ["false_color", "sar"].contains($0.product_type)
+                    })
+                if eventObservation != nil || hasTrueColorBrowse {
                     selectedEvent = event
                     observation = eventObservation
                     gibsContext = eventGibs

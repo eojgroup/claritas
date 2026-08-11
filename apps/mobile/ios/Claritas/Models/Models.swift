@@ -1951,6 +1951,50 @@ struct EarthObservation: Codable, Identifiable {
     let assets: [EarthObservationAsset]
 }
 
+extension EarthObservation {
+    var preferredDisplayAsset: EarthObservationAsset? {
+        assets.first { $0.asset_type == "preview" } ?? assets.first
+    }
+
+    var displayProductName: String {
+        switch product_type {
+        case "true_color": return "Natural color"
+        case "false_color": return "False-color composite"
+        case "sar": return "Radar observation"
+        case "ndvi": return "Vegetation index"
+        case "ndwi": return "Water index"
+        case "burn_index": return "Burn-sensitive index"
+        case "gibs_layer": return "Browse context"
+        default: return product_type.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    var isAnalyticalLayer: Bool {
+        ["ndvi", "ndwi", "burn_index"].contains(product_type)
+    }
+
+    fileprivate var displayRank: Int {
+        switch product_type {
+        case "true_color": return 0
+        case "false_color": return 1
+        case "sar": return 2
+        case "ndvi": return 3
+        case "ndwi": return 4
+        case "burn_index": return 5
+        default: return 99
+        }
+    }
+}
+
+extension Array where Element == EarthObservation {
+    var sortedForDisplay: [EarthObservation] {
+        sorted {
+            if $0.displayRank != $1.displayRank { return $0.displayRank < $1.displayRank }
+            return $0.capture_start > $1.capture_start
+        }
+    }
+}
+
 struct IntelligenceEventLocation: Codable, Identifiable {
     let id: String
     let canonical_name: String

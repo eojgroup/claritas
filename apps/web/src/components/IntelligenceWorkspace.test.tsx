@@ -132,7 +132,7 @@ describe("IntelligenceWorkspace", () => {
   it("renders event detail, satellite context, evidence labels, provenance, and uncertainty", async () => {
     render(<IntelligenceWorkspace initialCountry="AE" />);
     expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
-    expect((await screen.findByAltText(/true_color observation/i)).getAttribute("loading")).toBe("lazy");
+    expect((await screen.findByAltText(/Natural color observation/i)).getAttribute("loading")).toBe("lazy");
     expect((await screen.findByAltText(/NASA GIBS true-color context/i)).getAttribute("loading")).toBe("lazy");
     expect(screen.getByText("Context · not proof")).toBeTruthy();
     expect(screen.getByRole("link", { name: /NASA GIBS provenance/i }).getAttribute("href")).toBe("https://gibs.earthdata.nasa.gov/wms/example.jpg");

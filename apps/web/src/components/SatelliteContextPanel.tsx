@@ -7,6 +7,7 @@ import {
   type IntelligenceEvent,
 } from "../lib/api";
 import SatelliteImage from "./SatelliteImage";
+import { earthObservationProductLabel, selectOverviewObservation } from "./earthObservationPresentation";
 
 type Props = {
   country?: string | null;
@@ -67,10 +68,13 @@ export default function SatelliteContextPanel({
         ]);
         const detail = detailResult.status === "fulfilled" ? detailResult.value : null;
         const gibs = gibsResult.status === "fulfilled" ? gibsResult.value : null;
-        const observation = detail?.earth_observations.find((item) => item.assets.length > 0);
+        const gibsLayer = gibs?.layers.find((layer) => layer.category === "true_color" && layer.preview_url);
+        const observation = selectOverviewObservation(
+          detail?.earth_observations ?? [],
+          Boolean(gibsLayer),
+        );
         const asset = observation?.assets.find((item) => item.asset_type === "preview")
           ?? observation?.assets[0];
-        const gibsLayer = gibs?.layers.find((layer) => layer.category === "true_color" && layer.preview_url);
         const sources = [asset?.url, gibsLayer?.preview_url].filter((value): value is string => Boolean(value));
         if (!sources.length) return null;
         if (asset && observation) {
@@ -79,7 +83,7 @@ export default function SatelliteContextPanel({
             event,
             sources,
             capturedAt: observation.capture_start,
-            sourceLabel: `${observation.mission} · ${observation.product_type.replace(/_/g, " ")}`,
+            sourceLabel: `${observation.mission} · ${earthObservationProductLabel(observation.product_type)}`,
             observationKind: "processed_observation",
             notice: observation.analysis_summary
               || "A processed, event-scoped observation. Sensor, cloud and acquisition differences still limit comparison.",

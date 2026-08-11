@@ -18,6 +18,7 @@ import {
 import { CopernicusProvider } from "./providers/copernicus";
 import { APPROVED_GIBS_LAYERS, buildApprovedGibsEventLayers, gibsStatus } from "./providers/nasa-gibs";
 import { NasaFirmsProvider } from "./providers/nasa-firms";
+import { EarthProviderError } from "./provider";
 import { rankScenes, selectBeforeAfterPair } from "./scene-ranking";
 import type { BoundingBox, EarthProductType, EarthScene } from "./types";
 import { hasProcessingBudget } from "./types";
@@ -983,7 +984,9 @@ async function finishEarthJob(jobId: string, result: Record<string, unknown>) {
 
 async function failEarthJob(job: any, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  const providerError = error instanceof OpenRouterVisionError ? error : null;
+  const providerError = error instanceof EarthProviderError || error instanceof OpenRouterVisionError
+    ? error
+    : null;
   const dead = providerError?.retryable === false || job.attempts >= job.max_attempts;
   const backoffSeconds = Math.min(3_600, 15 * (2 ** Math.max(0, job.attempts - 1)));
   await query(

@@ -63,12 +63,12 @@ test("Copernicus refreshes an expired token once after an unauthorized response"
 });
 
 test("Copernicus Process API output is bounded and retains provider usage metadata", async () => {
-  let processBody: any;
+  const processBodies: any[] = [];
   const fetchMock: typeof fetch = async (input, init) => {
     if (String(input).includes("openid-connect/token")) {
       return new Response(JSON.stringify({ access_token: "token", expires_in: 3600 }), { status: 200 });
     }
-    processBody = JSON.parse(String(init?.body));
+    processBodies.push(JSON.parse(String(init?.body)));
     return new Response(new Uint8Array([137, 80, 78, 71]), {
       status: 200,
       headers: { "content-type": "image/png", "x-processingunits-spent": "0.75" },
@@ -82,6 +82,16 @@ test("Copernicus Process API output is bounded and retains provider usage metada
   assert.equal(rendered.width, 1024);
   assert.equal(rendered.height, 1024);
   assert.equal(rendered.processingUnits, 0.75);
-  assert.equal(processBody.output.width, 1024);
-  assert.match(processBody.evalscript, /B04/);
+  assert.equal(processBodies[0].output.width, 1024);
+  assert.match(processBodies[0].evalscript, /B04/);
+  assert.match(processBodies[0].evalscript, /dataMask/);
+  assert.doesNotMatch(processBodies[0].evalscript, /SCL|units:\s*["']REFLECTANCE/);
+
+  await provider.render({
+    bbox: [0, 0, 1, 1], start: new Date("2026-08-10"), end: new Date("2026-08-11"),
+    collection: "sentinel-2-l2a", product: "burn_index", width: 1024, height: 768,
+  });
+  assert.match(processBodies[1].evalscript, /B08/);
+  assert.match(processBodies[1].evalscript, /B12/);
+  assert.doesNotMatch(processBodies[1].evalscript, /Math\.max\(0,1-v\)/);
 });

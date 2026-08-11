@@ -18,22 +18,24 @@ type TokenPayload = { access_token?: string; expires_in?: number };
 
 const EVALSCRIPTS: Record<Exclude<EarthProductType, "gibs_layer">, string> = {
   true_color: `//VERSION=3
-function setup(){return {input:[{bands:["B02","B03","B04","SCL"],units:"REFLECTANCE"}],output:{bands:4}}}
-function evaluatePixel(s){if([3,8,9,10,11].includes(s.SCL))return [0,0,0,0];return [2.5*s.B04,2.5*s.B03,2.5*s.B02,1]}`,
+function setup(){return {input:["B02","B03","B04","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
+function stretch(v){return Math.min(1,Math.max(0,Math.pow(2.5*v,0.85)))}
+function evaluatePixel(s){return [stretch(s.B04),stretch(s.B03),stretch(s.B02),s.dataMask]}`,
   false_color: `//VERSION=3
-function setup(){return {input:[{bands:["B03","B04","B08","SCL"],units:"REFLECTANCE"}],output:{bands:4}}}
-function evaluatePixel(s){if([3,8,9,10,11].includes(s.SCL))return [0,0,0,0];return [2.5*s.B08,2.5*s.B04,2.5*s.B03,1]}`,
+function setup(){return {input:["B03","B04","B08","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
+function stretch(v){return Math.min(1,Math.max(0,Math.pow(2.5*v,0.85)))}
+function evaluatePixel(s){return [stretch(s.B08),stretch(s.B04),stretch(s.B03),s.dataMask]}`,
   ndvi: `//VERSION=3
-function setup(){return {input:["B04","B08","dataMask"],output:{bands:4}}}
-function evaluatePixel(s){let v=index(s.B08,s.B04);return [Math.max(0,-v),Math.max(0,v),0.2,s.dataMask]}`,
+function setup(){return {input:["B04","B08","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
+function evaluatePixel(s){if(!s.dataMask)return [0,0,0,0];let v=index(s.B08,s.B04);if(v<0)return [0.45,0.28,0.16,1];if(v<0.2)return [0.88,0.78,0.48,1];if(v<0.4)return [0.62,0.72,0.28,1];if(v<0.6)return [0.24,0.55,0.2,1];return [0.04,0.3,0.13,1]}`,
   ndwi: `//VERSION=3
-function setup(){return {input:["B03","B08","dataMask"],output:{bands:4}}}
-function evaluatePixel(s){let v=index(s.B03,s.B08);return [0,Math.max(0,v),Math.max(0,v),s.dataMask]}`,
+function setup(){return {input:["B03","B08","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
+function evaluatePixel(s){if(!s.dataMask)return [0,0,0,0];let v=index(s.B03,s.B08);if(v<-0.2)return [0.42,0.34,0.2,1];if(v<0)return [0.76,0.7,0.5,1];if(v<0.2)return [0.48,0.75,0.78,1];if(v<0.4)return [0.12,0.48,0.72,1];return [0.03,0.2,0.55,1]}`,
   burn_index: `//VERSION=3
-function setup(){return {input:["B08","B12","dataMask"],output:{bands:4}}}
-function evaluatePixel(s){let v=index(s.B08,s.B12);return [Math.max(0,1-v),Math.max(0,v),0,s.dataMask]}`,
+function setup(){return {input:["B08","B12","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
+function evaluatePixel(s){if(!s.dataMask)return [0,0,0,0];let v=index(s.B08,s.B12);if(v<-0.2)return [0.48,0.04,0.08,1];if(v<0)return [0.78,0.16,0.08,1];if(v<0.2)return [0.95,0.48,0.12,1];if(v<0.4)return [0.72,0.68,0.2,1];return [0.12,0.46,0.2,1]}`,
   sar: `//VERSION=3
-function setup(){return {input:["VV","VH","dataMask"],output:{bands:4}}}
+function setup(){return {input:["VV","VH","dataMask"],output:{bands:4,sampleType:"AUTO"}}}
 function evaluatePixel(s){let vv=Math.min(1,Math.sqrt(Math.max(0,s.VV))*2);let vh=Math.min(1,Math.sqrt(Math.max(0,s.VH))*4);return [vv,vh,(vv+vh)/2,s.dataMask]}`,
 };
 

@@ -218,7 +218,7 @@ struct IntelligenceWorkspaceView: View {
                     if !detail.earth_observations.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(alignment: .top, spacing: 10) {
-                                ForEach(detail.earth_observations.prefix(5)) { observation in
+                                ForEach(detail.earth_observations.sortedForDisplay.prefix(5)) { observation in
                                     EarthObservationTile(observation: observation)
                                         .frame(width: 250)
                                 }
@@ -616,7 +616,7 @@ struct EarthObservationWorkspaceView: View {
         defer { isLoading = false }
         do {
             let result = try await model.api.fetchEarthObservations(limit: 60)
-            observations = result.observations
+            observations = result.observations.sortedForDisplay
             providers = result.providers
             error = nil
         } catch {
@@ -686,8 +686,8 @@ private struct EarthObservationTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            if let asset = observation.assets.first {
-                AuthenticatedEarthImage(path: asset.url)
+            if let asset = observation.preferredDisplayAsset {
+                AuthenticatedEarthImage(path: asset.url, contentMode: observation.isAnalyticalLayer ? .fit : .fill)
                     .frame(height: 145)
                     .clipShape(RoundedRectangle(cornerRadius: 11))
             } else {
@@ -696,8 +696,13 @@ private struct EarthObservationTile: View {
                     .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 11))
             }
             Text(observation.location_name ?? "Monitored area").font(.subheadline.weight(.semibold))
-            Text("\(observation.product_type.replacingOccurrences(of: "_", with: " ").capitalized) · \(observation.mission)")
+            Text("\(observation.displayProductName) · \(observation.mission)")
                 .font(.caption).foregroundStyle(.secondary)
+            if observation.isAnalyticalLayer {
+                Text("ANALYTICAL LAYER · NOT NATURAL COLOR")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.orange)
+            }
             HStack {
                 Text(observation.capture_start.formatted(date: .abbreviated, time: .shortened))
                 Spacer()
@@ -746,6 +751,7 @@ private struct EarthComparisonView: View {
 struct AuthenticatedEarthImage: View {
     @EnvironmentObject private var model: AppModel
     let path: String
+    var contentMode: ContentMode = .fill
     @State private var image: UIImage?
     @State private var loadError: String?
     @State private var retryID = 0
@@ -753,7 +759,7 @@ struct AuthenticatedEarthImage: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+                Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else if let loadError {
                 VStack(spacing: 8) {
                     Label("Observation image unavailable", systemImage: "photo.badge.exclamationmark")

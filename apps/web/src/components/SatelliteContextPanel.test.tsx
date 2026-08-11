@@ -79,4 +79,46 @@ describe("SatelliteContextPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Inspect imagery/i }));
     expect(onOpenImagery).toHaveBeenCalledWith(event.id);
   });
+
+  it("does not promote a burn index to the overview hero when true-color browse context exists", async () => {
+    const eventWithObservation = { ...event, earth_observation_available: true };
+    vi.mocked(fetchIntelligenceEvents).mockResolvedValue([eventWithObservation]);
+    vi.mocked(fetchIntelligenceEvent).mockResolvedValue({
+      event: eventWithObservation,
+      evidence: [],
+      locations: [],
+      earth_observations: [{
+        id: "burn-observation",
+        event_id: event.id,
+        scene_id: "scene",
+        product_type: "burn_index",
+        status: "available",
+        captured_at: "2026-08-11T08:30:00Z",
+        provider: "copernicus",
+        mission: "sentinel-2",
+        collection: "sentinel-2-l2a",
+        provider_scene_id: "S2-burn",
+        capture_start: "2026-08-11T08:30:00Z",
+        source_url: "https://example.test/scene",
+        assets: [{
+          id: "burn-asset",
+          asset_type: "preview",
+          mime_type: "image/png",
+          width: 1024,
+          height: 768,
+          size_bytes: 1024,
+          generated_at: "2026-08-11T09:00:00Z",
+          url: "/api/earth-observation/assets/burn-asset",
+        }],
+      }],
+      related_events: [],
+      epistemic_notice: "Correlation does not establish causation.",
+    });
+
+    render(<SatelliteContextPanel onOpenEvent={vi.fn()} onOpenImagery={vi.fn()} />);
+    const image = await screen.findByAltText(/NASA GIBS · linked location/i);
+    expect(image.getAttribute("src")).toContain("gibs.earthdata.nasa.gov");
+    expect(screen.getByText("Browse context · not proof")).toBeTruthy();
+    expect(screen.queryByText(/Burn-sensitive index/i)).toBeNull();
+  });
 });

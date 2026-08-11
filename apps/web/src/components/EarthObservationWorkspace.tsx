@@ -8,6 +8,11 @@ import {
 } from "../lib/api";
 import { findDefensibleComparisonPair } from "./earthObservationComparison";
 import SatelliteImage from "./SatelliteImage";
+import {
+  earthObservationProductLabel,
+  isAnalyticalEarthProduct,
+  sortEarthObservationsForDisplay,
+} from "./earthObservationPresentation";
 
 type Props = {
   eventId?: string | null;
@@ -57,10 +62,12 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
   useEffect(() => { void load(); }, [load]);
 
   const products = useMemo(() => [...new Set(observations.map((item) => item.product_type))].sort(), [observations]);
-  const visibleObservations = useMemo(() => observations.filter((item) => (
-    (provider === "all" || item.provider === provider)
-    && (product === "all" || item.product_type === product)
-  )), [observations, product, provider]);
+  const visibleObservations = useMemo(() => sortEarthObservationsForDisplay(
+    observations.filter((item) => (
+      (provider === "all" || item.provider === provider)
+      && (product === "all" || item.product_type === product)
+    )),
+  ), [observations, product, provider]);
   const comparePair = useMemo(
     () => findDefensibleComparisonPair(visibleObservations, eventId),
     [eventId, visibleObservations],
@@ -93,7 +100,7 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
         </div>
         <div className="mt-4 flex flex-wrap gap-3">
           <label className="text-xs text-[color:var(--shell-muted)]">Provider<select value={provider} onChange={(event) => setProvider(event.target.value)} className="ml-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1.5 text-[color:var(--shell-ink)]"><option value="all">All</option>{providers.map((item) => <option key={item.provider} value={item.provider}>{item.provider.replace(/_/g, " ")}</option>)}</select></label>
-          <label className="text-xs text-[color:var(--shell-muted)]">Product<select value={product} onChange={(event) => setProduct(event.target.value)} className="ml-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1.5 text-[color:var(--shell-ink)]"><option value="all">All</option>{products.map((item) => <option key={item} value={item}>{item.replace(/_/g, " ")}</option>)}</select></label>
+          <label className="text-xs text-[color:var(--shell-muted)]">Product<select value={product} onChange={(event) => setProduct(event.target.value)} className="ml-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-3 py-1.5 text-[color:var(--shell-ink)]"><option value="all">All</option>{products.map((item) => <option key={item} value={item}>{earthObservationProductLabel(item)}</option>)}</select></label>
           {eventId && onOpenEvent && <button type="button" onClick={() => onOpenEvent(eventId)} className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]"><Link2 className="h-3.5 w-3.5" />Back to event thread</button>}
         </div>
       </section>
@@ -127,7 +134,8 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
         {!loading && visibleObservations.length === 0 && <div className="app-card col-span-full rounded-xl p-8 text-center"><ImageOff className="mx-auto h-7 w-7 text-[color:var(--shell-muted)]" /><div className="mt-3 text-sm font-semibold text-[color:var(--shell-ink)]">No event-specific observation assets in this scope</div><p className="mt-1 text-xs text-[color:var(--shell-muted)]">{providerNotice || "The investigation remains available while providers wait for a suitable, defensible scene."}</p></div>}
         {visibleObservations.map((item) => {
           const asset = preview(item);
-          return <article key={item.id} className="app-card overflow-hidden rounded-xl">{asset ? <SatelliteImage sources={[asset.url]} alt={`${item.product_type.replace(/_/g, " ")} observation of ${item.location_name || "monitored area"}`} className="aspect-video w-full bg-slate-100 object-cover" fallbackClassName="flex aspect-video items-center justify-center bg-slate-900" /> : <div className="flex aspect-video items-center justify-center bg-slate-100"><ImageOff className="h-7 w-7 text-slate-400" /></div>}<div className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-semibold text-[color:var(--shell-ink)]">{item.location_name || "Monitored area"}</div><div className="mt-1 text-xs capitalize text-[color:var(--shell-muted)]">{item.product_type.replace(/_/g, " ")} · {item.mission}</div></div><Satellite className="h-4 w-4 text-[color:var(--signal-sky)]" /></div><div className="mt-3 space-y-1 text-xs text-[color:var(--shell-muted)]"><div>Captured {dateLabel(item.capture_start)}</div><div className="flex items-center gap-1"><Cloud className="h-3 w-3" />{item.cloud_cover == null ? "Cloud cover not reported" : `${Math.round(item.cloud_cover)}% cloud cover`}{item.resolution_m == null ? "" : ` · ${item.resolution_m} m`}</div><div>{item.provider} · {item.collection}</div></div><div className="mt-3 flex flex-wrap gap-3"><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a>{item.event_id && onOpenEvent && <button type="button" onClick={() => onOpenEvent(item.event_id as string)} className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--signal-sky)]">Open event thread <Link2 className="h-3 w-3" /></button>}</div></div></article>;
+          const analytical = isAnalyticalEarthProduct(item.product_type);
+          return <article key={item.id} className="app-card overflow-hidden rounded-xl">{asset ? <SatelliteImage sources={[asset.url]} alt={`${earthObservationProductLabel(item.product_type)} observation of ${item.location_name || "monitored area"}`} className={`aspect-video w-full bg-slate-950 ${analytical ? "object-contain" : "object-cover"}`} fallbackClassName="flex aspect-video items-center justify-center bg-slate-900" /> : <div className="flex aspect-video items-center justify-center bg-slate-100"><ImageOff className="h-7 w-7 text-slate-400" /></div>}<div className="p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-sm font-semibold text-[color:var(--shell-ink)]">{item.location_name || "Monitored area"}</div><div className="mt-1 text-xs text-[color:var(--shell-muted)]">{earthObservationProductLabel(item.product_type)} · {item.mission}</div>{analytical && <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-700">Analytical layer · not natural color</div>}</div><Satellite className="h-4 w-4 text-[color:var(--signal-sky)]" /></div><div className="mt-3 space-y-1 text-xs text-[color:var(--shell-muted)]"><div>Captured {dateLabel(item.capture_start)}</div><div className="flex items-center gap-1"><Cloud className="h-3 w-3" />{item.cloud_cover == null ? "Cloud cover not reported" : `${Math.round(item.cloud_cover)}% cloud cover`}{item.resolution_m == null ? "" : ` · ${item.resolution_m} m`}</div><div>{item.provider} · {item.collection}</div></div><div className="mt-3 flex flex-wrap gap-3"><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a>{item.event_id && onOpenEvent && <button type="button" onClick={() => onOpenEvent(item.event_id as string)} className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--signal-sky)]">Open event thread <Link2 className="h-3 w-3" /></button>}</div></div></article>;
         })}
       </section>
     </div>
