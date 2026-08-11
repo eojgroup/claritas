@@ -1,5 +1,7 @@
 import express from "express";
 import { createHash, randomBytes, randomUUID } from "crypto";
+import { lookup } from "dns/promises";
+import { isIP } from "net";
 import {
   discoverPodcastFeeds,
   ingestPodcastIndex,
@@ -85,6 +87,23 @@ import {
   processPersonalBriefingJob,
   startPersonalBriefingWorker,
 } from "./personal-briefing";
+import {
+  getAlertCandidates,
+  getIntelligenceEvent,
+  listIntelligenceEvents,
+  listIntelligenceLocations,
+} from "./intelligence/service";
+import { getEventBackboneHealth, startEventBackbone } from "./intelligence/event-bus";
+import { getRapidSourceStatus, runFirmsNow, runUsgsNow, startRapidSourceWorker } from "./intelligence/rapid-sources";
+import {
+  enqueueEarthDiscovery,
+  getEarthAssetBuffer,
+  getEarthObservationStatus,
+  getEarthScene,
+  listEarthObservations,
+  requestEarthComparison,
+  startEarthObservationWorker,
+} from "./earth-observation/service";
 
 const app = express();
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
@@ -128,6 +147,7 @@ app.use("/api/auth", authRouter);
 const requireAdminRole = requireRole("admin");
 const requireSession = requireAuth();
 const requireAuthenticated = requirePaidAccess();
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let dailyBriefingSchedulerTimer: NodeJS.Timeout | null = null;
 let dailyBriefingSchedulerRunning = false;
@@ -1756,6 +1776,289 @@ app.put("/api/ingest/briefings/daily/:date", requireIngestionAccess, async (req,
   }
 });
 
+// Cross-domain intelligence graph. These routes return evidence references and
+// governed EO metadata; they never expose upstream provider credentials.
+app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
+  try {
+    const since = typeof req.query.since === "string" && !Number.isNaN(Date.parse(req.query.since))
+      ? new Date(req.query.since) : undefined;
+    const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : undefined;
+    if (country && !/^[A-Z]{2}$/.test(country)) return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
+    const locationId = typeof req.query.location_id === "string" ? req.query.location_id.trim() : undefined;
+    if (locationId && !UUID_PATTERN.test(locationId)) return res.status(400).json({ error: "location_id must be a UUID." });
+    const status = typeof req.query.status === "string" ? req.query.status.trim().toLowerCase() : undefined;
+    if (status && !["emerging", "active", "monitoring", "resolved", "dismissed"].includes(status)) {
+      return res.status(400).json({ error: "Invalid event status." });
+    }
+    const severity = typeof req.query.severity === "string" ? req.query.severity.trim().toLowerCase() : undefined;
+    if (severity && !["low", "medium", "high", "critical"].includes(severity)) {
+      return res.status(400).json({ error: "Invalid event severity." });
+    }
+    const events = await listIntelligenceEvents({
+      limit: Number(req.query.limit) || 30,
+      offset: Number(req.query.offset) || 0,
+      status,
+      severity,
+      country,
+      locationId,
+      eventType: typeof req.query.event_type === "string" ? req.query.event_type.trim() : undefined,
+      since,
+    });
+    res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+    return res.json({ events, count: events.length, generated_at: new Date().toISOString() });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/intelligence/events/:id", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Event id must be a UUID." });
+    const result = await getIntelligenceEvent(req.params.id);
+    if (!result) return res.status(404).json({ error: "Intelligence event not found." });
+    res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/intelligence/locations", requireAuthenticated, async (req, res) => {
+  try {
+    const locations = await listIntelligenceLocations({
+      query: typeof req.query.q === "string" ? req.query.q.slice(0, 120) : undefined,
+      type: typeof req.query.type === "string" ? req.query.type.trim() : undefined,
+      country: typeof req.query.country === "string" ? req.query.country.trim() : undefined,
+      monitoringTier: typeof req.query.monitoring_tier === "string" ? Number(req.query.monitoring_tier) : undefined,
+      limit: Number(req.query.limit) || 100,
+    });
+    return res.json({ locations, count: locations.length });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/intelligence/watchlist", requireAuthenticated, async (_req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(res);
+    const { rows } = await query(
+      `SELECT * FROM user_intelligence_watchlist WHERE user_id=$1 ORDER BY watch_type,watch_key`,
+      [userId],
+    );
+    return res.json({ watches: rows });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.put("/api/intelligence/watchlist", requireAuthenticated, async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(res);
+    const watchType = typeof req.body?.watch_type === "string" ? req.body.watch_type.trim().toLowerCase() : "";
+    const watchKey = typeof req.body?.watch_key === "string" ? req.body.watch_key.trim() : "";
+    const severity = typeof req.body?.minimum_severity === "string" ? req.body.minimum_severity.trim().toLowerCase() : "high";
+    if (!["country", "location", "port", "airport", "chokepoint", "commodity", "market_symbol", "event_type"].includes(watchType)
+        || !watchKey || watchKey.length > 160 || !["low", "medium", "high", "critical"].includes(severity)) {
+      return res.status(400).json({ error: "A valid watch_type, watch_key and minimum_severity are required." });
+    }
+    const { rows } = await query(
+      `INSERT INTO user_intelligence_watchlist (user_id,watch_type,watch_key,minimum_severity,alerts_enabled,metadata)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+       ON CONFLICT (user_id,watch_type,watch_key) DO UPDATE SET
+         minimum_severity=EXCLUDED.minimum_severity,alerts_enabled=EXCLUDED.alerts_enabled,
+         metadata=EXCLUDED.metadata,updated_at=now() RETURNING *`,
+      [userId, watchType, watchKey, severity, req.body?.alerts_enabled !== false,
+       JSON.stringify(req.body?.metadata && typeof req.body.metadata === "object" ? req.body.metadata : {})],
+    );
+    await query(`SELECT materialize_alert_candidate_recipients(NULL, $1)`, [userId]);
+    return res.json({ watch: rows[0] });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/intelligence/alerts", requireAuthenticated, async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(res);
+    const includeAcknowledged = ["1", "true", "yes"].includes(String(req.query.include_acknowledged ?? "").toLowerCase());
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+    const { rows } = await query(
+      `SELECT candidate.id,candidate.event_id,candidate.severity,candidate.title,candidate.body,
+              candidate.created_at,candidate.updated_at,recipient.eligibility_status,
+              recipient.acknowledged_at,recipient.matched_watch_id,recipient.metadata,
+              event.event_type,event.primary_country_iso2,event.relevance_score,
+              location.canonical_name AS location_name
+       FROM alert_candidate_recipient recipient
+       JOIN alert_candidate candidate ON candidate.id=recipient.candidate_id
+       JOIN intelligence_event event ON event.id=candidate.event_id
+       LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
+       WHERE recipient.user_id=$1 AND recipient.channel='in_app'
+         AND recipient.eligibility_status IN ('eligible','delivered')
+         AND ($2::boolean OR recipient.acknowledged_at IS NULL)
+       ORDER BY CASE candidate.severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1 END DESC,
+                candidate.updated_at DESC
+       LIMIT $3`,
+      [userId, includeAcknowledged, limit],
+    );
+    return res.json({ alerts: rows, count: rows.length });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.patch("/api/intelligence/alerts/:id", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Alert id must be a UUID." });
+    const action = typeof req.body?.action === "string" ? req.body.action.trim().toLowerCase() : "";
+    if (!['acknowledge', 'mute'].includes(action)) return res.status(400).json({ error: "action must be acknowledge or mute." });
+    const userId = getAuthenticatedUserId(res);
+    const { rows } = await query(
+      `UPDATE alert_candidate_recipient SET
+         acknowledged_at=CASE WHEN $3='acknowledge' THEN now() ELSE acknowledged_at END,
+         eligibility_status=CASE WHEN $3='mute' THEN 'muted' ELSE eligibility_status END,
+         updated_at=now()
+       WHERE candidate_id=$1::uuid AND user_id=$2 AND channel='in_app'
+       RETURNING *`,
+      [req.params.id, userId, action],
+    );
+    return rows[0] ? res.json({ alert: rows[0] }) : res.status(404).json({ error: "Alert not found." });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.delete("/api/intelligence/watchlist/:id", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Watch id must be a UUID." });
+    const userId = getAuthenticatedUserId(res);
+    const { rows } = await query<{ id: string }>(
+      `DELETE FROM user_intelligence_watchlist WHERE id=$1::uuid AND user_id=$2 RETURNING id`,
+      [req.params.id, userId],
+    );
+    if (rows.length) await query(`SELECT materialize_alert_candidate_recipients(NULL, $1)`, [userId]);
+    return rows.length ? res.status(204).send() : res.status(404).json({ error: "Watch not found." });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/earth-observation/events/:eventId", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.eventId)) return res.status(400).json({ error: "Event id must be a UUID." });
+    const observations = await listEarthObservations({ eventId: req.params.eventId, limit: Number(req.query.limit) || 30 });
+    return res.json({ observations, count: observations.length, provider_notice: observations.length ? null : "No suitable observation is currently available. Core event evidence remains available." });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/earth-observation/locations/:locationId", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.locationId)) return res.status(400).json({ error: "Location id must be a UUID." });
+    const observations = await listEarthObservations({ locationId: req.params.locationId, limit: Number(req.query.limit) || 30 });
+    return res.json({ observations, count: observations.length });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/earth-observation/observations", requireAuthenticated, async (req, res) => {
+  try {
+    const product = typeof req.query.product === "string" ? req.query.product.trim() : undefined;
+    if (product && !["true_color", "false_color", "ndvi", "ndwi", "burn_index", "sar", "gibs_layer"].includes(product)) {
+      return res.status(400).json({ error: "Invalid Earth Observation product." });
+    }
+    const observations = await listEarthObservations({
+      provider: typeof req.query.provider === "string" ? req.query.provider.trim() : undefined,
+      product: product as import("./earth-observation/types").EarthProductType | undefined,
+      limit: Number(req.query.limit) || 30,
+    });
+    const status = await getEarthObservationStatus();
+    return res.json({ observations, count: observations.length, providers: status.providers });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/earth-observation/scenes/:sceneId", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.sceneId)) return res.status(400).json({ error: "Scene id must be a UUID." });
+    const scene = await getEarthScene(req.params.sceneId);
+    return scene ? res.json({ scene }) : res.status(404).json({ error: "Earth Observation scene not found." });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/earth-observation/observations/:id/compare", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Observation id must be a UUID." });
+    const comparison = await requestEarthComparison(req.params.id);
+    return comparison ? res.json(comparison) : res.status(404).json({ error: "Earth Observation record not found." });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/earth-observation/assets/:id", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).send("invalid asset id");
+    const asset = await getEarthAssetBuffer(req.params.id);
+    if (!asset) return res.status(404).send("asset not found");
+    if (req.get("if-none-match") === `\"${asset.etag}\"`) return res.status(304).send();
+    res.setHeader("Content-Type", asset.mimeType);
+    res.setHeader("ETag", `\"${asset.etag}\"`);
+    res.setHeader("Cache-Control", "private, max-age=86400, immutable");
+    return res.send(asset.bytes);
+  } catch (error) {
+    return res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/admin/intelligence/status", requireAdminRole, async (_req, res) => {
+  try {
+    const [backbone, earth, rapidSources, alerts] = await Promise.all([
+      getEventBackboneHealth(), getEarthObservationStatus(), getRapidSourceStatus(), getAlertCandidates(50),
+    ]);
+    return res.json({ backbone, earth_observation: earth, rapid_sources: rapidSources, alert_candidates: alerts, generated_at: new Date().toISOString() });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/admin/intelligence/providers/:provider/run", requireAdminRole, async (req, res) => {
+  try {
+    const provider = req.params.provider.trim().toLowerCase();
+    if (provider === "usgs") return res.status(202).json(await runUsgsNow());
+    if (provider === "nasa-firms") return res.status(202).json(await runFirmsNow({ locationId: req.body?.location_id, forceAll: req.body?.force_all === true }));
+    if (provider === "copernicus") {
+      const locationId = typeof req.body?.location_id === "string" ? req.body.location_id : "";
+      const eventId = typeof req.body?.event_id === "string" ? req.body.event_id : null;
+      if (!UUID_PATTERN.test(locationId) || (eventId && !UUID_PATTERN.test(eventId))) {
+        return res.status(400).json({ error: "A valid location_id and optional event_id are required." });
+      }
+      return res.status(202).json({ job: await enqueueEarthDiscovery(locationId, eventId, req.body?.force === true) });
+    }
+    return res.status(400).json({ error: "provider must be usgs, nasa-firms, or copernicus." });
+  } catch (error) {
+    return res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/admin/intelligence/earth-jobs/:id/retry", requireAdminRole, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Job id must be a UUID." });
+    const { rows } = await query(
+      `UPDATE earth_processing_job SET status='queued',attempts=0,available_at=now(),last_error=NULL,finished_at=NULL,updated_at=now()
+       WHERE id=$1::uuid AND status IN ('failed','dead_letter','budget_deferred') RETURNING *`,
+      [req.params.id],
+    );
+    return rows[0] ? res.status(202).json({ job: rows[0] }) : res.status(409).json({ error: "Only failed, dead-lettered, or budget-deferred jobs can be retried." });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 // List recent news items with optional filters
 app.get("/api/news", requireAuthenticated, async (req, res) => {
   try {
@@ -3073,21 +3376,71 @@ app.get("/api/market/rates", requireAuthenticated, async (_req, res) => {
   }
 });
 
-// Lightweight image proxy for remote thumbnails that block hotlinking
+function isPrivateNetworkAddress(address: string) {
+  const normalized = address.toLowerCase().split("%")[0];
+  if (normalized.startsWith("::ffff:")) return isPrivateNetworkAddress(normalized.slice(7));
+  if (isIP(normalized) === 4) {
+    const parts = normalized.split(".").map(Number);
+    const [a, b] = parts;
+    return a === 0 || a === 10 || a === 127 || a >= 224
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && (b === 0 || b === 168))
+      || (a === 198 && (b === 18 || b === 19 || b === 51))
+      || (a === 203 && b === 0);
+  }
+  if (isIP(normalized) === 6) {
+    return normalized === "::" || normalized === "::1"
+      || normalized.startsWith("fc") || normalized.startsWith("fd")
+      || /^fe[89ab]/.test(normalized);
+  }
+  return true;
+}
+
+async function assertPublicImageUrl(value: string) {
+  const target = new URL(value);
+  if (target.protocol !== "https:" || target.username || target.password || target.port) {
+    throw new Error("Only credential-free HTTPS image URLs on the default port are permitted.");
+  }
+  if (target.hostname === "localhost" || target.hostname.endsWith(".localhost")) {
+    throw new Error("Local image hosts are not permitted.");
+  }
+  const addresses = await lookup(target.hostname, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some((entry) => isPrivateNetworkAddress(entry.address))) {
+    throw new Error("Image host resolves to a private or reserved network.");
+  }
+  return target;
+}
+
+async function fetchPublicImage(value: string) {
+  let target = await assertPublicImageUrl(value);
+  for (let redirects = 0; redirects <= 3; redirects += 1) {
+    const response = await fetch(target, { redirect: "manual", signal: AbortSignal.timeout(10_000) });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location || redirects === 3) throw new Error("Image redirect limit exceeded.");
+      target = await assertPublicImageUrl(new URL(location, target).toString());
+      continue;
+    }
+    return response;
+  }
+  throw new Error("Image redirect limit exceeded.");
+}
+
+// Bounded thumbnail proxy with DNS and redirect validation to prevent SSRF.
 app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
   try {
     const url = String(req.query.url || "");
-    if (!url || !/^https?:\/\//i.test(url)) {
+    if (!url || !/^https:\/\//i.test(url)) {
       return res.status(400).send("invalid url");
     }
-    const r = await fetch(url, {
-      redirect: "follow" as any,
-      signal: AbortSignal.timeout(10_000),
-    });
+    const r = await fetchPublicImage(url);
     if (!r.ok) {
       return res.status(r.status).send("upstream error");
     }
-    const ct = r.headers.get("content-type") || "image/jpeg";
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.toLowerCase().startsWith("image/")) return res.status(415).send("upstream is not an image");
     const contentLength = Number(r.headers.get("content-length") || 0);
     if (contentLength > 5_000_000) {
       return res.status(413).send("image too large");
@@ -3100,8 +3453,9 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
       return res.status(413).send("image too large");
     }
     res.status(200).send(buf);
-  } catch (e: any) {
-    res.status(500).send("proxy error");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(400).send(message.includes("private") || message.includes("permitted") ? "image host is not permitted" : "proxy error");
   }
 });
 
@@ -3110,6 +3464,9 @@ startIngestionAutomationWorker();
 startDailyBriefingSchedulerWorker();
 startPersonalBriefingWorker();
 startTransportIngestionWorkers();
+startEventBackbone();
+startRapidSourceWorker();
+startEarthObservationWorker();
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`API listening on http://0.0.0.0:${PORT}`);

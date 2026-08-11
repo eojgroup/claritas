@@ -23,6 +23,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var selectedSymbol: String? = nil
+    @Published var selectedIntelligenceEventID: String? = nil
     @Published var dailyBriefing: DailySignalBriefing? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
     @Published var news: [NewsItem] = []

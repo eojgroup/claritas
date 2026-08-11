@@ -977,6 +977,192 @@ export type AdminIngestionProviderCapabilities = {
   };
 };
 
+export type IntelligenceSeverity = "low" | "medium" | "high" | "critical";
+
+export type IntelligenceEvent = {
+  id: string;
+  event_type: string;
+  title: string;
+  summary: string;
+  status: "emerging" | "active" | "monitoring" | "resolved" | "dismissed";
+  severity: IntelligenceSeverity;
+  confidence: number;
+  start_time: string;
+  last_activity_time: string;
+  primary_location_id: string | null;
+  primary_country_iso2: string | null;
+  source_diversity: number;
+  domain_count: number;
+  relevance_score: number;
+  urgency_score: number;
+  materiality_score: number;
+  location_name?: string | null;
+  location_type?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  monitoring_tier?: number | null;
+  evidence_count: number;
+  earth_observation_available: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type IntelligenceEvidence = {
+  id: string;
+  domain: string;
+  evidence_type: string;
+  source_record_type: string;
+  source_record_id: string;
+  observed_at: string;
+  published_at?: string | null;
+  confidence: number;
+  relationship: string;
+  source_name?: string | null;
+  location_name?: string | null;
+  attribution?: string | null;
+  license?: string | null;
+  provenance?: Record<string, unknown>;
+  correlation_score?: number | null;
+};
+
+export type EarthObservationAsset = {
+  id: string;
+  asset_type: string;
+  mime_type: string;
+  width: number;
+  height: number;
+  size_bytes: number;
+  generated_at: string;
+  expires_at?: string | null;
+  url: string;
+};
+
+export type EarthObservation = {
+  id: string;
+  event_id?: string | null;
+  location_id?: string | null;
+  scene_id: string;
+  product_type: string;
+  status: string;
+  captured_at: string;
+  provider: string;
+  mission: string;
+  collection: string;
+  provider_scene_id: string;
+  capture_start: string;
+  capture_end?: string | null;
+  cloud_cover?: number | null;
+  resolution_m?: number | null;
+  orbit_direction?: string | null;
+  source_url: string;
+  location_name?: string | null;
+  analysis_summary?: string | null;
+  attribution?: string | null;
+  license?: string | null;
+  assets: EarthObservationAsset[];
+};
+
+export type IntelligenceEventDetail = {
+  event: IntelligenceEvent;
+  evidence: IntelligenceEvidence[];
+  locations: Array<{
+    id: string;
+    canonical_name: string;
+    location_type: string;
+    country_iso2?: string | null;
+    relationship: string;
+    confidence: number;
+    attribution?: string | null;
+    license?: string | null;
+  }>;
+  earth_observations: EarthObservation[];
+  related_events: Array<IntelligenceEvent & { relationship: string; rationale?: string | null }>;
+  epistemic_notice: string;
+};
+
+export type IntelligenceLocation = {
+  id: string;
+  slug: string;
+  location_type: string;
+  canonical_name: string;
+  country_iso2?: string | null;
+  latitude: number;
+  longitude: number;
+  bbox?: [number, number, number, number] | null;
+  importance_score: number;
+  monitoring_tier: number;
+  attribution?: string | null;
+  license?: string | null;
+};
+
+export type IntelligenceWatch = {
+  id: string;
+  watch_type: string;
+  watch_key: string;
+  minimum_severity: IntelligenceSeverity;
+  alerts_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IntelligenceAlert = {
+  id: string;
+  event_id: string;
+  severity: IntelligenceSeverity;
+  title: string;
+  body: string;
+  event_type: string;
+  primary_country_iso2?: string | null;
+  location_name?: string | null;
+  eligibility_status: "eligible" | "delivered";
+  acknowledged_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EarthProviderStatus = {
+  provider: string;
+  enabled: boolean;
+  configured: boolean;
+  state: "disabled" | "not_configured" | "ready" | "degraded" | "circuit_open" | "rate_limited";
+  reason?: string | null;
+  attribution: string;
+  last_attempt_at?: string | null;
+  last_success_at?: string | null;
+  consecutive_failures?: number;
+  last_error?: string | null;
+};
+
+export type IntelligenceAdminStatus = {
+  backbone: {
+    outbox: Array<{ status: string; count: number; oldest?: string | null }>;
+    unresolved_dead_letters: number;
+    consumers: Array<{ consumer_name: string; status: string; count: number; latest?: string | null }>;
+    correlation?: { last_success_at?: string | null; last_event_at?: string | null; consecutive_failures?: number; last_error?: string | null } | null;
+  };
+  earth_observation: {
+    providers: EarthProviderStatus[];
+    usage: Array<Record<string, unknown>>;
+    queue: Array<{ status: string; count: number; oldest?: string | null }>;
+    recent_jobs: Array<{
+      id: string;
+      job_type: string;
+      provider: string;
+      status: string;
+      attempts: number;
+      max_attempts: number;
+      location_id?: string | null;
+      location_name?: string | null;
+      last_error?: string | null;
+      updated_at: string;
+    }>;
+    assets: { count: number; size_bytes: number };
+    budgets: Record<string, number>;
+  };
+  rapid_sources: EarthProviderStatus[];
+  alert_candidates: Array<{ id: string; event_id: string; severity: IntelligenceSeverity; status: string; title: string }>;
+  generated_at: string;
+};
+
 const API_BASE = "";
 
 async function readError(resp: Response, fallback: string): Promise<string> {
@@ -1696,6 +1882,167 @@ export async function updateAdminUserSubscription(
   if (!resp.ok) throw new Error(await readError(resp, "Failed to update user subscription"));
   const data = await resp.json();
   return (data.user ?? null) as AdminUser | null;
+}
+
+export async function fetchIntelligenceEvents(params?: {
+  limit?: number;
+  status?: string;
+  severity?: IntelligenceSeverity;
+  country?: string;
+  locationId?: string;
+  eventType?: string;
+  since?: string;
+}): Promise<IntelligenceEvent[]> {
+  const sp = new URLSearchParams();
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.status) sp.set("status", params.status);
+  if (params?.severity) sp.set("severity", params.severity);
+  if (params?.country) sp.set("country", params.country);
+  if (params?.locationId) sp.set("location_id", params.locationId);
+  if (params?.eventType) sp.set("event_type", params.eventType);
+  if (params?.since) sp.set("since", params.since);
+  const resp = await fetch(`${API_BASE}/api/intelligence/events?${sp.toString()}`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence events"));
+  const data = await resp.json();
+  return (data.events ?? []) as IntelligenceEvent[];
+}
+
+export async function fetchIntelligenceEvent(id: string): Promise<IntelligenceEventDetail> {
+  const resp = await fetch(`${API_BASE}/api/intelligence/events/${encodeURIComponent(id)}`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence event"));
+  return (await resp.json()) as IntelligenceEventDetail;
+}
+
+export async function fetchIntelligenceLocations(params?: {
+  limit?: number;
+  query?: string;
+  type?: string;
+  country?: string;
+  monitoringTier?: number;
+}): Promise<IntelligenceLocation[]> {
+  const sp = new URLSearchParams();
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.query) sp.set("q", params.query);
+  if (params?.type) sp.set("type", params.type);
+  if (params?.country) sp.set("country", params.country);
+  if (params?.monitoringTier) sp.set("monitoring_tier", String(params.monitoringTier));
+  const resp = await fetch(`${API_BASE}/api/intelligence/locations?${sp.toString()}`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence locations"));
+  const data = await resp.json();
+  return (data.locations ?? []) as IntelligenceLocation[];
+}
+
+export async function fetchIntelligenceWatchlist(): Promise<IntelligenceWatch[]> {
+  const resp = await fetch(`${API_BASE}/api/intelligence/watchlist`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence watchlist"));
+  const data = await resp.json();
+  return (data.watches ?? []) as IntelligenceWatch[];
+}
+
+export async function saveIntelligenceWatch(payload: {
+  watch_type: string;
+  watch_key: string;
+  minimum_severity?: IntelligenceSeverity;
+  alerts_enabled?: boolean;
+}): Promise<IntelligenceWatch> {
+  const resp = await fetch(`${API_BASE}/api/intelligence/watchlist`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to save intelligence watch"));
+  const data = await resp.json();
+  return data.watch as IntelligenceWatch;
+}
+
+export async function deleteIntelligenceWatch(id: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/intelligence/watchlist/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!resp.ok && resp.status !== 404) throw new Error(await readError(resp, "Failed to remove intelligence watch"));
+}
+
+export async function fetchIntelligenceAlerts(): Promise<IntelligenceAlert[]> {
+  const resp = await fetch(`${API_BASE}/api/intelligence/alerts`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence alerts"));
+  const data = await resp.json();
+  return (data.alerts ?? []) as IntelligenceAlert[];
+}
+
+export async function acknowledgeIntelligenceAlert(id: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}/api/intelligence/alerts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "acknowledge" }),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to acknowledge intelligence alert"));
+}
+
+export async function fetchEarthObservations(params?: {
+  limit?: number;
+  provider?: string;
+  product?: string;
+}): Promise<{ observations: EarthObservation[]; providers: EarthProviderStatus[] }> {
+  const sp = new URLSearchParams();
+  if (params?.limit) sp.set("limit", String(params.limit));
+  if (params?.provider) sp.set("provider", params.provider);
+  if (params?.product) sp.set("product", params.product);
+  const resp = await fetch(`${API_BASE}/api/earth-observation/observations?${sp.toString()}`, {
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch Earth observations"));
+  const data = await resp.json();
+  return {
+    observations: (data.observations ?? []) as EarthObservation[],
+    providers: (data.providers ?? []) as EarthProviderStatus[],
+  };
+}
+
+export async function requestEarthObservationComparison(observationId: string): Promise<Record<string, unknown>> {
+  const resp = await fetch(
+    `${API_BASE}/api/earth-observation/observations/${encodeURIComponent(observationId)}/compare`,
+    { method: "POST", credentials: "include" },
+  );
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to compare Earth observations"));
+  return (await resp.json()) as Record<string, unknown>;
+}
+
+export async function fetchIntelligenceAdminStatus(): Promise<IntelligenceAdminStatus> {
+  const resp = await fetch(`${API_BASE}/api/admin/intelligence/status`, { credentials: "include" });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence status"));
+  return (await resp.json()) as IntelligenceAdminStatus;
+}
+
+export async function runIntelligenceProvider(
+  provider: "usgs" | "nasa-firms" | "copernicus",
+  payload: Record<string, unknown> = {},
+): Promise<Record<string, unknown>> {
+  const resp = await fetch(`${API_BASE}/api/admin/intelligence/providers/${provider}/run`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, `Failed to run ${provider}`));
+  return (await resp.json()) as Record<string, unknown>;
+}
+
+export async function retryEarthObservationJob(jobId: string): Promise<Record<string, unknown>> {
+  const resp = await fetch(`${API_BASE}/api/admin/intelligence/earth-jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to retry Earth Observation job"));
+  return (await resp.json()) as Record<string, unknown>;
 }
 
 export function imageProxy(url?: string | null): string | undefined {

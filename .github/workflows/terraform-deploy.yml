@@ -177,6 +177,16 @@ jobs:
         env:
           SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT || secrets.SEC_EDGAR_USER_AGENT }}
           NWS_USER_AGENT: ${{ vars.NWS_USER_AGENT || secrets.NWS_USER_AGENT }}
+          EVENT_CORRELATION_ENABLED: ${{ vars.EVENT_CORRELATION_ENABLED || 'true' }}
+          EVENT_ALERTS_ENABLED: ${{ vars.EVENT_ALERTS_ENABLED || 'true' }}
+          EARTH_OBSERVATION_ENABLED: ${{ vars.EARTH_OBSERVATION_ENABLED || 'false' }}
+          COPERNICUS_ENABLED: ${{ vars.COPERNICUS_ENABLED || 'false' }}
+          NASA_FIRMS_ENABLED: ${{ vars.NASA_FIRMS_ENABLED || 'false' }}
+          NASA_GIBS_ENABLED: ${{ vars.NASA_GIBS_ENABLED || 'false' }}
+          USGS_EARTHQUAKES_ENABLED: ${{ vars.USGS_EARTHQUAKES_ENABLED || 'false' }}
+          EO_VISION_ENRICHMENT_ENABLED: ${{ vars.EO_VISION_ENRICHMENT_ENABLED || 'false' }}
+          EO_MAX_DAILY_PROCESSING_UNITS: ${{ vars.EO_MAX_DAILY_PROCESSING_UNITS }}
+          EO_ASSET_RETENTION_DAYS: ${{ vars.EO_ASSET_RETENTION_DAYS }}
         run: |
           ns="${{ env.K8S_NAMESPACE }}"
           base="${{ env.DOMAIN }}"
@@ -193,6 +203,14 @@ jobs:
             nws_patch=$(node -e 'process.stdout.write(JSON.stringify({data:{NWS_USER_AGENT:process.env.NWS_USER_AGENT.trim()}}))')
             kubectl -n "$ns" patch configmap claritas-config --type merge -p "$nws_patch"
           fi
+          feature_patch=$(node -e '
+            const data={};
+            for (const key of ["EVENT_CORRELATION_ENABLED","EVENT_ALERTS_ENABLED","EARTH_OBSERVATION_ENABLED","COPERNICUS_ENABLED","NASA_FIRMS_ENABLED","NASA_GIBS_ENABLED","USGS_EARTHQUAKES_ENABLED","EO_VISION_ENRICHMENT_ENABLED","EO_MAX_DAILY_PROCESSING_UNITS","EO_ASSET_RETENTION_DAYS"]) {
+              const value=process.env[key]?.trim(); if (value) data[key]=value;
+            }
+            process.stdout.write(JSON.stringify({data}));
+          ')
+          kubectl -n "$ns" patch configmap claritas-config --type merge -p "$feature_patch"
 
       - name: 🔐 Upsert Secret (claritas-db)
         run: |
@@ -214,6 +232,29 @@ jobs:
             kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-openweather \
               --from-literal=OPENWEATHER_API_KEY="$OPENWEATHER_API_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
+          fi
+
+      - name: 🔐 Upsert Secret (claritas-earth-observation)
+        env:
+          COPERNICUS_CLIENT_ID: ${{ secrets.COPERNICUS_CLIENT_ID }}
+          COPERNICUS_CLIENT_SECRET: ${{ secrets.COPERNICUS_CLIENT_SECRET }}
+          NASA_FIRMS_MAP_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "${COPERNICUS_CLIENT_ID:-}" ]; then
+            args+=(--from-literal=COPERNICUS_CLIENT_ID="$COPERNICUS_CLIENT_ID")
+          fi
+          if [ -n "${COPERNICUS_CLIENT_SECRET:-}" ]; then
+            args+=(--from-literal=COPERNICUS_CLIENT_SECRET="$COPERNICUS_CLIENT_SECRET")
+          fi
+          if [ -n "${NASA_FIRMS_MAP_KEY:-}" ]; then
+            args+=(--from-literal=NASA_FIRMS_MAP_KEY="$NASA_FIRMS_MAP_KEY")
+          fi
+          if [ "${#args[@]}" -gt 0 ]; then
+            kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-earth-observation "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::Earth Observation credentials not set; optional providers remain disabled"
           fi
 
       ############################################

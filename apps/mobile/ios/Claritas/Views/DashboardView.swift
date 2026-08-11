@@ -21,6 +21,8 @@ struct DashboardView: View {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     mobileCommandHeader
 
+                    IntelligenceEventPulseView()
+
                     SignalMapPanel(
                         height: 310,
                         allowsComparison: false,

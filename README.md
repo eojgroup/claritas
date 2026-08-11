@@ -312,6 +312,23 @@ The API requires the database environment variables documented in
     `AISSTREAM_API_KEY`; the deployment writes it to Kubernetes secret
     `claritas-aisstream` under the same key.
   - adsb.lol requires no API key. Its published data is ODbL 1.0.
+- Event-driven intelligence and Earth Observation:
+  - `EVENT_CORRELATION_ENABLED`, `EARTH_OBSERVATION_ENABLED`,
+    `COPERNICUS_ENABLED`, `NASA_FIRMS_ENABLED`, `NASA_GIBS_ENABLED`,
+    `USGS_EARTHQUAKES_ENABLED`, `EVENT_ALERTS_ENABLED` and
+    `EO_VISION_ENRICHMENT_ENABLED` are repository variables. Optional providers
+    default to disabled; core ingestion and clients remain healthy in that state.
+  - Copernicus requires Actions secrets `COPERNICUS_CLIENT_ID` and
+    `COPERNICUS_CLIENT_SECRET`. NASA FIRMS requires `NASA_FIRMS_MAP_KEY`.
+    NASA GIBS and USGS do not require secrets.
+  - Cost/config variables include `EO_MAX_DAILY_PROCESSING_UNITS`,
+    `EO_RENDER_MAX_WIDTH`, `EO_RENDER_MAX_HEIGHT`,
+    `EO_MAX_AOI_SQUARE_DEGREES`, `EO_DEFAULT_CLOUD_THRESHOLD`,
+    `EO_ASSET_RETENTION_DAYS`, `EO_EVENT_RELEVANCE_THRESHOLD`,
+    `FIRMS_LOCATIONS_PER_POLL`, `NASA_FIRMS_POLL_SECONDS` and
+    `USGS_POLL_SECONDS`. Conservative Kubernetes defaults are committed.
+  - Exact registration, rollout and verification steps are in
+    [Earth Observation administrator setup](docs/operations/earth-observation-admin-setup.md).
 - Kubernetes deployment env wiring:
   - `infra/k8s/api-deployment.yaml`
 - Recommended secret names/keys in cluster:
@@ -319,9 +336,12 @@ The API requires the database environment variables documented in
   - `claritas-fred` / `FRED_API_KEY`
   - `claritas-podcastindex` / `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`
   - `claritas-aisstream` / `AISSTREAM_API_KEY`
+  - `claritas-earth-observation` / `COPERNICUS_CLIENT_ID`,
+    `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY` (only configured keys are written)
 - Production secret source (recommended):
   - GitHub repository secrets: `OPENWEATHER_API_KEY`, `FRED_API_KEY`,
-    `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`
+    `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`,
+    `COPERNICUS_CLIENT_ID`, `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY`
   - GitHub repository variables: `PODCAST_DISCOVERY_TERMS`, `PODCAST_FEED_IDS`,
     `PODCAST_MAX_FEEDS`, `PODCAST_MAX_EPISODES_PER_FEED`,
     `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`, `PODCASTINDEX_USER_AGENT`,
@@ -356,6 +376,8 @@ The daily briefing generator can use OpenCode as an internal LLM service:
 - **Data-source governance**: [`docs/data-source-governance.md`](./docs/data-source-governance.md)
 - **Lightweight news translation**: [`docs/news-translation.md`](./docs/news-translation.md)
 - **Cost-optimized production baseline**: [`docs/operations/cost-baseline.md`](./docs/operations/cost-baseline.md)
+- **Event intelligence and Earth Observation**: [`docs/architecture/event-earth-observation.md`](./docs/architecture/event-earth-observation.md)
+- **Earth Observation administrator setup**: [`docs/operations/earth-observation-admin-setup.md`](./docs/operations/earth-observation-admin-setup.md)
 
 ---
 

@@ -41,6 +41,86 @@ spec:
           env:
             - name: OPENWEATHER_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
+            - name: COPERNICUS_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-earth-observation, key: COPERNICUS_CLIENT_ID, optional: true } }
+            - name: COPERNICUS_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-earth-observation, key: COPERNICUS_CLIENT_SECRET, optional: true } }
+            - name: NASA_FIRMS_MAP_KEY
+              valueFrom: { secretKeyRef: { name: claritas-earth-observation, key: NASA_FIRMS_MAP_KEY, optional: true } }
+            - name: EVENT_BACKBONE_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_BACKBONE_ENABLED, optional: true } }
+            - name: EVENT_BUS_MODE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_BUS_MODE, optional: true } }
+            - name: EVENT_PUBSUB_TOPIC
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_PUBSUB_TOPIC, optional: true } }
+            - name: EVENT_PUBSUB_SUBSCRIPTION
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_PUBSUB_SUBSCRIPTION, optional: true } }
+            - name: EVENT_OUTBOX_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_OUTBOX_POLL_SECONDS, optional: true } }
+            - name: EVENT_OUTBOX_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_OUTBOX_BATCH_SIZE, optional: true } }
+            - name: EVENT_OUTBOX_MAX_ATTEMPTS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_OUTBOX_MAX_ATTEMPTS, optional: true } }
+            - name: EVENT_CONSUMER_MAX_MESSAGES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_CONSUMER_MAX_MESSAGES, optional: true } }
+            - name: EVENT_CORRELATION_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_CORRELATION_ENABLED, optional: true } }
+            - name: EVENT_ALERTS_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_ALERTS_ENABLED, optional: true } }
+            - name: EVENT_ALERT_RELEVANCE_THRESHOLD
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EVENT_ALERT_RELEVANCE_THRESHOLD, optional: true } }
+            - name: EARTH_OBSERVATION_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EARTH_OBSERVATION_ENABLED, optional: true } }
+            - name: COPERNICUS_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: COPERNICUS_ENABLED, optional: true } }
+            - name: NASA_FIRMS_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NASA_FIRMS_ENABLED, optional: true } }
+            - name: NASA_GIBS_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NASA_GIBS_ENABLED, optional: true } }
+            - name: USGS_EARTHQUAKES_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: USGS_EARTHQUAKES_ENABLED, optional: true } }
+            - name: EO_VISION_ENRICHMENT_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_VISION_ENRICHMENT_ENABLED, optional: true } }
+            - name: EO_ASSET_BUCKET
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_ASSET_BUCKET, optional: true } }
+            - name: EO_MAX_DAILY_PROCESSING_UNITS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_MAX_DAILY_PROCESSING_UNITS, optional: true } }
+            - name: EO_MAX_AOI_SQUARE_DEGREES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_MAX_AOI_SQUARE_DEGREES, optional: true } }
+            - name: EO_RENDER_MAX_WIDTH
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_RENDER_MAX_WIDTH, optional: true } }
+            - name: EO_RENDER_MAX_HEIGHT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_RENDER_MAX_HEIGHT, optional: true } }
+            - name: EO_DEFAULT_CLOUD_THRESHOLD
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_DEFAULT_CLOUD_THRESHOLD, optional: true } }
+            - name: EO_ASSET_RETENTION_DAYS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_ASSET_RETENTION_DAYS, optional: true } }
+            - name: EO_EVENT_RELEVANCE_THRESHOLD
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_EVENT_RELEVANCE_THRESHOLD, optional: true } }
+            - name: EO_MAX_SCENES_PER_DISCOVERY
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_MAX_SCENES_PER_DISCOVERY, optional: true } }
+            - name: EO_WORKER_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_WORKER_BATCH_SIZE, optional: true } }
+            - name: EO_WORKER_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_WORKER_POLL_SECONDS, optional: true } }
+            - name: NASA_FIRMS_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NASA_FIRMS_POLL_SECONDS, optional: true } }
+            - name: FIRMS_LOCATIONS_PER_POLL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: FIRMS_LOCATIONS_PER_POLL, optional: true } }
+            - name: NASA_FIRMS_SOURCE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NASA_FIRMS_SOURCE, optional: true } }
+            - name: USGS_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: USGS_POLL_SECONDS, optional: true } }
+            - name: USGS_MIN_EVENT_MAGNITUDE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: USGS_MIN_EVENT_MAGNITUDE, optional: true } }
+            - name: USGS_MIN_EVENT_SIGNIFICANCE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: USGS_MIN_EVENT_SIGNIFICANCE, optional: true } }
+            - name: USGS_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: USGS_USER_AGENT, optional: true } }
+            - name: NASA_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NASA_USER_AGENT, optional: true } }
+            - name: MARKET_EVENT_PERCENT_THRESHOLD
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: MARKET_EVENT_PERCENT_THRESHOLD, optional: true } }
             - name: PODCASTINDEX_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_KEY, optional: true } }
             - name: PODCASTINDEX_API_SECRET

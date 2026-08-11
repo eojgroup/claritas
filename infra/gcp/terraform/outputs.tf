@@ -62,6 +62,19 @@ output "claritas_sql_gsa_email" {
   value = google_service_account.claritas_sql_gsa.email
 }
 
+output "earth_observation_bucket" {
+  description = "Private bucket containing generated Earth Observation derivatives."
+  value       = google_storage_bucket.earth_observation.name
+}
+
+output "domain_events_topic" {
+  value = google_pubsub_topic.domain_events.name
+}
+
+output "domain_events_subscription" {
+  value = google_pubsub_subscription.domain_events_api.name
+}
+
 output "cloud_sql_export_role_name" {
   description = "Custom Cloud SQL export role when export members are configured."
   value       = try(google_project_iam_custom_role.cloud_sql_exporter[0].name, null)

@@ -15,3 +15,6 @@
 | C11  | Transport Intelligence      | Normalize live aviation and maritime movement into country-linked routes and qualified trends | Flight numbers, shipping corridors, port departures, country profiles, briefing takeaways |
 | C12  | Source Governance           | Enforce provenance, reuse rights, attribution, country scope and retirement decisions | Auditable active-source register and documented exclusions |
 | C13  | Cost Governance             | Bound compute, storage, polling, history and connection growth | Cost baseline, retention limits, demand batching and explicit scale-up triggers |
+| C14  | Cross-domain Event Intelligence | Correlate independently sourced evidence through time, location and entities without asserting causation | Prioritized intelligence events, evidence graph, watchlists and alert candidates |
+| C15  | Earth Observation Context | Discover, rank, render and govern provider-neutral physical observations | Sentinel scenes, FIRMS hotspots, private previews and qualified comparisons |
+| C16  | Spatial Asset Graph | Normalize countries, ports, airports, chokepoints and production regions with provenance | PostGIS proximity matching, monitored tiers and cross-domain location linkage |

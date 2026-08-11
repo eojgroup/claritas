@@ -397,6 +397,7 @@ The current system:
 - treats tablet as a map-led two-column review workspace;
 - treats mobile as map-led triage and drill-in;
 - treats watch as a map-led companion with a briefing glance, a one-page urgent pulse, and phone handoff.
+- adds a shared event workspace on web/iPad, focused event triage on iPhone, authenticated EO previews and before/after comparison, and a concise Watch event pulse that hands off to the exact iPhone event.
 
 Related decisions are recorded in:
 
@@ -404,3 +405,6 @@ Related decisions are recorded in:
 - [ADR-0002: Multi-device adaptive strategy](../ADRs/0002-multi-device-adaptive-strategy.md)
 - [ADR-0003: Semantic tokens and component taxonomy](../ADRs/0003-semantic-ui-system.md)
 - [ADR-0004: News-led leadership signals](../ADRs/0004-news-led-leadership-signals.md)
+- [ADR-0005: Transactional event backbone](../ADRs/0005-transactional-event-backbone.md)
+- [ADR-0006: PostGIS location and physical-asset graph](../ADRs/0006-postgis-location-graph.md)
+- [ADR-0007: Provider-neutral Earth Observation and private assets](../ADRs/0007-earth-observation-provider-assets.md)

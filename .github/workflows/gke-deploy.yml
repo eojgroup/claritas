@@ -16,6 +16,8 @@ on:
   pull_request:
     paths:
       - 'apps/api/**'
+      - 'apps/web/**'
+      - 'apps/mobile/**'
       - '.github/workflows/**'
       - 'infra/gcp/terraform/**'
       - 'infra/k8s/api-deployment.yaml'
@@ -37,7 +39,6 @@ permissions:
 jobs:
   validate:
     name: Validate workflows, migrations, and scripts
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -63,8 +64,42 @@ jobs:
         working-directory: apps/api
         run: |
           npm ci
+          npm test
           npm run build
           node -e 'const map=require("./dist/email-map.js"); map.renderBriefingMapPng([{country_iso2:"US",country_name:"United States",relevance_score:95,news_count:4,podcast_count:1,market_count:2}]).then((image)=>{if(image.length<1000)process.exit(1);console.log("Rendered "+image.length+" byte briefing map.");})'
+
+      - name: Exercise the event backbone against PostGIS
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          docker run --name claritas-postgis-test \
+            -e POSTGRES_PASSWORD=claritas_test \
+            -e POSTGRES_DB=claritas \
+            -p 54329:5432 \
+            -d postgis/postgis:16-3.5
+          cleanup() { docker rm -f claritas-postgis-test >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          for attempt in $(seq 1 90); do
+            if docker logs claritas-postgis-test 2>&1 | grep -q 'PostgreSQL init process complete' \
+              && docker exec claritas-postgis-test pg_isready -U postgres -d claritas >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec claritas-postgis-test pg_isready -U postgres -d claritas
+          for migration in $(find ../../infra/gcp/sql -maxdepth 1 -type f -name 'V*.sql' | sort -V); do
+            docker exec -i claritas-postgis-test psql -v ON_ERROR_STOP=1 -U postgres -d claritas < "$migration" >/dev/null
+          done
+          DB_HOST=127.0.0.1 DB_PORT=54329 DB_NAME=claritas \
+            DB_USER=postgres DB_PASSWORD=claritas_test npm run test:integration
+
+      - name: Build and lint web
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm test
+          npm run lint
+          npm run build
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -87,6 +122,7 @@ jobs:
   build:
     name: Build Docker Image and Push to Artifact Registry
     if: github.event_name != 'pull_request'
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -300,6 +336,16 @@ jobs:
           PODCASTINDEX_USER_AGENT: ${{ vars.PODCASTINDEX_USER_AGENT }}
           SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT || secrets.SEC_EDGAR_USER_AGENT }}
           NWS_USER_AGENT: ${{ vars.NWS_USER_AGENT || secrets.NWS_USER_AGENT }}
+          EVENT_CORRELATION_ENABLED: ${{ vars.EVENT_CORRELATION_ENABLED || 'true' }}
+          EVENT_ALERTS_ENABLED: ${{ vars.EVENT_ALERTS_ENABLED || 'true' }}
+          EARTH_OBSERVATION_ENABLED: ${{ vars.EARTH_OBSERVATION_ENABLED || 'false' }}
+          COPERNICUS_ENABLED: ${{ vars.COPERNICUS_ENABLED || 'false' }}
+          NASA_FIRMS_ENABLED: ${{ vars.NASA_FIRMS_ENABLED || 'false' }}
+          NASA_GIBS_ENABLED: ${{ vars.NASA_GIBS_ENABLED || 'false' }}
+          USGS_EARTHQUAKES_ENABLED: ${{ vars.USGS_EARTHQUAKES_ENABLED || 'false' }}
+          EO_VISION_ENRICHMENT_ENABLED: ${{ vars.EO_VISION_ENRICHMENT_ENABLED || 'false' }}
+          EO_MAX_DAILY_PROCESSING_UNITS: ${{ vars.EO_MAX_DAILY_PROCESSING_UNITS }}
+          EO_ASSET_RETENTION_DAYS: ${{ vars.EO_ASSET_RETENTION_DAYS }}
         run: |
           # Ensure claritas-config (DB + auth settings) exists
           kubectl -n "${NAMESPACE}" apply -f infra/k8s/config/claritas-config.yaml
@@ -329,6 +375,16 @@ jobs:
             "PODCASTINDEX_USER_AGENT",
             "SEC_EDGAR_USER_AGENT",
             "NWS_USER_AGENT",
+            "EVENT_CORRELATION_ENABLED",
+            "EVENT_ALERTS_ENABLED",
+            "EARTH_OBSERVATION_ENABLED",
+            "COPERNICUS_ENABLED",
+            "NASA_FIRMS_ENABLED",
+            "NASA_GIBS_ENABLED",
+            "USGS_EARTHQUAKES_ENABLED",
+            "EO_VISION_ENRICHMENT_ENABLED",
+            "EO_MAX_DAILY_PROCESSING_UNITS",
+            "EO_ASSET_RETENTION_DAYS",
           ]) {
             const value = process.env[key];
             if (value && value.trim()) data[key] = value.trim();
@@ -408,6 +464,9 @@ jobs:
           PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
           PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          COPERNICUS_CLIENT_ID: ${{ secrets.COPERNICUS_CLIENT_ID }}
+          COPERNICUS_CLIENT_SECRET: ${{ secrets.COPERNICUS_CLIENT_SECRET }}
+          NASA_FIRMS_MAP_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
         run: |
           set -euo pipefail
           # Upsert OpenWeather secret if provided
@@ -446,6 +505,22 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::AISSTREAM_API_KEY not provided; maritime transport ingestion remains disabled"
+          fi
+
+          eo_args=()
+          if [ -n "${COPERNICUS_CLIENT_ID:-}" ]; then
+            eo_args+=(--from-literal=COPERNICUS_CLIENT_ID="$COPERNICUS_CLIENT_ID")
+          fi
+          if [ -n "${COPERNICUS_CLIENT_SECRET:-}" ]; then
+            eo_args+=(--from-literal=COPERNICUS_CLIENT_SECRET="$COPERNICUS_CLIENT_SECRET")
+          fi
+          if [ -n "${NASA_FIRMS_MAP_KEY:-}" ]; then
+            eo_args+=(--from-literal=NASA_FIRMS_MAP_KEY="$NASA_FIRMS_MAP_KEY")
+          fi
+          if [ "${#eo_args[@]}" -gt 0 ]; then
+            kubectl -n "$NS" create secret generic claritas-earth-observation "${eo_args[@]}" --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::warning::Earth Observation credentials are absent; credentialed providers remain disabled"
           fi
 
       - name: 🔐 Ensure OpenCode briefing secrets exist

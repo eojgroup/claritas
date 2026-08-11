@@ -55,7 +55,10 @@ final class WatchSyncCoordinator: NSObject, WCSessionDelegate {
                 NotificationCenter.default.post(
                     name: .claritasWatchOpenDestination,
                     object: destination,
-                    userInfo: ["country": message["country"] as? String ?? ""]
+                    userInfo: [
+                        "country": message["country"] as? String ?? "",
+                        "eventID": message["eventID"] as? String ?? ""
+                    ]
                 )
             }
             replyHandler(["status": "opened"])

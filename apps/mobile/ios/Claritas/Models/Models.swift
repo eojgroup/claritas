@@ -1811,3 +1811,193 @@ private extension KeyedDecodingContainer {
         throw DecodingError.dataCorruptedError(forKey: key, in: self, debugDescription: "Expected integer-compatible value.")
     }
 }
+
+enum IntelligenceSeverity: String, Codable, CaseIterable {
+    case low
+    case medium
+    case high
+    case critical
+}
+
+struct IntelligenceEvent: Codable, Identifiable, Hashable {
+    let id: String
+    let event_type: String
+    let title: String
+    let summary: String
+    let status: String
+    let severity: IntelligenceSeverity
+    let confidence: Double
+    let start_time: Date
+    let last_activity_time: Date
+    let primary_location_id: String?
+    let primary_country_iso2: String?
+    let source_diversity: Int
+    let domain_count: Int
+    let relevance_score: Double
+    let urgency_score: Double
+    let materiality_score: Double
+    let location_name: String?
+    let location_type: String?
+    let latitude: Double?
+    let longitude: Double?
+    let monitoring_tier: Int?
+    let evidence_count: Int
+    let earth_observation_available: Bool
+}
+
+struct IntelligenceEvidence: Codable, Identifiable {
+    let id: String
+    let domain: String
+    let evidence_type: String
+    let source_record_type: String
+    let source_record_id: String
+    let observed_at: Date
+    let published_at: Date?
+    let confidence: Double
+    let relationship: String
+    let source_name: String?
+    let location_name: String?
+    let attribution: String?
+    let license: String?
+}
+
+struct EarthObservationAsset: Codable, Identifiable {
+    let id: String
+    let asset_type: String
+    let mime_type: String
+    let width: Int
+    let height: Int
+    let size_bytes: Int
+    let generated_at: Date
+    let expires_at: Date?
+    let url: String
+}
+
+struct EarthObservation: Codable, Identifiable {
+    let id: String
+    let event_id: String?
+    let location_id: String?
+    let scene_id: String
+    let product_type: String
+    let status: String
+    let captured_at: Date
+    let provider: String
+    let mission: String
+    let collection: String
+    let provider_scene_id: String
+    let capture_start: Date
+    let capture_end: Date?
+    let cloud_cover: Double?
+    let resolution_m: Double?
+    let orbit_direction: String?
+    let source_url: String
+    let location_name: String?
+    let analysis_summary: String?
+    let attribution: String?
+    let license: String?
+    let assets: [EarthObservationAsset]
+}
+
+struct IntelligenceEventDetail: Codable {
+    let event: IntelligenceEvent
+    let evidence: [IntelligenceEvidence]
+    let earth_observations: [EarthObservation]
+    let epistemic_notice: String
+}
+
+struct IntelligenceWatch: Codable, Identifiable {
+    let id: String
+    let watch_type: String
+    let watch_key: String
+    let minimum_severity: IntelligenceSeverity
+    let alerts_enabled: Bool
+    let created_at: Date
+    let updated_at: Date
+}
+
+struct IntelligenceAlert: Codable, Identifiable {
+    let id: String
+    let event_id: String
+    let severity: IntelligenceSeverity
+    let title: String
+    let body: String
+    let event_type: String
+    let primary_country_iso2: String?
+    let location_name: String?
+    let eligibility_status: String
+    let acknowledged_at: Date?
+    let created_at: Date
+    let updated_at: Date
+}
+
+struct EarthProviderStatus: Codable, Identifiable {
+    var id: String { provider }
+    let provider: String
+    let enabled: Bool
+    let configured: Bool
+    let state: String
+    let reason: String?
+    let attribution: String
+    let last_success_at: Date?
+    let consecutive_failures: Int?
+    let last_error: String?
+}
+
+struct EarthObservationListResponse: Codable {
+    let observations: [EarthObservation]
+    let providers: [EarthProviderStatus]
+}
+
+struct AdminIntelligenceStatus: Codable {
+    struct AlertCandidate: Codable, Identifiable {
+        let id: String
+        let event_id: String
+        let severity: IntelligenceSeverity
+        let status: String
+        let title: String
+    }
+
+    struct Backbone: Codable {
+        struct Count: Codable, Identifiable {
+            var id: String { status }
+            let status: String
+            let count: Int
+        }
+        let outbox: [Count]
+        let unresolved_dead_letters: Int
+    }
+
+    struct Earth: Codable {
+        struct QueueCount: Codable, Identifiable {
+            var id: String { status }
+            let status: String
+            let count: Int
+        }
+        struct Assets: Codable {
+            let count: Int
+            let size_bytes: Int
+        }
+        struct Job: Codable, Identifiable {
+            let id: String
+            let job_type: String
+            let provider: String
+            let status: String
+            let attempts: Int
+            let max_attempts: Int
+            let location_name: String?
+            let last_error: String?
+            let updated_at: Date
+        }
+        let providers: [EarthProviderStatus]
+        let queue: [QueueCount]
+        let assets: Assets
+        let recent_jobs: [Job]
+        let budgets: [String: Double]
+    }
+
+    let backbone: Backbone
+    let earth_observation: Earth
+    let rapid_sources: [EarthProviderStatus]
+    let alert_candidates: [AlertCandidate]
+    let generated_at: Date
+}

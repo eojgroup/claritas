@@ -116,6 +116,7 @@ type BriefingContext = {
     weather: number;
     leadership: number;
     transport: number;
+    intelligence_events: number;
   };
   news: Array<Record<string, unknown>>;
   global_events: Array<Record<string, unknown>>;
@@ -129,6 +130,7 @@ type BriefingContext = {
   weather_analysis: Record<string, unknown>;
   leadership: Array<Record<string, unknown>>;
   transport: Record<string, unknown>;
+  intelligence_events: Array<Record<string, unknown>>;
 };
 
 type BriefingModelOutput = {
@@ -249,6 +251,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     weatherResult,
     leadershipResult,
     transportResult,
+    intelligenceEventResult,
   ] = await Promise.all([
     query<NewsContextRow>(
       `SELECT
@@ -373,7 +376,46 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     getCountryWeatherLatest(),
     getCountryLeadershipLatest(),
     getTransportOverviewForBriefing(),
+    query<any>(
+      `SELECT event.id,event.event_type,event.title,event.summary,event.status,event.severity,
+              event.confidence,event.primary_country_iso2,event.relevance_score,event.urgency_score,
+              event.materiality_score,event.last_activity_time,location.canonical_name AS location_name,
+              COALESCE(jsonb_agg(jsonb_build_object(
+                'domain',evidence.domain,'evidence_type',evidence.evidence_type,
+                'relationship',evidence.relationship,'confidence',evidence.confidence,
+                'observed_at',evidence.observed_at,'source',COALESCE(source.name,evidence.source_record_type),
+                'attribution',evidence.attribution,'license',evidence.license
+              ) ORDER BY evidence.confidence DESC,evidence.observed_at DESC)
+              FILTER (WHERE evidence.id IS NOT NULL),'[]'::jsonb) AS evidence
+       FROM intelligence_event event
+       LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
+       LEFT JOIN intelligence_event_evidence evidence ON evidence.event_id=event.id
+       LEFT JOIN source ON source.id=evidence.source_id
+       WHERE event.last_activity_time >= $1::timestamptz AND event.last_activity_time < $2::timestamptz
+         AND event.status NOT IN ('dismissed','resolved')
+       GROUP BY event.id,location.id
+       ORDER BY event.relevance_score DESC,event.last_activity_time DESC LIMIT 30`,
+      [start, end],
+    ),
   ]);
+
+  const intelligenceEvents = intelligenceEventResult.rows.map((row) => ({
+    id: row.id,
+    event_type: row.event_type,
+    title: row.title,
+    summary: row.summary,
+    status: row.status,
+    severity: row.severity,
+    confidence: Number(row.confidence),
+    country: row.primary_country_iso2,
+    location: row.location_name,
+    relevance_score: Number(row.relevance_score),
+    urgency_score: Number(row.urgency_score),
+    materiality_score: Number(row.materiality_score),
+    last_activity_time: timestampToIso(row.last_activity_time),
+    evidence: Array.isArray(row.evidence) ? row.evidence : [],
+    epistemic_notice: "Correlation supplies context and does not establish causation.",
+  }));
 
   const news = newsResult.rows.map((row) => ({
     id: Number(row.id),
@@ -655,6 +697,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
       weather: weather.length,
       leadership: leadership.length,
       transport: transportResult.summary.active,
+      intelligence_events: intelligenceEvents.length,
     },
     news,
     global_events: globalEvents,
@@ -668,6 +711,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     weather_analysis: weatherAnalysis,
     leadership,
     transport,
+    intelligence_events: intelligenceEvents,
   };
 }
 
@@ -675,7 +719,8 @@ function buildSystemPrompt(): string {
   return [
     "You generate Claritas daily signal briefings from supplied JSON evidence.",
     "Use only the supplied evidence. Do not invent facts, numbers, sources, causal links, or forecasts.",
-    "Cover News, Podcast Intelligence, Markets, Weather, and Transport when material evidence is available. If a category has thin, stale, or missing data, say that plainly.",
+    "Use supplied intelligence_events as the primary cross-domain synthesis layer. Their evidence relationship labels distinguish reported, observed, derived, interpreted, and assessed material; correlation never establishes causation.",
+    "Cover News, Podcast Intelligence, Markets, Weather, Earth Observation, and Transport when material evidence is available. Use the raw domain collections for provenance and detail, not to recreate a competing correlation graph. If a category has thin, stale, or missing data, say that plainly.",
     "For news, name the publisher when supplied and distinguish it from the aggregation provider. Do not imply that an aggregation provider is the publisher.",
     "Write the briefing in English. Translate and summarize non-English news faithfully for comprehension, preserve publisher attribution, identify the original language when it is material, and never add context that is absent from the supplied evidence. The stored source title and text remain the auditable original evidence.",
     "GDELT Event records are machine-coded indicators, and GKG themes and tone are analytical metadata. Use them to identify coverage patterns and corroboration candidates; do not present an uncorroborated coded event, theme, or tone score as confirmed fact or public sentiment.",

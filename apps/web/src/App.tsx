@@ -27,6 +27,8 @@ import {
   Podcast,
   RefreshCw,
   Route,
+  Radar,
+  Satellite,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -126,6 +128,8 @@ type AppView =
   | "weather"
   | "markets"
   | "transport"
+  | "intelligence"
+  | "earth-observation"
   | "admin"
   | "profile"
   | "legal";
@@ -706,6 +710,10 @@ import AdminIngestionPanel from "./components/AdminIngestionPanel";
 import AdminUserManagementPanel from "./components/AdminUserManagementPanel";
 import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePreview";
 import TransportWorkspace from "./components/TransportWorkspace";
+import IntelligenceWorkspace from "./components/IntelligenceWorkspace";
+import EarthObservationWorkspace from "./components/EarthObservationWorkspace";
+import IntelligenceEventStrip from "./components/IntelligenceEventStrip";
+import AdminIntelligencePanel from "./components/AdminIntelligencePanel";
 import {
   fetchAuthMe,
   fetchAuthProviders,
@@ -3749,6 +3757,20 @@ export default function ClaritasDashboard() {
       icon: Route,
       group: "analysis",
     },
+    {
+      id: "intelligence",
+      label: "Intelligence",
+      view: "intelligence" as const,
+      icon: Radar,
+      group: "analysis",
+    },
+    {
+      id: "earth-observation",
+      label: "Earth observation",
+      view: "earth-observation" as const,
+      icon: Satellite,
+      group: "analysis",
+    },
     ...(isAdmin
       ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings, group: "operations" }]
       : []),
@@ -3786,6 +3808,16 @@ export default function ClaritasDashboard() {
       kicker: "Movement intelligence",
       title: "Shipping & flight routes",
       summary: "Live tracks, flight numbers, corridors, and country relationships",
+    },
+    intelligence: {
+      kicker: "Cross-domain analysis",
+      title: "Intelligence events",
+      summary: "Correlated evidence, confidence, location, and materiality",
+    },
+    "earth-observation": {
+      kicker: "Observed context",
+      title: "Earth observation",
+      summary: "Governed scenes, acquisition quality, provenance, and comparisons",
     },
     admin: {
       kicker: "Control room",
@@ -4595,6 +4627,10 @@ export default function ClaritasDashboard() {
 
             {activeView === "dashboard" && (
               <div className="workspace-page dashboard-workspace relative flex flex-col gap-4">
+                <IntelligenceEventStrip
+                  country={selectedCountry}
+                  onOpen={() => setActiveView("intelligence")}
+                />
                 <div className="relative flex flex-col gap-4">
                   <div
                     className="kpi-strip dashboard-kpis app-card-hero dashboard-panel rounded-xl px-4 py-3"
@@ -6027,6 +6063,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
+                <IntelligenceEventStrip country={selectedCountry} onOpen={() => setActiveView("intelligence")} />
                 <section
                   className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3"
                 >
@@ -7129,6 +7166,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "weather" && (
               <div className="workspace-page weather-workspace space-y-4">
+                <IntelligenceEventStrip country={selectedCountry} onOpen={() => setActiveView("intelligence")} />
                 <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -7655,6 +7693,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "markets" && (
               <div className="workspace-page markets-workspace space-y-4">
+                <IntelligenceEventStrip country={selectedCountry} onOpen={() => setActiveView("intelligence")} />
                 <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Market workspace</div>
@@ -8464,6 +8503,12 @@ export default function ClaritasDashboard() {
             {activeView === "transport" && (
               <TransportWorkspace initialCountry={transportFocusCountry} />
             )}
+            {activeView === "intelligence" && (
+              <IntelligenceWorkspace initialCountry={selectedCountry} />
+            )}
+            {activeView === "earth-observation" && (
+              <EarthObservationWorkspace />
+            )}
             {activeView === "admin" && isAdmin && (
               <div className="workspace-page control-room-page min-w-0 space-y-4">
                 <section className="control-room-intro">
@@ -8476,6 +8521,7 @@ export default function ClaritasDashboard() {
                     Authenticated administrator
                   </div>
                 </section>
+                <AdminIntelligencePanel />
                 <AdminIngestionPanel dark={dark} />
                 <AdminUserManagementPanel />
               </div>

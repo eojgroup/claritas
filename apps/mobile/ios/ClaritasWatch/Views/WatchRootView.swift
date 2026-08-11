@@ -10,6 +10,7 @@ struct WatchRootView: View {
                 WatchPairingView()
             } else {
                 TabView {
+                    WatchIntelligencePulseView()
                     WatchSignalGlanceView()
                     WatchBriefingView()
                     WatchPulseView()
@@ -21,6 +22,73 @@ struct WatchRootView: View {
         .tint(WatchPalette.orange)
         .task {
             await model.bootstrap()
+        }
+    }
+}
+
+private struct WatchIntelligencePulseView: View {
+    @EnvironmentObject private var model: WatchAppModel
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        WatchSectionLabel(title: "Event pulse", icon: "dot.radiowaves.left.and.right")
+                        Spacer()
+                        WatchRefreshStatus()
+                    }
+
+                    if model.intelligenceEvents.isEmpty {
+                        WatchCard {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("No material correlated events")
+                                    .font(.caption.weight(.semibold))
+                                Text("Source signals remain available on iPhone.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else {
+                        ForEach(model.intelligenceEvents.prefix(4)) { event in
+                            WatchCard {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack {
+                                        Circle()
+                                            .fill(event.severity == .critical ? Color.red : event.severity == .high ? WatchPalette.orange : WatchPalette.sage)
+                                            .frame(width: 7, height: 7)
+                                        Text(event.severity.rawValue.uppercased())
+                                            .font(.system(size: 8, weight: .bold))
+                                        Spacer()
+                                        Text("\(Int(event.confidence * 100))%")
+                                            .font(.caption2.monospacedDigit())
+                                    }
+                                    Text(event.title)
+                                        .font(.caption.weight(.semibold))
+                                        .lineLimit(3)
+                                    Text("\(event.location_name ?? event.primary_country_iso2 ?? "Global") · \(event.evidence_count) evidence")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.secondary)
+                                    Button {
+                                        model.openOnPhone(
+                                            "intelligence",
+                                            country: event.primary_country_iso2,
+                                            eventID: event.id
+                                        )
+                                    } label: {
+                                        Label("Open on iPhone", systemImage: "iphone")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .font(.caption2)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 3)
+            }
+            .navigationTitle("Intelligence")
+            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
     }
 }

@@ -36,6 +36,17 @@ variable "cloud_sql_connection_alert_threshold" {
   }
 }
 
+variable "earth_observation_asset_retention_days" {
+  description = "Lifecycle age for purgeable generated Earth Observation derivatives. Referenced metadata remains in PostgreSQL."
+  type        = number
+  default     = 60
+
+  validation {
+    condition     = var.earth_observation_asset_retention_days >= 30 && var.earth_observation_asset_retention_days <= 365
+    error_message = "earth_observation_asset_retention_days must be between 30 and 365."
+  }
+}
+
 variable "api_egress_node_locations" {
   description = "Zones used by the private API node pool. One node is created per zone; use one zone for the cost-optimized baseline."
   type        = list(string)

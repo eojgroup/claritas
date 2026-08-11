@@ -35,6 +35,21 @@ Re-evaluate an exclusion only after a new provider licence or written permission
 is archived and reviewed. Do not add a connector based only on a free tier or an
 undocumented assumption about public-sector copyright.
 
+## Disaster and Earth Observation sources
+
+| Provider | Coverage | Commercial-use review | Credential | Default | Required attribution |
+|---|---|---|---|---|---|
+| Copernicus Data Space / Sentinel Hub | Sentinel-1/2 discovery and bounded processing | Copernicus data terms reviewed; administrator must reconfirm account/quota terms before enabling | OAuth client ID/secret | Disabled | “Contains modified Copernicus Sentinel data” and provider scene URL |
+| NASA FIRMS | VIIRS near-real-time active-fire hotspots | NASA Earth Science open-data policy reviewed; underlying product citation retained | Free MAP_KEY | Disabled | NASA FIRMS, satellite/instrument and source version |
+| NASA EOSDIS GIBS | Reviewed WMTS visualization layers | NASA open-data guidance reviewed per allowlisted layer | None | Disabled | NASA EOSDIS GIBS and layer/time |
+| USGS Earthquakes | Real-time GeoJSON earthquake observations | U.S. government/public-domain policy reviewed | None | Disabled | U.S. Geological Survey and event URL |
+
+FIRMS hotspots are thermal anomalies, not proof of wildfire cause or damage.
+USGS records are physical observations, not impact assessments. Optical and SAR
+scene differences remain contextual evidence; acquisition, cloud, season and
+sensor conditions are disclosed. New EO layers or providers require a reviewed
+allowlist entry, licence/attribution storage and disabled-by-default rollout.
+
 ## Country linkage
 
 `country_iso2` describes the country the story is about. `source_country_iso2`

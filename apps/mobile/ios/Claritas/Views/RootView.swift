@@ -10,6 +10,8 @@ struct RootView: View {
         case weather
         case markets
         case transport
+        case intelligence
+        case earthObservation
         case admin
         case profile
         case policies
@@ -25,6 +27,8 @@ struct RootView: View {
             case .weather: return "Weather"
             case .markets: return "Markets"
             case .transport: return "Transport"
+            case .intelligence: return "Intelligence"
+            case .earthObservation: return "Earth observation"
             case .admin: return "Admin"
             case .profile: return "Profile"
             case .policies: return "Policies"
@@ -42,6 +46,8 @@ struct RootView: View {
             case .weather: return "cloud.sun"
             case .markets: return "chart.line.uptrend.xyaxis"
             case .transport: return "point.topleft.down.to.point.bottomright.curvepath"
+            case .intelligence: return "dot.radiowaves.left.and.right"
+            case .earthObservation: return "sensor.tag.radiowaves.forward"
             case .admin: return "shield.lefthalf.filled"
             case .profile: return "person.crop.circle"
             case .policies: return "doc.text"
@@ -91,6 +97,9 @@ struct RootView: View {
             if let country = note.userInfo?["country"] as? String, !country.isEmpty {
                 model.selectedCountry = country.uppercased()
             }
+            if let eventID = note.userInfo?["eventID"] as? String, !eventID.isEmpty {
+                model.selectedIntelligenceEventID = eventID
+            }
             let next: Tab
             switch destination {
             case "news": next = .news
@@ -99,6 +108,12 @@ struct RootView: View {
             case "transport":
                 next = .more
                 compactMorePath = [.transport]
+            case "intelligence":
+                next = .more
+                compactMorePath = [.intelligence]
+            case "earth-observation":
+                next = .more
+                compactMorePath = [.earthObservation]
             case "briefing":
                 next = .more
                 compactMorePath = [.briefing]
@@ -178,8 +193,8 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .news, .podcasts, .weather, .markets, .transport, .admin, .profile, .policies]
-            : [.overview, .news, .podcasts, .weather, .markets, .transport, .profile, .policies]
+            ? [.overview, .intelligence, .earthObservation, .news, .podcasts, .weather, .markets, .transport, .admin, .profile, .policies]
+            : [.overview, .intelligence, .earthObservation, .news, .podcasts, .weather, .markets, .transport, .profile, .policies]
     }
 
     private var sidebar: some View {
@@ -188,6 +203,8 @@ struct RootView: View {
                 sidebarLink(.overview)
             }
             Section("Signals") {
+                sidebarLink(.intelligence)
+                sidebarLink(.earthObservation)
                 sidebarLink(.news)
                 sidebarLink(.podcasts)
                 sidebarLink(.weather)
@@ -262,6 +279,10 @@ struct RootView: View {
             MarketsWorkspaceView()
         case .transport:
             TransportWorkspaceView()
+        case .intelligence:
+            IntelligenceWorkspaceView()
+        case .earthObservation:
+            EarthObservationWorkspaceView()
         case .admin:
             AdminWorkspaceView()
         case .profile:
@@ -296,6 +317,20 @@ private struct CompactMoreView: View {
                     )
 
                     BrandCard(title: "Intelligence", icon: "waveform.path.ecg") {
+                        destinationRow(
+                            title: "Cross-domain events",
+                            detail: "Correlated evidence, confidence, and materiality",
+                            icon: "dot.radiowaves.left.and.right",
+                            destination: IntelligenceWorkspaceView()
+                        )
+                        Divider()
+                        destinationRow(
+                            title: "Earth observation",
+                            detail: "Governed imagery, acquisition quality, and provenance",
+                            icon: "sensor.tag.radiowaves.forward",
+                            destination: EarthObservationWorkspaceView()
+                        )
+                        Divider()
                         destinationRow(
                             title: "Podcast intelligence",
                             detail: "Overall conclusions and attributed episode evidence",
@@ -1272,12 +1307,14 @@ struct PaywallView: View {
 struct AdminWorkspaceView: View {
     enum Panel: String, CaseIterable, Identifiable {
         case ingestion
+        case intelligence
         case users
 
         var id: String { rawValue }
         var title: String {
             switch self {
             case .ingestion: return "Ingestion"
+            case .intelligence: return "Events & EO"
             case .users: return "Users & Roles"
             }
         }
@@ -1319,9 +1356,12 @@ struct AdminWorkspaceView: View {
                                 .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
                         )
 
-                        if panel == .ingestion {
+                        switch panel {
+                        case .ingestion:
                             AdminIngestionPanelView()
-                        } else {
+                        case .intelligence:
+                            AdminIntelligenceOperationsView()
+                        case .users:
                             AdminUserManagementPanelView()
                         }
                     } else {

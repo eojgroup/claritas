@@ -8,6 +8,7 @@ resource "google_project_service" "enabled_services" {
     "servicenetworking.googleapis.com",
     "sqladmin.googleapis.com",
     "pubsub.googleapis.com",
+    "storage.googleapis.com",
     "secretmanager.googleapis.com",
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
@@ -81,6 +82,143 @@ resource "google_artifact_registry_repository" "claritas_app" {
 }
 
 ############################################
+# Event backbone and Earth Observation assets
+############################################
+resource "google_pubsub_topic" "domain_events" {
+  project = var.project_id
+  name    = "claritas-domain-events"
+
+  message_retention_duration = "86400s"
+
+  labels = {
+    service = "claritas"
+    domain  = "intelligence"
+  }
+
+  depends_on = [google_project_service.enabled_services["pubsub.googleapis.com"]]
+}
+
+resource "google_pubsub_topic" "alert_events" {
+  project = var.project_id
+  name    = "claritas-alert-events"
+
+  message_retention_duration = "86400s"
+
+  labels = {
+    service = "claritas"
+    domain  = "alerts"
+  }
+
+  depends_on = [google_project_service.enabled_services["pubsub.googleapis.com"]]
+}
+
+resource "google_pubsub_topic" "dead_letter" {
+  project = var.project_id
+  name    = "claritas-dead-letter"
+
+  message_retention_duration = "604800s"
+
+  labels = {
+    service = "claritas"
+    domain  = "operations"
+  }
+
+  depends_on = [google_project_service.enabled_services["pubsub.googleapis.com"]]
+}
+
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+locals {
+  pubsub_service_agent = "service-${data.google_project.current.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
+resource "google_pubsub_topic_iam_member" "dead_letter_service_agent_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.dead_letter.name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${local.pubsub_service_agent}"
+}
+
+resource "google_pubsub_subscription" "domain_events_api" {
+  project = var.project_id
+  name    = "claritas-domain-events-api"
+  topic   = google_pubsub_topic.domain_events.name
+
+  ack_deadline_seconds       = 60
+  message_retention_duration = "604800s"
+  retain_acked_messages      = false
+
+  expiration_policy {
+    ttl = ""
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.dead_letter.id
+    max_delivery_attempts = 8
+  }
+
+  depends_on = [google_pubsub_topic_iam_member.dead_letter_service_agent_publisher]
+}
+
+resource "google_pubsub_subscription_iam_member" "domain_events_service_agent_subscriber" {
+  project      = var.project_id
+  subscription = google_pubsub_subscription.domain_events_api.name
+  role         = "roles/pubsub.subscriber"
+  member       = "serviceAccount:${local.pubsub_service_agent}"
+}
+
+resource "google_pubsub_subscription" "dead_letter_operations" {
+  project = var.project_id
+  name    = "claritas-dead-letter-operations"
+  topic   = google_pubsub_topic.dead_letter.name
+
+  ack_deadline_seconds       = 60
+  message_retention_duration = "604800s"
+
+  expiration_policy {
+    ttl = ""
+  }
+}
+
+resource "google_storage_bucket" "earth_observation" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-claritas-earth-observation"
+  location                    = var.region
+  storage_class               = "STANDARD"
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+
+  versioning {
+    enabled = false
+  }
+
+  lifecycle_rule {
+    condition {
+      age            = var.earth_observation_asset_retention_days
+      matches_prefix = ["observations/"]
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  labels = {
+    service = "claritas"
+    domain  = "earth-observation"
+  }
+
+  depends_on = [google_project_service.enabled_services["storage.googleapis.com"]]
+}
+
+############################################
 # Secret Manager (OAuth credentials)
 ############################################
 locals {
@@ -126,6 +264,14 @@ resource "google_project_iam_member" "terraform_runner_monitoring_alerts" {
   depends_on = [
     google_project_service.enabled_services["monitoring.googleapis.com"]
   ]
+}
+
+resource "google_project_iam_member" "terraform_runner_logging_metrics" {
+  project = var.project_id
+  role    = "roles/logging.configWriter"
+  member  = "serviceAccount:${local.terraform_runner_sa}"
+
+  depends_on = [google_project_service.enabled_services["logging.googleapis.com"]]
 }
 
 resource "google_secret_manager_secret" "auth" {
@@ -196,6 +342,33 @@ resource "google_project_iam_member" "gsa_cloudsql_client" {
   project = var.project_id
   role    = "roles/cloudsql.client"
   member  = "serviceAccount:${google_service_account.claritas_sql_gsa.email}"
+}
+
+resource "google_pubsub_topic_iam_member" "api_domain_event_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.domain_events.name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.claritas_sql_gsa.email}"
+}
+
+resource "google_pubsub_topic_iam_member" "api_alert_event_publisher" {
+  project = var.project_id
+  topic   = google_pubsub_topic.alert_events.name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.claritas_sql_gsa.email}"
+}
+
+resource "google_pubsub_subscription_iam_member" "api_domain_event_subscriber" {
+  project      = var.project_id
+  subscription = google_pubsub_subscription.domain_events_api.name
+  role         = "roles/pubsub.subscriber"
+  member       = "serviceAccount:${google_service_account.claritas_sql_gsa.email}"
+}
+
+resource "google_storage_bucket_iam_member" "api_earth_observation_objects" {
+  bucket = google_storage_bucket.earth_observation.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.claritas_sql_gsa.email}"
 }
 
 ############################################

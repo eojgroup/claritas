@@ -17,6 +17,7 @@ final class WatchAppModel: ObservableObject {
     @Published private(set) var leadership: [CountryLeadership] = []
     @Published private(set) var markets: [MarketQuote] = []
     @Published private(set) var transport: TransportOverview?
+    @Published private(set) var intelligenceEvents: [IntelligenceEvent] = []
     @Published private(set) var briefingSchedule: DailyBriefingSchedule?
     @Published private(set) var isSavingBriefingSchedule: Bool = false
     @Published private(set) var briefingScheduleError: String?
@@ -50,7 +51,8 @@ final class WatchAppModel: ObservableObject {
     }
 
     var criticalSignalCount: Int {
-        weatherAlerts.count + marketBreaches.count + (transport?.summary.alerts ?? 0)
+        intelligenceEvents.filter { $0.severity == .critical || $0.severity == .high }.count +
+            weatherAlerts.count + marketBreaches.count + (transport?.summary.alerts ?? 0)
     }
 
     init() {
@@ -90,6 +92,7 @@ final class WatchAppModel: ObservableObject {
         async let leadershipResult = result { try await api.fetchCountryLeadership() }
         async let marketResult = result { try await api.fetchMarketQuotes(refresh: false) }
         async let scheduleResult = result { try await api.fetchDailyBriefingSchedule() }
+        async let intelligenceResult = result { try await api.fetchIntelligenceEvents(limit: 8) }
 
         let results = await (
             briefingResult,
@@ -98,7 +101,8 @@ final class WatchAppModel: ObservableObject {
             weatherResult,
             leadershipResult,
             marketResult,
-            scheduleResult
+            scheduleResult,
+            intelligenceResult
         )
         var errors: [Error] = []
 
@@ -135,6 +139,10 @@ final class WatchAppModel: ObservableObject {
             if isUnauthorized(error) {
                 errors.append(error)
             }
+        }
+        switch results.7 {
+        case .success(let value): intelligenceEvents = Array(value.prefix(8))
+        case .failure(let error): errors.append(error)
         }
 
         if let country = CountryRelevanceResolver.ranked(
@@ -178,8 +186,8 @@ final class WatchAppModel: ObservableObject {
         connectivity.requestContext()
     }
 
-    func openOnPhone(_ destination: String, country: String? = nil) {
-        connectivity.openOnPhone(destination, country: country)
+    func openOnPhone(_ destination: String, country: String? = nil, eventID: String? = nil) {
+        connectivity.openOnPhone(destination, country: country, eventID: eventID)
     }
 
     func updateDailyBriefingSchedule(enabled: Bool, scheduledTime: String, timezone: String) async {
@@ -248,6 +256,7 @@ final class WatchAppModel: ObservableObject {
             leadership: leadership,
             markets: markets,
             transport: transport,
+            intelligenceEvents: intelligenceEvents,
             briefingSchedule: briefingSchedule,
             lastUpdated: lastUpdated
         )
@@ -267,6 +276,7 @@ final class WatchAppModel: ObservableObject {
         leadership = snapshot.leadership
         markets = snapshot.markets
         transport = snapshot.transport
+        intelligenceEvents = snapshot.intelligenceEvents
         briefingSchedule = snapshot.briefingSchedule
         lastUpdated = snapshot.lastUpdated
     }
@@ -280,6 +290,7 @@ private struct WatchSnapshot: Codable {
     let leadership: [CountryLeadership]
     let markets: [MarketQuote]
     let transport: TransportOverview?
+    let intelligenceEvents: [IntelligenceEvent]
     let briefingSchedule: DailyBriefingSchedule?
     let lastUpdated: Date?
 }

@@ -502,6 +502,116 @@ final class APIClient {
         return comps.url
     }
 
+    func fetchIntelligenceEvents(limit: Int = 40, country: String? = nil) async throws -> [IntelligenceEvent] {
+        var comps = URLComponents(
+            url: baseURL.appendingPathComponent("/api/intelligence/events"),
+            resolvingAgainstBaseURL: false
+        )!
+        var items = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 100)))]
+        if let country, country.range(of: "^[A-Za-z]{2}$", options: .regularExpression) != nil {
+            items.append(URLQueryItem(name: "country", value: country.uppercased()))
+        }
+        comps.queryItems = items
+        return try await request(URLRequest(url: comps.url!), as: [IntelligenceEvent].self, rootKey: "events")
+    }
+
+    func fetchIntelligenceEvent(id: String) async throws -> IntelligenceEventDetail {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let url = baseURL.appendingPathComponent("/api/intelligence/events/\(encoded)")
+        return try await request(URLRequest(url: url), as: IntelligenceEventDetail.self)
+    }
+
+    func fetchIntelligenceWatchlist() async throws -> [IntelligenceWatch] {
+        let url = baseURL.appendingPathComponent("/api/intelligence/watchlist")
+        return try await request(URLRequest(url: url), as: [IntelligenceWatch].self, rootKey: "watches")
+    }
+
+    func saveIntelligenceWatch(type: String, key: String) async throws -> IntelligenceWatch {
+        var request = URLRequest(url: baseURL.appendingPathComponent("/api/intelligence/watchlist"))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "watch_type": type,
+            "watch_key": key,
+            "minimum_severity": "high",
+            "alerts_enabled": true,
+        ])
+        return try await self.request(request, as: IntelligenceWatch.self, rootKey: "watch")
+    }
+
+    func deleteIntelligenceWatch(id: String) async throws {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        var request = URLRequest(url: baseURL.appendingPathComponent("/api/intelligence/watchlist/\(encoded)"))
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: authedRequest(request))
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) || http.statusCode == 404 else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw APIError(status: status, message: errorMessage(data: data, statusCode: status))
+        }
+    }
+
+    func fetchIntelligenceAlerts() async throws -> [IntelligenceAlert] {
+        let url = baseURL.appendingPathComponent("/api/intelligence/alerts")
+        return try await request(URLRequest(url: url), as: [IntelligenceAlert].self, rootKey: "alerts")
+    }
+
+    func acknowledgeIntelligenceAlert(id: String) async throws {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        var request = URLRequest(url: baseURL.appendingPathComponent("/api/intelligence/alerts/\(encoded)"))
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": "acknowledge"])
+        let (data, response) = try await session.data(for: authedRequest(request))
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw APIError(status: status, message: errorMessage(data: data, statusCode: status))
+        }
+    }
+
+    func fetchEarthObservations(limit: Int = 40) async throws -> EarthObservationListResponse {
+        var comps = URLComponents(
+            url: baseURL.appendingPathComponent("/api/earth-observation/observations"),
+            resolvingAgainstBaseURL: false
+        )!
+        comps.queryItems = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 100)))]
+        return try await request(URLRequest(url: comps.url!), as: EarthObservationListResponse.self)
+    }
+
+    func fetchEarthAsset(path: String) async throws -> Data {
+        guard path.hasPrefix("/api/earth-observation/assets/") else {
+            throw APIError(status: 400, message: "Invalid Earth observation asset path")
+        }
+        let url = baseURL.appendingPathComponent(path)
+        let (data, response) = try await session.data(for: authedRequest(URLRequest(url: url)))
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError(status: -1, message: "No HTTP response")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
+        }
+        return data
+    }
+
+    func fetchAdminIntelligenceStatus() async throws -> AdminIntelligenceStatus {
+        let url = baseURL.appendingPathComponent("/api/admin/intelligence/status")
+        return try await request(URLRequest(url: url), as: AdminIntelligenceStatus.self)
+    }
+
+    func runIntelligenceProvider(_ provider: String) async throws {
+        guard provider == "usgs" || provider == "nasa-firms" else {
+            throw APIError(status: 400, message: "Unsupported provider run")
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("/api/admin/intelligence/providers/\(provider)/run"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("{}".utf8)
+        let (data, response) = try await session.data(for: authedRequest(request))
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw APIError(status: status, message: errorMessage(data: data, statusCode: status))
+        }
+    }
+
     // MARK: - Generic request
 
     private func request<T>(_ req: URLRequest, as: T.Type, rootKey: String? = nil) async throws -> T where T: Decodable {
