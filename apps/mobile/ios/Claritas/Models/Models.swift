@@ -1951,6 +1951,18 @@ struct EarthObservation: Codable, Identifiable {
     let assets: [EarthObservationAsset]
 }
 
+struct EarthComparisonScene: Codable {
+    let id: String?
+}
+
+struct EarthComparisonResponse: Codable {
+    let status: String
+    let before: EarthComparisonScene?
+    let after: EarthComparisonScene?
+    let notice: String?
+    let reason: String?
+}
+
 extension EarthObservation {
     var preferredDisplayAsset: EarthObservationAsset? {
         assets.first { $0.asset_type == "preview" } ?? assets.first

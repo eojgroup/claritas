@@ -256,6 +256,7 @@ export async function listEarthObservations(options: {
               'size_bytes', asset.size_bytes, 'generated_at', asset.generated_at,
               'expires_at', asset.expires_at,
               'url', '/api/earth-observation/assets/' || asset.id::text
+                || '?v=' || left(asset.content_hash, 16)
             ) ORDER BY asset.width) FILTER (WHERE asset.id IS NOT NULL), '[]'::jsonb) AS assets
      FROM earth_observation observation
      JOIN earth_scene scene ON scene.id = observation.scene_id

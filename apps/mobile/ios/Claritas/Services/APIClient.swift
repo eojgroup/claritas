@@ -633,11 +633,22 @@ final class APIClient {
         return try await request(URLRequest(url: comps.url!), as: EarthObservationListResponse.self)
     }
 
+    func requestEarthComparison(observationID: String) async throws -> EarthComparisonResponse {
+        let encoded = observationID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? observationID
+        var request = URLRequest(
+            url: baseURL.appendingPathComponent("/api/earth-observation/observations/\(encoded)/compare")
+        )
+        request.httpMethod = "POST"
+        return try await self.request(request, as: EarthComparisonResponse.self)
+    }
+
     func fetchEarthAsset(path: String) async throws -> Data {
-        guard path.hasPrefix("/api/earth-observation/assets/") else {
+        guard path.hasPrefix("/api/earth-observation/assets/"),
+              let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+              url.scheme == baseURL.scheme,
+              url.host == baseURL.host else {
             throw APIError(status: 400, message: "Invalid Earth observation asset path")
         }
-        let url = baseURL.appendingPathComponent(path)
         let (data, response) = try await session.data(for: authedRequest(URLRequest(url: url)))
         guard let http = response as? HTTPURLResponse else {
             throw APIError(status: -1, message: "No HTTP response")

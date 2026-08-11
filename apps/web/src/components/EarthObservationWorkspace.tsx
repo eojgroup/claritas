@@ -6,7 +6,7 @@ import {
   type EarthObservation,
   type EarthProviderStatus,
 } from "../lib/api";
-import { findDefensibleComparisonPair } from "./earthObservationComparison";
+import { findDefensibleComparisonPair, reconcileValidatedComparisonPair } from "./earthObservationComparison";
 import SatelliteImage from "./SatelliteImage";
 import {
   earthObservationProductLabel,
@@ -79,11 +79,23 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
       return;
     }
     let active = true;
+    setComparison({ status: "checking" });
     requestEarthObservationComparison(comparePair.after.id)
       .then((value) => { if (active) setComparison(value); })
-      .catch(() => { if (active) setComparison(null); });
+      .catch((reason) => {
+        if (active) setComparison({
+          status: "unavailable",
+          reason: reason instanceof Error ? reason.message : "Comparison validation failed.",
+        });
+      });
     return () => { active = false; };
   }, [comparePair]);
+
+  const validatedComparePair = useMemo(
+    () => reconcileValidatedComparisonPair(visibleObservations, comparison, eventId),
+    [comparison, eventId, visibleObservations],
+  );
+  const comparisonStatus = String(comparison?.status ?? "idle");
 
   return (
     <div className="workspace-page min-w-0 space-y-4">
@@ -107,7 +119,7 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
 
       {!eventId && !locationId && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
-          Library mode shows governed source assets. Claritas only offers a before/after comparison when two observations share the same event or unassigned location, product, and provider, with a valid chronological order.
+          Library mode shows governed source assets. Claritas only compares readable visual products when the server confirms the same event or unassigned location, product, provider, and a defensible chronological order.
         </div>
       )}
 
@@ -117,16 +129,32 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
 
       {error && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>}
 
-      {comparePair && preview(comparePair.before) && preview(comparePair.after) && (
+      {validatedComparePair && preview(validatedComparePair.before) && preview(validatedComparePair.after) && (
         <section className="app-card rounded-xl p-4 sm:p-5" aria-label="Defensible before and after comparison">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-sm font-semibold text-[color:var(--shell-ink)]">Before / after evidence</div><div className="mt-1 text-xs text-[color:var(--shell-muted)]">{comparePair.after.location_name || "Monitored location"} · same {comparePair.after.provider.replace(/_/g, " ")} provider and {comparePair.after.product_type.replace(/_/g, " ")} product</div></div><div className="text-xs text-[color:var(--shell-muted)]">{String(comparison?.status ?? "comparison checking").replace(/_/g, " ")}</div></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="text-sm font-semibold text-[color:var(--shell-ink)]">Before / after evidence</div><div className="mt-1 text-xs text-[color:var(--shell-muted)]">{validatedComparePair.after.location_name || "Monitored location"} · same {validatedComparePair.after.provider.replace(/_/g, " ")} provider and {earthObservationProductLabel(validatedComparePair.after.product_type)} product</div></div><div className="text-xs text-[color:var(--shell-muted)]">{comparisonStatus.replace(/_/g, " ")}</div></div>
           <div className="relative mt-4 aspect-[16/7] overflow-hidden rounded-xl bg-slate-100">
-            <SatelliteImage sources={[preview(comparePair.before)?.url]} alt={`Before observation captured ${dateLabel(comparePair.before.capture_start)}`} className="absolute inset-0 h-full w-full object-cover" fallbackClassName="absolute inset-0 flex items-center justify-center bg-slate-900" />
-            <div className="absolute inset-y-0 left-0 overflow-hidden border-r-2 border-white" style={{ width: `${slider}%` }}><SatelliteImage sources={[preview(comparePair.after)?.url]} alt={`After observation captured ${dateLabel(comparePair.after.capture_start)}`} className="h-full max-w-none object-cover" fallbackClassName="flex h-full min-w-full items-center justify-center bg-slate-800" style={{ width: "calc(100vw - 2rem)", minWidth: "100%" }} /></div>
-            <span className="absolute bottom-3 left-3 rounded-full bg-slate-950/75 px-3 py-1 text-xs text-white">After · {dateLabel(comparePair.after.capture_start)}</span><span className="absolute bottom-3 right-3 rounded-full bg-slate-950/75 px-3 py-1 text-xs text-white">Before · {dateLabel(comparePair.before.capture_start)}</span>
+            <SatelliteImage sources={[preview(validatedComparePair.before)?.url]} alt={`Before observation captured ${dateLabel(validatedComparePair.before.capture_start)}`} className={`absolute inset-0 h-full w-full ${isAnalyticalEarthProduct(validatedComparePair.before.product_type) ? "object-contain" : "object-cover"}`} fallbackClassName="absolute inset-0 flex items-center justify-center bg-slate-900" />
+            <SatelliteImage
+              sources={[preview(validatedComparePair.after)?.url]}
+              alt={`After observation captured ${dateLabel(validatedComparePair.after.capture_start)}`}
+              className={`absolute inset-0 h-full w-full ${isAnalyticalEarthProduct(validatedComparePair.after.product_type) ? "object-contain" : "object-cover"}`}
+              fallbackClassName="absolute inset-0 flex h-full w-full items-center justify-center bg-slate-800"
+              style={{ clipPath: `inset(0 ${100 - slider}% 0 0)` }}
+            />
+            <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 w-0.5 bg-white shadow" style={{ left: `${slider}%` }} />
+            <span className="absolute bottom-3 left-3 rounded-full bg-slate-950/75 px-3 py-1 text-xs text-white">After · {dateLabel(validatedComparePair.after.capture_start)}</span><span className="absolute bottom-3 right-3 rounded-full bg-slate-950/75 px-3 py-1 text-xs text-white">Before · {dateLabel(validatedComparePair.before.capture_start)}</span>
           </div>
           <input aria-label="Before and after comparison position" type="range" min="0" max="100" value={slider} onChange={(event) => setSlider(Number(event.target.value))} className="mt-3 w-full accent-slate-800" />
           <p className="mt-2 text-xs leading-5 text-[color:var(--shell-muted)]">{String(comparison?.notice ?? "Acquisition time, sensor, cloud, season, and viewing geometry can produce apparent differences.")}</p>
+        </section>
+      )}
+
+      {comparePair && !validatedComparePair && comparison && (
+        <section className="app-card rounded-xl p-4 text-xs leading-5 text-[color:var(--shell-muted)]" aria-label="Comparison validation status">
+          <div className="font-semibold text-[color:var(--shell-ink)]">Before / after comparison {comparisonStatus === "checking" ? "is being validated" : "is unavailable"}</div>
+          <p className="mt-1">{comparisonStatus === "checking"
+            ? "Claritas is checking event timing, acquisition order, provider, product, and image availability before showing pixels."
+            : String(comparison.reason ?? comparison.notice ?? "No defensible before/after pair is currently available for this event.")}</p>
         </section>
       )}
 

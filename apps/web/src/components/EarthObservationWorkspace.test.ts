@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findDefensibleComparisonPair } from "./earthObservationComparison";
+import { findDefensibleComparisonPair, reconcileValidatedComparisonPair } from "./earthObservationComparison";
 import type { EarthObservation } from "../lib/api";
 
 function observation(id: string, eventId: string | null, locationId: string | null, capture: string): EarthObservation {
@@ -53,5 +53,35 @@ describe("findDefensibleComparisonPair", () => {
       observation("event-a-only", "event-a", null, "2026-08-10T08:00:00Z"),
       observation("event-b-only", "event-b", null, "2026-08-11T08:00:00Z"),
     ], "event-a")).toBeNull();
+  });
+
+  it("does not automatically promote analytical products into the comparison canvas", () => {
+    const rows = [
+      { ...observation("before", "event-a", "location-a", "2026-08-10T08:00:00Z"), product_type: "burn_index" },
+      { ...observation("after", "event-a", "location-a", "2026-08-11T08:00:00Z"), product_type: "burn_index" },
+    ];
+    expect(findDefensibleComparisonPair(rows, "event-a")).toBeNull();
+    expect(reconcileValidatedComparisonPair(rows, {
+      status: "available",
+      before: { id: rows[0].scene_id },
+      after: { id: rows[1].scene_id },
+    }, "event-a")).toBeNull();
+  });
+
+  it("fails closed when the backend rejects or selects a different comparison", () => {
+    const before = observation("before", "event-a", "location-a", "2026-08-10T08:00:00Z");
+    const after = observation("after", "event-a", "location-a", "2026-08-11T08:00:00Z");
+    expect(reconcileValidatedComparisonPair([before, after], { status: "unavailable" }, "event-a"))
+      .toBeNull();
+    expect(reconcileValidatedComparisonPair([before, after], {
+      status: "available",
+      before: { id: before.scene_id },
+      after: { id: "different-scene" },
+    }, "event-a")).toBeNull();
+    expect(reconcileValidatedComparisonPair([before, after], {
+      status: "limited_comparability",
+      before: { id: before.scene_id },
+      after: { id: after.scene_id },
+    }, "event-a")?.after.id).toBe("after");
   });
 });

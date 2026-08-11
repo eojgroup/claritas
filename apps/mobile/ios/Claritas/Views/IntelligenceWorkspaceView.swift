@@ -513,12 +513,17 @@ struct EarthObservationWorkspaceView: View {
     @EnvironmentObject private var model: AppModel
     @State private var observations: [EarthObservation] = []
     @State private var providers: [EarthProviderStatus] = []
+    @State private var comparable: [EarthObservation] = []
+    @State private var comparisonNotice: String?
     @State private var comparePosition = 0.5
     @State private var isLoading = false
     @State private var error: String?
 
-    private var comparable: [EarthObservation] {
-        let candidates = observations.filter { !$0.assets.isEmpty && $0.event_id != nil }
+    private func comparisonCandidate(in observations: [EarthObservation]) -> (before: EarthObservation, after: EarthObservation)? {
+        let visualProducts = Set(["true_color", "false_color", "sar"])
+        let candidates = observations
+            .filter { $0.preferredDisplayAsset != nil && $0.event_id != nil && visualProducts.contains($0.product_type) }
+            .sorted { $0.capture_start > $1.capture_start }
         for after in candidates {
             if let before = candidates.first(where: {
                 $0.id != after.id
@@ -528,10 +533,30 @@ struct EarthObservationWorkspaceView: View {
                     && $0.product_type == after.product_type
                     && $0.capture_start < after.capture_start
             }) {
-                return [before, after]
+                return (before, after)
             }
         }
-        return []
+        return nil
+    }
+
+    private func validatedComparison(
+        in observations: [EarthObservation],
+        response: EarthComparisonResponse
+    ) -> [EarthObservation] {
+        guard ["available", "limited_comparability"].contains(response.status),
+              let beforeSceneID = response.before?.id,
+              let afterSceneID = response.after?.id,
+              beforeSceneID != afterSceneID,
+              let before = observations.first(where: { $0.scene_id == beforeSceneID && $0.preferredDisplayAsset != nil }),
+              let after = observations.first(where: { $0.scene_id == afterSceneID && $0.preferredDisplayAsset != nil }),
+              before.event_id != nil,
+              before.event_id == after.event_id,
+              before.location_id == after.location_id,
+              before.provider == after.provider,
+              before.product_type == after.product_type,
+              before.capture_start < after.capture_start
+        else { return [] }
+        return [before, after]
     }
 
     var body: some View {
@@ -581,8 +606,14 @@ struct EarthObservationWorkspaceView: View {
                                 .frame(height: 260)
                             Slider(value: $comparePosition, in: 0...1)
                                 .accessibilityLabel("Before and after comparison position")
-                            Text("Sensor, season, cloud, and viewing geometry can resemble physical change. Visual differences are contextual evidence, not automatic proof of cause.")
+                            Text(comparisonNotice ?? "Sensor, season, cloud, and viewing geometry can resemble physical change. Visual differences are contextual evidence, not automatic proof of cause.")
                                 .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if let comparisonNotice {
+                        BrandCard(title: "Comparison unavailable", icon: "rectangle.on.rectangle.slash") {
+                            Text(comparisonNotice)
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -616,9 +647,23 @@ struct EarthObservationWorkspaceView: View {
         defer { isLoading = false }
         do {
             let result = try await model.api.fetchEarthObservations(limit: 60)
-            observations = result.observations.sortedForDisplay
+            let sortedObservations = result.observations.sortedForDisplay
+            observations = sortedObservations
             providers = result.providers
+            comparable = []
+            comparisonNotice = nil
             error = nil
+            if let candidate = comparisonCandidate(in: sortedObservations) {
+                do {
+                    let validation = try await model.api.requestEarthComparison(observationID: candidate.after.id)
+                    comparable = validatedComparison(in: sortedObservations, response: validation)
+                    comparisonNotice = comparable.count == 2
+                        ? validation.notice
+                        : (validation.reason ?? validation.notice ?? "No defensible before/after pair is currently available.")
+                } catch {
+                    comparisonNotice = "Claritas could not validate a defensible before/after pair."
+                }
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -725,25 +770,33 @@ private struct EarthComparisonView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                AuthenticatedEarthImage(path: before.assets[0].url)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                AuthenticatedEarthImage(path: after.assets[0].url)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .frame(width: geometry.size.width * position, alignment: .leading)
-                    .clipped()
-                Rectangle().fill(.white).frame(width: 2).offset(x: geometry.size.width * position)
-                VStack {
-                    Spacer()
-                    HStack {
-                        Text("After").padding(6).background(.black.opacity(0.65), in: Capsule())
+            if let beforeAsset = before.preferredDisplayAsset,
+               let afterAsset = after.preferredDisplayAsset {
+                ZStack(alignment: .leading) {
+                    AuthenticatedEarthImage(path: beforeAsset.url)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                    AuthenticatedEarthImage(path: afterAsset.url)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .frame(width: geometry.size.width * position, alignment: .leading)
+                        .clipped()
+                    Rectangle().fill(.white).frame(width: 2).offset(x: geometry.size.width * position)
+                    VStack {
                         Spacer()
-                        Text("Before").padding(6).background(.black.opacity(0.65), in: Capsule())
+                        HStack {
+                            Text("After").padding(6).background(.black.opacity(0.65), in: Capsule())
+                            Spacer()
+                            Text("Before").padding(6).background(.black.opacity(0.65), in: Capsule())
+                        }
+                        .font(.caption2.weight(.bold)).foregroundStyle(.white).padding(8)
                     }
-                    .font(.caption2.weight(.bold)).foregroundStyle(.white).padding(8)
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                Label("Comparison images unavailable", systemImage: "photo.badge.exclamationmark")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 }
