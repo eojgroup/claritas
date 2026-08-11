@@ -79,7 +79,7 @@ jobs:
             -d postgis/postgis:16-3.5
           cleanup() { docker rm -f claritas-postgis-test >/dev/null 2>&1 || true; }
           trap cleanup EXIT
-          for attempt in $(seq 1 90); do
+          for _ in $(seq 1 90); do
             if docker logs claritas-postgis-test 2>&1 | grep -q 'PostgreSQL init process complete' \
               && docker exec claritas-postgis-test pg_isready -U postgres -d claritas >/dev/null 2>&1; then
               break
@@ -849,6 +849,8 @@ jobs:
       - name: 🩺 Verify ingestion and scheduler runtime configuration
         run: |
           set -euo pipefail
+          # The single quotes intentionally protect JavaScript template literals from Bash.
+          # shellcheck disable=SC2016
           kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
             const missing = [];
             if (!process.env.FRED_API_KEY?.trim()) missing.push("FRED_API_KEY");

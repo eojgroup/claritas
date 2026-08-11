@@ -68,13 +68,18 @@ jobs:
           project_id: ${{ env.PROJECT_ID }}
           install_components: gke-gcloud-auth-plugin
 
-      # Bootstrap the least-privilege permission needed to create Terraform's
-      # alert policies. Terraform manages the same binding after this step.
-      - name: 🚨 Ensure alert-policy IAM permission
+      # Bootstrap permissions needed before Terraform can manage the same
+      # bindings itself. Pub/Sub resources cannot bootstrap their own creator.
+      - name: 🚨 Ensure infrastructure IAM permissions
         run: |
           gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
             --member="serviceAccount:terraform-github-oidc@${PROJECT_ID}.iam.gserviceaccount.com" \
             --role="roles/monitoring.alertPolicyEditor" \
+            --condition=None \
+            --quiet
+          gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+            --member="serviceAccount:terraform-github-oidc@${PROJECT_ID}.iam.gserviceaccount.com" \
+            --role="roles/pubsub.admin" \
             --condition=None \
             --quiet
 
@@ -124,7 +129,20 @@ jobs:
 
       - name: 🚀 Terraform Apply (core)
         working-directory: infra/gcp/terraform
-        run: terraform apply -auto-approve -var-file="terraform.tfvars" -lock-timeout=5m
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if terraform apply -auto-approve -var-file="terraform.tfvars" -lock-timeout=5m; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "Terraform apply failed after ${attempt} attempts." >&2
+              exit 1
+            fi
+            delay=$((attempt * 30))
+            echo "Terraform apply failed; waiting ${delay}s for Google API/IAM propagation before retry ${attempt}/5." >&2
+            sleep "$delay"
+          done
 
       ############################################
       # Cloud SQL Terraform outputs
