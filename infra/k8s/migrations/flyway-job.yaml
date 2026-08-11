@@ -23,6 +23,15 @@ spec:
             - "--port=5432"
             - "--exit-zero-on-sigterm"
             - "$(INSTANCE_CONNECTION_NAME)"
+          # Restartable init containers do not otherwise block the application
+          # container until their listener is ready. Prevent Flyway racing the
+          # proxy during short-lived Jobs.
+          startupProbe:
+            tcpSocket:
+              port: 5432
+            periodSeconds: 1
+            timeoutSeconds: 1
+            failureThreshold: 45
           env:
             - name: INSTANCE_CONNECTION_NAME
               valueFrom:
@@ -38,16 +47,14 @@ spec:
           command: ["/bin/sh", "-lc"]
           args:
             - |
-              set -e
+              set -eu
               # Compose JDBC URL from DB_NAME provided via ConfigMap
               export FLYWAY_URL="jdbc:postgresql://127.0.0.1:5432/${DB_NAME}"
-              # Fail fast on bad credentials/config. Long retry loops hide real errors.
-              export FLYWAY_CONNECT_RETRIES=8
+              # The proxy startup probe handles listener readiness; these
+              # retries cover brief database-side connection interruptions.
+              export FLYWAY_CONNECT_RETRIES=20
               export FLYWAY_CONNECT_RETRIES_INTERVAL=3
-              # Apply then validate:
-              # - migrate handles expected pending scripts
-              # - validate still catches drift/checksum issues afterward
-              /flyway/flyway info
+              echo "Flyway proxy is ready; applying migrations."
               /flyway/flyway migrate
               /flyway/flyway validate
           env:
@@ -62,15 +69,14 @@ spec:
             - name: FLYWAY_LOCATIONS
               value: "filesystem:/flyway/sql"
             - name: JAVA_TOOL_OPTIONS
-              # Keep this short-lived migration Job schedulable on the small
-              # production node pool. Flyway only loads the migration set once.
-              value: "-Xms32m -Xmx128m -XX:MaxRAMPercentage=75"
+              value: "-Xms32m -Xmx192m -XX:MaxRAMPercentage=75"
           volumeMounts:
             - name: flyway-sql
               mountPath: /flyway/sql
           resources:
             requests: { cpu: "25m", memory: "64Mi" }
-            limits:   { cpu: "200m", memory: "192Mi" }
+            limits:   { cpu: "300m", memory: "320Mi" }
+          terminationMessagePolicy: FallbackToLogsOnError
       volumes:
         - name: flyway-sql
           configMap:

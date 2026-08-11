@@ -817,6 +817,7 @@ jobs:
             kubectl -n "$NS" get job "$job" -o wide || true
             kubectl -n "$NS" describe job "$job" | sed -n '1,200p' || true
             kubectl -n "$NS" get pods -l job-name="$job" -o wide || true
+            kubectl -n "$NS" get pods -l job-name="$job" -o jsonpath='{range .items[*]}{.metadata.name}{" flyway="}{.status.containerStatuses[?(@.name=="flyway")].state.terminated.reason}{" exit="}{.status.containerStatuses[?(@.name=="flyway")].state.terminated.exitCode}{" message="}{.status.containerStatuses[?(@.name=="flyway")].state.terminated.message}{"\n"}{end}' || true
             kubectl -n "$NS" logs "job/$job" -c flyway --tail=200 || true
             kubectl -n "$NS" logs "job/$job" -c cloud-sql-proxy --tail=200 || true
             exit 1
