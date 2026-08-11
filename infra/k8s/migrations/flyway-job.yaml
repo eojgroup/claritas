@@ -21,14 +21,18 @@ spec:
             - "--structured-logs"
             - "--private-ip"
             - "--port=5432"
+            - "--health-check"
+            - "--http-address=0.0.0.0"
+            - "--http-port=9090"
             - "--exit-zero-on-sigterm"
             - "$(INSTANCE_CONNECTION_NAME)"
           # Restartable init containers do not otherwise block the application
           # container until their listener is ready. Prevent Flyway racing the
           # proxy during short-lived Jobs.
           startupProbe:
-            tcpSocket:
-              port: 5432
+            httpGet:
+              path: /startup
+              port: 9090
             periodSeconds: 1
             timeoutSeconds: 1
             failureThreshold: 45
