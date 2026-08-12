@@ -470,7 +470,14 @@ final class AppModel: ObservableObject {
     }
 
     func configurePushNotifications() async {
-        guard authStatus == .authed else { return }
+        guard authStatus == .authed else {
+            pushRegistrationError = "Sign in before enabling event alerts."
+            return
+        }
+        guard hasPaidAccess else {
+            pushRegistrationError = "Event alerts require an account with active access."
+            return
+        }
         do {
             let granted = try await PushNotificationCoordinator.requestAuthorizationAndRegister()
             guard granted else {

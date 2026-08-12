@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ProfileView: View {
     enum Section: String, CaseIterable, Identifiable {
@@ -31,6 +32,7 @@ struct ProfileView: View {
     @State private var briefingScheduleEnabled: Bool = true
     @State private var briefingScheduleTime: Date = ProfileView.dateFromScheduleTime("07:00")
     @State private var briefingScheduleTimezone: String = TimeZone.current.identifier
+    @State private var isConfiguringPushNotifications = false
 
     private var displayName: String {
         model.authUser?.display_name ?? model.authUser?.email ?? "Signed in"
@@ -238,13 +240,32 @@ struct ProfileView: View {
                             .foregroundStyle(model.pushRegistrationError == nil ? Color.secondary : Color.orange)
                     }
                     Spacer()
-                    Button {
-                        Task { await model.configurePushNotifications() }
-                    } label: {
-                        Label("Enable", systemImage: "bell.badge")
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Button {
+                            isConfiguringPushNotifications = true
+                            Task {
+                                await model.configurePushNotifications()
+                                isConfiguringPushNotifications = false
+                            }
+                        } label: {
+                            if isConfiguringPushNotifications {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Enable", systemImage: "bell.badge")
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isConfiguringPushNotifications)
+
+                        if model.pushRegistrationError?.contains("system settings") == true {
+                            Button("Open Settings") {
+                                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                                UIApplication.shared.open(url)
+                            }
                             .font(.caption.weight(.semibold))
+                        }
                     }
-                    .buttonStyle(.bordered)
                 }
 
                 Divider()
