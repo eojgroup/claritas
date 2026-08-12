@@ -84,6 +84,10 @@ jobs:
             echo "TestFlight automation is installed but signing credentials are incomplete. Add the five documented repository secrets once; ordinary deployments then require no manual export or group assignment." >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "configured=$configured" >> "$GITHUB_OUTPUT"
+          if [[ "$configured" != "true" ]]; then
+            echo "Refusing to report a successful main-branch Apple release without complete TestFlight credentials." >&2
+            exit 1
+          fi
 
       - name: Select Xcode
         if: steps.signing.outputs.configured == 'true'
@@ -97,6 +101,7 @@ jobs:
           mkdir -p "$signing_dir" "$HOME/.private_keys"
           printf '%s\n' "$APP_STORE_CONNECT_PRIVATE_KEY_P8" > "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           printf '%s' "$APPLE_DISTRIBUTION_CERTIFICATE_P12" | base64 --decode > "$signing_dir/distribution.p12"
+          openssl pkcs12 -in "$signing_dir/distribution.p12" -clcerts -nokeys -passin env:APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD -out "$signing_dir/distribution.pem"
           openssl pkey -in "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" -check -noout
           cp "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" "$HOME/.private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           keychain_path="$RUNNER_TEMP/claritas-signing.keychain-db"
@@ -116,6 +121,12 @@ jobs:
           echo "Validated $distribution_identities Apple Distribution signing identity in the isolated keychain."
           echo "APP_STORE_CONNECT_PRIVATE_KEY_PATH=$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" >> "$GITHUB_ENV"
           echo "SIGNING_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
+          echo "DISTRIBUTION_CERTIFICATE_PATH=$signing_dir/distribution.pem" >> "$GITHUB_ENV"
+
+      - name: Prepare App Store provisioning profiles
+        if: steps.signing.outputs.configured == 'true'
+        working-directory: apps/mobile/ios
+        run: ruby prepare_app_store_profiles.rb
 
       - name: Generate release project
         if: steps.signing.outputs.configured == 'true'
@@ -142,8 +153,6 @@ jobs:
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
-            CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
             OTHER_CODE_SIGN_FLAGS="--keychain $SIGNING_KEYCHAIN_PATH" \
             archive 2>&1 | tee "$RUNNER_TEMP/claritas-archive.log"
 
@@ -156,7 +165,7 @@ jobs:
             -exportArchive \
             -archivePath "$RUNNER_TEMP/Claritas.xcarchive" \
             -exportPath "$RUNNER_TEMP/claritas-export" \
-            -exportOptionsPlist apps/mobile/ios/ExportOptions.plist \
+            -exportOptionsPlist "$EXPORT_OPTIONS_PLIST" \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$APP_STORE_CONNECT_PRIVATE_KEY_PATH" \
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \

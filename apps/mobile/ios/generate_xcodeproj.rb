@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 
 require "fileutils"
+require "json"
 require "xcodeproj"
 
 ROOT = File.expand_path(__dir__)
@@ -37,6 +38,7 @@ if ENV.key?("WATCH_BUNDLE_ID") && ENV.fetch("WATCH_BUNDLE_ID") != watch_bundle_i
   MESSAGE
 end
 development_team = ENV.fetch("DEVELOPMENT_TEAM", "VTBJTFDTQY")
+release_provisioning_profiles = JSON.parse(ENV.fetch("RELEASE_PROVISIONING_PROFILES_JSON", "{}"))
 ios_deployment_target = ENV.fetch("IOS_DEPLOYMENT_TARGET", "16.0")
 watchos_deployment_target = ENV.fetch("WATCHOS_DEPLOYMENT_TARGET", "10.0")
 version_file = File.join(ROOT, "VERSION")
@@ -108,6 +110,17 @@ configure_target(
     "TARGETED_DEVICE_FAMILY" => "1,2"
   }
 )
+
+def configure_release_signing(target, bundle_identifier, release_profiles)
+  profile_name = release_profiles[bundle_identifier]
+  return if profile_name.to_s.empty?
+  release = target.build_configurations.find { |configuration| configuration.name == "Release" }
+  raise "Missing Release configuration for #{target.name}" unless release
+  release.build_settings["CODE_SIGN_STYLE"] = "Manual"
+  release.build_settings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
+  release.build_settings["PROVISIONING_PROFILE_SPECIFIER"] = profile_name
+end
+
 ios_target.build_configurations.each do |configuration|
   configuration.build_settings["APNS_ENVIRONMENT"] = configuration.name == "Release" ? "production" : "development"
 end
@@ -176,6 +189,14 @@ configure_target(
     "WATCHOS_DEPLOYMENT_TARGET" => watchos_deployment_target
   }
 )
+
+# CI supplies App Store profile names only for distribution builds. Keep the
+# checked-in project automatic for local development, and apply the manual
+# Release overrides after the shared target settings so they cannot be reset.
+configure_release_signing(ios_target, product_identifiers.fetch(:ios), release_provisioning_profiles)
+configure_release_signing(widget_target, product_identifiers.fetch(:widget), release_provisioning_profiles)
+configure_release_signing(watch_target, product_identifiers.fetch(:watch), release_provisioning_profiles)
+configure_release_signing(watch_widget_target, product_identifiers.fetch(:watch_widget), release_provisioning_profiles)
 
 root_group = project.main_group
 ios_group = root_group.new_group("Claritas")
@@ -323,12 +344,21 @@ watch_product.settings = { "ATTRIBUTES" => ["RemoveHeadersOnCopy", "CodeSignOnCo
 project.root_object.attributes["TargetAttributes"] = {
   ios_target.uuid => {
     "DevelopmentTeam" => development_team,
-    "ProvisioningStyle" => "Automatic",
+    "ProvisioningStyle" => release_provisioning_profiles.empty? ? "Automatic" : "Manual",
     "SystemCapabilities" => { "com.apple.Push" => { "enabled" => 1 } }
   },
-  watch_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" },
-  widget_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" },
-  watch_widget_target.uuid => { "DevelopmentTeam" => development_team, "ProvisioningStyle" => "Automatic" }
+  watch_target.uuid => {
+    "DevelopmentTeam" => development_team,
+    "ProvisioningStyle" => release_provisioning_profiles.empty? ? "Automatic" : "Manual"
+  },
+  widget_target.uuid => {
+    "DevelopmentTeam" => development_team,
+    "ProvisioningStyle" => release_provisioning_profiles.empty? ? "Automatic" : "Manual"
+  },
+  watch_widget_target.uuid => {
+    "DevelopmentTeam" => development_team,
+    "ProvisioningStyle" => release_provisioning_profiles.empty? ? "Automatic" : "Manual"
+  }
 }
 
 project.save

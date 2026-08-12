@@ -89,7 +89,12 @@ specifications.each do |target_name, specification|
   check.call(target.product_type == specification[:product_type], "#{target_name} has the wrong product type")
 
   attributes = target_attributes.fetch(target.uuid, {})
-  check.call(attributes["ProvisioningStyle"] == "Automatic", "#{target_name} must use automatic provisioning")
+  release_settings = target.build_configurations.find { |configuration| configuration.name == "Release" }&.build_settings || {}
+  expected_provisioning_style = release_settings["CODE_SIGN_STYLE"] == "Manual" ? "Manual" : "Automatic"
+  check.call(
+    attributes["ProvisioningStyle"] == expected_provisioning_style,
+    "#{target_name} target provisioning style must match its Release configuration"
+  )
   check.call(!attributes["DevelopmentTeam"].to_s.empty?, "#{target_name} must define a development team")
 
   target.build_configurations.each do |configuration|
@@ -106,7 +111,12 @@ specifications.each do |target_name, specification|
     expected_app_group = ["group.#{resolved_bundle_anchor}", app_group_suffix].compact.join(".")
     check.call(settings[app_group_setting] == expected_app_group, "#{prefix} has the wrong App Group")
     check.call(!settings[app_group_setting].to_s.include?("$("), "#{prefix} App Group must be concrete")
-    check.call(settings["CODE_SIGN_STYLE"] == "Automatic", "#{prefix} must use automatic signing")
+    if configuration.name == "Release" && settings["CODE_SIGN_STYLE"] == "Manual"
+      check.call(settings["CODE_SIGN_IDENTITY"] == "Apple Distribution", "#{prefix} manual signing must use Apple Distribution")
+      check.call(!settings["PROVISIONING_PROFILE_SPECIFIER"].to_s.empty?, "#{prefix} manual signing must name a provisioning profile")
+    else
+      check.call(settings["CODE_SIGN_STYLE"] == "Automatic", "#{prefix} must use automatic signing")
+    end
     check.call(!settings["DEVELOPMENT_TEAM"].to_s.empty?, "#{prefix} must define a development team")
 
     resolved_product_identifier = settings["PRODUCT_BUNDLE_IDENTIFIER"].to_s
