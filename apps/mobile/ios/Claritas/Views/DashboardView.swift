@@ -3660,7 +3660,7 @@ struct SignalMapPanel: View {
                 mapControls
 
                 ZStack(alignment: .topLeading) {
-                    InteractiveCountryBubbleMap(
+                    NativeSignalMap(
                         points: points,
                         events: locatedEvents,
                         mapRegion: region,
@@ -4186,6 +4186,198 @@ private enum SignalMapDataBuilder {
     }
 }
 
+private struct NativeSignalMap: View {
+    let points: [CountryBubblePoint]
+    let events: [IntelligenceEvent]
+    let mapRegion: SignalMapRegion
+    let compactPresentation: Bool
+    let selectedCountry: String?
+    let comparisonCountry: String?
+    let pinnedCountry: String?
+    let featuredCountry: String?
+    let resetToken: Int
+    let onSelectCountry: (String) -> Void
+    let onSelectEvent: (IntelligenceEvent) -> Void
+
+    @State private var viewport = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 12, longitude: 0),
+        span: MKCoordinateSpan(latitudeDelta: 142, longitudeDelta: 350)
+    )
+
+    private var annotations: [NativeSignalAnnotation] {
+        let countries = points.prefix(compactPresentation ? 28 : 64).map {
+            NativeSignalAnnotation(id: "country-\($0.id)", coordinate: $0.coordinate, country: $0, event: nil)
+        }
+        let mappedEvents = events.prefix(compactPresentation ? 42 : 100).compactMap { event -> NativeSignalAnnotation? in
+            guard let latitude = event.latitude, let longitude = event.longitude else { return nil }
+            return NativeSignalAnnotation(
+                id: "event-\(event.id)",
+                coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                country: nil,
+                event: event
+            )
+        }
+        return countries + mappedEvents
+    }
+
+    var body: some View {
+        Map(
+            coordinateRegion: $viewport,
+            interactionModes: [.pan, .zoom],
+            showsUserLocation: false,
+            annotationItems: annotations
+        ) { annotation in
+            MapAnnotation(coordinate: annotation.coordinate) {
+                if let country = annotation.country {
+                    countryMarker(country)
+                } else if let event = annotation.event {
+                    eventMarker(event)
+                }
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            Text("Apple Maps · event points use source coordinates")
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(.white.opacity(0.78))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.5), in: Capsule())
+                .padding(8)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .topTrailing) {
+            if compactPresentation {
+                Label("Pinch to zoom", systemImage: "hand.pinch")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .padding(8)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onAppear { resetViewport() }
+        .onChange(of: mapRegion) { _ in resetViewport() }
+        .onChange(of: resetToken) { _ in resetViewport() }
+        .onChange(of: selectedCountry) { next in
+            guard let next,
+                  let coordinate = points.first(where: { $0.iso == next.uppercased() })?.coordinate else { return }
+            withAnimation(.easeInOut(duration: 0.24)) {
+                viewport = MKCoordinateRegion(
+                    center: coordinate,
+                    span: MKCoordinateSpan(latitudeDelta: 38, longitudeDelta: 44)
+                )
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Interactive global event map")
+    }
+
+    private func countryMarker(_ point: CountryBubblePoint) -> some View {
+        let selected = point.iso == selectedCountry?.uppercased()
+        let compared = point.iso == comparisonCountry?.uppercased()
+        let featured = point.iso == featuredCountry?.uppercased()
+        let pinned = point.iso == pinnedCountry?.uppercased()
+        let diameter = countryMarkerSize(point)
+
+        return Button { onSelectCountry(point.iso) } label: {
+            ZStack {
+                if featured || pinned {
+                    Circle()
+                        .stroke(
+                            ClaritasPalette.shellAccent(for: .dark),
+                            style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])
+                        )
+                        .frame(width: diameter + 8, height: diameter + 8)
+                }
+                Circle()
+                    .fill(ClaritasPalette.shellAccent(for: .dark).opacity(0.86))
+                    .overlay(
+                        Circle().stroke(
+                            compared ? ClaritasPalette.dataBlue(for: .dark) : .white.opacity(0.9),
+                            lineWidth: selected || compared ? 2.5 : 1
+                        )
+                    )
+                    .frame(width: diameter, height: diameter)
+                if !compactPresentation || selected || featured {
+                    Text(point.iso)
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Color(hex: "#07141E"))
+                }
+            }
+            .frame(minWidth: 36, minHeight: 36)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(point.iso), rank \(point.rank), \(point.detail)")
+    }
+
+    private func eventMarker(_ event: IntelligenceEvent) -> some View {
+        let color: Color
+        switch event.severity {
+        case .critical: color = Color(hex: "#C77A72")
+        case .high: color = Color(hex: "#D3C3A5")
+        case .medium: color = Color(hex: "#91ADBA")
+        case .low: color = Color(hex: "#718794")
+        }
+        let diameter: CGFloat = event.severity == .critical ? 16 : event.severity == .high ? 14 : 12
+
+        return Button { onSelectEvent(event) } label: {
+            ZStack {
+                Circle().fill(color.opacity(0.28)).frame(width: diameter + 10, height: diameter + 10)
+                if event.earth_observation_available {
+                    Circle()
+                        .stroke(Color(hex: "#DCE8EE"), style: StrokeStyle(lineWidth: 2, dash: [3, 2]))
+                        .frame(width: diameter + 7, height: diameter + 7)
+                }
+                Circle()
+                    .fill(color)
+                    .overlay(Circle().stroke(.white, lineWidth: 1.2))
+                    .frame(width: diameter, height: diameter)
+            }
+            .frame(minWidth: 34, minHeight: 34)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(event.severity.rawValue) event, \(event.title)")
+    }
+
+    private func countryMarkerSize(_ point: CountryBubblePoint) -> CGFloat {
+        let magnitudes = points.map { log1p(max($0.magnitude, 0)) }
+        guard let minimum = magnitudes.min(), let maximum = magnitudes.max(), maximum > minimum else {
+            return compactPresentation ? 12 : 18
+        }
+        let normalized = (log1p(max(point.magnitude, 0)) - minimum) / (maximum - minimum)
+        return compactPresentation ? 10 + CGFloat(normalized * 7) : 13 + CGFloat(normalized * 10)
+    }
+
+    private func resetViewport() {
+        let bounds = mapRegion.geographicBounds
+        let center = CLLocationCoordinate2D(
+            latitude: (bounds.minLat + bounds.maxLat) / 2,
+            longitude: (bounds.minLon + bounds.maxLon) / 2
+        )
+        viewport = MKCoordinateRegion(
+            center: center,
+            span: MKCoordinateSpan(
+                latitudeDelta: min(160, max(8, bounds.maxLat - bounds.minLat)),
+                longitudeDelta: min(350, max(10, bounds.maxLon - bounds.minLon))
+            )
+        )
+    }
+}
+
+private struct NativeSignalAnnotation: Identifiable {
+    let id: String
+    let coordinate: CLLocationCoordinate2D
+    let country: CountryBubblePoint?
+    let event: IntelligenceEvent?
+}
+
+// Retained as the lightweight canvas implementation for older platform
+// previews. iPhone and iPad use NativeSignalMap above; watchOS has its own
+// deliberately simplified glance map.
 private struct InteractiveCountryBubbleMap: View {
     let points: [CountryBubblePoint]
     let events: [IntelligenceEvent]
