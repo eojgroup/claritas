@@ -12,6 +12,7 @@ struct DashboardView: View {
     @State private var minTemp: String = ""
     @State private var hasAppliedStoredModes: Bool = false
     @State private var showsCountryFocus = false
+    @State private var showsExpandedMap = false
 
     enum ListMode: String, CaseIterable { case news, weather, market }
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
@@ -24,10 +25,13 @@ struct DashboardView: View {
                         openCompactDestination("briefing")
                     }
 
+                    mobileNewsPulse
+
                     SignalMapPanel(
-                        height: 350,
+                        height: 292,
                         allowsComparison: false,
-                        showsCountryProfile: false
+                        showsCountryProfile: false,
+                        onExpand: { showsExpandedMap = true }
                     )
 
                     IntelligenceEventPulseView(presentation: .horizontal)
@@ -53,6 +57,92 @@ struct DashboardView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .fullScreenCover(isPresented: $showsExpandedMap) {
+            NavigationStack {
+                BrandBackground {
+                    GeometryReader { proxy in
+                        SignalMapPanel(
+                            height: max(300, proxy.size.height - 132),
+                            allowsComparison: false,
+                            showsCountryProfile: false
+                        )
+                        .padding(14)
+                    }
+                }
+                .navigationTitle("Global event map")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showsExpandedMap = false }
+                    }
+                }
+            }
+        }
+    }
+
+    private var mobileNewsPulse: some View {
+        let latest = model.news
+            .sorted { ($0.eventDate ?? .distantPast) > ($1.eventDate ?? .distantPast) }
+
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Label("LATEST REPORTING", systemImage: "newspaper")
+                    .font(.caption2.weight(.bold))
+                    .tracking(1.1)
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                Spacer()
+                Button("All news") { openCompactDestination("news") }
+                    .font(.caption.weight(.semibold))
+            }
+            .padding(.bottom, 9)
+
+            if latest.isEmpty {
+                Text("Reporting is updating. Pull to refresh or open the news lens.")
+                    .font(.subheadline)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(Array(latest.prefix(3).enumerated()), id: \.element.id) { index, item in
+                    Button { openCompactDestination("news") } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.presentationTitle)
+                                    .font(.subheadline.weight(index == 0 ? .semibold : .medium))
+                                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                                    .multilineTextAlignment(.leading)
+                                    .lineLimit(index == 0 ? 2 : 1)
+                                HStack(spacing: 6) {
+                                    Text(item.source_name ?? "Reporting source")
+                                    if let date = item.eventDate {
+                                        Text("·")
+                                        Text(date.formatted(date: .omitted, time: .shortened))
+                                            .monospacedDigit()
+                                    }
+                                    if !item.linked_events.isEmpty {
+                                        Text("· Linked event")
+                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                    }
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                .lineLimit(1)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                .padding(.top, 3)
+                        }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if index < min(latest.count, 3) - 1 { Divider() }
+                }
+            }
+        }
+        .padding(14)
+        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
     }
 
     private var mobileQuickActions: some View {
@@ -3516,6 +3606,7 @@ struct SignalMapPanel: View {
     let height: CGFloat
     let allowsComparison: Bool
     let showsCountryProfile: Bool
+    var onExpand: (() -> Void)? = nil
 
     private var compactLayout: Bool { horizontalSizeClass == .compact }
 
@@ -3573,6 +3664,7 @@ struct SignalMapPanel: View {
                         points: points,
                         events: locatedEvents,
                         mapRegion: region,
+                        compactPresentation: compactLayout && height < 400,
                         selectedCountry: model.selectedCountry,
                         comparisonCountry: comparisonCountry,
                         pinnedCountry: pinnedCountry,
@@ -3695,6 +3787,14 @@ struct SignalMapPanel: View {
                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                 }
                 Spacer()
+                if let onExpand {
+                    Button(action: onExpand) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Expand map")
+                }
                 if eventLoadError != nil {
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
@@ -4090,6 +4190,7 @@ private struct InteractiveCountryBubbleMap: View {
     let points: [CountryBubblePoint]
     let events: [IntelligenceEvent]
     let mapRegion: SignalMapRegion
+    let compactPresentation: Bool
     let selectedCountry: String?
     let comparisonCountry: String?
     let pinnedCountry: String?
@@ -4122,12 +4223,12 @@ private struct InteractiveCountryBubbleMap: View {
                         drawLand(context: context, size: size)
                     }
 
-                    ForEach(points.prefix(64)) { point in
+                    ForEach(points.prefix(compactPresentation ? 24 : 64)) { point in
                         bubbleView(for: point)
                             .position(project(point.coordinate, size: proxy.size))
                     }
 
-                    ForEach(events.prefix(100)) { event in
+                    ForEach(events.prefix(compactPresentation ? 36 : 100)) { event in
                         if let latitude = event.latitude, let longitude = event.longitude {
                             eventView(for: event)
                                 .position(project(
@@ -4146,7 +4247,18 @@ private struct InteractiveCountryBubbleMap: View {
                 .simultaneousGesture(magnificationGesture)
                 .simultaneousGesture(dragGesture)
 
-                viewportControls
+                if compactPresentation {
+                    Label("Pinch to zoom", systemImage: "hand.pinch")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color(hex: "#F2EEE6").opacity(0.82))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color(hex: "#11222E").opacity(0.88), in: Capsule())
+                        .padding(8)
+                        .allowsHitTesting(false)
+                } else {
+                    viewportControls
+                }
 
                 if points.isEmpty {
                     Text("No mapped \(mapRegion.label.lowercased()) data for this layer.")
@@ -4176,7 +4288,7 @@ private struct InteractiveCountryBubbleMap: View {
         let size = bubbleSize(for: point)
 
         return Button(action: { onSelectCountry(point.iso) }) {
-            VStack(spacing: 2) {
+            VStack(spacing: compactPresentation ? 0 : 2) {
                 ZStack {
                     if featured || pinned {
                         Circle()
@@ -4204,17 +4316,19 @@ private struct InteractiveCountryBubbleMap: View {
                         .frame(width: size, height: size)
                 }
 
-                Text(point.iso)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black, radius: 2)
-                    .overlay(alignment: .trailing) {
-                        if featured {
-                            Text("#1")
-                                .font(.system(size: 7, weight: .bold))
-                                .offset(x: 14, y: 0)
+                if !compactPresentation || selected || featured {
+                    Text(point.iso)
+                        .font(.system(size: compactPresentation ? 8 : 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black, radius: 2)
+                        .overlay(alignment: .trailing) {
+                            if featured && !compactPresentation {
+                                Text("#1")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .offset(x: 14, y: 0)
+                            }
                         }
-                    }
+                }
             }
             .frame(minWidth: ClaritasLayout.minimumTouchTarget, minHeight: ClaritasLayout.minimumTouchTarget)
             .contentShape(Rectangle())
@@ -4262,10 +4376,12 @@ private struct InteractiveCountryBubbleMap: View {
     private func bubbleSize(for point: CountryBubblePoint) -> CGFloat {
         let magnitudes = points.map { log1p(max($0.magnitude, 0)) }
         guard let minimum = magnitudes.min(), let maximum = magnitudes.max(), maximum > minimum else {
-            return 24
+            return compactPresentation ? 13 : 24
         }
         let normalized = (log1p(max(point.magnitude, 0)) - minimum) / (maximum - minimum)
-        return 18 + CGFloat(normalized * 18)
+        return compactPresentation
+            ? 10 + CGFloat(normalized * 9)
+            : 18 + CGFloat(normalized * 18)
     }
 
     private var viewportControls: some View {
@@ -4275,7 +4391,7 @@ private struct InteractiveCountryBubbleMap: View {
                     committedScale = min(3, committedScale + 0.35)
                 }
             }
-            Divider().overlay(Color.white.opacity(0.12))
+            Divider().frame(width: 28).overlay(Color.white.opacity(0.12))
             viewportButton(icon: "minus", label: "Zoom out") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     committedScale = max(1, committedScale - 0.35)
@@ -4284,11 +4400,12 @@ private struct InteractiveCountryBubbleMap: View {
                     }
                 }
             }
-            Divider().overlay(Color.white.opacity(0.12))
+            Divider().frame(width: 28).overlay(Color.white.opacity(0.12))
             viewportButton(icon: "scope", label: "Reset map") {
                 resetViewport()
             }
         }
+        .frame(width: ClaritasLayout.minimumTouchTarget)
         .background(Color(hex: "#11222E").opacity(0.94), in: RoundedRectangle(cornerRadius: 9))
         .overlay(
             RoundedRectangle(cornerRadius: 9)

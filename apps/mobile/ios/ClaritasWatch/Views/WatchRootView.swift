@@ -10,10 +10,10 @@ struct WatchRootView: View {
                 WatchPairingView()
             } else {
                 TabView {
-                    WatchIntelligencePulseView()
-                    WatchSignalGlanceView()
                     WatchBriefingView()
+                    WatchIntelligencePulseView()
                     WatchPulseView()
+                    WatchSignalGlanceView()
                     WatchTransportPulseView()
                 }
                 .tabViewStyle(.verticalPage)

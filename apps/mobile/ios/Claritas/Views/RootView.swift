@@ -103,8 +103,7 @@ struct RootView: View {
             let next: Tab
             switch destination {
             case "news":
-                next = .more
-                compactMorePath = [.news]
+                next = .news
             case "weather":
                 next = .more
                 compactMorePath = [.weather]
@@ -120,7 +119,8 @@ struct RootView: View {
                 next = .more
                 compactMorePath = [.earthObservation]
             case "briefing":
-                next = .briefing
+                next = .more
+                compactMorePath = [.briefing]
             default: next = .dashboard
             }
             tab = next
@@ -148,7 +148,7 @@ struct RootView: View {
     private var compactShell: some View {
         TabView(selection: $tab) {
             compactTab(.dashboard)
-            compactTab(.briefing)
+            compactTab(.news)
             compactTab(.intelligence)
             compactTab(.more)
         }
@@ -335,6 +335,13 @@ private struct CompactMoreView: View {
                     )
 
                     BrandCard(title: "Source lenses", icon: "waveform.path.ecg") {
+                        destinationRow(
+                            title: "Daily briefing",
+                            detail: "Today’s concise cross-source picture and key takeaways",
+                            icon: "sparkles",
+                            destination: DailyBriefingWorkspaceView()
+                        )
+                        Divider()
                         destinationRow(
                             title: "News reporting",
                             detail: "Original reporting linked into canonical event threads",
