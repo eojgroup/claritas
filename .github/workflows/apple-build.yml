@@ -95,8 +95,9 @@ jobs:
         run: |
           signing_dir="$RUNNER_TEMP/claritas-signing"
           mkdir -p "$signing_dir" "$HOME/.private_keys"
+          printf '%s\n' "$APP_STORE_CONNECT_PRIVATE_KEY_P8" > "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           printf '%s' "$APPLE_DISTRIBUTION_CERTIFICATE_P12" | base64 --decode > "$signing_dir/distribution.p12"
-          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY_P8" | base64 --decode > "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+          openssl pkey -in "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" -check -noout
           cp "$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" "$HOME/.private_keys/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           keychain_path="$RUNNER_TEMP/claritas-signing.keychain-db"
           keychain_password="$(openssl rand -hex 24)"
