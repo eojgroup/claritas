@@ -54,12 +54,6 @@ def normalized_serial(value)
   value.to_s.upcase.gsub(/[^0-9A-F]/, "").sub(/\A0+/, "")
 end
 
-def profile_certificate_ids(profile_id, token)
-  request_json(:get, "/v1/profiles/#{profile_id}/relationships/certificates", token)
-    .fetch("data", [])
-    .map { |item| item.fetch("id") }
-end
-
 def active_profile?(profile)
   attributes = profile.fetch("attributes", {})
   return false unless attributes.fetch("profileState", "ACTIVE") == "ACTIVE"
@@ -106,6 +100,11 @@ certificate_resource = certificates.find do |item|
 end
 abort "The imported Apple Distribution certificate is not active in App Store Connect for this API key's team" unless certificate_resource
 certificate_id = certificate_resource.fetch("id")
+active_store_profiles = request_json(
+  :get,
+  "/v1/profiles?filter%5BprofileType%5D=IOS_APP_STORE&filter%5BprofileState%5D=ACTIVE&include=bundleId,certificates&limit=200&limit%5Bcertificates%5D=50",
+  token
+).fetch("data", [])
 
 identifiers = [
   bundle_id,
@@ -128,13 +127,13 @@ identifiers.each do |identifier|
   exact_bundle_ids = bundle_ids.select { |item| item.dig("attributes", "identifier") == identifier }
   abort "Expected one exact registered bundle ID for #{identifier}, found #{exact_bundle_ids.length}" unless exact_bundle_ids.length == 1
   bundle_resource_id = exact_bundle_ids.first.fetch("id")
-  # Profiles do not support bundleId as a collection filter. Apple exposes the
-  # relationship through the bundle ID resource instead.
-  profiles = request_json(:get, "/v1/bundleIds/#{bundle_resource_id}/profiles?limit=200", token)
-    .fetch("data", [])
-    .select { |candidate| candidate.dig("attributes", "profileType") == "IOS_APP_STORE" }
-  profile = profiles.find do |candidate|
-    active_profile?(candidate) && profile_certificate_ids(candidate.fetch("id"), token).include?(certificate_id)
+  # The profile collection supports type/state filters but not bundleId. Its
+  # JSON:API relationships provide the exact bundle and certificate linkage in
+  # one authoritative request and avoid stale relationship-only profile IDs.
+  profile = active_store_profiles.find do |candidate|
+    candidate.dig("relationships", "bundleId", "data", "id") == bundle_resource_id &&
+      active_profile?(candidate) &&
+      candidate.dig("relationships", "certificates", "data").to_a.any? { |item| item["id"] == certificate_id }
   end
 
   unless profile
