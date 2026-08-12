@@ -233,7 +233,7 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Event alerts")
                             .font(.subheadline.weight(.semibold))
-                        Text(model.pushRegistrationError ?? "Watched high-impact signals can open directly in Signal desk.")
+                        Text(model.pushRegistrationError ?? "Watched high-impact signals can open directly in their investigation.")
                             .font(.caption)
                             .foregroundStyle(model.pushRegistrationError == nil ? Color.secondary : Color.orange)
                     }

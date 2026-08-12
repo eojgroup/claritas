@@ -60,7 +60,7 @@ private struct ClaritasWidgetView: View {
         VStack(alignment: .leading, spacing: 7) {
             Label("CLARITAS", systemImage: "globe.europe.africa.fill")
                 .font(.caption2.weight(.bold))
-                .foregroundStyle(Color(red: 237.0 / 255.0, green: 163.0 / 255.0, blue: 106.0 / 255.0))
+                .foregroundStyle(Color(red: 211.0 / 255.0, green: 195.0 / 255.0, blue: 165.0 / 255.0))
             Text(entry.snapshot.dailyTitle)
                 .font(.headline)
                 .lineLimit(2)
@@ -76,7 +76,7 @@ private struct ClaritasWidgetView: View {
             .font(.caption2.monospacedDigit())
             .foregroundStyle(.secondary)
         }
-        .background(Color(red: 8.0 / 255.0, green: 17.0 / 255.0, blue: 25.0 / 255.0))
+        .background(Color(red: 7.0 / 255.0, green: 20.0 / 255.0, blue: 30.0 / 255.0))
     }
 }
 

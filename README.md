@@ -338,7 +338,9 @@ The API requires the database environment variables documented in
 - Native event alerts:
   - `APNS_DELIVERY_ENABLED=true` enables the bounded delivery worker, but its
     readiness remains `not_configured` until `APNS_PRIVATE_KEY`, `APNS_KEY_ID`
-    and `APNS_TEAM_ID` are present and valid. APNs acceptance is recorded
+    and `APNS_TEAM_ID` are present and valid. Current environment-scoped keys
+    can additionally use `APNS_SANDBOX_PRIVATE_KEY` and `APNS_SANDBOX_KEY_ID`
+    for Debug devices. APNs acceptance is recorded
     separately from user acknowledgement.
 - Kubernetes deployment env wiring:
   - `infra/k8s/api-deployment.yaml`
@@ -349,12 +351,14 @@ The API requires the database environment variables documented in
   - `claritas-aisstream` / `AISSTREAM_API_KEY`
   - `claritas-earth-observation` / `COPERNICUS_CLIENT_ID`,
     `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY` (only configured keys are written)
-  - `claritas-apns` / `APNS_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`
+  - `claritas-apns` / `APNS_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`, and
+    optional paired `APNS_SANDBOX_PRIVATE_KEY`, `APNS_SANDBOX_KEY_ID`
 - Production secret source (recommended):
   - GitHub repository secrets: `OPENWEATHER_API_KEY`, `FRED_API_KEY`,
     `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`,
     `COPERNICUS_CLIENT_ID`, `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY`,
-    `APNS_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`
+    `APNS_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`,
+    `APNS_SANDBOX_PRIVATE_KEY`, `APNS_SANDBOX_KEY_ID`
   - GitHub repository variables: `PODCAST_DISCOVERY_TERMS`, `PODCAST_FEED_IDS`,
     `PODCAST_MAX_FEEDS`, `PODCAST_MAX_EPISODES_PER_FEED`,
     `PODCAST_INTELLIGENCE_EXTRACTION_ENABLED`, `PODCASTINDEX_USER_AGENT`,

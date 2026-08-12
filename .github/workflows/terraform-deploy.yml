@@ -290,14 +290,27 @@ jobs:
         env:
           APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
           APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+          APNS_SANDBOX_PRIVATE_KEY: ${{ secrets.APNS_SANDBOX_PRIVATE_KEY }}
+          APNS_SANDBOX_KEY_ID: ${{ secrets.APNS_SANDBOX_KEY_ID }}
           APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
         run: |
           set -euo pipefail
           if [ -n "${APNS_PRIVATE_KEY:-}" ] && [ -n "${APNS_KEY_ID:-}" ] && [ -n "${APNS_TEAM_ID:-}" ]; then
-            kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-apns \
-              --from-literal=APNS_PRIVATE_KEY="$APNS_PRIVATE_KEY" \
-              --from-literal=APNS_KEY_ID="$APNS_KEY_ID" \
-              --from-literal=APNS_TEAM_ID="$APNS_TEAM_ID" \
+            apns_args=(
+              --from-literal=APNS_PRIVATE_KEY="$APNS_PRIVATE_KEY"
+              --from-literal=APNS_KEY_ID="$APNS_KEY_ID"
+              --from-literal=APNS_TEAM_ID="$APNS_TEAM_ID"
+            )
+            if [ -n "${APNS_SANDBOX_PRIVATE_KEY:-}" ] && [ -n "${APNS_SANDBOX_KEY_ID:-}" ]; then
+              apns_args+=(
+                --from-literal=APNS_SANDBOX_PRIVATE_KEY="$APNS_SANDBOX_PRIVATE_KEY"
+                --from-literal=APNS_SANDBOX_KEY_ID="$APNS_SANDBOX_KEY_ID"
+              )
+            elif [ -n "${APNS_SANDBOX_PRIVATE_KEY:-}${APNS_SANDBOX_KEY_ID:-}" ]; then
+              echo "::error::APNS_SANDBOX_PRIVATE_KEY and APNS_SANDBOX_KEY_ID must be supplied together" >&2
+              exit 1
+            fi
+            kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-apns "${apns_args[@]}" \
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::APNs GitHub credentials are incomplete; any existing claritas-apns secret is preserved and may remain active. Disable APNS_DELIVERY_ENABLED or rotate/revoke explicitly."

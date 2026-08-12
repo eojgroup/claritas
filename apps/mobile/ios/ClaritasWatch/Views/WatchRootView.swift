@@ -50,23 +50,23 @@ private struct WatchIntelligencePulseView: View {
                             }
                         }
                     } else {
-                        ForEach(model.intelligenceEvents.prefix(4)) { event in
+                        ForEach(model.intelligenceEvents.prefix(2)) { event in
                             WatchCard {
                                 VStack(alignment: .leading, spacing: 5) {
                                     HStack {
                                         Circle()
-                                            .fill(event.severity == .critical ? Color.red : event.severity == .high ? WatchPalette.orange : WatchPalette.sage)
+                                            .fill(event.severity == .critical ? WatchPalette.negative : event.severity == .high ? WatchPalette.orange : WatchPalette.sage)
                                             .frame(width: 7, height: 7)
                                         Text(event.severity.rawValue.uppercased())
                                             .font(.system(size: 8, weight: .bold))
                                         Spacer()
-                                        Text("\(Int(event.confidence * 100))%")
+                                        Text(event.last_activity_time.formatted(date: .omitted, time: .shortened))
                                             .font(.caption2.monospacedDigit())
                                     }
                                     Text(event.title)
                                         .font(.caption.weight(.semibold))
                                         .lineLimit(3)
-                                    Text("\(event.location_name ?? event.primary_country_iso2 ?? "Global") · \(event.evidence_count) evidence")
+                                    Text("\(event.location_name ?? event.primary_country_iso2 ?? "Unresolved") · \(event.evidence_count) evidence · \(Int(event.confidence * 100))%")
                                         .font(.system(size: 9))
                                         .foregroundStyle(.secondary)
                                     Button {

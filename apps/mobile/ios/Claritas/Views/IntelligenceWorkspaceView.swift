@@ -785,9 +785,13 @@ struct EarthObservationWorkspaceView: View {
 }
 
 struct IntelligenceEventPulseView: View {
+    enum Presentation: Equatable { case list, horizontal }
+
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var events: [IntelligenceEvent] = []
     @State private var isLoading = true
+    var presentation: Presentation = .list
 
     var body: some View {
         Group {
@@ -799,32 +803,21 @@ struct IntelligenceEventPulseView: View {
                 }
             } else if !events.isEmpty {
                 BrandCard(title: "Correlated event pulse", icon: "dot.radiowaves.left.and.right") {
-                    ForEach(events.prefix(3)) { event in
-                        Button {
-                            model.selectedIntelligenceEventID = event.id
-                            NotificationCenter.default.post(
-                                name: .claritasWatchOpenDestination,
-                                object: "intelligence",
-                                userInfo: ["eventID": event.id]
-                            )
-                        } label: {
-                            HStack(alignment: .top) {
-                                Circle()
-                                    .fill(event.severity == .critical ? Color.red : event.severity == .high ? Color.orange : Color.blue)
-                                    .frame(width: 7, height: 7)
-                                    .padding(.top, 5)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(event.title).font(.caption.weight(.semibold)).lineLimit(2)
-                                    Text("\(event.location_name ?? event.primary_country_iso2 ?? "Global") · \(event.domain_count) lenses · \(event.evidence_count) evidence")
-                                        .font(.caption2).foregroundStyle(.secondary)
+                    if presentation == .horizontal {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(spacing: 10) {
+                                ForEach(events.prefix(4)) { event in
+                                    eventButton(event, horizontal: true)
+                                        .frame(width: 248)
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
                             }
-                            .contentShape(Rectangle())
+                            .padding(.horizontal, 1)
                         }
-                        .buttonStyle(.plain)
-                        if event.id != events.prefix(3).last?.id { Divider() }
+                    } else {
+                        ForEach(events.prefix(3)) { event in
+                            eventButton(event, horizontal: false)
+                            if event.id != events.prefix(3).last?.id { Divider() }
+                        }
                     }
                 }
             } else {
@@ -833,8 +826,73 @@ struct IntelligenceEventPulseView: View {
         }
         .task(id: model.selectedCountry) {
             isLoading = true
-            events = (try? await model.api.fetchIntelligenceEvents(limit: 3, country: model.selectedCountry)) ?? []
+            events = (try? await model.api.fetchIntelligenceEvents(limit: 4, country: model.selectedCountry)) ?? []
             isLoading = false
+        }
+    }
+
+    private func eventButton(_ event: IntelligenceEvent, horizontal: Bool) -> some View {
+        Button {
+            model.selectedIntelligenceEventID = event.id
+            NotificationCenter.default.post(
+                name: .claritasWatchOpenDestination,
+                object: "intelligence",
+                userInfo: ["eventID": event.id, "country": event.primary_country_iso2 ?? ""]
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(severityColor(event.severity))
+                        .frame(width: 7, height: 7)
+                    Text(event.severity.rawValue.uppercased())
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(severityColor(event.severity))
+                    Spacer()
+                    Text(event.last_activity_time.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+                Text(event.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(horizontal ? 3 : 2)
+                Label(
+                    event.location_name ?? event.primary_country_iso2 ?? "Location unresolved",
+                    systemImage: "mappin"
+                )
+                .font(.caption)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                .lineLimit(1)
+                HStack {
+                    Text("\(event.domain_count) lenses · \(event.evidence_count) evidence")
+                        .font(.caption2)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+            }
+            .padding(horizontal ? 12 : 0)
+            .frame(maxWidth: .infinity, minHeight: horizontal ? 132 : nil, alignment: .topLeading)
+            .background(
+                horizontal ? ClaritasPalette.shellSurfaceMuted(for: colorScheme) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func severityColor(_ severity: IntelligenceSeverity) -> Color {
+        switch severity {
+        case .critical: return ClaritasPalette.negativeText(for: colorScheme)
+        case .high: return ClaritasPalette.shellAccent(for: colorScheme)
+        case .medium: return ClaritasPalette.dataBlue(for: colorScheme)
+        case .low: return ClaritasPalette.shellMuted(for: colorScheme)
         }
     }
 }

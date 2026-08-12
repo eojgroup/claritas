@@ -1,14 +1,17 @@
 import SwiftUI
 
 enum ClaritasPalette {
-    static let darkBlue = Color(hex: "#0B2028")
-    static let darkGreen = Color(hex: "#244D42")
-    static let lightGreen = Color(hex: "#B8CFBF")
-    static let sage = Color(hex: "#5E927E")
-    static let orange = Color(hex: "#D1B78A")
-    static let orangeStrong = Color(hex: "#A97846")
-    static let grey = Color(hex: "#5C6966")
-    static let beige = Color(hex: "#D8C6A3")
+    // A restrained command palette shared by iPhone and iPad. The previous
+    // green/orange treatment made whole panels compete with their content;
+    // navy now carries structure while beige and blue are reserved for state.
+    static let darkBlue = Color(hex: "#0B1E2D")
+    static let darkGreen = Color(hex: "#253D46")
+    static let lightGreen = Color(hex: "#CBD5D8")
+    static let sage = Color(hex: "#829EAC")
+    static let orange = Color(hex: "#D3C3A5")
+    static let orangeStrong = Color(hex: "#927A54")
+    static let grey = Color(hex: "#657580")
+    static let beige = Color(hex: "#D3C3A5")
     static let brown = orangeStrong
     static let offWhite = Color(hex: "#F7F2E8")
     static let text = Color(hex: "#0B2028")
@@ -17,59 +20,59 @@ enum ClaritasPalette {
     static let negative = Color(hex: "#A73B32")
 
     static func shellBackground(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#07151B") : Color(hex: "#EEE5D5")
+        scheme == .dark ? Color(hex: "#07141E") : Color(hex: "#ECEFF0")
     }
 
     static func shellBackgroundElevated(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#0B2023") : Color(hex: "#E4D7BF")
+        scheme == .dark ? Color(hex: "#0B1E2D") : Color(hex: "#E2E7E9")
     }
 
     static func shellSurface(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#102A2A").opacity(0.92) : Color(hex: "#F7F2E8").opacity(0.86)
+        scheme == .dark ? Color(hex: "#102735").opacity(0.96) : Color(hex: "#F7F5F0").opacity(0.94)
     }
 
     static func shellRaised(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#15342F").opacity(0.97) : Color(hex: "#FAF6EE").opacity(0.96)
+        scheme == .dark ? Color(hex: "#173140").opacity(0.98) : Color(hex: "#FFFFFF").opacity(0.98)
     }
 
     static func shellSurfaceMuted(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#193831").opacity(0.84) : Color(hex: "#E5D8C1").opacity(0.82)
+        scheme == .dark ? Color(hex: "#203A48").opacity(0.88) : Color(hex: "#E5EAEC").opacity(0.92)
     }
 
     static func shellBorder(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#D8C6A3").opacity(0.16) : darkBlue.opacity(0.16)
+        scheme == .dark ? Color(hex: "#AFC0C8").opacity(0.18) : darkBlue.opacity(0.14)
     }
 
     static func shellBorderStrong(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#D8C6A3").opacity(0.28) : darkBlue.opacity(0.3)
+        scheme == .dark ? Color(hex: "#AFC0C8").opacity(0.3) : darkBlue.opacity(0.24)
     }
 
     static func shellInk(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#F1EBDD") : text
+        scheme == .dark ? Color(hex: "#F2F0EA") : text
     }
 
     static func shellMuted(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#B9C3BC") : grey
+        scheme == .dark ? Color(hex: "#B8C3C9") : grey
     }
 
     static func shellSidebar(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#061118") : Color(hex: "#0B2028")
+        scheme == .dark ? Color(hex: "#06111A") : Color(hex: "#0B1E2D")
     }
 
     static func shellHighlight(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#D1B78A").opacity(0.17) : Color(hex: "#D8C6A3").opacity(0.78)
+        scheme == .dark ? Color(hex: "#D3C3A5").opacity(0.16) : Color(hex: "#D3C3A5").opacity(0.7)
     }
 
     static func shellAccent(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#D1B78A") : Color(hex: "#A97846")
+        scheme == .dark ? Color(hex: "#D3C3A5") : Color(hex: "#765F3E")
     }
 
     static func shellAccentSecondary(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#5E927E") : Color(hex: "#2F6858")
+        scheme == .dark ? Color(hex: "#91ADBA") : Color(hex: "#426779")
     }
 
     static func positiveText(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#82AF99") : Color(hex: "#2F6858")
+        scheme == .dark ? Color(hex: "#91B7A6") : Color(hex: "#356B58")
     }
 
     static func negativeText(for scheme: ColorScheme) -> Color {
@@ -77,7 +80,7 @@ enum ClaritasPalette {
     }
 
     static func dataBlue(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#7FA3AD") : Color(hex: "#315F70")
+        scheme == .dark ? Color(hex: "#9AB6C4") : Color(hex: "#426779")
     }
 
     static func glassHighlight(for scheme: ColorScheme) -> Color {
@@ -127,8 +130,8 @@ struct BrandBackground<Content: View>: View {
                     ClaritasPalette.shellBackgroundElevated(for: colorScheme),
                     ClaritasPalette.shellBackground(for: colorScheme),
                     colorScheme == .dark
-                        ? Color(hex: "#07151B")
-                        : Color(hex: "#E8DCC6")
+                        ? Color(hex: "#07141E")
+                        : Color(hex: "#E4E8EA")
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -203,6 +206,59 @@ struct BrandSectionHeader: View {
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             }
         }
+    }
+}
+
+/// A deliberately compact entry point to the daily briefing. It gives the
+/// reader the current synthesis before the map without turning the overview
+/// into another long briefing page.
+struct BriefingOverviewCard: View {
+    let briefing: DailySignalBriefing?
+    let onOpen: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Label("DAILY BRIEFING", systemImage: "doc.text")
+                        .font(.caption2.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                    Spacer()
+                    if let updated = briefing?.updatedDate {
+                        Text(updated.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+
+                Text(briefing?.title ?? "Today’s global signal picture")
+                    .font(.headline)
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    .lineLimit(1)
+
+                if let takeaway = briefing?.key_takeaways.first {
+                    Text(takeaway)
+                        .font(.subheadline)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .lineLimit(2)
+                } else {
+                    Text("Open the briefing for the latest cross-source synthesis.")
+                        .font(.subheadline)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .lineLimit(2)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens the complete daily briefing")
     }
 }
 

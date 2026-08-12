@@ -10,6 +10,12 @@
 **/xcuserdata/
 **/*.xcuserstate
 
+# Apple signing and push credentials are deployment secrets, never source.
+AuthKey_*.p8
+aps*.cer
+*.p12
+*.mobileprovision
+
 # JavaScript dependencies and build caches
 **/node_modules/
 **/dist/

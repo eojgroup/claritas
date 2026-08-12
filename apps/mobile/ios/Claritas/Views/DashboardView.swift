@@ -11,6 +11,7 @@ struct DashboardView: View {
     @State private var section: DashboardSection = .overview
     @State private var minTemp: String = ""
     @State private var hasAppliedStoredModes: Bool = false
+    @State private var showsCountryFocus = false
 
     enum ListMode: String, CaseIterable { case news, weather, market }
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
@@ -19,23 +20,23 @@ struct DashboardView: View {
         DashboardBackground {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    mobileCommandHeader
-
-                    IntelligenceEventPulseView()
+                    BriefingOverviewCard(briefing: model.dailyBriefing) {
+                        openCompactDestination("briefing")
+                    }
 
                     SignalMapPanel(
-                        height: 310,
+                        height: 350,
                         allowsComparison: false,
                         showsCountryProfile: false
                     )
 
-                    mobilePostureStrip
+                    IntelligenceEventPulseView(presentation: .horizontal)
+
+                    mobileQuickActions
 
                     if model.selectedCountry != nil {
-                        mobileFocusCard
+                        mobileSelectionBar
                     }
-
-                    mobilePriorityCard
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 16)
@@ -44,6 +45,132 @@ struct DashboardView: View {
                 await model.loadInitial()
             }
         }
+        .onChange(of: model.selectedCountry) { next in
+            if next != nil { showsCountryFocus = true }
+        }
+        .sheet(isPresented: $showsCountryFocus) {
+            mobileCountryFocusSheet
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var mobileQuickActions: some View {
+        HStack(spacing: 10) {
+            mobileAction(
+                title: "Investigate",
+                detail: "Evidence thread",
+                icon: "scope"
+            ) { openCompactDestination("intelligence") }
+            mobileAction(
+                title: "News",
+                detail: "Source reporting",
+                icon: "newspaper"
+            ) { openCompactDestination("news") }
+            mobileAction(
+                title: "Transport",
+                detail: "Routes & history",
+                icon: "point.topleft.down.to.point.bottomright.curvepath"
+            ) { openCompactDestination("transport") }
+        }
+    }
+
+    private func mobileAction(
+        title: String,
+        detail: String,
+        icon: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                Image(systemName: icon)
+                    .font(.headline)
+                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    .lineLimit(1)
+                Text(detail)
+                    .font(.system(size: 9))
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+            .padding(11)
+            .brandGlass(cornerRadius: 12)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var mobileSelectionBar: some View {
+        Button { showsCountryFocus = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "mappin.and.ellipse")
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("CURRENT MAP FOCUS")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    Text("\(mobileCountryName) · Open country context")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                }
+                Spacer()
+                Image(systemName: "chevron.up")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            }
+            .padding(13)
+            .brandGlass(cornerRadius: 12, elevated: true)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var mobileCountryFocusSheet: some View {
+        BrandBackground {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    mobileFocusCard
+                    HStack(spacing: 10) {
+                        Button {
+                            showsCountryFocus = false
+                            openCompactDestination("news")
+                        } label: {
+                            Label("Related news", systemImage: "newspaper")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button {
+                            showsCountryFocus = false
+                            openCompactDestination("intelligence")
+                        } label: {
+                            Label("Events", systemImage: "scope")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    Button {
+                        showsCountryFocus = false
+                        openCompactDestination("transport")
+                    } label: {
+                        Label("Open country transport and corridor history", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(16)
+            }
+        }
+    }
+
+    private func openCompactDestination(_ destination: String) {
+        NotificationCenter.default.post(
+            name: .claritasWatchOpenDestination,
+            object: destination,
+            userInfo: ["country": model.selectedCountry ?? ""]
+        )
     }
 
     private var legacyDashboard: some View {
@@ -373,6 +500,7 @@ struct DashboardView: View {
                     Spacer()
                     Button("Clear") {
                         model.clearSelection()
+                        showsCountryFocus = false
                     }
                     .buttonStyle(.bordered)
                 }
@@ -2540,32 +2668,32 @@ struct PoliciesWorkspaceView: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
                             BrandSwatch(
                                 name: "Command Navy",
-                                hex: colorScheme == .dark ? "#315F72" : "#172F42",
-                                color: colorScheme == .dark ? Color(hex: "#315F72") : ClaritasPalette.darkBlue
+                                hex: "#0B1E2D",
+                                color: ClaritasPalette.darkBlue
                             )
                             BrandSwatch(
-                                name: "Signal Blue",
-                                hex: colorScheme == .dark ? "#77A8BA" : "#3E6A80",
+                                name: "Evidence Blue",
+                                hex: colorScheme == .dark ? "#9AB6C4" : "#426779",
                                 color: ClaritasPalette.dataBlue(for: colorScheme)
                             )
                             BrandSwatch(
-                                name: "Signal Orange",
-                                hex: colorScheme == .dark ? "#EDA36A" : "#E6A06A",
+                                name: "Briefing Beige",
+                                hex: colorScheme == .dark ? "#D3C3A5" : "#765F3E",
                                 color: ClaritasPalette.shellAccent(for: colorScheme)
                             )
                             BrandSwatch(
                                 name: "Working Surface",
-                                hex: colorScheme == .dark ? "#11222E" : "#FFFAF1",
+                                hex: colorScheme == .dark ? "#102735" : "#F7F5F0",
                                 color: ClaritasPalette.shellSurface(for: colorScheme)
                             )
                             BrandSwatch(
                                 name: "Muted Text",
-                                hex: colorScheme == .dark ? "#A9B5BA" : "#53616A",
+                                hex: colorScheme == .dark ? "#B8C3C9" : "#657580",
                                 color: ClaritasPalette.shellMuted(for: colorScheme)
                             )
                             BrandSwatch(
                                 name: "Primary Ink",
-                                hex: colorScheme == .dark ? "#F2EEE6" : "#172F42",
+                                hex: colorScheme == .dark ? "#F2F0EA" : "#0B2028",
                                 color: ClaritasPalette.shellInk(for: colorScheme)
                             )
                         }
@@ -3389,6 +3517,8 @@ struct SignalMapPanel: View {
     let allowsComparison: Bool
     let showsCountryProfile: Bool
 
+    private var compactLayout: Bool { horizontalSizeClass == .compact }
+
     private var points: [CountryBubblePoint] {
         SignalMapDataBuilder.points(
             for: mode,
@@ -3411,6 +3541,13 @@ struct SignalMapPanel: View {
                       let longitude = event.longitude,
                       latitude.isFinite,
                       longitude.isFinite else { return false }
+                let locationType = event.location_type?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                if let locationType,
+                   ["country", "country_centroid", "admin", "admin1", "administrative_area"].contains(locationType) {
+                    return false
+                }
                 if let country = event.primary_country_iso2, !region.contains(country) {
                     return false
                 }
@@ -3428,81 +3565,8 @@ struct SignalMapPanel: View {
     var body: some View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    BrandSectionHeader(
-                        kicker: "Global event picture",
-                        title: "\(locatedEvents.count) located events · \(mode.title)",
-                        detail: "Event dots open the canonical evidence thread; rings identify satellite-backed events."
-                    )
-                    Spacer(minLength: 0)
-                }
-
-                Picker("Map layer", selection: $mode) {
-                    ForEach(SignalMapMode.allCases) { item in
-                        Text(item.label).tag(item)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: mode) { next in
-                    storedMode = next.rawValue
-                    clearComparison()
-                }
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(SignalMapRegion.allCases) { item in
-                            Button(item.label) {
-                                region = item
-                                clearComparison()
-                                resetToken += 1
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.regular)
-                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
-                            .tint(region == item ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
-                        }
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    if allowsComparison, horizontalSizeClass == .regular {
-                        Button {
-                            compareMode.toggle()
-                            if !compareMode { comparisonCountry = nil }
-                        } label: {
-                            Label(compareMode ? "Comparing" : "Compare", systemImage: "square.split.2x1")
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(compareMode ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
-                    }
-
-                    if horizontalSizeClass == .regular {
-                        Button {
-                            pinnedCountry = model.selectedCountry?.uppercased()
-                        } label: {
-                            Label(
-                                pinnedCountry == nil ? "Pin selection" : "Pinned \(pinnedCountry!)",
-                                systemImage: pinnedCountry == nil ? "pin" : "pin.fill"
-                            )
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(model.selectedCountry == nil)
-                    }
-
-                    Spacer()
-
-                    Button {
-                        model.selectedCountry = nil
-                        comparisonCountry = nil
-                        pinnedCountry = nil
-                        compareMode = false
-                        resetToken += 1
-                    } label: {
-                        Label("Reset", systemImage: "arrow.counterclockwise")
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .font(.caption)
+                mapHeader
+                mapControls
 
                 ZStack(alignment: .topLeading) {
                     InteractiveCountryBubbleMap(
@@ -3524,7 +3588,7 @@ struct SignalMapPanel: View {
                             .stroke(ClaritasPalette.shellBorderStrong(for: colorScheme), lineWidth: 1)
                     )
 
-                    if mode == .signals, let highest {
+                    if !compactLayout, mode == .signals, let highest {
                         Button {
                             selectCountry(highest.iso)
                         } label: {
@@ -3556,21 +3620,6 @@ struct SignalMapPanel: View {
                 }
 
                 HStack(spacing: 10) {
-                    HStack(spacing: 4) {
-                        Circle().fill(ClaritasPalette.shellAccent(for: colorScheme)).frame(width: 10, height: 10)
-                        Circle().fill(ClaritasPalette.shellAccent(for: colorScheme)).frame(width: 14, height: 14)
-                        Circle().fill(ClaritasPalette.shellAccent(for: colorScheme)).frame(width: 18, height: 18)
-                    }
-                    Text("\(mode.legend) · log-scaled")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("\(points.count) mapped")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 10) {
                     Label("\(locatedEvents.count) events", systemImage: "dot.radiowaves.left.and.right")
                     Label("\(locatedEvents.filter(\.earth_observation_available).count) satellite-backed", systemImage: "sensor.tag.radiowaves.forward")
                     Spacer()
@@ -3582,7 +3631,7 @@ struct SignalMapPanel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-                if mode == .signals {
+                if !compactLayout, mode == .signals {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Relevance model")
                             .font(.caption.weight(.semibold))
@@ -3630,6 +3679,150 @@ struct SignalMapPanel: View {
         .task(id: model.selectedCountry ?? "global") {
             await loadEvents()
         }
+    }
+
+    @ViewBuilder
+    private var mapHeader: some View {
+        if compactLayout {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("GLOBAL EVENT MAP")
+                        .font(.caption2.weight(.bold))
+                        .tracking(1.2)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    Text("\(locatedEvents.count) located · \(locatedEvents.filter(\.earth_observation_available).count) with imagery")
+                        .font(.headline)
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                }
+                Spacer()
+                if eventLoadError != nil {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                        .accessibilityLabel("Event map is retrying")
+                }
+            }
+        } else {
+            BrandSectionHeader(
+                kicker: "Global event picture",
+                title: "\(locatedEvents.count) located events · \(mode.title)",
+                detail: "Event dots open the canonical evidence thread; rings identify satellite-backed events."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var mapControls: some View {
+        if compactLayout {
+            HStack(spacing: 8) {
+                Menu {
+                    Picker("Map layer", selection: $mode) {
+                        ForEach(SignalMapMode.allCases) { item in
+                            Text(item.label).tag(item)
+                        }
+                    }
+                } label: {
+                    Label(mode.label, systemImage: "square.3.layers.3d")
+                }
+                .buttonStyle(.bordered)
+
+                Menu {
+                    Picker("Region", selection: $region) {
+                        ForEach(SignalMapRegion.allCases) { item in
+                            Text(item.label).tag(item)
+                        }
+                    }
+                } label: {
+                    Label(region.label, systemImage: "globe")
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+                Button {
+                    resetMapState()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .frame(minWidth: 30)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Reset map")
+            }
+            .font(.caption)
+            .onChange(of: mode) { next in
+                storedMode = next.rawValue
+                clearComparison()
+            }
+            .onChange(of: region) { _ in
+                clearComparison()
+                resetToken += 1
+            }
+        } else {
+            Picker("Map layer", selection: $mode) {
+                ForEach(SignalMapMode.allCases) { item in
+                    Text(item.label).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: mode) { next in
+                storedMode = next.rawValue
+                clearComparison()
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SignalMapRegion.allCases) { item in
+                        Button(item.label) {
+                            region = item
+                            clearComparison()
+                            resetToken += 1
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                        .tint(region == item ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                if allowsComparison {
+                    Button {
+                        compareMode.toggle()
+                        if !compareMode { comparisonCountry = nil }
+                    } label: {
+                        Label(compareMode ? "Comparing" : "Compare", systemImage: "square.split.2x1")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(compareMode ? ClaritasPalette.shellAccentSecondary(for: colorScheme) : nil)
+                }
+
+                Button {
+                    pinnedCountry = model.selectedCountry?.uppercased()
+                } label: {
+                    Label(
+                        pinnedCountry == nil ? "Pin selection" : "Pinned \(pinnedCountry!)",
+                        systemImage: pinnedCountry == nil ? "pin" : "pin.fill"
+                    )
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.selectedCountry == nil)
+
+                Spacer()
+                Button { resetMapState() } label: {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.bordered)
+            }
+            .font(.caption)
+        }
+    }
+
+    private func resetMapState() {
+        model.selectedCountry = nil
+        comparisonCountry = nil
+        pinnedCountry = nil
+        compareMode = false
+        region = .global
+        resetToken += 1
     }
 
     private var selectedPoint: CountryBubblePoint? {
@@ -3916,9 +4109,9 @@ private struct InteractiveCountryBubbleMap: View {
                 ZStack {
                     LinearGradient(
                         colors: [
-                            Color(hex: "#0C1C27"),
+                            Color(hex: "#0C2230"),
                             ClaritasPalette.shellSidebar(for: .dark),
-                            Color(hex: "#071018")
+                            Color(hex: "#07141E")
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -4034,10 +4227,10 @@ private struct InteractiveCountryBubbleMap: View {
     private func eventView(for event: IntelligenceEvent) -> some View {
         let color: Color
         switch event.severity {
-        case .critical: color = Color(hex: "#EF625C")
-        case .high: color = Color(hex: "#EE9463")
-        case .medium: color = Color(hex: "#E0B86E")
-        case .low: color = Color(hex: "#7EB8C9")
+        case .critical: color = Color(hex: "#C77A72")
+        case .high: color = Color(hex: "#D3C3A5")
+        case .medium: color = Color(hex: "#91ADBA")
+        case .low: color = Color(hex: "#718794")
         }
         let size: CGFloat = event.severity == .critical ? 18 : event.severity == .high ? 16 : 14
         return Button(action: { onSelectEvent(event) }) {
@@ -4048,7 +4241,7 @@ private struct InteractiveCountryBubbleMap: View {
                 if event.earth_observation_available {
                     Circle()
                         .stroke(
-                            Color(hex: "#7ED4E6"),
+                            Color(hex: "#B6CBD5"),
                             style: StrokeStyle(lineWidth: 2, dash: [3, 2])
                         )
                         .frame(width: size + 8, height: size + 8)
@@ -4205,8 +4398,8 @@ private struct InteractiveCountryBubbleMap: View {
                 }
             }
             path.closeSubpath()
-            context.fill(path, with: .color(Color(hex: "#254453").opacity(0.82)))
-            context.stroke(path, with: .color(Color(hex: "#77A8BA").opacity(0.5)), lineWidth: 0.8)
+            context.fill(path, with: .color(Color(hex: "#294553").opacity(0.86)))
+            context.stroke(path, with: .color(Color(hex: "#8EA7B3").opacity(0.46)), lineWidth: 0.8)
         }
     }
 

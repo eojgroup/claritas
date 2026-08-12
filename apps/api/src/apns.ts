@@ -19,7 +19,7 @@ import {
   type ApnsEnvironment,
   type ApnsSendResult,
 } from "./apns-policy";
-import { createApnsProviderToken, normalizeApnsPrivateKey } from "./apns-signing";
+import { createApnsProviderToken, normalizeApnsPrivateKey, selectApnsEnvironmentCredential } from "./apns-signing";
 export { createApnsProviderToken } from "./apns-signing";
 export { ApnsRegistrationError } from "./apns-policy";
 export type { ApnsSendResult } from "./apns-policy";
@@ -31,6 +31,9 @@ type ApnsConfig = {
   teamId: string | null;
   topic: string;
   privateKey: string | null;
+  sandboxKeyId: string | null;
+  sandboxPrivateKey: string | null;
+  sandboxUsesProductionCredential: boolean;
   reason: string | null;
 };
 
@@ -81,10 +84,22 @@ export function getApnsConfig(): ApnsConfig {
   const keyId = /^[A-Z0-9]{10}$/.test(rawKeyId) ? rawKeyId : null;
   const teamId = /^[A-Z0-9]{10}$/.test(rawTeamId) ? rawTeamId : null;
   const privateKey = normalizeApnsPrivateKey(process.env.APNS_PRIVATE_KEY);
+  const rawSandboxKeyId = process.env.APNS_SANDBOX_KEY_ID?.trim() ?? "";
+  const rawSandboxPrivateKey = process.env.APNS_SANDBOX_PRIVATE_KEY?.trim() ?? "";
+  const sandboxSpecified = Boolean(rawSandboxKeyId || rawSandboxPrivateKey);
+  const sandboxKeyId = sandboxSpecified && /^[A-Z0-9]{10}$/.test(rawSandboxKeyId)
+    ? rawSandboxKeyId
+    : sandboxSpecified ? null : keyId;
+  const sandboxPrivateKey = sandboxSpecified
+    ? normalizeApnsPrivateKey(rawSandboxPrivateKey)
+    : privateKey;
   const topic = process.env.APNS_BUNDLE_TOPIC?.trim() || "com.eojgroup.claritas";
   const validTopic = /^[A-Za-z0-9][A-Za-z0-9.-]{0,254}$/.test(topic);
   const missing = [!keyId && "valid APNS_KEY_ID", !teamId && "valid APNS_TEAM_ID",
-    !privateKey && "valid P-256 APNS_PRIVATE_KEY", !validTopic && "valid APNS_BUNDLE_TOPIC"]
+    !privateKey && "valid P-256 APNS_PRIVATE_KEY",
+    !sandboxKeyId && "valid APNS_SANDBOX_KEY_ID",
+    !sandboxPrivateKey && "valid P-256 APNS_SANDBOX_PRIVATE_KEY",
+    !validTopic && "valid APNS_BUNDLE_TOPIC"]
     .filter(Boolean) as string[];
   return {
     enabled,
@@ -93,16 +108,20 @@ export function getApnsConfig(): ApnsConfig {
     teamId,
     topic,
     privateKey,
+    sandboxKeyId,
+    sandboxPrivateKey,
+    sandboxUsesProductionCredential: !sandboxSpecified,
     reason: !enabled ? "Feature flag disabled." : missing.length ? `Missing or invalid ${missing.join(", ")}.` : null,
   };
 }
 
-function apnsCredentialFingerprint(config: ApnsConfig): string | null {
-  if (!config.configured || !config.keyId || !config.teamId || !config.privateKey) return null;
+function apnsCredentialFingerprint(config: ApnsConfig, environment: ApnsEnvironment): string | null {
+  const credential = selectApnsEnvironmentCredential(config, environment);
+  if (!config.configured || !credential.keyId || !credential.teamId || !credential.privateKey) return null;
   return createHash("sha256")
-    .update(JSON.stringify({ keyId: config.keyId, teamId: config.teamId, topic: config.topic }))
+    .update(JSON.stringify({ keyId: credential.keyId, teamId: credential.teamId, topic: config.topic, environment }))
     .update("\0")
-    .update(config.privateKey)
+    .update(credential.privateKey)
     .digest("hex");
 }
 
@@ -310,19 +329,20 @@ export async function unregisterAllPushDevices(userId: number) {
   });
 }
 
-function providerToken(config: ApnsConfig): string {
-  if (!config.keyId || !config.teamId || !config.privateKey) throw new Error("APNs signing credentials are incomplete.");
+function providerToken(config: ApnsConfig, environment: ApnsEnvironment): string {
+  const credential = selectApnsEnvironmentCredential(config, environment);
+  if (!credential.keyId || !credential.teamId || !credential.privateKey) throw new Error("APNs signing credentials are incomplete.");
   const now = Date.now();
-  const keyFingerprint = createHash("sha256").update(config.privateKey).digest("hex");
+  const keyFingerprint = createHash("sha256").update(credential.privateKey).digest("hex");
   if (cachedProviderToken
-      && cachedProviderToken.keyId === config.keyId
-      && cachedProviderToken.teamId === config.teamId
+      && cachedProviderToken.keyId === credential.keyId
+      && cachedProviderToken.teamId === credential.teamId
       && cachedProviderToken.keyFingerprint === keyFingerprint
       && now - cachedProviderToken.createdAt < 50 * 60 * 1_000) {
     return cachedProviderToken.value;
   }
-  const value = createApnsProviderToken(config, now);
-  cachedProviderToken = { value, createdAt: now, keyId: config.keyId, teamId: config.teamId, keyFingerprint };
+  const value = createApnsProviderToken(credential, now);
+  cachedProviderToken = { value, createdAt: now, keyId: credential.keyId, teamId: credential.teamId, keyFingerprint };
   return value;
 }
 
@@ -337,8 +357,8 @@ export async function sendApnsNotification(
     : "https://api.sandbox.push.apple.com";
   const apnsId = delivery.apns_id || randomUUID();
   const payload = buildApnsPayload(delivery);
-  const authorizationToken = providerToken(config);
-  const credentialFingerprint = apnsCredentialFingerprint(config);
+  const authorizationToken = providerToken(config, delivery.environment);
+  const credentialFingerprint = apnsCredentialFingerprint(config, delivery.environment);
   const expirationSeconds = integerEnv("APNS_EXPIRATION_SECONDS", 3_600, 0, 86_400);
   const expiration = expirationSeconds === 0
     ? "0"
@@ -710,14 +730,16 @@ async function runWorkerCycle() {
       }
       await recordDeliveryResult(delivery, await sendApnsNotification(delivery, config));
     } catch (error) {
-      await failDelivery(delivery, error, apnsCredentialFingerprint(config));
+      await failDelivery(delivery, error, apnsCredentialFingerprint(config, delivery.environment));
     }
   }
 }
 
 export async function getApnsStatus() {
   const config = getApnsConfig();
-  const fingerprint = apnsCredentialFingerprint(config);
+  const fingerprints = (["production", "development"] as const)
+    .map((environment) => apnsCredentialFingerprint(config, environment))
+    .filter((value): value is string => Boolean(value));
   const [devices, deliveries, verification] = await Promise.all([
     query<{ active: number; total: number }>(
       `SELECT count(*) FILTER (WHERE active)::int AS active,count(*)::int AS total FROM user_push_device`,
@@ -732,18 +754,18 @@ export async function getApnsStatus() {
     }>(
       `SELECT
          max(accepted_at) FILTER (
-           WHERE status='accepted' AND credential_fingerprint=$1
+           WHERE status='accepted' AND credential_fingerprint=ANY($1::text[])
          ) AS last_verified_at,
          max(updated_at) FILTER (
-           WHERE credential_fingerprint=$1
+           WHERE credential_fingerprint=ANY($1::text[])
              AND (apns_status IN (403,429) OR apns_status BETWEEN 500 AND 599)
          ) AS last_provider_failure_at,
          (array_agg(COALESCE(apns_reason,last_error) ORDER BY updated_at DESC) FILTER (
-           WHERE credential_fingerprint=$1
+           WHERE credential_fingerprint=ANY($1::text[])
              AND (apns_status IN (403,429) OR apns_status BETWEEN 500 AND 599)
          ))[1] AS last_provider_error
        FROM apns_delivery`,
-      [fingerprint],
+      [fingerprints],
     ),
   ]);
   const providerVerification = verification.rows[0] ?? {
@@ -769,6 +791,13 @@ export async function getApnsStatus() {
     state,
     reason,
     topic: config.topic,
+    environments: {
+      production: { configured: Boolean(config.keyId && config.teamId && config.privateKey) },
+      development: {
+        configured: Boolean(config.sandboxKeyId && config.teamId && config.sandboxPrivateKey),
+        credential_source: config.sandboxUsesProductionCredential ? "production_compatible_key" : "sandbox_key",
+      },
+    },
     devices: devices.rows[0] ?? { active: 0, total: 0 },
     deliveries: deliveries.rows,
     verification: providerVerification,

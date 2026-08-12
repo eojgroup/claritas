@@ -17,6 +17,18 @@ export function normalizeApnsPrivateKey(value: string | undefined): string | nul
   }
 }
 
+export function selectApnsEnvironmentCredential(config: {
+  keyId: string | null;
+  teamId: string | null;
+  privateKey: string | null;
+  sandboxKeyId: string | null;
+  sandboxPrivateKey: string | null;
+}, environment: "development" | "production") {
+  return environment === "development"
+    ? { keyId: config.sandboxKeyId, teamId: config.teamId, privateKey: config.sandboxPrivateKey }
+    : { keyId: config.keyId, teamId: config.teamId, privateKey: config.privateKey };
+}
+
 /** Pure APNs ES256 signing helper, kept independent from database/runtime state. */
 export function createApnsProviderToken(config: {
   keyId: string | null;

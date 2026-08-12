@@ -58,13 +58,32 @@ struct PadOverviewView: View {
                     commandHeader
                     workspaceStrip
 
-                    SignalMapPanel(
-                        height: 470,
-                        allowsComparison: true,
-                        showsCountryProfile: true
-                    )
+                    BriefingOverviewCard(briefing: model.dailyBriefing) {
+                        destination = .briefing
+                    }
 
-                    OverviewSatelliteContextView(destination: $destination)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 16) {
+                            SignalMapPanel(
+                                height: 500,
+                                allowsComparison: true,
+                                showsCountryProfile: false
+                            )
+                            .frame(maxWidth: .infinity, alignment: .top)
+
+                            OverviewSatelliteContextView(destination: $destination)
+                                .frame(width: 340, alignment: .top)
+                        }
+
+                        VStack(spacing: 16) {
+                            SignalMapPanel(
+                                height: 460,
+                                allowsComparison: true,
+                                showsCountryProfile: false
+                            )
+                            OverviewSatelliteContextView(destination: $destination)
+                        }
+                    }
 
                     metrics
 
@@ -115,10 +134,10 @@ struct PadOverviewView: View {
     private var workspaceStrip: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                workspaceButton(.intelligence, label: "Signal desk")
-                workspaceButton(.earthObservation, label: "Satellite imagery")
-                workspaceButton(.transport, label: "Live transport")
                 workspaceButton(.briefing, label: "Daily briefing")
+                workspaceButton(.intelligence, label: "Investigate events")
+                workspaceButton(.transport, label: "Transport context")
+                workspaceButton(.news, label: "Source reporting")
             }
             .padding(.horizontal, 2)
         }

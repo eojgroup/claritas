@@ -13,7 +13,7 @@ import {
   normalizeDeviceToken,
   normalizeInstallationId,
 } from "./apns-policy";
-import { createApnsProviderToken, normalizeApnsPrivateKey } from "./apns-signing";
+import { createApnsProviderToken, normalizeApnsPrivateKey, selectApnsEnvironmentCredential } from "./apns-signing";
 
 test("APNs provider token is a compact ES256 JWT with bounded claims", () => {
   const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
@@ -35,6 +35,26 @@ test("APNs provider token is a compact ES256 JWT with bounded claims", () => {
   assert.equal(Buffer.from(signature, "base64url").length, 64);
   assert.ok(normalizeApnsPrivateKey(privateKey.export({ type: "pkcs8", format: "pem" }).toString()));
   assert.equal(normalizeApnsPrivateKey("not a key"), null);
+});
+
+test("APNs selects environment-specific signing keys without mixing device environments", () => {
+  const config = {
+    keyId: "PROD123456",
+    teamId: "VTBJTFDTQY",
+    privateKey: "production-key",
+    sandboxKeyId: "DEV1234567",
+    sandboxPrivateKey: "sandbox-key",
+  };
+  assert.deepEqual(selectApnsEnvironmentCredential(config, "production"), {
+    keyId: "PROD123456",
+    teamId: "VTBJTFDTQY",
+    privateKey: "production-key",
+  });
+  assert.deepEqual(selectApnsEnvironmentCredential(config, "development"), {
+    keyId: "DEV1234567",
+    teamId: "VTBJTFDTQY",
+    privateKey: "sandbox-key",
+  });
 });
 
 test("APNs device tokens remain opaque, normalized, and metadata-bounded", () => {

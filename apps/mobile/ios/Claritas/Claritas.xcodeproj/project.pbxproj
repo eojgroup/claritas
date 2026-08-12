@@ -7,175 +7,175 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		001C1FA5BC72CA0E6604B128 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FE11CE79955D2884090DB07 /* Models.swift */; };
-		00BD066EFF73D1876C7C24F9 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DA2E370D7A1B8172751B4EC /* AppModel.swift */; };
-		0EEFAD9D682ED87B123C6278 /* WatchBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = C07A685F7CA6C570333BF5CD /* WatchBrand.swift */; };
-		10E862A044BC4AECF14D9D34 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3508A1AB8DE4260968CF0E3 /* ProfileView.swift */; };
-		179E660BC37D213429E27966 /* ClaritasWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18334E167C49F6CC128BE66C /* ClaritasWidgets.swift */; };
-		1999DCBBC34BB8456A663E74 /* WatchConnectivityClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF5F5F588577D1AA370FE43 /* WatchConnectivityClient.swift */; };
-		2493F09846EAC2E5B183E9DF /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FE11CE79955D2884090DB07 /* Models.swift */; };
-		34B5574B80927CD859CD9852 /* TransportWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9B694A5F2BF43A6D2FDEA3 /* TransportWorkspaceView.swift */; };
-		3FA123F2997E4DCC745B05F9 /* NewsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2740FE0043B4D2FC6CC53565 /* NewsListView.swift */; };
-		4B992F0B8171708E91E9896A /* Claritas Watch Widgets.appex in Embed Watch Extensions */ = {isa = PBXBuildFile; fileRef = 832CB1109F413B0A2F208E94 /* Claritas Watch Widgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
-		5632A4B72EDF0E1CBF55C89E /* AuthSessionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CC0B5C4D35DD47B1720829F /* AuthSessionPresenter.swift */; };
-		5709FA44112998062D81F914 /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20EEC748E6C88443637730C1 /* CountryProfileView.swift */; };
-		5EACCA07648FAAE2370D958D /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 7AC6CA1A8EFD49055FAC0772 /* Config.plist */; };
-		6495105DD5C731B290FEE443 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7DCC83FA65D3E993C6550C1 /* APIClient.swift */; };
-		6CDDE03068DE0C6F73EE913B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7DCC83FA65D3E993C6550C1 /* APIClient.swift */; };
-		7971E598C453B4CCF600607B /* WidgetSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC3A804E972903B940A0296 /* WidgetSnapshotStore.swift */; };
-		88FA28E5086743A9B54E750F /* ClaritasWatchWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 704739A938D6ACB398BEE2AE /* ClaritasWatchWidgets.swift */; };
-		8C45C39B854CC2FA32A41AC5 /* WatchWidgetSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22337D55EAC389BFA70FE60A /* WatchWidgetSnapshotStore.swift */; };
-		8CA00D44C8BD8AB7C04D6348 /* IntelligenceWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04DE391B95A47B6D2C861AF /* IntelligenceWorkspaceView.swift */; };
-		91F30E1BCC9DCCD132A90609 /* Claritas Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 71EBD1559287C85829F5A170 /* Claritas Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
-		97A283E7CD2DCC019AAE0996 /* ClaritasWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B7DE8BC0A8FE7737011D493 /* ClaritasWatchApp.swift */; };
-		97FC4B646E34337C0C51EFB9 /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD12A633EC531A6DF7EBE442 /* WeatherListView.swift */; };
-		98A109A602CFF3853280F71E /* PadOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3610A1EB891952F6C1C000C /* PadOverviewView.swift */; };
-		A384A923EA6CB84B0C79715D /* PushNotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D697BBDD8FA893B82998D632 /* PushNotificationCoordinator.swift */; };
-		A95661CCC96863A9E562061F /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C393EA4703F800A1064E2F4 /* DashboardView.swift */; };
-		B973390B02A937D41A08FFF9 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE62AFBAF9753A0019BA1369 /* App.swift */; };
-		CBA8129163E47BB4B9D844FE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9208C32402FEAB31CD5FF3FF /* Assets.xcassets */; };
-		DA28C6749C9C1B6E3348C7EC /* Claritas Widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 46E775021C576324CADE7225 /* Claritas Widgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
-		DC59678A3089C065C8B84A10 /* WatchSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5EFDE88CA648EA2426448DE /* WatchSyncCoordinator.swift */; };
-		DC7F7F1AF154DC2233139630 /* BrandComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 873B1FEBCDD481201740163C /* BrandComponents.swift */; };
-		E20592607128D66335B57F1E /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 02ECF423C0A748974CD49EAD /* Config.plist */; };
-		E3CC6E7EAE186AEFB3021A17 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FA67F552844B75858D622B5 /* LoginView.swift */; };
-		E50EE53F1815C164C7704766 /* WatchAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD18CB25907769D848A2167C /* WatchAppModel.swift */; };
-		E9A8D4417BE834D4148A0267 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25A81ABF78A8EC80C1DAC9A4 /* RootView.swift */; };
-		EDA215B76E561DB3BBC4162F /* WatchKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D9686E2EF78EAB5EE58710 /* WatchKeychain.swift */; };
-		F626D0C1FF1977D84CDEBCDA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4DC4632ABBB306994EC9749B /* Assets.xcassets */; };
-		F86A911805B1D33ADBBD7DC9 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73DADED02DD99589A7182EEA /* WatchRootView.swift */; };
+		0005A6423D59027AAD0F6BBC /* WatchConnectivityClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 199DCB3C162C3FCD93E8FC04 /* WatchConnectivityClient.swift */; };
+		049795CE6D98C6E9CCC88583 /* AuthSessionPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F385CC6E0F58C7A4500C014 /* AuthSessionPresenter.swift */; };
+		06F33FE6278612DC143A57BC /* Claritas Widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 09730A5D12CD9F3929372C84 /* Claritas Widgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
+		0BB26FB3B2059248B7A986EB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D908F9A4537A20AB486665F0 /* Assets.xcassets */; };
+		134377E250255A03B24C4A60 /* ClaritasWatchWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = E131D1FBDA70AE830E365530 /* ClaritasWatchWidgets.swift */; };
+		1D12DCD095578FBDA0EB9ABF /* PadOverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A838212A7EB16043B9DD8692 /* PadOverviewView.swift */; };
+		1F8F35AE6B9694123A83DE87 /* PushNotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143F5DE064E3FBE2F74DCC63 /* PushNotificationCoordinator.swift */; };
+		27B76EE6E532B6D0D23EA6C2 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD731FDC2CAF73E11240D11D /* DashboardView.swift */; };
+		2944D7A945B33A608A16C334 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC643F8DABCC63C8614BF0A6 /* RootView.swift */; };
+		2A35385C2E49AAF32952E6C4 /* WidgetSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC6003B75CB3D57CDE618795 /* WidgetSnapshotStore.swift */; };
+		32C9DDA3D92B4052A44C521C /* WeatherListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1019BBA62A6913444D9B467 /* WeatherListView.swift */; };
+		41787FA7138CC108D2BA1FF1 /* WatchSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5045F60779EE08CFE1407071 /* WatchSyncCoordinator.swift */; };
+		48AFD94ED499FE29D14A46CF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 818BB9F45DA2368D1A15CDF9 /* Assets.xcassets */; };
+		4DD9CB720641F28D9C6310A2 /* CountryProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80FD855711C35D5102E2FE36 /* CountryProfileView.swift */; };
+		4E64A0EF6668ADB2DE40A314 /* WatchWidgetSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DACBE66B649ADC6E7A2809A9 /* WatchWidgetSnapshotStore.swift */; };
+		4F552B678CF509C0E1FB6954 /* NewsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29459807D8E5074B9C236F67 /* NewsListView.swift */; };
+		4FCCBC8C3DFCF4E0E1DEF067 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AD99AB50839456A4632984 /* Models.swift */; };
+		5380CE9D58AF285F8DE74CB4 /* Claritas Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = F1C65E2AD662D863F6EAF89A /* Claritas Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
+		59C85296512BB1C83F21C200 /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AD87F0995D0A1A0E0312C30 /* WatchRootView.swift */; };
+		5BE4CF043FAE510ACC95F3C5 /* WatchAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C999259FD11B6B0DF43EA5E6 /* WatchAppModel.swift */; };
+		5BE754CCCE4830B8EDD03C9F /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AD99AB50839456A4632984 /* Models.swift */; };
+		6F1C03F3311FE46E16784DCE /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A20BC2C888C4D31AFA087CA /* LoginView.swift */; };
+		70DA1ADBE03A41C189D8C2DD /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 7D212B1CFA49D77C6292EB00 /* Config.plist */; };
+		9D934D4EE4E37F66EDF0B969 /* BrandComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BDBA71E7AB4A2CBAE1761E1 /* BrandComponents.swift */; };
+		AED7E94C190C06CAD9AAA887 /* IntelligenceWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25EC02EC6D489B7496265E9D /* IntelligenceWorkspaceView.swift */; };
+		B18D0C30A4957B47545AC934 /* ClaritasWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAE17BE9C7186CD49A9585A3 /* ClaritasWidgets.swift */; };
+		B46C27B78DF459B7AECDAAE5 /* TransportWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11E1D99FDBDD1FCC0693DA51 /* TransportWorkspaceView.swift */; };
+		B559153097CD29BF8655C970 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A38F19D3B6E031A3317D73D9 /* ProfileView.swift */; };
+		B58CFF6260B99C18319978F6 /* WatchBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = C37DB0D972546396F728F948 /* WatchBrand.swift */; };
+		B89A99624F14D199A1ADA786 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1465CF2379C42F02C2A3C840 /* APIClient.swift */; };
+		BAB2B5A3F2FA373DE4EECEAA /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1465CF2379C42F02C2A3C840 /* APIClient.swift */; };
+		CC78A02173C8A7680A276D8C /* Claritas Watch Widgets.appex in Embed Watch Extensions */ = {isa = PBXBuildFile; fileRef = BC62D426695B1302941AADA4 /* Claritas Watch Widgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy, ); }; };
+		DAA7C627C69E3901B51AE039 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F12B48E57EFABCE24892AD7 /* AppModel.swift */; };
+		E8462647A121451F581EF188 /* WatchKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560EF83FB92A987BB3993E53 /* WatchKeychain.swift */; };
+		E97CE9339E3C3AA926286172 /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 03EDBCD1E91D22EE1AF4E167 /* Config.plist */; };
+		F2911028A43F45881C5A8979 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EC9D5A8012718FEE05A3543 /* App.swift */; };
+		FC54E743DE78F07094C3747B /* ClaritasWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF92D0039595CFD896A643B /* ClaritasWatchApp.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
-		34E55278128E3C0E41F7F803 /* PBXContainerItemProxy */ = {
+		6974AC08FE0FA6E828F22D24 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 28D5DD8D08C0D289340F50A8 /* Project object */;
+			containerPortal = 62790F27F98D4AE274E14EA7 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = F01320ADE4B3D4DCA1290D6E;
-			remoteInfo = "Claritas Watch Widgets";
-		};
-		8D8F9B5158111B094CF53AAF /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 28D5DD8D08C0D289340F50A8 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 674DB9A41BA7948133544856;
+			remoteGlobalIDString = 3BFBCBA034D5BC98700E6DE1;
 			remoteInfo = "Claritas Watch App";
 		};
-		A2EB66CD98C4B9FE1B10A30A /* PBXContainerItemProxy */ = {
+		6D52C2599A100F43EED41510 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
-			containerPortal = 28D5DD8D08C0D289340F50A8 /* Project object */;
+			containerPortal = 62790F27F98D4AE274E14EA7 /* Project object */;
 			proxyType = 1;
-			remoteGlobalIDString = 69534D48F6E06EEA6DB8B5CA;
+			remoteGlobalIDString = A6C986AF5176C7618293B229;
+			remoteInfo = "Claritas Watch Widgets";
+		};
+		B58EF490176791177E50851D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 62790F27F98D4AE274E14EA7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0BC8D304A45A5501A58D740A;
 			remoteInfo = "Claritas Widgets";
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		097CA4590527995E3D15C673 /* Embed Watch Content */ = {
+		04083C70A214E1F3D4ED822B /* Embed Watch Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				CC78A02173C8A7680A276D8C /* Claritas Watch Widgets.appex in Embed Watch Extensions */,
+			);
+			name = "Embed Watch Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6DC263FEF3B084A87CC03F20 /* Embed Watch Content */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
 			dstSubfolderSpec = 16;
 			files = (
-				91F30E1BCC9DCCD132A90609 /* Claritas Watch App.app in Embed Watch Content */,
+				5380CE9D58AF285F8DE74CB4 /* Claritas Watch App.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		24783330C20EBE2ED9DF9EC0 /* Embed Foundation Extensions */ = {
+		BFF86CA0C9B7A61732E26037 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				DA28C6749C9C1B6E3348C7EC /* Claritas Widgets.appex in Embed Foundation Extensions */,
+				06F33FE6278612DC143A57BC /* Claritas Widgets.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		9B83A9516E2992FC40F2CF88 /* Embed Watch Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				4B992F0B8171708E91E9896A /* Claritas Watch Widgets.appex in Embed Watch Extensions */,
-			);
-			name = "Embed Watch Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		02ECF423C0A748974CD49EAD /* Config.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Config.plist; sourceTree = "<group>"; };
-		0A8154345E963D3A9058D800 /* ClaritasWatch.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = ClaritasWatch.entitlements; sourceTree = "<group>"; };
-		0B7DE8BC0A8FE7737011D493 /* ClaritasWatchApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaritasWatchApp.swift; sourceTree = "<group>"; };
-		18334E167C49F6CC128BE66C /* ClaritasWidgets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaritasWidgets.swift; sourceTree = "<group>"; };
-		195E4C3BE93D17A09B36D2D8 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
-		20EEC748E6C88443637730C1 /* CountryProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CountryProfileView.swift; path = Views/CountryProfileView.swift; sourceTree = "<group>"; };
-		22337D55EAC389BFA70FE60A /* WatchWidgetSnapshotStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchWidgetSnapshotStore.swift; path = Services/WatchWidgetSnapshotStore.swift; sourceTree = "<group>"; };
-		25A81ABF78A8EC80C1DAC9A4 /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootView.swift; path = Views/RootView.swift; sourceTree = "<group>"; };
-		2740FE0043B4D2FC6CC53565 /* NewsListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NewsListView.swift; path = Views/NewsListView.swift; sourceTree = "<group>"; };
-		3FE11CE79955D2884090DB07 /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Models.swift; path = Models/Models.swift; sourceTree = "<group>"; };
-		46E775021C576324CADE7225 /* Claritas Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Claritas Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
-		47D9686E2EF78EAB5EE58710 /* WatchKeychain.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchKeychain.swift; path = Services/WatchKeychain.swift; sourceTree = "<group>"; };
-		4DC4632ABBB306994EC9749B /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		54E0E17C57ABE0204BDBFD42 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		6DA2E370D7A1B8172751B4EC /* AppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
-		704739A938D6ACB398BEE2AE /* ClaritasWatchWidgets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaritasWatchWidgets.swift; sourceTree = "<group>"; };
-		71EBD1559287C85829F5A170 /* Claritas Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Claritas Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
-		73DADED02DD99589A7182EEA /* WatchRootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchRootView.swift; path = Views/WatchRootView.swift; sourceTree = "<group>"; };
-		7758822BDC3666209D73E3EE /* ClaritasWidgets.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = ClaritasWidgets.entitlements; sourceTree = "<group>"; };
-		7AC6CA1A8EFD49055FAC0772 /* Config.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Config.plist; sourceTree = "<group>"; };
-		7C393EA4703F800A1064E2F4 /* DashboardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DashboardView.swift; path = Views/DashboardView.swift; sourceTree = "<group>"; };
-		7CC0B5C4D35DD47B1720829F /* AuthSessionPresenter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AuthSessionPresenter.swift; path = Services/AuthSessionPresenter.swift; sourceTree = "<group>"; };
-		832CB1109F413B0A2F208E94 /* Claritas Watch Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Claritas Watch Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
-		873B1FEBCDD481201740163C /* BrandComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BrandComponents.swift; path = Views/BrandComponents.swift; sourceTree = "<group>"; };
-		8E8DAF1F5B0EACB236A4B5CC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		8FA67F552844B75858D622B5 /* LoginView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LoginView.swift; path = Views/LoginView.swift; sourceTree = "<group>"; };
-		9208C32402FEAB31CD5FF3FF /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		9B9B694A5F2BF43A6D2FDEA3 /* TransportWorkspaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TransportWorkspaceView.swift; path = Views/TransportWorkspaceView.swift; sourceTree = "<group>"; };
-		A04DE391B95A47B6D2C861AF /* IntelligenceWorkspaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = IntelligenceWorkspaceView.swift; path = Views/IntelligenceWorkspaceView.swift; sourceTree = "<group>"; };
-		A3508A1AB8DE4260968CF0E3 /* ProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileView.swift; path = Views/ProfileView.swift; sourceTree = "<group>"; };
-		A5EFDE88CA648EA2426448DE /* WatchSyncCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchSyncCoordinator.swift; path = Services/WatchSyncCoordinator.swift; sourceTree = "<group>"; };
-		ACF5F5F588577D1AA370FE43 /* WatchConnectivityClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchConnectivityClient.swift; path = Services/WatchConnectivityClient.swift; sourceTree = "<group>"; };
-		B3610A1EB891952F6C1C000C /* PadOverviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PadOverviewView.swift; path = Views/PadOverviewView.swift; sourceTree = "<group>"; };
-		C07A685F7CA6C570333BF5CD /* WatchBrand.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchBrand.swift; path = Views/WatchBrand.swift; sourceTree = "<group>"; };
-		C69BFF5AC9FB2970A41CA104 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		CE85F0B202418614C9E7A4B6 /* Claritas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Claritas.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		D697BBDD8FA893B82998D632 /* PushNotificationCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PushNotificationCoordinator.swift; path = Services/PushNotificationCoordinator.swift; sourceTree = "<group>"; };
-		E386D0776C9F00B818CE24FE /* ClaritasWatchWidgets.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = ClaritasWatchWidgets.entitlements; sourceTree = "<group>"; };
-		E7DCC83FA65D3E993C6550C1 /* APIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIClient.swift; path = Services/APIClient.swift; sourceTree = "<group>"; };
-		EA297559FCD9F51D34D60B45 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		FD12A633EC531A6DF7EBE442 /* WeatherListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WeatherListView.swift; path = Views/WeatherListView.swift; sourceTree = "<group>"; };
-		FD18CB25907769D848A2167C /* WatchAppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchAppModel.swift; sourceTree = "<group>"; };
-		FDC3A804E972903B940A0296 /* WidgetSnapshotStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WidgetSnapshotStore.swift; path = Services/WidgetSnapshotStore.swift; sourceTree = "<group>"; };
-		FE62AFBAF9753A0019BA1369 /* App.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		03EDBCD1E91D22EE1AF4E167 /* Config.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Config.plist; sourceTree = "<group>"; };
+		09730A5D12CD9F3929372C84 /* Claritas Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Claritas Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		0F6D06A33DC5AB79BB190B9B /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		11E1D99FDBDD1FCC0693DA51 /* TransportWorkspaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TransportWorkspaceView.swift; path = Views/TransportWorkspaceView.swift; sourceTree = "<group>"; };
+		143F5DE064E3FBE2F74DCC63 /* PushNotificationCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PushNotificationCoordinator.swift; path = Services/PushNotificationCoordinator.swift; sourceTree = "<group>"; };
+		1465CF2379C42F02C2A3C840 /* APIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = APIClient.swift; path = Services/APIClient.swift; sourceTree = "<group>"; };
+		199DCB3C162C3FCD93E8FC04 /* WatchConnectivityClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchConnectivityClient.swift; path = Services/WatchConnectivityClient.swift; sourceTree = "<group>"; };
+		1F385CC6E0F58C7A4500C014 /* AuthSessionPresenter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = AuthSessionPresenter.swift; path = Services/AuthSessionPresenter.swift; sourceTree = "<group>"; };
+		25EC02EC6D489B7496265E9D /* IntelligenceWorkspaceView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = IntelligenceWorkspaceView.swift; path = Views/IntelligenceWorkspaceView.swift; sourceTree = "<group>"; };
+		29459807D8E5074B9C236F67 /* NewsListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = NewsListView.swift; path = Views/NewsListView.swift; sourceTree = "<group>"; };
+		4AD87F0995D0A1A0E0312C30 /* WatchRootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchRootView.swift; path = Views/WatchRootView.swift; sourceTree = "<group>"; };
+		4F12B48E57EFABCE24892AD7 /* AppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		5045F60779EE08CFE1407071 /* WatchSyncCoordinator.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchSyncCoordinator.swift; path = Services/WatchSyncCoordinator.swift; sourceTree = "<group>"; };
+		560EF83FB92A987BB3993E53 /* WatchKeychain.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchKeychain.swift; path = Services/WatchKeychain.swift; sourceTree = "<group>"; };
+		5A20BC2C888C4D31AFA087CA /* LoginView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LoginView.swift; path = Views/LoginView.swift; sourceTree = "<group>"; };
+		678CFD2B7AADCC98DA6C8D03 /* ClaritasWatchWidgets.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = ClaritasWatchWidgets.entitlements; sourceTree = "<group>"; };
+		686EE0C2B920E8C3E5DFDE33 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		6BDBA71E7AB4A2CBAE1761E1 /* BrandComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BrandComponents.swift; path = Views/BrandComponents.swift; sourceTree = "<group>"; };
+		7D212B1CFA49D77C6292EB00 /* Config.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Config.plist; sourceTree = "<group>"; };
+		7EC9D5A8012718FEE05A3543 /* App.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		80FD855711C35D5102E2FE36 /* CountryProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CountryProfileView.swift; path = Views/CountryProfileView.swift; sourceTree = "<group>"; };
+		818BB9F45DA2368D1A15CDF9 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		98566C026C0C0B296B3BC540 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/WatchOS.platform/Developer/SDKs/WatchOS11.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		98CA7B010CCC510AC4E2B1F0 /* Claritas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Claritas.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9D7BC0F776E3A378824E13AB /* ClaritasWidgets.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = ClaritasWidgets.entitlements; sourceTree = "<group>"; };
+		9DD3F6BAD76D23D4625B6B7F /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A38F19D3B6E031A3317D73D9 /* ProfileView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ProfileView.swift; path = Views/ProfileView.swift; sourceTree = "<group>"; };
+		A838212A7EB16043B9DD8692 /* PadOverviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PadOverviewView.swift; path = Views/PadOverviewView.swift; sourceTree = "<group>"; };
+		A841CF616376EF39CE1E9A40 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AAE17BE9C7186CD49A9585A3 /* ClaritasWidgets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaritasWidgets.swift; sourceTree = "<group>"; };
+		AC643F8DABCC63C8614BF0A6 /* RootView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = RootView.swift; path = Views/RootView.swift; sourceTree = "<group>"; };
+		AD731FDC2CAF73E11240D11D /* DashboardView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = DashboardView.swift; path = Views/DashboardView.swift; sourceTree = "<group>"; };
+		B1019BBA62A6913444D9B467 /* WeatherListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WeatherListView.swift; path = Views/WeatherListView.swift; sourceTree = "<group>"; };
+		BC62D426695B1302941AADA4 /* Claritas Watch Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Claritas Watch Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		C37DB0D972546396F728F948 /* WatchBrand.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchBrand.swift; path = Views/WatchBrand.swift; sourceTree = "<group>"; };
+		C442C51A037B7B741432F191 /* ClaritasWatch.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = ClaritasWatch.entitlements; sourceTree = "<group>"; };
+		C999259FD11B6B0DF43EA5E6 /* WatchAppModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WatchAppModel.swift; sourceTree = "<group>"; };
+		D908F9A4537A20AB486665F0 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		DACBE66B649ADC6E7A2809A9 /* WatchWidgetSnapshotStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WatchWidgetSnapshotStore.swift; path = Services/WatchWidgetSnapshotStore.swift; sourceTree = "<group>"; };
+		E131D1FBDA70AE830E365530 /* ClaritasWatchWidgets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaritasWatchWidgets.swift; sourceTree = "<group>"; };
+		E6AD99AB50839456A4632984 /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = Models.swift; path = Models/Models.swift; sourceTree = "<group>"; };
+		ECF92D0039595CFD896A643B /* ClaritasWatchApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaritasWatchApp.swift; sourceTree = "<group>"; };
+		F1C65E2AD662D863F6EAF89A /* Claritas Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Claritas Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		FC6003B75CB3D57CDE618795 /* WidgetSnapshotStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WidgetSnapshotStore.swift; path = Services/WidgetSnapshotStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		8F55B4F988A3AF06AF865DC1 /* Frameworks */ = {
+		55F67E67EEB9233B1E674258 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		AEB34EBF93F61DA22C0DBB9E /* Frameworks */ = {
+		86DB7692CA3F53774F3BFF76 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		B411D283AEFF947EE808D0D2 /* Frameworks */ = {
+		CF2D49A1F6003272595B2FF2 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		BF973E6133DA5E9850A6D666 /* Frameworks */ = {
+		D1685FC023C4E653BE43117B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -185,144 +185,125 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		0A294F57BE21FE17F2D318D1 = {
+		03B6EBC2B959971BFC0241B2 /* Claritas */ = {
 			isa = PBXGroup;
 			children = (
-				429CEE8EC168A4D4EE00ACB7 /* Products */,
-				5670327FFBAC294DA89608C3 /* Frameworks */,
-				ACBFF772C2CE55100C7DDFE6 /* Claritas */,
-				DE889C287A956C8FB91F2BED /* ClaritasWatch */,
-				B648886BBFAC14A211B862CB /* ClaritasWidgets */,
-				D92A81D85CCE4F2164C086E6 /* ClaritasWatchWidgets */,
-			);
-			sourceTree = "<group>";
-		};
-		429CEE8EC168A4D4EE00ACB7 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				CE85F0B202418614C9E7A4B6 /* Claritas.app */,
-				71EBD1559287C85829F5A170 /* Claritas Watch App.app */,
-				46E775021C576324CADE7225 /* Claritas Widgets.appex */,
-				832CB1109F413B0A2F208E94 /* Claritas Watch Widgets.appex */,
-			);
-			name = Products;
-			sourceTree = "<group>";
-		};
-		46C5A40CB2CEBD29571CC573 /* watchOS */ = {
-			isa = PBXGroup;
-			children = (
-				195E4C3BE93D17A09B36D2D8 /* Foundation.framework */,
-			);
-			name = watchOS;
-			sourceTree = "<group>";
-		};
-		5670327FFBAC294DA89608C3 /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				46C5A40CB2CEBD29571CC573 /* watchOS */,
-			);
-			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		ACBFF772C2CE55100C7DDFE6 /* Claritas */ = {
-			isa = PBXGroup;
-			children = (
-				FE62AFBAF9753A0019BA1369 /* App.swift */,
-				6DA2E370D7A1B8172751B4EC /* AppModel.swift */,
-				3FE11CE79955D2884090DB07 /* Models.swift */,
-				E7DCC83FA65D3E993C6550C1 /* APIClient.swift */,
-				7CC0B5C4D35DD47B1720829F /* AuthSessionPresenter.swift */,
-				D697BBDD8FA893B82998D632 /* PushNotificationCoordinator.swift */,
-				A5EFDE88CA648EA2426448DE /* WatchSyncCoordinator.swift */,
-				FDC3A804E972903B940A0296 /* WidgetSnapshotStore.swift */,
-				873B1FEBCDD481201740163C /* BrandComponents.swift */,
-				20EEC748E6C88443637730C1 /* CountryProfileView.swift */,
-				7C393EA4703F800A1064E2F4 /* DashboardView.swift */,
-				A04DE391B95A47B6D2C861AF /* IntelligenceWorkspaceView.swift */,
-				8FA67F552844B75858D622B5 /* LoginView.swift */,
-				2740FE0043B4D2FC6CC53565 /* NewsListView.swift */,
-				B3610A1EB891952F6C1C000C /* PadOverviewView.swift */,
-				A3508A1AB8DE4260968CF0E3 /* ProfileView.swift */,
-				25A81ABF78A8EC80C1DAC9A4 /* RootView.swift */,
-				9B9B694A5F2BF43A6D2FDEA3 /* TransportWorkspaceView.swift */,
-				FD12A633EC531A6DF7EBE442 /* WeatherListView.swift */,
-				4DC4632ABBB306994EC9749B /* Assets.xcassets */,
-				7AC6CA1A8EFD49055FAC0772 /* Config.plist */,
-				8E8DAF1F5B0EACB236A4B5CC /* Info.plist */,
+				7EC9D5A8012718FEE05A3543 /* App.swift */,
+				4F12B48E57EFABCE24892AD7 /* AppModel.swift */,
+				E6AD99AB50839456A4632984 /* Models.swift */,
+				1465CF2379C42F02C2A3C840 /* APIClient.swift */,
+				1F385CC6E0F58C7A4500C014 /* AuthSessionPresenter.swift */,
+				143F5DE064E3FBE2F74DCC63 /* PushNotificationCoordinator.swift */,
+				5045F60779EE08CFE1407071 /* WatchSyncCoordinator.swift */,
+				FC6003B75CB3D57CDE618795 /* WidgetSnapshotStore.swift */,
+				6BDBA71E7AB4A2CBAE1761E1 /* BrandComponents.swift */,
+				80FD855711C35D5102E2FE36 /* CountryProfileView.swift */,
+				AD731FDC2CAF73E11240D11D /* DashboardView.swift */,
+				25EC02EC6D489B7496265E9D /* IntelligenceWorkspaceView.swift */,
+				5A20BC2C888C4D31AFA087CA /* LoginView.swift */,
+				29459807D8E5074B9C236F67 /* NewsListView.swift */,
+				A838212A7EB16043B9DD8692 /* PadOverviewView.swift */,
+				A38F19D3B6E031A3317D73D9 /* ProfileView.swift */,
+				AC643F8DABCC63C8614BF0A6 /* RootView.swift */,
+				11E1D99FDBDD1FCC0693DA51 /* TransportWorkspaceView.swift */,
+				B1019BBA62A6913444D9B467 /* WeatherListView.swift */,
+				818BB9F45DA2368D1A15CDF9 /* Assets.xcassets */,
+				03EDBCD1E91D22EE1AF4E167 /* Config.plist */,
+				0F6D06A33DC5AB79BB190B9B /* Info.plist */,
 			);
 			name = Claritas;
 			sourceTree = "<group>";
 		};
-		B648886BBFAC14A211B862CB /* ClaritasWidgets */ = {
+		37FF0AB6BC20BB03B6410099 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				18334E167C49F6CC128BE66C /* ClaritasWidgets.swift */,
-				EA297559FCD9F51D34D60B45 /* Info.plist */,
-				7758822BDC3666209D73E3EE /* ClaritasWidgets.entitlements */,
+				9D344D6BFAA05081804FB71D /* watchOS */,
 			);
-			name = ClaritasWidgets;
-			path = ../ClaritasWidgets;
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		D92A81D85CCE4F2164C086E6 /* ClaritasWatchWidgets */ = {
+		4F1CBC95B49256229B7C2DBF /* ClaritasWatch */ = {
 			isa = PBXGroup;
 			children = (
-				704739A938D6ACB398BEE2AE /* ClaritasWatchWidgets.swift */,
-				C69BFF5AC9FB2970A41CA104 /* Info.plist */,
-				E386D0776C9F00B818CE24FE /* ClaritasWatchWidgets.entitlements */,
-			);
-			name = ClaritasWatchWidgets;
-			path = ../ClaritasWatchWidgets;
-			sourceTree = "<group>";
-		};
-		DE889C287A956C8FB91F2BED /* ClaritasWatch */ = {
-			isa = PBXGroup;
-			children = (
-				0B7DE8BC0A8FE7737011D493 /* ClaritasWatchApp.swift */,
-				ACF5F5F588577D1AA370FE43 /* WatchConnectivityClient.swift */,
-				47D9686E2EF78EAB5EE58710 /* WatchKeychain.swift */,
-				22337D55EAC389BFA70FE60A /* WatchWidgetSnapshotStore.swift */,
-				C07A685F7CA6C570333BF5CD /* WatchBrand.swift */,
-				73DADED02DD99589A7182EEA /* WatchRootView.swift */,
-				FD18CB25907769D848A2167C /* WatchAppModel.swift */,
-				9208C32402FEAB31CD5FF3FF /* Assets.xcassets */,
-				02ECF423C0A748974CD49EAD /* Config.plist */,
-				54E0E17C57ABE0204BDBFD42 /* Info.plist */,
-				0A8154345E963D3A9058D800 /* ClaritasWatch.entitlements */,
+				ECF92D0039595CFD896A643B /* ClaritasWatchApp.swift */,
+				199DCB3C162C3FCD93E8FC04 /* WatchConnectivityClient.swift */,
+				560EF83FB92A987BB3993E53 /* WatchKeychain.swift */,
+				DACBE66B649ADC6E7A2809A9 /* WatchWidgetSnapshotStore.swift */,
+				C37DB0D972546396F728F948 /* WatchBrand.swift */,
+				4AD87F0995D0A1A0E0312C30 /* WatchRootView.swift */,
+				C999259FD11B6B0DF43EA5E6 /* WatchAppModel.swift */,
+				D908F9A4537A20AB486665F0 /* Assets.xcassets */,
+				7D212B1CFA49D77C6292EB00 /* Config.plist */,
+				686EE0C2B920E8C3E5DFDE33 /* Info.plist */,
+				C442C51A037B7B741432F191 /* ClaritasWatch.entitlements */,
 			);
 			name = ClaritasWatch;
 			path = ../ClaritasWatch;
 			sourceTree = "<group>";
 		};
+		965A572F4EEB28E62A7E47DD /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				98CA7B010CCC510AC4E2B1F0 /* Claritas.app */,
+				F1C65E2AD662D863F6EAF89A /* Claritas Watch App.app */,
+				09730A5D12CD9F3929372C84 /* Claritas Widgets.appex */,
+				BC62D426695B1302941AADA4 /* Claritas Watch Widgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		9D344D6BFAA05081804FB71D /* watchOS */ = {
+			isa = PBXGroup;
+			children = (
+				98566C026C0C0B296B3BC540 /* Foundation.framework */,
+			);
+			name = watchOS;
+			sourceTree = "<group>";
+		};
+		B9C19DACE87FCF7389ABEBA9 = {
+			isa = PBXGroup;
+			children = (
+				965A572F4EEB28E62A7E47DD /* Products */,
+				37FF0AB6BC20BB03B6410099 /* Frameworks */,
+				03B6EBC2B959971BFC0241B2 /* Claritas */,
+				4F1CBC95B49256229B7C2DBF /* ClaritasWatch */,
+				F5F00294671B264B48B54C08 /* ClaritasWidgets */,
+				C4B493542D6FEE4F918F8E1B /* ClaritasWatchWidgets */,
+			);
+			sourceTree = "<group>";
+		};
+		C4B493542D6FEE4F918F8E1B /* ClaritasWatchWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				E131D1FBDA70AE830E365530 /* ClaritasWatchWidgets.swift */,
+				9DD3F6BAD76D23D4625B6B7F /* Info.plist */,
+				678CFD2B7AADCC98DA6C8D03 /* ClaritasWatchWidgets.entitlements */,
+			);
+			name = ClaritasWatchWidgets;
+			path = ../ClaritasWatchWidgets;
+			sourceTree = "<group>";
+		};
+		F5F00294671B264B48B54C08 /* ClaritasWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				AAE17BE9C7186CD49A9585A3 /* ClaritasWidgets.swift */,
+				A841CF616376EF39CE1E9A40 /* Info.plist */,
+				9D7BC0F776E3A378824E13AB /* ClaritasWidgets.entitlements */,
+			);
+			name = ClaritasWidgets;
+			path = ../ClaritasWidgets;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		674DB9A41BA7948133544856 /* Claritas Watch App */ = {
+		0BC8D304A45A5501A58D740A /* Claritas Widgets */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 469A53CA6B2FA21C8B73448B /* Build configuration list for PBXNativeTarget "Claritas Watch App" */;
+			buildConfigurationList = 41C62EC4121FA52F1F7100E4 /* Build configuration list for PBXNativeTarget "Claritas Widgets" */;
 			buildPhases = (
-				24A031AC771C2527E80D61A6 /* Sources */,
-				8F55B4F988A3AF06AF865DC1 /* Frameworks */,
-				6C9FA48C8E98DFBCE7D4E513 /* Resources */,
-				9B83A9516E2992FC40F2CF88 /* Embed Watch Extensions */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				703189BD763A74B62CF3048E /* PBXTargetDependency */,
-			);
-			name = "Claritas Watch App";
-			productName = "Claritas Watch App";
-			productReference = 71EBD1559287C85829F5A170 /* Claritas Watch App.app */;
-			productType = "com.apple.product-type.application";
-		};
-		69534D48F6E06EEA6DB8B5CA /* Claritas Widgets */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 26AAC8B7911AB340DA9B7671 /* Build configuration list for PBXNativeTarget "Claritas Widgets" */;
-			buildPhases = (
-				2874600630166488B2AD0898 /* Sources */,
-				BF973E6133DA5E9850A6D666 /* Frameworks */,
-				9591A2975EB7B15994A5A54C /* Resources */,
+				966C61F1BC536A7B73FC678A /* Sources */,
+				55F67E67EEB9233B1E674258 /* Frameworks */,
+				8F657AAF3FACDCB71AC38CD6 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -330,37 +311,35 @@
 			);
 			name = "Claritas Widgets";
 			productName = "Claritas Widgets";
-			productReference = 46E775021C576324CADE7225 /* Claritas Widgets.appex */;
+			productReference = 09730A5D12CD9F3929372C84 /* Claritas Widgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		7860188D7A34B79F323BD98C /* Claritas */ = {
+		3BFBCBA034D5BC98700E6DE1 /* Claritas Watch App */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = EB59ABD0E70B168E47B1FD17 /* Build configuration list for PBXNativeTarget "Claritas" */;
+			buildConfigurationList = D766DFBB87B49B608C5D3FC5 /* Build configuration list for PBXNativeTarget "Claritas Watch App" */;
 			buildPhases = (
-				5A735F43070FA73002EEC6EB /* Sources */,
-				AEB34EBF93F61DA22C0DBB9E /* Frameworks */,
-				42E1AB4FEAEC6DC0A80A527E /* Resources */,
-				24783330C20EBE2ED9DF9EC0 /* Embed Foundation Extensions */,
-				097CA4590527995E3D15C673 /* Embed Watch Content */,
+				79D0E16DE51692DBA04B4316 /* Sources */,
+				CF2D49A1F6003272595B2FF2 /* Frameworks */,
+				00BCE22457A10583A6B84D2A /* Resources */,
+				04083C70A214E1F3D4ED822B /* Embed Watch Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
-				414307183E156DBED3BA19BE /* PBXTargetDependency */,
-				4C8A59A5CAA2F5C5792D0960 /* PBXTargetDependency */,
+				63E1E5E0F51E55658C84BD85 /* PBXTargetDependency */,
 			);
-			name = Claritas;
-			productName = Claritas;
-			productReference = CE85F0B202418614C9E7A4B6 /* Claritas.app */;
+			name = "Claritas Watch App";
+			productName = "Claritas Watch App";
+			productReference = F1C65E2AD662D863F6EAF89A /* Claritas Watch App.app */;
 			productType = "com.apple.product-type.application";
 		};
-		F01320ADE4B3D4DCA1290D6E /* Claritas Watch Widgets */ = {
+		A6C986AF5176C7618293B229 /* Claritas Watch Widgets */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 55DA1012E0BF71E0BCB5A249 /* Build configuration list for PBXNativeTarget "Claritas Watch Widgets" */;
+			buildConfigurationList = 8990CE44FFD06F15F2655E89 /* Build configuration list for PBXNativeTarget "Claritas Watch Widgets" */;
 			buildPhases = (
-				319DB23B41A9511760B70939 /* Sources */,
-				B411D283AEFF947EE808D0D2 /* Frameworks */,
-				08FC93443A14991246A38E2E /* Resources */,
+				7A15032221ECA71C7EF865B1 /* Sources */,
+				86DB7692CA3F53774F3BFF76 /* Frameworks */,
+				E6AE1B09A6C576B1E2F1987D /* Resources */,
 			);
 			buildRules = (
 			);
@@ -368,27 +347,52 @@
 			);
 			name = "Claritas Watch Widgets";
 			productName = "Claritas Watch Widgets";
-			productReference = 832CB1109F413B0A2F208E94 /* Claritas Watch Widgets.appex */;
+			productReference = BC62D426695B1302941AADA4 /* Claritas Watch Widgets.appex */;
 			productType = "com.apple.product-type.app-extension";
+		};
+		F57DE68AFFAB7BCDBE29D0B7 /* Claritas */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 50CC96B23B0259C73C8648E4 /* Build configuration list for PBXNativeTarget "Claritas" */;
+			buildPhases = (
+				8362B52FDBE61138A1A9EB29 /* Sources */,
+				D1685FC023C4E653BE43117B /* Frameworks */,
+				8B45A8870E6319DDC76E7A8E /* Resources */,
+				BFF86CA0C9B7A61732E26037 /* Embed Foundation Extensions */,
+				6DC263FEF3B084A87CC03F20 /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D71F2C8175D20149651A5FAE /* PBXTargetDependency */,
+				CB1448D452ED47269243CE19 /* PBXTargetDependency */,
+			);
+			name = Claritas;
+			productName = Claritas;
+			productReference = 98CA7B010CCC510AC4E2B1F0 /* Claritas.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		28D5DD8D08C0D289340F50A8 /* Project object */ = {
+		62790F27F98D4AE274E14EA7 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					674DB9A41BA7948133544856 = {
+					0BC8D304A45A5501A58D740A = {
 						DevelopmentTeam = VTBJTFDTQY;
 						ProvisioningStyle = Automatic;
 					};
-					69534D48F6E06EEA6DB8B5CA = {
+					3BFBCBA034D5BC98700E6DE1 = {
 						DevelopmentTeam = VTBJTFDTQY;
 						ProvisioningStyle = Automatic;
 					};
-					7860188D7A34B79F323BD98C = {
+					A6C986AF5176C7618293B229 = {
+						DevelopmentTeam = VTBJTFDTQY;
+						ProvisioningStyle = Automatic;
+					};
+					F57DE68AFFAB7BCDBE29D0B7 = {
 						DevelopmentTeam = VTBJTFDTQY;
 						ProvisioningStyle = Automatic;
 						SystemCapabilities = {
@@ -397,13 +401,9 @@
 							};
 						};
 					};
-					F01320ADE4B3D4DCA1290D6E = {
-						DevelopmentTeam = VTBJTFDTQY;
-						ProvisioningStyle = Automatic;
-					};
 				};
 			};
-			buildConfigurationList = F84313B7ED9EBC15525AA5C3 /* Build configuration list for PBXProject "Claritas" */;
+			buildConfigurationList = 34700E46CAE5C3D61CF3CF00 /* Build configuration list for PBXProject "Claritas" */;
 			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -411,48 +411,48 @@
 				en,
 				Base,
 			);
-			mainGroup = 0A294F57BE21FE17F2D318D1;
+			mainGroup = B9C19DACE87FCF7389ABEBA9;
 			minimizedProjectReferenceProxies = 0;
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 429CEE8EC168A4D4EE00ACB7 /* Products */;
+			productRefGroup = 965A572F4EEB28E62A7E47DD /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				7860188D7A34B79F323BD98C /* Claritas */,
-				674DB9A41BA7948133544856 /* Claritas Watch App */,
-				69534D48F6E06EEA6DB8B5CA /* Claritas Widgets */,
-				F01320ADE4B3D4DCA1290D6E /* Claritas Watch Widgets */,
+				F57DE68AFFAB7BCDBE29D0B7 /* Claritas */,
+				3BFBCBA034D5BC98700E6DE1 /* Claritas Watch App */,
+				0BC8D304A45A5501A58D740A /* Claritas Widgets */,
+				A6C986AF5176C7618293B229 /* Claritas Watch Widgets */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		08FC93443A14991246A38E2E /* Resources */ = {
+		00BCE22457A10583A6B84D2A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0BB26FB3B2059248B7A986EB /* Assets.xcassets in Resources */,
+				70DA1ADBE03A41C189D8C2DD /* Config.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B45A8870E6319DDC76E7A8E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				48AFD94ED499FE29D14A46CF /* Assets.xcassets in Resources */,
+				E97CE9339E3C3AA926286172 /* Config.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8F657AAF3FACDCB71AC38CD6 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		42E1AB4FEAEC6DC0A80A527E /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				F626D0C1FF1977D84CDEBCDA /* Assets.xcassets in Resources */,
-				5EACCA07648FAAE2370D958D /* Config.plist in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		6C9FA48C8E98DFBCE7D4E513 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				CBA8129163E47BB4B9D844FE /* Assets.xcassets in Resources */,
-				E20592607128D66335B57F1E /* Config.plist in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		9591A2975EB7B15994A5A54C /* Resources */ = {
+		E6AE1B09A6C576B1E2F1987D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -462,233 +462,89 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		24A031AC771C2527E80D61A6 /* Sources */ = {
+		79D0E16DE51692DBA04B4316 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				97A283E7CD2DCC019AAE0996 /* ClaritasWatchApp.swift in Sources */,
-				1999DCBBC34BB8456A663E74 /* WatchConnectivityClient.swift in Sources */,
-				EDA215B76E561DB3BBC4162F /* WatchKeychain.swift in Sources */,
-				8C45C39B854CC2FA32A41AC5 /* WatchWidgetSnapshotStore.swift in Sources */,
-				0EEFAD9D682ED87B123C6278 /* WatchBrand.swift in Sources */,
-				F86A911805B1D33ADBBD7DC9 /* WatchRootView.swift in Sources */,
-				E50EE53F1815C164C7704766 /* WatchAppModel.swift in Sources */,
-				001C1FA5BC72CA0E6604B128 /* Models.swift in Sources */,
-				6CDDE03068DE0C6F73EE913B /* APIClient.swift in Sources */,
+				FC54E743DE78F07094C3747B /* ClaritasWatchApp.swift in Sources */,
+				0005A6423D59027AAD0F6BBC /* WatchConnectivityClient.swift in Sources */,
+				E8462647A121451F581EF188 /* WatchKeychain.swift in Sources */,
+				4E64A0EF6668ADB2DE40A314 /* WatchWidgetSnapshotStore.swift in Sources */,
+				B58CFF6260B99C18319978F6 /* WatchBrand.swift in Sources */,
+				59C85296512BB1C83F21C200 /* WatchRootView.swift in Sources */,
+				5BE4CF043FAE510ACC95F3C5 /* WatchAppModel.swift in Sources */,
+				4FCCBC8C3DFCF4E0E1DEF067 /* Models.swift in Sources */,
+				BAB2B5A3F2FA373DE4EECEAA /* APIClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		2874600630166488B2AD0898 /* Sources */ = {
+		7A15032221ECA71C7EF865B1 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				179E660BC37D213429E27966 /* ClaritasWidgets.swift in Sources */,
+				134377E250255A03B24C4A60 /* ClaritasWatchWidgets.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		319DB23B41A9511760B70939 /* Sources */ = {
+		8362B52FDBE61138A1A9EB29 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				88FA28E5086743A9B54E750F /* ClaritasWatchWidgets.swift in Sources */,
+				F2911028A43F45881C5A8979 /* App.swift in Sources */,
+				DAA7C627C69E3901B51AE039 /* AppModel.swift in Sources */,
+				5BE754CCCE4830B8EDD03C9F /* Models.swift in Sources */,
+				B89A99624F14D199A1ADA786 /* APIClient.swift in Sources */,
+				049795CE6D98C6E9CCC88583 /* AuthSessionPresenter.swift in Sources */,
+				1F8F35AE6B9694123A83DE87 /* PushNotificationCoordinator.swift in Sources */,
+				41787FA7138CC108D2BA1FF1 /* WatchSyncCoordinator.swift in Sources */,
+				2A35385C2E49AAF32952E6C4 /* WidgetSnapshotStore.swift in Sources */,
+				9D934D4EE4E37F66EDF0B969 /* BrandComponents.swift in Sources */,
+				4DD9CB720641F28D9C6310A2 /* CountryProfileView.swift in Sources */,
+				27B76EE6E532B6D0D23EA6C2 /* DashboardView.swift in Sources */,
+				AED7E94C190C06CAD9AAA887 /* IntelligenceWorkspaceView.swift in Sources */,
+				6F1C03F3311FE46E16784DCE /* LoginView.swift in Sources */,
+				4F552B678CF509C0E1FB6954 /* NewsListView.swift in Sources */,
+				1D12DCD095578FBDA0EB9ABF /* PadOverviewView.swift in Sources */,
+				B559153097CD29BF8655C970 /* ProfileView.swift in Sources */,
+				2944D7A945B33A608A16C334 /* RootView.swift in Sources */,
+				B46C27B78DF459B7AECDAAE5 /* TransportWorkspaceView.swift in Sources */,
+				32C9DDA3D92B4052A44C521C /* WeatherListView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		5A735F43070FA73002EEC6EB /* Sources */ = {
+		966C61F1BC536A7B73FC678A /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B973390B02A937D41A08FFF9 /* App.swift in Sources */,
-				00BD066EFF73D1876C7C24F9 /* AppModel.swift in Sources */,
-				2493F09846EAC2E5B183E9DF /* Models.swift in Sources */,
-				6495105DD5C731B290FEE443 /* APIClient.swift in Sources */,
-				5632A4B72EDF0E1CBF55C89E /* AuthSessionPresenter.swift in Sources */,
-				A384A923EA6CB84B0C79715D /* PushNotificationCoordinator.swift in Sources */,
-				DC59678A3089C065C8B84A10 /* WatchSyncCoordinator.swift in Sources */,
-				7971E598C453B4CCF600607B /* WidgetSnapshotStore.swift in Sources */,
-				DC7F7F1AF154DC2233139630 /* BrandComponents.swift in Sources */,
-				5709FA44112998062D81F914 /* CountryProfileView.swift in Sources */,
-				A95661CCC96863A9E562061F /* DashboardView.swift in Sources */,
-				8CA00D44C8BD8AB7C04D6348 /* IntelligenceWorkspaceView.swift in Sources */,
-				E3CC6E7EAE186AEFB3021A17 /* LoginView.swift in Sources */,
-				3FA123F2997E4DCC745B05F9 /* NewsListView.swift in Sources */,
-				98A109A602CFF3853280F71E /* PadOverviewView.swift in Sources */,
-				10E862A044BC4AECF14D9D34 /* ProfileView.swift in Sources */,
-				E9A8D4417BE834D4148A0267 /* RootView.swift in Sources */,
-				34B5574B80927CD859CD9852 /* TransportWorkspaceView.swift in Sources */,
-				97FC4B646E34337C0C51EFB9 /* WeatherListView.swift in Sources */,
+				B18D0C30A4957B47545AC934 /* ClaritasWidgets.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		414307183E156DBED3BA19BE /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = "Claritas Watch App";
-			target = 674DB9A41BA7948133544856 /* Claritas Watch App */;
-			targetProxy = 8D8F9B5158111B094CF53AAF /* PBXContainerItemProxy */;
-		};
-		4C8A59A5CAA2F5C5792D0960 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			name = "Claritas Widgets";
-			target = 69534D48F6E06EEA6DB8B5CA /* Claritas Widgets */;
-			targetProxy = A2EB66CD98C4B9FE1B10A30A /* PBXContainerItemProxy */;
-		};
-		703189BD763A74B62CF3048E /* PBXTargetDependency */ = {
+		63E1E5E0F51E55658C84BD85 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			name = "Claritas Watch Widgets";
-			target = F01320ADE4B3D4DCA1290D6E /* Claritas Watch Widgets */;
-			targetProxy = 34E55278128E3C0E41F7F803 /* PBXContainerItemProxy */;
+			target = A6C986AF5176C7618293B229 /* Claritas Watch Widgets */;
+			targetProxy = 6D52C2599A100F43EED41510 /* PBXContainerItemProxy */;
+		};
+		CB1448D452ED47269243CE19 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Claritas Widgets";
+			target = 0BC8D304A45A5501A58D740A /* Claritas Widgets */;
+			targetProxy = B58EF490176791177E50851D /* PBXContainerItemProxy */;
+		};
+		D71F2C8175D20149651A5FAE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "Claritas Watch App";
+			target = 3BFBCBA034D5BC98700E6DE1 /* Claritas Watch App */;
+			targetProxy = 6974AC08FE0FA6E828F22D24 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
-		16731467FA357998059654F2 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLARITAS_IOS_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
-				CLARITAS_WATCH_WIDGET_APP_GROUP = group.com.eojgroup.claritas.watch;
-				CODE_SIGN_ENTITLEMENTS = ../ClaritasWatch/ClaritasWatch.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
-				DEVELOPMENT_TEAM = VTBJTFDTQY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ../ClaritasWatch/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.watchkitapp;
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
-			};
-			name = Debug;
-		};
-		19EBC4738E3AC2447E2AB960 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CLARITAS_WATCH_WIDGET_APP_GROUP = group.com.eojgroup.claritas.watch;
-				CODE_SIGN_ENTITLEMENTS = ../ClaritasWatchWidgets/ClaritasWatchWidgets.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
-				DEVELOPMENT_TEAM = VTBJTFDTQY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ../ClaritasWatchWidgets/Info.plist;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.watchkitapp.widgets;
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				VALIDATE_PRODUCT = YES;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
-			};
-			name = Release;
-		};
-		28F72F595A9A2183EE7C8976 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APNS_ENVIRONMENT = development;
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				CLARITAS_IOS_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
-				CLARITAS_WIDGET_APP_GROUP = group.com.eojgroup.claritas;
-				CODE_SIGN_ENTITLEMENTS = Claritas.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
-				DEVELOPMENT_TEAM = VTBJTFDTQY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.news";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
-				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Debug;
-		};
-		487B05B455EE36CB428D4D8E /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				CLARITAS_WIDGET_APP_GROUP = group.com.eojgroup.claritas;
-				CODE_SIGN_ENTITLEMENTS = ../ClaritasWidgets/ClaritasWidgets.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
-				DEVELOPMENT_TEAM = VTBJTFDTQY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ../ClaritasWidgets/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.widgets;
-				SDKROOT = iphoneos;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		80836D44A3D7E8FE84152221 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APNS_ENVIRONMENT = production;
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CLANG_ENABLE_OBJC_WEAK = NO;
-				CLARITAS_IOS_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
-				CLARITAS_WIDGET_APP_GROUP = group.com.eojgroup.claritas;
-				CODE_SIGN_ENTITLEMENTS = Claritas.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
-				DEVELOPMENT_TEAM = VTBJTFDTQY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.news";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
-				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		8394021CBB81A07631A2DB71 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				APPLICATION_EXTENSION_API_ONLY = YES;
-				CLARITAS_WATCH_WIDGET_APP_GROUP = group.com.eojgroup.claritas.watch;
-				CODE_SIGN_ENTITLEMENTS = ../ClaritasWatchWidgets/ClaritasWatchWidgets.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 9;
-				DEVELOPMENT_TEAM = VTBJTFDTQY;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ../ClaritasWatchWidgets/Info.plist;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.watchkitapp.widgets;
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
-			};
-			name = Debug;
-		};
-		AEFB20C64CA500874CB4558F /* Release */ = {
+		023B98A9F91D0A929089DB9B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -744,7 +600,147 @@
 			};
 			name = Release;
 		};
-		C9701D84AC7B806F1797764A /* Debug */ = {
+		0CFA0204DCA23F645072E537 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APNS_ENVIRONMENT = development;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CLARITAS_IOS_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
+				CLARITAS_WIDGET_APP_GROUP = group.com.eojgroup.claritas;
+				CODE_SIGN_ENTITLEMENTS = Claritas.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = VTBJTFDTQY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.news";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		111F0BEF35F64FE8BB7C49D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLARITAS_IOS_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
+				CLARITAS_WATCH_WIDGET_APP_GROUP = group.com.eojgroup.claritas.watch;
+				CODE_SIGN_ENTITLEMENTS = ../ClaritasWatch/ClaritasWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = VTBJTFDTQY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ../ClaritasWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		50CA10100A37866EA2115703 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLARITAS_WATCH_WIDGET_APP_GROUP = group.com.eojgroup.claritas.watch;
+				CODE_SIGN_ENTITLEMENTS = ../ClaritasWatchWidgets/ClaritasWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = VTBJTFDTQY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ../ClaritasWatchWidgets/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.watchkitapp.widgets;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		6D75926ECDD560D387593A13 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLARITAS_WATCH_WIDGET_APP_GROUP = group.com.eojgroup.claritas.watch;
+				CODE_SIGN_ENTITLEMENTS = ../ClaritasWatchWidgets/ClaritasWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = VTBJTFDTQY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ../ClaritasWatchWidgets/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.watchkitapp.widgets;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
+		};
+		710DDA4EC59B4883F73D775C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLARITAS_IOS_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
+				CLARITAS_WATCH_WIDGET_APP_GROUP = group.com.eojgroup.claritas.watch;
+				CODE_SIGN_ENTITLEMENTS = ../ClaritasWatch/ClaritasWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = VTBJTFDTQY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ../ClaritasWatch/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.watchkitapp;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
+		};
+		785516889A9C352084BB3523 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CLARITAS_WIDGET_APP_GROUP = group.com.eojgroup.claritas;
+				CODE_SIGN_ENTITLEMENTS = ../ClaritasWidgets/ClaritasWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 9;
+				DEVELOPMENT_TEAM = VTBJTFDTQY;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ../ClaritasWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.widgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A7D958CDA63F0747E426D13C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -807,7 +803,7 @@
 			};
 			name = Debug;
 		};
-		E33BBB6B4F0E964E36EC9E8F /* Debug */ = {
+		AB003B5FB6590E1C432000EE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
@@ -825,83 +821,87 @@
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
 			};
-			name = Debug;
+			name = Release;
 		};
-		ED1DC97414C0DD3D76B44E2D /* Release */ = {
+		D0281CB1143FDE5463BB4264 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APNS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
 				CLARITAS_IOS_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
-				CLARITAS_WATCH_WIDGET_APP_GROUP = group.com.eojgroup.claritas.watch;
-				CODE_SIGN_ENTITLEMENTS = ../ClaritasWatch/ClaritasWatch.entitlements;
+				CLARITAS_WIDGET_APP_GROUP = group.com.eojgroup.claritas;
+				CODE_SIGN_ENTITLEMENTS = Claritas.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = VTBJTFDTQY;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = ../ClaritasWatch/Info.plist;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Claritas;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.news";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas.watchkitapp;
-				SDKROOT = watchos;
-				SKIP_INSTALL = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.eojgroup.claritas;
+				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = 4;
+				TARGETED_DEVICE_FAMILY = "1,2";
 				VALIDATE_PRODUCT = YES;
-				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		26AAC8B7911AB340DA9B7671 /* Build configuration list for PBXNativeTarget "Claritas Widgets" */ = {
+		34700E46CAE5C3D61CF3CF00 /* Build configuration list for PBXProject "Claritas" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				487B05B455EE36CB428D4D8E /* Release */,
-				E33BBB6B4F0E964E36EC9E8F /* Debug */,
+				A7D958CDA63F0747E426D13C /* Debug */,
+				023B98A9F91D0A929089DB9B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		469A53CA6B2FA21C8B73448B /* Build configuration list for PBXNativeTarget "Claritas Watch App" */ = {
+		41C62EC4121FA52F1F7100E4 /* Build configuration list for PBXNativeTarget "Claritas Widgets" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				ED1DC97414C0DD3D76B44E2D /* Release */,
-				16731467FA357998059654F2 /* Debug */,
+				AB003B5FB6590E1C432000EE /* Release */,
+				785516889A9C352084BB3523 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		55DA1012E0BF71E0BCB5A249 /* Build configuration list for PBXNativeTarget "Claritas Watch Widgets" */ = {
+		50CC96B23B0259C73C8648E4 /* Build configuration list for PBXNativeTarget "Claritas" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				19EBC4738E3AC2447E2AB960 /* Release */,
-				8394021CBB81A07631A2DB71 /* Debug */,
+				D0281CB1143FDE5463BB4264 /* Release */,
+				0CFA0204DCA23F645072E537 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		EB59ABD0E70B168E47B1FD17 /* Build configuration list for PBXNativeTarget "Claritas" */ = {
+		8990CE44FFD06F15F2655E89 /* Build configuration list for PBXNativeTarget "Claritas Watch Widgets" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				80836D44A3D7E8FE84152221 /* Release */,
-				28F72F595A9A2183EE7C8976 /* Debug */,
+				50CA10100A37866EA2115703 /* Release */,
+				6D75926ECDD560D387593A13 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		F84313B7ED9EBC15525AA5C3 /* Build configuration list for PBXProject "Claritas" */ = {
+		D766DFBB87B49B608C5D3FC5 /* Build configuration list for PBXNativeTarget "Claritas Watch App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				C9701D84AC7B806F1797764A /* Debug */,
-				AEFB20C64CA500874CB4558F /* Release */,
+				710DDA4EC59B4883F73D775C /* Release */,
+				111F0BEF35F64FE8BB7C49D1 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
-	rootObject = 28D5DD8D08C0D289340F50A8 /* Project object */;
+	rootObject = 62790F27F98D4AE274E14EA7 /* Project object */;
 }

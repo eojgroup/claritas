@@ -27,8 +27,8 @@ struct RootView: View {
             case .weather: return "Weather"
             case .markets: return "Markets"
             case .transport: return "Transport"
-            case .intelligence: return "Signal desk"
-            case .earthObservation: return "Imagery library"
+            case .intelligence: return "Investigate"
+            case .earthObservation: return "Imagery evidence"
             case .admin: return "Admin"
             case .profile: return "Profile"
             case .policies: return "Policies"
@@ -102,9 +102,15 @@ struct RootView: View {
             }
             let next: Tab
             switch destination {
-            case "news": next = .news
-            case "weather": next = .weather
-            case "markets": next = .markets
+            case "news":
+                next = .more
+                compactMorePath = [.news]
+            case "weather":
+                next = .more
+                compactMorePath = [.weather]
+            case "markets":
+                next = .more
+                compactMorePath = [.markets]
             case "transport":
                 next = .more
                 compactMorePath = [.transport]
@@ -114,12 +120,24 @@ struct RootView: View {
                 next = .more
                 compactMorePath = [.earthObservation]
             case "briefing":
-                next = .more
-                compactMorePath = [.briefing]
+                next = .briefing
             default: next = .dashboard
             }
             tab = next
-            sidebarSelection = sidebarItems.contains(next) ? next : .overview
+            if horizontalSizeClass == .regular {
+                switch destination {
+                case "news": sidebarSelection = .news
+                case "weather": sidebarSelection = .weather
+                case "markets": sidebarSelection = .markets
+                case "transport": sidebarSelection = .transport
+                case "intelligence": sidebarSelection = .intelligence
+                case "earth-observation": sidebarSelection = .earthObservation
+                case "briefing": sidebarSelection = .briefing
+                default: sidebarSelection = .overview
+                }
+            } else {
+                sidebarSelection = .overview
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .claritasPushTokenAvailable)) { note in
             guard let token = note.object as? String, !token.isEmpty else { return }
@@ -130,9 +148,8 @@ struct RootView: View {
     private var compactShell: some View {
         TabView(selection: $tab) {
             compactTab(.dashboard)
+            compactTab(.briefing)
             compactTab(.intelligence)
-            compactTab(.earthObservation)
-            compactTab(.news)
             compactTab(.more)
         }
         .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
@@ -188,7 +205,9 @@ struct RootView: View {
     }
 
     private var resolvedSidebarSelection: Tab {
-        if let sidebarSelection, sidebarItems.contains(sidebarSelection) {
+        if let sidebarSelection,
+           sidebarSelection != .more,
+           (sidebarSelection != .admin || model.isAdmin) {
             return sidebarSelection
         }
         return .overview
@@ -196,17 +215,16 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .intelligence, .earthObservation, .briefing, .transport, .admin, .profile, .policies]
-            : [.overview, .intelligence, .earthObservation, .briefing, .transport, .profile, .policies]
+            ? [.overview, .briefing, .intelligence, .transport, .admin, .profile, .policies]
+            : [.overview, .briefing, .intelligence, .transport, .profile, .policies]
     }
 
     private var sidebar: some View {
         List(selection: $sidebarSelection) {
             Section("Workspace") {
                 sidebarLink(.overview)
-                sidebarLink(.intelligence)
-                sidebarLink(.earthObservation)
                 sidebarLink(.briefing)
+                sidebarLink(.intelligence)
             }
             Section("Source lenses") {
                 sidebarLink(.transport)
@@ -313,17 +331,10 @@ private struct CompactMoreView: View {
                     BrandSectionHeader(
                         kicker: "Claritas",
                         title: "More",
-                        detail: "Evidence, briefing, account, and reference tools."
+                        detail: "Source lenses, governed imagery, account, and reference tools."
                     )
 
                     BrandCard(title: "Source lenses", icon: "waveform.path.ecg") {
-                        destinationRow(
-                            title: "Daily briefing",
-                            detail: "A concise synthesis of the current event picture",
-                            icon: "sparkles",
-                            destination: DailyBriefingWorkspaceView()
-                        )
-                        Divider()
                         destinationRow(
                             title: "News reporting",
                             detail: "Original reporting linked into canonical event threads",
@@ -357,6 +368,15 @@ private struct CompactMoreView: View {
                             detail: "Flight, shipping, corridor, and country activity",
                             icon: "point.topleft.down.to.point.bottomright.curvepath",
                             destination: TransportWorkspaceView()
+                        )
+                    }
+
+                    BrandCard(title: "Evidence tools", icon: "checkmark.seal") {
+                        destinationRow(
+                            title: "Imagery evidence library",
+                            detail: "Governed source assets; event-linked imagery remains available in each investigation",
+                            icon: "sensor.tag.radiowaves.forward",
+                            destination: EarthObservationWorkspaceView()
                         )
                     }
 
