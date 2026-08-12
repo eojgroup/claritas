@@ -362,6 +362,7 @@ export default memo(function WorldMapBubbles({
     moved: boolean;
   } | null>(null);
   const suppressClickUntilRef = useRef(0);
+  const wheelZoomArmedRef = useRef(false);
   const [size, setSize] = useState(INITIAL_SIZE);
   const [view, setView] = useState<ViewTransform>({
     scale: 1,
@@ -369,6 +370,7 @@ export default memo(function WorldMapBubbles({
     y: 0,
   });
   const [isDragging, setIsDragging] = useState(false);
+  const [wheelZoomArmed, setWheelZoomArmed] = useState(false);
   const [hoveredCountry, setHoveredCountry] = useState<string | null>(null);
   const [hoveredPoint, setHoveredPoint] = useState<{
     point: WorldMapPoint;
@@ -564,6 +566,10 @@ export default memo(function WorldMapBubbles({
     if (!svg) return;
     const handleWheel = (event: WheelEvent) => {
       if (event.deltaY === 0) return;
+      // Ordinary page scrolling must remain inert while the pointer merely
+      // happens to cross the map. Mouse-wheel zoom is deliberately armed by a
+      // click/drag on the map; browser/trackpad pinch (ctrlKey) remains direct.
+      if (!event.ctrlKey && !event.metaKey && !wheelZoomArmedRef.current) return;
       const rect = svg.getBoundingClientRect();
       if (rect.width < 1 || rect.height < 1) return;
       const anchorX = (event.clientX - rect.left) * (size.width / rect.width);
@@ -615,6 +621,10 @@ export default memo(function WorldMapBubbles({
 
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.button !== 0) return;
+    if (event.pointerType !== "touch") {
+      wheelZoomArmedRef.current = true;
+      setWheelZoomArmed(true);
+    }
     activePointersRef.current.set(event.pointerId, {
       clientX: event.clientX,
       clientY: event.clientY,
@@ -821,8 +831,16 @@ export default memo(function WorldMapBubbles({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onPointerLeave={() => {
+          if (!isDragging) {
+            wheelZoomArmedRef.current = false;
+            setWheelZoomArmed(false);
+          }
+        }}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
+            wheelZoomArmedRef.current = false;
+            setWheelZoomArmed(false);
             event.currentTarget.blur();
           }
         }}
@@ -1161,6 +1179,12 @@ export default memo(function WorldMapBubbles({
           })}
         </g>
       </svg>
+
+      <div className="pointer-events-none absolute bottom-3 right-3 z-[2] hidden rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg-elevated)]/90 px-2.5 py-1 text-[9px] font-semibold text-[color:var(--shell-muted)] shadow-sm backdrop-blur sm:block">
+        {wheelZoomArmed
+          ? "Scroll zoom active · leave map or press Esc to release"
+          : "Click map to enable scroll zoom · pinch anytime"}
+      </div>
 
       <div className="world-map-controls absolute right-3 top-3">
         <button

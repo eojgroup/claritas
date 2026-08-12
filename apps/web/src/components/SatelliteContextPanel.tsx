@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Cloud, MapPin, RefreshCw, Satellite, ScanSearch } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, ChevronRight, Cloud, Images, MapPin, Maximize2, RefreshCw, Satellite, ScanSearch } from "lucide-react";
 import {
   fetchEventGibsContext,
   fetchIntelligenceEvent,
@@ -15,6 +15,7 @@ type Props = {
   compact?: boolean;
   onOpenEvent: (eventId: string) => void;
   onOpenImagery: (eventId: string) => void;
+  onContextEventChange?: (eventId: string | null) => void;
 };
 
 type SatelliteSlide = {
@@ -154,6 +155,7 @@ export default function SatelliteContextPanel({
   compact = false,
   onOpenEvent,
   onOpenImagery,
+  onContextEventChange,
 }: Props) {
   const [slides, setSlides] = useState<SatelliteSlide[]>([]);
   const [selected, setSelected] = useState(0);
@@ -346,6 +348,25 @@ export default function SatelliteContextPanel({
   const thumbnails = useMemo(() => slides.slice(0, 5), [slides]);
   const stale = Boolean(current && (error || (loadedScope && loadedScope !== requestedScope)));
 
+  useEffect(() => {
+    onContextEventChange?.(current?.event.id ?? null);
+    return () => onContextEventChange?.(null);
+  }, [current?.event.id, onContextEventChange]);
+
+  const selectPrevious = () => {
+    setSelected((value) => (value <= 0 ? slides.length - 1 : value - 1));
+  };
+  const selectNext = () => {
+    setSelected((value) => (value + 1) % slides.length);
+  };
+  const processedCount = slides.filter((slide) => slide.observationKind === "processed_observation").length;
+  const selectionReason = current?.observationKind === "processed_observation"
+    ? `Shown because it is one of ${processedCount} event-linked processed ${processedCount === 1 ? "scene" : "scenes"} in this scope. The initial scene is ranked by event severity and relevance.`
+    : "Shown as regional browse context because no higher-ranked processed scene fills this position. It is location context, not event confirmation.";
+  const mapLinkExplanation = currentEvent?.coordinateLabel
+    ? "The outlined event marker on the map refers to this image."
+    : "No defensible point marker is available; the image remains scoped to the event's trusted linked geography.";
+
   return (
     <section className="flex min-h-0 flex-col" aria-label={heading}>
       <div className="flex items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-4 py-3">
@@ -391,20 +412,63 @@ export default function SatelliteContextPanel({
         </div>
       )}
       {current && (
-        <div className={`${imageHeight} grid min-h-0 gap-0 ${compact ? "sm:grid-cols-[minmax(8rem,0.65fr)_minmax(14rem,1.35fr)]" : "sm:grid-cols-[minmax(15rem,0.9fr)_minmax(17rem,1.1fr)]"}`}>
-          <div className={`satellite-image-stage relative flex items-center justify-center overflow-hidden border-b border-[color:var(--shell-border)] sm:border-b-0 sm:border-r ${compact ? "min-h-36 p-2" : "min-h-56 p-3"}`}>
-            <SatelliteImage
-              sources={current.sources}
-              alt={`${current.sourceLabel} for ${currentEvent?.headline || current.event.title}`}
-              className={`${compact ? "max-h-48" : "max-h-[24rem]"} w-full rounded-lg object-contain`}
-              fallbackClassName={`flex h-full w-full items-center justify-center rounded-lg bg-[color:var(--shell-sidebar)] ${compact ? "min-h-32" : "min-h-56"}`}
-              loading="eager"
-            />
-            <div className={`absolute rounded-full border border-white/20 bg-[rgba(5,18,23,0.82)] px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-stone-100 backdrop-blur-md ${compact ? "left-3 top-3" : "left-5 top-5"}`}>
-              {current.observationKind === "processed_observation" ? "Event-linked observation" : "Regional browse context"}
+        <div className={`${imageHeight} grid min-h-0 gap-0 ${compact ? "grid-cols-1" : "sm:grid-cols-[minmax(15rem,0.9fr)_minmax(17rem,1.1fr)]"}`}>
+          <div className={`satellite-image-stage relative flex items-center justify-center overflow-hidden border-b border-[color:var(--shell-border)] ${compact ? "aspect-[16/9] min-h-52 p-2" : "min-h-56 p-3 sm:border-b-0 sm:border-r"}`}>
+            <button
+              type="button"
+              onClick={() => onOpenImagery(current.event.id)}
+              className="group/image flex h-full w-full items-center justify-center overflow-hidden rounded-lg"
+              aria-label={`Open full imagery assessment for ${currentEvent?.headline || current.event.title}`}
+            >
+              <SatelliteImage
+                sources={current.sources}
+                alt={`${current.sourceLabel} for ${currentEvent?.headline || current.event.title}`}
+                className={`${compact ? "h-full max-h-[20rem]" : "max-h-[24rem]"} w-full rounded-lg object-contain transition-transform duration-200 group-hover/image:scale-[1.015]`}
+                fallbackClassName={`flex h-full w-full items-center justify-center rounded-lg bg-[color:var(--shell-sidebar)] ${compact ? "min-h-52" : "min-h-56"}`}
+                loading="eager"
+              />
+            </button>
+            <div className={`pointer-events-none absolute rounded-full border border-white/20 bg-[rgba(5,18,23,0.84)] px-2 py-1 text-[8px] font-semibold uppercase tracking-[0.12em] text-stone-100 backdrop-blur-md ${compact ? "left-3 top-3" : "left-5 top-5"}`}>
+              Map highlight · {selected + 1} of {slides.length} · {current.observationKind === "processed_observation" ? "event-linked" : "browse context"}
             </div>
+            <div className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded-full border border-white/20 bg-[rgba(5,18,23,0.84)] px-2 py-1 text-[8px] font-semibold text-stone-100 backdrop-blur-md">
+              <Maximize2 className="h-3 w-3" /> Open assessment
+            </div>
+            {slides.length > 1 && (
+              <div className="absolute bottom-3 right-3 flex items-center overflow-hidden rounded-full border border-white/20 bg-[rgba(5,18,23,0.88)] text-stone-100 shadow-lg backdrop-blur-md">
+                <button type="button" onClick={selectPrevious} className="p-2 hover:bg-white/10" aria-label="Show previous satellite context"><ChevronLeft className="h-4 w-4" /></button>
+                <span className="min-w-12 text-center text-[10px] font-semibold">{selected + 1}/{slides.length}</span>
+                <button type="button" onClick={selectNext} className="p-2 hover:bg-white/10" aria-label="Show next satellite context"><ChevronRight className="h-4 w-4" /></button>
+              </div>
+            )}
           </div>
-          <div className={`flex min-w-0 flex-col ${compact ? "p-3" : "p-4 sm:p-5"}`}>
+          {compact && slides.length > 1 && (
+            <div className="satellite-context-picker app-scroll-panel flex gap-2 overflow-x-auto border-b border-[color:var(--shell-border)] p-2" aria-label="Available map-linked satellite contexts">
+              {thumbnails.map((slide, index) => {
+                const slideEvent = presentEvent(slide.event);
+                return (
+                  <button
+                    key={slide.id}
+                    type="button"
+                    onClick={() => setSelected(index)}
+                    aria-label={`Show imagery for ${slideEvent.headline}`}
+                    className={`grid w-36 shrink-0 grid-cols-[3rem_minmax(0,1fr)] items-center gap-2 rounded-lg border p-1.5 text-left ${selected === index ? "border-[color:var(--shell-accent)] bg-[color:var(--signal-sky-soft)]" : "border-[color:var(--shell-border)] bg-[color:var(--shell-bg)]"}`}
+                  >
+                    <SatelliteImage sources={slide.sources} alt="" className="h-10 w-12 rounded object-cover" fallbackClassName="h-10 w-12 rounded bg-[color:var(--shell-sidebar)]" />
+                    <span className="min-w-0">
+                      <strong className="line-clamp-2 block text-[9px] leading-3 text-[color:var(--shell-ink)]">{slideEvent.headline}</strong>
+                      <small className="mt-0.5 block text-[8px] uppercase tracking-wide text-[color:var(--shell-muted)]">{slide.observationKind === "processed_observation" ? "Processed" : "Browse"}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className={`app-scroll-panel flex min-w-0 flex-col ${compact ? "max-h-[24rem] overflow-y-auto p-3" : "p-4 sm:p-5"}`}>
+            <div className="mb-2 rounded-lg border border-[color:var(--shell-accent-2)]/35 bg-[color:var(--signal-sky-soft)] p-2.5">
+              <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-accent-2)]"><Images className="h-3.5 w-3.5" />Why this scene is shown</div>
+              <p className="mt-1 text-[10px] leading-4 text-[color:var(--shell-ink)]">{selectionReason} {mapLinkExplanation}</p>
+            </div>
             <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-muted)]">
               <span className={current.observationKind === "processed_observation" ? "text-[color:var(--signal-emerald)]" : "text-[color:var(--signal-amber)]"}>
                 {current.modelInterpretation

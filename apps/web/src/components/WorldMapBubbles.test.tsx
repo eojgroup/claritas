@@ -123,19 +123,39 @@ describe("WorldMapBubbles interaction", () => {
     vi.unstubAllGlobals();
   });
 
-  it("zooms on an ordinary wheel hover without also scrolling the page", () => {
+  it("keeps ordinary wheel scrolling inert on hover until the map is activated", () => {
     const { mapLayer, svg } = renderMap();
-    fireEvent.pointerEnter(svg);
+    const eventMarker = screen.getByRole("button", { name: /Observed fire signal/i });
+    fireEvent.pointerEnter(eventMarker, { clientX: 420, clientY: 260 });
     const before = mapLayer.getAttribute("transform");
 
-    const event = dispatchWheel(svg, { deltaY: -100 });
+    const hoverWheel = dispatchWheel(svg, { deltaY: -100 });
 
-    expect(event.defaultPrevented).toBe(true);
+    expect(hoverWheel.defaultPrevented).toBe(false);
+    expect(mapLayer.getAttribute("transform")).toBe(before);
+
+    fireEvent.pointerDown(svg, {
+      button: 0,
+      clientX: 480,
+      clientY: 240,
+      pointerId: 7,
+      pointerType: "mouse",
+    });
+    const activatedWheel = dispatchWheel(svg, { deltaY: -100 });
+
+    expect(activatedWheel.defaultPrevented).toBe(true);
     expect(mapLayer.getAttribute("transform")).not.toBe(before);
   });
 
   it("returns same-direction wheel scrolling to the page at the minimum zoom", () => {
     const { mapLayer, svg } = renderMap();
+    fireEvent.pointerDown(svg, {
+      button: 0,
+      clientX: 480,
+      clientY: 240,
+      pointerId: 8,
+      pointerType: "mouse",
+    });
     const before = mapLayer.getAttribute("transform");
 
     const event = dispatchWheel(svg, { deltaY: 100 });
@@ -154,19 +174,19 @@ describe("WorldMapBubbles interaction", () => {
     expect(mapLayer.getAttribute("transform")).not.toBe(before);
   });
 
-  it("keeps wheel zoom available for keyboard-focused users", () => {
+  it("keeps modifier-assisted wheel zoom available for keyboard-focused users", () => {
     const { mapLayer, svg } = renderMap();
     act(() => svg.focus());
     expect(document.activeElement).toBe(svg);
     const before = mapLayer.getAttribute("transform");
 
-    const event = dispatchWheel(svg, { deltaY: -100 });
+    const event = dispatchWheel(svg, { ctrlKey: true, deltaY: -100 });
 
     expect(event.defaultPrevented).toBe(true);
     expect(mapLayer.getAttribute("transform")).not.toBe(before);
   });
 
-  it("does not require focus or interfere with country selection before wheel zoom", () => {
+  it("arms wheel zoom from a country pointer action without interfering with selection", () => {
     const { mapLayer, svg } = renderMap();
     const country = screen.getAllByRole("button", { name: /Germany: 8/i })[0];
     fireEvent.pointerDown(country, {

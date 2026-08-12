@@ -886,6 +886,7 @@ export default function ClaritasDashboard() {
       return null;
     }
   });
+  const [satelliteContextEventId, setSatelliteContextEventId] = useState<string | null>(null);
   const [comparisonCountry, setComparisonCountry] = useState<string | null>(
     null,
   );
@@ -1215,10 +1216,12 @@ export default function ClaritasDashboard() {
           label,
           severity: event.severity,
           hasImagery: event.earth_observation_available,
-          selected: event.id === selectedIntelligenceEventId,
+          selected:
+            event.id === selectedIntelligenceEventId ||
+            event.id === satelliteContextEventId,
         };
       });
-  }, [overviewEvents, selectedIntelligenceEventId]);
+  }, [overviewEvents, satelliteContextEventId, selectedIntelligenceEventId]);
 
   useEffect(() => {
     if (!isAdmin && activeView === "admin") {
@@ -5486,6 +5489,7 @@ export default function ClaritasDashboard() {
                               compact
                               onOpenEvent={handleOpenIntelligence}
                               onOpenImagery={(eventId) => handleOpenImagery(eventId)}
+                              onContextEventChange={setSatelliteContextEventId}
                             />
                             <div
                               className="country-profile-metrics"
@@ -5932,6 +5936,7 @@ export default function ClaritasDashboard() {
                             compact
                             onOpenEvent={handleOpenIntelligence}
                             onOpenImagery={(eventId) => handleOpenImagery(eventId)}
+                            onContextEventChange={setSatelliteContextEventId}
                           />
                         </div>
                       )}

@@ -29,6 +29,9 @@ const event = {
   urgency_score: 0.7,
   materiality_score: 0.8,
   location_name: "Panama Canal",
+  latitude: 9.08,
+  longitude: -79.68,
+  location_type: "corridor",
   evidence_count: 3,
   earth_observation_available: false,
 };
@@ -72,7 +75,8 @@ describe("SatelliteContextPanel", () => {
   it("shows linked-location browse imagery on Overview and opens the exact event", async () => {
     const onOpenEvent = vi.fn();
     const onOpenImagery = vi.fn();
-    render(<SatelliteContextPanel country="PA" onOpenEvent={onOpenEvent} onOpenImagery={onOpenImagery} />);
+    const onContextEventChange = vi.fn();
+    render(<SatelliteContextPanel country="PA" onOpenEvent={onOpenEvent} onOpenImagery={onOpenImagery} onContextEventChange={onContextEventChange} />);
     const image = await screen.findByAltText(/NASA GIBS · linked location/i);
     expect(image.getAttribute("src")).toContain("/api/proxy-image?url=");
     expect(screen.getByText("Context only · not proof")).toBeTruthy();
@@ -80,6 +84,9 @@ describe("SatelliteContextPanel", () => {
     expect(screen.getByText("Linked-location context, not event evidence.")).toBeTruthy();
     expect(screen.getByText(/share the same UTC day.*order within that day cannot be established/i)).toBeTruthy();
     expect(screen.queryByText(/Acquired 8 hours after/i)).toBeNull();
+    expect(screen.getByText(/Why this scene is shown/i)).toBeTruthy();
+    expect(screen.getByText(/outlined event marker on the map refers to this image/i)).toBeTruthy();
+    expect(onContextEventChange).toHaveBeenCalledWith(event.id);
     fireEvent.click(screen.getByRole("button", { name: /Open evidence thread/i }));
     expect(onOpenEvent).toHaveBeenCalledWith(event.id);
     fireEvent.click(screen.getByRole("button", { name: /Inspect imagery/i }));
