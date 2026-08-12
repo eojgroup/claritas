@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
 
       - name: Validate generated project contracts
         working-directory: apps/mobile/ios
@@ -98,7 +98,7 @@ jobs:
 
       - name: Select Xcode
         if: steps.signing.outputs.configured == 'true'
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
 
       - name: Prepare isolated signing keychain
         if: steps.signing.outputs.configured == 'true'
