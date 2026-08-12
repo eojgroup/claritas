@@ -64,6 +64,7 @@ jobs:
     runs-on: macos-15
     env:
       APP_BUNDLE_ID: com.eojgroup.claritas
+      TESTFLIGHT_GROUP_NAME: Claritas Test Group
       DEVELOPMENT_TEAM: VTBJTFDTQY
       APP_WORKFLOW_RUN_NUMBER: ${{ github.run_number }}
       APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
@@ -192,7 +193,7 @@ jobs:
           fi
           xcrun altool --upload-app --type ios --file "$ipa_path" --apiKey "$APP_STORE_CONNECT_KEY_ID" --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
 
-      - name: Assign the only TestFlight group
+      - name: Assign the configured TestFlight group
         if: steps.signing.outputs.configured == 'true'
         run: ruby apps/mobile/ios/distribute_testflight.rb
 

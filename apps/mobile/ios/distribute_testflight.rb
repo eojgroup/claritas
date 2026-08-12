@@ -51,6 +51,7 @@ issuer_id = required_environment("APP_STORE_CONNECT_ISSUER_ID")
 private_key_path = required_environment("APP_STORE_CONNECT_PRIVATE_KEY_PATH")
 bundle_id = required_environment("APP_BUNDLE_ID")
 build_number = required_environment("APP_BUILD_NUMBER")
+group_name = required_environment("TESTFLIGHT_GROUP_NAME")
 token = jwt(key_id: key_id, issuer_id: issuer_id, private_key_path: private_key_path)
 
 apps = request_json(:get, "/v1/apps?filter%5BbundleId%5D=#{URI.encode_www_form_component(bundle_id)}&limit=2", token).fetch("data", [])
@@ -58,11 +59,12 @@ abort "Expected one App Store Connect app for #{bundle_id}, found #{apps.length}
 app_id = apps.first.fetch("id")
 
 groups = request_json(:get, "/v1/apps/#{app_id}/betaGroups?limit=200", token).fetch("data", [])
-unless groups.length == 1
-  names = groups.map { |group| group.dig("attributes", "name") }.compact
-  abort "Expected exactly one TestFlight group for #{bundle_id}, found #{groups.length}: #{names.join(", ")}"
+matching_groups = groups.select { |candidate| candidate.dig("attributes", "name") == group_name }
+unless matching_groups.length == 1
+  names = groups.map { |candidate| candidate.dig("attributes", "name") }.compact
+  abort "Expected exactly one TestFlight group named #{group_name.inspect} for #{bundle_id}, found #{matching_groups.length}. Available groups: #{names.join(", ")}"
 end
-group = groups.first
+group = matching_groups.first
 
 build = nil
 40.times do |attempt|
@@ -81,7 +83,7 @@ end
 abort "Build #{build_number} did not finish TestFlight processing within 20 minutes" unless build
 
 if group.dig("attributes", "hasAccessToAllBuilds") == true
-  puts "Build #{build_number} is available to the only TestFlight group, #{group.dig("attributes", "name") || group.fetch("id")}, through automatic access."
+  puts "Build #{build_number} is available to #{group_name} through automatic access."
   exit 0
 end
 
@@ -92,4 +94,4 @@ request_json(
   token,
   body: { data: [{ type: "betaGroups", id: group.fetch("id") }] },
 )
-puts "Distributed build #{build_number} to the only TestFlight group: #{group.dig("attributes", "name") || group.fetch("id")}."
+puts "Distributed build #{build_number} to the configured TestFlight group: #{group_name}."

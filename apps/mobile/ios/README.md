@@ -130,7 +130,7 @@ For CI builds that regenerate the project, `MARKETING_VERSION`, `BUILD_NUMBER`, 
 
 ## Automated TestFlight delivery
 
-Every main-branch Apple change first compiles the iPhone, iPad and Watch products. When signing is configured, the same workflow then archives the universal app, exports and uploads its IPA, waits for App Store Connect processing, and assigns the build to the app's only TestFlight group. The workflow deliberately stops if more than one group exists so a future group cannot receive a build accidentally.
+Every main-branch Apple change first compiles the iPhone, iPad and Watch products. When signing is configured, the same workflow then archives the universal app, exports and uploads its IPA, waits for App Store Connect processing, and assigns the build to the explicitly configured `Claritas Test Group`. The workflow uses an exact group-name match and stops if that group is missing or ambiguous, so `Claritas Test Group External` cannot receive a build accidentally.
 
 Configure these repository secrets once. Paste the App Store Connect `.p8` key as its complete PEM text, including its `BEGIN` and `END` lines. Base64 encode the binary distribution `.p12` without line wrapping:
 
