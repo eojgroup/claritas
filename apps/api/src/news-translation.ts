@@ -3,7 +3,6 @@ import { query } from "./db";
 import {
   createFreeOpenRouterLlmClientFromEnv,
   isFreeOpenRouterModel,
-  LlmProviderError,
   type LlmClient,
   type LlmStructuredRequest,
 } from "./llm";
@@ -724,9 +723,17 @@ export async function processNewsTranslationCandidates(options: {
         );
       } catch (error) {
         result.errors.push(error instanceof Error ? error.message : String(error));
-        if (error instanceof LlmProviderError && error.status === 402) {
+        const providerStatus =
+          typeof error === "object" && error !== null && "status" in error
+            ? Number((error as { status?: unknown }).status)
+            : null;
+        if (providerStatus === 402) {
           // Cost ambiguity or a billing-policy rejection is not transient.
           // Stop the whole batch so a suspicious route is never tried again.
+          // This is deliberately structural rather than `instanceof`: test
+          // loaders and bundled runtimes can materialize the provider-error
+          // class through distinct module identities, while the HTTP policy
+          // status remains the stable contract.
           for (const candidate of pending) failedIds.add(candidate.id);
           for (const deferredChunk of chunks.slice(chunkIndex + 1)) {
             for (const candidate of deferredChunk) failedIds.add(candidate.id);
