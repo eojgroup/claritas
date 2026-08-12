@@ -65,7 +65,7 @@ jobs:
     env:
       APP_BUNDLE_ID: com.eojgroup.claritas
       DEVELOPMENT_TEAM: VTBJTFDTQY
-      APP_BUILD_NUMBER: ${{ github.run_number }}
+      APP_WORKFLOW_RUN_NUMBER: ${{ github.run_number }}
       APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
       APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       APP_STORE_CONNECT_PRIVATE_KEY_P8: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY_P8 }}
@@ -88,6 +88,13 @@ jobs:
             echo "Refusing to report a successful main-branch Apple release without complete TestFlight credentials." >&2
             exit 1
           fi
+          # Encode the monotonically increasing workflow number into Apple's
+          # documented four/two/two digit CFBundleVersion components. Starting
+          # at major 1000 also supersedes legacy/manual integer builds such as 15.
+          build_major=$((1000 + APP_WORKFLOW_RUN_NUMBER / 10000))
+          build_minor=$(((APP_WORKFLOW_RUN_NUMBER / 100) % 100))
+          build_patch=$((APP_WORKFLOW_RUN_NUMBER % 100))
+          echo "APP_BUILD_NUMBER=${build_major}.${build_minor}.${build_patch}" >> "$GITHUB_ENV"
 
       - name: Select Xcode
         if: steps.signing.outputs.configured == 'true'
