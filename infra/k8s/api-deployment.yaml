@@ -159,6 +159,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_POLL_SECONDS, optional: true } }
             - name: DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES, optional: true } }
+            - name: TRANSPORT_RUNTIME_FRESHNESS_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RUNTIME_FRESHNESS_SECONDS, optional: true } }
             - name: TRANSPORT_WORKER_LOCK_RETRY_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_WORKER_LOCK_RETRY_SECONDS, optional: true } }
             - name: ADSB_LOL_POLL_ENABLED
@@ -213,6 +215,24 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_TARGET_LANGUAGES, optional: true } }
             - name: NEWS_TRANSLATION_BATCH_SIZE
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_BATCH_SIZE, optional: true } }
+            - name: NEWS_TRANSLATION_MODEL
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MODEL, optional: true } }
+            - name: NEWS_TRANSLATION_CHUNK_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_CHUNK_SIZE, optional: true } }
+            - name: NEWS_TRANSLATION_MAX_CHUNK_SOURCE_CHARACTERS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MAX_CHUNK_SOURCE_CHARACTERS, optional: true } }
+            - name: NEWS_TRANSLATION_MAX_RETRIES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MAX_RETRIES, optional: true } }
+            - name: NEWS_TRANSLATION_MAX_OUTPUT_TOKENS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MAX_OUTPUT_TOKENS, optional: true } }
+            - name: NEWS_TRANSLATION_MAX_DAILY_REQUESTS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MAX_DAILY_REQUESTS, optional: true } }
+            - name: NEWS_TRANSLATION_MAX_AUTOMATIC_DAILY_REQUESTS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MAX_AUTOMATIC_DAILY_REQUESTS, optional: true } }
+            - name: NEWS_TRANSLATION_MAX_DAILY_CHARACTERS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MAX_DAILY_CHARACTERS, optional: true } }
+            - name: NEWS_TRANSLATION_MAX_DAILY_TOKEN_UNITS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MAX_DAILY_TOKEN_UNITS, optional: true } }
             - name: NEWS_TRANSLATION_SUMMARY_MAX_WORDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_SUMMARY_MAX_WORDS, optional: true } }
             - name: OPENCODE_SERVER_USERNAME
@@ -317,12 +337,18 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_TRACK_RETENTION_DAYS, optional: true } }
             - name: TRANSPORT_AGGREGATE_RETENTION_DAYS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_AGGREGATE_RETENTION_DAYS, optional: true } }
+            - name: TRANSPORT_DAILY_HISTORY_RETENTION_DAYS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_DAILY_HISTORY_RETENTION_DAYS, optional: true } }
+            - name: TRANSPORT_CORRIDOR_PAIRS_PER_DAY_MODE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_CORRIDOR_PAIRS_PER_DAY_MODE, optional: true } }
             - name: TRANSPORT_SNAPSHOT_RETENTION_DAYS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_SNAPSHOT_RETENTION_DAYS, optional: true } }
             - name: TRANSPORT_RETENTION_INTERVAL_MINUTES
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RETENTION_INTERVAL_MINUTES, optional: true } }
             - name: TRANSPORT_RETENTION_BATCH_SIZE
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RETENTION_BATCH_SIZE, optional: true } }
+            - name: TRANSPORT_RETENTION_BUDGET_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RETENTION_BUDGET_SECONDS, optional: true } }
             - name: TRANSPORT_RETENTION_MAX_BATCHES
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RETENTION_MAX_BATCHES, optional: true } }
             - name: AUTH_BASE_URL

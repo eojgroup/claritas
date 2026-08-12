@@ -203,6 +203,7 @@ function toEmailEvent(
     severity: event.severity,
     confidence: event.confidence,
     relevance_score: event.relevance_score,
+    start_time: event.start_time,
     where: event.where,
     why_interesting: event.why_interesting,
     profile_reasons: profileReasons,
@@ -210,6 +211,7 @@ function toEmailEvent(
       title: item.title,
       publisher: item.publisher,
       url: item.url,
+      published_at: item.published_at,
     })),
     earth_observation: event.earth_observation.map((item) => ({
       product_type: item.product_type,
@@ -218,6 +220,8 @@ function toEmailEvent(
       imagery_available: item.imagery_available,
       evidentiary_role: item.evidentiary_role,
       analysis_summary: item.analysis_summary,
+      temporal_alignment: item.temporal_alignment ?? null,
+      assessment_boundary: item.assessment_boundary ?? null,
     })),
   };
 }
@@ -251,7 +255,7 @@ export function buildImportantEventEmailContent(
       minimum_severity: minimumSeverity,
     },
     profile_topics: profileTopics,
-    occurred_at: delivery.candidate_created_at instanceof Date
+    alert_created_at: delivery.candidate_created_at instanceof Date
       ? delivery.candidate_created_at.toISOString()
       : new Date(delivery.candidate_created_at).toISOString(),
     theme: preferences.email_theme === "light" ? "light" : "dark",

@@ -7,7 +7,6 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { geoNaturalEarth1, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
@@ -110,7 +109,23 @@ type ViewTransform = {
   y: number;
 };
 
+type ActivePointer = {
+  clientX: number;
+  clientY: number;
+};
+
+type PinchGesture = {
+  startDistance: number;
+  startMidpointX: number;
+  startMidpointY: number;
+  startScale: number;
+  worldX: number;
+  worldY: number;
+  moved: boolean;
+};
+
 const INITIAL_SIZE = { width: 960, height: 480 };
+const GESTURE_CLICK_SUPPRESSION_MS = 900;
 
 const WORLD_GEOMETRY = (() => {
   const references = worldCountries as WorldCountryReference[];
@@ -228,6 +243,42 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function distanceBetween(
+  first: ActivePointer,
+  second: ActivePointer,
+) {
+  return Math.hypot(
+    second.clientX - first.clientX,
+    second.clientY - first.clientY,
+  );
+}
+
+function midpointBetween(
+  first: ActivePointer,
+  second: ActivePointer,
+) {
+  return {
+    clientX: (first.clientX + second.clientX) / 2,
+    clientY: (first.clientY + second.clientY) / 2,
+  };
+}
+
+function mapWheelZoomFactor(
+  event: Pick<WheelEvent, "ctrlKey" | "metaKey" | "deltaMode" | "deltaY">,
+  pageHeight: number,
+) {
+  const pixelDelta = event.deltaY * (
+    event.deltaMode === WheelEvent.DOM_DELTA_LINE
+      ? 16
+      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+        ? Math.max(1, pageHeight)
+        : 1
+  );
+  const boundedDelta = clamp(pixelDelta, -240, 240);
+  const sensitivity = event.ctrlKey || event.metaKey ? 0.01 : 0.0018;
+  return Math.exp(-boundedDelta * sensitivity);
+}
+
 function interpolateRgb(from: [number, number, number], to: [number, number, number], ratio: number) {
   const bounded = clamp(ratio, 0, 1);
   const channels = from.map((value, index) => Math.round(value + (to[index] - value) * bounded));
@@ -298,6 +349,10 @@ export default memo(function WorldMapBubbles({
 }: WorldMapBubblesProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const viewRef = useRef<ViewTransform>({ scale: 1, x: 0, y: 0 });
+  const activePointersRef = useRef(new globalThis.Map<number, ActivePointer>());
+  const pinchRef = useRef<PinchGesture | null>(null);
+  const gestureMovedRef = useRef(false);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
@@ -306,7 +361,7 @@ export default memo(function WorldMapBubbles({
     originY: number;
     moved: boolean;
   } | null>(null);
-  const suppressClickRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
   const [size, setSize] = useState(INITIAL_SIZE);
   const [view, setView] = useState<ViewTransform>({
     scale: 1,
@@ -328,6 +383,10 @@ export default memo(function WorldMapBubbles({
     rank: number;
     meta?: BubbleDatum["meta"];
   } | null>(null);
+
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
 
   const isDark = Boolean(dark);
   const isCompact = variant === "compact";
@@ -483,33 +542,115 @@ export default memo(function WorldMapBubbles({
     });
   }, [eventPoints, isCompact, markers, projection, size.height, size.width]);
 
-  const zoomAt = useCallback(
-    (nextScale: number, anchorX: number, anchorY: number) => {
+  const zoomByAt = useCallback(
+    (factor: number, anchorX: number, anchorY: number) => {
       setView((current) => {
-        const scaleValue = clamp(nextScale, 1, 5);
+        const scaleValue = clamp(current.scale * factor, 1, 5);
         const ratio = scaleValue / current.scale;
-        return {
+        const next = {
           scale: scaleValue,
           x: anchorX - (anchorX - current.x) * ratio,
           y: anchorY - (anchorY - current.y) * ratio,
         };
+        viewRef.current = next;
+        return next;
       });
     },
     [],
   );
 
-  const handleWheel = (event: ReactWheelEvent<SVGSVGElement>) => {
-    event.preventDefault();
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return;
+      const rect = svg.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return;
+      const anchorX = (event.clientX - rect.left) * (size.width / rect.width);
+      const anchorY = (event.clientY - rect.top) * (size.height / rect.height);
+      const factor = mapWheelZoomFactor(event, rect.height);
+      const nextScale = clamp(viewRef.current.scale * factor, 1, 5);
+      // Release the wheel back to document scrolling once the user reaches a
+      // zoom boundary. Otherwise one gesture must perform exactly one action:
+      // transform the map without also moving/reflowing the surrounding page.
+      if (Math.abs(nextScale - viewRef.current.scale) < 0.0001) return;
+      event.preventDefault();
+      zoomByAt(factor, anchorX, anchorY);
+      setHoveredPoint(null);
+      setTip(null);
+    };
+
+    // React delegates wheel events through a passive root listener in current
+    // browsers. A native non-passive listener is required to avoid the old
+    // double action where one wheel tick both moved the page and zoomed the map.
+    svg.addEventListener("wheel", handleWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", handleWheel);
+  }, [size.height, size.width, zoomByAt]);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const preserveTwoFingerGesture = (event: TouchEvent) => {
+      if (event.touches.length >= 2 && event.cancelable) {
+        event.preventDefault();
+      }
+    };
+    // CSS leaves one-finger vertical pan to the document. Reserving only
+    // multi-touch movement prevents the browser from claiming an intentional
+    // two-finger map pinch/pan before the pointer handlers can process it.
+    svg.addEventListener("touchmove", preserveTwoFingerGesture, {
+      passive: false,
+    });
+    return () => svg.removeEventListener("touchmove", preserveTwoFingerGesture);
+  }, []);
+
+  const clientToMap = (clientX: number, clientY: number) => {
     const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const anchorX = event.clientX - rect.left;
-    const anchorY = event.clientY - rect.top;
-    const factor = event.deltaY < 0 ? 1.18 : 0.84;
-    zoomAt(view.scale * factor, anchorX, anchorY);
+    if (!rect || rect.width < 1 || rect.height < 1) return null;
+    return {
+      x: (clientX - rect.left) * (size.width / rect.width),
+      y: (clientY - rect.top) * (size.height / rect.height),
+    };
   };
 
   const handlePointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
     if (event.button !== 0) return;
+    activePointersRef.current.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+    });
+    if (activePointersRef.current.size >= 2) {
+      activePointersRef.current.forEach((_, pointerId) => {
+        try {
+          event.currentTarget.setPointerCapture(pointerId);
+        } catch {
+          // A browser can reject capture if a pointer ended between events.
+        }
+      });
+      const [first, second] = [...activePointersRef.current.values()];
+      const midpoint = midpointBetween(first, second);
+      const anchor = clientToMap(midpoint.clientX, midpoint.clientY);
+      if (anchor) {
+        const current = viewRef.current;
+        pinchRef.current = {
+          startDistance: Math.max(1, distanceBetween(first, second)),
+          startMidpointX: midpoint.clientX,
+          startMidpointY: midpoint.clientY,
+          startScale: current.scale,
+          worldX: (anchor.x - current.x) / current.scale,
+          worldY: (anchor.y - current.y) / current.scale,
+          moved: false,
+        };
+      }
+      dragRef.current = null;
+      return;
+    }
+    if (event.pointerType === "touch") {
+      // A single finger belongs to normal vertical page scrolling. Touch map
+      // manipulation starts only after a second active pointer is present.
+      dragRef.current = null;
+      return;
+    }
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -521,46 +662,115 @@ export default memo(function WorldMapBubbles({
   };
 
   const handlePointerMove = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (activePointersRef.current.has(event.pointerId)) {
+      activePointersRef.current.set(event.pointerId, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+    }
+    if (pinchRef.current && activePointersRef.current.size >= 2) {
+      const [first, second] = [...activePointersRef.current.values()];
+      const pinch = pinchRef.current;
+      const distance = Math.max(1, distanceBetween(first, second));
+      const midpoint = midpointBetween(first, second);
+      const anchor = clientToMap(midpoint.clientX, midpoint.clientY);
+      if (!anchor) return;
+      const scaleValue = clamp(
+        pinch.startScale * (distance / pinch.startDistance),
+        1,
+        5,
+      );
+      const next = {
+        scale: scaleValue,
+        x: anchor.x - pinch.worldX * scaleValue,
+        y: anchor.y - pinch.worldY * scaleValue,
+      };
+      if (Math.abs(distance - pinch.startDistance) > 3) {
+        pinch.moved = true;
+        gestureMovedRef.current = true;
+      }
+      if (
+        Math.abs(midpoint.clientX - pinch.startMidpointX) +
+          Math.abs(midpoint.clientY - pinch.startMidpointY) >
+        3
+      ) {
+        pinch.moved = true;
+        gestureMovedRef.current = true;
+      }
+      viewRef.current = next;
+      setView(next);
+      setIsDragging(true);
+      event.preventDefault();
+      return;
+    }
+    if (event.pointerType === "touch") return;
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const dx = event.clientX - drag.startX;
     const dy = event.clientY - drag.startY;
     if (!drag.moved && Math.abs(dx) + Math.abs(dy) > 4) {
       drag.moved = true;
-      event.currentTarget.setPointerCapture(event.pointerId);
+      gestureMovedRef.current = true;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture can race with a pointer leaving the document.
+      }
       setIsDragging(true);
     }
     if (!drag.moved) return;
-    setView((current) => ({
-      ...current,
-      x: drag.originX + dx,
-      y: drag.originY + dy,
-    }));
+    setView((current) => {
+      const next = {
+        ...current,
+        x: drag.originX + dx,
+        y: drag.originY + dy,
+      };
+      viewRef.current = next;
+      return next;
+    });
   };
 
   const handlePointerUp = (event: ReactPointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
+    if (drag?.pointerId === event.pointerId && drag.moved) {
+      gestureMovedRef.current = true;
+    }
+    activePointersRef.current.delete(event.pointerId);
+    if (activePointersRef.current.size < 2) {
+      pinchRef.current = null;
+    }
     if (drag?.pointerId === event.pointerId) {
-      suppressClickRef.current = drag.moved;
-      if (drag.moved) {
-        window.setTimeout(() => {
-          suppressClickRef.current = false;
-        }, 0);
-      }
       dragRef.current = null;
     }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+    if (activePointersRef.current.size === 0) {
+      if (gestureMovedRef.current) {
+        // Mobile browsers may synthesize click well after pointerup. A
+        // timestamp remains reliable across that delay, unlike a zero-timeout
+        // boolean, and is checked by both country and event targets.
+        suppressClickUntilRef.current = Date.now() + GESTURE_CLICK_SUPPRESSION_MS;
+      }
+      gestureMovedRef.current = false;
+      setIsDragging(false);
+    }
+    if (
+      typeof event.currentTarget.hasPointerCapture === "function" &&
+      event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    setIsDragging(false);
   };
 
+  const gestureClickIsSuppressed = () =>
+    Date.now() < suppressClickUntilRef.current;
+
   const handleCountrySelect = (iso: string) => {
-    if (suppressClickRef.current) {
-      suppressClickRef.current = false;
-      return;
-    }
+    if (gestureClickIsSuppressed()) return;
     onSelect?.(iso);
+  };
+
+  const handlePointSelect = (point: WorldMapPoint) => {
+    if (gestureClickIsSuppressed()) return;
+    onSelectPoint?.(point);
   };
 
   const updateTip = (
@@ -604,13 +814,20 @@ export default memo(function WorldMapBubbles({
         }`}
         viewBox={`0 0 ${size.width} ${size.height}`}
         role="application"
-        aria-label="Interactive world signal map. Use the controls or mouse wheel to zoom and drag to pan."
-        onWheel={handleWheel}
+        tabIndex={0}
+        style={{ touchAction: "pan-y" }}
+        aria-label="Interactive world signal map. Use the mouse wheel, trackpad, or pinch gesture to zoom and drag to pan."
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.currentTarget.blur();
+          }
+        }}
       >
+        <title>Scroll or pinch over the map to zoom. Drag to pan.</title>
         <rect
           width={size.width}
           height={size.height}
@@ -888,7 +1105,7 @@ export default memo(function WorldMapBubbles({
                   });
                 }}
                 onPointerLeave={() => setHoveredPoint(null)}
-                onClick={() => onSelectPoint?.(eventPoint)}
+                onClick={() => handlePointSelect(eventPoint)}
                 onKeyDown={(event: ReactKeyboardEvent<SVGGElement>) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -949,7 +1166,7 @@ export default memo(function WorldMapBubbles({
         <button
           type="button"
           onClick={() =>
-            zoomAt(view.scale * 1.35, size.width / 2, size.height / 2)
+            zoomByAt(1.35, size.width / 2, size.height / 2)
           }
           aria-label="Zoom in"
         >
@@ -958,7 +1175,7 @@ export default memo(function WorldMapBubbles({
         <button
           type="button"
           onClick={() =>
-            zoomAt(view.scale / 1.35, size.width / 2, size.height / 2)
+            zoomByAt(1 / 1.35, size.width / 2, size.height / 2)
           }
           aria-label="Zoom out"
         >
@@ -990,11 +1207,10 @@ export default memo(function WorldMapBubbles({
       )}
 
       {hoveredPoint && (
-        <button
-          type="button"
-          onClick={() => onSelectPoint?.(hoveredPoint.point)}
-          className="app-card absolute z-10 w-64 rounded-lg p-3 text-left shadow-xl"
+        <div
+          className="app-card pointer-events-none absolute z-10 w-64 rounded-lg p-3 text-left shadow-xl"
           style={{ left: hoveredPoint.x, top: hoveredPoint.y }}
+          aria-hidden="true"
         >
           <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">
             {hoveredPoint.point.severity ?? "low"} event
@@ -1008,7 +1224,7 @@ export default memo(function WorldMapBubbles({
               {hoveredPoint.point.subtitle}
             </small>
           )}
-        </button>
+        </div>
       )}
 
       {featuredMarker && !hoveredCountry && !tip && (

@@ -34,7 +34,7 @@ step automatically.
 - Dashboard demand signals are aggregated in memory and flushed at most once per pipeline per minute instead of writing on every read request.
 - GDELT raw rows per run are capped at 500.
 - AIS and ADS-B sampling is ten minutes, route enrichment is capped at 750 aircraft per refresh, and overview reads cache for two minutes.
-- Raw transport tracks retain 3 days, movement aggregates 60 days and current snapshots 14 days.
+- Raw transport tracks retain 3 days, movement events and per-entity country presence 60 days, compact port-hour plus bounded daily country/corridor aggregates 100 days, and current snapshots 14 days.
 - Successful ingestion audits retain 30 days; failed audits retain 90 days.
 - Query Insights retains one plan per minute and omits client addresses and application tags.
 

@@ -4,6 +4,7 @@ export type LlmStructuredRequest = {
   schema: Record<string, unknown>;
   title?: string;
   retryCount?: number;
+  maxOutputTokens?: number;
 };
 
 export type LlmStructuredResponse<T> = {
@@ -89,6 +90,13 @@ const DEFAULT_OPENCODE_SESSION_TIMEOUT_MS = 8_000;
 const DEFAULT_OPENCODE_MESSAGE_TIMEOUT_MS = 12_000;
 const DEFAULT_OPENROUTER_TIMEOUT_MS = 45_000;
 
+type FreeOpenRouterClientConfig = {
+  apiKey: string;
+  model: string;
+  timeoutMs: number;
+  applicationTitle: string;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -119,6 +127,42 @@ function getIntegerEnv(name: string, fallback: number, min: number, max: number)
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(Math.max(Math.trunc(parsed), min), max);
+}
+
+/**
+ * OpenRouter guarantees zero-cost routing only for its free router or an
+ * explicitly suffixed free model variant. Keep this intentionally narrow: an
+ * ordinary model slug must never become eligible because its current price
+ * happens to be zero or because a shared LLM configuration uses it.
+ */
+export function isFreeOpenRouterModel(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const model = value.trim().toLowerCase();
+  if (model === "openrouter/free") return true;
+  return /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._\-/:]*:free$/.test(model);
+}
+
+/**
+ * A free-labelled route is necessary but not sufficient: OpenRouter's response
+ * must also account for the request with an explicit zero cost. Missing,
+ * malformed, negative, or non-zero cost is treated as a policy failure so an
+ * optional enrichment can never silently cross into paid inference.
+ */
+export function assertFreeOpenRouterResponseCost(usage: unknown): 0 {
+  const cost = asRecord(usage)?.cost;
+  if (typeof cost !== "number" || !Number.isFinite(cost)) {
+    throw new LlmProviderError(
+      "Free OpenRouter response did not include an unambiguous numeric usage.cost; output was rejected.",
+      402,
+    );
+  }
+  if (cost !== 0) {
+    throw new LlmProviderError(
+      `Free OpenRouter response reported non-zero usage.cost (${cost}); output was rejected.`,
+      402,
+    );
+  }
+  return 0;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -685,6 +729,152 @@ export class OpenCodeLlmClient implements LlmClient {
     }
     return parsed;
   }
+}
+
+/**
+ * A deliberately small OpenRouter client used by optional features whose cost
+ * policy is stricter than the application's general briefing LLM. It can only
+ * be constructed with OpenRouter's free router or an explicit `:free` model.
+ */
+export class FreeOpenRouterLlmClient implements LlmClient {
+  private readonly config: FreeOpenRouterClientConfig;
+
+  constructor(config: FreeOpenRouterClientConfig) {
+    if (!isFreeOpenRouterModel(config.model)) {
+      throw new LlmConfigurationError(
+        "Free OpenRouter client requires model openrouter/free or an explicit :free variant.",
+      );
+    }
+    this.config = {
+      ...config,
+      model: config.model.trim().toLowerCase(),
+    };
+  }
+
+  async generateStructured<T>(request: LlmStructuredRequest): Promise<LlmStructuredResponse<T>> {
+    const maxAttempts = Math.min(Math.max((request.retryCount ?? 1) + 1, 1), 3);
+    const maxOutputTokens = Math.min(Math.max(request.maxOutputTokens ?? 2_048, 128), 8_192);
+    let lastParseError: LlmProviderError | null = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${this.config.apiKey}`,
+              "content-type": "application/json",
+              "http-referer": "https://app.claritas.info",
+              "x-title": this.config.applicationTitle,
+            },
+            body: JSON.stringify({
+              model: this.config.model,
+              messages: [
+                { role: "system", content: request.system },
+                { role: "user", content: buildJsonTextPrompt(request, attempt > 1) },
+              ],
+              max_tokens: maxOutputTokens,
+              temperature: 0.1,
+              // Enforce the policy before routing as well as validating the
+              // returned usage ledger. OpenRouter rejects the request when no
+              // provider can satisfy these zero-price ceilings.
+              provider: {
+                max_price: {
+                  prompt: 0,
+                  completion: 0,
+                  request: 0,
+                  image: 0,
+                },
+              },
+            }),
+          },
+          this.config.timeoutMs,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new LlmProviderError(`Free OpenRouter request was unreachable: ${message}`, 502);
+      }
+
+      const body = await readResponseBody(response);
+      if (!response.ok) {
+        const message = findMessage(tryParseJson(body)) || body || response.statusText;
+        throw new LlmProviderError(
+          `Free OpenRouter request failed with HTTP ${response.status}: ${message}`,
+          response.status,
+          body || null,
+        );
+      }
+
+      try {
+        const parsed = tryParseJson(body);
+        if (typeof parsed === "undefined") {
+          throw new LlmProviderError("Free OpenRouter returned a non-JSON response.", 502, body || null);
+        }
+        const record = asRecord(parsed);
+        const usage = asRecord(record?.usage);
+        assertFreeOpenRouterResponseCost(usage);
+        const content = collectOpenRouterMessageContent(parsed);
+        const actualModel = typeof record?.model === "string" && record.model.trim()
+          ? record.model.trim()
+          : this.config.model;
+        return {
+          output: parseJsonObjectFromText(content) as T,
+          provider: "openrouter",
+          model: actualModel,
+          metadata: {
+            requested_model: this.config.model,
+            free_only: true,
+            structured_output_mode: "json_text",
+            attempts: attempt,
+            max_output_tokens: maxOutputTokens,
+            usage,
+          },
+        };
+      } catch (error) {
+        if (
+          !(error instanceof LlmProviderError)
+          || error.status === 402
+          || attempt === maxAttempts
+        ) throw error;
+        lastParseError = error;
+      }
+    }
+
+    throw lastParseError || new LlmProviderError("Free OpenRouter did not return parseable JSON output.");
+  }
+}
+
+export function createFreeOpenRouterLlmClientFromEnv(options: {
+  modelEnv?: string;
+  defaultModel?: string;
+  applicationTitle?: string;
+} = {}): LlmClient {
+  const modelEnv = options.modelEnv || "OPENROUTER_FREE_MODEL";
+  const model = getOptionalEnv(modelEnv) || options.defaultModel || "openrouter/free";
+  if (!isFreeOpenRouterModel(model)) {
+    throw new LlmConfigurationError(
+      `${modelEnv} must be openrouter/free or an explicit OpenRouter :free model variant.`,
+    );
+  }
+  const apiKey = getOptionalEnv("OPENROUTER_API_KEY");
+  if (!apiKey) {
+    throw new LlmConfigurationError(
+      `${modelEnv} is configured for free inference, but OPENROUTER_API_KEY is unavailable.`,
+    );
+  }
+  return new FreeOpenRouterLlmClient({
+    apiKey,
+    model,
+    timeoutMs: getIntegerEnv(
+      "OPENROUTER_TIMEOUT_MS",
+      DEFAULT_OPENROUTER_TIMEOUT_MS,
+      5_000,
+      180_000,
+    ),
+    applicationTitle: options.applicationTitle || "Claritas",
+  });
 }
 
 export function createLlmClientFromEnv(): LlmClient {

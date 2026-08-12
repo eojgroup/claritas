@@ -5,6 +5,7 @@ import {
   GLOBAL_AIS_BOUNDING_BOX,
   buildAisSubscription,
   normalizeAisBoundingBoxes,
+  shouldQueueAisSnapshot,
 } from "./ais-subscription";
 
 test("AIS default subscription matches the provider's documented global handshake", () => {
@@ -24,4 +25,10 @@ test("AIS bounding boxes are normalized and invalid boxes are rejected", () => {
     ]),
     [[[40, -10], [50, 20]]],
   );
+});
+
+test("static AIS metadata cannot replace a usable live position with null coordinates", () => {
+  assert.equal(shouldQueueAisSnapshot(null, null), false);
+  assert.equal(shouldQueueAisSnapshot(91, 12), false);
+  assert.equal(shouldQueueAisSnapshot(59.3293, 18.0686), true);
 });

@@ -299,13 +299,14 @@ export async function listEarthObservations(options: {
                     'summary',recent.summary,
                     'url',recent.url,
                     'source_name',recent.source_name,
+                    'published_at',recent.published_at,
                     'observed_at',recent.observed_at,
                     'relationship',recent.relationship,
                     'confidence',recent.confidence,
                     'correlation_score',recent.correlation_score
                   ) ORDER BY recent.observed_at DESC),'[]'::jsonb)
           FROM (
-            SELECT evidence.id,evidence.observed_at,evidence.relationship,
+            SELECT evidence.id,evidence.observed_at,evidence.published_at,evidence.relationship,
                    evidence.confidence,evidence.correlation_score,
                    COALESCE(source_item.title,evidence.metadata->>'title',evidence.provenance->>'title') AS title,
                    COALESCE(source_item.summary,evidence.metadata->>'summary') AS summary,

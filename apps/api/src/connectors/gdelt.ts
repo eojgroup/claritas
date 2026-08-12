@@ -406,6 +406,9 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   const apiUrl = new URL(process.env.GDELT_DOC_API_URL || DOC_API_URL);
   apiUrl.searchParams.set("query", params.query?.trim() || process.env.GDELT_DOC_QUERY || DEFAULT_QUERY);
   apiUrl.searchParams.set("mode", "artlist");
+  // Keep the scheduled headline volume within the single bounded translation
+  // request so a fresh hourly run does not create a permanent presentation
+  // backlog. Explicit admin requests may still choose another supported size.
   apiUrl.searchParams.set("maxrecords", String(clampInt(params.maxRecords, 1, 250, 100)));
   apiUrl.searchParams.set("format", "json");
   apiUrl.searchParams.set("timespan", params.timespan?.trim() || "24h");

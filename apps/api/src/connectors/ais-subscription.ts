@@ -28,6 +28,27 @@ export function buildAisSubscription(
   };
 }
 
+/**
+ * Only coordinate-bearing AIS messages may replace the persisted live
+ * position. Static reports are still subscribed to and cached as metadata, but
+ * must never erase a vessel's last usable map position with null coordinates.
+ */
+export function shouldQueueAisSnapshot(
+  latitude: number | null,
+  longitude: number | null,
+): boolean {
+  return (
+    latitude != null &&
+    longitude != null &&
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+}
+
 function finiteCoordinate(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value;

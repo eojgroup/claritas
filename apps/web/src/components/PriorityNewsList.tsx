@@ -66,6 +66,7 @@ type PriorityNewsListProps = {
   onToggle: (item: NewsItem, iso?: string) => void;
   onRequestTranslation?: (item: NewsItem) => void | Promise<void>;
   translationPendingIds?: Set<number>;
+  translationErrorIds?: Set<number>;
   onSelectCountry: (iso: string) => void;
   onOpenWorkspace?: () => void;
   onOpenEvent?: (eventId: string) => void;
@@ -83,6 +84,7 @@ export default function PriorityNewsList({
   onToggle,
   onRequestTranslation,
   translationPendingIds,
+  translationErrorIds,
   onSelectCountry,
   onOpenWorkspace,
   onOpenEvent,
@@ -128,6 +130,11 @@ export default function PriorityNewsList({
         const displayTitle = newsDisplayTitle(item);
         const displaySummary = newsDisplaySummary(item);
         const translationPending = translationPendingIds?.has(item.id) ?? false;
+        const translationUnavailable = Boolean(
+          translationErrorIds?.has(item.id) &&
+          item.translation?.summary_status !== "generated" &&
+          item.translation?.summary_status !== "insufficient",
+        );
         const linkedEvents = item.linked_events ?? [];
         const timestamp = newsTimestampParts(item.event_time);
         const satelliteState = linkedEvents.find((event) => (
@@ -198,8 +205,23 @@ export default function PriorityNewsList({
                     AI translation · {item.language_code?.toUpperCase() ?? "SOURCE"}→{item.translation.target_language_code.toUpperCase()}
                   </span>
                 ) : item.language_code ? (
-                  <span className="news-leadership-change" title="Original article language">
-                    {item.language_code.toUpperCase()}{translationRequired ? " · translation pending" : ""}
+                  <span
+                    className="news-leadership-change"
+                    title={translationRequired
+                      ? translationPending
+                        ? "English translation is being generated from the stored publisher text"
+                        : translationUnavailable
+                          ? "The optional English translation could not be generated; the original source remains available"
+                          : "Original publisher language; English translation starts when this story is opened"
+                      : "Original article language"}
+                  >
+                    {item.language_code.toUpperCase()}{translationRequired
+                      ? translationPending
+                        ? "→EN · translating"
+                        : translationUnavailable
+                          ? " source · English unavailable"
+                          : " source · English on open"
+                      : ""}
                   </span>
                 ) : null}
                 {isLeadershipChange && (
@@ -224,7 +246,9 @@ export default function PriorityNewsList({
                     ? "Generating a short English summary from the available source excerpt…"
                     : displaySummary ??
                       (translationRequired
-                        ? "Select to request a short English summary."
+                        ? translationUnavailable
+                          ? "English enrichment is temporarily unavailable. The original publisher report remains usable."
+                          : "Open to translate the headline and available source excerpt."
                         : "Select for source and country context.")}
                 </small>
                 <span className="dashboard-news-mobile-source">
@@ -308,6 +332,22 @@ export default function PriorityNewsList({
                       {item.summary && (
                         <p className="mt-1 text-xs text-[color:var(--shell-muted)]">{item.summary}</p>
                       )}
+                    </div>
+                  )}
+                  {translationRequired && translationUnavailable && !translationPending && (
+                    <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-[color:var(--signal-amber)] bg-[color:var(--signal-amber-soft)] p-3 text-xs text-[color:var(--shell-ink)]">
+                      <span className="min-w-0 flex-1">
+                        {translated
+                          ? "The translated headline is available, but the optional English summary could not be generated."
+                          : "Automatic English translation is temporarily unavailable."} No source text was discarded or replaced.
+                      </span>
+                      <button
+                        type="button"
+                        className="rounded-full border border-[color:var(--shell-border-strong)] px-3 py-1 font-semibold hover:border-[color:var(--shell-ink)]"
+                        onClick={() => void onRequestTranslation?.(item)}
+                      >
+                        {translated ? "Retry English summary" : "Retry translation"}
+                      </button>
                     </div>
                   )}
                   {iso && isPrimary && (

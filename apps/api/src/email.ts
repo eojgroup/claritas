@@ -32,6 +32,7 @@ export type BriefingEmailEvent = {
   severity: string;
   confidence: number;
   relevance_score: number;
+  start_time: string | null;
   where: string;
   why_interesting: string[];
   profile_reasons: string[];
@@ -39,6 +40,7 @@ export type BriefingEmailEvent = {
     title: string;
     publisher: string;
     url: string | null;
+    published_at: string | null;
   }>;
   earth_observation: Array<{
     product_type: string;
@@ -47,6 +49,8 @@ export type BriefingEmailEvent = {
     imagery_available: boolean;
     evidentiary_role: string;
     analysis_summary: string | null;
+    temporal_alignment: string | null;
+    assessment_boundary: string | null;
   }>;
 };
 
@@ -111,7 +115,7 @@ export type ImportantEventEmailContent = {
     minimum_severity: string;
   };
   profile_topics: string[];
-  occurred_at: string;
+  alert_created_at: string;
   theme: BriefingEmailTheme;
 };
 
@@ -275,6 +279,13 @@ function eventEvidenceUrl(eventId: string): string | null {
   }
 }
 
+function exactUtcTimestamp(value: string | null): string | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
+}
+
 function eventHtml(event: BriefingEmailEvent, palette: BriefingEmailPalette): string {
   const profileReasons = event.profile_reasons.length
     ? `<div style="margin:10px 0 0;padding:10px 12px;border-left:3px solid ${palette.accent};background:${palette.surfaceMuted};color:${palette.ink}"><strong>Why it matches your profile</strong><br>${escapeHtml(event.profile_reasons.join(" · "))}</div>`
@@ -287,7 +298,8 @@ function eventHtml(event: BriefingEmailEvent, palette: BriefingEmailPalette): st
     const title = url
       ? `<a href="${escapeHtml(url)}" style="color:${palette.link};text-decoration:underline">${escapeHtml(item.title)}</a>`
       : escapeHtml(item.title);
-    return `<li style="margin:0 0 6px;color:${palette.ink}">${title}<span style="color:${palette.muted}"> · ${escapeHtml(item.publisher)}</span></li>`;
+    const publishedAt = exactUtcTimestamp(item.published_at);
+    return `<li style="margin:0 0 6px;color:${palette.ink}">${title}<span style="color:${palette.muted}"> · ${escapeHtml(item.publisher)}${publishedAt ? ` · published ${escapeHtml(publishedAt)}` : " · publication time unavailable"}</span></li>`;
   }).join("");
   const eo = event.earth_observation.slice(0, 4).map((item) => {
     const role = item.evidentiary_role === "sensor_observation"
@@ -297,7 +309,8 @@ function eventHtml(event: BriefingEmailEvent, palette: BriefingEmailPalette): st
         : "visual context";
     const details = [item.provider, item.product_type.replace(/_/g, " "), role]
       .filter(Boolean).join(" · ");
-    return `<li style="margin:0 0 6px;color:${palette.ink}">${escapeHtml(details)}${item.captured_at ? ` · ${escapeHtml(item.captured_at.slice(0, 10))}` : ""}${item.analysis_summary ? `<div style="color:${palette.muted}">${escapeHtml(item.analysis_summary)}</div>` : ""}</li>`;
+    const capturedAt = exactUtcTimestamp(item.captured_at);
+    return `<li style="margin:0 0 6px;color:${palette.ink}">${escapeHtml(details)}${capturedAt ? ` · captured ${escapeHtml(capturedAt)}` : " · capture time unavailable"}${item.temporal_alignment ? `<div style="color:${palette.muted}">${escapeHtml(item.temporal_alignment)}</div>` : ""}${item.assessment_boundary ? `<div style="color:${palette.muted}">${escapeHtml(item.assessment_boundary)}</div>` : ""}${item.analysis_summary ? `<div style="color:${palette.muted}">${escapeHtml(item.analysis_summary)}</div>` : ""}</li>`;
   }).join("");
   const eventUrl = eventEvidenceUrl(event.id);
   const eventLink = eventUrl
@@ -307,6 +320,7 @@ function eventHtml(event: BriefingEmailEvent, palette: BriefingEmailPalette): st
     <div style="font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:${palette.accent}">${escapeHtml(event.severity)} · ${escapeHtml(event.event_type.replace(/_/g, " "))} · ${Math.round(event.confidence * 100)}% confidence</div>
     <h3 style="margin:7px 0 5px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">${escapeHtml(event.title)}</h3>
     <div style="font-size:13px;color:${palette.muted}"><strong>Where:</strong> ${escapeHtml(event.where)}</div>
+    <div style="font-size:13px;color:${palette.muted}"><strong>Event start:</strong> ${escapeHtml(exactUtcTimestamp(event.start_time) || "not yet resolved")}</div>
     <p style="margin:10px 0;color:${palette.ink};line-height:1.5">${escapeHtml(event.summary)}</p>
     ${profileReasons}
     ${why ? `<strong style="display:block;margin-top:12px;color:${palette.ink}">Why this is interesting</strong><ul style="margin:7px 0 0;padding-left:20px">${why}</ul>` : ""}
@@ -321,15 +335,16 @@ function eventText(event: BriefingEmailEvent): string[] {
     `${event.severity.toUpperCase()} · ${event.event_type.replace(/_/g, " ")} · ${Math.round(event.confidence * 100)}% confidence`,
     event.title,
     `Where: ${event.where}`,
+    `Event start: ${exactUtcTimestamp(event.start_time) || "not yet resolved"}`,
     event.summary,
     ...(event.profile_reasons.length ? ["Why it matches your profile:", ...event.profile_reasons.map((reason) => `- ${reason}`)] : []),
     ...(event.why_interesting.length ? ["Why this is interesting:", ...event.why_interesting.map((reason) => `- ${reason}`)] : []),
     ...(event.linked_news.length ? ["Linked news:", ...event.linked_news.flatMap((item) => [
-      `- ${item.title} · ${item.publisher}`,
+      `- ${item.title} · ${item.publisher} · ${exactUtcTimestamp(item.published_at) ? `published ${exactUtcTimestamp(item.published_at)}` : "publication time unavailable"}`,
       ...(safeWebUrl(item.url) ? [`  ${safeWebUrl(item.url)}`] : []),
     ])] : []),
     ...(event.earth_observation.length ? ["Earth observation:", ...event.earth_observation.map((item) =>
-      `- ${item.provider} · ${item.product_type.replace(/_/g, " ")} · ${item.evidentiary_role.replace(/_/g, " ")}${item.analysis_summary ? ` · ${item.analysis_summary}` : ""}`
+      `- ${item.provider} · ${item.product_type.replace(/_/g, " ")} · ${item.evidentiary_role.replace(/_/g, " ")}${exactUtcTimestamp(item.captured_at) ? ` · captured ${exactUtcTimestamp(item.captured_at)}` : " · capture time unavailable"}${item.temporal_alignment ? ` · ${item.temporal_alignment}` : ""}${item.assessment_boundary ? ` · ${item.assessment_boundary}` : ""}${item.analysis_summary ? ` · ${item.analysis_summary}` : ""}`
     ), "Imagery and model interpretations provide context; they are not automatic proof of causation."] : []),
     ...(eventEvidenceUrl(event.id) ? [`Open event evidence/imagery: ${eventEvidenceUrl(event.id)}`] : []),
   ];
@@ -610,7 +625,7 @@ export function renderImportantEventEmail(content: ImportantEventEmailContent): 
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:680px;background:${palette.panel};border:1px solid ${palette.border};border-radius:14px"><tr><td style="padding:28px">
         <div style="font-size:12px;font-weight:700;letter-spacing:.18em;color:${palette.accent};text-transform:uppercase">Claritas important event · ${escapeHtml(severity)}</div>
         <h1 style="margin:10px 0 6px;font-family:${EMAIL_FONT};font-size:29px;line-height:1.2;color:${palette.ink}">${escapeHtml(event.title)}</h1>
-        <div style="font-size:13px;color:${palette.muted}">${escapeHtml(greeting)} · ${escapeHtml(content.occurred_at.slice(0, 16).replace("T", " "))} UTC</div>
+        <div style="font-size:13px;color:${palette.muted}">${escapeHtml(greeting)} · Alert created ${escapeHtml(exactUtcTimestamp(content.alert_created_at) || "time unavailable")}</div>
         ${eventHtml(event, palette)}
         <div style="margin-top:16px;padding:14px;background:${palette.surfaceMuted};border:1px solid ${palette.border};border-radius:10px;color:${palette.ink}">
           <strong>Notification profile</strong>
@@ -627,6 +642,7 @@ export function renderImportantEventEmail(content: ImportantEventEmailContent): 
   const text = [
     `CLARITAS IMPORTANT EVENT · ${severity}`,
     greeting,
+    `Alert created: ${exactUtcTimestamp(content.alert_created_at) || "time unavailable"}`,
     "",
     ...eventText(event),
     "",

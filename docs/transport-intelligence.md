@@ -22,15 +22,19 @@ flowchart LR
   Snapshot --> Trail[(Sampled track points)]
   Snapshot --> Event[(Port movement events)]
   Trail --> Presence[(Hourly entity-country presence)]
+  Snapshot --> DailyCountry[(Daily country peak samples)]
+  Snapshot --> DailyCorridor[(Capped daily corridor peak samples)]
   Event --> MovementHour[(Hourly country-port movement)]
-  Snapshot --> Aggregate[Country and corridor aggregates]
   MovementHour --> Trend[24h vs prior 24h movement trends]
   Presence --> Trend
+  DailyCountry --> Trend
+  DailyCorridor --> Trend
   Trend --> Briefing[Daily + personal briefing takeaways]
   Trend --> Profile[Country profile]
   Trail --> Full[Web + iPad drill-in]
-  Aggregate --> Full
-  Aggregate --> Compact[iPhone + Watch pulse]
+  DailyCountry --> Full
+  DailyCorridor --> Full
+  DailyCountry --> Compact[iPhone + Watch pulse]
 ```
 
 Only one API replica holds the PostgreSQL advisory lock for scheduled transport ingestion. This prevents duplicate global WebSocket subscriptions and polling loops while keeping the API itself horizontally scalable. A new rolling-update pod retries lock acquisition every ten seconds until the terminating pod releases the session lock; it cannot permanently start without transport workers after losing the initial race. HTTP refresh requests only bypass the short-lived overview cache; they never launch ingestion work from a request-serving replica.
@@ -42,8 +46,8 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - Runtime environment variable and GitHub Actions repository secret: `AISSTREAM_API_KEY`.
 - Kubernetes secret: `claritas-aisstream`, key `AISSTREAM_API_KEY`.
 - `AISSTREAM_ENABLED` is the operational safety switch and defaults to `true`.
-- Default coverage divides the world into 42 geographic boxes and rotates two boxes into the WebSocket subscription every 20 seconds. AISstream treats a new subscription as a replacement, so this gathers global coverage incrementally instead of requesting one full-world burst.
-- `AISSTREAM_BOUNDING_BOXES` can replace the default coverage with a JSON array of provider-format bounding boxes. `AISSTREAM_SUBSCRIPTION_BATCH_SIZE` and `AISSTREAM_SUBSCRIPTION_ROTATION_SECONDS` control how those boxes rotate.
+- The default is AISstream's documented single global bounding box (`[-90,-180]` to `[90,180]`). `AISSTREAM_BOUNDING_BOXES` can replace it with at most 12 provider-format boxes on that same subscription. Subscription updates replace rather than merge prior coverage, so Claritas does not rotate partial regions.
+- “Global” is geographic subscription scope, not complete ocean coverage. AISstream describes the service as beta with no uptime SLA and reports reception roughly 200 km from most coastlines; vessels far offshore and areas without terrestrial stations can be absent.
 - `AISSTREAM_SAMPLE_SECONDS` controls current-position sampling and defaults to 600 seconds.
 - `AISSTREAM_IDLE_TIMEOUT_SECONDS` defaults to 120 seconds. A connected stream that produces no usable vessel snapshot inside this window is terminated and reconnected; this covers the provider failure mode where a WebSocket remains open but silently stops delivering AIS frames.
 - Vessel snapshots drain through one flush at a time, in bounded batches. The production defaults persist at most two 250-vessel batches per five-second cycle, retain newer queued positions while a write is in flight, and requeue failed writes without allowing overlapping flushes to exhaust the database pool.
@@ -60,6 +64,22 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - Requests use the provider-required compression and application-identification
   headers. Data is attributed to Fintraffic / digitraffic.fi under CC BY 4.0,
   and normalized records retain the source and license in their payload.
+- This is an official regional fallback, not a global fallback. Claritas reports
+  its Finland/Baltic scope explicitly and never converts a missing regional
+  record into evidence that vessel activity stopped.
+
+### Why Marinesia is not an automatic fallback
+
+Marinesia was evaluated in August 2026, but its current official getting-started
+guide says every endpoint requires an API key. Its free plan is tightly rate
+limited and only exposes a small area sample or a single latest vessel lookup;
+bulk/global listings and historical positions require a higher plan. The
+provider's official pages currently disagree on some exact free-tier limits,
+which is another reason not to build a supposedly keyless availability path on
+them. Claritas therefore does not send uncredentialled requests, evade limits,
+or represent Marinesia as a free global source. A future integration must use a
+server-side key, configured plan limits, licensing review, and explicit provider
+attribution.
 
 ### adsb.lol
 
@@ -85,7 +105,7 @@ Each current snapshot may carry multiple explicit country roles:
 
 Country aggregates count unique vehicles per role. A single vehicle is counted once in a country's total even when it has several roles for that country. Maritime corridors fall back to flag-to-destination when a defensible origin has not yet been observed; route aggregates expose whether their origin is observed, a flag fallback, or mixed. The country-connection tooltip and corridor list label proxy evidence instead of presenting that link as an exact port-to-port voyage.
 
-## Movement trends and takeaways
+## Movement history, trends, and takeaways
 
 Claritas compares the latest 24 hours with the preceding 24 hours:
 
@@ -96,10 +116,30 @@ Claritas compares the latest 24 hours with the preceding 24 hours:
 
 The API returns both the underlying current/previous values and concise, qualified takeaways. Web and iPad show the full port and trend detail. When a country is selected, the web workspace derives country-linked live totals, resolved arrivals and departures, current-position count, strongest counterpart, network reach, and origin/destination coverage from the same scoped response. Selecting a resolved counterpart then narrows those aggregates to the two-way corridor: total active movements, each direction, mode mix, share of the country's resolved network, and observed versus flag-proxy origin evidence. iPhone and Watch show the takeaways without raw vehicle data. Country profiles use the country-scoped trend, while daily and personal briefings receive the same data and methodology notes as evidence for generation.
 
+The web deep dive also exposes 7-, 30-, and 90-day daily series from Claritas'
+own persisted observations. `transport_country_activity_day` stores daily peak
+sampled country-linked activity for the 100-day history window, while
+`transport_movement_hour` supplies monitored-port arrivals and departures for
+the same 100-day bounded history window.
+`transport_corridor_activity_day` stores daily peak sampled activity per
+mode/country pair and keeps observed-origin and maritime flag-proxy counts
+separate. It admits at most the first 1,000 encountered pairs per mode/day,
+prioritising higher-volume pairs only within each ingestion flush, and retains
+100 days. Later pairs can be omitted regardless of volume, creating an
+early-cycle sampling bias; this is sampled coverage rather than a complete
+global corridor ranking. The default
+corridor history is capped at 200,000 compact rows rather than expanding
+per vehicle/hour. Country history adds fewer than 50,000 rows at the same
+retention. Both histories start prospectively at V44, without scanning or
+seeding from the production raw-track table during rollout. Charts leave
+unobserved days empty rather than displaying false zero traffic and state the
+actual first/last date, observed-day count, source mix, and retention policy.
+
 ## API
 
 - `GET /api/transport/overview?country=SE&detail=aggregate` returns country-scoped KPIs, linked-country and corridor aggregates, 24-hour trend comparisons, qualified takeaways, monitored-port movement, hourly activity, freshness, and source coverage. `country` is a required ISO alpha-2 code for every interactive client request.
 - `GET /api/transport/overview?country=SE&detail=full` adds current flight and vessel records for web and iPad. Optional `mode` and `entity_limit` filters apply consistently to aggregates and details. Corridor results include only routes whose resolved origin or destination is the selected country, while the broader entity result retains explicit current/flag/registration linkage.
+- `GET /api/transport/overview?country=SE&corridor=FI&detail=full` adds a two-way SE–FI historical corridor series while preserving the selected country's live relationship context. `corridor` must be a different ISO alpha-2 code.
 - `GET /api/transport/entities/:mode/:entityId` returns the current normalized record and up to 24 hours of sampled track points.
 
 All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Runtime coverage reports distinguish disabled, connecting, reconnecting, receiving, and live states, plus message, accepted-snapshot, persisted-snapshot, queue, drop, malformed-frame, subscription-batch, primary-source, fallback-source, and write-error diagnostics. This separates a configured but silent upstream stream from parsing or database persistence failures and shows whether the official regional fallback is active. Web, iPhone, and iPad resolve an explicit selection first and otherwise use the same highest-relevance country highlighted by the cross-source signal map; Watch uses that same highlighted-country fallback. Interactive clients never request a global overview. Equivalent country overview requests are coalesced and cached for 120 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation retains a private aggregate-only global ranking path because its purpose is to compare country activity; it never loads raw entities, and a transient read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
@@ -110,6 +150,6 @@ All endpoints use the same authenticated paid-access boundary as the other Clari
 - iPhone shows only KPIs, qualified trend takeaways, leading countries, and leading corridors. It does not receive raw vehicles or track points during normal app bootstrap.
 - Watch shows only aggregate flight/vessel/country counts, a qualified takeaway, an aggregate country bubble map, and the leading corridor, with a handoff to the iPhone transport section.
 
-Freshness windows are 20 minutes for aviation and two hours for maritime snapshots. Historical track points are sampled at ten-minute resolution and retained for three days. Current snapshots are retained for 14 days after their last observation; movement events and hourly aggregates are retained for 60 days. The advisory-lock owner prunes expired rows in bounded batches every three hours.
+Freshness windows are 20 minutes for aviation and two hours for maritime snapshots. Historical track points are sampled at ten-minute resolution and retained for three days. Current snapshots are retained for 14 days after their last observation; movement events and detailed per-entity country presence retain 60 days, while compact port-hour movements and capped daily country/corridor aggregates retain 100 days. The advisory-lock owner prunes expired rows every three hours using one shared batch and 30-second wall-clock budget. It rotates unfinished tables to the front of the next pass and reports backlog state through its deployment-local runtime health route, so catch-up cannot overlap or monopolize the API pool.
 
 The operational defaults are documented in [Cloud SQL capacity and transport load](operations/cloud-sql-capacity.md).

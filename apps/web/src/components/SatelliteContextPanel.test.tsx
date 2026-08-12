@@ -78,6 +78,8 @@ describe("SatelliteContextPanel", () => {
     expect(screen.getByText("Context only · not proof")).toBeTruthy();
     expect(screen.getByText(/Regional NASA browse layer shown at a bounded size/i)).toBeTruthy();
     expect(screen.getByText("Linked-location context, not event evidence.")).toBeTruthy();
+    expect(screen.getByText(/share the same UTC day.*order within that day cannot be established/i)).toBeTruthy();
+    expect(screen.queryByText(/Acquired 8 hours after/i)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Open evidence thread/i }));
     expect(onOpenEvent).toHaveBeenCalledWith(event.id);
     fireEvent.click(screen.getByRole("button", { name: /Inspect imagery/i }));
@@ -142,6 +144,17 @@ describe("SatelliteContextPanel", () => {
     vi.mocked(fetchIntelligenceEvent).mockResolvedValue({
       event: eventWithObservation,
       evidence: [],
+      linked_news: [{
+        id: "news-1",
+        evidence_type: "publisher_report",
+        relationship: "reported",
+        title: "Terminal access interrupted",
+        url: "https://example.test/terminal-report",
+        publisher: "Canal Journal",
+        published_at: "2026-08-11T08:10:00Z",
+        observed_at: "2026-08-11T08:20:00Z",
+        confidence: 0.9,
+      }],
       locations: [],
       earth_observations: [{
         id: "natural-observation",
@@ -150,10 +163,10 @@ describe("SatelliteContextPanel", () => {
         product_type: "true_color",
         status: "available",
         captured_at: "2026-08-11T08:30:00Z",
-        provider: "copernicus",
-        mission: "sentinel-2",
-        collection: "sentinel-2-l2a",
-        provider_scene_id: "S2-natural",
+        provider: "independent-provider",
+        mission: "mission-x",
+        collection: "mission-x-imagery",
+        provider_scene_id: "MX-natural",
         capture_start: "2026-08-11T08:30:00Z",
         source_url: "https://example.test/scene",
         assets: [{ ...highResolutionAsset, id: "thumbnail", asset_type: "thumbnail", width: 320, url: "/api/earth-observation/assets/thumbnail" }, highResolutionAsset],
@@ -191,12 +204,18 @@ describe("SatelliteContextPanel", () => {
     });
 
     render(<SatelliteContextPanel onOpenEvent={vi.fn()} onOpenImagery={vi.fn()} />);
-    const image = await screen.findByAltText(/sentinel-2 · natural color/i);
+    const image = await screen.findByAltText(/mission-x · natural color/i);
     expect(image.getAttribute("src")).toBe(highResolutionAsset.url);
     expect(screen.getByText(/High-resolution processed scene · 10 m native resolution · 14.8 m effective pixel size/i)).toBeTruthy();
-    expect(screen.getByText(/2 linked reports/i)).toBeTruthy();
+    expect(screen.getByText("Terminal access interrupted")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Terminal access interrupted" }).getAttribute("href")).toBe("https://example.test/terminal-report");
+    expect(screen.getByText(/Canal Journal · Aug 11, 2026, 08:10:00 AM UTC/i)).toBeTruthy();
+    expect(screen.getByText(/post-start context, not proof of impact or cause/i)).toBeTruthy();
+    expect(screen.getByText(/hypotheses for human review/i)).toBeTruthy();
     expect(screen.getByText(/does not by itself prove causation/i)).toBeTruthy();
     expect(screen.getByText(/Model interpretation · not a sensor measurement/i)).toBeTruthy();
+    expect(screen.getByText(/Source: independent-provider · mission-x\. Formal attribution was not supplied/i)).toBeTruthy();
+    expect(screen.queryByText(/Copernicus Sentinel data/i)).toBeNull();
     expect(screen.getByText("Possible access-road flooding is visible.")).toBeTruthy();
     expect(screen.getByText("Observed feature:").parentElement?.textContent).toContain("Standing water is visible");
     expect(screen.getByText("Possible change:").parentElement?.textContent).toContain("Road access may have narrowed");

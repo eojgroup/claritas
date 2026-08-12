@@ -32,4 +32,40 @@ describe("PriorityNewsList", () => {
     fireEvent.click(screen.getByRole("button", { name: /Fire near energy infrastructure/i }));
     expect(onOpenEvent).toHaveBeenCalledWith(item.linked_events?.[0].id);
   });
+
+  it("distinguishes on-demand translation from active work and offers a retry after failure", () => {
+    const onRequestTranslation = vi.fn();
+    const item: NewsItem = {
+      id: 43,
+      kind: "news",
+      title: "Incendio cerca del puerto",
+      summary: "Los bomberos respondieron.",
+      url: "https://example.com/es-report",
+      country_iso2: "ES",
+      language_code: "es",
+      event_time: "2026-08-12T08:00:00Z",
+    };
+    const props = {
+      items: [item],
+      selectedId: item.id,
+      emptyState: null,
+      getImageUrl: () => undefined,
+      getSourceLabel: () => "Example",
+      getCountryName: () => "Spain",
+      onToggle: () => undefined,
+      onSelectCountry: () => undefined,
+      onRequestTranslation,
+    };
+
+    const { rerender } = render(<PriorityNewsList {...props} />);
+    expect(screen.getByText(/ES source · English on open/i)).toBeTruthy();
+    expect(screen.queryByText(/translation pending/i)).toBeNull();
+
+    rerender(<PriorityNewsList {...props} translationPendingIds={new Set([item.id])} />);
+    expect(screen.getByText(/ES→EN · translating/i)).toBeTruthy();
+
+    rerender(<PriorityNewsList {...props} translationErrorIds={new Set([item.id])} />);
+    fireEvent.click(screen.getByRole("button", { name: /Retry translation/i }));
+    expect(onRequestTranslation).toHaveBeenCalledWith(item);
+  });
 });

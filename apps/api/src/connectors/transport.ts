@@ -13,12 +13,22 @@ import {
   GLOBAL_AIS_BOUNDING_BOX,
   buildAisSubscription,
   normalizeAisBoundingBoxes,
+  shouldQueueAisSnapshot,
   type AisBoundingBox,
 } from "./ais-subscription";
 import {
   parseDigitrafficMaritimeObservations,
   type DigitrafficMaritimeObservation,
 } from "./digitraffic-maritime";
+import {
+  transportHistoryModeValue,
+  transportHistoryWindow,
+} from "./transport-history";
+import {
+  buildTransportRuntimeHealth,
+  transportRetentionBudgetAvailable,
+  type TransportRetentionHealth,
+} from "./transport-runtime-health";
 
 export type TransportMode = "maritime" | "aviation";
 export type TransportDetailLevel = "aggregate" | "full";
@@ -136,6 +146,31 @@ type PortTrendRow = {
   departures_current: string | number;
   arrivals_current: string | number;
   cargo_departures_current: string | number;
+};
+
+type HistoricalActivityRow = {
+  bucket: string | Date;
+  maritime_entities: string | number;
+  aviation_entities: string | number;
+  observed_hours: string | number;
+  source_names: string[] | null;
+};
+
+type HistoricalMovementRow = {
+  bucket: string | Date;
+  ship_departures: string | number;
+  ship_arrivals: string | number;
+  cargo_vessel_departures: string | number;
+};
+
+type HistoricalCorridorRow = {
+  bucket: string | Date;
+  maritime_entities: string | number;
+  aviation_entities: string | number;
+  observed_hours: string | number;
+  observed_origins: string | number;
+  flag_proxy_origins: string | number;
+  source_names: string[] | null;
 };
 
 type AdsbAircraft = {
@@ -327,6 +362,8 @@ let aisConnectedAt: number | null = null;
 let aisLastMessageAt: number | null = null;
 let aisLastSnapshotAt: number | null = null;
 let aisLastStoredAt: number | null = null;
+let aisLastPositionAt: number | null = null;
+let aisLastPositionStoredAt: number | null = null;
 let aisLastFlushAt: number | null = null;
 let aisLastError: string | null = null;
 let aisLastFlushError: string | null = null;
@@ -339,6 +376,7 @@ let aisMalformedMessages = 0;
 let aisLastProgressLogAt = 0;
 let digitrafficRefresh: Promise<{ fetched: number; queued: number }> | null = null;
 let digitrafficTimer: NodeJS.Timeout | null = null;
+let digitrafficLastRefreshAt: number | null = null;
 let digitrafficLastSnapshotAt: number | null = null;
 let digitrafficLastStoredAt: number | null = null;
 let digitrafficLastError: string | null = null;
@@ -350,8 +388,23 @@ let aviationRouteLookupGeneration = 0;
 let adsbRouteProviderFailures = 0;
 let adsbRouteProviderUnavailableUntil = 0;
 let transportWorkerStarted = false;
+let transportWorkerLeader = false;
 let transportWorkerLockRetryTimer: NodeJS.Timeout | null = null;
 let transportRetentionTimer: NodeJS.Timeout | null = null;
+let transportRetentionRun: Promise<void> | null = null;
+let transportRetentionTargetOffset = 0;
+let transportRetentionHealth: TransportRetentionHealth = {
+  running: false,
+  last_pass_at: null,
+  duration_ms: null,
+  deleted_rows: 0,
+  batches: 0,
+  backlog: false,
+  backlog_tables: [],
+  oldest_expired_at: null,
+  budget_exhausted: false,
+  error: false,
+};
 
 function enabledFromEnv(name: string, fallback = true): boolean {
   const value = process.env[name]?.trim().toLowerCase();
@@ -376,6 +429,15 @@ function transportTrackSampleMilliseconds(): number {
   return (
     boundedIntegerFromEnv("TRANSPORT_TRACK_SAMPLE_SECONDS", 600, 60, 1_800) *
     1_000
+  );
+}
+
+function transportCorridorPairsPerDayMode(): number {
+  return boundedIntegerFromEnv(
+    "TRANSPORT_CORRIDOR_PAIRS_PER_DAY_MODE",
+    1_000,
+    100,
+    2_000,
   );
 }
 
@@ -452,7 +514,7 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     Date.now() - latestObservedMilliseconds <= 5 * 60_000;
   const connected = aisSocket?.readyState === WebSocket.OPEN;
   const recentlyReceiving =
-    aisLastMessageAt != null && Date.now() - aisLastMessageAt <= 5 * 60_000;
+    aisLastPositionAt != null && Date.now() - aisLastPositionAt <= 5 * 60_000;
   const fallbackRecentlyReceiving =
     digitrafficLastSnapshotAt != null &&
     Date.now() - digitrafficLastSnapshotAt <= 5 * 60_000;
@@ -461,7 +523,7 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     connected &&
     aisConnectedAt &&
     Date.now() - aisConnectedAt > 45_000 &&
-    (!aisLastMessageAt || aisLastMessageAt < aisConnectedAt),
+    (!aisLastPositionAt || aisLastPositionAt < aisConnectedAt),
   );
   const primaryStatus = !primaryConfigured
     ? "disabled"
@@ -485,6 +547,9 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
             : "reconnecting";
   return {
     configured,
+    primary_source: "AISstream",
+    primary_coverage: "best_effort_global",
+    primary_service_level: "beta_no_sla",
     primary_configured: primaryConfigured,
     primary_status: primaryStatus,
     connected,
@@ -492,6 +557,10 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     last_message_at: aisLastMessageAt ? isoDate(aisLastMessageAt) : null,
     last_snapshot_at: aisLastSnapshotAt ? isoDate(aisLastSnapshotAt) : null,
     last_stored_at: aisLastStoredAt ? isoDate(aisLastStoredAt) : null,
+    last_position_at: aisLastPositionAt ? isoDate(aisLastPositionAt) : null,
+    last_position_stored_at: aisLastPositionStoredAt
+      ? isoDate(aisLastPositionStoredAt)
+      : null,
     last_flush_at: aisLastFlushAt ? isoDate(aisLastFlushAt) : null,
     last_error: aisLastError,
     persistence_error: Boolean(aisLastFlushError),
@@ -505,6 +574,8 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     subscription_batches: 1,
     subscription_boxes: subscriptionBoxes.length,
     fallback_source: "Fintraffic Digitraffic",
+    fallback_coverage: "Finland and nearby Baltic reception",
+    global_fallback_available: false,
     fallback_configured: fallbackConfigured,
     fallback_last_snapshot_at: digitrafficLastSnapshotAt
       ? isoDate(digitrafficLastSnapshotAt)
@@ -516,7 +587,42 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     fallback_snapshots_accepted: digitrafficSnapshotsAccepted,
     fallback_snapshots_stored: digitrafficSnapshotsStored,
     fallback_license: "CC BY 4.0",
+    coverage_note:
+      "No verified keyless REST provider currently supplies complete global live AIS. AISstream remains a best-effort beta source; Fintraffic is an official regional fallback and must not be presented as global coverage.",
   };
+}
+
+export function getTransportRuntimeHealth() {
+  const now = Date.now();
+  return buildTransportRuntimeHealth({
+    now,
+    freshnessMilliseconds:
+      boundedIntegerFromEnv(
+        "TRANSPORT_RUNTIME_FRESHNESS_SECONDS",
+        300,
+        60,
+        1_800,
+      ) * 1_000,
+    workerStarted: transportWorkerStarted,
+    workerLeader: transportWorkerLeader,
+    primaryConfigured:
+      enabledFromEnv("AISSTREAM_ENABLED") &&
+      Boolean(process.env.AISSTREAM_API_KEY?.trim()),
+    primaryConnected: aisSocket?.readyState === WebSocket.OPEN,
+    primaryLastMessageAt: aisLastMessageAt,
+    primaryLastSnapshotAt: aisLastPositionAt,
+    primaryLastStoredAt: aisLastPositionStoredAt,
+    primaryError: Boolean(aisLastError || aisLastFlushError),
+    fallbackConfigured: enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED"),
+    fallbackLastRefreshAt: digitrafficLastRefreshAt,
+    fallbackLastSnapshotAt: digitrafficLastSnapshotAt,
+    fallbackLastStoredAt: digitrafficLastStoredAt,
+    fallbackError: Boolean(digitrafficLastError),
+    retention: {
+      ...transportRetentionHealth,
+      running: transportRetentionRun != null,
+    },
+  });
 }
 
 function boundsForGeometry(geometry: Polygon | MultiPolygon): [number, number, number, number] {
@@ -753,7 +859,9 @@ function startAisWatchdog(): void {
   aisWatchdogTimer = setInterval(() => {
     const socket = aisSocket;
     if (!socket || socket.readyState !== WebSocket.OPEN || !aisConnectedAt) return;
-    const lastActivity = Math.max(aisLastSnapshotAt ?? 0, aisConnectedAt);
+    // Static/voyage metadata can keep a socket noisy while the live map has no
+    // positions. Only a usable coordinate postpones the position watchdog.
+    const lastActivity = Math.max(aisLastPositionAt ?? 0, aisConnectedAt);
     const idleMilliseconds = Date.now() - lastActivity;
     if (idleMilliseconds <= aisIdleTimeoutMilliseconds()) return;
     aisLastError = `No usable AIS vessel snapshots received for ${Math.round(idleMilliseconds / 1_000)} seconds`;
@@ -799,13 +907,7 @@ function queueMaritimeMessage(message: unknown): void {
   const longitude = asFinite(body.Longitude ?? metadata.longitude ?? metadata.Longitude);
   const observedAt = isoDate(metadata.time_utc);
   const now = Date.now();
-  const isPosition =
-    latitude != null &&
-    longitude != null &&
-    latitude >= -90 &&
-    latitude <= 90 &&
-    longitude >= -180 &&
-    longitude <= 180;
+  const isPosition = shouldQueueAisSnapshot(latitude, longitude);
 
   const displayName =
     asString(body.Name) ??
@@ -839,7 +941,12 @@ function queueMaritimeMessage(message: unknown): void {
     });
   }
 
-  if (isPosition && now - (lastMaritimeQueuedAt.get(mmsi) ?? 0) < aisSampleMilliseconds()) {
+  // ShipStaticData and StaticDataReport enrich the in-memory vessel profile,
+  // but a coordinate-free record must not replace a fresh/current database
+  // position. The next usable position carries the cached static fields.
+  if (!isPosition) return;
+
+  if (now - (lastMaritimeQueuedAt.get(mmsi) ?? 0) < aisSampleMilliseconds()) {
     return;
   }
 
@@ -935,7 +1042,10 @@ function queueMaritimeMessage(message: unknown): void {
   maritimeQueue.set(mmsi, snapshot);
   aisSnapshotsAccepted += 1;
   aisLastSnapshotAt = now;
-  if (isPosition) lastMaritimeQueuedAt.set(mmsi, now);
+  if (isPosition && latitude != null && longitude != null) {
+    aisLastPositionAt = now;
+    lastMaritimeQueuedAt.set(mmsi, now);
+  }
   const maximumQueue = Math.max(
     500,
     Math.min(Number.parseInt(process.env.AISSTREAM_MAX_QUEUE || "5000", 10) || 5000, 25000)
@@ -1071,12 +1181,18 @@ async function flushMaritimeQueue(): Promise<void> {
         const aisStored = snapshots.filter(
           (snapshot) => snapshot.source_name === "aisstream",
         ).length;
+        const aisPositionsStored = snapshots.filter(
+          (snapshot) => snapshot.source_name === "aisstream"
+            && snapshot.latitude != null
+            && snapshot.longitude != null,
+        ).length;
         const digitrafficStored = snapshots.filter(
           (snapshot) => snapshot.source_name === "digitraffic",
         ).length;
         aisSnapshotsStored += aisStored;
         digitrafficSnapshotsStored += digitrafficStored;
         if (aisStored > 0) aisLastStoredAt = storedAt;
+        if (aisPositionsStored > 0) aisLastPositionStoredAt = storedAt;
         if (digitrafficStored > 0) digitrafficLastStoredAt = storedAt;
         aisLastFlushAt = storedAt;
         aisLastFlushError = null;
@@ -1296,6 +1412,7 @@ async function runDigitrafficMaritimeRefresh(): Promise<{
     for (const observation of observations) {
       if (queueDigitrafficObservation(observation)) queued += 1;
     }
+    digitrafficLastRefreshAt = Date.now();
     digitrafficLastError = null;
     console.info(
       JSON.stringify({
@@ -1930,6 +2047,282 @@ async function storeTransportSnapshots(snapshots: TransportSnapshotInput[]): Pro
       values,
     );
   }
+
+  const countryDaily = new Map<
+    string,
+    {
+      bucket: string;
+      mode: TransportMode;
+      country: string;
+      entities: Set<string>;
+      hourMask: bigint;
+      firstObservedAt: string;
+      lastObservedAt: string;
+      sources: Set<string>;
+    }
+  >();
+  for (const row of activityRows) {
+    if (row.country === TRANSPORT_SCOPE_GLOBAL) continue;
+    const observedAt = new Date(row.snapshot.observed_at);
+    const bucket = new Date(observedAt);
+    bucket.setUTCHours(0, 0, 0, 0);
+    const key = [bucket.toISOString(), row.snapshot.mode, row.country].join(":");
+    const existing = countryDaily.get(key) ?? {
+      bucket: bucket.toISOString().slice(0, 10),
+      mode: row.snapshot.mode,
+      country: row.country,
+      entities: new Set<string>(),
+      hourMask: 0n,
+      firstObservedAt: row.snapshot.observed_at,
+      lastObservedAt: row.snapshot.observed_at,
+      sources: new Set<string>(),
+    };
+    existing.entities.add(row.snapshot.entity_id);
+    existing.hourMask |= 1n << BigInt(observedAt.getUTCHours());
+    if (row.snapshot.observed_at < existing.firstObservedAt) {
+      existing.firstObservedAt = row.snapshot.observed_at;
+    }
+    if (row.snapshot.observed_at > existing.lastObservedAt) {
+      existing.lastObservedAt = row.snapshot.observed_at;
+    }
+    existing.sources.add(row.snapshot.source_name);
+    countryDaily.set(key, existing);
+  }
+  const countryAggregates = Array.from(countryDaily.values());
+  for (let offset = 0; offset < countryAggregates.length; offset += 500) {
+    const batch = countryAggregates.slice(offset, offset + 500);
+    const values: unknown[] = [];
+    const rows = batch.map((row, index) => {
+      const start = index * 9;
+      values.push(
+        row.bucket,
+        row.mode,
+        row.country,
+        row.entities.size,
+        row.hourMask.toString(),
+        row.firstObservedAt,
+        row.lastObservedAt,
+        Array.from(row.sources).sort(),
+        1,
+      );
+      return `(${Array.from(
+        { length: 9 },
+        (_, valueIndex) => `$${start + valueIndex + 1}`,
+      ).join(", ")})`;
+    });
+    await query(
+      `INSERT INTO transport_country_activity_day (
+         bucket, mode, country_iso2, peak_active_entities,
+         observed_hour_mask, first_observed_at, last_observed_at,
+         source_names, observation_batches
+       ) VALUES ${rows.join(", ")}
+       ON CONFLICT (bucket, mode, country_iso2) DO UPDATE SET
+         peak_active_entities = GREATEST(
+           transport_country_activity_day.peak_active_entities,
+           EXCLUDED.peak_active_entities
+         ),
+         observed_hour_mask =
+           transport_country_activity_day.observed_hour_mask |
+           EXCLUDED.observed_hour_mask,
+         observation_batches =
+           transport_country_activity_day.observation_batches + 1,
+         first_observed_at = LEAST(
+           transport_country_activity_day.first_observed_at,
+           EXCLUDED.first_observed_at
+         ),
+         last_observed_at = GREATEST(
+           transport_country_activity_day.last_observed_at,
+           EXCLUDED.last_observed_at
+         ),
+         source_names = ARRAY(
+           SELECT DISTINCT source
+           FROM unnest(
+             transport_country_activity_day.source_names || EXCLUDED.source_names
+           ) source
+           ORDER BY source
+         )`,
+      values,
+    );
+  }
+
+  const corridorRows = trackPoints.flatMap((snapshot) => {
+    const explicitOrigin = normalizeIso2(snapshot.origin_country_iso2);
+    const flagOrigin =
+      snapshot.mode === "maritime"
+        ? normalizeIso2(snapshot.registration_country_iso2)
+        : null;
+    const origin = explicitOrigin ?? flagOrigin;
+    const destination = normalizeIso2(snapshot.destination_country_iso2);
+    if (!origin || !destination) return [];
+    if (origin === destination) return [];
+    const observedAt = new Date(snapshot.observed_at);
+    const hourMask = 1n << BigInt(observedAt.getUTCHours());
+    const bucket = new Date(observedAt);
+    bucket.setUTCHours(0, 0, 0, 0);
+    return [{
+      snapshot,
+      origin,
+      destination,
+      bucket: bucket.toISOString().slice(0, 10),
+      hourMask,
+      originBasis: explicitOrigin ? "observed" : "flag_fallback",
+    }];
+  });
+  const corridorAggregates = new Map<
+    string,
+    {
+      bucket: string;
+      mode: TransportMode;
+      origin: string;
+      destination: string;
+      entities: Set<string>;
+      observedOrigins: Set<string>;
+      flagProxyOrigins: Set<string>;
+      hourMask: bigint;
+      firstObservedAt: string;
+      lastObservedAt: string;
+      sources: Set<string>;
+    }
+  >();
+  for (const row of corridorRows) {
+    const key = [row.bucket, row.snapshot.mode, row.origin, row.destination].join(":");
+    const existing = corridorAggregates.get(key) ?? {
+      bucket: row.bucket,
+      mode: row.snapshot.mode,
+      origin: row.origin,
+      destination: row.destination,
+      entities: new Set<string>(),
+      observedOrigins: new Set<string>(),
+      flagProxyOrigins: new Set<string>(),
+      hourMask: 0n,
+      firstObservedAt: row.snapshot.observed_at,
+      lastObservedAt: row.snapshot.observed_at,
+      sources: new Set<string>(),
+    };
+    existing.entities.add(row.snapshot.entity_id);
+    (row.originBasis === "observed"
+      ? existing.observedOrigins
+      : existing.flagProxyOrigins
+    ).add(row.snapshot.entity_id);
+    existing.hourMask |= row.hourMask;
+    if (row.snapshot.observed_at < existing.firstObservedAt) {
+      existing.firstObservedAt = row.snapshot.observed_at;
+    }
+    if (row.snapshot.observed_at > existing.lastObservedAt) {
+      existing.lastObservedAt = row.snapshot.observed_at;
+    }
+    existing.sources.add(row.snapshot.source_name);
+    corridorAggregates.set(key, existing);
+  }
+  const aggregates = Array.from(corridorAggregates.values()).sort(
+    (left, right) => right.entities.size - left.entities.size,
+  );
+  for (let offset = 0; offset < aggregates.length; offset += 500) {
+    const batch = aggregates.slice(offset, offset + 500);
+    const values: unknown[] = [];
+    const rows = batch.map((row, index) => {
+      const start = index * 12;
+      values.push(
+        row.bucket,
+        row.mode,
+        row.origin,
+        row.destination,
+        row.entities.size,
+        row.observedOrigins.size,
+        row.flagProxyOrigins.size,
+        row.hourMask.toString(),
+        row.firstObservedAt,
+        row.lastObservedAt,
+        Array.from(row.sources).sort(),
+        transportCorridorPairsPerDayMode(),
+      );
+      return `(${Array.from(
+        { length: 12 },
+        (_, valueIndex) => `$${start + valueIndex + 1}`,
+      ).join(", ")})`;
+    });
+    await query(
+      `WITH incoming (
+         bucket, mode, origin_country_iso2, destination_country_iso2,
+         peak_active_entities, peak_observed_origins,
+         peak_flag_proxy_origins, observed_hour_mask, first_observed_at,
+         last_observed_at, source_names, daily_cap
+       ) AS (VALUES ${rows.join(", ")}),
+       ranked AS (
+         SELECT incoming.*,
+                EXISTS (
+                  SELECT 1 FROM transport_corridor_activity_day current
+                  WHERE current.bucket = incoming.bucket
+                    AND current.mode = incoming.mode
+                    AND current.origin_country_iso2 = incoming.origin_country_iso2
+                    AND current.destination_country_iso2 = incoming.destination_country_iso2
+                ) AS already_present,
+                ROW_NUMBER() OVER (
+                  PARTITION BY incoming.bucket, incoming.mode
+                  ORDER BY incoming.peak_active_entities DESC,
+                           incoming.origin_country_iso2,
+                           incoming.destination_country_iso2
+                ) AS admission_rank
+         FROM incoming
+       ),
+       eligible AS (
+         SELECT ranked.*
+         FROM ranked
+         WHERE already_present OR (
+           SELECT COUNT(*)
+           FROM transport_corridor_activity_day current
+           WHERE current.bucket = ranked.bucket
+             AND current.mode = ranked.mode
+         ) + admission_rank <= ranked.daily_cap
+       )
+       INSERT INTO transport_corridor_activity_day (
+         bucket, mode, origin_country_iso2, destination_country_iso2,
+         peak_active_entities, peak_observed_origins,
+         peak_flag_proxy_origins, observed_hour_mask, observation_batches,
+         first_observed_at, last_observed_at, source_names
+       )
+       SELECT bucket, mode, origin_country_iso2, destination_country_iso2,
+              peak_active_entities, peak_observed_origins,
+              peak_flag_proxy_origins, observed_hour_mask, 1,
+              first_observed_at, last_observed_at, source_names
+       FROM eligible
+       ON CONFLICT (bucket, mode, origin_country_iso2, destination_country_iso2)
+       DO UPDATE SET
+         peak_active_entities = GREATEST(
+           transport_corridor_activity_day.peak_active_entities,
+           EXCLUDED.peak_active_entities
+         ),
+         peak_observed_origins = GREATEST(
+           transport_corridor_activity_day.peak_observed_origins,
+           EXCLUDED.peak_observed_origins
+         ),
+         peak_flag_proxy_origins = GREATEST(
+           transport_corridor_activity_day.peak_flag_proxy_origins,
+           EXCLUDED.peak_flag_proxy_origins
+         ),
+         observed_hour_mask =
+           transport_corridor_activity_day.observed_hour_mask |
+           EXCLUDED.observed_hour_mask,
+         observation_batches =
+           transport_corridor_activity_day.observation_batches + 1,
+         first_observed_at = LEAST(
+           transport_corridor_activity_day.first_observed_at,
+           EXCLUDED.first_observed_at
+         ),
+         last_observed_at = GREATEST(
+           transport_corridor_activity_day.last_observed_at,
+           EXCLUDED.last_observed_at
+         ),
+         source_names = ARRAY(
+           SELECT DISTINCT source
+           FROM unnest(
+             transport_corridor_activity_day.source_names || EXCLUDED.source_names
+           ) source
+           ORDER BY source
+         )`,
+      values,
+    );
+  }
 }
 
 function activeTransportWhere(alias = "s"): string {
@@ -2014,10 +2407,212 @@ function describeTrendChange(
   } than the previous 24-hour window.`;
 }
 
+function transportDailyHistoryRetentionDays(): number {
+  return boundedIntegerFromEnv(
+    "TRANSPORT_DAILY_HISTORY_RETENTION_DAYS",
+    100,
+    90,
+    120,
+  );
+}
+
+function utcDay(value: string | Date): string {
+  return isoDate(value).slice(0, 10);
+}
+
+async function loadTransportHistory(
+  country: string,
+  corridorCountry: string | null,
+  mode: TransportMode | null,
+) {
+  const historyDays = 90;
+  const modeClause = mode
+    ? "AND mode = $2"
+    : "AND mode IN ('maritime', 'aviation')";
+  const modeParams = mode ? [country, mode] : [country];
+  const activityResult = await query<HistoricalActivityRow>(
+    `WITH country_rows AS (
+       SELECT *
+       FROM transport_country_activity_day
+       WHERE country_iso2 = $1
+         AND bucket >= date_trunc('day', now()) - interval '89 days'
+         ${modeClause}
+     ),
+     metrics AS (
+       SELECT
+         date_trunc('day', bucket) AS bucket,
+         SUM(peak_active_entities) FILTER (WHERE mode = 'maritime') AS maritime_entities,
+         SUM(peak_active_entities) FILTER (WHERE mode = 'aviation') AS aviation_entities,
+         bit_count(bit_or(observed_hour_mask)::bit(64)) AS observed_hours
+       FROM country_rows
+       GROUP BY date_trunc('day', bucket)
+     ),
+     sources AS (
+       SELECT
+         date_trunc('day', row.bucket) AS bucket,
+         ARRAY_AGG(DISTINCT source ORDER BY source) AS source_names
+       FROM country_rows row
+       CROSS JOIN LATERAL unnest(row.source_names) source
+       GROUP BY date_trunc('day', row.bucket)
+     )
+     SELECT metrics.*, COALESCE(sources.source_names, ARRAY[]::text[]) AS source_names
+     FROM metrics
+     LEFT JOIN sources USING (bucket)
+     ORDER BY bucket`,
+    modeParams,
+  );
+  const [movementResult, corridorResult] = await Promise.all([
+    mode === "aviation"
+      ? Promise.resolve({ rows: [] as HistoricalMovementRow[] })
+      : query<HistoricalMovementRow>(
+          `SELECT
+             date_trunc('day', bucket) AS bucket,
+             SUM(departures) AS ship_departures,
+             SUM(arrivals) AS ship_arrivals,
+             SUM(cargo_vessel_departures) AS cargo_vessel_departures
+           FROM transport_movement_hour
+           WHERE country_iso2 = $1
+             AND bucket >= date_trunc('day', now()) - interval '89 days'
+           GROUP BY date_trunc('day', bucket)
+           ORDER BY bucket`,
+          [country],
+        ),
+    corridorCountry
+      ? query<HistoricalCorridorRow>(
+          `WITH corridor_rows AS (
+             SELECT *
+             FROM transport_corridor_activity_day
+             WHERE bucket >= date_trunc('day', now()) - interval '89 days'
+               AND (
+                 (origin_country_iso2 = $1 AND destination_country_iso2 = $2)
+                 OR
+                 (origin_country_iso2 = $2 AND destination_country_iso2 = $1)
+               )
+               ${mode ? "AND mode = $3" : ""}
+           ),
+           metrics AS (
+             SELECT
+               date_trunc('day', bucket) AS bucket,
+               SUM(peak_active_entities) FILTER (WHERE mode = 'maritime') AS maritime_entities,
+               SUM(peak_active_entities) FILTER (WHERE mode = 'aviation') AS aviation_entities,
+               bit_count(bit_or(observed_hour_mask)::bit(64)) AS observed_hours,
+               SUM(peak_observed_origins) AS observed_origins,
+               SUM(peak_flag_proxy_origins) AS flag_proxy_origins
+             FROM corridor_rows
+             GROUP BY date_trunc('day', bucket)
+           ),
+           sources AS (
+             SELECT
+               date_trunc('day', row.bucket) AS bucket,
+               ARRAY_AGG(DISTINCT source ORDER BY source) AS source_names
+             FROM corridor_rows row
+             CROSS JOIN LATERAL unnest(row.source_names) source
+             GROUP BY date_trunc('day', row.bucket)
+           )
+           SELECT metrics.*, COALESCE(sources.source_names, ARRAY[]::text[]) AS source_names
+           FROM metrics
+           LEFT JOIN sources USING (bucket)
+           ORDER BY bucket`,
+          mode ? [country, corridorCountry, mode] : [country, corridorCountry],
+        )
+      : Promise.resolve({ rows: [] as HistoricalCorridorRow[] }),
+  ]);
+
+  const activity = new Map(activityResult.rows.map((row) => [utcDay(row.bucket), row]));
+  const movements = new Map(movementResult.rows.map((row) => [utcDay(row.bucket), row]));
+  const corridors = new Map(corridorResult.rows.map((row) => [utcDay(row.bucket), row]));
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const series = Array.from({ length: historyDays }, (_, index) => {
+    const date = new Date(today);
+    date.setUTCDate(today.getUTCDate() - (historyDays - index - 1));
+    const day = date.toISOString().slice(0, 10);
+    const activityRow = activity.get(day);
+    const movementRow = movements.get(day);
+    const corridorRow = corridors.get(day);
+    return {
+      bucket: date.toISOString(),
+      maritime_entities: activityRow
+        ? transportHistoryModeValue(
+            mode,
+            "maritime",
+            count(activityRow.maritime_entities),
+          )
+        : null,
+      aviation_entities: activityRow
+        ? transportHistoryModeValue(
+            mode,
+            "aviation",
+            count(activityRow.aviation_entities),
+          )
+        : null,
+      observed_hours: activityRow ? count(activityRow.observed_hours) : 0,
+      ship_departures: movementRow ? count(movementRow.ship_departures) : null,
+      ship_arrivals: movementRow ? count(movementRow.ship_arrivals) : null,
+      cargo_vessel_departures: movementRow
+        ? count(movementRow.cargo_vessel_departures)
+        : null,
+      corridor_maritime_entities: corridorRow
+        ? transportHistoryModeValue(
+            mode,
+            "maritime",
+            count(corridorRow.maritime_entities),
+          )
+        : null,
+      corridor_aviation_entities: corridorRow
+        ? transportHistoryModeValue(
+            mode,
+            "aviation",
+            count(corridorRow.aviation_entities),
+          )
+        : null,
+      corridor_observed_hours: corridorRow ? count(corridorRow.observed_hours) : 0,
+      corridor_observed_origins: corridorRow
+        ? count(corridorRow.observed_origins)
+        : null,
+      corridor_flag_proxy_origins: corridorRow
+        ? count(corridorRow.flag_proxy_origins)
+        : null,
+      source_names: Array.from(
+        new Set([
+          ...(activityRow?.source_names ?? []),
+          ...(corridorRow?.source_names ?? []),
+        ]),
+      ),
+    };
+  });
+  const corridorScoped = Boolean(corridorCountry);
+  const observedSeries = series.filter((point) =>
+    corridorScoped
+      ? point.corridor_observed_hours > 0
+      : point.observed_hours > 0 ||
+        point.ship_departures != null ||
+        point.ship_arrivals != null,
+  );
+  return {
+    scope: corridorScoped ? ("corridor" as const) : ("country" as const),
+    country,
+    corridor_country: corridorCountry,
+    requested_days: historyDays,
+    retention_days: transportDailyHistoryRetentionDays(),
+    available_from: observedSeries[0]?.bucket ?? null,
+    available_to: observedSeries.at(-1)?.bucket ?? null,
+    observed_days: observedSeries.length,
+    windows: ([7, 30, 90] as const).map((days) =>
+      transportHistoryWindow(series, days, corridorScoped),
+    ),
+    series,
+    methodology: corridorScoped
+      ? "Daily sum of directional peak samples with resolved endpoints in either corridor direction. It is not a daily-unique vehicle count. Storage is capped at the first 1,000 admitted country pairs per mode/day, prioritising higher-volume pairs only within each ingestion flush. Later pairs can be omitted regardless of volume, creating an early-cycle sampling bias; this is not a complete corridor ranking. Maritime flag state remains separately labelled as proxy origin evidence. Missing days mean no persisted observations, not zero traffic."
+      : "Daily peak sampled vehicles linked to the selected country, plus separately retained monitored-port transitions. Values are not daily-unique national traffic. Missing days mean no persisted observations, not zero traffic.",
+  };
+}
+
 type TransportOverviewOptions = {
   detail?: TransportDetailLevel;
   mode?: TransportMode;
   country?: string;
+  corridorCountry?: string;
   entityLimit?: number;
   bypassCache?: boolean;
 };
@@ -2026,6 +2621,7 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
   const detail = options?.detail ?? "aggregate";
   const mode = options?.mode ?? null;
   const country = normalizeIso2(options?.country) ?? null;
+  const corridorCountry = normalizeIso2(options?.corridorCountry) ?? null;
   const countryParameter = `$${mode ? 2 : 1}`;
   const filters = [
     activeTransportWhere("s"),
@@ -2244,6 +2840,9 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
            GROUP BY ${country ? "GROUPING SETS ((country_iso2), ())" : "country_iso2"}`,
           trendCountryParams
         );
+  const history = country
+    ? await loadTransportHistory(country, corridorCountry, mode)
+    : null;
 
   const countries = new Map<
     string,
@@ -2657,6 +3256,7 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
       mode: row.mode,
       active_count: count(row.active_count),
     })),
+    history,
     entities,
     coverage: {
       maritime: {
@@ -2699,6 +3299,7 @@ function transportOverviewCacheKey(options?: TransportOverviewOptions): string {
     detail: options?.detail ?? "aggregate",
     mode: options?.mode ?? null,
     country: normalizeIso2(options?.country) ?? null,
+    corridorCountry: normalizeIso2(options?.corridorCountry) ?? null,
     entityLimit: options?.entityLimit ?? null,
   });
 }
@@ -2765,6 +3366,7 @@ function emptyTransportOverview(): TransportOverviewResult {
     takeaways: [],
     ports: [],
     activity: [],
+    history: null,
     entities: [],
     coverage: {
       maritime: {
@@ -2911,47 +3513,80 @@ type RetentionTarget = {
   retentionDays: number;
 };
 
-async function pruneTransportTable(target: RetentionTarget): Promise<number> {
+type RetentionBatchResult = {
+  deleted: number;
+  oldestExpiredAt: string | null;
+};
+
+async function pruneTransportTableBatch(
+  target: RetentionTarget,
+  batchSize: number,
+): Promise<RetentionBatchResult> {
+  const result = await query<{
+    deleted: string | number;
+    oldest_expired_at: string | Date | null;
+  }>(
+    `WITH candidates AS MATERIALIZED (
+       SELECT ctid, ${target.timestampColumn} AS expired_at
+       FROM ${target.table}
+       WHERE ${target.timestampColumn} < now() - ($1 * interval '1 day')
+       ORDER BY ${target.timestampColumn}, ctid
+       LIMIT ($2 + 1)
+       FOR UPDATE SKIP LOCKED
+     ),
+     doomed AS (
+       SELECT ctid
+       FROM candidates
+       ORDER BY expired_at, ctid
+       LIMIT $2
+     ),
+     removed AS (
+       DELETE FROM ${target.table} target
+       USING doomed
+       WHERE target.ctid = doomed.ctid
+       RETURNING 1
+     )
+     SELECT
+       COUNT(*) AS deleted,
+       (
+         SELECT MIN(candidate.expired_at)
+         FROM candidates candidate
+         LEFT JOIN doomed USING (ctid)
+         WHERE doomed.ctid IS NULL
+       ) AS oldest_expired_at
+     FROM removed`,
+    [target.retentionDays, batchSize],
+  );
+  const oldest = result.rows[0]?.oldest_expired_at;
+  return {
+    deleted: count(result.rows[0]?.deleted),
+    oldestExpiredAt: oldest == null ? null : isoDate(oldest),
+  };
+}
+
+async function pruneTransportHistory(): Promise<void> {
+  const startedAt = Date.now();
+  const deadline =
+    startedAt +
+    boundedIntegerFromEnv(
+      "TRANSPORT_RETENTION_BUDGET_SECONDS",
+      30,
+      5,
+      120,
+    ) *
+      1_000;
   const batchSize = boundedIntegerFromEnv(
     "TRANSPORT_RETENTION_BATCH_SIZE",
     5_000,
     500,
     20_000,
   );
-  const maxBatches = boundedIntegerFromEnv(
+  const maximumBatches = boundedIntegerFromEnv(
     "TRANSPORT_RETENTION_MAX_BATCHES",
     10,
     1,
     100,
   );
-  let deleted = 0;
-  for (let batch = 0; batch < maxBatches; batch += 1) {
-    const result = await query<{ deleted: string | number }>(
-      `WITH doomed AS (
-         SELECT ctid
-         FROM ${target.table}
-         WHERE ${target.timestampColumn} < now() - ($1 * interval '1 day')
-         ORDER BY ${target.timestampColumn}
-         LIMIT $2
-       ),
-       removed AS (
-         DELETE FROM ${target.table} target
-         USING doomed
-         WHERE target.ctid = doomed.ctid
-         RETURNING 1
-       )
-       SELECT COUNT(*) AS deleted
-       FROM removed`,
-      [target.retentionDays, batchSize],
-    );
-    const countDeleted = count(result.rows[0]?.deleted);
-    deleted += countDeleted;
-    if (countDeleted < batchSize) break;
-  }
-  return deleted;
-}
-
-async function pruneTransportHistory(): Promise<void> {
   const trackDays = boundedIntegerFromEnv(
     "TRANSPORT_TRACK_RETENTION_DAYS",
     3,
@@ -2961,9 +3596,10 @@ async function pruneTransportHistory(): Promise<void> {
   const aggregateDays = boundedIntegerFromEnv(
     "TRANSPORT_AGGREGATE_RETENTION_DAYS",
     60,
-    7,
+    30,
     730,
   );
+  const dailyHistoryDays = transportDailyHistoryRetentionDays();
   const snapshotDays = boundedIntegerFromEnv(
     "TRANSPORT_SNAPSHOT_RETENTION_DAYS",
     14,
@@ -2984,7 +3620,11 @@ async function pruneTransportHistory(): Promise<void> {
     {
       table: "transport_movement_hour",
       timestampColumn: "bucket",
-      retentionDays: aggregateDays,
+      // This is already a compact port/hour aggregate (no entity IDs or raw
+      // payload), so retain it alongside the bounded daily history. Otherwise
+      // a 90-day country window would silently lose its final 30 days of port
+      // movement context while still advertising a 90-day scope.
+      retentionDays: dailyHistoryDays,
     },
     {
       table: "transport_entity_activity_hour",
@@ -2992,14 +3632,94 @@ async function pruneTransportHistory(): Promise<void> {
       retentionDays: aggregateDays,
     },
     {
+      table: "transport_country_activity_day",
+      timestampColumn: "bucket",
+      retentionDays: dailyHistoryDays,
+    },
+    {
+      table: "transport_corridor_activity_day",
+      timestampColumn: "bucket",
+      retentionDays: dailyHistoryDays,
+    },
+    {
       table: "transport_snapshot",
       timestampColumn: "observed_at",
       retentionDays: snapshotDays,
     },
   ];
-  const deleted: Record<string, number> = {};
-  for (const target of targets) {
-    deleted[target.table] = await pruneTransportTable(target);
+  const offset = transportRetentionTargetOffset % targets.length;
+  transportRetentionTargetOffset = (transportRetentionTargetOffset + 1) % targets.length;
+  const pending = [...targets.slice(offset), ...targets.slice(0, offset)];
+  const deleted: Record<string, number> = Object.fromEntries(
+    targets.map((target) => [target.table, 0]),
+  );
+  const oldestExpiredByTable = new Map<string, string>();
+  let batches = 0;
+  let activeTarget: RetentionTarget | null = null;
+
+  try {
+    while (
+      pending.length > 0 &&
+      transportRetentionBudgetAvailable({
+        now: Date.now(),
+        deadline,
+        batches,
+        maximumBatches,
+      })
+    ) {
+      const target = pending.shift();
+      if (!target) break;
+      activeTarget = target;
+      const result = await pruneTransportTableBatch(target, batchSize);
+      activeTarget = null;
+      batches += 1;
+      deleted[target.table] += result.deleted;
+      if (result.oldestExpiredAt) {
+        oldestExpiredByTable.set(target.table, result.oldestExpiredAt);
+        pending.push(target);
+      } else {
+        oldestExpiredByTable.delete(target.table);
+      }
+    }
+
+    const backlogTables = Array.from(
+      new Set(pending.map((target) => target.table)),
+    ).sort();
+    const oldestExpiredAt = Array.from(oldestExpiredByTable.values()).sort()[0] ?? null;
+    const budgetExhausted = pending.length > 0;
+    transportRetentionHealth = {
+      running: false,
+      last_pass_at: new Date().toISOString(),
+      duration_ms: Date.now() - startedAt,
+      deleted_rows: Object.values(deleted).reduce((sum, value) => sum + value, 0),
+      batches,
+      backlog: backlogTables.length > 0,
+      backlog_tables: backlogTables,
+      oldest_expired_at: oldestExpiredAt,
+      budget_exhausted: budgetExhausted,
+      error: false,
+    };
+  } catch (error) {
+    const backlogTables = Array.from(
+      new Set([
+        ...(activeTarget ? [activeTarget.table] : []),
+        ...pending.map((target) => target.table),
+      ]),
+    ).sort();
+    transportRetentionHealth = {
+      running: false,
+      last_pass_at: new Date().toISOString(),
+      duration_ms: Date.now() - startedAt,
+      deleted_rows: Object.values(deleted).reduce((sum, value) => sum + value, 0),
+      batches,
+      backlog: true,
+      backlog_tables: backlogTables.length > 0 ? backlogTables : ["unknown"],
+      oldest_expired_at:
+        Array.from(oldestExpiredByTable.values()).sort()[0] ?? null,
+      budget_exhausted: false,
+      error: true,
+    };
+    throw error;
   }
 
   const memoryCutoff = Date.now() - 2 * 24 * 60 * 60 * 1_000;
@@ -3017,14 +3737,30 @@ async function pruneTransportHistory(): Promise<void> {
     if (cached.expiresAt < Date.now()) routeCache.delete(callsign);
   }
 
-  if (Object.values(deleted).some((value) => value > 0)) {
+  if (
+    transportRetentionHealth.deleted_rows > 0 ||
+    transportRetentionHealth.backlog
+  ) {
     console.info(
       JSON.stringify({
         event: "transport_retention_pruned",
         deleted,
+        ...transportRetentionHealth,
       }),
     );
   }
+}
+
+function runTransportRetentionPass(): Promise<void> {
+  if (transportRetentionRun) return transportRetentionRun;
+  transportRetentionHealth = {
+    ...transportRetentionHealth,
+    running: true,
+  };
+  transportRetentionRun = pruneTransportHistory().finally(() => {
+    transportRetentionRun = null;
+  });
+  return transportRetentionRun;
 }
 
 function startTransportRetentionWorker(): void {
@@ -3035,7 +3771,7 @@ function startTransportRetentionWorker(): void {
     15,
     1_440,
   );
-  void pruneTransportHistory().catch((error) => {
+  void runTransportRetentionPass().catch((error) => {
     console.warn(
       `Initial transport retention pass failed: ${
         error instanceof Error ? error.message : String(error)
@@ -3043,7 +3779,7 @@ function startTransportRetentionWorker(): void {
     );
   });
   transportRetentionTimer = setInterval(() => {
-    void pruneTransportHistory().catch((error) => {
+    void runTransportRetentionPass().catch((error) => {
       console.warn(
         `Transport retention pass failed: ${
           error instanceof Error ? error.message : String(error)
@@ -3071,6 +3807,7 @@ async function acquireTransportWorkerLock(): Promise<void> {
       [WORKER_LOCK_NAMESPACE, WORKER_LOCK_KEY]
     );
     if (!lock.rows[0]?.acquired) {
+      transportWorkerLeader = false;
       client.release();
       console.info(
         "Transport ingestion worker is active on another API replica; retrying lock transfer.",
@@ -3081,6 +3818,7 @@ async function acquireTransportWorkerLock(): Promise<void> {
       );
       return;
     }
+    transportWorkerLeader = true;
     connectAisStream();
     startAisWatchdog();
     startDigitrafficMaritimeWorker();
@@ -3118,6 +3856,7 @@ async function acquireTransportWorkerLock(): Promise<void> {
     // Keep the dedicated client checked out: the PostgreSQL session owns the
     // advisory lock and releases it automatically if this process exits.
   } catch (error) {
+    transportWorkerLeader = false;
     console.warn(
       `Transport worker lock is unavailable; retrying: ${
         error instanceof Error ? error.message : String(error)

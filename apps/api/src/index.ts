@@ -25,9 +25,11 @@ import {
 import {
   getTransportEntity,
   getTransportOverview,
+  getTransportRuntimeHealth,
   startTransportIngestionWorkers,
   type TransportMode,
 } from "./connectors/transport";
+import { isLoopbackAddress } from "./connectors/transport-runtime-health";
 import {
   getDatabasePoolStats,
   isDatabaseUnavailableError,
@@ -153,6 +155,17 @@ app.get("/readyz", async (_req, res) => {
     console.warn("Readiness check failed: database unavailable.");
     return res.status(503).send("not ready");
   }
+});
+app.get("/internal/transport/runtime-health", (req, res) => {
+  // This is a deployment-local release gate, not a public observability API.
+  // Inspect the actual socket peer rather than proxy headers so the route
+  // cannot be made public by spoofing X-Forwarded-For.
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    return res.status(404).send("not found");
+  }
+  const health = getTransportRuntimeHealth();
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(health.ready ? 200 : 503).json(health);
 });
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -3332,6 +3345,16 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
     if (!/^[A-Z]{2}$/.test(country)) {
       return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
     }
+    const corridorCountry =
+      typeof req.query.corridor === "string"
+        ? req.query.corridor.trim().toUpperCase()
+        : "";
+    if (corridorCountry && !/^[A-Z]{2}$/.test(corridorCountry)) {
+      return res.status(400).json({ error: "corridor must be an ISO alpha-2 code." });
+    }
+    if (corridorCountry && corridorCountry === country) {
+      return res.status(400).json({ error: "corridor must identify a different country." });
+    }
     const entityLimitRaw =
       typeof req.query.entity_limit === "string"
         ? Number.parseInt(req.query.entity_limit, 10)
@@ -3343,6 +3366,7 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
       detail,
       mode,
       country,
+      corridorCountry: corridorCountry || undefined,
       entityLimit: Number.isFinite(entityLimitRaw as number) ? entityLimitRaw : undefined,
       bypassCache: refresh,
     });

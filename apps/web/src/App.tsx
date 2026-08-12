@@ -927,6 +927,9 @@ export default function ClaritasDashboard() {
   const [newsTranslationPendingIds, setNewsTranslationPendingIds] = useState<Set<number>>(
     () => new Set(),
   );
+  const [newsTranslationErrorIds, setNewsTranslationErrorIds] = useState<Set<number>>(
+    () => new Set(),
+  );
   const [dailyBriefing, setDailyBriefing] = useState<DailySignalBriefing | null>(null);
   const [dailyBriefingError, setDailyBriefingError] = useState<string | null>(null);
   const [dataWindowPreset, setDataWindowPreset] =
@@ -1316,6 +1319,12 @@ export default function ClaritasDashboard() {
     ) {
       return;
     }
+    setNewsTranslationErrorIds((current) => {
+      if (!current.has(item.id)) return current;
+      const next = new Set(current);
+      next.delete(item.id);
+      return next;
+    });
     setNewsTranslationPendingIds((current) => new Set(current).add(item.id));
     try {
       const translation = await ensureNewsTranslationSummary(item.id);
@@ -1339,6 +1348,7 @@ export default function ClaritasDashboard() {
       );
     } catch {
       // The original source remains usable when optional AI enrichment is unavailable.
+      setNewsTranslationErrorIds((current) => new Set(current).add(item.id));
     } finally {
       setNewsTranslationPendingIds((current) => {
         const next = new Set(current);
@@ -3040,6 +3050,34 @@ export default function ClaritasDashboard() {
         (country) => country.country.toUpperCase() === relationCountry,
       ) ?? null
     );
+  }, [relationCountry, transportOverview]);
+
+  const relatedTransportHistory = useMemo(() => {
+    const history = transportOverview?.history;
+    if (
+      !relationCountry ||
+      !history ||
+      history.scope !== "country" ||
+      history.country.toUpperCase() !== relationCountry
+    ) {
+      return null;
+    }
+    const summary = history.windows.find((window) => window.days === 30) ?? null;
+    const series = history.series.slice(-30).map((point) => {
+      const observedCounts = [point.maritime_entities, point.aviation_entities]
+        .filter((value): value is number => value != null);
+      return {
+        day: new Date(point.bucket).toLocaleDateString([], {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        }),
+        vehicles: point.observed_hours > 0 && observedCounts.length > 0
+          ? observedCounts.reduce((total, value) => total + value, 0)
+          : null,
+      };
+    });
+    return { history, summary, series };
   }, [relationCountry, transportOverview]);
 
   const relatedNews = useMemo(() => {
@@ -4956,31 +4994,38 @@ export default function ClaritasDashboard() {
                   </div>
 
                   <section
-                    className={`${cardBase} briefing-rail dashboard-panel order-[5] p-4`}
-                    style={{ animationDelay: "80ms" }}
+                    className={`${cardBase} briefing-rail dashboard-panel order-[0] border-l-4 border-l-[color:var(--shell-accent)] p-3 sm:p-4`}
+                    style={{ animationDelay: "0ms" }}
                   >
                     <details className="group">
                       <summary className="cursor-pointer list-none">
-                        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="grid gap-3 lg:grid-cols-[minmax(14rem,0.5fr)_minmax(20rem,1fr)_auto] lg:items-center">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                               <FileText className="h-3.5 w-3.5" />
-                              Daily briefing · map context
+                              Daily briefing · global map context
                             </div>
                             <div className="mt-1 truncate text-base font-semibold text-[color:var(--shell-ink)]">
                               {dailyBriefing?.title ?? "Daily signal brief"}
                             </div>
                           </div>
-                          <div className="flex min-w-0 flex-col gap-1 text-xs text-[color:var(--shell-muted)] lg:max-w-2xl lg:items-end">
-                            <span>
+                          <div className="min-w-0 text-xs text-[color:var(--shell-ink)]">
+                            {dailyBriefing?.key_takeaways?.length ? (
+                              <div className="grid gap-1 sm:grid-cols-2">
+                                {dailyBriefing.key_takeaways.slice(0, 2).map((item, index) => (
+                                  <span key={`${dailyBriefing.id}-summary-${index}`} className="line-clamp-2 border-l border-[color:var(--shell-border)] pl-3 leading-5">{item}</span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span>{dailyBriefingError ? "Briefing unavailable." : "Takeaways pending."}</span>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-1 text-xs text-[color:var(--shell-muted)] lg:items-end">
+                            <time dateTime={dailyBriefing?.published_at || undefined}>
                               {dailyBriefing?.published_at
                                 ? `Published ${formatExactTimestamp(dailyBriefing.published_at)}`
                                 : "No published briefing"}
-                            </span>
-                            <span className="line-clamp-1 text-[color:var(--shell-ink)]">
-                              {dailyBriefing?.key_takeaways?.[0] ??
-                                (dailyBriefingError ? "Briefing unavailable." : "Takeaways pending.")}
-                            </span>
+                            </time>
                             <span className="inline-flex items-center gap-1 self-start font-semibold text-[color:var(--shell-accent-2)] lg:self-auto">
                               Open full briefing
                               <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
@@ -5677,51 +5722,123 @@ export default function ClaritasDashboard() {
                               )}
                             </section>
 
-                            {relatedTransport && (
+                            {(relatedTransport || relatedTransportHistory) && (
                               <section className="country-profile-section">
                                 <div className="country-profile-section-heading">
                                   <Route className="h-4 w-4" />
                                   <span>Transport movement</span>
-                                  <small>24h compared with previous 24h</small>
+                                  <small>
+                                    {relatedTransport
+                                      ? "24h compared with previous 24h"
+                                      : "current provider sample unavailable · retained history shown below"}
+                                  </small>
                                 </div>
-                                <div className="country-transport-grid">
-                                  {[
-                                    {
-                                      label: "Ship departures",
-                                      metric: relatedTransport.trend.ship_departures,
-                                    },
-                                    {
-                                      label: "Cargo vessels",
-                                      metric:
-                                        relatedTransport.trend
-                                          .cargo_vessel_departures,
-                                    },
-                                    {
-                                      label: "Tracked flights",
-                                      metric: relatedTransport.trend.tracked_flights,
-                                    },
-                                  ].map(({ label, metric }) => (
-                                    <div key={label}>
-                                      <span>{label}</span>
-                                      <strong>{metric.current}</strong>
-                                      <small data-direction={metric.direction}>
-                                        {metric.direction === "new"
-                                          ? "New baseline"
-                                          : metric.change_pct == null
-                                            ? "No comparison"
-                                            : formatSignedMetric(
-                                                metric.change_pct,
-                                                1,
-                                                "%",
-                                              )}
+                                {relatedTransport ? (
+                                  <div className="country-transport-grid">
+                                    {[
+                                      {
+                                        label: "Ship departures",
+                                        metric: relatedTransport.trend.ship_departures,
+                                      },
+                                      {
+                                        label: "Cargo vessels",
+                                        metric:
+                                          relatedTransport.trend
+                                            .cargo_vessel_departures,
+                                      },
+                                      {
+                                        label: "Tracked flights",
+                                        metric: relatedTransport.trend.tracked_flights,
+                                      },
+                                    ].map(({ label, metric }) => (
+                                      <div key={label}>
+                                        <span>{label}</span>
+                                        <strong>{metric.current}</strong>
+                                        <small data-direction={metric.direction}>
+                                          {metric.direction === "new"
+                                            ? "New baseline"
+                                            : metric.change_pct == null
+                                              ? "No comparison"
+                                              : formatSignedMetric(
+                                                  metric.change_pct,
+                                                  1,
+                                                  "%",
+                                                )}
+                                        </small>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="product-state">
+                                    No fresh transport sample is available for this country. Retained observations remain visible; a coverage gap does not mean zero traffic.
+                                  </div>
+                                )}
+                                {relatedTransportHistory?.summary && (
+                                  <div className="mt-3 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+                                    <div className="flex flex-wrap items-end justify-between gap-2">
+                                      <div>
+                                        <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">
+                                          30-day sampled activity
+                                        </span>
+                                        <div className="mt-1 text-xs text-[color:var(--shell-ink)]">
+                                          {relatedTransportHistory.summary.observed_days}/30 observed days · {relatedTransportHistory.summary.average_daily_entities == null
+                                            ? "average unavailable"
+                                            : `${relatedTransportHistory.summary.average_daily_entities.toLocaleString()} average daily peak sample`}
+                                        </div>
+                                      </div>
+                                      <small className="text-[10px] text-[color:var(--shell-muted)]">
+                                        {relatedTransportHistory.history.available_from
+                                          ? `Available from ${new Date(relatedTransportHistory.history.available_from).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} UTC`
+                                          : "History starts with the first persisted observation"}
                                       </small>
                                     </div>
-                                  ))}
-                                </div>
-                                <p className="country-transport-note">
-                                  Cargo-vessel departures are an AIS movement
-                                  proxy, not measured cargo tonnage.
-                                </p>
+                                    <div className="mt-2 h-24" aria-label="Thirty-day sampled transport activity chart">
+                                      {relatedTransportHistory.summary.observed_days > 0 ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                          <AreaChart data={relatedTransportHistory.series} margin={{ top: 4, right: 2, bottom: 0, left: -30 }}>
+                                            <defs>
+                                              <linearGradient id="country-transport-history-fill" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stopColor="var(--signal-sky)" stopOpacity={0.42} />
+                                                <stop offset="100%" stopColor="var(--signal-sky)" stopOpacity={0.03} />
+                                              </linearGradient>
+                                            </defs>
+                                            <XAxis dataKey="day" hide />
+                                            <YAxis allowDecimals={false} tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
+                                            <Tooltip
+                                              contentStyle={{
+                                                background: "var(--shell-surface-strong)",
+                                                border: "1px solid var(--shell-border)",
+                                                borderRadius: 8,
+                                                fontSize: 10,
+                                              }}
+                                            />
+                                            <Area
+                                              type="monotone"
+                                              dataKey="vehicles"
+                                              name="Tracked vehicles"
+                                              stroke="var(--signal-sky)"
+                                              fill="url(#country-transport-history-fill)"
+                                              connectNulls={false}
+                                            />
+                                          </AreaChart>
+                                        </ResponsiveContainer>
+                                      ) : (
+                                        <div className="flex h-full items-center justify-center text-[10px] text-[color:var(--shell-muted)]">
+                                          No persisted observations in this window; missing coverage is not zero traffic.
+                                        </div>
+                                      )}
+                                    </div>
+                                    <p className="mt-1 text-[9px] leading-4 text-[color:var(--shell-muted)]">
+                                      Daily peak sampled vehicles within Claritas provider coverage, not daily-unique traffic. Gaps mean no retained sample, not no traffic.
+                                    </p>
+                                  </div>
+                                )}
+                                {relatedTransport && (
+                                  <p className="country-transport-note">
+                                    Cargo-vessel departures are an AIS movement
+                                    proxy, not measured cargo tonnage.
+                                  </p>
+                                )}
                                 <button
                                   type="button"
                                   className="country-transport-open"
@@ -5925,6 +6042,7 @@ export default function ClaritasDashboard() {
                               }}
                               onRequestTranslation={requestNewsTranslationSummary}
                               translationPendingIds={newsTranslationPendingIds}
+                              translationErrorIds={newsTranslationErrorIds}
                               onSelectCountry={setSelectedCountry}
                               onOpenWorkspace={() => setActiveView("news")}
                               onOpenEvent={handleOpenIntelligence}
@@ -6416,6 +6534,7 @@ export default function ClaritasDashboard() {
                         }}
                         onRequestTranslation={requestNewsTranslationSummary}
                         translationPendingIds={newsTranslationPendingIds}
+                        translationErrorIds={newsTranslationErrorIds}
                         onOpenEvent={handleOpenIntelligence}
                         onSelectCountry={(iso) => {
                           setSelectedCountry(iso);

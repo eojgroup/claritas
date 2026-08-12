@@ -56,6 +56,35 @@ function providerStateClass(state: string) {
   return "bg-amber-100 text-amber-800";
 }
 
+function observationAlignment(capturedAt: string, eventStartTime?: string | null) {
+  if (!eventStartTime) return "Event start time is unresolved; acquisition alignment cannot yet be assessed.";
+  const captured = Date.parse(capturedAt);
+  const started = Date.parse(eventStartTime);
+  if (Number.isNaN(captured) || Number.isNaN(started)) return "Acquisition timing could not be aligned with the event timeline.";
+  const minutes = Math.round(Math.abs(captured - started) / 60_000);
+  const amount = minutes < 60
+    ? `${minutes} minute${minutes === 1 ? "" : "s"}`
+    : minutes < 2_880
+      ? `${Math.round(minutes / 60)} hour${Math.round(minutes / 60) === 1 ? "" : "s"}`
+      : `${Math.round(minutes / 1_440)} day${Math.round(minutes / 1_440) === 1 ? "" : "s"}`;
+  return captured >= started
+    ? `Captured ${amount} after the recorded event start · post-start context, not proof of impact.`
+    : `Captured ${amount} before the recorded event start · possible baseline context only.`;
+}
+
+function sceneConclusion(observation: EarthObservation) {
+  if (observation.model_interpretation) {
+    return "A model has flagged possible features for human review. Its interpretation is not an independent observation and does not confirm event impact.";
+  }
+  if (observation.imagery?.evidence_role === "sensor_derived_signal" || isAnalyticalEarthProduct(observation.product_type)) {
+    return "This analytical product can highlight sensor-derived conditions or change at the mapped area. It does not directly show flames, damage, impact, or cause.";
+  }
+  if (observation.imagery?.natural_color) {
+    return "This natural-colour scene shows visible surface conditions at the mapped area. A view of fields, vegetation, water, or buildings neither confirms nor disproves the reported event without interpreted change evidence.";
+  }
+  return "This image is event-aligned visual context. No visible impact conclusion has been established from it.";
+}
+
 export default function EarthObservationWorkspace({ eventId, locationId, onOpenEvent }: Props) {
   const scoped = Boolean(eventId || locationId);
   const [observations, setObservations] = useState<EarthObservation[]>([]);
@@ -253,6 +282,19 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
   const contextStatus = eventContext?.status ?? eventDetail?.event.status;
   const contextStartTime = eventContext?.start_time ?? eventDetail?.event.start_time;
   const contextCoordinates = eventDetail?.understanding?.coordinates;
+  const contextWhy = eventDetail?.understanding?.why_interesting
+    ?? "This event is prioritised from its relevance, urgency, materiality, and cross-source evidence. Those scores do not establish real-world impact by themselves.";
+  const linkedNews = eventDetail?.linked_news ?? (eventContext?.news?.items ?? []).flatMap((item, index) => {
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    if (!title) return [];
+    return [{
+      id: typeof item.evidence_id === "string" ? item.evidence_id : `observation-news-${index}`,
+      title,
+      url: typeof item.url === "string" ? item.url : null,
+      publisher: typeof item.source_name === "string" ? item.source_name : null,
+      published_at: typeof item.published_at === "string" ? item.published_at : null,
+    }];
+  });
 
   return (
     <div className="workspace-page min-w-0 space-y-4">
@@ -278,10 +320,33 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
           </button>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-3" aria-label="Event imagery context">
+        <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="Event imagery context">
           <article className="app-card rounded-xl p-4"><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">What</div><p className="mt-2 text-sm leading-5 text-[color:var(--shell-ink)]">{text(contextSummary, (eventContext?.event_type ?? eventDetail?.event.event_type) ? `A ${(eventContext?.event_type ?? eventDetail?.event.event_type ?? "event").replace(/_/g, " ")} event under review.` : "Event definition is being resolved from linked evidence.")}</p></article>
           <article className="app-card rounded-xl p-4"><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Where and when</div><p className="mt-2 text-sm leading-5 text-[color:var(--shell-ink)]">{contextLocation}</p>{contextCoordinates && <p className="mt-1 text-xs text-[color:var(--shell-muted)]">{contextCoordinates.label} · {contextCoordinates.basis === "source_observed" ? "source-observed geography" : "estimated mapped geography"}</p>}<p className="mt-1 text-xs text-[color:var(--shell-muted)]">Event start {earthObservationTimestamp(contextStartTime)}</p></article>
-          <article className="app-card rounded-xl p-4"><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Why imagery matters</div><p className="mt-2 text-sm leading-5 text-[color:var(--shell-ink)]">{text(linkage?.limitation, "Compare reported change with observable conditions while preserving sensor, cloud, resolution, and timing limitations.")}</p></article>
+          <article className="app-card rounded-xl p-4"><div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Why it matters</div><p className="mt-2 text-sm leading-5 text-[color:var(--shell-ink)]">{contextWhy}</p></article>
+          <article className="app-card rounded-xl p-4">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Linked reporting</div>
+            {linkedNews.length ? (
+              <div className="mt-2 space-y-2">
+                {linkedNews.slice(0, 2).map((item) => (
+                  <div key={item.id} className="text-xs leading-5 text-[color:var(--shell-ink)]">
+                    {item.url ? <a href={item.url} target="_blank" rel="noreferrer" className="font-semibold text-[color:var(--signal-sky)]">{item.title}</a> : <strong>{item.title}</strong>}
+                    <div className="text-[10px] text-[color:var(--shell-muted)]">{item.publisher || "Publisher unavailable"} · {item.published_at ? earthObservationTimestamp(item.published_at) : "publication time unavailable"}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs leading-5 text-[color:var(--shell-muted)]">
+                {linkedNewsCount > 0
+                  ? `${linkedNewsCount} linked publisher ${linkedNewsCount === 1 ? "report is" : "reports are"} recorded; open the event thread for publisher details. No impact is inferred from imagery alone.`
+                  : "No publisher report is explicitly linked yet. The event is currently sensor- or source-led, so reported impact is not independently contextualised by news."}
+              </p>
+            )}
+          </article>
+        </div>
+
+        <div className="mt-3 rounded-xl border border-[color:var(--signal-amber)]/40 bg-[color:var(--signal-amber-soft)] px-4 py-3 text-xs leading-5 text-[color:var(--shell-ink)]">
+          <strong>Imagery assessment boundary.</strong> {text(linkage?.limitation, "The scenes can provide location- and time-aligned physical context. They do not automatically show the reported event, quantify impact, or establish causation.")}
         </div>
 
         <div className="mt-4 flex flex-wrap gap-3">
@@ -356,12 +421,14 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
                   <div className="flex items-start justify-between gap-3"><div><div className="text-sm font-semibold text-[color:var(--shell-ink)]">{item.location_name || contextLocation}</div><div className="mt-1 text-xs text-[color:var(--shell-muted)]">{earthObservationEvidenceLabel(item)}</div></div>{analytical ? <AlertTriangle className="h-4 w-4 shrink-0 text-amber-700" /> : <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-700" />}</div>
                   <div className="mt-3 space-y-1 text-xs leading-5 text-[color:var(--shell-muted)]">
                     <div><strong className="text-[color:var(--shell-ink)]">Acquired:</strong> {earthObservationTimestamp(item.capture_start)}</div>
+                    <div><strong className="text-[color:var(--shell-ink)]">Timeline:</strong> {observationAlignment(item.capture_start, contextStartTime)}</div>
                     <div className="flex items-center gap-1"><Cloud className="h-3 w-3" />{item.cloud_cover == null ? "Cloud cover not reported" : `${Math.round(item.cloud_cover)}% cloud cover`}</div>
                     <div>{earthObservationQualityLabel(item)}</div>
                     <div>{item.provider.replace(/_/g, " ")} · {item.mission} · {item.collection}</div>
                   </div>
                   <p className="mt-3 text-xs leading-5 text-[color:var(--shell-muted)]">{text(item.imagery?.interpretation ?? item.imagery?.display_guidance, analytical ? "This is a derived analytical layer; colours are not a natural view of the scene." : "Use as visual context alongside event timing and linked reporting.")}</p>
-                  {item.analysis_summary && <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] p-3 text-xs leading-5 text-[color:var(--shell-muted)]"><strong className="block text-[color:var(--shell-ink)]">{item.analysis_summary_role === "model_interpretation" ? "Model interpretation" : "Observation note"}</strong>{item.analysis_summary}</div>}
+                  <div className="mt-3 rounded-lg border border-[color:var(--signal-amber)]/40 bg-[color:var(--signal-amber-soft)] p-3 text-xs leading-5 text-[color:var(--shell-ink)]"><strong className="block">What this scene can support</strong>{sceneConclusion(item)}</div>
+                  {item.analysis_summary && item.analysis_summary_role !== "model_interpretation" && <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] p-3 text-xs leading-5 text-[color:var(--shell-muted)]"><strong className="block text-[color:var(--shell-ink)]">Observation note</strong>{item.analysis_summary}</div>}
                   {item.model_interpretation?.summary && <div className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs leading-5 text-amber-950"><strong className="block">Model interpretation · not a sensor measurement</strong>{item.model_interpretation.summary}<small className="mt-1 block">{item.model_interpretation.notice}</small></div>}
                   <div className="mt-3 border-t border-[color:var(--shell-border)] pt-3 text-[10px] leading-4 text-[color:var(--shell-muted)]"><ShieldCheck className="mr-1 inline h-3 w-3" />{item.attribution || item.provider}{item.license ? ` · ${item.license}` : ""}</div>
                   <div className="mt-3 flex flex-wrap gap-3"><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a>{item.event_id && onOpenEvent && <button type="button" onClick={() => onOpenEvent(item.event_id as string)} className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--signal-sky)]">Open event evidence <Link2 className="h-3 w-3" /></button>}</div>

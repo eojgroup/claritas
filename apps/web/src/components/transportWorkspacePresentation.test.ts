@@ -26,7 +26,7 @@ function overview(): TransportOverview {
       { mode: "aviation", origin_country: "US", origin_name: "United States", destination_country: "CA", destination_name: "Canada", active_count: 99, origin_basis: "observed", examples: [] },
     ],
     trends: {} as TransportOverview["trends"],
-    takeaways: [], ports: [], activity: [],
+    takeaways: [], ports: [], activity: [], history: null,
     entities: [{
       id: "vessel", mode: "maritime", entity_id: "1", display_name: "Vessel", callsign: null, flight_number: null,
       registration: null, vehicle_type: null, vehicle_category: null, latitude: 52, longitude: 4, heading: 90, speed: 10,

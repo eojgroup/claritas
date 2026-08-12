@@ -533,7 +533,7 @@ export type TransportEntity = {
   linkage_confidence: "high" | "medium" | "low" | "none";
   status: string | null;
   is_alert: boolean;
-  source_name: "aisstream" | "adsb_lol";
+  source_name: "aisstream" | "digitraffic" | "adsb_lol";
   observed_at: string;
   country_links: Array<{
     role: "current" | "origin" | "destination" | "flag" | "registration";
@@ -545,6 +545,51 @@ export type TransportActivityPoint = {
   bucket: string;
   mode: TransportMode;
   active_count: number;
+};
+
+export type TransportHistoryPoint = {
+  bucket: string;
+  maritime_entities: number | null;
+  aviation_entities: number | null;
+  observed_hours: number;
+  ship_departures: number | null;
+  ship_arrivals: number | null;
+  cargo_vessel_departures: number | null;
+  corridor_maritime_entities: number | null;
+  corridor_aviation_entities: number | null;
+  corridor_observed_hours: number;
+  corridor_observed_origins: number | null;
+  corridor_flag_proxy_origins: number | null;
+  source_names: string[];
+};
+
+export type TransportHistoryWindow = {
+  days: 7 | 30 | 90;
+  observed_days: number;
+  observation_hours: number;
+  entity_day_observations: number;
+  average_daily_entities: number | null;
+  peak_daily_entities: { bucket: string; value: number } | null;
+  maritime_entity_days: number;
+  aviation_entity_days: number;
+  ship_departures: number | null;
+  ship_arrivals: number | null;
+  cargo_vessel_departures: number | null;
+  observed_origin_share: number | null;
+};
+
+export type TransportHistory = {
+  scope: "country" | "corridor";
+  country: string;
+  corridor_country: string | null;
+  requested_days: 90;
+  retention_days: number;
+  available_from: string | null;
+  available_to: string | null;
+  observed_days: number;
+  windows: TransportHistoryWindow[];
+  series: TransportHistoryPoint[];
+  methodology: string;
 };
 
 export type TransportOverview = {
@@ -602,12 +647,16 @@ export type TransportOverview = {
     cargo_vessel_departures: number;
   }>;
   activity: TransportActivityPoint[];
+  history: TransportHistory | null;
   entities: TransportEntity[];
   coverage: {
     maritime: {
       source: "AISstream";
       transport: "WebSocket";
       configured: boolean;
+      primary_source: "AISstream";
+      primary_coverage: "best_effort_global";
+      primary_service_level: "beta_no_sla";
       primary_configured: boolean;
       primary_status: "disabled" | "connecting" | "reconnecting" | "upstream_stalled" | "live";
       connected: boolean;
@@ -628,6 +677,8 @@ export type TransportOverview = {
       subscription_batches: number;
       subscription_boxes?: number;
       fallback_source: "Fintraffic Digitraffic";
+      fallback_coverage: string;
+      global_fallback_available: false;
       fallback_configured: boolean;
       fallback_last_snapshot_at: string | null;
       fallback_last_stored_at: string | null;
@@ -635,6 +686,7 @@ export type TransportOverview = {
       fallback_snapshots_accepted: number;
       fallback_snapshots_stored: number;
       fallback_license: "CC BY 4.0";
+      coverage_note: string;
       freshness_minutes: number;
       movement_method: string;
       cargo_method: string;
@@ -1730,6 +1782,7 @@ export async function fetchCountryMarketDetail(country: string): Promise<Country
 
 export async function fetchTransportOverview(params: {
   country: string;
+  corridorCountry?: string;
   detail?: "aggregate" | "full";
   mode?: TransportMode;
   entityLimit?: number;
@@ -1741,6 +1794,10 @@ export async function fetchTransportOverview(params: {
   }
   const sp = new URLSearchParams();
   sp.set("country", country);
+  const corridorCountry = params.corridorCountry?.trim().toUpperCase();
+  if (corridorCountry && /^[A-Z]{2}$/.test(corridorCountry)) {
+    sp.set("corridor", corridorCountry);
+  }
   if (params.detail) sp.set("detail", params.detail);
   if (params.mode) sp.set("mode", params.mode);
   if (typeof params.entityLimit === "number") {

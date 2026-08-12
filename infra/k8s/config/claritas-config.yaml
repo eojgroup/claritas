@@ -30,7 +30,19 @@ data:
   # opt-in and are generated only when a user opens a story.
   NEWS_TRANSLATION_ENABLED: "true"
   NEWS_TRANSLATION_TARGET_LANGUAGES: "en"
-  NEWS_TRANSLATION_BATCH_SIZE: "48"
+  # Candidates are loaded in a broad window, then sent in small independently
+  # persisted chunks. Every provider attempt consumes one durable UTC-day
+  # reservation. The automatic sub-cap leaves capacity for reader requests.
+  NEWS_TRANSLATION_BATCH_SIZE: "100"
+  NEWS_TRANSLATION_MODEL: "openrouter/free"
+  NEWS_TRANSLATION_CHUNK_SIZE: "12"
+  NEWS_TRANSLATION_MAX_CHUNK_SOURCE_CHARACTERS: "4500"
+  NEWS_TRANSLATION_MAX_RETRIES: "1"
+  NEWS_TRANSLATION_MAX_OUTPUT_TOKENS: "2048"
+  NEWS_TRANSLATION_MAX_DAILY_REQUESTS: "30"
+  NEWS_TRANSLATION_MAX_AUTOMATIC_DAILY_REQUESTS: "24"
+  NEWS_TRANSLATION_MAX_DAILY_CHARACTERS: "250000"
+  NEWS_TRANSLATION_MAX_DAILY_TOKEN_UNITS: "350000"
   NEWS_TRANSLATION_SUMMARY_MAX_WORDS: "55"
   # Durable cross-domain events use Pub/Sub in GKE and a transactionally
   # equivalent in-process consumer when EVENT_BUS_MODE=local in development.
@@ -123,7 +135,7 @@ data:
   AISSTREAM_ENABLED: "true"
   AISSTREAM_SAMPLE_SECONDS: "600"
   AISSTREAM_IDLE_TIMEOUT_SECONDS: "120"
-  # Rotate small geographic subscriptions and persist bounded batches so a
+  # Persist the documented global subscription in bounded batches so a
   # full-world vessel burst cannot monopolize the API database pool.
   AISSTREAM_FLUSH_INTERVAL_SECONDS: "5"
   AISSTREAM_FLUSH_BATCH_SIZE: "250"
@@ -132,6 +144,9 @@ data:
   DIGITRAFFIC_MARITIME_ENABLED: "true"
   DIGITRAFFIC_MARITIME_POLL_SECONDS: "60"
   DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES: "15"
+  # Deployment health accepts a recent AISstream message or a successful
+  # Fintraffic poll. Empty regional polls still prove provider availability.
+  TRANSPORT_RUNTIME_FRESHNESS_SECONDS: "300"
   TRANSPORT_WORKER_LOCK_RETRY_SECONDS: "10"
   ADSB_LOL_POLL_ENABLED: "true"
   ADSB_LOL_POLL_SECONDS: "600"
@@ -140,10 +155,19 @@ data:
   TRANSPORT_TRACK_SAMPLE_SECONDS: "600"
   TRANSPORT_OVERVIEW_CACHE_SECONDS: "120"
   TRANSPORT_TRACK_RETENTION_DAYS: "3"
+  # Preserve the established country/hour storage budget. A 90-day selector
+  # remains honest about the actual observed coverage inside this window.
   TRANSPORT_AGGREGATE_RETENTION_DAYS: "60"
+  # Corridor history is a daily aggregate capped at 1,000 country pairs per
+  # mode/day: at most 200,000 retained rows with the 100-day default.
+  TRANSPORT_DAILY_HISTORY_RETENTION_DAYS: "100"
+  TRANSPORT_CORRIDOR_PAIRS_PER_DAY_MODE: "1000"
   TRANSPORT_SNAPSHOT_RETENTION_DAYS: "14"
   TRANSPORT_RETENTION_INTERVAL_MINUTES: "180"
   TRANSPORT_RETENTION_BATCH_SIZE: "5000"
+  # One pass shares this wall-clock and batch budget across every retention
+  # table; unfinished tables remain visible as backlog and rotate to the front.
+  TRANSPORT_RETENTION_BUDGET_SECONDS: "30"
   TRANSPORT_RETENTION_MAX_BATCHES: "10"
   KEYCLOAK_REALM: "claritas"
   KEYCLOAK_WEB_CLIENT_ID: "claritas-web"

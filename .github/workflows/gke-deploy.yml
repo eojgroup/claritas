@@ -543,7 +543,7 @@ jobs:
               --from-literal=AISSTREAM_API_KEY="$AISSTREAM_API_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
           else
-            echo "::warning::AISSTREAM_API_KEY not provided; maritime transport ingestion remains disabled"
+            echo "::warning::AISSTREAM_API_KEY not provided; global maritime ingestion is unavailable and only the configured regional fallback can run"
           fi
 
           eo_args=()
@@ -920,10 +920,10 @@ jobs:
           kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
             const missing = [];
             if (!process.env.FRED_API_KEY?.trim()) missing.push("FRED_API_KEY");
-            if (!process.env.AISSTREAM_API_KEY?.trim()) missing.push("AISSTREAM_API_KEY");
-            if (["0", "false", "no", "off"].includes((process.env.AISSTREAM_ENABLED || "true").toLowerCase())) {
-              missing.push("AISSTREAM_ENABLED=true");
-            }
+            const disabled = (value) => ["0", "false", "no", "off"].includes((value || "true").toLowerCase());
+            const primaryConfigured = !disabled(process.env.AISSTREAM_ENABLED) && Boolean(process.env.AISSTREAM_API_KEY?.trim());
+            const fallbackConfigured = !disabled(process.env.DIGITRAFFIC_MARITIME_ENABLED);
+            if (!primaryConfigured && !fallbackConfigured) missing.push("AISstream credentials or DIGITRAFFIC_MARITIME_ENABLED=true");
             if (["0", "false", "no", "off"].includes((process.env.DAILY_BRIEFING_SCHEDULER_ENABLED || "true").toLowerCase())) {
               missing.push("DAILY_BRIEFING_SCHEDULER_ENABLED=true");
             }
@@ -934,13 +934,71 @@ jobs:
             fetch("http://127.0.0.1:8080/readyz")
               .then((response) => {
                 if (!response.ok) throw new Error(`readiness returned ${response.status}`);
-                console.log("FRED, AISstream, daily scheduler, and API readiness are configured.");
+                console.log("FRED, maritime provider path, daily scheduler, and API readiness are configured.");
               })
               .catch((error) => {
                 console.error(error);
                 process.exit(1);
               });
           '
+
+          # Query every pod over its loopback interface. Standby replicas are
+          # expected under advisory-lock leader election; the release requires
+          # at least one current leader source, without requiring vessels to be
+          # present in Fintraffic's regional reception area.
+          transport_ready=0
+          transport_state=""
+          for attempt in $(seq 1 24); do
+            mapfile -t pods < <(
+              kubectl -n "${NAMESPACE}" get pods \
+                -l app=claritas-api \
+                --field-selector=status.phase=Running \
+                -o name
+            )
+            for pod in "${pods[@]}"; do
+              body="$(
+                kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- node -e '
+                  fetch("http://127.0.0.1:8080/internal/transport/runtime-health")
+                    .then((response) => response.text())
+                    .then((value) => process.stdout.write(value))
+                    .catch(() => process.exit(1));
+                ' 2>/dev/null || true
+              )"
+              summary="$(
+                printf '%s' "$body" | node -e '
+                  let input = "";
+                  process.stdin.on("data", (chunk) => { input += chunk; });
+                  process.stdin.on("end", () => {
+                    try {
+                      const health = JSON.parse(input);
+                      console.log(`${Boolean(health.ready)} ${health.state || "unknown"}`);
+                    } catch {
+                      console.log("false unreadable");
+                    }
+                  });
+                '
+              )"
+              read -r ready state <<< "$summary"
+              echo "${pod}: transport runtime ${state}"
+              if [ "$ready" = "true" ] && { [ "$state" = "live_primary" ] || [ "$state" = "regional_fallback" ]; }; then
+                transport_ready=1
+                transport_state="$state"
+                break 2
+              fi
+            done
+            sleep 10
+          done
+          if [ "$transport_ready" -ne 1 ]; then
+            echo "::error::No transport leader reported a current AISstream primary or explicit Fintraffic regional fallback." >&2
+            kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
+              grep -E "(AISstream|aisstream_|digitraffic_maritime_refresh|Transport ingestion worker)" || true
+            exit 1
+          fi
+          if [ "$transport_state" = "regional_fallback" ]; then
+            echo "::warning::Transport is healthy but degraded to the Finland/Baltic Fintraffic fallback; global AIS is not implied."
+          else
+            echo "::notice title=Transport runtime verified::AISstream primary is current."
+          fi
           kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
             grep -E "(Ingestion automation worker started|Daily briefing scheduler started|Transport ingestion worker|AISstream transport subscription connected|aisstream_subscription_started|aisstream_ingestion_progress|aisstream_idle_reconnect|digitraffic_maritime_refresh)" || true
 

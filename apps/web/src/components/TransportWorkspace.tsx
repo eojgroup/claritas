@@ -17,6 +17,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -38,6 +39,7 @@ import {
 } from "../lib/api";
 
 type ModeFilter = TransportMode | "all";
+type HistoryWindow = 7 | 30 | 90;
 type Props = {
   initialCountry?: string | null;
 };
@@ -66,6 +68,18 @@ function timeLabel(value: string | null | undefined) {
 
 function exactTimeLabel(value: string | null | undefined) {
   return transportTimestamp(value)?.exact ?? "No timestamp received";
+}
+
+function historyDateLabel(value: string | null | undefined) {
+  if (!value) return "No observations yet";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "Date unavailable";
+  return date.toLocaleDateString([], {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 function formatNumber(value: number | null | undefined, suffix = "") {
@@ -223,6 +237,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
   const [mode, setMode] = useState<ModeFilter>("all");
   const [country, setCountry] = useState<string>(() => normalizedCountry(initialCountry));
   const [corridorCountry, setCorridorCountry] = useState("");
+  const [historyWindow, setHistoryWindow] = useState<HistoryWindow>(30);
   const [selected, setSelected] = useState<TransportEntity | null>(null);
   const [track, setTrack] = useState<TransportTrackPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -259,6 +274,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
           detail: "full",
           mode: mode === "all" ? undefined : mode,
           country,
+          corridorCountry: corridorCountry || undefined,
           entityLimit: 1_200,
           refresh: force,
         });
@@ -275,7 +291,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
         }
       }
     },
-    [country, mode],
+    [corridorCountry, country, mode],
   );
 
   useEffect(() => {
@@ -285,7 +301,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
     // Selection is intentionally excluded: selecting a marker must not refetch
     // the entire workspace.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [country, mode]);
+  }, [corridorCountry, country, mode]);
 
   const selectEntity = useCallback(async (entity: TransportEntity) => {
     const requestID = selectionRequestRef.current + 1;
@@ -367,6 +383,35 @@ export default function TransportWorkspace({ initialCountry }: Props) {
         new Date(left.bucket).getTime() - new Date(right.bucket).getTime(),
     );
   }, [overview]);
+
+  const history = overview?.history ?? null;
+  const historySummary = history?.windows.find(
+    (window) => window.days === historyWindow,
+  );
+  const historySeries = useMemo(() => {
+    const corridorScoped = history?.scope === "corridor";
+    return (history?.series ?? []).slice(-historyWindow).map((point) => ({
+      ...point,
+      label: new Date(point.bucket).toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
+      }),
+      maritime: corridorScoped
+        ? point.corridor_maritime_entities
+        : point.maritime_entities,
+      aviation: corridorScoped
+        ? point.corridor_aviation_entities
+        : point.aviation_entities,
+      departures: corridorScoped ? null : point.ship_departures,
+    }));
+  }, [history, historyWindow]);
+  const historySources = useMemo(
+    () =>
+      Array.from(
+        new Set(historySeries.flatMap((point) => point.source_names)),
+      ),
+    [historySeries],
+  );
 
   const countryRows = useMemo(
     () =>
@@ -992,6 +1037,157 @@ export default function TransportWorkspace({ initialCountry }: Props) {
               </article>
             </>
           )}
+        </section>
+      )}
+
+      {history && historySummary && (
+        <section className="app-card transport-history-card" aria-label="Historical transport observations">
+          <header>
+            <div>
+              <span>Persisted observation history</span>
+              <h2>
+                {history.scope === "corridor" && history.corridor_country
+                  ? `${country} ↔ ${history.corridor_country} sampled activity`
+                  : `${selectedCountryInsight?.countryName ?? country} sampled activity`}
+              </h2>
+              <p>
+                Coverage {historyDateLabel(history.available_from)}–{historyDateLabel(history.available_to)} UTC · {history.observed_days} observed days currently retained
+              </p>
+            </div>
+            <div className="transport-history-window" aria-label="History window">
+              {([7, 30, 90] as const).map((days) => (
+                <button
+                  key={days}
+                  type="button"
+                  aria-pressed={historyWindow === days}
+                  onClick={() => setHistoryWindow(days)}
+                >
+                  {days}d
+                </button>
+              ))}
+            </div>
+          </header>
+
+          <div className="transport-history-layout">
+            <div className="transport-history-chart">
+              {historySummary.observed_days > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={historySeries} margin={{ top: 8, right: 8, bottom: 2, left: -10 }}>
+                    <defs>
+                      <linearGradient id="history-aviation-fill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#77A8BA" stopOpacity={0.58} />
+                        <stop offset="100%" stopColor="#77A8BA" stopOpacity={0.03} />
+                      </linearGradient>
+                      <linearGradient id="history-maritime-fill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#EDA36A" stopOpacity={0.5} />
+                        <stop offset="100%" stopColor="#EDA36A" stopOpacity={0.03} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="var(--shell-border)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 10 }} minTickGap={30} />
+                    <YAxis yAxisId="entities" tick={{ fontSize: 10 }} allowDecimals={false} />
+                    {history.scope === "country" && (
+                      <YAxis
+                        yAxisId="movements"
+                        orientation="right"
+                        tick={{ fontSize: 10 }}
+                        allowDecimals={false}
+                      />
+                    )}
+                    <Tooltip
+                      contentStyle={{
+                        background: "var(--shell-surface-strong)",
+                        border: "1px solid var(--shell-border)",
+                        borderRadius: 8,
+                      }}
+                    />
+                    <Legend />
+                    {mode !== "maritime" && (
+                      <Area
+                        yAxisId="entities"
+                        type="monotone"
+                        dataKey="aviation"
+                        name="Peak sampled aircraft"
+                        stroke="#77A8BA"
+                        fill="url(#history-aviation-fill)"
+                        connectNulls={false}
+                      />
+                    )}
+                    {mode !== "aviation" && (
+                      <Area
+                        yAxisId="entities"
+                        type="monotone"
+                        dataKey="maritime"
+                        name="Peak sampled vessels"
+                        stroke="#EDA36A"
+                        fill="url(#history-maritime-fill)"
+                        connectNulls={false}
+                      />
+                    )}
+                    {history.scope === "country" && mode !== "aviation" && (
+                      <Bar
+                        yAxisId="movements"
+                        dataKey="departures"
+                        name="Port departures"
+                        fill="var(--signal-amber)"
+                        opacity={0.55}
+                        maxBarSize={12}
+                      />
+                    )}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="transport-chart-empty">
+                  {history.scope === "corridor"
+                    ? "Corridor history starts when this release records the first vehicle with both endpoints resolved."
+                    : "No persisted observations fall inside this window yet."}
+                </div>
+              )}
+            </div>
+
+            <div className="transport-history-metrics">
+              <article>
+                <span>Average observed day</span>
+                <strong>
+                  {historySummary.average_daily_entities == null
+                    ? "—"
+                    : historySummary.average_daily_entities.toLocaleString()}
+                </strong>
+                <small>Daily peak sampled vehicles, not daily-unique; days without samples are excluded</small>
+              </article>
+              <article>
+                <span>Peak observed day</span>
+                <strong>{historySummary.peak_daily_entities?.value.toLocaleString() ?? "—"}</strong>
+                <small>{historyDateLabel(historySummary.peak_daily_entities?.bucket)}</small>
+              </article>
+              <article>
+                <span>Coverage in {historyWindow}d window</span>
+                <strong>{historySummary.observed_days}/{historyWindow} days</strong>
+                <small>{historySummary.observation_hours.toLocaleString()} provider-observation hours</small>
+              </article>
+              <article>
+                <span>{history.scope === "corridor" ? "Resolved origin evidence" : "Monitored port flow"}</span>
+                <strong>
+                  {history.scope === "corridor"
+                    ? historySummary.observed_origin_share == null
+                      ? "—"
+                      : `${historySummary.observed_origin_share.toFixed(1)}% direct`
+                    : `${(historySummary.ship_departures ?? 0).toLocaleString()} out · ${(historySummary.ship_arrivals ?? 0).toLocaleString()} in`}
+                </strong>
+                <small>
+                  {history.scope === "corridor"
+                    ? "Remainder uses maritime flag state as an explicitly labelled proxy"
+                    : `${(historySummary.cargo_vessel_departures ?? 0).toLocaleString()} cargo/tanker departure observations`}
+                </small>
+              </article>
+            </div>
+          </div>
+          <footer>
+            <span>{history.methodology}</span>
+            <span>
+              Sources in this window: {historySources.length > 0 ? historySources.join(", ") : "none observed"}. Retention policy: {history.retention_days} days.
+            </span>
+          </footer>
         </section>
       )}
 

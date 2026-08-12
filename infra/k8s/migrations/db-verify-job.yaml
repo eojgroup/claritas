@@ -69,6 +69,7 @@ spec:
                   ('ingestion_run'),
                   ('country'),
                   ('item'),
+                  ('item_translation'),
                   ('weather_snapshot'),
                   ('market_snapshot'),
                   ('app_user'),
@@ -90,9 +91,12 @@ spec:
                   ('earth_provider_usage'),
                   ('earth_fire_detection'),
                   ('earthquake_observation'),
+                  ('transport_country_activity_day'),
+                  ('transport_corridor_activity_day'),
                   ('alert_candidate'),
                   ('alert_candidate_recipient'),
                   ('alert_email_delivery'),
+                  ('news_translation_usage'),
                   ('user_intelligence_watchlist')
                 ) AS t(name)
                 WHERE to_regclass('public.' || t.name) IS NULL;

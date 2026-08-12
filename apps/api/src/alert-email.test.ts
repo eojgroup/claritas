@@ -28,6 +28,7 @@ const event: BriefingIntelligenceEvent = {
   materiality_score: 0.69,
   source_diversity: 3,
   domain_count: 2,
+  start_time: "2026-08-11T09:30:00.000Z",
   last_activity_time: "2026-08-11T12:00:00.000Z",
   what: "Disruption is being assessed.",
   where: "Port of Rotterdam, NL",
@@ -62,6 +63,8 @@ const event: BriefingIntelligenceEvent = {
     source_url: "https://dataspace.copernicus.eu/",
     attribution: "Copernicus Sentinel data",
     evidentiary_role: "sensor_observation",
+    temporal_alignment: "Captured 30 minutes after the recorded event start.",
+    assessment_boundary: "Visual context does not establish impact or cause.",
   }],
   evidence: [],
   entities: [],
@@ -118,7 +121,12 @@ test("important-event email includes event, geography, news, EO and profile cont
     assert.match(rendered.subject, /^\[HIGH\]/);
     assert.match(rendered.html, /Port of Rotterdam, NL/);
     assert.match(rendered.html, /Terminal operator reports delays/);
+    assert.match(rendered.html, /Event start:<\/strong> 2026-08-11 09:30:00 UTC/);
+    assert.match(rendered.html, /published 2026-08-11 11:00:00 UTC/);
+    assert.match(rendered.html, /Alert created 2026-08-11 12:00:00 UTC/);
     assert.match(rendered.html, /sensor-derived observation/);
+    assert.match(rendered.html, /captured 2026-08-11 10:00:00 UTC/);
+    assert.match(rendered.html, /Visual context does not establish impact or cause/);
     assert.match(rendered.html, /Transportation/);
     assert.match(rendered.html, /Open event evidence\/imagery/);
     assert.match(rendered.text, /\?event=5c2d6f9b-e28d-4e14-bd21-928a5242052f/);

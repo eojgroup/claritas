@@ -94,6 +94,8 @@ describe("EarthObservationWorkspace event scope", () => {
     expect(await screen.findByRole("heading", { name: "Port fire" })).toBeTruthy();
     expect(screen.getAllByText("NL test site").length).toBeGreaterThan(0);
     expect(screen.getByText("2 linked news reports")).toBeTruthy();
+    expect(screen.getByText(/2 linked publisher reports are recorded/i)).toBeTruthy();
+    expect(screen.getByText("Material event context.")).toBeTruthy();
     expect(screen.getByText(/No readable event imagery is available yet/)).toBeTruthy();
   });
 

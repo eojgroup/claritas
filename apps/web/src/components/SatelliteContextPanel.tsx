@@ -37,6 +37,18 @@ type SatelliteSlide = {
   interpretation?: string | null;
   displayGuidance?: string | null;
   linkedNewsCount?: number | null;
+  linkedNews: Array<{
+    id: string;
+    title: string;
+    url?: string | null;
+    publisher?: string | null;
+    publishedAt?: string | null;
+  }>;
+  whyInteresting?: string | null;
+  eventStartTime?: string | null;
+  evidenceRole?: "visual_context" | "sensor_derived_signal" | "regional_browse_context";
+  visualClass?: "natural" | "enhanced" | "analytical" | "radar" | "browse";
+  naturalColor?: boolean;
   linkageLimitation?: string | null;
   modelInterpretation?: {
     summary?: string | null;
@@ -48,6 +60,54 @@ type SatelliteSlide = {
     notice: string;
   } | null;
 };
+
+function observationAlignment(
+  capturedAt: string,
+  eventStartTime?: string | null,
+  capturedAtPrecision: SatelliteSlide["capturedAtPrecision"] = "instant",
+) {
+  if (!eventStartTime) return "Event start time is unresolved, so acquisition alignment cannot yet be assessed.";
+  const captured = Date.parse(capturedAt);
+  const started = Date.parse(eventStartTime);
+  if (Number.isNaN(captured) || Number.isNaN(started)) {
+    return "Acquisition timing could not be aligned with the event timeline.";
+  }
+  if (capturedAtPrecision === "date") {
+    const capturedDay = capturedAt.slice(0, 10);
+    const eventDay = new Date(started).toISOString().slice(0, 10);
+    if (capturedDay === eventDay) {
+      return "The browse layer and event share the same UTC day, but the provider supplies no exact capture time; their order within that day cannot be established.";
+    }
+    return capturedDay > eventDay
+      ? "The browse layer is dated after the event's UTC start day. Its exact acquisition time is unavailable, so it is day-level post-event context only."
+      : "The browse layer is dated before the event's UTC start day. Its exact acquisition time is unavailable, so it is day-level baseline context only.";
+  }
+  const minutes = Math.round(Math.abs(captured - started) / 60_000);
+  const interval = minutes < 60
+    ? `${minutes} minute${minutes === 1 ? "" : "s"}`
+    : minutes < 2_880
+      ? `${Math.round(minutes / 60)} hour${Math.round(minutes / 60) === 1 ? "" : "s"}`
+      : `${Math.round(minutes / 1_440)} day${Math.round(minutes / 1_440) === 1 ? "" : "s"}`;
+  return captured >= started
+    ? `Acquired ${interval} after the recorded event start; this is post-start context, not proof of impact or cause.`
+    : `Acquired ${interval} before the recorded event start; use it only as possible baseline context.`;
+}
+
+function imageConclusion(slide: SatelliteSlide) {
+  if (slide.observationKind === "browse_context") {
+    return "This regional browse image locates the wider setting. Its scale cannot establish event conditions, damage, or cause.";
+  }
+  if (slide.modelInterpretation) {
+    return "A model has interpreted this scene, but its findings remain hypotheses for human review—not an independent observation or impact confirmation.";
+  }
+  if (slide.evidenceRole === "sensor_derived_signal" || slide.visualClass === "analytical") {
+    return "This derived sensor product can highlight spectral conditions at the mapped area. It does not directly show flames, damage, impact, or causation.";
+  }
+  if (slide.naturalColor) {
+    return "This natural-colour scene shows visible surface conditions at the mapped area. Seeing fields, forest, water, or buildings does not confirm or disprove the reported event; no visual impact conclusion is available without interpreted change evidence.";
+  }
+  return "This event-aligned scene supplies visual context only. No visible impact conclusion has been established from the image.";
+}
 
 function eventRank(event: IntelligenceEvent) {
   return (event.earth_observation_available ? 2 : 0)
@@ -71,6 +131,18 @@ function formatExactTimestamp(value: string) {
 
 function friendlyContextError() {
   return "Satellite context is temporarily unavailable. Retry shortly.";
+}
+
+function observationAttributionFallback(
+  provider?: string | null,
+  mission?: string | null,
+) {
+  const sourceIdentity = [provider, mission]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
+  return sourceIdentity.length > 0
+    ? `Source: ${sourceIdentity.join(" · ")}. Formal attribution was not supplied in this observation record.`
+    : "Formal source attribution was not supplied in this observation record.";
 }
 
 const MAX_PROCESSED_EVENT_DETAILS = 3;
@@ -116,11 +188,17 @@ export default function SatelliteContextPanel({
         processedCandidates.map((event) => fetchIntelligenceEvent(event.id)),
       );
       if (requestId.current !== currentRequest) return;
+      const detailByEventId = new Map(detailResults.flatMap((result, index) => (
+        result.status === "fulfilled" && processedCandidates[index]
+          ? [[processedCandidates[index].id, result.value] as const]
+          : []
+      )));
       const processedSlides = detailResults.flatMap((result, index): SatelliteSlide[] => {
         if (result.status !== "fulfilled") return [];
         const event = processedCandidates[index];
         if (!event) return [];
-        const observation = selectOverviewObservation(result.value.earth_observations ?? [], false);
+        const detail = result.value;
+        const observation = selectOverviewObservation(detail.earth_observations ?? [], false);
         const asset = observation?.imagery?.preferred_asset
           ?? observation?.assets.find((item) => item.asset_type === "preview")
           ?? observation?.assets[0];
@@ -139,7 +217,8 @@ export default function SatelliteContextPanel({
           notice: observation.analysis_summary_role !== "model_interpretation" && observation.analysis_summary
             ? observation.analysis_summary
             : "A processed, event-scoped observation. Sensor, cloud and acquisition differences still limit comparison.",
-          attribution: observation.attribution || "Contains modified Copernicus Sentinel data.",
+          attribution: observation.attribution?.trim()
+            || observationAttributionFallback(observation.provider, observation.mission),
           imageWidth: asset.width,
           imageHeight: asset.height,
           resolutionM: observation.imagery?.native_resolution_m ?? observation.resolution_m,
@@ -148,7 +227,21 @@ export default function SatelliteContextPanel({
           qualityTier: observation.imagery?.quality_tier,
           interpretation: observation.imagery?.interpretation,
           displayGuidance: observation.imagery?.display_guidance,
-          linkedNewsCount: observation.event_context?.news?.count,
+          linkedNewsCount: detail.understanding?.linked_news_count
+            ?? observation.event_context?.news?.count
+            ?? detail.linked_news?.length,
+          linkedNews: (detail.linked_news ?? []).slice(0, 3).map((item) => ({
+            id: item.id,
+            title: item.title,
+            url: item.url,
+            publisher: item.publisher,
+            publishedAt: item.published_at,
+          })),
+          whyInteresting: detail.understanding?.why_interesting ?? null,
+          eventStartTime: detail.event.start_time,
+          evidenceRole: observation.imagery?.evidence_role,
+          visualClass: observation.imagery?.visual_class,
+          naturalColor: observation.imagery?.natural_color,
           linkageLimitation: observation.event_context?.linkage?.limitation,
           modelInterpretation: observation.model_interpretation,
         }];
@@ -162,13 +255,24 @@ export default function SatelliteContextPanel({
         .filter((event) => !processedEventIds.has(event.id))
         .slice(0, browseSlots);
       const browseResults = await Promise.allSettled(
-        browseCandidates.map((event) => fetchEventGibsContext(event.id)),
+        browseCandidates.map(async (event) => {
+          const knownDetail = detailByEventId.get(event.id);
+          const [gibsResult, detailResult] = await Promise.allSettled([
+            fetchEventGibsContext(event.id),
+            knownDetail ? Promise.resolve(knownDetail) : fetchIntelligenceEvent(event.id),
+          ]);
+          if (gibsResult.status === "rejected") throw gibsResult.reason;
+          return {
+            gibs: gibsResult.value,
+            detail: detailResult.status === "fulfilled" ? detailResult.value : null,
+          };
+        }),
       );
       const browseSlides = browseResults.flatMap((result, index): SatelliteSlide[] => {
-        if (result.status !== "fulfilled" || !result.value) return [];
+        if (result.status !== "fulfilled" || !result.value.gibs) return [];
         const event = browseCandidates[index];
         if (!event) return [];
-        const gibs = result.value;
+        const { gibs, detail } = result.value;
         const gibsLayer = gibs.layers.find((layer) => layer.category === "true_color" && layer.preview_url);
         if (!gibsLayer) return [];
         return [{
@@ -185,6 +289,19 @@ export default function SatelliteContextPanel({
           qualityTier: gibsLayer.quality_tier,
           interpretation: "Regional browse imagery for geographic and environmental context, not detailed event verification.",
           displayGuidance: gibsLayer.display_guidance,
+          linkedNewsCount: detail?.understanding?.linked_news_count ?? detail?.linked_news?.length ?? null,
+          linkedNews: (detail?.linked_news ?? []).slice(0, 3).map((item) => ({
+            id: item.id,
+            title: item.title,
+            url: item.url,
+            publisher: item.publisher,
+            publishedAt: item.published_at,
+          })),
+          whyInteresting: detail?.understanding?.why_interesting ?? null,
+          eventStartTime: detail?.event.start_time ?? event.start_time,
+          evidenceRole: "regional_browse_context",
+          visualClass: "browse",
+          naturalColor: true,
         }];
       });
       const rows = [...processedSlides, ...browseSlides]
@@ -290,7 +407,11 @@ export default function SatelliteContextPanel({
           <div className={`flex min-w-0 flex-col ${compact ? "p-3" : "p-4 sm:p-5"}`}>
             <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-muted)]">
               <span className={current.observationKind === "processed_observation" ? "text-[color:var(--signal-emerald)]" : "text-[color:var(--signal-amber)]"}>
-                {current.observationKind === "processed_observation" ? "Satellite assessment available" : "Context only · not proof"}
+                {current.modelInterpretation
+                  ? "Model interpretation available · review required"
+                  : current.observationKind === "processed_observation"
+                    ? "Event-aligned imagery · impact not established"
+                    : "Context only · not proof"}
               </span>
             </div>
             <div className="mt-1 space-y-0.5 text-[9px] leading-4 text-[color:var(--shell-muted)]">
@@ -306,12 +427,47 @@ export default function SatelliteContextPanel({
             {currentEvent?.focus && <p className="mt-1 text-xs text-[color:var(--shell-muted)]">Signal focus · {currentEvent.focus}</p>}
             <div className="mt-3 flex items-center gap-1.5 text-xs font-semibold text-[color:var(--shell-ink)]"><MapPin className="h-3.5 w-3.5 text-[color:var(--shell-accent-2)]" />{currentEvent?.locationLabel || "Event geography"}</div>
             {currentEvent?.coordinateLabel && <div className="mt-1 pl-5 text-[10px] leading-4 text-[color:var(--shell-muted)]">{currentEvent.locationBasis} · {currentEvent.coordinateLabel}</div>}
-            {currentEvent && !compact && (
-              <div className="mt-3 grid grid-cols-2 gap-2">
+            {currentEvent && (
+              <div className={`mt-3 grid gap-2 ${compact ? "grid-cols-1" : "grid-cols-2"}`}>
                 <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-2.5"><div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-accent)]">What happened</div><p className="mt-1 line-clamp-3 text-[11px] leading-4 text-[color:var(--shell-ink)]">{currentEvent.summary}</p></div>
-                <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-2.5"><div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-accent)]">Why it ranks</div><p className="mt-1 text-[11px] leading-4 text-[color:var(--shell-ink)]">{Math.round(current.event.relevance_score * 100)}% relevance · {current.linkedNewsCount == null ? `${current.event.evidence_count} linked evidence` : `${current.linkedNewsCount} linked ${current.linkedNewsCount === 1 ? "report" : "reports"}`}</p></div>
+                <div className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-2.5"><div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-accent)]">Why it matters</div><p className="mt-1 line-clamp-3 text-[11px] leading-4 text-[color:var(--shell-ink)]">{current.whyInteresting || `${Math.round(current.event.relevance_score * 100)}% relevance across ${current.event.domain_count} linked ${current.event.domain_count === 1 ? "domain" : "domains"}. Impact has not been independently established.`}</p></div>
               </div>
             )}
+            <div className="mt-2 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-2.5">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-muted)]">Linked reporting</div>
+              {current.linkedNews.length ? (
+                <div className="mt-1 space-y-1.5">
+                  {current.linkedNews.slice(0, compact ? 1 : 3).map((item) => (
+                    <div key={item.id} className="text-[10px] leading-4 text-[color:var(--shell-ink)]">
+                      {item.url ? (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold text-[color:var(--signal-sky)] hover:underline"
+                        >
+                          {item.title}
+                        </a>
+                      ) : (
+                        <span className="font-semibold">{item.title}</span>
+                      )}
+                      <span className="text-[color:var(--shell-muted)]"> · {item.publisher || "Publisher unavailable"}{item.publishedAt ? ` · ${formatExactTimestamp(item.publishedAt)}` : " · publication time unavailable"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1 text-[10px] leading-4 text-[color:var(--shell-muted)]">
+                  {current.linkedNewsCount && current.linkedNewsCount > 0
+                    ? `${current.linkedNewsCount} linked publisher ${current.linkedNewsCount === 1 ? "report is" : "reports are"} recorded; open the evidence thread for the publisher details. No impact is inferred from the image alone.`
+                    : "No publisher report is explicitly linked to this event yet. The alert is currently sensor- or source-led, so impact remains uncontextualised by reporting."}
+                </p>
+              )}
+            </div>
+            <div className="mt-2 rounded-lg border border-[color:var(--signal-amber)]/40 bg-[color:var(--signal-amber-soft)] p-2.5">
+              <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-accent)]">What this image adds</div>
+              <p className="mt-1 text-[10px] leading-4 text-[color:var(--shell-ink)]">{imageConclusion(current)}</p>
+              <p className="mt-1 text-[9px] leading-4 text-[color:var(--shell-muted)]">{observationAlignment(current.capturedAt, current.eventStartTime, current.capturedAtPrecision)}</p>
+            </div>
             <p className={`${compact ? "mt-2 line-clamp-2 text-[10px] leading-4" : "mt-3 text-xs leading-5"} text-[color:var(--shell-muted)]`}>{current.interpretation || current.notice}</p>
             {current.interpretation && current.notice !== current.interpretation && !compact && <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">{current.notice}</p>}
             {current.linkageLimitation && <p className="mt-2 border-l-2 border-[color:var(--shell-accent)] pl-2 text-[10px] leading-4 text-[color:var(--shell-muted)]">{current.linkageLimitation}</p>}

@@ -29,13 +29,28 @@ waiting counts.
 - Raw track sampling: ten minutes.
 - Raw track retention: three days.
 - Stale current-snapshot retention: 14 days.
-- Movement-event and hourly-aggregate retention: 60 days.
+- Movement-event and per-entity hourly country-presence retention: 60 days.
+- Compact monitored-port hourly aggregate retention: 100 days.
+- Capped daily corridor-aggregate retention: 100 days (90-day product window plus a ten-day maintenance buffer).
 - Overview cache and single-flight window: 120 seconds.
 
 Port transitions are written once to `transport_movement_event`; an insert
 trigger maintains `transport_movement_hour`. Deduplicated vehicle/country
-presence is stored in `transport_entity_activity_hour`. User-facing comparisons
-read these compact structures rather than sorting raw tracks.
+presence is stored in `transport_entity_activity_hour`. Resolved origin and
+destination activity is summarized into one daily row per mode/country pair in
+`transport_corridor_activity_day`, without vehicle identifiers or raw provider
+payload. `transport_country_activity_day` adds at most one row per country,
+mode and day. The default admits the first 1,000 encountered corridor pairs per
+mode/day, prioritising volume only within each ingestion flush. Later pairs may
+be omitted regardless of volume, so the result has an explicit early-cycle
+sampling bias and is not a complete ranking. It retains both daily tables
+for 100 days: a hard application bound below 250,000
+rows (200,000 corridor rows plus fewer than 50,000 ISO-country rows). Even the
+permitted maximum configuration (2,000 pairs and 120 days) stays below 540,000
+daily rows. User-facing 7/30/90-day
+comparisons read these compact structures rather than sorting raw tracks. V44
+begins corridor retention prospectively and deliberately does not scan the live
+raw-track table during rollout.
 
 Web and iOS market reads can poll frequently without forcing ingestion. Scheduled
 market ingestion runs at most every four hours by default, while explicit admin
@@ -47,11 +62,21 @@ filter changes, explicit refresh, or a completed mutation.
 safety switches. Prefer pausing transport ingestion over allowing it to impair
 authentication, news, weather, market, or briefing requests.
 
-AISstream uses rotating geographic subscriptions and a single bounded queue
-drain. Its five-second flush never overlaps a previous flush and writes at most
+Retention catch-up shares a global ten-batch and 30-second budget across all
+transport tables. A single pass never overlaps another; unfinished tables
+rotate to the front and remain explicit in internal runtime health until a
+later pass clears them.
+
+AISstream uses one documented global bounding-box subscription and a single
+bounded queue drain. The provider is beta/no-SLA and its terrestrial station
+network reports roughly 200 km of coastal reception, so this is not complete
+ocean coverage. Its five-second flush never overlaps a previous flush and writes at most
 500 vessel snapshots per cycle with the production defaults. The keyless
-Digitraffic fallback adds two compressed HTTP requests per minute and feeds the
-same bounded queue; it does not create a second database writer.
+Digitraffic fallback adds two compressed HTTP requests per minute for its
+Finland/Baltic region and feeds the same bounded queue; it is not a global
+fallback and does not create a second database writer. Marinesia is not used:
+its current service requires an API key and its free access cannot provide a
+global bulk feed.
 
 ## Monitoring
 

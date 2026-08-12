@@ -22,6 +22,8 @@ export type BriefingEventEarthObservation = {
   source_url: string | null;
   attribution: string | null;
   evidentiary_role: "sensor_observation" | "model_interpretation" | "visual_context";
+  temporal_alignment?: string;
+  assessment_boundary?: string;
 };
 
 export type BriefingIntelligenceEvent = {
@@ -42,6 +44,7 @@ export type BriefingIntelligenceEvent = {
   materiality_score: number;
   source_diversity: number;
   domain_count: number;
+  start_time: string | null;
   last_activity_time: string;
   what: string;
   where: string;
@@ -88,6 +91,7 @@ type EventContextRow = {
   materiality_score: number | string;
   source_diversity: number | string;
   domain_count: number | string;
+  start_time?: string | Date | null;
   last_activity_time: string | Date;
   evidence: unknown;
   entities: unknown;
@@ -108,6 +112,12 @@ function text(value: unknown, maximum = 2_000): string {
 }
 
 function numberOrNull(value: unknown): number | null {
+  if (
+    value == null
+    || (typeof value === "string" && value.trim().length === 0)
+  ) {
+    return null;
+  }
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -233,22 +243,52 @@ export function buildEventInterestReasons(input: {
   }
   if (input.linked_news_count > 0) {
     reasons.push(`${input.linked_news_count} linked publisher ${input.linked_news_count === 1 ? "report" : "reports"}`);
+  } else {
+    reasons.push("No linked publisher reporting yet; real-world impact remains uncontextualised by news");
   }
   if (input.physical_observation_count > 0) {
-    reasons.push(`${input.physical_observation_count} sensor-derived Earth observation ${input.physical_observation_count === 1 ? "asset" : "assets"} available`);
+    reasons.push(`${input.physical_observation_count} event-aligned Earth observation ${input.physical_observation_count === 1 ? "asset" : "assets"} available; imagery is context, not automatic impact confirmation`);
   } else if (input.model_interpretation_count > 0) {
     reasons.push("Earth-observation model interpretation is available, but no sensor image is treated as confirmation");
   }
   return reasons.slice(0, 6);
 }
 
+function describeObservationAlignment(capturedAt: string | null, eventStart: string | null): string {
+  if (!capturedAt || !eventStart) return "Acquisition timing cannot yet be aligned with the event start.";
+  const captured = Date.parse(capturedAt);
+  const started = Date.parse(eventStart);
+  if (Number.isNaN(captured) || Number.isNaN(started)) return "Acquisition timing cannot yet be aligned with the event start.";
+  const minutes = Math.round(Math.abs(captured - started) / 60_000);
+  const duration = minutes < 60
+    ? `${minutes} minute${minutes === 1 ? "" : "s"}`
+    : minutes < 2_880
+      ? `${Math.round(minutes / 60)} hour${Math.round(minutes / 60) === 1 ? "" : "s"}`
+      : `${Math.round(minutes / 1_440)} day${Math.round(minutes / 1_440) === 1 ? "" : "s"}`;
+  return captured >= started
+    ? `Captured ${duration} after the recorded event start; post-start context does not establish impact or cause.`
+    : `Captured ${duration} before the recorded event start; possible baseline context only.`;
+}
+
+function earthObservationBoundary(productType: string, role: BriefingEventEarthObservation["evidentiary_role"]): string {
+  if (role === "model_interpretation") {
+    return "Model-generated interpretation for human review; not an independent sensor observation or confirmation.";
+  }
+  if (["burn_index", "false_color", "ndvi", "sar", "radar"].some((token) => productType.toLowerCase().includes(token))) {
+    return "Derived sensor product that may highlight conditions or change; it does not directly show flames, damage, impact, or causation.";
+  }
+  return "Event-aligned visual context. Surface appearance alone neither confirms nor disproves the reported event, and no impact conclusion should be inferred without interpreted change evidence.";
+}
+
 export function normalizeBriefingEventContextRow(row: EventContextRow): BriefingIntelligenceEvent {
+  const eventStartTime = toIso(row.start_time ?? null);
   const evidence = records(row.evidence).map((entry) => ({
     domain: text(entry.domain, 40),
     evidence_type: text(entry.evidence_type, 100),
     relationship: text(entry.relationship, 40),
     confidence: numberOrNull(entry.confidence),
     observed_at: toIso(text(entry.observed_at, 50) || null),
+    published_at: toIso(text(entry.published_at, 50) || null),
     source: text(entry.source, 160) || text(entry.source_record_type, 100),
     source_record_type: text(entry.source_record_type, 100),
     source_title: text(entry.source_title, 400) || null,
@@ -264,7 +304,7 @@ export function normalizeBriefingEventContextRow(row: EventContextRow): Briefing
       summary: typeof entry.source_summary === "string" ? entry.source_summary : null,
       url: typeof entry.source_url === "string" ? entry.source_url : null,
       publisher: text(entry.source, 160) || "Publisher unavailable",
-      published_at: typeof entry.observed_at === "string" ? entry.observed_at : null,
+      published_at: typeof entry.published_at === "string" ? entry.published_at : null,
       relationship: text(entry.relationship, 40) || "reported",
     }))
     .filter((entry, index, all) => all.findIndex((candidate) =>
@@ -296,6 +336,16 @@ export function normalizeBriefingEventContextRow(row: EventContextRow): Briefing
           : imageryAvailable
             ? "sensor_observation" as const
             : "visual_context" as const,
+        temporal_alignment: describeObservationAlignment(
+          toIso(text(entry.captured_at, 50) || null),
+          eventStartTime,
+        ),
+        assessment_boundary: earthObservationBoundary(
+          text(entry.product_type, 80),
+          analysisKind === "model_interpretation"
+            ? "model_interpretation"
+            : imageryAvailable ? "sensor_observation" : "visual_context",
+        ),
       };
       const details = record(entry.analysis_details);
       const methodology = record(entry.methodology);
@@ -315,6 +365,7 @@ export function normalizeBriefingEventContextRow(row: EventContextRow): Briefing
         source_url: null,
         attribution: "Model interpretation of the separately attributed sensor observation",
         evidentiary_role: "model_interpretation",
+        assessment_boundary: earthObservationBoundary(sensorObservation.product_type, "model_interpretation"),
       };
       return [sensorObservation, modelInterpretation];
     })
@@ -365,6 +416,7 @@ export function normalizeBriefingEventContextRow(row: EventContextRow): Briefing
     materiality_score: materiality,
     source_diversity: sourceDiversity,
     domain_count: domainCount,
+    start_time: eventStartTime,
     last_activity_time: toIso(row.last_activity_time) ?? new Date(0).toISOString(),
     what: summary || text(row.title, 400) || "Event details are still being assembled.",
     where: describeEventLocation({ location_name: locationName, country_iso2: country, latitude, longitude }),
@@ -438,7 +490,7 @@ async function queryBriefingEvents(input: {
   params.push(Math.min(100, Math.max(1, Math.trunc(input.limit))));
   const limitRef = `$${params.length}`;
   const { rows } = await query<EventContextRow>(
-    `SELECT event.id,event.event_type,event.title,event.summary,event.status,event.severity,
+    `SELECT event.id,event.event_type,event.title,event.summary,event.status,event.severity,event.start_time,
             true AS priority_eligible,
             event.confidence,event.primary_country_iso2,country.region,
             event.relevance_score,event.urgency_score,event.materiality_score,
@@ -455,7 +507,7 @@ async function queryBriefingEvents(input: {
                        jsonb_build_object(
                          'domain',evidence.domain,'evidence_type',evidence.evidence_type,
                          'relationship',evidence.relationship,'confidence',evidence.confidence,
-                         'observed_at',evidence.observed_at,
+                         'observed_at',evidence.observed_at,'published_at',evidence.published_at,
                          'source',COALESCE(NULLIF(source_item.payload->>'source',''),
                            NULLIF(source_item.payload->>'domain',''),source.name,evidence.source_record_type),
                          'source_record_type',evidence.source_record_type,
