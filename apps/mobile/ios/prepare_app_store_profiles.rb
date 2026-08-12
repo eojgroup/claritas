@@ -121,9 +121,13 @@ profile_names = {}
 
 identifiers.each do |identifier|
   encoded_identifier = URI.encode_www_form_component(identifier)
-  bundle_ids = request_json(:get, "/v1/bundleIds?filter%5Bidentifier%5D=#{encoded_identifier}&limit=2", token).fetch("data", [])
-  abort "Expected one registered bundle ID for #{identifier}, found #{bundle_ids.length}" unless bundle_ids.length == 1
-  bundle_resource_id = bundle_ids.first.fetch("id")
+  # Apple's identifier filter can return prefix matches (the main app query can
+  # therefore include its widget IDs). Resolve the one exact registered ID.
+  bundle_ids = request_json(:get, "/v1/bundleIds?filter%5Bidentifier%5D=#{encoded_identifier}&limit=200", token)
+    .fetch("data", [])
+  exact_bundle_ids = bundle_ids.select { |item| item.dig("attributes", "identifier") == identifier }
+  abort "Expected one exact registered bundle ID for #{identifier}, found #{exact_bundle_ids.length}" unless exact_bundle_ids.length == 1
+  bundle_resource_id = exact_bundle_ids.first.fetch("id")
   profiles = request_json(
     :get,
     "/v1/profiles?filter%5BbundleId%5D=#{bundle_resource_id}&filter%5BprofileType%5D=IOS_APP_STORE&limit=200",
