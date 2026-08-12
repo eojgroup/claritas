@@ -949,6 +949,7 @@ jobs:
           transport_ready=0
           transport_state=""
           for attempt in $(seq 1 24); do
+            echo "Transport runtime verification attempt ${attempt}/24"
             mapfile -t pods < <(
               kubectl -n "${NAMESPACE}" get pods \
                 -l app=claritas-api \
@@ -971,7 +972,7 @@ jobs:
                   process.stdin.on("end", () => {
                     try {
                       const health = JSON.parse(input);
-                      console.log(`${Boolean(health.ready)} ${health.state || "unknown"}`);
+                      console.log(String(Boolean(health.ready)) + " " + (health.state || "unknown"));
                     } catch {
                       console.log("false unreadable");
                     }
