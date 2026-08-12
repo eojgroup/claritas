@@ -107,6 +107,13 @@ jobs:
           security import "$signing_dir/distribution.p12" -P "$APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
           security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain_path"
           security list-keychains -d user -s "$keychain_path"
+          distribution_identities="$(security find-identity -v -p codesigning "$keychain_path" | grep -E -c '"(Apple|iPhone) Distribution:' || true)"
+          if [[ "$distribution_identities" -lt 1 ]]; then
+            echo "The imported P12 does not contain an Apple Distribution signing identity and private key." >&2
+            echo "Export the Apple Distribution certificate together with its private key from Keychain Access, then replace APPLE_DISTRIBUTION_CERTIFICATE_P12." >&2
+            exit 1
+          fi
+          echo "Validated $distribution_identities Apple Distribution signing identity in the isolated keychain."
           echo "APP_STORE_CONNECT_PRIVATE_KEY_PATH=$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" >> "$GITHUB_ENV"
           echo "SIGNING_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
 
@@ -135,6 +142,9 @@ jobs:
             -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
             -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
             DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $SIGNING_KEYCHAIN_PATH" \
             archive 2>&1 | tee "$RUNNER_TEMP/claritas-archive.log"
 
       - name: Export signed IPA
