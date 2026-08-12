@@ -617,6 +617,14 @@ a {
   pointer-events: none;
 }
 
+.map-event-tooltip {
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid var(--shell-border-strong);
+  background: var(--shell-surface-strong);
+  color: var(--shell-ink);
+}
+
 .world-map-featured-ring {
   transform-box: fill-box;
   transform-origin: center;

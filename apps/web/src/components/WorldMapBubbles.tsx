@@ -1232,8 +1232,12 @@ export default memo(function WorldMapBubbles({
 
       {hoveredPoint && (
         <div
-          className="app-card pointer-events-none absolute z-10 w-64 rounded-lg p-3 text-left shadow-xl"
-          style={{ left: hoveredPoint.x, top: hoveredPoint.y }}
+          className="map-event-tooltip pointer-events-none z-10 w-64 rounded-lg p-3 text-left shadow-xl"
+          style={{
+            position: "absolute",
+            left: hoveredPoint.x,
+            top: hoveredPoint.y,
+          }}
           aria-hidden="true"
         >
           <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">

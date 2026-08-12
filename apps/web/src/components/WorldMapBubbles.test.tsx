@@ -126,7 +126,13 @@ describe("WorldMapBubbles interaction", () => {
   it("keeps ordinary wheel scrolling inert on hover until the map is activated", () => {
     const { mapLayer, svg } = renderMap();
     const eventMarker = screen.getByRole("button", { name: /Observed fire signal/i });
+    const beforeHover = mapLayer.getAttribute("transform");
     fireEvent.pointerEnter(eventMarker, { clientX: 420, clientY: 260 });
+    const tooltip = screen.getByText("Observed fire signal").closest(".map-event-tooltip");
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.classList.contains("app-card")).toBe(false);
+    expect((tooltip as HTMLElement).style.position).toBe("absolute");
+    expect(mapLayer.getAttribute("transform")).toBe(beforeHover);
     const before = mapLayer.getAttribute("transform");
 
     const hoverWheel = dispatchWheel(svg, { deltaY: -100 });

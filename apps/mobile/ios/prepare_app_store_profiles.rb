@@ -128,11 +128,11 @@ identifiers.each do |identifier|
   exact_bundle_ids = bundle_ids.select { |item| item.dig("attributes", "identifier") == identifier }
   abort "Expected one exact registered bundle ID for #{identifier}, found #{exact_bundle_ids.length}" unless exact_bundle_ids.length == 1
   bundle_resource_id = exact_bundle_ids.first.fetch("id")
-  profiles = request_json(
-    :get,
-    "/v1/profiles?filter%5BbundleId%5D=#{bundle_resource_id}&filter%5BprofileType%5D=IOS_APP_STORE&limit=200",
-    token
-  ).fetch("data", [])
+  # Profiles do not support bundleId as a collection filter. Apple exposes the
+  # relationship through the bundle ID resource instead.
+  profiles = request_json(:get, "/v1/bundleIds/#{bundle_resource_id}/profiles?limit=200", token)
+    .fetch("data", [])
+    .select { |candidate| candidate.dig("attributes", "profileType") == "IOS_APP_STORE" }
   profile = profiles.find do |candidate|
     active_profile?(candidate) && profile_certificate_ids(candidate.fetch("id"), token).include?(certificate_id)
   end

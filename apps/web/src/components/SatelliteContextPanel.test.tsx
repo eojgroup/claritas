@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SatelliteContextPanel from "./SatelliteContextPanel";
 import { fetchEventGibsContext, fetchIntelligenceEvent, fetchIntelligenceEvents } from "../lib/api";
@@ -86,7 +86,7 @@ describe("SatelliteContextPanel", () => {
     expect(screen.queryByText(/Acquired 8 hours after/i)).toBeNull();
     expect(screen.getByText(/Why this scene is shown/i)).toBeTruthy();
     expect(screen.getByText(/outlined event marker on the map refers to this image/i)).toBeTruthy();
-    expect(onContextEventChange).toHaveBeenCalledWith(event.id);
+    await waitFor(() => expect(onContextEventChange).toHaveBeenCalledWith(event.id));
     fireEvent.click(screen.getByRole("button", { name: /Open evidence thread/i }));
     expect(onOpenEvent).toHaveBeenCalledWith(event.id);
     fireEvent.click(screen.getByRole("button", { name: /Inspect imagery/i }));

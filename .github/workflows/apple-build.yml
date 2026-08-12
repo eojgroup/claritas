@@ -119,9 +119,11 @@ jobs:
             exit 1
           fi
           echo "Validated $distribution_identities Apple Distribution signing identity in the isolated keychain."
-          echo "APP_STORE_CONNECT_PRIVATE_KEY_PATH=$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" >> "$GITHUB_ENV"
-          echo "SIGNING_KEYCHAIN_PATH=$keychain_path" >> "$GITHUB_ENV"
-          echo "DISTRIBUTION_CERTIFICATE_PATH=$signing_dir/distribution.pem" >> "$GITHUB_ENV"
+          {
+            echo "APP_STORE_CONNECT_PRIVATE_KEY_PATH=$signing_dir/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
+            echo "SIGNING_KEYCHAIN_PATH=$keychain_path"
+            echo "DISTRIBUTION_CERTIFICATE_PATH=$signing_dir/distribution.pem"
+          } >> "$GITHUB_ENV"
 
       - name: Prepare App Store provisioning profiles
         if: steps.signing.outputs.configured == 'true'
