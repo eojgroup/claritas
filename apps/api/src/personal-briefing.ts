@@ -750,9 +750,13 @@ async function selectSignals(
          i.kind,
          s.name AS source_name,
          COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
-         COALESCE(translation.translated_title, i.title) AS title,
+         COALESCE(NULLIF(btrim(translation.translated_title), ''), i.title) AS title,
          i.title AS original_title,
-         COALESCE(translation.generated_summary, i.summary) AS summary,
+         CASE
+           WHEN NULLIF(btrim(translation.translated_title), '') IS NOT NULL
+             THEN NULLIF(btrim(translation.generated_summary), '')
+           ELSE i.summary
+         END AS summary,
          i.url,
          upper(i.country_iso2::text) AS country_iso2,
          i.language_code,
@@ -770,6 +774,12 @@ async function selectSignals(
         AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
        WHERE COALESCE(i.event_time, i.created_at) >= $1::timestamptz
          AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
+         AND (
+           NULLIF(btrim(translation.translated_title), '') IS NOT NULL
+           OR i.kind <> 'news_article'
+           OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) IN ('en', 'eng', 'english')
+           OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) LIKE 'en-%'
+         )
        ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
        LIMIT 400`,
       [sourceWindowStart, sourceWindowEnd, BRIEFING_OUTPUT_LANGUAGE]
@@ -986,23 +996,14 @@ function deterministicBriefing(
       })
     );
   }
-  const hasUntranslatedNonEnglishSource = signals.some((signal) => {
-    const language = signal.original_language?.trim().toLowerCase();
-    return Boolean(
-      language &&
-      language !== "en" &&
-      language !== "english" &&
-      !signal.translation
-    );
-  });
   return {
     title,
     update_text: updateText,
     key_takeaways: keyTakeaways,
     data_quality_notes: [
       ...(signals.length === 0 ? ["No source items matched the saved filters."] : []),
-      ...(hasUntranslatedNonEnglishSource
-        ? ["Some non-English source titles did not yet have a cached AI translation and remain in their original language in this fallback briefing."]
+      ...(signals.some((signal) => signal.translation)
+        ? ["Non-English publisher material is shown in a cached AI translation for convenience and remains linked to its original source."]
         : []),
     ],
     generated_by: "deterministic",
@@ -1810,9 +1811,19 @@ function toEmailContent(row: DeliveryClaimRow): BriefingEmailContent {
         const newsTitle = boundedText(item.title, 400);
         return newsTitle ? [{
           title: newsTitle,
+          original_title: boundedText(item.original_title, 400) || null,
+          original_language: boundedText(item.original_language, 24) || null,
           publisher: boundedText(item.publisher, 160) || "Publisher unavailable",
           url: boundedText(item.url, 2_000) || null,
           published_at: toIso(boundedText(item.published_at, 50) || null),
+          translation: asRecord(item.translation).kind === "ai_translation"
+            ? {
+                kind: "ai_translation" as const,
+                target_language: boundedText(asRecord(item.translation).target_language, 24) || "en",
+                provider: boundedText(asRecord(item.translation).provider, 100) || "Translation provider unavailable",
+                model: boundedText(asRecord(item.translation).model, 160) || null,
+              }
+            : null,
         }] : [];
       }),
       earth_observation: observations.slice(0, 4).flatMap((observationValue) => {
@@ -1841,6 +1852,8 @@ function toEmailContent(row: DeliveryClaimRow): BriefingEmailContent {
       const signal = asRecord(value);
       return {
         title: boundedText(signal.title, 300) || "Untitled signal",
+        original_title: boundedText(signal.original_title, 300) || null,
+        original_language: boundedText(signal.original_language, 24) || null,
         summary: boundedText(signal.summary, 800) || null,
         url: boundedText(signal.url, 2_000) || null,
         source_name:
@@ -1848,6 +1861,14 @@ function toEmailContent(row: DeliveryClaimRow): BriefingEmailContent {
           boundedText(signal.source_name, 100) ||
           "Claritas source",
         reasons: boundedTextList(signal.reasons, 5, 100),
+        translation: asRecord(signal.translation).kind === "ai_translation"
+          ? {
+              kind: "ai_translation" as const,
+              target_language: boundedText(asRecord(signal.translation).target_language, 24) || "en",
+              provider: boundedText(asRecord(signal.translation).provider, 100) || "Translation provider unavailable",
+              model: boundedText(asRecord(signal.translation).model, 160) || null,
+            }
+          : null,
       };
     }),
     markets: markets.slice(0, 50).map((value) => {

@@ -3512,6 +3512,7 @@ enum SignalMapMode: String, CaseIterable, Identifiable {
     case news
     case weather
     case leadership
+    case transport
 
     var id: String { rawValue }
 
@@ -3521,6 +3522,7 @@ enum SignalMapMode: String, CaseIterable, Identifiable {
         case .news: return "News"
         case .weather: return "Weather"
         case .leadership: return "Leaders"
+        case .transport: return "Transport"
         }
     }
 
@@ -3530,6 +3532,7 @@ enum SignalMapMode: String, CaseIterable, Identifiable {
         case .news: return "Story concentration"
         case .weather: return "Latest weather conditions"
         case .leadership: return "Country leadership"
+        case .transport: return "Live scoped movement"
         }
     }
 
@@ -3539,6 +3542,7 @@ enum SignalMapMode: String, CaseIterable, Identifiable {
         case .news: return "Mapped stories"
         case .weather: return "Temperature severity"
         case .leadership: return "Leadership records"
+        case .transport: return "Tracked movement"
         }
     }
 }
@@ -3685,11 +3689,16 @@ struct SignalMapPanel: View {
             podcasts: model.podcasts,
             weather: model.weather,
             countryMarkets: model.countryMarkets,
-            leadership: model.leadership
+            leadership: model.leadership,
+            transport: model.transportOverview
         )
     }
 
     private var highest: CountryBubblePoint? { points.first }
+
+    private var mappedEvents: [IntelligenceEvent] {
+        mode == .transport ? [] : locatedEvents
+    }
 
     private var locatedEvents: [IntelligenceEvent] {
         let bounds = region.geographicBounds
@@ -3725,17 +3734,19 @@ struct SignalMapPanel: View {
             VStack(alignment: .leading, spacing: 12) {
                 mapHeader
                 mapControls
+                scopeIndicator
 
                 ZStack(alignment: .topLeading) {
                     NativeSignalMap(
                         points: points,
-                        events: locatedEvents,
+                        events: mappedEvents,
                         mapRegion: region,
                         compactPresentation: compactLayout && height < 400,
                         selectedCountry: model.selectedCountry,
                         comparisonCountry: comparisonCountry,
                         pinnedCountry: pinnedCountry,
                         featuredCountry: mode == .signals ? highest?.iso : nil,
+                        transportEntities: mode == .transport ? (model.transportOverview?.entities ?? []) : [],
                         resetToken: resetToken,
                         onSelectCountry: selectCountry,
                         onSelectEvent: selectEvent
@@ -3779,8 +3790,13 @@ struct SignalMapPanel: View {
                 }
 
                 HStack(spacing: 10) {
-                    Label("\(locatedEvents.count) events", systemImage: "dot.radiowaves.left.and.right")
-                    Label("\(locatedEvents.filter(\.earth_observation_available).count) satellite-backed", systemImage: "sensor.tag.radiowaves.forward")
+                    if mode == .transport {
+                        Label("\(model.transportOverview?.entities.count ?? 0) scoped movements", systemImage: "location.north.line")
+                        Label("\(points.count) country links", systemImage: "link")
+                    } else {
+                        Label("\(mappedEvents.count) events", systemImage: "dot.radiowaves.left.and.right")
+                        Label("\(mappedEvents.filter(\.earth_observation_available).count) satellite-backed", systemImage: "sensor.tag.radiowaves.forward")
+                    }
                     Spacer()
                     if eventLoadError != nil {
                         Text("Event layer retrying")
@@ -3840,6 +3856,60 @@ struct SignalMapPanel: View {
         }
     }
 
+    private var scopeIndicator: some View {
+        let selected = model.selectedCountry?.uppercased()
+        let effective = mode == .transport ? model.transportFocusCountry?.uppercased() : selected
+        let name = effective.flatMap { Locale(identifier: "en_US").localizedString(forRegionCode: $0) }
+        let timestamp = mode == .transport
+            ? model.transportOverview?.generatedDate?.formatted(date: .abbreviated, time: .standard)
+            : nil
+        let scopeTitle: String
+        if let effective {
+            scopeTitle = "Current country scope · \(name ?? effective) (\(effective))"
+        } else {
+            scopeTitle = "Global map scope"
+        }
+        let scopeDetail: String
+        if mode == .transport, model.isRefreshingTransport {
+            scopeDetail = "Loading current aircraft and vessel positions for this country…"
+        } else if mode == .transport, let error = model.transportLoadError {
+            scopeDetail = "Transport coverage is temporarily unavailable · \(error)"
+        } else if mode == .transport {
+            scopeDetail = "Transport positions and totals are filtered to this scope\(timestamp.map { " · updated \($0)" } ?? "")"
+        } else {
+            scopeDetail = "Selecting a country filters its reporting, events, imagery, weather, markets, and transport"
+        }
+        return HStack(spacing: 8) {
+            Image(systemName: effective == nil ? "globe" : "scope")
+                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(scopeTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                Text(scopeDetail)
+                    .font(.caption2)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+            if selected != nil {
+                Button("Clear") { resetMapState() }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            ClaritasPalette.shellBackgroundElevated(for: colorScheme),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+        )
+    }
+
     @ViewBuilder
     private var mapHeader: some View {
         if compactLayout {
@@ -3849,7 +3919,9 @@ struct SignalMapPanel: View {
                         .font(.caption2.weight(.bold))
                         .tracking(1.2)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    Text("\(locatedEvents.count) located · \(locatedEvents.filter(\.earth_observation_available).count) with imagery")
+                    Text(mode == .transport
+                         ? "\(model.transportOverview?.entities.count ?? 0) movements · \(points.count) country links"
+                         : "\(mappedEvents.count) located · \(mappedEvents.filter(\.earth_observation_available).count) with imagery")
                         .font(.headline)
                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                 }
@@ -3871,8 +3943,12 @@ struct SignalMapPanel: View {
         } else {
             BrandSectionHeader(
                 kicker: "Global event picture",
-                title: "\(locatedEvents.count) located events · \(mode.title)",
-                detail: "Event dots open the canonical evidence thread; rings identify satellite-backed events."
+                title: mode == .transport
+                    ? "\(model.transportOverview?.entities.count ?? 0) movements · \(mode.title)"
+                    : "\(mappedEvents.count) located events · \(mode.title)",
+                detail: mode == .transport
+                    ? "Aircraft and vessel positions are limited to the selected country relationship scope and current provider coverage."
+                    : "Event dots open the canonical evidence thread; rings identify satellite-backed events."
             )
         }
     }
@@ -4052,7 +4128,8 @@ private enum SignalMapDataBuilder {
         podcasts: [PodcastEpisode],
         weather: [CountryWeather],
         countryMarkets: [CountryMarketOverview],
-        leadership: [CountryLeadership]
+        leadership: [CountryLeadership],
+        transport: TransportOverview?
     ) -> [CountryBubblePoint] {
         let raw: [CountryBubblePoint]
         switch mode {
@@ -4094,6 +4171,18 @@ private enum SignalMapDataBuilder {
                     valueLabel: "\(max(row.roles.count, 1))",
                     detail: names.isEmpty ? "Leadership record" : names.joined(separator: " · "),
                     magnitude: Double(max(row.roles.count, 1))
+                )
+            }
+        case .transport:
+            raw = (transport?.countries ?? []).map { country in
+                let aircraft = country.aviation.active
+                let vessels = country.maritime.active
+                return point(
+                    id: "transport-\(country.country)",
+                    iso: country.country,
+                    valueLabel: "\(country.active_count)",
+                    detail: "\(aircraft) aircraft · \(vessels) vessels · current scoped coverage",
+                    magnitude: Double(max(country.active_count, 1))
                 )
             }
         }
@@ -4262,6 +4351,7 @@ private struct NativeSignalMap: View {
     let comparisonCountry: String?
     let pinnedCountry: String?
     let featuredCountry: String?
+    let transportEntities: [TransportEntity]
     let resetToken: Int
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
@@ -4272,19 +4362,37 @@ private struct NativeSignalMap: View {
     )
 
     private var annotations: [NativeSignalAnnotation] {
-        let countries = points.prefix(compactPresentation ? 28 : 64).map {
-            NativeSignalAnnotation(id: "country-\($0.id)", coordinate: $0.coordinate, country: $0, event: nil)
+        // iPhone keeps the same data layers as iPad and web; compactPresentation
+        // changes marker typography only, never the intelligence coverage.
+        let countries = points.prefix(64).map {
+            NativeSignalAnnotation(id: "country-\($0.id)", coordinate: $0.coordinate, country: $0, event: nil, transport: nil)
         }
-        let mappedEvents = events.prefix(compactPresentation ? 42 : 100).compactMap { event -> NativeSignalAnnotation? in
+        let mappedEvents = events.prefix(100).compactMap { event -> NativeSignalAnnotation? in
             guard let latitude = event.latitude, let longitude = event.longitude else { return nil }
             return NativeSignalAnnotation(
                 id: "event-\(event.id)",
                 coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
                 country: nil,
-                event: event
+                event: event,
+                transport: nil
             )
         }
-        return countries + mappedEvents
+        let movements = transportEntities.prefix(compactPresentation ? 200 : 320).compactMap { entity -> NativeSignalAnnotation? in
+            guard let latitude = entity.latitude,
+                  let longitude = entity.longitude,
+                  latitude.isFinite,
+                  longitude.isFinite,
+                  abs(latitude) <= 90,
+                  abs(longitude) <= 180 else { return nil }
+            return NativeSignalAnnotation(
+                id: "transport-\(entity.id)",
+                coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                country: nil,
+                event: nil,
+                transport: entity
+            )
+        }
+        return countries + mappedEvents + movements
     }
 
     var body: some View {
@@ -4299,6 +4407,8 @@ private struct NativeSignalMap: View {
                     countryMarker(country)
                 } else if let event = annotation.event {
                     eventMarker(event)
+                } else if let transport = annotation.transport {
+                    transportMarker(transport)
                 }
             }
         }
@@ -4410,6 +4520,20 @@ private struct NativeSignalMap: View {
         .accessibilityLabel("\(event.severity.rawValue) event, \(event.title)")
     }
 
+    private func transportMarker(_ entity: TransportEntity) -> some View {
+        let tone = entity.mode == .aviation
+            ? ClaritasPalette.dataBlue(for: .dark)
+            : ClaritasPalette.shellAccent(for: .dark)
+        return Image(systemName: entity.mode == .aviation ? "airplane" : "ferry.fill")
+            .font(.system(size: compactPresentation ? 8 : 10, weight: .bold))
+            .foregroundStyle(Color(hex: "#07141E"))
+            .frame(width: compactPresentation ? 18 : 22, height: compactPresentation ? 18 : 22)
+            .background(tone.opacity(0.92), in: Circle())
+            .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1))
+            .rotationEffect(.degrees(entity.mode == .aviation ? (entity.heading ?? 0) - 45 : 0))
+            .accessibilityLabel("\(entity.mode == .aviation ? "Aircraft" : "Vessel") \(entity.display_name ?? entity.entity_id), observed \(entity.observed_at)")
+    }
+
     private func countryMarkerSize(_ point: CountryBubblePoint) -> CGFloat {
         let magnitudes = points.map { log1p(max($0.magnitude, 0)) }
         guard let minimum = magnitudes.min(), let maximum = magnitudes.max(), maximum > minimum else {
@@ -4440,6 +4564,7 @@ private struct NativeSignalAnnotation: Identifiable {
     let coordinate: CLLocationCoordinate2D
     let country: CountryBubblePoint?
     let event: IntelligenceEvent?
+    let transport: TransportEntity?
 }
 
 // Retained as the lightweight canvas implementation for older platform

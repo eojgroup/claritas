@@ -263,9 +263,13 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
          i.id,
          s.name AS source_name,
          COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
-         COALESCE(translation.translated_title, i.title) AS title,
+         COALESCE(NULLIF(btrim(translation.translated_title), ''), i.title) AS title,
          i.title AS original_title,
-         COALESCE(translation.generated_summary, i.summary) AS summary,
+         CASE
+           WHEN NULLIF(btrim(translation.translated_title), '') IS NOT NULL
+             THEN NULLIF(btrim(translation.generated_summary), '')
+           ELSE i.summary
+         END AS summary,
          i.url,
          i.country_iso2,
          i.language_code,
@@ -283,6 +287,11 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        WHERE i.kind = 'news_article'
          AND COALESCE(i.event_time, i.created_at) >= $1::timestamptz
          AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
+         AND (
+           NULLIF(btrim(translation.translated_title), '') IS NOT NULL
+           OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) IN ('en', 'eng', 'english')
+           OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) LIKE 'en-%'
+         )
        ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
        LIMIT $3`,
       [start, end, newsLimit, BRIEFING_OUTPUT_LANGUAGE]

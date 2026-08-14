@@ -209,9 +209,12 @@ function toEmailEvent(
     profile_reasons: profileReasons,
     linked_news: event.linked_news.map((item) => ({
       title: item.title,
+      original_title: item.original_title,
+      original_language: item.original_language,
       publisher: item.publisher,
       url: item.url,
       published_at: item.published_at,
+      translation: item.translation,
     })),
     earth_observation: event.earth_observation.map((item) => ({
       product_type: item.product_type,

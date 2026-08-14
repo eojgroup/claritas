@@ -1,5 +1,6 @@
 import Charts
 import Foundation
+import MapKit
 import SwiftUI
 import UIKit
 
@@ -116,11 +117,73 @@ struct TransportWorkspaceView: View {
         VStack(alignment: .leading, spacing: 16) {
             BrandSectionHeader(
                 kicker: "Transport pulse",
-                title: "Routes by country",
-                detail: "Aggregate shipping and flight activity. Open Claritas on iPad or web for live vehicles and route drill-in."
+                title: "Live movement · \(model.transportFocusCountry ?? "country scope")",
+                detail: "Current aircraft, vessels, routes, and country relationships in the country scope selected from the overview map."
             )
 
             IntelligenceEventPulseView()
+
+            Picker("Movement layer", selection: $mode) {
+                Text("Combined").tag(Optional<TransportMode>.none)
+                Text("Flights").tag(Optional<TransportMode>.some(.aviation))
+                Text("Shipping").tag(Optional<TransportMode>.some(.maritime))
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: mode) { _ in clearSelection() }
+
+            BrandCard(
+                title: "\(model.transportFocusCountry ?? "Scoped") live positions",
+                icon: "map.fill"
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("\(filteredEntities.count) visible", systemImage: "location.north.line")
+                        Spacer()
+                        if let generated = overview?.generatedDate {
+                            Text("Updated \(generated.formatted(date: .abbreviated, time: .standard))")
+                        } else {
+                            Text("Update time unavailable")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+
+                    TransportNativeMap(
+                        entities: filteredEntities,
+                        selectedID: selectedEntity?.id,
+                        scopeCountry: model.transportFocusCountry,
+                        onSelect: { entity in Task { await select(entity) } }
+                    )
+                    .frame(height: 310)
+
+                    if let selectedEntity {
+                        HStack(spacing: 10) {
+                            Image(systemName: selectedEntity.mode == .aviation ? "airplane" : "ferry.fill")
+                                .foregroundStyle(selectedEntity.mode == .aviation
+                                    ? ClaritasPalette.dataBlue(for: colorScheme)
+                                    : ClaritasPalette.shellAccent(for: colorScheme))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(selectedEntity.display_name ?? selectedEntity.callsign ?? selectedEntity.entity_id)
+                                    .font(.subheadline.weight(.semibold))
+                                Text("\(selectedEntity.route_label ?? selectedEntity.current_location_name ?? "Route unresolved") · seen \(selectedEntity.observedDate?.formatted(date: .abbreviated, time: .standard) ?? selectedEntity.observed_at)")
+                                    .font(.caption2)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                        }
+                        .padding(10)
+                        .background(
+                            ClaritasPalette.shellBackgroundElevated(for: colorScheme),
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
+                    }
+
+                    Text("Tap a marker for its latest identity and route. Counts reflect available AIS and ADS-B reception, not complete national traffic.")
+                        .font(.caption2)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+            }
 
             if let error = model.transportLoadError {
                 BrandCard(title: "Transport data unavailable", icon: "exclamationmark.triangle") {
@@ -869,6 +932,102 @@ struct TransportWorkspaceView: View {
         selectedEntity = nil
         selectedTrack = []
         isLoadingEntity = false
+    }
+}
+
+private struct TransportNativeMap: View {
+    let entities: [TransportEntity]
+    let selectedID: String?
+    let scopeCountry: String?
+    let onSelect: (TransportEntity) -> Void
+
+    @State private var viewport = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 12, longitude: 0),
+        span: MKCoordinateSpan(latitudeDelta: 142, longitudeDelta: 350)
+    )
+
+    private var plotted: [TransportEntity] {
+        Array(entities.filter {
+            guard let latitude = $0.latitude, let longitude = $0.longitude else { return false }
+            return latitude.isFinite && longitude.isFinite && abs(latitude) <= 90 && abs(longitude) <= 180
+        }.prefix(320))
+    }
+
+    var body: some View {
+        Map(
+            coordinateRegion: $viewport,
+            interactionModes: [.pan, .zoom],
+            showsUserLocation: false,
+            annotationItems: plotted
+        ) { entity in
+            MapAnnotation(coordinate: CLLocationCoordinate2D(
+                latitude: entity.latitude ?? 0,
+                longitude: entity.longitude ?? 0
+            )) {
+                Button { onSelect(entity) } label: {
+                    Image(systemName: entity.mode == .aviation ? "airplane" : "ferry.fill")
+                        .font(.system(size: selectedID == entity.id ? 12 : 9, weight: .bold))
+                        .foregroundStyle(Color(hex: "#07141E"))
+                        .frame(
+                            width: selectedID == entity.id ? 28 : 21,
+                            height: selectedID == entity.id ? 28 : 21
+                        )
+                        .background(markerTone(entity).opacity(0.94), in: Circle())
+                        .overlay(Circle().stroke(.white, lineWidth: selectedID == entity.id ? 2 : 1))
+                        .rotationEffect(.degrees(entity.mode == .aviation ? (entity.heading ?? 0) - 45 : 0))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(entity.mode == .aviation ? "Aircraft" : "Vessel") \(entity.display_name ?? entity.entity_id)")
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.white.opacity(0.28), lineWidth: 1)
+        )
+        .overlay(alignment: .topLeading) {
+            Text("CURRENT SCOPE · \((scopeCountry ?? "GLOBAL").uppercased())")
+                .font(.caption2.weight(.bold))
+                .tracking(1)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(Color.black.opacity(0.62), in: Capsule())
+                .padding(9)
+                .allowsHitTesting(false)
+        }
+        .onAppear { fitViewport() }
+        .onChange(of: scopeCountry) { _ in fitViewport() }
+        .onChange(of: plotted.map(\.id)) { _ in fitViewport() }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Live transport map for \(scopeCountry ?? "the current country scope")")
+    }
+
+    private func markerTone(_ entity: TransportEntity) -> Color {
+        entity.mode == .aviation ? Color(hex: "#91ADBA") : Color(hex: "#D3C3A5")
+    }
+
+    private func fitViewport() {
+        let scoped = plotted.filter {
+            guard let scope = scopeCountry?.uppercased() else { return true }
+            return $0.current_country_iso2?.uppercased() == scope
+        }
+        let candidates = scoped.isEmpty ? plotted : scoped
+        guard !candidates.isEmpty else { return }
+        let latitudes = candidates.compactMap(\.latitude)
+        let longitudes = candidates.compactMap(\.longitude)
+        guard let minLat = latitudes.min(), let maxLat = latitudes.max(),
+              let minLon = longitudes.min(), let maxLon = longitudes.max() else { return }
+        viewport = MKCoordinateRegion(
+            center: CLLocationCoordinate2D(
+                latitude: (minLat + maxLat) / 2,
+                longitude: (minLon + maxLon) / 2
+            ),
+            span: MKCoordinateSpan(
+                latitudeDelta: min(142, max(2.5, (maxLat - minLat) * 1.35)),
+                longitudeDelta: min(350, max(3, (maxLon - minLon) * 1.35))
+            )
+        )
     }
 }
 

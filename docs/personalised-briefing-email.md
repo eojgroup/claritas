@@ -34,6 +34,13 @@ publisher titles and URLs, and Earth-observation context with an explicit eviden
 Machine-coded, single-source GDELT records do not lead this collection unless they have publisher
 evidence, cross-domain corroboration, or a relevance score of at least 0.85.
 
+Publisher news is language-gated before it enters either the general or personalised newsletter.
+An item is eligible only when its source language is known English or its current title/summary
+hashes have a cached English translation. Non-English items without a completed translation are
+deferred rather than exposed in their source language. Email labels translated entries as
+`AI-translated from <language> to English for convenience`, retains the original title/language in
+the stored briefing contract, and links to the original publisher evidence.
+
 Briefing generation uses the existing provider-neutral LLM adapter. If that adapter is unavailable,
 the worker produces a deterministic extractive briefing so email delivery can continue.
 

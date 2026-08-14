@@ -34,6 +34,7 @@ final class AppModel: ObservableObject {
     @Published var marketQuotes: [MarketQuote] = []
     @Published var countryMarkets: [CountryMarketOverview] = []
     @Published var transportOverview: TransportOverview? = nil
+    @Published private(set) var transportOverviewCountry: String? = nil
     @Published var isRefreshingNews: Bool = false
     @Published var isRefreshingPodcasts: Bool = false
     @Published var isRefreshingWeather: Bool = false
@@ -458,6 +459,7 @@ final class AppModel: ObservableObject {
         marketQuotes = []
         countryMarkets = []
         transportOverview = nil
+        transportOverviewCountry = nil
         newsLoadError = nil
         podcastLoadError = nil
         transportLoadError = nil
@@ -683,18 +685,27 @@ final class AppModel: ObservableObject {
 
         guard let country = transportFocusCountry else {
             transportOverview = nil
+            transportOverviewCountry = nil
             transportLoadError = "Transport intelligence is waiting for a highlighted country."
             return
+        }
+        if transportOverviewCountry != country {
+            // Never relabel a previous country's live positions as the newly
+            // selected scope while the replacement request is in flight.
+            transportOverview = nil
+            transportOverviewCountry = nil
         }
 
         do {
             let overview = try await api.fetchTransportOverview(
-                detail: "aggregate",
+                detail: "full",
                 country: country,
+                entityLimit: 320,
                 refresh: forceRefresh
             )
             guard transportRequestID == requestID, transportFocusCountry == country else { return }
             transportOverview = overview
+            transportOverviewCountry = country
         } catch {
             if Task.isCancelled || transportRequestID != requestID { return }
             if isPaymentRequired(error) {

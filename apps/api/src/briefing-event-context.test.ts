@@ -87,12 +87,19 @@ test("briefing news preserves publication time separately from evidence receipt"
       source: "Publisher",
       source_record_type: "item",
       source_title: "Fire response reported",
+      source_original_title: "Incendio reportado",
+      source_language: "es",
+      translation_provider: "openrouter",
+      translation_model: "openrouter/free",
     }],
     entities: [],
     earth_observations: [],
   });
 
   assert.equal(normalized.linked_news[0]?.published_at, "2026-08-11T09:00:00.000Z");
+  assert.equal(normalized.linked_news[0]?.original_language, "es");
+  assert.equal(normalized.linked_news[0]?.original_title, "Incendio reportado");
+  assert.equal(normalized.linked_news[0]?.translation?.target_language, "en");
   assert.notEqual(normalized.linked_news[0]?.published_at, normalized.evidence[0]?.observed_at);
   assert.equal(normalized.start_time, "2026-08-11T08:00:00.000Z");
 });

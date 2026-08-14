@@ -1,10 +1,18 @@
 export type BriefingEventNewsLink = {
   title: string;
+  original_title: string | null;
+  original_language: string | null;
   summary: string | null;
   url: string | null;
   publisher: string;
   published_at: string | null;
   relationship: string;
+  translation: {
+    kind: "ai_translation";
+    target_language: "en";
+    provider: string;
+    model: string | null;
+  } | null;
 };
 
 export type BriefingEventEarthObservation = {
@@ -174,11 +182,21 @@ export function projectBriefingPriorityEvents<T extends BriefingIntelligenceEven
         .slice(0, BRIEFING_PRIORITY_EVENT_LIMITS.why_interesting),
       linked_news: event.linked_news.slice(0, BRIEFING_PRIORITY_EVENT_LIMITS.linked_news).map((item) => ({
         title: text(item.title, 220),
+        original_title: text(item.original_title, 220) || null,
+        original_language: text(item.original_language, 24) || null,
         summary: text(item.summary, 240) || null,
         url: boundedProjectionUrl(item.url),
         publisher: text(item.publisher, 120) || "Publisher unavailable",
         published_at: item.published_at,
         relationship: text(item.relationship, 40),
+        translation: item.translation
+          ? {
+              kind: "ai_translation" as const,
+              target_language: "en" as const,
+              provider: text(item.translation.provider, 100) || "Translation provider unavailable",
+              model: text(item.translation.model, 160) || null,
+            }
+          : null,
       })),
       earth_observation: event.earth_observation
         .slice(0, BRIEFING_PRIORITY_EVENT_LIMITS.earth_observation)
@@ -292,6 +310,10 @@ export function normalizeBriefingEventContextRow(row: EventContextRow): Briefing
     source: text(entry.source, 160) || text(entry.source_record_type, 100),
     source_record_type: text(entry.source_record_type, 100),
     source_title: text(entry.source_title, 400) || null,
+    source_original_title: text(entry.source_original_title, 400) || null,
+    source_language: text(entry.source_language, 24) || null,
+    translation_provider: text(entry.translation_provider, 100) || null,
+    translation_model: text(entry.translation_model, 160) || null,
     source_summary: text(entry.source_summary, 1_200) || null,
     source_url: text(entry.source_url, 2_000) || null,
     attribution: text(entry.attribution, 500) || null,
@@ -301,11 +323,21 @@ export function normalizeBriefingEventContextRow(row: EventContextRow): Briefing
     .filter((entry) => entry.domain === "news" && entry.source_record_type === "item" && !!entry.source_title)
     .map((entry) => ({
       title: String(entry.source_title),
+      original_title: typeof entry.source_original_title === "string" ? entry.source_original_title : null,
+      original_language: typeof entry.source_language === "string" ? entry.source_language : null,
       summary: typeof entry.source_summary === "string" ? entry.source_summary : null,
       url: typeof entry.source_url === "string" ? entry.source_url : null,
       publisher: text(entry.source, 160) || "Publisher unavailable",
       published_at: typeof entry.published_at === "string" ? entry.published_at : null,
       relationship: text(entry.relationship, 40) || "reported",
+      translation: typeof entry.translation_provider === "string"
+        ? {
+            kind: "ai_translation" as const,
+            target_language: "en" as const,
+            provider: entry.translation_provider,
+            model: typeof entry.translation_model === "string" ? entry.translation_model : null,
+          }
+        : null,
     }))
     .filter((entry, index, all) => all.findIndex((candidate) =>
       candidate.title === entry.title && candidate.url === entry.url) === index)
@@ -511,10 +543,30 @@ async function queryBriefingEvents(input: {
                          'source',COALESCE(NULLIF(source_item.payload->>'source',''),
                            NULLIF(source_item.payload->>'domain',''),source.name,evidence.source_record_type),
                          'source_record_type',evidence.source_record_type,
-                         'source_title',COALESCE(source_item.title,
+                         'source_title',COALESCE(
+                           CASE WHEN source_item.id IS NOT NULL THEN CASE
+                             WHEN NULLIF(btrim(source_translation.translated_title),'') IS NOT NULL
+                               THEN source_translation.translated_title
+                             WHEN lower(replace(COALESCE(source_item.language_code,''),'_','-')) IN ('en','eng','english')
+                               OR lower(replace(COALESCE(source_item.language_code,''),'_','-')) LIKE 'en-%'
+                               THEN source_item.title
+                             ELSE NULL
+                           END END,
                            NULLIF(concat_ws(' / ',global_source.actor1_name,global_source.actor2_name),''),
                            global_source.action_geo_name),
-                         'source_summary',COALESCE(source_item.summary,
+                         'source_original_title',source_item.title,
+                         'source_language',source_item.language_code,
+                         'translation_provider',source_translation.provider,
+                         'translation_model',source_translation.model,
+                         'source_summary',COALESCE(
+                           CASE WHEN source_item.id IS NOT NULL THEN CASE
+                             WHEN NULLIF(btrim(source_translation.translated_title),'') IS NOT NULL
+                               THEN COALESCE(source_translation.generated_summary,source_translation.translated_title)
+                             WHEN lower(replace(COALESCE(source_item.language_code,''),'_','-')) IN ('en','eng','english')
+                               OR lower(replace(COALESCE(source_item.language_code,''),'_','-')) LIKE 'en-%'
+                               THEN source_item.summary
+                             ELSE NULL
+                           END END,
                            CASE WHEN global_source.id IS NOT NULL THEN
                              'Structured GDELT event near ' || COALESCE(global_source.action_geo_name,'an unspecified location') END),
                          'source_url',COALESCE(source_item.url,global_source.url,evidence.provenance->>'url'),
@@ -525,6 +577,11 @@ async function queryBriefingEvents(input: {
                 LEFT JOIN item source_item ON source_item.id=CASE
                   WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
                     THEN evidence.source_record_id::bigint END
+                LEFT JOIN item_translation source_translation
+                  ON source_translation.item_id=source_item.id
+                 AND source_translation.target_language_code='en'
+                 AND source_translation.source_title_hash=md5(COALESCE(source_item.title,''))
+                 AND source_translation.source_summary_hash IS NOT DISTINCT FROM md5(source_item.summary)
                 LEFT JOIN global_event global_source ON global_source.id=CASE
                   WHEN evidence.source_record_type='global_event' AND evidence.source_record_id ~ '^[0-9]+$'
                     THEN evidence.source_record_id::bigint END

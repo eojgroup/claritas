@@ -41,11 +41,19 @@ const event: BriefingIntelligenceEvent = {
   },
   linked_news: [{
     title: "Terminal operator reports delays",
+    original_title: "Terminalbetreiber meldet Verzögerungen",
+    original_language: "de",
     summary: null,
     url: "https://publisher.example/report",
     publisher: "Publisher",
     published_at: "2026-08-11T11:00:00.000Z",
     relationship: "reported",
+    translation: {
+      kind: "ai_translation",
+      target_language: "en",
+      provider: "openrouter",
+      model: "openrouter/free",
+    },
   }],
   earth_observation_state: "sensor_imagery_available",
   earth_observation: [{
@@ -123,6 +131,8 @@ test("important-event email includes event, geography, news, EO and profile cont
     assert.match(rendered.html, /Terminal operator reports delays/);
     assert.match(rendered.html, /Event start:<\/strong> 2026-08-11 09:30:00 UTC/);
     assert.match(rendered.html, /published 2026-08-11 11:00:00 UTC/);
+    assert.match(rendered.html, /AI-translated from DE to English for convenience/);
+    assert.match(rendered.text, /original publisher text remains available/);
     assert.match(rendered.html, /Alert created 2026-08-11 12:00:00 UTC/);
     assert.match(rendered.html, /sensor-derived observation/);
     assert.match(rendered.html, /captured 2026-08-11 10:00:00 UTC/);

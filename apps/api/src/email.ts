@@ -18,10 +18,18 @@ export type EmailRuntimeConfig = {
 
 export type BriefingEmailSignal = {
   title: string;
+  original_title?: string | null;
+  original_language?: string | null;
   summary: string | null;
   url: string | null;
   source_name: string;
   reasons: string[];
+  translation?: {
+    kind: "ai_translation";
+    target_language: string;
+    provider: string;
+    model: string | null;
+  } | null;
 };
 
 export type BriefingEmailEvent = {
@@ -38,9 +46,17 @@ export type BriefingEmailEvent = {
   profile_reasons: string[];
   linked_news: Array<{
     title: string;
+    original_title?: string | null;
+    original_language?: string | null;
     publisher: string;
     url: string | null;
     published_at: string | null;
+    translation?: {
+      kind: "ai_translation";
+      target_language: string;
+      provider: string;
+      model: string | null;
+    } | null;
   }>;
   earth_observation: Array<{
     product_type: string;
@@ -286,6 +302,18 @@ function exactUtcTimestamp(value: string | null): string | null {
   return parsed.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, " UTC");
 }
 
+function translationDisclosure(input: {
+  original_language?: string | null;
+  translation?: { target_language: string; provider: string } | null;
+}): string | null {
+  if (!input.translation) return null;
+  const source = input.original_language?.trim().toUpperCase() || "the source language";
+  const target = input.translation.target_language.trim().toUpperCase() === "EN"
+    ? "English"
+    : input.translation.target_language.trim().toUpperCase();
+  return `AI-translated from ${source} to ${target} for convenience`;
+}
+
 function eventHtml(event: BriefingEmailEvent, palette: BriefingEmailPalette): string {
   const profileReasons = event.profile_reasons.length
     ? `<div style="margin:10px 0 0;padding:10px 12px;border-left:3px solid ${palette.accent};background:${palette.surfaceMuted};color:${palette.ink}"><strong>Why it matches your profile</strong><br>${escapeHtml(event.profile_reasons.join(" · "))}</div>`
@@ -299,7 +327,8 @@ function eventHtml(event: BriefingEmailEvent, palette: BriefingEmailPalette): st
       ? `<a href="${escapeHtml(url)}" style="color:${palette.link};text-decoration:underline">${escapeHtml(item.title)}</a>`
       : escapeHtml(item.title);
     const publishedAt = exactUtcTimestamp(item.published_at);
-    return `<li style="margin:0 0 6px;color:${palette.ink}">${title}<span style="color:${palette.muted}"> · ${escapeHtml(item.publisher)}${publishedAt ? ` · published ${escapeHtml(publishedAt)}` : " · publication time unavailable"}</span></li>`;
+    const disclosure = translationDisclosure(item);
+    return `<li style="margin:0 0 6px;color:${palette.ink}">${title}<span style="color:${palette.muted}"> · ${escapeHtml(item.publisher)}${publishedAt ? ` · published ${escapeHtml(publishedAt)}` : " · publication time unavailable"}</span>${disclosure ? `<div style="font-size:11px;color:${palette.accent}">${escapeHtml(disclosure)}; original publisher text remains available at the source link.</div>` : ""}</li>`;
   }).join("");
   const eo = event.earth_observation.slice(0, 4).map((item) => {
     const role = item.evidentiary_role === "sensor_observation"
@@ -341,6 +370,7 @@ function eventText(event: BriefingEmailEvent): string[] {
     ...(event.why_interesting.length ? ["Why this is interesting:", ...event.why_interesting.map((reason) => `- ${reason}`)] : []),
     ...(event.linked_news.length ? ["Linked news:", ...event.linked_news.flatMap((item) => [
       `- ${item.title} · ${item.publisher} · ${exactUtcTimestamp(item.published_at) ? `published ${exactUtcTimestamp(item.published_at)}` : "publication time unavailable"}`,
+      ...(translationDisclosure(item) ? [`  ${translationDisclosure(item)}; original publisher text remains available at the source link.`] : []),
       ...(safeWebUrl(item.url) ? [`  ${safeWebUrl(item.url)}`] : []),
     ])] : []),
     ...(event.earth_observation.length ? ["Earth observation:", ...event.earth_observation.map((item) =>
@@ -380,7 +410,8 @@ export function renderBriefingEmail(
       const summary = signal.summary
         ? `<div style="margin-top:5px;color:${palette.muted}">${escapeHtml(signal.summary)}</div>`
         : "";
-      return `<li style="margin:0 0 14px;color:${palette.ink}"><strong>${linkedTitle}</strong><div style="font-size:12px;color:${palette.muted}">${escapeHtml(signal.source_name)}${reasons}</div>${summary}</li>`;
+      const disclosure = translationDisclosure(signal);
+      return `<li style="margin:0 0 14px;color:${palette.ink}"><strong>${linkedTitle}</strong><div style="font-size:12px;color:${palette.muted}">${escapeHtml(signal.source_name)}${reasons}</div>${disclosure ? `<div style="font-size:11px;color:${palette.accent}">${escapeHtml(disclosure)}; original publisher text remains available at the source link.</div>` : ""}${summary}</li>`;
     })
     .join("");
   const marketHtml = content.markets
