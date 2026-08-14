@@ -4665,7 +4665,23 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
                 installCountryOverlays(on: map)
             }
 
-            let nextAnnotationSignature = [
+            let pointSignature = next.points.map { point in
+                "\(point.id):\(point.rank):\(point.colorValue)"
+            }.joined(separator: ",")
+            let visibleEvents = next.events.prefix(eventLimit(for: next))
+            let eventSignature = visibleEvents.map { event in
+                let latitude = event.latitude.map { String($0) } ?? "missing"
+                let longitude = event.longitude.map { String($0) } ?? "missing"
+                return "\(event.id):\(latitude):\(longitude):\(event.severity.rawValue):\(event.earth_observation_available)"
+            }.joined(separator: ",")
+            let transportLimit = next.compactPresentation ? 200 : 320
+            let transportSignature = next.transportEntities.prefix(transportLimit).map { entity in
+                let latitude = entity.latitude.map { String($0) } ?? "missing"
+                let longitude = entity.longitude.map { String($0) } ?? "missing"
+                let heading = entity.heading.map { String($0) } ?? "missing"
+                return "\(entity.id):\(latitude):\(longitude):\(heading):\(entity.observed_at)"
+            }.joined(separator: ",")
+            let annotationParts: [String] = [
                 next.mode.rawValue,
                 next.mapRegion.rawValue,
                 next.compactPresentation ? "compact" : "regular",
@@ -4673,14 +4689,11 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
                 next.comparisonCountry?.uppercased() ?? "",
                 next.pinnedCountry?.uppercased() ?? "",
                 next.featuredCountry?.uppercased() ?? "",
-                next.points.map { "\($0.id):\($0.rank):\($0.colorValue)" }.joined(separator: ","),
-                next.events.prefix(eventLimit(for: next)).map {
-                    "\($0.id):\($0.latitude ?? 999):\($0.longitude ?? 999):\($0.severity.rawValue):\($0.earth_observation_available)"
-                }.joined(separator: ","),
-                next.transportEntities.prefix(next.compactPresentation ? 200 : 320).map {
-                    "\($0.id):\($0.latitude ?? 999):\($0.longitude ?? 999):\($0.heading ?? -1):\($0.observed_at)"
-                }.joined(separator: ",")
-            ].joined(separator: "|")
+                pointSignature,
+                eventSignature,
+                transportSignature
+            ]
+            let nextAnnotationSignature = annotationParts.joined(separator: "|")
             if force || nextAnnotationSignature != annotationSignature {
                 annotationSignature = nextAnnotationSignature
                 installAnnotations(on: map)
