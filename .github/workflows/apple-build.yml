@@ -59,7 +59,9 @@ jobs:
 
   testflight:
     name: Archive and distribute to TestFlight
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # A manual release must exercise the same signed archive and TestFlight
+    # delivery path as a push to main; compiling alone is a false green.
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: build
     runs-on: macos-15
     env:
