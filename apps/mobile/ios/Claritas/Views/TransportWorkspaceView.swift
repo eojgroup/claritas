@@ -974,6 +974,14 @@ private enum TransportMapViewport: String {
     case links
 }
 
+private struct TransportCountryModePoint: Identifiable {
+    let country: String
+    let mode: String
+    let count: Int
+
+    var id: String { "\(country)-\(mode)" }
+}
+
 private struct TransportMapConnection: Identifiable {
     let mode: TransportMode
     let originCountry: String
