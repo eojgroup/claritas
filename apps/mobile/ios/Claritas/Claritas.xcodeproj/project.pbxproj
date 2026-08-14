@@ -44,6 +44,7 @@
 		E97CE9339E3C3AA926286172 /* Config.plist in Resources */ = {isa = PBXBuildFile; fileRef = 03EDBCD1E91D22EE1AF4E167 /* Config.plist */; };
 		F2911028A43F45881C5A8979 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EC9D5A8012718FEE05A3543 /* App.swift */; };
 		FC54E743DE78F07094C3747B /* ClaritasWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECF92D0039595CFD896A643B /* ClaritasWatchApp.swift */; };
+		C0A17A5C71A24EA586738FA1 /* WorldCountries.geojson in Resources */ = {isa = PBXBuildFile; fileRef = C1B28B6D82B35FB6978490B2 /* WorldCountries.geojson */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -151,6 +152,7 @@
 		ECF92D0039595CFD896A643B /* ClaritasWatchApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ClaritasWatchApp.swift; sourceTree = "<group>"; };
 		F1C65E2AD662D863F6EAF89A /* Claritas Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Claritas Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC6003B75CB3D57CDE618795 /* WidgetSnapshotStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = WidgetSnapshotStore.swift; path = Services/WidgetSnapshotStore.swift; sourceTree = "<group>"; };
+		C1B28B6D82B35FB6978490B2 /* WorldCountries.geojson */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.json; name = WorldCountries.geojson; path = Resources/WorldCountries.geojson; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -209,6 +211,7 @@
 				B1019BBA62A6913444D9B467 /* WeatherListView.swift */,
 				818BB9F45DA2368D1A15CDF9 /* Assets.xcassets */,
 				03EDBCD1E91D22EE1AF4E167 /* Config.plist */,
+				C1B28B6D82B35FB6978490B2 /* WorldCountries.geojson */,
 				0F6D06A33DC5AB79BB190B9B /* Info.plist */,
 			);
 			name = Claritas;
@@ -442,6 +445,7 @@
 			files = (
 				48AFD94ED499FE29D14A46CF /* Assets.xcassets in Resources */,
 				E97CE9339E3C3AA926286172 /* Config.plist in Resources */,
+				C0A17A5C71A24EA586738FA1 /* WorldCountries.geojson in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

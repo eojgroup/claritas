@@ -200,6 +200,39 @@ if File.file?(accent_color_path)
   check.call(!accent_color.fetch("colors", []).empty?, "Claritas AccentColor asset must contain a color")
 end
 
+world_countries_path = File.join(ROOT, "Claritas", "Resources", "WorldCountries.geojson")
+check.call(File.file?(world_countries_path), "Claritas must bundle the Natural Earth country geometry")
+if File.file?(world_countries_path)
+  begin
+    world_countries = JSON.parse(File.read(world_countries_path))
+    features = world_countries.fetch("features", [])
+    iso_codes = features.filter_map { |feature| feature.dig("properties", "iso2") }
+    check.call(world_countries["type"] == "FeatureCollection", "WorldCountries.geojson must be a feature collection")
+    check.call(features.length >= 170, "WorldCountries.geojson must retain global country coverage")
+    check.call(iso_codes.length == iso_codes.uniq.length, "WorldCountries.geojson must contain unique ISO-2 features")
+    dateline_jumps = features.flat_map do |feature|
+      geometry = feature["geometry"] || {}
+      polygons = geometry["type"] == "Polygon" ? [geometry["coordinates"]] : geometry["coordinates"] || []
+      polygons.flat_map do |polygon|
+        polygon.flat_map do |ring|
+          ring.each_cons(2).filter_map do |left, right|
+            [feature.dig("properties", "iso2"), (left[0].to_f - right[0].to_f).abs] if (left[0].to_f - right[0].to_f).abs > 180
+          end
+        end
+      end
+    end
+    check.call(dateline_jumps.empty?, "WorldCountries.geojson must split rings at the antimeridian: #{dateline_jumps.inspect}")
+  rescue JSON::ParserError => error
+    errors << "WorldCountries.geojson is invalid JSON: #{error.message}"
+  end
+
+  ios_resources = targets.fetch("Claritas").resources_build_phase.files_references
+  check.call(
+    ios_resources.any? { |reference| File.expand_path(reference.real_path.to_s) == world_countries_path },
+    "Claritas target must copy WorldCountries.geojson into the app bundle"
+  )
+end
+
 if errors.any?
   warn errors.map { |error| "ERROR: #{error}" }.join("\n")
   exit 1

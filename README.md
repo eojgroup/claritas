@@ -238,7 +238,16 @@ The API requires the database environment variables documented in
   - Structured Wikidata content is consumed under CC0.
 - Open intelligence providers:
   - GDELT DOC/Event/GKG is keyless. Optional tuning: `GDELT_DOC_QUERY`,
-    `GDELT_MAX_RAW_ROWS`, and an identifying `GDELT_USER_AGENT`.
+    `GDELT_MAX_RAW_ROWS`, and an identifying `GDELT_USER_AGENT`. Scheduled
+    ingestion polls every 15 minutes with at most 25 DOC headlines per run; if
+    DOC is rate limited it records degraded coverage and uses a relevance-filtered
+    25-link maximum from the official rolling GDELT Article List RSS feed.
+    Event and GKG parsing is capped at 190 rows each per scheduled run so the
+    15-minute cadence retains approximately the previous hourly raw-row budget.
+  - GOV.UK Search is keyless and adds OGL-licensed primary-source `news_story`,
+    `press_release` and `world_news_story` records. Optional bounded tuning:
+    `GOVUK_NEWS_LOOKBACK_HOURS` (default 48) and `GOVUK_NEWS_MAX_RECORDS`
+    (default 100, maximum 250).
   - Official institutional RSS is keyless. Claritas ingests European Commission,
     Federal Reserve, SEC, BLS employment/CPI/PPI/JOLTS, and ECB press/statistical
     releases while preserving the publishing institution, feed, attribution,
@@ -294,6 +303,11 @@ The API requires the database environment variables documented in
   - Ingestion preserves the original publisher title, summary and language code.
     GDELT remains the aggregation provider while the publisher domain (for
     example `reuters.com`) is displayed separately when GDELT returns it.
+  - Timestamp provenance is explicit. GDELT DOC uses a 15-minute provider
+    first-seen batch time; the bounded GAL fallback cannot distinguish publisher
+    time from provider discovery; official RSS uses publisher publication time;
+    GOV.UK uses its public timestamp. Invalid GDELT timestamps are skipped rather
+    than replaced with the current time.
   - Non-English headlines are translated automatically into the configured
     interface language after ingestion. A short summary is generated only when
     a user expands a story and only from the already-ingested headline/excerpt.

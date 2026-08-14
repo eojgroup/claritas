@@ -2,6 +2,7 @@ import { ingestOpenWeatherCountryWeather } from "./connectors/openweather";
 import { ingestNwsAlerts } from "./connectors/nws";
 import { ingestGdelt } from "./connectors/gdelt";
 import { ingestInstitutionalRss } from "./connectors/institutional-rss";
+import { ingestGovUkNews } from "./connectors/govuk-news";
 import { ingestSecEdgar } from "./connectors/sec-edgar";
 import { ingestEcbData } from "./connectors/ecb";
 import { ingestOecdSharePrices } from "./connectors/oecd";
@@ -129,10 +130,12 @@ type IngestionTotals = {
 type NewsRunProviders = {
   gdelt: boolean;
   institutionalRss: boolean;
+  govUk: boolean;
 };
 
 type NewsRunPlan = {
   providers: NewsRunProviders;
+  gdelt: { timespan: string; maxRecords: number; maxRawRows: number };
   requestPayload: Record<string, unknown>;
 };
 
@@ -157,7 +160,7 @@ type LeadershipRunPlan = {
 
 type StepResult = {
   step: string;
-  status: "success" | "failed";
+  status: "success" | "degraded" | "failed";
   started_at: string;
   finished_at: string;
   duration_ms: number;
@@ -175,6 +178,7 @@ type TriggerRunInput = {
 type SourceConfigKey =
   | "gdelt"
   | "institutionalRss"
+  | "govUk"
   | "openweather"
   | "nws"
   | "secEdgar"
@@ -199,6 +203,12 @@ const SOURCE_CONFIG: Record<
     sourceName: "institutional_rss",
     apiBaseUrl: "https://claritas.info/sources/institutional-rss",
     provider: "institutional_rss",
+    authType: "none",
+  },
+  govUk: {
+    sourceName: "govuk_search",
+    apiBaseUrl: "https://www.gov.uk/api/search.json",
+    provider: "govuk_search",
     authType: "none",
   },
   openweather: {
@@ -270,6 +280,7 @@ const activeRunPromises = new Map<number, Promise<void>>();
 const INGESTION_SOURCE_NAMES = [
   "gdelt",
   "institutional_rss",
+  "govuk_search",
   "openweather",
   "nws",
   "sec_edgar",
@@ -442,6 +453,7 @@ function resolvePipeline(pipeline: string | null, sourceName: string): Ingestion
   }
   if (sourceName === "gdelt") return "news";
   if (sourceName === "institutional_rss") return "news";
+  if (sourceName === "govuk_search") return "news";
   if (sourceName === "openweather") return "weather";
   if (sourceName === "nws") return "weather";
   if (["sec_edgar", "ecb", "oecd", "fred", "world_bank_wdi"].includes(sourceName)) return "market";
@@ -598,14 +610,44 @@ function startRunTask(runId: number, task: () => Promise<void>) {
 export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
   const body = asRecord(rawBody);
   const providersRaw = asRecord(body.providers);
+  const gdeltRaw = asRecord(body.gdelt);
   const providers: NewsRunProviders = {
     gdelt: asBoolean(providersRaw.gdelt, true),
     institutionalRss: asBoolean(providersRaw.institutionalRss ?? providersRaw.institutional_rss, true),
+    govUk: asBoolean(providersRaw.govUk ?? providersRaw.gov_uk ?? providersRaw.govuk, true),
   };
-  if (!providers.gdelt && !providers.institutionalRss) {
+  if (!providers.gdelt && !providers.institutionalRss && !providers.govUk) {
     throw new IngestionValidationError("Select at least one news provider.");
   }
-  return { providers, requestPayload: { providers } };
+  const requestedTimespan = asString(gdeltRaw.timespan) ?? "1h";
+  if (!/^\d+(?:min|h|d)$/i.test(requestedTimespan)) {
+    throw new IngestionValidationError("gdelt.timespan must use GDELT duration syntax such as 15min, 1h, or 1d.");
+  }
+  const gdelt = {
+    timespan: requestedTimespan.toLowerCase(),
+    // Four 15-minute runs remain within the previous 100-headline hourly
+    // ceiling while surfacing developments much sooner.
+    maxRecords: clampInt(gdeltRaw.maxRecords ?? gdeltRaw.max_records, 1, 25, 25),
+    // Event and GKG archives previously processed 750 rows once per hour.
+    // Four 190-row polls retain roughly that hourly workload at lower latency.
+    maxRawRows: clampInt(gdeltRaw.maxRawRows ?? gdeltRaw.max_raw_rows, 25, 190, 190),
+  };
+  return { providers, gdelt, requestPayload: { providers, gdelt } };
+}
+
+export function classifyGdeltNewsCoverage(
+  result: Record<string, unknown>,
+): "success" | "degraded" | "failed" {
+  if (result.doc_status === "healthy") return "success";
+  if (result.doc_status === "degraded_fallback") {
+    const fallback = asRecord(result.gal_fallback);
+    const selected = Number(fallback.selected);
+    const latestEventTime = typeof fallback.latest_event_time === "string"
+      ? Date.parse(fallback.latest_event_time)
+      : Number.NaN;
+    if (Number.isFinite(selected) && selected > 0 && Number.isFinite(latestEventTime)) return "degraded";
+  }
+  return "failed";
 }
 
 export function buildWeatherRunPlan(rawBody: unknown): WeatherRunPlan {
@@ -704,22 +746,31 @@ async function executeProviderStep(
   totals: IngestionTotals,
   step: string,
   action: () => Promise<Record<string, unknown>>,
+  classifyResult?: (result: Record<string, unknown>) => "success" | "degraded" | "failed",
 ): Promise<boolean> {
   const startedAt = Date.now();
   await safeAppendRunLog(runId, "info", `Running ${step} ingest.`);
   try {
     const result = await action();
     mergeTotals(totals, extractTotals(result));
+    const status = classifyResult?.(result) ?? "success";
     steps.push({
       step,
-      status: "success",
+      status,
       started_at: new Date(startedAt).toISOString(),
       finished_at: toIsoNow(),
       duration_ms: Date.now() - startedAt,
       result,
     });
-    await safeAppendRunLog(runId, "info", `${step} ingest completed.`, { result });
-    return true;
+    await safeAppendRunLog(
+      runId,
+      status === "failed" ? "error" : status === "degraded" ? "warn" : "info",
+      status === "failed"
+        ? `${step} ingest completed without usable publisher coverage.`
+        : status === "degraded" ? `${step} ingest completed in degraded mode.` : `${step} ingest completed.`,
+      { result },
+    );
+    return status !== "failed";
   } catch (error) {
     const message = toErrorMessage(error);
     steps.push({
@@ -748,13 +799,35 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
     });
 
     if (plan.providers.gdelt) {
-      await executeProviderStep(runId, steps, totals, "gdelt/doc-event-gkg", async () => ingestGdelt());
+      await executeProviderStep(
+        runId,
+        steps,
+        totals,
+        "gdelt/doc-event-gkg",
+        async () => ingestGdelt({
+          timespan: plan.gdelt.timespan,
+          maxRecords: plan.gdelt.maxRecords,
+          maxRawRows: plan.gdelt.maxRawRows,
+        }),
+        classifyGdeltNewsCoverage,
+      );
     }
     if (plan.providers.institutionalRss) {
-      await executeProviderStep(runId, steps, totals, "institutional-rss/primary-source-releases", ingestInstitutionalRss);
+      await executeProviderStep(
+        runId,
+        steps,
+        totals,
+        "institutional-rss/primary-source-releases",
+        ingestInstitutionalRss,
+        (result) => result.health === "degraded" ? "degraded" : "success",
+      );
+    }
+    if (plan.providers.govUk) {
+      await executeProviderStep(runId, steps, totals, "govuk-search/primary-source-news", ingestGovUkNews);
     }
 
-    const providerSucceeded = steps.filter((step) => step.status === "success").length;
+    const providerSteps = steps.filter((step) => !step.step.startsWith("news-translation/"));
+    const providerSucceeded = providerSteps.filter((step) => step.status !== "failed").length;
     if (providerSucceeded === 0) throw new Error("All selected news providers failed.");
 
     if (newsTranslationEnabled()) {
@@ -772,16 +845,27 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
       });
     }
 
+    const degradedSteps = providerSteps.filter((step) => step.status !== "success").map((step) => step.step);
+    const health = degradedSteps.length > 0 ? "degraded" : "healthy";
     const stats = {
       pipeline: "news",
+      health,
+      degraded_steps: degradedSteps,
       duration_ms: Date.now() - runStartedAt,
       steps,
       totals,
     };
 
-    await updateRunStatus(runId, "success", { stats, finished: true });
-    await safeAppendRunLog(runId, "info", "News ingestion run finished successfully.", {
+    await updateRunStatus(runId, "success", {
+      error: degradedSteps.length > 0 ? `Degraded provider steps: ${degradedSteps.join(", ")}` : null,
+      stats,
+      finished: true,
+    });
+    await safeAppendRunLog(runId, health === "degraded" ? "warn" : "info", health === "degraded"
+      ? "News ingestion run finished with degraded provider coverage."
+      : "News ingestion run finished successfully.", {
       totals,
+      degraded_steps: degradedSteps,
     });
   } catch (err) {
     const errorMessage = toErrorMessage(err);
@@ -998,7 +1082,9 @@ export async function triggerNewsRun(input: {
   actor: TriggerActor;
   plan: NewsRunPlan;
 }): Promise<{ runId: number }> {
-  const sourceNameOverride: SourceConfigKey = input.plan.providers.gdelt ? "gdelt" : "institutionalRss";
+  const sourceNameOverride: SourceConfigKey = input.plan.providers.gdelt
+    ? "gdelt"
+    : input.plan.providers.govUk ? "govUk" : "institutionalRss";
   const run = await createRun({
     pipeline: "news",
     actor: input.actor,
@@ -1099,6 +1185,7 @@ export async function listRuns(options: {
       `(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'gdelt')
         OR ($${pipelineIdx} = 'news' AND s.name = 'institutional_rss')
+        OR ($${pipelineIdx} = 'news' AND s.name = 'govuk_search')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'nws')
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')
@@ -1211,6 +1298,7 @@ export async function getMetrics(options?: {
       `(r.pipeline = $${pipelineIdx}
         OR ($${pipelineIdx} = 'news' AND s.name = 'gdelt')
         OR ($${pipelineIdx} = 'news' AND s.name = 'institutional_rss')
+        OR ($${pipelineIdx} = 'news' AND s.name = 'govuk_search')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'openweather')
         OR ($${pipelineIdx} = 'weather' AND s.name = 'nws')
         OR ($${pipelineIdx} = 'market' AND s.name = 'sec_edgar')

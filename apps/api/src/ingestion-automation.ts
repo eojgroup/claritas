@@ -50,6 +50,7 @@ type DemandRow = {
 
 type LatestDataRow = {
   latest_data_at: DbTimestamp | null;
+  latest_acquired_at: DbTimestamp | null;
 };
 
 export type IngestionAutomationRule = {
@@ -79,6 +80,7 @@ export type IngestionAutomationPipelineStatus = {
   last_success_at: string | null;
   last_failure_at: string | null;
   latest_data_at: string | null;
+  latest_acquired_at: string | null;
   data_age_minutes: number | null;
   demand_requests: number;
   active_runs: number;
@@ -138,10 +140,10 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
     pipeline: "news",
     enabled: true,
     schedule_enabled: true,
-    schedule_interval_minutes: 60,
+    schedule_interval_minutes: 15,
     intelligent_enabled: true,
-    min_spacing_minutes: 15,
-    freshness_sla_minutes: 90,
+    min_spacing_minutes: 10,
+    freshness_sla_minutes: 30,
     demand_window_minutes: 15,
     demand_threshold: 20,
     failure_backoff_minutes: 20,
@@ -149,7 +151,9 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
       providers: {
         gdelt: true,
         institutionalRss: true,
+        govUk: true,
       },
+      gdelt: { timespan: "1h", maxRecords: 25, maxRawRows: 190 },
     },
   },
   weather: {
@@ -614,10 +618,15 @@ async function getPipelineEvaluationStates(): Promise<PipelineEvaluationState[]>
        FROM ingestion_run
        GROUP BY pipeline
      ), latest_data AS (
-       SELECT 'news'::text AS pipeline, MAX(i.created_at) AS latest_data_at
+       SELECT 'news'::text AS pipeline,
+              MAX(i.event_time) FILTER (
+                WHERE i.event_time IS NOT NULL
+                  AND i.event_time <= now() + interval '5 minutes'
+              ) AS latest_data_at
        FROM item i
        JOIN source s ON s.id = i.source_id
-       WHERE s.name IN ('gdelt', 'institutional_rss')
+       WHERE i.kind = 'news_article'
+         AND s.name IN ('gdelt', 'institutional_rss', 'govuk_search')
          AND COALESCE(s.metadata->>'retired', 'false') <> 'true'
        UNION ALL
        SELECT 'weather', MAX(latest_data_at) FROM (
@@ -639,6 +648,13 @@ async function getPipelineEvaluationStates(): Promise<PipelineEvaluationState[]>
        SELECT 'podcasts', MAX(last_synced_at) FROM podcast_feed
        UNION ALL
        SELECT 'leadership', MAX(retrieved_at) FROM country_leadership
+     ), latest_acquisition AS (
+       SELECT 'news'::text AS pipeline, MAX(i.created_at) AS latest_acquired_at
+       FROM item i
+       JOIN source s ON s.id = i.source_id
+       WHERE i.kind = 'news_article'
+         AND s.name IN ('gdelt', 'institutional_rss', 'govuk_search')
+         AND COALESCE(s.metadata->>'retired', 'false') <> 'true'
      ), demand AS (
        SELECT
          rule.pipeline,
@@ -656,22 +672,26 @@ async function getPipelineEvaluationStates(): Promise<PipelineEvaluationState[]>
        run.last_failure_at,
        COALESCE(run.active_runs, 0)::int AS active_runs,
        latest.latest_data_at,
+       acquired.latest_acquired_at,
        COALESCE(demand.demand_requests, 0)::int AS demand_requests
      FROM ingestion_automation_rule rule
      LEFT JOIN run_status run ON run.pipeline = rule.pipeline
      LEFT JOIN latest_data latest ON latest.pipeline = rule.pipeline
+     LEFT JOIN latest_acquisition acquired ON acquired.pipeline = rule.pipeline
      LEFT JOIN demand ON demand.pipeline = rule.pipeline
      ORDER BY rule.pipeline ASC`,
   );
 
   return rows.map((row) => {
     const latestDataAt = timestampToString(row.latest_data_at);
+    const latestAcquiredAt = timestampToString(row.latest_acquired_at);
     return {
       pipeline: parsePipeline(row.pipeline),
       last_run_at: timestampToString(row.last_run_at),
       last_success_at: timestampToString(row.last_success_at),
       last_failure_at: timestampToString(row.last_failure_at),
       latest_data_at: latestDataAt,
+      latest_acquired_at: latestAcquiredAt,
       data_age_minutes: computeDataAgeMinutes(latestDataAt),
       demand_requests: Number(row.demand_requests || 0),
       active_runs: Number(row.active_runs || 0),

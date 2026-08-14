@@ -68,4 +68,20 @@ describe("PriorityNewsList", () => {
     fireEvent.click(screen.getByRole("button", { name: /Retry translation/i }));
     expect(onRequestTranslation).toHaveBeenCalledWith(item);
   });
+
+  it("labels provider discovery batches separately from publisher publication time", () => {
+    const item: NewsItem = {
+      id: 44,
+      kind: "news",
+      title: "A newly discovered report",
+      summary: null,
+      url: "https://example.com/report",
+      country_iso2: "GB",
+      event_time: "2026-08-14T09:15:00Z",
+      payload: { time_basis: "provider_first_seen", time_precision: "15_minutes" },
+    };
+
+    render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example · via GDELT"} getCountryName={() => "United Kingdom"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
+    expect(screen.getByText(/First seen · Aug 14, 2026/i)).toBeTruthy();
+  });
 });

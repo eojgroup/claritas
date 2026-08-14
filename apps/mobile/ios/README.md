@@ -1,5 +1,15 @@
 # Claritas Apple Apps (SwiftUI)
 
+The iPhone and iPad signal map uses [Natural Earth country geometry](https://www.naturalearthdata.com/about/terms-of-use/)
+(public domain), distributed through the `world-atlas` dataset, for its native
+MapKit signal-concentration layer. Apple Maps remains the basemap and interaction
+engine; the bundled geometry only supplies country boundaries.
+
+Natural Earth rings at the ±180° meridian are split before MapKit consumes
+them. After replacing or regenerating the resource, run
+`node apps/mobile/ios/sanitize_world_countries.mjs` and then the project
+validator; the validator rejects any remaining cross-world ring segment.
+
 Project path: `apps/mobile/ios/Claritas/Claritas.xcodeproj`
 Generator source: `apps/mobile/ios/generate_xcodeproj.rb`
 
@@ -155,5 +165,8 @@ The App Store Connect key must be a team key with Admin access because CI uses t
 - ATS is currently permissive (NSAllowsArbitraryLoads=true) to simplify dev. For production, replace with explicit domain exceptions or HTTPS endpoints.
 - Backend auth redirect validation now supports non-HTTP callback schemes via `AUTH_ALLOWED_REDIRECT_SCHEMES` (default includes `claritas`).
 - Country centroids support overview navigation only; they are not valid substitutes for event-specific EO coordinates.
-- The native map uses a touch-first dark geospatial canvas, shared overview relevance points, region scope, selection, ranked bubble scale, pan/zoom, and reset behavior aligned with web and Watch.
+- The native iPhone/iPad map uses Apple Maps with a Natural Earth country
+  choropleth, a bounded set of priority labels, event/satellite markers,
+  scoped transport markers, country profiles, native pan/zoom, and reset
+  behavior aligned with web. Watch retains its intentionally compact glance map.
 - The structure is modular (Models, Services, Views) to ease future extensions (auth, settings, notifications, charts).

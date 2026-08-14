@@ -32,7 +32,10 @@ step automatically.
 
 - Market automation runs at most every four hours by default; manual runs remain available.
 - Dashboard demand signals are aggregated in memory and flushed at most once per pipeline per minute instead of writing on every read request.
-- GDELT raw rows per run are capped at 500.
+- Scheduled GDELT Event/GKG parsing is capped at 190 rows per archive and run.
+  Publisher discovery runs every 15 minutes with at most 25 DOC or bounded
+  GAL-fallback headlines, keeping approximately the previous 750 raw rows and
+  100 publisher headlines per hour while reducing latency.
 - AIS and ADS-B sampling is ten minutes, route enrichment is capped at 750 aircraft per refresh, and overview reads cache for two minutes.
 - Raw transport tracks retain 3 days, movement events and per-entity country presence 60 days, compact port-hour plus bounded daily country/corridor aggregates 100 days, and current snapshots 14 days.
 - Successful ingestion audits retain 30 days; failed audits retain 90 days.

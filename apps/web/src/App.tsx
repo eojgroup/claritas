@@ -321,6 +321,17 @@ const resolveNewsSource = (item: NewsItem): string | undefined => {
   if (sourceName?.toLowerCase() === "gdelt" && explicitPublisher) {
     return `${explicitPublisher.replace(/^www\./i, "")} · via GDELT`;
   }
+  const governedPublisher = (
+    explicitPublisher ??
+    pickSource(payload?.["publisher"]) ??
+    pickSource(payload?.["source"])
+  )?.replace(/^www\./i, "");
+  if (sourceName?.toLowerCase() === "govuk_search" && governedPublisher) {
+    return `${governedPublisher} · via GOV.UK`;
+  }
+  if (sourceName?.toLowerCase() === "institutional_rss" && governedPublisher) {
+    return `${governedPublisher} · official feed`;
+  }
   if (sourceName) return prettySourceName(sourceName);
   return source ? prettySourceName(source) : undefined;
 };

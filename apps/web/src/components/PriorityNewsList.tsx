@@ -45,6 +45,18 @@ const newsTimestampParts = (value: string | null | undefined) => {
   };
 };
 
+const newsTimeBasisLabel = (item: NewsItem) => {
+  const payload =
+    item.payload && typeof item.payload === "object" && !Array.isArray(item.payload)
+      ? (item.payload as Record<string, unknown>)
+      : null;
+  const basis = typeof payload?.time_basis === "string" ? payload.time_basis : "";
+  if (basis === "provider_first_seen") return "First seen";
+  if (basis === "publisher_published_or_provider_discovered") return "Source time";
+  if (basis.startsWith("publisher_")) return "Published";
+  return "Reported";
+};
+
 function isLeadershipChangeStory(item: NewsItem): boolean {
   const text = `${newsDisplayTitle(item)} ${newsDisplaySummary(item) ?? ""} ${item.title ?? ""} ${item.summary ?? ""}`;
   return (
@@ -137,6 +149,7 @@ export default function PriorityNewsList({
         );
         const linkedEvents = item.linked_events ?? [];
         const timestamp = newsTimestampParts(item.event_time);
+        const timeBasisLabel = newsTimeBasisLabel(item);
         const satelliteState = linkedEvents.find((event) => (
           event.earth_observation_state && event.earth_observation_state !== "not_requested"
         ))?.earth_observation_state;
@@ -179,7 +192,7 @@ export default function PriorityNewsList({
                 title={timestamp.exact}
               >
                 <strong>{timestamp.time}</strong>
-                <small>{timestamp.date}</small>
+                <small>{timeBasisLabel} · {timestamp.date}</small>
                 <small>{timestamp.zone}</small>
               </time>
               <span

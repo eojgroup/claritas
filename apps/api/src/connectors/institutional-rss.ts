@@ -158,6 +158,7 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
   let updated = 0;
   let unchanged = 0;
   let skipped = 0;
+  let latestEventTime: string | null = null;
   const failures: Array<{ feed: string; error: string }> = [];
   for (const feed of INSTITUTIONAL_RSS_FEEDS) {
     try {
@@ -177,6 +178,7 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
         const publishedRaw = tag(block, "pubDate") ?? tag(block, "published") ?? tag(block, "updated");
         const parsed = publishedRaw ? Date.parse(publishedRaw) : Number.NaN;
         const eventTime = Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+        if (eventTime && (!latestEventTime || eventTime > latestEventTime)) latestEventTime = eventTime;
         const inference = inferNewsCountry({ title, summary, url, feedCountryHint: feed.sourceCountryIso2 });
         if (inference.iso2) {
           await query(`INSERT INTO country (iso2, name) VALUES ($1::char(2), $1) ON CONFLICT (iso2) DO NOTHING`, [inference.iso2]);
@@ -210,6 +212,9 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
              feed: feed.id, feed_url: feed.url, publisher_url: feed.homepage,
              attribution: feed.attribution, license: feed.license, license_url: feed.licenseUrl,
              topics: feed.topics, country_inference: inference,
+             time_basis: eventTime ? "publisher_published" : "unavailable",
+             time_precision: eventTime ? "source_provided" : "unavailable",
+             publisher_published_at: eventTime,
            }), crypto.createHash("sha256").update(`${url}|${eventTime}|${feed.id}`).digest("hex"),
            feed.languageCode, feed.sourceCountryIso2]
         );
@@ -222,5 +227,15 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
     }
   }
   if (failures.length === INSTITUTIONAL_RSS_FEEDS.length) throw new Error(`All institutional RSS feeds failed: ${failures.map((failure) => `${failure.feed}: ${failure.error}`).join("; ")}`);
-  return { provider: "institutional_rss", inserted, updated, unchanged, skipped, feeds: INSTITUTIONAL_RSS_FEEDS.length, failures };
+  return {
+    provider: "institutional_rss",
+    health: failures.length > 0 ? "degraded" : "healthy",
+    inserted,
+    updated,
+    unchanged,
+    skipped,
+    latest_event_time: latestEventTime,
+    feeds: INSTITUTIONAL_RSS_FEEDS.length,
+    failures,
+  };
 }

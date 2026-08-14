@@ -67,6 +67,12 @@ private struct NewsRow: View {
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(2)
                 }
+                if let disclosure = item.translationDisclosure {
+                    Text(disclosure)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                        .lineLimit(1)
+                }
                 HStack(spacing: 5) {
                     if let source = sourceLabel {
                         Text(source).lineLimit(1)
@@ -78,7 +84,7 @@ private struct NewsRow: View {
                     }
                     Spacer(minLength: 2)
                     if let date = item.eventDate {
-                        Text(date.formatted(date: .numeric, time: .shortened))
+                        Text("\(timeBasisLabel) \(date.formatted(date: .numeric, time: .shortened))")
                             .monospacedDigit()
                     }
                 }
@@ -160,7 +166,7 @@ private struct NewsRow: View {
                         .buttonStyle(.plain)
                     }
                     if let d = item.eventDate {
-                        Text(DateFormatter.localizedString(from: d, dateStyle: .short, timeStyle: .short))
+                        Text("\(timeBasisLabel) \(DateFormatter.localizedString(from: d, dateStyle: .short, timeStyle: .short))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -248,10 +254,19 @@ private struct NewsRow: View {
     }
 
     private var sourceLabel: String? {
-        if item.source_name?.lowercased() == "gdelt",
-           let payload = item.payload?.object,
-           let publisher = normalizedSourceName(payload["source"]?.string) {
-            return "\(publisher) · via GDELT"
+        if let sourceName = item.source_name?.lowercased(),
+           let payload = item.payload?.object {
+            let publisher = normalizedSourceName(payload["publisher"]?.string)
+                ?? normalizedSourceName(payload["source"]?.string)
+            if sourceName == "gdelt", let publisher {
+                return "\(publisher) · via GDELT"
+            }
+            if sourceName == "govuk_search", let publisher {
+                return "\(publisher) · via GOV.UK"
+            }
+            if sourceName == "institutional_rss", let publisher {
+                return "\(publisher) · official feed"
+            }
         }
         if let explicit = normalizedSourceName(item.source_name) {
             return explicit
@@ -271,6 +286,20 @@ private struct NewsRow: View {
             }
         }
         return nil
+    }
+
+    private var timeBasisLabel: String {
+        guard let basis = item.payload?.object?["time_basis"]?.string else {
+            return "Reported"
+        }
+        switch basis {
+        case "provider_first_seen":
+            return "First seen"
+        case "publisher_published_or_provider_discovered":
+            return "Source time"
+        default:
+            return basis.hasPrefix("publisher_") ? "Published" : "Reported"
+        }
     }
 
     private func normalizedSourceName(_ value: String?) -> String? {

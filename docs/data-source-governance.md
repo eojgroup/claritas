@@ -13,6 +13,7 @@ derived briefing product.
 | Provider | Coverage | Commercial basis | Credential |
 |---|---|---|---|
 | GDELT | Global multilingual news discovery, events, geography, themes and tone | GDELT reuse terms; original publisher remains visible | None |
+| GOV.UK Search API | Current UK Government news stories, press releases and world news stories | Crown copyright / Open Government Licence v3.0, with source organisation and OGL attribution retained | None |
 | European Commission Press Corner | EU institutional releases | Commission reuse policy / CC BY 4.0 unless stated otherwise | None |
 | Federal Reserve Board | All press releases, including monetary policy and banking regulation | U.S. government public domain unless stated otherwise; cite the Board | None |
 | U.S. Bureau of Labor Statistics | Employment Situation, CPI, PPI and JOLTS releases | BLS public domain; cite BLS | None |
@@ -22,6 +23,27 @@ derived briefing product.
 Institutional feeds are normalized through one connector and source record, but
 the publishing institution is retained on every item. Repeated polls do not write
 unchanged items, which avoids PostgreSQL churn while preserving idempotency.
+
+GOV.UK ingestion is restricted to the Search API document types `news_story`,
+`press_release` and `world_news_story`; external search results and other GOV.UK
+document types are rejected. The connector stores the publishing organisation,
+source URL, public timestamp, subject-country inference and OGL notice. GOV.UK's
+`public_timestamp` is labelled as the publisher's public timestamp rather than
+silently claiming that every value is the first publication time.
+
+GDELT DOC remains the preferred global publisher-discovery path. If DOC is rate
+limited or unavailable, Claritas records that provider step as degraded and may
+ingest at most 25 relevance-filtered links from GDELT's official rolling Article
+List RSS feed. This fallback is deliberately a bounded sample, not complete
+global coverage. Because GAL RSS does not declare article language, the fallback
+admits only headlines with defensible English-language signals; ambiguous or
+non-English headlines are rejected instead of bypassing translation policy. The
+feed and raw archives are retrieved from GDELT's TLS-backed Google Cloud Storage
+origin. GAL `pubDate` is an exact publisher time for only a minority of records
+and otherwise represents GDELT discovery, so fallback items carry the
+explicit `publisher_published_or_provider_discovered` time basis. Normal GDELT
+DOC items carry `provider_first_seen` with 15-minute precision. Neither value is
+presented as an exact publisher publication timestamp.
 
 ## Reviewed but not enabled
 

@@ -300,7 +300,7 @@ def write_app_scheme(project_path, target)
 end
 
 ios_swift_paths = Dir.chdir(IOS_SOURCE_ROOT) { Dir.glob("**/*.swift").sort }
-ios_resource_paths = ["Assets.xcassets", "Config.plist"]
+ios_resource_paths = ["Assets.xcassets", "Config.plist", "Resources/WorldCountries.geojson"]
 ios_refs = add_files(ios_group, IOS_SOURCE_ROOT, ios_swift_paths + ios_resource_paths + ["Info.plist"])
 
 watch_swift_paths = Dir.chdir(WATCH_SOURCE_ROOT) { Dir.glob("**/*.swift").sort }

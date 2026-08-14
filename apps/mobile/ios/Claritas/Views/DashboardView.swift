@@ -1,6 +1,7 @@
 import SwiftUI
 import Charts
 import MapKit
+import UIKit
 
 struct DashboardView: View {
     @EnvironmentObject private var model: AppModel
@@ -48,9 +49,6 @@ struct DashboardView: View {
             .refreshable {
                 await model.loadInitial()
             }
-        }
-        .onChange(of: model.selectedCountry) { next in
-            if next != nil { showsCountryFocus = true }
         }
         .sheet(isPresented: $showsCountryFocus) {
             mobileCountryFocusSheet
@@ -221,7 +219,9 @@ struct DashboardView: View {
         BrandBackground {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    mobileFocusCard
+                    CountryProfileView(selectedCountry: model.selectedCountry)
+                        .padding(16)
+                        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
                     HStack(spacing: 10) {
                         Button {
                             showsCountryFocus = false
@@ -3575,8 +3575,8 @@ enum SignalMapRegion: String, CaseIterable, Identifiable {
         switch self {
         case .global:
             return MKCoordinateRegion(
-                center: CLLocationCoordinate2D(latitude: 15, longitude: 10),
-                span: MKCoordinateSpan(latitudeDelta: 145, longitudeDelta: 300)
+                center: CLLocationCoordinate2D(latitude: 15, longitude: 0),
+                span: MKCoordinateSpan(latitudeDelta: 145, longitudeDelta: 358)
             )
         case .americas:
             return MKCoordinateRegion(
@@ -3673,6 +3673,8 @@ struct SignalMapPanel: View {
     @State private var resetToken = 0
     @State private var events: [IntelligenceEvent] = []
     @State private var eventLoadError: String?
+    @State private var profileCountry: String?
+    @State private var showsCountryProfileSheet = false
 
     let height: CGFloat
     let allowsComparison: Bool
@@ -3740,8 +3742,9 @@ struct SignalMapPanel: View {
                     NativeSignalMap(
                         points: points,
                         events: mappedEvents,
+                        mode: mode,
                         mapRegion: region,
-                        compactPresentation: compactLayout && height < 400,
+                        compactPresentation: compactLayout,
                         selectedCountry: model.selectedCountry,
                         comparisonCountry: comparisonCountry,
                         pinnedCountry: pinnedCountry,
@@ -3837,6 +3840,14 @@ struct SignalMapPanel: View {
                                 .font(.caption)
                                 .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                         }
+                        Button {
+                            profileCountry = selected.iso
+                            showsCountryProfileSheet = true
+                        } label: {
+                            Label("Country profile", systemImage: "rectangle.and.text.magnifyingglass")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .font(.caption)
                     }
                 }
 
@@ -3854,6 +3865,112 @@ struct SignalMapPanel: View {
         .task(id: model.selectedCountry ?? "global") {
             await loadEvents()
         }
+        .sheet(isPresented: $showsCountryProfileSheet) {
+            NavigationStack {
+                BrandBackground {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            mapCountryContextCard
+                            CountryProfileView(selectedCountry: profileCountry ?? model.selectedCountry)
+                                .padding(16)
+                                .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
+
+                            countryProfileActions
+                        }
+                        .padding(16)
+                    }
+                }
+                .navigationTitle(countryProfileTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showsCountryProfileSheet = false }
+                    }
+                }
+            }
+            .presentationDetents(
+                compactLayout
+                    ? Set([PresentationDetent.medium, .large])
+                    : Set([PresentationDetent.large])
+            )
+            .presentationDragIndicator(.visible)
+        }
+    }
+
+    private var countryProfileTitle: String {
+        guard let iso = (profileCountry ?? model.selectedCountry)?.uppercased() else {
+            return "Country profile"
+        }
+        return Locale(identifier: "en_US").localizedString(forRegionCode: iso) ?? iso
+    }
+
+    private var countryProfileActions: some View {
+        HStack(spacing: 10) {
+            profileAction("Related news", icon: "newspaper", destination: "news")
+            profileAction("Investigate", icon: "scope", destination: "intelligence")
+            profileAction("Transport", icon: "point.topleft.down.to.point.bottomright.curvepath", destination: "transport")
+        }
+    }
+
+    private var mapCountryContextCard: some View {
+        let iso = (profileCountry ?? model.selectedCountry)?.uppercased()
+        let point = points.first { $0.iso == iso }
+        let countryEvents = events.filter { $0.primary_country_iso2?.uppercased() == iso }
+        let latest = countryEvents.map(\.last_activity_time).max()
+        return BrandCard(title: "Map signal context", icon: "map") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    profileMetric("Layer", mode.label, mode.legend)
+                    profileMetric("Intensity", point?.valueLabel ?? "—", point?.detail ?? "No mapped value")
+                    profileMetric("Events", "\(countryEvents.count)", "\(countryEvents.filter(\.earth_observation_available).count) with imagery")
+                }
+                if let latest {
+                    Label(
+                        "Latest mapped event activity \(latest.formatted(date: .abbreviated, time: .standard))",
+                        systemImage: "clock"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+                Text("The country colour is relative to the current map layer and region; it is a prioritisation aid, not an absolute risk rating.")
+                    .font(.caption2)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            }
+        }
+    }
+
+    private func profileMetric(_ label: String, _ value: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .tracking(0.9)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func profileAction(_ title: String, icon: String, destination: String) -> some View {
+        Button {
+            showsCountryProfileSheet = false
+            NotificationCenter.default.post(
+                name: .claritasWatchOpenDestination,
+                object: destination,
+                userInfo: ["country": profileCountry ?? model.selectedCountry ?? ""]
+            )
+        } label: {
+            Label(title, systemImage: icon)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
     }
 
     private var scopeIndicator: some View {
@@ -4081,7 +4198,9 @@ struct SignalMapPanel: View {
             comparisonCountry = normalized
             return
         }
-        model.selectedCountry = model.selectedCountry?.uppercased() == normalized ? nil : normalized
+        model.selectedCountry = normalized
+        profileCountry = normalized
+        showsCountryProfileSheet = true
         comparisonCountry = nil
     }
 
@@ -4159,7 +4278,8 @@ private enum SignalMapDataBuilder {
                     iso: row.country,
                     valueLabel: row.temp_c.map { String(format: "%.0f°C", $0) } ?? "—",
                     detail: "\(row.weather_main ?? "Current conditions") · \(Int(row.humidity ?? 0))% humidity",
-                    magnitude: severity
+                    magnitude: severity,
+                    colorValue: temperature
                 )
             }
         case .leadership:
@@ -4202,6 +4322,7 @@ private enum SignalMapDataBuilder {
                     valueLabel: item.valueLabel,
                     detail: item.detail,
                     magnitude: item.magnitude,
+                    colorValue: item.colorValue,
                     rank: index + 1,
                     coordinate: item.coordinate
                 )
@@ -4326,7 +4447,8 @@ private enum SignalMapDataBuilder {
         iso: String,
         valueLabel: String,
         detail: String,
-        magnitude: Double
+        magnitude: Double,
+        colorValue: Double? = nil
     ) -> CountryBubblePoint {
         let normalized = iso.uppercased()
         return CountryBubblePoint(
@@ -4335,6 +4457,7 @@ private enum SignalMapDataBuilder {
             valueLabel: valueLabel,
             detail: detail,
             magnitude: magnitude,
+            colorValue: colorValue ?? magnitude,
             rank: 0,
             coordinate: CountryCentroidLookup.coordinate(for: normalized) ??
                 CLLocationCoordinate2D(latitude: 0, longitude: 0)
@@ -4345,6 +4468,7 @@ private enum SignalMapDataBuilder {
 private struct NativeSignalMap: View {
     let points: [CountryBubblePoint]
     let events: [IntelligenceEvent]
+    let mode: SignalMapMode
     let mapRegion: SignalMapRegion
     let compactPresentation: Bool
     let selectedCountry: String?
@@ -4356,69 +4480,34 @@ private struct NativeSignalMap: View {
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
 
-    @State private var viewport = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 12, longitude: 0),
-        span: MKCoordinateSpan(latitudeDelta: 142, longitudeDelta: 350)
-    )
-
-    private var annotations: [NativeSignalAnnotation] {
-        // iPhone keeps the same data layers as iPad and web; compactPresentation
-        // changes marker typography only, never the intelligence coverage.
-        let countries = points.prefix(64).map {
-            NativeSignalAnnotation(id: "country-\($0.id)", coordinate: $0.coordinate, country: $0, event: nil, transport: nil)
-        }
-        let mappedEvents = events.prefix(100).compactMap { event -> NativeSignalAnnotation? in
-            guard let latitude = event.latitude, let longitude = event.longitude else { return nil }
-            return NativeSignalAnnotation(
-                id: "event-\(event.id)",
-                coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
-                country: nil,
-                event: event,
-                transport: nil
-            )
-        }
-        let movements = transportEntities.prefix(compactPresentation ? 200 : 320).compactMap { entity -> NativeSignalAnnotation? in
-            guard let latitude = entity.latitude,
-                  let longitude = entity.longitude,
-                  latitude.isFinite,
-                  longitude.isFinite,
-                  abs(latitude) <= 90,
-                  abs(longitude) <= 180 else { return nil }
-            return NativeSignalAnnotation(
-                id: "transport-\(entity.id)",
-                coordinate: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
-                country: nil,
-                event: nil,
-                transport: entity
-            )
-        }
-        return countries + mappedEvents + movements
-    }
-
     var body: some View {
-        Map(
-            coordinateRegion: $viewport,
-            interactionModes: [.pan, .zoom],
-            showsUserLocation: false,
-            annotationItems: annotations
-        ) { annotation in
-            MapAnnotation(coordinate: annotation.coordinate) {
-                if let country = annotation.country {
-                    countryMarker(country)
-                } else if let event = annotation.event {
-                    eventMarker(event)
-                } else if let transport = annotation.transport {
-                    transportMarker(transport)
-                }
-            }
-        }
+        MapKitSignalDensityView(
+            points: points,
+            events: events,
+            mode: mode,
+            mapRegion: mapRegion,
+            compactPresentation: compactPresentation,
+            selectedCountry: selectedCountry,
+            comparisonCountry: comparisonCountry,
+            pinnedCountry: pinnedCountry,
+            featuredCountry: featuredCountry,
+            transportEntities: transportEntities,
+            resetToken: resetToken,
+            onSelectCountry: onSelectCountry,
+            onSelectEvent: onSelectEvent
+        )
         .overlay(alignment: .bottomLeading) {
-            Text("Apple Maps · event points use source coordinates")
+            Text("Apple Maps · Natural Earth boundaries")
                 .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(.white.opacity(0.78))
                 .padding(.horizontal, 7)
                 .padding(.vertical, 4)
                 .background(Color.black.opacity(0.5), in: Capsule())
+                .padding(8)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            SignalDensityLegend(mode: mode, points: points)
                 .padding(8)
                 .allowsHitTesting(false)
         }
@@ -4434,137 +4523,542 @@ private struct NativeSignalMap: View {
                     .allowsHitTesting(false)
             }
         }
-        .onAppear { resetViewport() }
-        .onChange(of: mapRegion) { _ in resetViewport() }
-        .onChange(of: resetToken) { _ in resetViewport() }
-        .onChange(of: selectedCountry) { next in
-            guard let next,
-                  let coordinate = points.first(where: { $0.iso == next.uppercased() })?.coordinate else { return }
-            withAnimation(.easeInOut(duration: 0.24)) {
-                viewport = MKCoordinateRegion(
-                    center: coordinate,
-                    span: MKCoordinateSpan(latitudeDelta: 38, longitudeDelta: 44)
-                )
-            }
-        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Interactive global event map")
     }
+}
 
-    private func countryMarker(_ point: CountryBubblePoint) -> some View {
-        let selected = point.iso == selectedCountry?.uppercased()
-        let compared = point.iso == comparisonCountry?.uppercased()
-        let featured = point.iso == featuredCountry?.uppercased()
-        let pinned = point.iso == pinnedCountry?.uppercased()
-        let diameter = countryMarkerSize(point)
+private struct SignalDensityLegend: View {
+    let mode: SignalMapMode
+    let points: [CountryBubblePoint]
 
-        return Button { onSelectCountry(point.iso) } label: {
-            ZStack {
-                if featured || pinned {
-                    Circle()
-                        .stroke(
-                            ClaritasPalette.shellAccent(for: .dark),
-                            style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])
-                        )
-                        .frame(width: diameter + 8, height: diameter + 8)
-                }
-                Circle()
-                    .fill(ClaritasPalette.shellAccent(for: .dark).opacity(0.86))
-                    .overlay(
-                        Circle().stroke(
-                            compared ? ClaritasPalette.dataBlue(for: .dark) : .white.opacity(0.9),
-                            lineWidth: selected || compared ? 2.5 : 1
-                        )
-                    )
-                    .frame(width: diameter, height: diameter)
-                if !compactPresentation || selected || featured {
-                    Text(point.iso)
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Color(hex: "#07141E"))
-                }
-            }
-            .frame(minWidth: 36, minHeight: 36)
-            .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(point.iso), rank \(point.rank), \(point.detail)")
-    }
+    private var values: [Double] { points.map(\.colorValue) }
+    private var lower: Double { mode == .signals ? 0 : (values.min() ?? 0) }
+    private var upper: Double { mode == .signals ? 100 : (values.max() ?? 1) }
 
-    private func eventMarker(_ event: IntelligenceEvent) -> some View {
-        let color: Color
-        switch event.severity {
-        case .critical: color = Color(hex: "#C77A72")
-        case .high: color = Color(hex: "#D3C3A5")
-        case .medium: color = Color(hex: "#91ADBA")
-        case .low: color = Color(hex: "#718794")
-        }
-        let diameter: CGFloat = event.severity == .critical ? 16 : event.severity == .high ? 14 : 12
-
-        return Button { onSelectEvent(event) } label: {
-            ZStack {
-                Circle().fill(color.opacity(0.28)).frame(width: diameter + 10, height: diameter + 10)
-                if event.earth_observation_available {
-                    Circle()
-                        .stroke(Color(hex: "#DCE8EE"), style: StrokeStyle(lineWidth: 2, dash: [3, 2]))
-                        .frame(width: diameter + 7, height: diameter + 7)
-                }
-                Circle()
-                    .fill(color)
-                    .overlay(Circle().stroke(.white, lineWidth: 1.2))
-                    .frame(width: diameter, height: diameter)
-            }
-            .frame(minWidth: 34, minHeight: 34)
-            .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(event.severity.rawValue) event, \(event.title)")
-    }
-
-    private func transportMarker(_ entity: TransportEntity) -> some View {
-        let tone = entity.mode == .aviation
-            ? ClaritasPalette.dataBlue(for: .dark)
-            : ClaritasPalette.shellAccent(for: .dark)
-        return Image(systemName: entity.mode == .aviation ? "airplane" : "ferry.fill")
-            .font(.system(size: compactPresentation ? 8 : 10, weight: .bold))
-            .foregroundStyle(Color(hex: "#07141E"))
-            .frame(width: compactPresentation ? 18 : 22, height: compactPresentation ? 18 : 22)
-            .background(tone.opacity(0.92), in: Circle())
-            .overlay(Circle().stroke(.white.opacity(0.9), lineWidth: 1))
-            .rotationEffect(.degrees(entity.mode == .aviation ? (entity.heading ?? 0) - 45 : 0))
-            .accessibilityLabel("\(entity.mode == .aviation ? "Aircraft" : "Vessel") \(entity.display_name ?? entity.entity_id), observed \(entity.observed_at)")
-    }
-
-    private func countryMarkerSize(_ point: CountryBubblePoint) -> CGFloat {
-        let magnitudes = points.map { log1p(max($0.magnitude, 0)) }
-        guard let minimum = magnitudes.min(), let maximum = magnitudes.max(), maximum > minimum else {
-            return compactPresentation ? 12 : 18
-        }
-        let normalized = (log1p(max(point.magnitude, 0)) - minimum) / (maximum - minimum)
-        return compactPresentation ? 10 + CGFloat(normalized * 7) : 13 + CGFloat(normalized * 10)
-    }
-
-    private func resetViewport() {
-        let bounds = mapRegion.geographicBounds
-        let center = CLLocationCoordinate2D(
-            latitude: (bounds.minLat + bounds.maxLat) / 2,
-            longitude: (bounds.minLon + bounds.maxLon) / 2
-        )
-        viewport = MKCoordinateRegion(
-            center: center,
-            span: MKCoordinateSpan(
-                latitudeDelta: min(160, max(8, bounds.maxLat - bounds.minLat)),
-                longitudeDelta: min(350, max(10, bounds.maxLon - bounds.minLon))
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(mode.legend.uppercased())
+                .font(.system(size: 7, weight: .bold))
+                .tracking(0.8)
+            LinearGradient(
+                colors: legendColors,
+                startPoint: .leading,
+                endPoint: .trailing
             )
-        )
+            .frame(width: 92, height: 5)
+            .clipShape(Capsule())
+            HStack {
+                Text(format(lower))
+                Spacer()
+                Text(format(upper))
+            }
+            .font(.system(size: 7).monospacedDigit())
+        }
+        .foregroundStyle(.white.opacity(0.88))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .frame(width: 108)
+        .background(Color.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private var legendColors: [Color] {
+        if mode == .weather {
+            return [Color(hex: "#2B5B87"), Color(hex: "#D3BE7E"), Color(hex: "#BD4136")]
+        }
+        return [Color(hex: "#1C3041"), Color(hex: "#305B6D"), Color(hex: "#D87543")]
+    }
+
+    private func format(_ value: Double) -> String {
+        if mode == .signals { return "\(Int(value))/100" }
+        if mode == .weather { return "\(Int(value))°" }
+        return value >= 1_000
+            ? String(format: "%.1fk", value / 1_000)
+            : String(format: "%.0f", value)
     }
 }
 
-private struct NativeSignalAnnotation: Identifiable {
-    let id: String
+private struct MapKitSignalDensityView: UIViewRepresentable {
+    let points: [CountryBubblePoint]
+    let events: [IntelligenceEvent]
+    let mode: SignalMapMode
+    let mapRegion: SignalMapRegion
+    let compactPresentation: Bool
+    let selectedCountry: String?
+    let comparisonCountry: String?
+    let pinnedCountry: String?
+    let featuredCountry: String?
+    let transportEntities: [TransportEntity]
+    let resetToken: Int
+    let onSelectCountry: (String) -> Void
+    let onSelectEvent: (IntelligenceEvent) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIView(context: Context) -> MKMapView {
+        let map = MKMapView(frame: .zero)
+        map.delegate = context.coordinator
+        map.isRotateEnabled = false
+        map.isPitchEnabled = false
+        map.showsCompass = true
+        map.showsScale = !compactPresentation
+        map.pointOfInterestFilter = .excludingAll
+        map.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: Coordinator.countryReuseID)
+        map.register(MKAnnotationView.self, forAnnotationViewWithReuseIdentifier: Coordinator.eventReuseID)
+        map.register(MKAnnotationView.self, forAnnotationViewWithReuseIdentifier: Coordinator.transportReuseID)
+
+        let configuration = MKStandardMapConfiguration(elevationStyle: .flat)
+        configuration.emphasisStyle = .muted
+        configuration.pointOfInterestFilter = .excludingAll
+        map.preferredConfiguration = configuration
+
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleMapTap(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delegate = context.coordinator
+        map.addGestureRecognizer(tap)
+        context.coordinator.mapView = map
+        context.coordinator.update(map, with: self, force: true)
+        return map
+    }
+
+    func updateUIView(_ map: MKMapView, context: Context) {
+        context.coordinator.update(map, with: self, force: false)
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
+        static let countryReuseID = "claritas-country-density"
+        static let eventReuseID = "claritas-event"
+        static let transportReuseID = "claritas-transport"
+
+        private var parent: MapKitSignalDensityView
+        private var overlayCountries: [ObjectIdentifier: String] = [:]
+        private var pointByCountry: [String: CountryBubblePoint] = [:]
+        private var overlaySignature = ""
+        private var annotationSignature = ""
+        private var viewportSignature = ""
+        weak var mapView: MKMapView?
+
+        init(parent: MapKitSignalDensityView) {
+            self.parent = parent
+        }
+
+        func update(_ map: MKMapView, with next: MapKitSignalDensityView, force: Bool) {
+            parent = next
+            pointByCountry = next.points.reduce(into: [:]) { result, point in
+                let iso = point.iso.uppercased()
+                if let current = result[iso], current.rank <= point.rank { return }
+                result[iso] = point
+            }
+            map.showsScale = !next.compactPresentation
+
+            let nextOverlaySignature = [
+                next.mode.rawValue,
+                next.selectedCountry?.uppercased() ?? "",
+                next.comparisonCountry?.uppercased() ?? "",
+                next.pinnedCountry?.uppercased() ?? "",
+                next.points.map { "\($0.iso):\($0.colorValue)" }.joined(separator: ",")
+            ].joined(separator: "|")
+            if force || nextOverlaySignature != overlaySignature {
+                overlaySignature = nextOverlaySignature
+                installCountryOverlays(on: map)
+            }
+
+            let nextAnnotationSignature = [
+                next.mode.rawValue,
+                next.mapRegion.rawValue,
+                next.compactPresentation ? "compact" : "regular",
+                next.selectedCountry?.uppercased() ?? "",
+                next.comparisonCountry?.uppercased() ?? "",
+                next.pinnedCountry?.uppercased() ?? "",
+                next.featuredCountry?.uppercased() ?? "",
+                next.points.map { "\($0.id):\($0.rank):\($0.colorValue)" }.joined(separator: ","),
+                next.events.prefix(eventLimit(for: next)).map {
+                    "\($0.id):\($0.latitude ?? 999):\($0.longitude ?? 999):\($0.severity.rawValue):\($0.earth_observation_available)"
+                }.joined(separator: ","),
+                next.transportEntities.prefix(next.compactPresentation ? 200 : 320).map {
+                    "\($0.id):\($0.latitude ?? 999):\($0.longitude ?? 999):\($0.heading ?? -1):\($0.observed_at)"
+                }.joined(separator: ",")
+            ].joined(separator: "|")
+            if force || nextAnnotationSignature != annotationSignature {
+                annotationSignature = nextAnnotationSignature
+                installAnnotations(on: map)
+            }
+
+            let nextViewportSignature = "\(next.mapRegion.rawValue)|\(next.resetToken)"
+            if force || nextViewportSignature != viewportSignature {
+                viewportSignature = nextViewportSignature
+                map.setRegion(next.mapRegion.coordinateRegion, animated: !force)
+            }
+        }
+
+        private func installCountryOverlays(on map: MKMapView) {
+            map.removeOverlays(map.overlays)
+            overlayCountries.removeAll(keepingCapacity: true)
+
+            var overlays: [MKOverlay] = []
+            for boundary in NaturalEarthCountryBoundaries.shared.boundaries {
+                for polygon in boundary.polygons {
+                    overlayCountries[ObjectIdentifier(polygon)] = boundary.iso
+                    overlays.append(polygon)
+                }
+            }
+            map.addOverlays(overlays, level: .aboveRoads)
+        }
+
+        private func installAnnotations(on map: MKMapView) {
+            let existing = map.annotations.filter { !($0 is MKUserLocation) }
+            map.removeAnnotations(existing)
+
+            // The choropleth already makes every country visible and tappable.
+            // Keep centroid labels to the leading signals plus explicit scope
+            // countries so dense regions do not become a wall of map pins.
+            let leadingCountryLimit = parent.mapRegion == .global
+                ? 3
+                : (parent.compactPresentation ? 3 : 5)
+            var labelledCountries = Array(parent.points.prefix(leadingCountryLimit))
+            let scopedCountries = [
+                parent.selectedCountry,
+                parent.comparisonCountry,
+                parent.pinnedCountry,
+                parent.featuredCountry,
+            ].compactMap { $0?.uppercased() }
+            for iso in scopedCountries where !labelledCountries.contains(where: { $0.iso == iso }) {
+                if let point = parent.points.first(where: { $0.iso == iso }) {
+                    labelledCountries.append(point)
+                }
+            }
+            let boundaryCountries = Set(NaturalEarthCountryBoundaries.shared.boundaries.map(\.iso))
+            for point in parent.points where
+                !boundaryCountries.contains(point.iso) &&
+                !labelledCountries.contains(where: { $0.iso == point.iso }) {
+                // Tiny states and territories omitted from the simplified
+                // polygon set retain a centroid affordance when they carry a
+                // signal, so Singapore/Hong Kong-style scopes remain usable.
+                labelledCountries.append(point)
+            }
+            let countries: [MKAnnotation] = labelledCountries.map { CountryDensityAnnotation($0) }
+            let events: [MKAnnotation] = parent.events.prefix(eventLimit(for: parent)).compactMap { EventMapAnnotation($0) }
+            let movements: [MKAnnotation] = parent.transportEntities
+                .prefix(parent.compactPresentation ? 200 : 320)
+                .compactMap { TransportMapAnnotation($0) }
+            map.addAnnotations(countries + events + movements)
+        }
+
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            guard let polygon = overlay as? MKPolygon else {
+                return MKOverlayRenderer(overlay: overlay)
+            }
+            let renderer = MKPolygonRenderer(polygon: polygon)
+            guard let iso = overlayCountries[ObjectIdentifier(polygon)] else {
+                renderer.fillColor = .clear
+                renderer.strokeColor = .clear
+                return renderer
+            }
+
+            let selected = iso == parent.selectedCountry?.uppercased()
+            let compared = iso == parent.comparisonCountry?.uppercased()
+            let pinned = iso == parent.pinnedCountry?.uppercased()
+            if let point = pointByCountry[iso] {
+                renderer.fillColor = SignalDensityColorScale.color(
+                    for: point,
+                    mode: parent.mode,
+                    points: parent.points,
+                    dark: mapView.traitCollection.userInterfaceStyle == .dark
+                ).withAlphaComponent(selected ? 0.72 : 0.48)
+            } else {
+                let dark = mapView.traitCollection.userInterfaceStyle == .dark
+                renderer.fillColor = dark
+                    ? UIColor(red: 0.06, green: 0.13, blue: 0.19, alpha: selected ? 0.68 : 0.20)
+                    : UIColor(red: 0.58, green: 0.66, blue: 0.71, alpha: selected ? 0.58 : 0.16)
+            }
+            renderer.strokeColor = compared
+                ? UIColor(red: 0.47, green: 0.72, blue: 0.82, alpha: 1)
+                : selected || pinned
+                    ? UIColor.white.withAlphaComponent(0.95)
+                    : UIColor.white.withAlphaComponent(0.30)
+            renderer.lineWidth = selected || compared || pinned ? 2.2 : 0.7
+            renderer.lineDashPattern = pinned ? [NSNumber(value: 4), NSNumber(value: 3)] : nil
+            return renderer
+        }
+
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let country = annotation as? CountryDensityAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(
+                    withIdentifier: Self.countryReuseID,
+                    for: country
+                ) as! MKMarkerAnnotationView
+                let selected = country.point.iso == parent.selectedCountry?.uppercased()
+                let featured = country.point.iso == parent.featuredCountry?.uppercased()
+                view.annotation = country
+                view.markerTintColor = SignalDensityColorScale.color(
+                    for: country.point,
+                    mode: parent.mode,
+                    points: parent.points,
+                    dark: mapView.traitCollection.userInterfaceStyle == .dark
+                )
+                view.glyphText = country.point.iso
+                view.glyphTintColor = UIColor(red: 0.03, green: 0.08, blue: 0.12, alpha: 1)
+                view.displayPriority = selected || featured || country.point.rank <= 12 ? .required : .defaultHigh
+                view.animatesWhenAdded = false
+                view.canShowCallout = false
+                view.titleVisibility = .hidden
+                view.subtitleVisibility = .hidden
+                view.accessibilityLabel = "\(country.point.iso), rank \(country.point.rank), \(country.point.detail)"
+                return view
+            }
+
+            if let event = annotation as? EventMapAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(
+                    withIdentifier: Self.eventReuseID,
+                    for: event
+                )
+                view.annotation = event
+                view.image = eventImage(for: event.event)
+                view.displayPriority = event.event.severity == .critical || event.event.severity == .high
+                    ? .required
+                    : event.event.severity == .medium ? .defaultHigh : .defaultLow
+                view.collisionMode = .circle
+                view.canShowCallout = false
+                view.accessibilityLabel = "\(event.event.severity.rawValue) event, \(event.event.title)"
+                return view
+            }
+
+            if let movement = annotation as? TransportMapAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(
+                    withIdentifier: Self.transportReuseID,
+                    for: movement
+                )
+                view.annotation = movement
+                let aviation = movement.entity.mode == .aviation
+                let tone = aviation
+                    ? UIColor(red: 0.47, green: 0.66, blue: 0.73, alpha: 1)
+                    : UIColor(red: 0.84, green: 0.65, blue: 0.42, alpha: 1)
+                view.image = UIImage(systemName: aviation ? "airplane" : "ferry.fill")?
+                    .withTintColor(tone, renderingMode: .alwaysOriginal)
+                view.transform = aviation
+                    ? CGAffineTransform(rotationAngle: CGFloat((movement.entity.heading ?? 0) - 45) * .pi / 180)
+                    : .identity
+                view.displayPriority = .defaultLow
+                view.collisionMode = .circle
+                view.canShowCallout = false
+                view.accessibilityLabel = "\(aviation ? "Aircraft" : "Vessel") \(movement.entity.display_name ?? movement.entity.entity_id)"
+                return view
+            }
+            return nil
+        }
+
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            defer { mapView.deselectAnnotation(view.annotation, animated: false) }
+            if let country = view.annotation as? CountryDensityAnnotation {
+                parent.onSelectCountry(country.point.iso)
+            } else if let event = view.annotation as? EventMapAnnotation {
+                parent.onSelectEvent(event.event)
+            }
+        }
+
+        @objc func handleMapTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended, let map = mapView else { return }
+            let location = recognizer.location(in: map)
+            let mapPoint = MKMapPoint(map.convert(location, toCoordinateFrom: map))
+
+            for overlay in map.overlays.reversed() {
+                guard let polygon = overlay as? MKPolygon,
+                      let iso = overlayCountries[ObjectIdentifier(polygon)],
+                      let renderer = map.renderer(for: polygon) as? MKPolygonRenderer else { continue }
+                if renderer.path == nil { renderer.createPath() }
+                let renderedPoint = renderer.point(for: mapPoint)
+                if renderer.path?.contains(renderedPoint) == true {
+                    parent.onSelectCountry(iso)
+                    return
+                }
+            }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            var view: UIView? = touch.view
+            while let current = view {
+                if current is MKAnnotationView { return false }
+                view = current.superview
+            }
+            return true
+        }
+
+        private func eventColor(_ severity: IntelligenceSeverity) -> UIColor {
+            switch severity {
+            case .critical: return UIColor(red: 0.78, green: 0.35, blue: 0.33, alpha: 1)
+            case .high: return UIColor(red: 0.83, green: 0.55, blue: 0.35, alpha: 1)
+            case .medium: return UIColor(red: 0.48, green: 0.66, blue: 0.73, alpha: 1)
+            case .low: return UIColor(red: 0.38, green: 0.49, blue: 0.55, alpha: 1)
+            }
+        }
+
+        private func eventLimit(for map: MapKitSignalDensityView) -> Int {
+            if map.mapRegion == .global {
+                return map.compactPresentation ? 48 : 96
+            }
+            return map.compactPresentation ? 80 : 120
+        }
+
+        private func eventImage(for event: IntelligenceEvent) -> UIImage {
+            let dotDiameter: CGFloat
+            switch event.severity {
+            case .critical: dotDiameter = 11
+            case .high: dotDiameter = 10
+            case .medium: dotDiameter = 9
+            case .low: dotDiameter = 8
+            }
+            let imageSize: CGFloat = 22
+            return UIGraphicsImageRenderer(size: CGSize(width: imageSize, height: imageSize)).image { renderer in
+                let context = renderer.cgContext
+                let center = CGPoint(x: imageSize / 2, y: imageSize / 2)
+                if event.earth_observation_available {
+                    let ringDiameter = dotDiameter + 8
+                    context.setStrokeColor(UIColor(red: 0.70, green: 0.86, blue: 0.91, alpha: 0.95).cgColor)
+                    context.setLineWidth(1.5)
+                    context.setLineDash(phase: 0, lengths: [2.2, 1.8])
+                    context.strokeEllipse(in: CGRect(
+                        x: center.x - ringDiameter / 2,
+                        y: center.y - ringDiameter / 2,
+                        width: ringDiameter,
+                        height: ringDiameter
+                    ))
+                    context.setLineDash(phase: 0, lengths: [])
+                }
+                let dotRect = CGRect(
+                    x: center.x - dotDiameter / 2,
+                    y: center.y - dotDiameter / 2,
+                    width: dotDiameter,
+                    height: dotDiameter
+                )
+                context.setFillColor(eventColor(event.severity).cgColor)
+                context.fillEllipse(in: dotRect)
+                context.setStrokeColor(UIColor.white.withAlphaComponent(0.9).cgColor)
+                context.setLineWidth(1)
+                context.strokeEllipse(in: dotRect.insetBy(dx: 0.5, dy: 0.5))
+            }
+        }
+    }
+}
+
+private final class CountryDensityAnnotation: NSObject, MKAnnotation {
+    let point: CountryBubblePoint
+    dynamic var coordinate: CLLocationCoordinate2D { point.coordinate }
+
+    init(_ point: CountryBubblePoint) {
+        self.point = point
+    }
+}
+
+private final class EventMapAnnotation: NSObject, MKAnnotation {
+    let event: IntelligenceEvent
     let coordinate: CLLocationCoordinate2D
-    let country: CountryBubblePoint?
-    let event: IntelligenceEvent?
-    let transport: TransportEntity?
+
+    init?(_ event: IntelligenceEvent) {
+        guard let latitude = event.latitude,
+              let longitude = event.longitude,
+              latitude.isFinite,
+              longitude.isFinite,
+              abs(latitude) <= 90,
+              abs(longitude) <= 180 else { return nil }
+        self.event = event
+        coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+private final class TransportMapAnnotation: NSObject, MKAnnotation {
+    let entity: TransportEntity
+    let coordinate: CLLocationCoordinate2D
+
+    init?(_ entity: TransportEntity) {
+        guard let latitude = entity.latitude,
+              let longitude = entity.longitude,
+              latitude.isFinite,
+              longitude.isFinite,
+              abs(latitude) <= 90,
+              abs(longitude) <= 180 else { return nil }
+        self.entity = entity
+        coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+}
+
+private struct NaturalEarthCountryBoundary {
+    let iso: String
+    let polygons: [MKPolygon]
+}
+
+private final class NaturalEarthCountryBoundaries {
+    static let shared = NaturalEarthCountryBoundaries()
+    let boundaries: [NaturalEarthCountryBoundary]
+
+    private init() {
+        guard let url = Bundle.main.url(forResource: "WorldCountries", withExtension: "geojson"),
+              let data = try? Data(contentsOf: url),
+              let objects = try? MKGeoJSONDecoder().decode(data) else {
+            boundaries = []
+            return
+        }
+
+        boundaries = objects.compactMap { object in
+            guard let feature = object as? MKGeoJSONFeature,
+                  let properties = feature.properties,
+                  let payload = try? JSONSerialization.jsonObject(with: properties) as? [String: Any],
+                  let iso = (payload["iso2"] as? String)?.uppercased(),
+                  !iso.isEmpty else { return nil }
+            let polygons = feature.geometry.flatMap { geometry -> [MKPolygon] in
+                if let polygon = geometry as? MKPolygon { return [polygon] }
+                if let multiPolygon = geometry as? MKMultiPolygon { return multiPolygon.polygons }
+                return []
+            }
+            guard !polygons.isEmpty else { return nil }
+            return NaturalEarthCountryBoundary(iso: iso, polygons: polygons)
+        }
+    }
+}
+
+private enum SignalDensityColorScale {
+    static func color(
+        for point: CountryBubblePoint,
+        mode: SignalMapMode,
+        points: [CountryBubblePoint],
+        dark: Bool
+    ) -> UIColor {
+        let values = points.map(\.colorValue)
+        let minimum = mode == .signals ? 0 : (values.min() ?? 0)
+        let maximum = mode == .signals ? 100 : (values.max() ?? 1)
+        let ratio = min(1, max(0, (point.colorValue - minimum) / max(0.0001, maximum - minimum)))
+
+        if mode == .weather {
+            let cold = dark ? (43.0, 91.0, 135.0) : (55.0, 113.0, 166.0)
+            let mild = dark ? (211.0, 190.0, 126.0) : (190.0, 168.0, 105.0)
+            let hot = dark ? (189.0, 65.0, 54.0) : (166.0, 54.0, 45.0)
+            return ratio < 0.5
+                ? interpolate(cold, mild, ratio * 2)
+                : interpolate(mild, hot, (ratio - 0.5) * 2)
+        }
+
+        let low = dark ? (28.0, 48.0, 65.0) : (180.0, 198.0, 211.0)
+        let middle = dark ? (48.0, 91.0, 109.0) : (78.0, 125.0, 145.0)
+        let high = dark ? (216.0, 117.0, 67.0) : (190.0, 82.0, 43.0)
+        return ratio < 0.55
+            ? interpolate(low, middle, ratio / 0.55)
+            : interpolate(middle, high, (ratio - 0.55) / 0.45)
+    }
+
+    private static func interpolate(
+        _ from: (Double, Double, Double),
+        _ to: (Double, Double, Double),
+        _ ratio: Double
+    ) -> UIColor {
+        let bounded = min(1, max(0, ratio))
+        return UIColor(
+            red: (from.0 + (to.0 - from.0) * bounded) / 255,
+            green: (from.1 + (to.1 - from.1) * bounded) / 255,
+            blue: (from.2 + (to.2 - from.2) * bounded) / 255,
+            alpha: 1
+        )
+    }
 }
 
 // Retained as the lightweight canvas implementation for older platform
@@ -5011,6 +5505,7 @@ private struct CountryBubblePoint: Identifiable {
     let valueLabel: String
     let detail: String
     let magnitude: Double
+    let colorValue: Double
     let rank: Int
     let coordinate: CLLocationCoordinate2D
 }
