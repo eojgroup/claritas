@@ -1061,6 +1061,8 @@ export type IntelligenceEvent = {
   confidence: number;
   start_time: string;
   last_activity_time: string;
+  expires_at?: string | null;
+  freshness_state?: "active" | "expiring" | "expired";
   primary_location_id: string | null;
   primary_country_iso2: string | null;
   source_diversity: number;
@@ -2149,6 +2151,7 @@ export async function fetchIntelligenceEvents(params?: {
   locationId?: string;
   eventType?: string;
   since?: string;
+  includeExpired?: boolean;
 }): Promise<IntelligenceEvent[]> {
   const sp = new URLSearchParams();
   if (params?.limit) sp.set("limit", String(params.limit));
@@ -2158,6 +2161,7 @@ export async function fetchIntelligenceEvents(params?: {
   if (params?.locationId) sp.set("location_id", params.locationId);
   if (params?.eventType) sp.set("event_type", params.eventType);
   if (params?.since) sp.set("since", params.since);
+  if (params?.includeExpired) sp.set("include_expired", "true");
   const resp = await fetch(`${API_BASE}/api/intelligence/events?${sp.toString()}`, {
     credentials: "include",
   });

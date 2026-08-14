@@ -23,6 +23,10 @@ import {
   type ScoredCorrelationCandidate,
 } from "./correlation";
 import type { CorrelationCandidate, IntelligenceSignalInput } from "./types";
+import {
+  intelligenceEventExpiresAtSql,
+  intelligenceEventFreshness,
+} from "./freshness";
 
 type EventRow = {
   id: string;
@@ -48,6 +52,7 @@ type EventRow = {
   metadata: Record<string, unknown>;
   created_at: string | Date;
   updated_at: string | Date;
+  expires_at?: string | Date;
   location_name?: string | null;
   location_type?: string | null;
   latitude?: number | null;
@@ -150,6 +155,7 @@ function eventToApi(row: EventRow) {
     .includes(String(row.earth_observation_state))
     ? row.earth_observation_state as NonNullable<EventRow["earth_observation_state"]>
     : row.earth_observation_available ? "imagery_available" : "not_requested";
+  const expiresAt = iso(row.expires_at);
   return {
     ...row,
     confidence: Number(row.confidence),
@@ -166,6 +172,10 @@ function eventToApi(row: EventRow) {
     end_time: iso(row.end_time),
     created_at: iso(row.created_at),
     updated_at: iso(row.updated_at),
+    expires_at: expiresAt,
+    freshness_state: expiresAt
+      ? intelligenceEventFreshness({ expiresAt, status: row.status })
+      : "expired",
     evidence_count: Number(row.evidence_count ?? 0),
     earth_observation_state: earthObservationState,
     earth_observation_available: earthObservationState === "imagery_available",
@@ -202,6 +212,7 @@ export async function listIntelligenceEvents(options: {
   locationId?: string;
   eventType?: string;
   since?: Date;
+  includeExpired?: boolean;
 } = {}) {
   const params: unknown[] = [];
   const where: string[] = [
@@ -213,6 +224,11 @@ export async function listIntelligenceEvents(options: {
     )`,
   ];
   const add = (value: unknown) => { params.push(value); return `$${params.length}`; };
+  const explicitlyArchivedStatus = options.status === "resolved" || options.status === "dismissed";
+  if (!options.includeExpired && !explicitlyArchivedStatus) {
+    where.push(`event.status IN ('emerging','active','monitoring')`);
+    where.push(`${intelligenceEventExpiresAtSql("event")} > now()`);
+  }
   if (options.status) where.push(`event.status = ${add(options.status)}`);
   if (options.severity) where.push(`event.severity = ${add(options.severity)}`);
   if (options.country) where.push(`event.primary_country_iso2 = ${add(options.country.toUpperCase())}`);
@@ -236,6 +252,7 @@ export async function listIntelligenceEvents(options: {
             COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude,
             location.monitoring_tier,
             (SELECT count(*)::int FROM intelligence_event_evidence evidence WHERE evidence.event_id = event.id) AS evidence_count,
+            ${intelligenceEventExpiresAtSql("event")} AS expires_at,
             (${intelligenceEventEarthObservationStateSql()}) AS earth_observation_state
      FROM intelligence_event event
      LEFT JOIN intelligence_location location ON location.id = event.primary_location_id
@@ -256,6 +273,7 @@ export async function getIntelligenceEvent(eventId: string) {
               COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude,
               location.monitoring_tier,
               (SELECT count(*)::int FROM intelligence_event_evidence evidence WHERE evidence.event_id = event.id) AS evidence_count,
+              ${intelligenceEventExpiresAtSql("event")} AS expires_at,
               (${intelligenceEventEarthObservationStateSql()}) AS earth_observation_state
        FROM intelligence_event event
        LEFT JOIN intelligence_location location ON location.id = event.primary_location_id

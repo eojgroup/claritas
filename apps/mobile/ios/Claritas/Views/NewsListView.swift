@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NewsListView: View {
     let items: [NewsItem]
+    var compact: Bool = false
     var onSelectCountry: (String) -> Void
     var onOpenEvent: (String) -> Void = { eventID in
         NotificationCenter.default.post(
@@ -20,9 +21,12 @@ struct NewsListView: View {
                 .padding()
                 .brandGlass(cornerRadius: 12)
         } else {
-            VStack(spacing: 12) {
+            VStack(spacing: compact ? 0 : 12) {
                 ForEach(items) { n in
-                    NewsRow(item: n, onSelectCountry: onSelectCountry, onOpenEvent: onOpenEvent)
+                    NewsRow(item: n, compact: compact, onSelectCountry: onSelectCountry, onOpenEvent: onOpenEvent)
+                    if compact && n.id != items.last?.id {
+                        Divider()
+                    }
                 }
             }
         }
@@ -31,17 +35,88 @@ struct NewsListView: View {
 
 private struct NewsRow: View {
     let item: NewsItem
+    let compact: Bool
     var onSelectCountry: (String) -> Void
     var onOpenEvent: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        if compact {
+            compactBody
+        } else {
+            regularBody
+        }
+    }
+
+    private var compactBody: some View {
+        HStack(alignment: .top, spacing: 10) {
+            if let imageURL = proxiedImageURL() {
+                RemoteImage(url: imageURL)
+                    .frame(width: 74, height: 54)
+                    .background(ClaritasPalette.shellSurface(for: colorScheme))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if let urlString = item.url, let url = URL(string: urlString) {
+                    Link(item.presentationTitle, destination: url)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                        .lineLimit(2)
+                } else {
+                    Text(item.presentationTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(2)
+                }
+                HStack(spacing: 5) {
+                    if let source = sourceLabel {
+                        Text(source).lineLimit(1)
+                    }
+                    if let iso = item.country_iso2?.uppercased(), !iso.isEmpty {
+                        Text("·")
+                        Button(iso) { onSelectCountry(iso) }
+                            .buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 2)
+                    if let date = item.eventDate {
+                        Text(date.formatted(date: .numeric, time: .shortened))
+                            .monospacedDigit()
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                if let summary = item.presentationSummary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let event = item.linked_events.first {
+                    Button {
+                        onOpenEvent(event.id)
+                    } label: {
+                        Label("\(item.linked_events.count) linked \(item.linked_events.count == 1 ? "event" : "events")", systemImage: "link")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                    .accessibilityLabel("Open linked event: \(event.title)")
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+
+    private var regularBody: some View {
         HStack(alignment: .top, spacing: 12) {
-            RemoteImage(url: proxiedImageURL())
-                .frame(width: 120, height: 75)
-                .background(ClaritasPalette.shellSurface(for: colorScheme))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+            if let imageURL = proxiedImageURL() {
+                RemoteImage(url: imageURL)
+                    .frame(width: 120, height: 75)
+                    .background(ClaritasPalette.shellSurface(for: colorScheme))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+            }
             VStack(alignment: .leading, spacing: 6) {
                 if let u = item.url, let url = URL(string: u) {
                     Link(item.presentationTitle, destination: url)

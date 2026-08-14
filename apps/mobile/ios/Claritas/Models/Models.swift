@@ -1865,6 +1865,8 @@ struct IntelligenceEvent: Codable, Identifiable, Hashable {
     let confidence: Double
     let start_time: Date
     let last_activity_time: Date
+    let expires_at: Date?
+    let freshness_state: String?
     let primary_location_id: String?
     let primary_country_iso2: String?
     let source_diversity: Int

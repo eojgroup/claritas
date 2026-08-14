@@ -69,6 +69,11 @@ private struct WatchIntelligencePulseView: View {
                                     Text("\(event.location_name ?? event.primary_country_iso2 ?? "Unresolved") · \(event.evidence_count) evidence · \(Int(event.confidence * 100))%")
                                         .font(.system(size: 9))
                                         .foregroundStyle(.secondary)
+                                    if let expiresAt = event.expires_at {
+                                        Text("Current until \(expiresAt.formatted(date: .omitted, time: .shortened))")
+                                            .font(.system(size: 9).monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
                                     Button {
                                         model.openOnPhone(
                                             "intelligence",

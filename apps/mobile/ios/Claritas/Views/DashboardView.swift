@@ -1218,6 +1218,7 @@ struct NewsWorkspaceView: View {
     @State private var imagesOnly: Bool = false
     @State private var sort: Sort = .newest
     @State private var loadMode: AppModel.NewsLoadMode = .recent
+    @State private var showsFilters = false
 
     private var sourceOptions: [String] {
         let sources = Set(model.news.compactMap(newsSourceLabel))
@@ -1304,137 +1305,42 @@ struct NewsWorkspaceView: View {
         return "\(start.formatted(date: .abbreviated, time: .omitted)) - \(end.formatted(date: .abbreviated, time: .omitted))"
     }
 
+    private var hasActiveFilters: Bool {
+        model.selectedCountry != nil || !query.isEmpty || sourceFilter != "all" || !countryFilter.isEmpty || imagesOnly || sort != .newest
+    }
+
     var body: some View {
         BrandBackground {
             ScrollView {
-                VStack(spacing: 18) {
-                    IntelligenceEventPulseView()
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 14) {
-                            BrandSectionHeader(
-                                kicker: "News",
-                                title: "Global signal stream",
-                                detail: "Filter the same recent and archive news feeds available on web."
-                            )
-
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                                BrandMetricCard(title: "Loaded", value: "\(rows.count)", detail: "Filtered articles in view", tone: nil)
-                                BrandMetricCard(title: "Sources", value: "\(sourceOptions.count)", detail: "Distinct publishers in current dataset", tone: nil)
-                                BrandMetricCard(title: "Coverage", value: loadMode.rawValue.capitalized, detail: coverageLabel, tone: nil)
-                            }
-
-                            HStack(spacing: 8) {
-                                Picker("Load mode", selection: $loadMode) {
-                                    Text("Recent").tag(AppModel.NewsLoadMode.recent)
-                                    Text("Archive").tag(AppModel.NewsLoadMode.archive)
-                                }
-                                .pickerStyle(.segmented)
-
-                                Button(model.isRefreshingNews ? "Refreshing…" : "Refresh") {
-                                    Task { await model.refreshNews(mode: loadMode) }
-                                }
-                                .buttonStyle(.bordered)
-                                .disabled(model.isRefreshingNews)
-                            }
-
-                            if let error = model.newsLoadError, !error.isEmpty {
-                                Text(error)
-                                    .font(.footnote)
-                                    .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
-                            }
+                if horizontalSizeClass == .compact {
+                    compactNewsContent
+                } else {
+                    regularNewsContent
+                }
+            }
+            .refreshable { await model.refreshNews(mode: loadMode) }
+        }
+        .sheet(isPresented: $showsFilters) {
+            NavigationStack {
+                ScrollView {
+                    filterPanel
+                        .padding()
+                }
+                .background(ClaritasPalette.shellBackground(for: colorScheme))
+                .navigationTitle("News filters")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    if hasActiveFilters {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Reset") { resetFilters() }
                         }
                     }
-
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Filters")
-                                .font(.headline)
-
-                            HStack(spacing: 8) {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundStyle(.secondary)
-                                TextField("Search headlines, summaries, or countries", text: $query)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                            }
-                            .padding(10)
-                            .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-                            )
-
-                            HStack(spacing: 10) {
-                                Picker("Source", selection: $sourceFilter) {
-                                    Text("All sources").tag("all")
-                                    ForEach(sourceOptions, id: \.self) { source in
-                                        Text(source).tag(source)
-                                    }
-                                }
-                                .pickerStyle(.menu)
-
-                                TextField("Country", text: $countryFilter)
-                                    .textInputAutocapitalization(.characters)
-                                    .autocorrectionDisabled()
-                                    .textFieldStyle(.roundedBorder)
-                            }
-
-                            Toggle("Only articles with images", isOn: $imagesOnly)
-
-                            Picker("Sort", selection: $sort) {
-                                ForEach(Sort.allCases) { sort in
-                                    Text(sort.title).tag(sort)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                        }
-                    }
-
-                    if horizontalSizeClass == .compact {
-                        storyPanel
-                    }
-
-                    if !timelineData.isEmpty || !sourceData.isEmpty {
-                        VStack(spacing: 12) {
-                            BrandCard {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Timeline")
-                                        .font(.headline)
-                                    Chart(timelineData) { item in
-                                        LineMark(
-                                            x: .value("Date", item.date),
-                                            y: .value("Stories", item.count)
-                                        )
-                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                    }
-                                    .frame(height: 180)
-                                }
-                            }
-
-                            BrandCard {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Top sources")
-                                        .font(.headline)
-                                    Chart(sourceData) { item in
-                                        BarMark(
-                                            x: .value("Source", item.label),
-                                            y: .value("Stories", item.count)
-                                        )
-                                        .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
-                                    }
-                                    .frame(height: 180)
-                                }
-                            }
-                        }
-                    }
-
-                    if horizontalSizeClass != .compact {
-                        storyPanel
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showsFilters = false }
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 24)
             }
+            .presentationDetents([.medium, .large])
         }
         .task {
             loadMode = model.newsLoadMode
@@ -1447,16 +1353,177 @@ struct NewsWorkspaceView: View {
         }
     }
 
-    private var storyPanel: some View {
+    private var compactNewsContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(loadMode == .recent ? "Latest news" : "News archive")
+                        .font(.title2.weight(.bold))
+                    Text("\(rows.count) stories · \(coverageLabel)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { showsFilters = true } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.title3)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Filter news")
+                Button { Task { await model.refreshNews(mode: loadMode) } } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.title3)
+                }
+                .buttonStyle(.bordered)
+                .disabled(model.isRefreshingNews)
+                .accessibilityLabel("Refresh news")
+            }
+
+            Picker("Load mode", selection: $loadMode) {
+                Text("Recent").tag(AppModel.NewsLoadMode.recent)
+                Text("Archive").tag(AppModel.NewsLoadMode.archive)
+            }
+            .pickerStyle(.segmented)
+
+            if hasActiveFilters {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                    Text(model.selectedCountry.map { "Country \($0.uppercased())" } ?? "Filtered news")
+                    Spacer()
+                    Button("Clear") { resetFilters() }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+            }
+
+            if let error = model.newsLoadError, !error.isEmpty {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+            }
+
+            NewsListView(items: rows, compact: true) { iso in
+                model.selectedCountry = iso
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 110)
+    }
+
+    private var regularNewsContent: some View {
+        VStack(spacing: 16) {
+            BrandCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    BrandSectionHeader(
+                        kicker: "News",
+                        title: "Global signal stream",
+                        detail: "Browse publisher reporting first; use filters and coverage analytics to narrow the stream."
+                    )
+                    HStack(spacing: 8) {
+                        Picker("Load mode", selection: $loadMode) {
+                            Text("Recent").tag(AppModel.NewsLoadMode.recent)
+                            Text("Archive").tag(AppModel.NewsLoadMode.archive)
+                        }
+                        .pickerStyle(.segmented)
+                        Button(model.isRefreshingNews ? "Refreshing…" : "Refresh") {
+                            Task { await model.refreshNews(mode: loadMode) }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(model.isRefreshingNews)
+                    }
+                }
+            }
+            filterPanel
+            storyPanel(compact: false)
+            analyticsPanels
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 24)
+    }
+
+    private var filterPanel: some View {
+        BrandCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Filters")
+                    .font(.headline)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search headlines, summaries, or countries", text: $query)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                .padding(10)
+                .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+                HStack(spacing: 10) {
+                    Picker("Source", selection: $sourceFilter) {
+                        Text("All sources").tag("all")
+                        ForEach(sourceOptions, id: \.self) { source in Text(source).tag(source) }
+                    }
+                    .pickerStyle(.menu)
+                    TextField("Country", text: $countryFilter)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .textFieldStyle(.roundedBorder)
+                }
+                Toggle("Only articles with images", isOn: $imagesOnly)
+                Picker("Sort", selection: $sort) {
+                    ForEach(Sort.allCases) { sort in Text(sort.title).tag(sort) }
+                }
+                .pickerStyle(.segmented)
+            }
+        }
+    }
+
+    private var analyticsPanels: some View {
+        Group {
+            if !timelineData.isEmpty || !sourceData.isEmpty {
+                HStack(alignment: .top, spacing: 12) {
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Timeline").font(.headline)
+                            Chart(timelineData) { item in
+                                LineMark(x: .value("Date", item.date), y: .value("Stories", item.count))
+                                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                            }
+                            .frame(height: 180)
+                        }
+                    }
+                    BrandCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Top sources").font(.headline)
+                            Chart(sourceData) { item in
+                                BarMark(x: .value("Source", item.label), y: .value("Stories", item.count))
+                                    .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
+                            }
+                            .frame(height: 180)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func storyPanel(compact: Bool) -> some View {
         BrandCard {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Stories")
                     .font(.headline)
-                NewsListView(items: rows) { iso in
+                NewsListView(items: rows, compact: compact) { iso in
                     model.selectedCountry = iso
                 }
             }
         }
+    }
+
+    private func resetFilters() {
+        query = ""
+        sourceFilter = "all"
+        countryFilter = ""
+        imagesOnly = false
+        sort = .newest
+        model.selectedCountry = nil
     }
 }
 

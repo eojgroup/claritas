@@ -113,6 +113,14 @@ export default function IntelligenceEventStrip({ country, onOpen }: Props) {
                     <Clock3 className="h-3 w-3" />
                     Updated {formatExactTimestamp(event.last_activity_time)}
                   </time>
+                  {event.expires_at && (
+                    <time
+                      dateTime={event.expires_at}
+                      className={`mt-1 flex items-center gap-1 text-[10px] ${event.freshness_state === "expiring" ? "text-[color:var(--shell-accent)]" : "text-[color:var(--shell-muted)]"}`}
+                    >
+                      Current until {formatExactTimestamp(event.expires_at)}
+                    </time>
+                  )}
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[color:var(--shell-muted)]">
                     <span className="inline-flex items-center gap-1"><Link2 className="h-3 w-3" />{event.evidence_count} evidence</span>
                     <span>{Math.round(event.relevance_score * 100)}% relevance</span>

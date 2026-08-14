@@ -15,6 +15,7 @@ struct IntelligenceWorkspaceView: View {
     @State private var detailLoading = false
     @State private var error: String?
     @State private var detailError: String?
+    @State private var includeExpired = false
 
     var body: some View {
         BrandBackground {
@@ -25,6 +26,13 @@ struct IntelligenceWorkspaceView: View {
                         title: "Signal desk",
                         detail: "Follow a development from first report through physical observation, operational effects, market response, and assessed meaning."
                     )
+
+                    Picker("Event visibility", selection: $includeExpired) {
+                        Text("Current").tag(false)
+                        Text("Archive").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityHint("Current hides events after their visibility window. Archive includes expired events.")
 
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -83,7 +91,7 @@ struct IntelligenceWorkspaceView: View {
             }
             .refreshable { await load() }
         }
-        .task { await load() }
+        .task(id: includeExpired) { await load() }
         .task(id: selectedID) { await loadDetail() }
         .task(id: selectedID) { await loadGibsContext() }
         .onChange(of: model.selectedIntelligenceEventID) { requested in
@@ -117,6 +125,15 @@ struct IntelligenceWorkspaceView: View {
                                 Text("\(event.evidence_count) evidence")
                             }
                             .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Updated \(event.last_activity_time.formatted(date: .abbreviated, time: .standard))")
+                                if let expiresAt = event.expires_at {
+                                    Text("\(event.freshness_state == "expired" ? "Expired" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .standard))")
+                                        .foregroundStyle(event.freshness_state == "expired" ? ClaritasPalette.negativeText(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
+                                }
+                            }
+                            .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
                         }
                         .padding(.vertical, 11)
@@ -158,6 +175,16 @@ struct IntelligenceWorkspaceView: View {
                     }
                     Text(detail.event.title)
                         .font(.title3.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Started \(detail.event.start_time.formatted(date: .abbreviated, time: .standard))")
+                        Text("Updated \(detail.event.last_activity_time.formatted(date: .abbreviated, time: .standard))")
+                        if let expiresAt = detail.event.expires_at {
+                            Text("\(detail.event.freshness_state == "expired" ? "Expired" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .standard))")
+                                .foregroundStyle(detail.event.freshness_state == "expired" ? ClaritasPalette.negativeText(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
+                        }
+                    }
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 10) {
                         eventUnderstandingRow(
                             label: "What happened",
@@ -469,7 +496,11 @@ struct IntelligenceWorkspaceView: View {
         let watchTask = Task { try? await model.api.fetchIntelligenceWatchlist() }
         let alertTask = Task { try? await model.api.fetchIntelligenceAlerts() }
         do {
-            let rows = try await model.api.fetchIntelligenceEvents(limit: 60, country: model.selectedCountry)
+            let rows = try await model.api.fetchIntelligenceEvents(
+                limit: 60,
+                country: model.selectedCountry,
+                includeExpired: includeExpired
+            )
             events = rows
             if let requested = model.selectedIntelligenceEventID {
                 selectedID = requested
@@ -874,6 +905,11 @@ struct IntelligenceEventPulseView: View {
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+                if let expiresAt = event.expires_at {
+                    Text("\(event.freshness_state == "expired" ? "Expired" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(event.freshness_state == "expired" ? ClaritasPalette.negativeText(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
                 }
             }
             .padding(horizontal ? 12 : 0)

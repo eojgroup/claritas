@@ -502,7 +502,7 @@ final class APIClient {
         return comps.url
     }
 
-    func fetchIntelligenceEvents(limit: Int = 40, country: String? = nil) async throws -> [IntelligenceEvent] {
+    func fetchIntelligenceEvents(limit: Int = 40, country: String? = nil, includeExpired: Bool = false) async throws -> [IntelligenceEvent] {
         var comps = URLComponents(
             url: baseURL.appendingPathComponent("/api/intelligence/events"),
             resolvingAgainstBaseURL: false
@@ -510,6 +510,9 @@ final class APIClient {
         var items = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 100)))]
         if let country, country.range(of: "^[A-Za-z]{2}$", options: .regularExpression) != nil {
             items.append(URLQueryItem(name: "country", value: country.uppercased()))
+        }
+        if includeExpired {
+            items.append(URLQueryItem(name: "include_expired", value: "true"))
         }
         comps.queryItems = items
         return try await request(URLRequest(url: comps.url!), as: [IntelligenceEvent].self, rootKey: "events")

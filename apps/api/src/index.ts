@@ -1831,6 +1831,7 @@ app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
       locationId,
       eventType: typeof req.query.event_type === "string" ? req.query.event_type.trim() : undefined,
       since,
+      includeExpired: req.query.include_expired === "true",
     });
     res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
     return res.json({ events, count: events.length, generated_at: new Date().toISOString() });

@@ -1212,7 +1212,7 @@ export default function ClaritasDashboard() {
           latitude: Number(event.latitude),
           longitude: Number(event.longitude),
           title: event.title,
-          subtitle: `${event.location_name || event.primary_country_iso2 || "Estimated event location"} · updated ${formatExactTimestamp(event.last_activity_time)} · ${event.domain_count} domain${event.domain_count === 1 ? "" : "s"}`,
+          subtitle: `${event.location_name || event.primary_country_iso2 || "Estimated event location"} · updated ${formatExactTimestamp(event.last_activity_time)}${event.expires_at ? ` · current until ${formatExactTimestamp(event.expires_at)}` : ""} · ${event.domain_count} domain${event.domain_count === 1 ? "" : "s"}`,
           label,
           severity: event.severity,
           hasImagery: event.earth_observation_available,

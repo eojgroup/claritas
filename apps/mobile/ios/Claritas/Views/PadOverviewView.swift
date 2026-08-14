@@ -411,6 +411,11 @@ struct OverviewSatelliteContextView: View {
                             Text(selectedEvent.location_name ?? selectedEvent.primary_country_iso2 ?? "Global")
                                 .font(.caption)
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            if let expiresAt = selectedEvent.expires_at {
+                                Text("Updated \(selectedEvent.last_activity_time.formatted(date: .abbreviated, time: .standard)) · current until \(expiresAt.formatted(date: .abbreviated, time: .standard))")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            }
                             Text(observation?.attribution ?? gibsLayer?.provenance.attribution ?? "Satellite context")
                                 .font(.caption2)
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))

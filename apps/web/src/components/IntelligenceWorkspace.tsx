@@ -152,6 +152,7 @@ export default function IntelligenceWorkspace({
   const [detail, setDetail] = useState<IntelligenceEventDetail | null>(null);
   const [gibsContext, setGibsContext] = useState<GibsEventContext | null>(null);
   const [severity, setSeverity] = useState<IntelligenceSeverity | "all">("all");
+  const [includeExpired, setIncludeExpired] = useState(false);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -184,6 +185,7 @@ export default function IntelligenceWorkspace({
         limit: 60,
         country: initialCountry || undefined,
         severity: severity === "all" ? undefined : severity,
+        includeExpired,
       });
       setEvents(rows);
       setSelectedId((current) => {
@@ -198,7 +200,7 @@ export default function IntelligenceWorkspace({
     const [watchResult, alertResult] = await optionalData;
     if (watchResult.status === "fulfilled") setWatches(watchResult.value);
     if (alertResult.status === "fulfilled") setAlerts(alertResult.value);
-  }, [initialCountry, initialEventId, severity]);
+  }, [includeExpired, initialCountry, initialEventId, severity]);
 
   useEffect(() => { void loadEvents(); }, [loadEvents]);
 
@@ -371,6 +373,14 @@ export default function IntelligenceWorkspace({
               {value}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setIncludeExpired((value) => !value)}
+            aria-pressed={includeExpired}
+            className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${includeExpired ? "border-[color:var(--shell-accent)] bg-[color:var(--shell-accent)] text-[color:var(--shell-bg)]" : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"}`}
+          >
+            {includeExpired ? "Archive included" : "Current only"}
+          </button>
         </div>
       </section>
 
@@ -414,6 +424,11 @@ export default function IntelligenceWorkspace({
                   <time dateTime={event.last_activity_time} className="mt-2 block text-[10px] tabular-nums text-[color:var(--shell-muted)]">
                     Latest evidence {dateLabel(event.last_activity_time)}
                   </time>
+                  {event.expires_at && (
+                    <time dateTime={event.expires_at} className={`mt-1 block text-[10px] tabular-nums ${event.freshness_state === "expired" ? "text-[color:var(--signal-coral)]" : "text-[color:var(--shell-muted)]"}`}>
+                      {event.freshness_state === "expired" ? "Expired" : "Current until"} {dateLabel(event.expires_at)}
+                    </time>
+                  )}
                 </button>
               );
             })}
@@ -438,7 +453,7 @@ export default function IntelligenceWorkspace({
                     <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-accent)]">{detailPresentation?.typeLabel}</div>
                     <h2 className="mt-1 text-2xl font-semibold text-[color:var(--shell-ink)]">{detailPresentation?.headline}</h2>
                     {detailPresentation?.focus && <div className="mt-1 text-xs text-[color:var(--shell-muted)]">Signal focus · {detailPresentation.focus}</div>}
-                    <div className="mt-2 flex items-center gap-2 text-xs text-[color:var(--shell-muted)]"><MapPin className="h-3.5 w-3.5" />{detailPresentation?.locationLabel} · Active {dateLabel(detail.event.last_activity_time)}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[color:var(--shell-muted)]"><span className="inline-flex items-center gap-2"><MapPin className="h-3.5 w-3.5" />{detailPresentation?.locationLabel}</span><span>Started {dateLabel(detail.event.start_time)}</span><span>Updated {dateLabel(detail.event.last_activity_time)}</span>{detail.event.expires_at && <span className={detail.event.freshness_state === "expired" ? "text-[color:var(--signal-coral)]" : ""}>{detail.event.freshness_state === "expired" ? "Expired" : "Current until"} {dateLabel(detail.event.expires_at)}</span>}</div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
                     {watchTarget && <button type="button" disabled={watchPending} onClick={() => void toggleWatch()} className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] px-3 py-2 text-xs font-semibold text-[color:var(--shell-ink)] disabled:opacity-50">{activeWatch ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}{activeWatch ? "Stop watching" : `Watch ${watchTarget.key}`}</button>}
