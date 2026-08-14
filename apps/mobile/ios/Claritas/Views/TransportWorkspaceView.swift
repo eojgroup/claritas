@@ -8,6 +8,7 @@ struct TransportWorkspaceView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var detailedOverview: TransportOverview?
+    @State private var detailedOverviewCountry: String?
     @State private var mode: TransportMode?
     @State private var selectedEntity: TransportEntity?
     @State private var selectedTrack: [TransportTrackPoint] = []
@@ -22,7 +23,14 @@ struct TransportWorkspaceView: View {
     }
 
     private var overview: TransportOverview? {
-        isPad ? detailedOverview ?? model.transportOverview : model.transportOverview
+        guard isPad else { return model.transportOverview }
+        let scope = model.transportFocusCountry?.uppercased()
+        if detailedOverviewCountry == scope {
+            return detailedOverview
+        }
+        return model.transportOverviewCountry?.uppercased() == scope
+            ? model.transportOverview
+            : nil
     }
 
     var body: some View {
@@ -76,13 +84,17 @@ struct TransportWorkspaceView: View {
                     title: "\(model.transportFocusCountry ?? "Country") movement map",
                     icon: "map.fill"
                 ) {
-                    TransportCanvasMap(
+                    TransportTrackingMap(
                         entities: filteredEntities,
+                        routes: overview?.routes ?? [],
+                        mode: mode,
                         selectedID: selectedEntity?.id,
                         track: selectedTrack,
+                        scopeCountry: model.transportFocusCountry,
                         onSelect: { entity in
                             Task { await select(entity) }
-                        }
+                        },
+                        onSelectCountry: selectScopeCountry
                     )
                     .frame(minHeight: 440)
                 }
@@ -148,11 +160,16 @@ struct TransportWorkspaceView: View {
                     .font(.caption)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
 
-                    TransportNativeMap(
+                    TransportTrackingMap(
                         entities: filteredEntities,
+                        routes: overview?.routes ?? [],
+                        mode: mode,
                         selectedID: selectedEntity?.id,
+                        track: selectedTrack,
                         scopeCountry: model.transportFocusCountry,
-                        onSelect: { entity in Task { await select(entity) } }
+                        compactPresentation: true,
+                        onSelect: { entity in Task { await select(entity) } },
+                        onSelectCountry: selectScopeCountry
                     )
                     .frame(height: 310)
 
@@ -870,6 +887,7 @@ struct TransportWorkspaceView: View {
     private func loadDetails(forceRefresh: Bool) async {
         guard let country = model.transportFocusCountry else {
             detailedOverview = nil
+            detailedOverviewCountry = nil
             detailError = "Choose a country to load transport intelligence."
             return
         }
@@ -890,8 +908,10 @@ struct TransportWorkspaceView: View {
                 entityLimit: 1_200,
                 refresh: forceRefresh
             )
-            guard detailRequestID == requestID else { return }
+            guard detailRequestID == requestID,
+                  model.transportFocusCountry?.uppercased() == country.uppercased() else { return }
             detailedOverview = value
+            detailedOverviewCountry = country.uppercased()
             if let selectedEntity,
                !value.entities.contains(where: { $0.id == selectedEntity.id }) {
                 clearSelection()
@@ -933,57 +953,116 @@ struct TransportWorkspaceView: View {
         selectedTrack = []
         isLoadingEntity = false
     }
+
+    private func selectScopeCountry(_ country: String) {
+        let normalized = country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard normalized.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil,
+              normalized != model.transportFocusCountry?.uppercased() else { return }
+        clearSelection()
+        detailedOverview = nil
+        detailedOverviewCountry = nil
+        model.selectedCountry = normalized
+    }
 }
 
-private struct TransportNativeMap: View {
+// The dedicated transport workspace uses the same native MapKit foundation as
+// the overview map.  Unlike the old canvas, it retains real map gestures and
+// layers the country relationship, resolved vehicle route, and sampled trail
+// over current aircraft and vessel positions.
+private enum TransportMapViewport: String {
+    case world
+    case links
+}
+
+private struct TransportMapConnection: Identifiable {
+    let mode: TransportMode
+    let originCountry: String
+    let originName: String
+    let destinationCountry: String
+    let destinationName: String
+    let activeCount: Int
+
+    var id: String { "\(mode.rawValue)-\(originCountry)-\(destinationCountry)" }
+
+    static func make(
+        routes: [TransportRouteAggregate],
+        scopeCountry: String?,
+        mode: TransportMode?
+    ) -> [TransportMapConnection] {
+        guard let scope = scopeCountry?.uppercased() else { return [] }
+        var sourceByID: [String: TransportRouteAggregate] = [:]
+        var countsByID: [String: Int] = [:]
+
+        for route in routes {
+            if let mode, route.mode != mode { continue }
+            let origin = route.origin_country.uppercased()
+            let destination = route.destination_country.uppercased()
+            guard origin != destination, origin == scope || destination == scope else { continue }
+            let id = "\(route.mode.rawValue)-\(origin)-\(destination)"
+            sourceByID[id] = route
+            countsByID[id, default: 0] += route.active_count
+        }
+
+        return sourceByID.compactMap { id, route in
+            guard let count = countsByID[id] else { return nil }
+            return TransportMapConnection(
+                mode: route.mode,
+                originCountry: route.origin_country.uppercased(),
+                originName: route.origin_name,
+                destinationCountry: route.destination_country.uppercased(),
+                destinationName: route.destination_name,
+                activeCount: count
+            )
+        }
+        .sorted {
+            $0.activeCount == $1.activeCount
+                ? $0.id < $1.id
+                : $0.activeCount > $1.activeCount
+        }
+    }
+}
+
+private struct TransportTrackingMap: View {
     let entities: [TransportEntity]
+    let routes: [TransportRouteAggregate]
+    let mode: TransportMode?
     let selectedID: String?
+    let track: [TransportTrackPoint]
     let scopeCountry: String?
+    var compactPresentation = false
     let onSelect: (TransportEntity) -> Void
+    let onSelectCountry: (String) -> Void
 
-    @State private var viewport = MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 12, longitude: 0),
-        span: MKCoordinateSpan(latitudeDelta: 142, longitudeDelta: 350)
-    )
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var viewport: TransportMapViewport = .links
+    @State private var viewportToken = 0
 
-    private var plotted: [TransportEntity] {
-        Array(entities.filter {
-            guard let latitude = $0.latitude, let longitude = $0.longitude else { return false }
-            return latitude.isFinite && longitude.isFinite && abs(latitude) <= 90 && abs(longitude) <= 180
-        }.prefix(320))
+    private var connections: [TransportMapConnection] {
+        TransportMapConnection.make(routes: routes, scopeCountry: scopeCountry, mode: mode)
+    }
+
+    private var visibleEntities: [TransportEntity] {
+        Array(entities.prefix(compactPresentation ? 200 : 320))
     }
 
     var body: some View {
-        Map(
-            coordinateRegion: $viewport,
-            interactionModes: [.pan, .zoom],
-            showsUserLocation: false,
-            annotationItems: plotted
-        ) { entity in
-            MapAnnotation(coordinate: CLLocationCoordinate2D(
-                latitude: entity.latitude ?? 0,
-                longitude: entity.longitude ?? 0
-            )) {
-                Button { onSelect(entity) } label: {
-                    Image(systemName: entity.mode == .aviation ? "airplane" : "ferry.fill")
-                        .font(.system(size: selectedID == entity.id ? 12 : 9, weight: .bold))
-                        .foregroundStyle(Color(hex: "#07141E"))
-                        .frame(
-                            width: selectedID == entity.id ? 28 : 21,
-                            height: selectedID == entity.id ? 28 : 21
-                        )
-                        .background(markerTone(entity).opacity(0.94), in: Circle())
-                        .overlay(Circle().stroke(.white, lineWidth: selectedID == entity.id ? 2 : 1))
-                        .rotationEffect(.degrees(entity.mode == .aviation ? (entity.heading ?? 0) - 45 : 0))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("\(entity.mode == .aviation ? "Aircraft" : "Vessel") \(entity.display_name ?? entity.entity_id)")
-            }
-        }
+        MapKitTransportTrackingView(
+            entities: visibleEntities,
+            connections: connections,
+            selectedID: selectedID,
+            track: track,
+            scopeCountry: scopeCountry,
+            viewport: viewport,
+            viewportToken: viewportToken,
+            compactPresentation: compactPresentation,
+            darkAppearance: colorScheme == .dark,
+            onSelect: onSelect,
+            onSelectCountry: onSelectCountry
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
         )
         .overlay(alignment: .topLeading) {
             Text("CURRENT SCOPE · \((scopeCountry ?? "GLOBAL").uppercased())")
@@ -996,282 +1075,499 @@ private struct TransportNativeMap: View {
                 .padding(9)
                 .allowsHitTesting(false)
         }
-        .onAppear { fitViewport() }
-        .onChange(of: scopeCountry) { _ in fitViewport() }
-        .onChange(of: plotted.map(\.id)) { _ in fitViewport() }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Live transport map for \(scopeCountry ?? "the current country scope")")
-    }
-
-    private func markerTone(_ entity: TransportEntity) -> Color {
-        entity.mode == .aviation ? Color(hex: "#91ADBA") : Color(hex: "#D3C3A5")
-    }
-
-    private func fitViewport() {
-        let scoped = plotted.filter {
-            guard let scope = scopeCountry?.uppercased() else { return true }
-            return $0.current_country_iso2?.uppercased() == scope
-        }
-        let candidates = scoped.isEmpty ? plotted : scoped
-        guard !candidates.isEmpty else { return }
-        let latitudes = candidates.compactMap(\.latitude)
-        let longitudes = candidates.compactMap(\.longitude)
-        guard let minLat = latitudes.min(), let maxLat = latitudes.max(),
-              let minLon = longitudes.min(), let maxLon = longitudes.max() else { return }
-        viewport = MKCoordinateRegion(
-            center: CLLocationCoordinate2D(
-                latitude: (minLat + maxLat) / 2,
-                longitude: (minLon + maxLon) / 2
-            ),
-            span: MKCoordinateSpan(
-                latitudeDelta: min(142, max(2.5, (maxLat - minLat) * 1.35)),
-                longitudeDelta: min(350, max(3, (maxLon - minLon) * 1.35))
+        .overlay(alignment: .topTrailing) {
+            VStack(spacing: 0) {
+                viewportButton(icon: "globe", label: "Show world") {
+                    setViewport(.world)
+                }
+                Divider().frame(width: 30)
+                viewportButton(icon: "point.topleft.down.to.point.bottomright.curvepath", label: "Show country links") {
+                    setViewport(.links)
+                }
+                .disabled(connections.isEmpty)
+            }
+            .background(Color(hex: "#11222E").opacity(0.92), in: RoundedRectangle(cornerRadius: 9))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9)
+                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
             )
+            .padding(9)
+        }
+        .overlay(alignment: .bottomLeading) {
+            HStack(spacing: 9) {
+                if mode != .maritime { legend("Aircraft", color: Color(hex: "#78A9BA")) }
+                if mode != .aviation { legend("Vessels", color: Color(hex: "#D6A66B")) }
+                if !connections.isEmpty { legend("Country links", color: Color(hex: "#D87543"), line: true) }
+                if track.count > 1 { legend("Trail", color: .white, line: true) }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color.black.opacity(0.62), in: Capsule())
+            .padding(9)
+            .allowsHitTesting(false)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            "Live transport tracking map with \(visibleEntities.count) vehicles and \(connections.count) country connections"
         )
+        .accessibilityHint("Tap a vehicle for its details or a country label to change transport scope")
+    }
+
+    private func viewportButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(hex: "#F2EEE6"))
+                .frame(width: ClaritasLayout.minimumTouchTarget, height: ClaritasLayout.minimumTouchTarget)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func legend(_ label: String, color: Color, line: Bool = false) -> some View {
+        HStack(spacing: 4) {
+            if line {
+                Capsule().fill(color).frame(width: 13, height: 2)
+            } else {
+                Circle().fill(color).frame(width: 7, height: 7)
+            }
+            Text(label)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(.white.opacity(0.9))
+        }
+    }
+
+    private func setViewport(_ next: TransportMapViewport) {
+        viewport = next
+        viewportToken += 1
     }
 }
 
-private struct TransportCountryModePoint: Identifiable {
-    let country: String
-    let mode: String
-    let count: Int
-    var id: String { "\(country)-\(mode)" }
-}
-
-private struct TransportCanvasMap: View {
+private struct MapKitTransportTrackingView: UIViewRepresentable {
     let entities: [TransportEntity]
+    let connections: [TransportMapConnection]
     let selectedID: String?
     let track: [TransportTrackPoint]
+    let scopeCountry: String?
+    let viewport: TransportMapViewport
+    let viewportToken: Int
+    let compactPresentation: Bool
+    let darkAppearance: Bool
     let onSelect: (TransportEntity) -> Void
-    @Environment(\.colorScheme) private var colorScheme
+    let onSelectCountry: (String) -> Void
 
-    private var plottedEntities: [TransportEntity] {
-        Array(entities.prefix(1_000))
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
     }
 
-    var body: some View {
-        GeometryReader { proxy in
-            Canvas { context, size in
-                let bounds = CGRect(origin: .zero, size: size)
-                context.fill(
-                    Path(roundedRect: bounds, cornerRadius: 12),
-                    with: .color(ClaritasPalette.shellBackground(for: colorScheme))
-                )
-                drawGrid(context: context, size: size)
-                drawContinents(context: context, size: size)
-                drawRoutes(context: context, size: size)
-                drawTrack(context: context, size: size)
-                drawEntities(context: context, size: size)
+    func makeUIView(context: Context) -> MKMapView {
+        let map = MKMapView(frame: .zero)
+        map.delegate = context.coordinator
+        map.isRotateEnabled = false
+        map.isPitchEnabled = false
+        map.showsCompass = true
+        map.showsScale = !compactPresentation
+        map.pointOfInterestFilter = .excludingAll
+        map.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: Coordinator.countryReuseID)
+        map.register(MKAnnotationView.self, forAnnotationViewWithReuseIdentifier: Coordinator.entityReuseID)
+
+        let configuration = MKStandardMapConfiguration(elevationStyle: .flat)
+        configuration.emphasisStyle = .muted
+        configuration.pointOfInterestFilter = .excludingAll
+        map.preferredConfiguration = configuration
+
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleMapTap(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delegate = context.coordinator
+        map.addGestureRecognizer(tap)
+        context.coordinator.mapView = map
+        context.coordinator.update(map, with: self, force: true)
+        return map
+    }
+
+    func updateUIView(_ map: MKMapView, context: Context) {
+        context.coordinator.update(map, with: self, force: false)
+    }
+
+    final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
+        static let countryReuseID = "claritas-transport-country"
+        static let entityReuseID = "claritas-transport-entity"
+
+        private var parent: MapKitTransportTrackingView
+        private var countryPolygons: [ObjectIdentifier: String] = [:]
+        private var overlayStyles: [ObjectIdentifier: TransportOverlayStyle] = [:]
+        private var overlaySignature = ""
+        private var annotationSignature = ""
+        private var viewportSignature = ""
+        weak var mapView: MKMapView?
+
+        init(parent: MapKitTransportTrackingView) {
+            self.parent = parent
+        }
+
+        func update(_ map: MKMapView, with next: MapKitTransportTrackingView, force: Bool) {
+            parent = next
+            map.showsScale = !next.compactPresentation
+
+            let nextOverlaySignature = [
+                next.scopeCountry?.uppercased() ?? "",
+                next.connections.map { "\($0.id):\($0.activeCount)" }.joined(separator: ","),
+                next.entities.prefix(140).map { entity in
+                    "\(entity.id):\(entity.origin_latitude ?? 0):\(entity.origin_longitude ?? 0):\(entity.destination_latitude ?? 0):\(entity.destination_longitude ?? 0)"
+                }.joined(separator: ","),
+                next.selectedID ?? "",
+                next.track.map { "\($0.latitude):\($0.longitude):\($0.observed_at)" }.joined(separator: ","),
+                next.darkAppearance ? "dark" : "light"
+            ].joined(separator: "|")
+            if force || nextOverlaySignature != overlaySignature {
+                overlaySignature = nextOverlaySignature
+                installOverlays(on: map)
             }
-            .contentShape(Rectangle())
-            .gesture(
-                SpatialTapGesture()
-                    .onEnded { event in
-                        if let entity = nearestEntity(to: event.location, size: proxy.size) {
-                            onSelect(entity)
-                        }
-                    }
-            )
-            .overlay(alignment: .bottomLeading) {
-                HStack(spacing: 12) {
-                    legendItem("Aircraft", color: ClaritasPalette.dataBlue(for: colorScheme))
-                    legendItem("Vessels", color: ClaritasPalette.shellAccent(for: colorScheme))
-                    Text("\(plottedEntities.count) visible")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+
+            let nextAnnotationSignature = [
+                next.scopeCountry?.uppercased() ?? "",
+                next.selectedID ?? "",
+                next.connections.map { "\($0.id):\($0.activeCount)" }.joined(separator: ","),
+                next.entities.map { entity in
+                    "\(entity.id):\(entity.latitude ?? 0):\(entity.longitude ?? 0):\(entity.heading ?? 0):\(entity.is_alert):\(entity.observed_at)"
+                }.joined(separator: ",")
+            ].joined(separator: "|")
+            if force || nextAnnotationSignature != annotationSignature {
+                annotationSignature = nextAnnotationSignature
+                installAnnotations(on: map)
+            }
+
+            let nextViewportSignature = [
+                next.scopeCountry?.uppercased() ?? "",
+                next.viewport.rawValue,
+                String(next.viewportToken),
+                next.selectedID ?? ""
+            ].joined(separator: "|")
+            if force || nextViewportSignature != viewportSignature {
+                viewportSignature = nextViewportSignature
+                setViewport(on: map, animated: !force)
+            }
+        }
+
+        private func installOverlays(on map: MKMapView) {
+            map.removeOverlays(map.overlays)
+            countryPolygons.removeAll(keepingCapacity: true)
+            overlayStyles.removeAll(keepingCapacity: true)
+
+            var countryOverlays: [MKOverlay] = []
+            for boundary in NaturalEarthCountryBoundaries.shared.boundaries {
+                for polygon in boundary.polygons {
+                    countryPolygons[ObjectIdentifier(polygon)] = boundary.iso
+                    countryOverlays.append(polygon)
                 }
-                .padding(9)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9))
-                .padding(10)
+            }
+            map.addOverlays(countryOverlays, level: .aboveRoads)
+
+            let corridorOverlays = parent.connections.compactMap { connection -> MKPolyline? in
+                guard let start = CountryCentroidLookup.coordinate(for: connection.originCountry),
+                      let end = CountryCentroidLookup.coordinate(for: connection.destinationCountry) else { return nil }
+                let line = MKPolyline(coordinates: curvedCoordinates(from: start, to: end), count: 3)
+                overlayStyles[ObjectIdentifier(line)] = .countryConnection(connection.mode, connection.activeCount)
+                return line
+            }
+            map.addOverlays(corridorOverlays, level: .aboveRoads)
+
+            let routeOverlays = parent.entities.prefix(140).compactMap { entity -> MKPolyline? in
+                guard let start = coordinate(latitude: entity.origin_latitude, longitude: entity.origin_longitude),
+                      let end = coordinate(latitude: entity.destination_latitude, longitude: entity.destination_longitude) else { return nil }
+                let line = MKPolyline(coordinates: curvedCoordinates(from: start, to: end), count: 3)
+                overlayStyles[ObjectIdentifier(line)] = .vehicleRoute(entity.mode, entity.id == parent.selectedID)
+                return line
+            }
+            map.addOverlays(routeOverlays, level: .aboveRoads)
+
+            let sampledTrack = parent.track.compactMap { point in
+                coordinate(latitude: point.latitude, longitude: point.longitude)
+            }
+            if sampledTrack.count > 1 {
+                let line = MKPolyline(coordinates: sampledTrack, count: sampledTrack.count)
+                overlayStyles[ObjectIdentifier(line)] = .sampledTrack
+                map.addOverlay(line, level: .aboveRoads)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-        )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "Live transport map with \(plottedEntities.count) selectable vehicles"
-        )
-        .accessibilityHint("Tap near an aircraft or vessel to show its details")
-    }
 
-    private func project(latitude: Double, longitude: Double, size: CGSize) -> CGPoint {
-        CGPoint(
-            x: (longitude + 180) / 360 * size.width,
-            y: (82 - latitude) / 142 * size.height
-        )
-    }
+        private func installAnnotations(on map: MKMapView) {
+            map.removeAnnotations(map.annotations.filter { !($0 is MKUserLocation) })
 
-    private func drawGrid(context: GraphicsContext, size: CGSize) {
-        var path = Path()
-        for longitude in stride(from: -120.0, through: 120.0, by: 60.0) {
-            let top = project(latitude: 82, longitude: longitude, size: size)
-            let bottom = project(latitude: -60, longitude: longitude, size: size)
-            path.move(to: top)
-            path.addLine(to: bottom)
-        }
-        for latitude in stride(from: -30.0, through: 60.0, by: 30.0) {
-            let left = project(latitude: latitude, longitude: -180, size: size)
-            let right = project(latitude: latitude, longitude: 180, size: size)
-            path.move(to: left)
-            path.addLine(to: right)
-        }
-        context.stroke(
-            path,
-            with: .color(ClaritasPalette.shellBorder(for: colorScheme).opacity(0.55)),
-            lineWidth: 0.6
-        )
-    }
-
-    private func drawContinents(context: GraphicsContext, size: CGSize) {
-        let continents: [[(Double, Double)]] = [
-            [(-168, 72), (-52, 72), (-60, 18), (-100, 8), (-130, 24), (-168, 58)],
-            [(-82, 12), (-34, 6), (-49, -56), (-72, -52), (-81, -5)],
-            [(-12, 72), (40, 72), (35, 35), (10, 35), (-10, 45)],
-            [(-18, 36), (52, 32), (43, -35), (18, -35), (-15, 5)],
-            [(30, 72), (178, 68), (150, 5), (105, -10), (55, 10), (35, 35)],
-            [(110, -10), (155, -10), (153, -44), (115, -40)]
-        ]
-        for polygon in continents {
-            var path = Path()
-            for (index, coordinate) in polygon.enumerated() {
-                let point = project(
-                    latitude: coordinate.1,
-                    longitude: coordinate.0,
-                    size: size
+            let scope = parent.scopeCountry?.uppercased()
+            var countries = scope.map { [$0] } ?? []
+            for connection in parent.connections {
+                if !countries.contains(connection.originCountry) { countries.append(connection.originCountry) }
+                if !countries.contains(connection.destinationCountry) { countries.append(connection.destinationCountry) }
+            }
+            let countryCounts = parent.connections.reduce(into: [String: Int]()) { result, connection in
+                result[connection.originCountry, default: 0] += connection.activeCount
+                result[connection.destinationCountry, default: 0] += connection.activeCount
+            }
+            let countryAnnotations: [MKAnnotation] = countries.prefix(18).compactMap { iso in
+                guard let coordinate = CountryCentroidLookup.coordinate(for: iso) else { return nil }
+                return TransportCountryAnnotation(
+                    iso: iso,
+                    coordinate: coordinate,
+                    activeCount: countryCounts[iso] ?? 0,
+                    selected: iso == scope
                 )
-                if index == 0 {
-                    path.move(to: point)
-                } else {
-                    path.addLine(to: point)
+            }
+            let entityAnnotations: [MKAnnotation] = parent.entities.compactMap(TransportEntityAnnotation.init)
+            map.addAnnotations(countryAnnotations + entityAnnotations)
+        }
+
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let polygon = overlay as? MKPolygon {
+                let renderer = MKPolygonRenderer(polygon: polygon)
+                let iso = countryPolygons[ObjectIdentifier(polygon)]
+                let scope = parent.scopeCountry?.uppercased()
+                let linked = parent.connections.contains {
+                    $0.originCountry == iso || $0.destinationCountry == iso
+                }
+                renderer.fillColor = iso == scope
+                    ? UIColor(red: 0.85, green: 0.65, blue: 0.42, alpha: 0.22)
+                    : linked
+                        ? UIColor(red: 0.36, green: 0.66, blue: 0.74, alpha: 0.14)
+                        : .clear
+                renderer.strokeColor = iso == scope
+                    ? UIColor.white.withAlphaComponent(0.92)
+                    : linked
+                        ? UIColor(red: 0.50, green: 0.75, blue: 0.82, alpha: 0.82)
+                        : UIColor.white.withAlphaComponent(0.16)
+                renderer.lineWidth = iso == scope ? 2.1 : linked ? 1.25 : 0.55
+                return renderer
+            }
+            guard let line = overlay as? MKPolyline,
+                  let style = overlayStyles[ObjectIdentifier(line)] else {
+                return MKOverlayRenderer(overlay: overlay)
+            }
+            let renderer = MKPolylineRenderer(polyline: line)
+            switch style {
+            case let .countryConnection(mode, count):
+                renderer.strokeColor = mode == .aviation
+                    ? UIColor(red: 0.42, green: 0.69, blue: 0.79, alpha: 0.88)
+                    : UIColor(red: 0.87, green: 0.61, blue: 0.36, alpha: 0.88)
+                renderer.lineWidth = min(5, 1.3 + log2(Double(max(count, 1))))
+                renderer.lineDashPattern = [NSNumber(value: 6), NSNumber(value: 4)]
+            case let .vehicleRoute(mode, selected):
+                renderer.strokeColor = mode == .aviation
+                    ? UIColor(red: 0.48, green: 0.72, blue: 0.80, alpha: selected ? 0.92 : 0.24)
+                    : UIColor(red: 0.90, green: 0.64, blue: 0.39, alpha: selected ? 0.92 : 0.24)
+                renderer.lineWidth = selected ? 2.7 : 0.9
+            case .sampledTrack:
+                renderer.strokeColor = UIColor.white.withAlphaComponent(0.96)
+                renderer.lineWidth = 3
+                renderer.lineDashPattern = nil
+            }
+            return renderer
+        }
+
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let country = annotation as? TransportCountryAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(
+                    withIdentifier: Self.countryReuseID,
+                    for: country
+                ) as! MKMarkerAnnotationView
+                view.annotation = country
+                view.markerTintColor = country.selected
+                    ? UIColor(red: 0.85, green: 0.65, blue: 0.42, alpha: 1)
+                    : UIColor(red: 0.42, green: 0.69, blue: 0.79, alpha: 1)
+                view.glyphText = country.iso
+                view.glyphTintColor = UIColor(red: 0.03, green: 0.08, blue: 0.12, alpha: 1)
+                view.displayPriority = country.selected ? .required : .defaultHigh
+                view.canShowCallout = false
+                view.titleVisibility = .hidden
+                view.subtitleVisibility = .hidden
+                view.accessibilityLabel = "\(country.iso), \(country.activeCount) active country-linked movements"
+                return view
+            }
+            if let entity = annotation as? TransportEntityAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(
+                    withIdentifier: Self.entityReuseID,
+                    for: entity
+                )
+                view.annotation = entity
+                let aviation = entity.entity.mode == .aviation
+                let tone = entity.entity.is_alert
+                    ? UIColor(red: 0.82, green: 0.35, blue: 0.33, alpha: 1)
+                    : aviation
+                        ? UIColor(red: 0.47, green: 0.66, blue: 0.73, alpha: 1)
+                        : UIColor(red: 0.84, green: 0.65, blue: 0.42, alpha: 1)
+                view.image = UIImage(systemName: aviation ? "airplane" : "ferry.fill")?
+                    .withTintColor(tone, renderingMode: .alwaysOriginal)
+                view.transform = aviation
+                    ? CGAffineTransform(rotationAngle: CGFloat((entity.entity.heading ?? 0) - 45) * .pi / 180)
+                    : .identity
+                view.displayPriority = entity.entity.id == parent.selectedID || entity.entity.is_alert
+                    ? .required
+                    : .defaultLow
+                view.collisionMode = .circle
+                view.canShowCallout = false
+                view.accessibilityLabel = "\(aviation ? "Aircraft" : "Vessel") \(entity.entity.display_name ?? entity.entity.entity_id)"
+                return view
+            }
+            return nil
+        }
+
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            defer { mapView.deselectAnnotation(view.annotation, animated: false) }
+            if let country = view.annotation as? TransportCountryAnnotation {
+                parent.onSelectCountry(country.iso)
+            } else if let entity = view.annotation as? TransportEntityAnnotation {
+                parent.onSelect(entity.entity)
+            }
+        }
+
+        @objc func handleMapTap(_ recognizer: UITapGestureRecognizer) {
+            guard recognizer.state == .ended, let map = mapView else { return }
+            let point = MKMapPoint(map.convert(recognizer.location(in: map), toCoordinateFrom: map))
+            for overlay in map.overlays.reversed() {
+                guard let polygon = overlay as? MKPolygon,
+                      let iso = countryPolygons[ObjectIdentifier(polygon)],
+                      let renderer = map.renderer(for: polygon) as? MKPolygonRenderer else { continue }
+                if renderer.path == nil { renderer.createPath() }
+                if renderer.path?.contains(renderer.point(for: point)) == true {
+                    parent.onSelectCountry(iso)
+                    return
                 }
             }
-            path.closeSubpath()
-            context.fill(
-                path,
-                with: .color(ClaritasPalette.shellBackgroundElevated(for: colorScheme))
-            )
-            context.stroke(
-                path,
-                with: .color(ClaritasPalette.shellBorder(for: colorScheme)),
-                lineWidth: 0.8
-            )
         }
-    }
 
-    private func drawRoutes(context: GraphicsContext, size: CGSize) {
-        for entity in plottedEntities.prefix(180) {
-            guard
-                let originLatitude = entity.origin_latitude,
-                let originLongitude = entity.origin_longitude,
-                let destinationLatitude = entity.destination_latitude,
-                let destinationLongitude = entity.destination_longitude
-            else { continue }
-            let start = project(
-                latitude: originLatitude,
-                longitude: originLongitude,
-                size: size
-            )
-            let end = project(
-                latitude: destinationLatitude,
-                longitude: destinationLongitude,
-                size: size
-            )
-            var path = Path()
-            path.move(to: start)
-            path.addQuadCurve(
-                to: end,
-                control: CGPoint(
-                    x: (start.x + end.x) / 2,
-                    y: (start.y + end.y) / 2 - min(70, abs(end.x - start.x) * 0.18)
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            var view: UIView? = touch.view
+            while let current = view {
+                if current is MKAnnotationView { return false }
+                view = current.superview
+            }
+            return true
+        }
+
+        private func setViewport(on map: MKMapView, animated: Bool) {
+            if let selectedID = parent.selectedID,
+               let entity = parent.entities.first(where: { $0.id == selectedID }),
+               let coordinate = coordinate(latitude: entity.latitude, longitude: entity.longitude) {
+                map.setRegion(
+                    MKCoordinateRegion(
+                        center: coordinate,
+                        span: MKCoordinateSpan(latitudeDelta: 22, longitudeDelta: 28)
+                    ),
+                    animated: animated
                 )
-            )
-            context.stroke(
-                path,
-                with: .color(
-                    (entity.mode == .aviation
-                        ? ClaritasPalette.dataBlue(for: colorScheme)
-                        : ClaritasPalette.shellAccent(for: colorScheme))
-                        .opacity(entity.id == selectedID ? 0.9 : 0.2)
+                return
+            }
+            guard parent.viewport == .links else {
+                map.setRegion(
+                    MKCoordinateRegion(
+                        center: CLLocationCoordinate2D(latitude: 15, longitude: 0),
+                        span: MKCoordinateSpan(latitudeDelta: 145, longitudeDelta: 358)
+                    ),
+                    animated: animated
+                )
+                return
+            }
+            var coordinates: [CLLocationCoordinate2D] = []
+            if let scope = parent.scopeCountry,
+               let coordinate = CountryCentroidLookup.coordinate(for: scope) {
+                coordinates.append(coordinate)
+            }
+            for connection in parent.connections {
+                if let origin = CountryCentroidLookup.coordinate(for: connection.originCountry) {
+                    coordinates.append(origin)
+                }
+                if let destination = CountryCentroidLookup.coordinate(for: connection.destinationCountry) {
+                    coordinates.append(destination)
+                }
+            }
+            guard !coordinates.isEmpty else {
+                map.setRegion(
+                    MKCoordinateRegion(
+                        center: CLLocationCoordinate2D(latitude: 15, longitude: 0),
+                        span: MKCoordinateSpan(latitudeDelta: 145, longitudeDelta: 358)
+                    ),
+                    animated: animated
+                )
+                return
+            }
+            let latitudes = coordinates.map(\.latitude)
+            let longitudes = coordinates.map(\.longitude)
+            guard let minLat = latitudes.min(), let maxLat = latitudes.max(),
+                  let minLon = longitudes.min(), let maxLon = longitudes.max() else { return }
+            map.setRegion(
+                MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLon + maxLon) / 2),
+                    span: MKCoordinateSpan(
+                        latitudeDelta: min(145, max(18, (maxLat - minLat) * 1.35)),
+                        longitudeDelta: min(350, max(24, (maxLon - minLon) * 1.35))
+                    )
                 ),
-                lineWidth: entity.id == selectedID ? 2.2 : 0.8
+                animated: animated
             )
         }
-    }
 
-    private func drawTrack(context: GraphicsContext, size: CGSize) {
-        guard track.count > 1 else { return }
-        var path = Path()
-        for (index, point) in track.enumerated() {
-            let projected = project(
-                latitude: point.latitude,
-                longitude: point.longitude,
-                size: size
-            )
-            if index == 0 {
-                path.move(to: projected)
-            } else {
-                path.addLine(to: projected)
-            }
+        private func coordinate(latitude: Double?, longitude: Double?) -> CLLocationCoordinate2D? {
+            guard let latitude, let longitude,
+                  latitude.isFinite, longitude.isFinite,
+                  abs(latitude) <= 90, abs(longitude) <= 180 else { return nil }
+            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
         }
-        context.stroke(
-            path,
-            with: .color(ClaritasPalette.shellInk(for: colorScheme)),
-            lineWidth: 2.4
-        )
-    }
 
-    private func drawEntities(context: GraphicsContext, size: CGSize) {
-        for entity in plottedEntities {
-            guard let latitude = entity.latitude, let longitude = entity.longitude else { continue }
-            let point = project(latitude: latitude, longitude: longitude, size: size)
-            let selected = entity.id == selectedID
-            let radius = selected ? 6.5 : 3.2
-            let rect = CGRect(
-                x: point.x - radius,
-                y: point.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            )
-            let tone = entity.is_alert
-                ? ClaritasPalette.negativeText(for: colorScheme)
-                : entity.mode == .aviation
-                    ? ClaritasPalette.dataBlue(for: colorScheme)
-                    : ClaritasPalette.shellAccent(for: colorScheme)
-            context.fill(Path(ellipseIn: rect), with: .color(tone))
-            if selected {
-                context.stroke(
-                    Path(ellipseIn: rect.insetBy(dx: -3, dy: -3)),
-                    with: .color(ClaritasPalette.shellInk(for: colorScheme)),
-                    lineWidth: 1.5
-                )
-            }
+        private func curvedCoordinates(
+            from start: CLLocationCoordinate2D,
+            to end: CLLocationCoordinate2D
+        ) -> [CLLocationCoordinate2D] {
+            let longitudeDelta = normalizedLongitude(end.longitude - start.longitude)
+            let midpointLongitude = normalizedLongitude(start.longitude + longitudeDelta / 2)
+            let arc = min(16, max(2, abs(longitudeDelta) * 0.10))
+            let midpointLatitude = min(82, max(-70, (start.latitude + end.latitude) / 2 + arc))
+            return [
+                start,
+                CLLocationCoordinate2D(latitude: midpointLatitude, longitude: midpointLongitude),
+                end
+            ]
+        }
+
+        private func normalizedLongitude(_ value: CLLocationDegrees) -> CLLocationDegrees {
+            var normalized = value
+            while normalized > 180 { normalized -= 360 }
+            while normalized < -180 { normalized += 360 }
+            return normalized
         }
     }
+}
 
-    private func nearestEntity(to location: CGPoint, size: CGSize) -> TransportEntity? {
-        plottedEntities
-            .compactMap { entity -> (TransportEntity, CGFloat)? in
-                guard let latitude = entity.latitude, let longitude = entity.longitude else {
-                    return nil
-                }
-                let point = project(latitude: latitude, longitude: longitude, size: size)
-                let distance = hypot(point.x - location.x, point.y - location.y)
-                return distance <= 28 ? (entity, distance) : nil
-            }
-            .min { $0.1 < $1.1 }?
-            .0
+private enum TransportOverlayStyle {
+    case countryConnection(TransportMode, Int)
+    case vehicleRoute(TransportMode, Bool)
+    case sampledTrack
+}
+
+private final class TransportCountryAnnotation: NSObject, MKAnnotation {
+    let iso: String
+    let activeCount: Int
+    let selected: Bool
+    dynamic var coordinate: CLLocationCoordinate2D
+
+    init(iso: String, coordinate: CLLocationCoordinate2D, activeCount: Int, selected: Bool) {
+        self.iso = iso
+        self.coordinate = coordinate
+        self.activeCount = activeCount
+        self.selected = selected
     }
+}
 
-    private func legendItem(_ label: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(label)
-                .font(.caption2)
-        }
+private final class TransportEntityAnnotation: NSObject, MKAnnotation {
+    let entity: TransportEntity
+    let coordinate: CLLocationCoordinate2D
+
+    init?(_ entity: TransportEntity) {
+        guard let latitude = entity.latitude,
+              let longitude = entity.longitude,
+              latitude.isFinite,
+              longitude.isFinite,
+              abs(latitude) <= 90,
+              abs(longitude) <= 180 else { return nil }
+        self.entity = entity
+        coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 }

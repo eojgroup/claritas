@@ -4996,12 +4996,12 @@ private final class TransportMapAnnotation: NSObject, MKAnnotation {
     }
 }
 
-private struct NaturalEarthCountryBoundary {
+struct NaturalEarthCountryBoundary {
     let iso: String
     let polygons: [MKPolygon]
 }
 
-private final class NaturalEarthCountryBoundaries {
+final class NaturalEarthCountryBoundaries {
     static let shared = NaturalEarthCountryBoundaries()
     let boundaries: [NaturalEarthCountryBoundary]
 
@@ -5523,7 +5523,7 @@ private struct CountryBubblePoint: Identifiable {
     let coordinate: CLLocationCoordinate2D
 }
 
-private enum CountryCentroidLookup {
+enum CountryCentroidLookup {
     private static let values: [String: CLLocationCoordinate2D] = [
         "US": CLLocationCoordinate2D(latitude: 37.0902, longitude: -95.7129),
         "CA": CLLocationCoordinate2D(latitude: 56.1304, longitude: -106.3468),
