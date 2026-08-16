@@ -1,10 +1,17 @@
 import { query, withTransaction } from "../db";
+import worldCountries from "world-countries";
 import { buildEventDedupeKey, computeSignalPriority, evaluateMarketMove } from "./correlation";
 import { resolveLocationFromText, resolveNearestLocation } from "./location-resolver";
 import {
   attachIntelligenceSignalToExistingEvent,
+  attachIntelligenceSignalToMajorEventContext,
   correlateAndUpsertIntelligenceSignal,
 } from "./service";
+import {
+  attachWeatherSnapshotToMajorEventContext,
+  refreshMajorEarthquakeContext,
+  refreshRecentMajorEarthquakeTransportContext,
+} from "./major-event-context";
 import { calculateRollingBaseline, detectTransportAnomaly } from "./transport-anomaly";
 import { trustedGdeltActionCoordinate, trustedGdeltLocations } from "./gdelt-geography";
 import { buildGdeltEventPresentation } from "./event-presentation";
@@ -93,10 +100,10 @@ export function isAcceptedNewsQuality(payload: unknown, sourceName: unknown) {
   return status === "accepted" || (status == null && !requiresVerifiedQuality);
 }
 
-function classifyEventType(text: string) {
+export function classifyEventType(text: string) {
   const normalized = text.toLowerCase();
   const mappings: Array<[RegExp, string]> = [
-    [/earthquake|seismic|tremor/, "earthquake"],
+    [/earthquake|\bquake\b|seismic|tremor|aftershock|epicent(?:er|re)|tsunami/, "earthquake"],
     [/wildfire|forest fire|bushfire|active fire/, "wildfire"],
     [/flood|inundation|flash flood/, "flood"],
     [/hurricane|typhoon|cyclone|storm/, "severe_storm"],
@@ -106,6 +113,31 @@ function classifyEventType(text: string) {
     [/attack|explosion|strike|conflict/, "security_incident"],
   ];
   return mappings.find(([pattern]) => pattern.test(normalized))?.[1] ?? "reported_development";
+}
+
+type WorldCountry = { cca2?: string; name?: { common?: string; official?: string } };
+
+export function earthquakeCountryFromPlace(place: unknown) {
+  if (typeof place !== "string" || !place.trim()) return null;
+  const normalized = place.trim().toLocaleLowerCase();
+  const matches = (worldCountries as WorldCountry[]).filter((country) => {
+    const names = [country.name?.common, country.name?.official]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toLocaleLowerCase());
+    return names.some((name) => normalized === name
+      || normalized.endsWith(`, ${name}`)
+      || normalized.endsWith(` ${name}`));
+  });
+  return matches.length === 1 ? matches[0].cca2 ?? null : null;
+}
+
+export function earthquakePlaceEntityKeys(place: unknown, eventId: unknown) {
+  const values = collectEntityKeys(place, eventId);
+  if (typeof place !== "string") return values;
+  const trimmed = place.trim();
+  const localPlace = trimmed.match(/\b(?:of|near)\s+([^,]+)/i)?.[1]?.trim();
+  const commaParts = trimmed.split(",").map((value) => value.trim()).filter(Boolean);
+  return collectEntityKeys(values, localPlace, commaParts.at(-1));
 }
 
 function weatherSeverity(value: string | null): IntelligenceSeverity {
@@ -145,7 +177,9 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     : null)
     ?? await resolveLocationFromText(text, story.country_iso2)
     ?? await countryLocation(story.country_iso2);
-  if (!location && !story.country_iso2) return;
+  // Precisely located offshore/local reporting remains usable even when the
+  // provider omitted a country and no catalogue location is nearby.
+  if (!location && !story.country_iso2 && !gkgCoordinate) return;
   const eventType = classifyEventType(text);
   const reliability = sourceReliability[story.source_name] ?? 0.68;
   const priority = computeSignalPriority({
@@ -156,8 +190,11 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     locationImportance: Number(location?.importance_score ?? 0.45),
     domainCount: 1,
   });
-  await correlateAndUpsertIntelligenceSignal({
-    dedupeKey: buildEventDedupeKey([eventType, location?.id ?? story.country_iso2, dayKey(occurred)]),
+  const newsAnchor = gkgCoordinate
+    ? `${Math.round(gkgCoordinate.latitude * 10) / 10},${Math.round(gkgCoordinate.longitude * 10) / 10}`
+    : location?.id ?? story.country_iso2;
+  const signalInput = {
+    dedupeKey: buildEventDedupeKey([eventType, newsAnchor, dayKey(occurred)]),
     eventType,
     title: String(story.title ?? "Reported development"),
     summary: String(story.summary ?? "A publisher reported a development. Independent corroboration may still be limited.").slice(0, 1_800),
@@ -181,6 +218,7 @@ async function handleNewsStory(event: DomainEventEnvelope) {
       coordinate_source: gkgCoordinate ? "gdelt_gkg_location" : location?.match_basis ?? null,
     },
     entityKeys: collectEntityKeys(
+      gkgCoordinate?.name,
       story.payload?.gkg?.persons,
       story.payload?.gkg?.organizations,
       story.payload?.gkg?.locations,
@@ -206,7 +244,9 @@ async function handleNewsStory(event: DomainEventEnvelope) {
         extracted_coordinate: gkgCoordinate,
       },
     },
-  });
+  } satisfies Parameters<typeof correlateAndUpsertIntelligenceSignal>[0];
+  const selected = await correlateAndUpsertIntelligenceSignal(signalInput);
+  await attachIntelligenceSignalToMajorEventContext(signalInput, { excludeEventId: selected.id });
 }
 
 async function handlePodcastSignal(event: DomainEventEnvelope) {
@@ -268,7 +308,7 @@ async function handlePodcastSignal(event: DomainEventEnvelope) {
     locationImportance: Number(location?.importance_score ?? 0.35),
     domainCount: 1,
   });
-  await attachIntelligenceSignalToExistingEvent({
+  const contextInput = {
     dedupeKey: buildEventDedupeKey(["podcast-context", recordId]),
     eventType,
     title: `Podcast context: ${signal.title}`.slice(0, 300),
@@ -320,6 +360,10 @@ async function handlePodcastSignal(event: DomainEventEnvelope) {
         assessment_boundary: "Podcast transcript extraction is contextual and does not independently confirm the event or establish causation.",
       },
     },
+  } satisfies Parameters<typeof attachIntelligenceSignalToExistingEvent>[0];
+  const selected = await attachIntelligenceSignalToExistingEvent(contextInput);
+  await attachIntelligenceSignalToMajorEventContext(contextInput, {
+    excludeEventId: selected?.id ?? null,
   });
 }
 
@@ -354,7 +398,7 @@ async function handleGdeltEvent(event: DomainEventEnvelope) {
     freshnessHours: Math.max(0, (Date.now() - observed.getTime()) / 3_600_000), severity: "medium",
     locationImportance: Number(location?.importance_score ?? 0.4), domainCount: 1,
   });
-  await correlateAndUpsertIntelligenceSignal({
+  const signalInput = {
     dedupeKey: buildEventDedupeKey(["gdelt_event", record.external_id]),
     eventType: "reported_development", title: presentation.title, summary: presentation.summary,
     severity: "medium", confidence: 0.68, startTime: observed, lastActivityTime: observed,
@@ -378,7 +422,9 @@ async function handleGdeltEvent(event: DomainEventEnvelope) {
       provenance: { provider: "gdelt", url: record.url, mention_count: record.mention_count, source_count: record.source_count },
       license: record.source_metadata?.license ?? "GDELT reuse terms; original publisher terms remain applicable", attribution: "GDELT / original publishers",
     },
-  });
+  } satisfies Parameters<typeof correlateAndUpsertIntelligenceSignal>[0];
+  const selected = await correlateAndUpsertIntelligenceSignal(signalInput);
+  await attachIntelligenceSignalToMajorEventContext(signalInput, { excludeEventId: selected.id });
 }
 
 async function handleWeatherAlert(event: DomainEventEnvelope) {
@@ -399,7 +445,7 @@ async function handleWeatherAlert(event: DomainEventEnvelope) {
     freshnessHours: Math.max(0, (Date.now() - start.getTime()) / 3_600_000), severity,
     locationImportance: Number(location?.importance_score ?? 0.5), domainCount: 1,
   });
-  await correlateAndUpsertIntelligenceSignal({
+  const signalInput = {
     dedupeKey: buildEventDedupeKey(["weather", alert.external_id, alert.country_iso2]),
     eventType: classifyEventType(alert.event), title: alert.headline ?? alert.event,
     summary: String(alert.description ?? `${alert.event} affecting ${alert.area ?? alert.country_iso2}.`).slice(0, 1_800),
@@ -419,7 +465,14 @@ async function handleWeatherAlert(event: DomainEventEnvelope) {
       license: alert.source_metadata?.license ?? null, attribution: alert.sender_name,
       metadata: { severity: alert.severity, urgency: alert.urgency, certainty: alert.certainty, area: alert.area },
     },
-  });
+  } satisfies Parameters<typeof correlateAndUpsertIntelligenceSignal>[0];
+  const selected = await correlateAndUpsertIntelligenceSignal(signalInput);
+  await attachIntelligenceSignalToMajorEventContext(signalInput, { excludeEventId: selected.id });
+}
+
+async function handleWeatherSnapshot(event: DomainEventEnvelope) {
+  const id = Number(event.payload.weather_snapshot_id ?? event.aggregate_id);
+  await attachWeatherSnapshotToMajorEventContext(id);
 }
 
 async function handleEarthquake(event: DomainEventEnvelope) {
@@ -434,25 +487,26 @@ async function handleEarthquake(event: DomainEventEnvelope) {
   const radius = magnitude >= 7 ? 300 : magnitude >= 6 ? 180 : 100;
   const location = await resolveNearestLocation(quake.latitude, quake.longitude, radius,
     ["port", "airport", "city", "refinery", "lng_terminal", "power_station", "mine", "industrial_facility", "country"]);
+  const primaryCountryIso2 = location?.country_iso2 ?? earthquakeCountryFromPlace(quake.place);
   const observed = new Date(quake.observed_at);
   const priority = computeSignalPriority({
     sourceReliability: 0.98, sourceDiversity: 1,
     freshnessHours: Math.max(0, (Date.now() - observed.getTime()) / 3_600_000), severity,
     locationImportance: Number(location?.importance_score ?? 0.65), domainCount: 1,
   });
-  await correlateAndUpsertIntelligenceSignal({
+  const intelligenceEvent = await correlateAndUpsertIntelligenceSignal({
     dedupeKey: buildEventDedupeKey(["usgs", quake.usgs_event_id]), eventType: "earthquake",
     title: `${quake.magnitude == null ? "Earthquake" : `M${Number(quake.magnitude).toFixed(1)} earthquake`} — ${quake.place}`,
     summary: `USGS observed an earthquake at ${quake.place}${quake.depth_km == null ? "" : `, depth ${Number(quake.depth_km).toFixed(1)} km`}.${quake.tsunami ? " The source tsunami flag is set." : ""}`,
     severity, confidence: 0.98, startTime: observed, lastActivityTime: new Date(quake.updated_at_source),
-    primaryLocationId: location?.id ?? null, primaryCountryIso2: location?.country_iso2 ?? null,
+    primaryLocationId: location?.id ?? null, primaryCountryIso2,
     latitude: quake.latitude, longitude: quake.longitude,
     coordinatesAreExact: true,
     relevanceScore: Math.max(priority.score, Math.min(1, magnitude / 9)), urgencyScore: Math.min(1, magnitude / 8),
     materialityScore: Math.min(1, (Number(quake.significance ?? 0) / 1_000) + (location?.importance_score ?? 0) * 0.25),
     scoreComponents: { ...priority.components, magnitude, significance: quake.significance, proximity_radius_km: radius },
     metadata: { tsunami: quake.tsunami, depth_km: quake.depth_km, alert_level: quake.alert_level, felt: quake.felt },
-    entityKeys: collectEntityKeys(quake.place, quake.usgs_event_id),
+    entityKeys: earthquakePlaceEntityKeys(quake.place, quake.usgs_event_id),
     evidence: {
       domain: "disaster", evidenceType: "seismic_observation", sourceRecordType: "earthquake_observation", sourceRecordId: id,
       sourceId: Number(event.payload.source_id) || null, observedAt: observed, publishedAt: new Date(quake.updated_at_source), locationId: location?.id ?? null,
@@ -461,6 +515,30 @@ async function handleEarthquake(event: DomainEventEnvelope) {
       metadata: { magnitude: quake.magnitude, magnitude_type: quake.magnitude_type, depth_km: quake.depth_km, tsunami: quake.tsunami },
     },
   });
+  if (severity === "high" || severity === "critical") {
+    await refreshMajorEarthquakeContext(intelligenceEvent.id);
+  }
+}
+
+async function handleEarthquakeContextRecheck(event: DomainEventEnvelope) {
+  const id = String(event.payload.earthquake_observation_id ?? event.aggregate_id);
+  const { rows } = await query<{ id: string }>(
+    `SELECT linked_event.id
+     FROM intelligence_event_evidence evidence
+     JOIN intelligence_event linked_event ON linked_event.id=evidence.event_id
+     WHERE evidence.source_record_type='earthquake_observation'
+       AND evidence.source_record_id=$1
+       AND linked_event.event_type='earthquake'
+       AND linked_event.severity IN ('high','critical')
+     ORDER BY CASE WHEN evidence.relationship='observed' THEN 0 ELSE 1 END,
+              linked_event.start_time DESC,linked_event.id
+     LIMIT 1`,
+    [id],
+  );
+  // A context replay is intentionally attach-only. The original observation
+  // outbox remains responsible for creating a missing canonical event; this
+  // path must not revisit alert-recipient or EO-discovery side effects.
+  if (rows[0]) await refreshMajorEarthquakeContext(rows[0].id);
 }
 
 async function handleFire(event: DomainEventEnvelope) {
@@ -516,6 +594,10 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
   const { rows } = await query<any>(`SELECT * FROM transport_movement_event WHERE id=$1`, [id]);
   const movement = rows[0];
   if (!movement) return;
+  const observed = new Date(movement.observed_at);
+  const refreshEarthquakeContext = () => refreshRecentMajorEarthquakeTransportContext(
+    movement.country_iso2, observed,
+  );
   const { rows: hours } = await query<{ bucket: string | Date; total: number }>(
     `SELECT date_trunc('day',bucket) AS bucket,
             sum(departures+arrivals)::int AS total
@@ -525,7 +607,10 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
     [movement.country_iso2, movement.location_name],
   );
   const values = hours.map((row) => Number(row.total));
-  if (values.length < 7) return;
+  if (values.length < 7) {
+    await refreshEarthquakeContext();
+    return;
+  }
   const current = values.at(-1) ?? 0;
   const previous = values.at(-2) ?? 0;
   const anomaly = detectTransportAnomaly({
@@ -534,10 +619,12 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
     twentyEightDayMedian: calculateRollingBaseline(values.slice(0, -1), 28),
     sampleHours: Math.min(28, values.length - 1) * 24,
   });
-  if (!anomaly.anomalous) return;
+  if (!anomaly.anomalous) {
+    await refreshEarthquakeContext();
+    return;
+  }
   const location = await resolveLocationFromText(movement.location_name, movement.country_iso2)
     ?? await countryLocation(movement.country_iso2);
-  const observed = new Date(movement.observed_at);
   const severity: IntelligenceSeverity = anomaly.magnitude >= 0.75 ? "high" : "medium";
   const priority = computeSignalPriority({
     sourceReliability: 0.72, sourceDiversity: 1,
@@ -546,7 +633,7 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
     anomalyMagnitude: anomaly.magnitude,
   });
   const change = anomaly.percentChange == null ? "a new baseline" : `${Math.abs(anomaly.percentChange * 100).toFixed(0)}% ${anomaly.direction}`;
-  await correlateAndUpsertIntelligenceSignal({
+  const signalInput = {
     dedupeKey: buildEventDedupeKey(["transport-anomaly", movement.location_name, dayKey(observed)]),
     eventType: "transport_disruption", title: `${movement.location_name} movement anomaly`,
     summary: `Observed arrivals and departures are ${change} the robust rolling baseline. Coverage reflects Claritas telemetry sources, not total port-authority traffic.`,
@@ -562,7 +649,10 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
       provenance: { provider: movement.source_name, methodology: anomaly.methodology }, attribution: movement.source_name,
       metadata: { current, baseline: anomaly.baseline, percent_change: anomaly.percentChange, event_type: movement.event_type, vehicle_category: movement.vehicle_category },
     },
-  });
+  } satisfies Parameters<typeof correlateAndUpsertIntelligenceSignal>[0];
+  const selected = await correlateAndUpsertIntelligenceSignal(signalInput);
+  await attachIntelligenceSignalToMajorEventContext(signalInput, { excludeEventId: selected.id });
+  await refreshEarthquakeContext();
 }
 
 async function handleMarketIndicator(event: DomainEventEnvelope) {
@@ -634,7 +724,9 @@ export async function processDomainEvent(event: DomainEventEnvelope) {
       case "news.event.observed": return handleGdeltEvent(event);
       case "weather.alert.created":
       case "weather.alert.updated": return handleWeatherAlert(event);
+      case "weather.snapshot.updated": return handleWeatherSnapshot(event);
       case "disaster.earthquake.observed": return handleEarthquake(event);
+      case "disaster.earthquake.context.recheck": return handleEarthquakeContextRecheck(event);
       case "earth.fire.detected": return handleFire(event);
       case "transport.movement.recorded": return handleTransportMovement(event);
       case "market.instrument.observed": return handleMarketIndicator(event);

@@ -2208,8 +2208,39 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     }
     const li = params.push(limit);
     const oi = params.push(offset);
+    // A globally newest-first page is easily monopolised by a high-volume
+    // national publisher (for example, a burst of U.S. regulatory releases).
+    // Interleave the newest record from each mapped country before taking the
+    // next record from that country. Country-scoped reads retain strict
+    // newest-first ordering, and the reader may still sort its bounded result.
+    const newsCandidateOrderSql = country
+      ? "candidate.event_time DESC NULLS LAST, candidate.id DESC"
+      : `candidate.country_rank ASC,
+         candidate.event_time DESC NULLS LAST,
+         candidate.id DESC`;
 
     const sql = `
+      WITH eligible_news AS MATERIALIZED (
+        SELECT i.id, i.event_time,
+               ROW_NUMBER() OVER (
+                 PARTITION BY COALESCE(i.country_iso2, 'ZZ'::char(2))
+                 ORDER BY i.event_time DESC NULLS LAST, i.id DESC
+               ) AS country_rank
+        FROM item i
+        JOIN source s ON s.id = i.source_id
+        LEFT JOIN item_translation translation
+          ON translation.item_id = i.id
+         AND translation.target_language_code = $${displayLanguageIndex}
+         AND translation.source_title_hash = md5(COALESCE(i.title, ''))
+         AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
+        ${where.length ? "WHERE " + where.join(" AND ") : ""}
+      ), ranked_news AS MATERIALIZED (
+        SELECT candidate.id,
+               ROW_NUMBER() OVER (ORDER BY ${newsCandidateOrderSql}) AS result_order
+        FROM eligible_news candidate
+        ORDER BY ${newsCandidateOrderSql}
+        LIMIT $${li} OFFSET $${oi}
+      )
       SELECT i.id, i.kind, i.title, i.summary, i.url, i.country_iso2,
              i.language_code, i.source_country_iso2, i.tone,
              i.event_time, i.payload, s.name AS source_name,
@@ -2232,7 +2263,8 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
                'article_body_used', false
              ) END AS translation,
              COALESCE(linked.linked_events, '[]'::jsonb) AS linked_events
-      FROM item i
+      FROM ranked_news ranked
+      JOIN item i ON i.id = ranked.id
       JOIN source s ON s.id = i.source_id
       LEFT JOIN item_translation translation
         ON translation.item_id = i.id
@@ -2280,9 +2312,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
           AND evidence.source_record_id=i.id::text
           AND event.status <> 'dismissed'
       ) linked ON true
-      ${where.length ? "WHERE " + where.join(" AND ") : ""}
-      ORDER BY i.event_time DESC NULLS LAST, i.id DESC
-      LIMIT $${li} OFFSET $${oi}
+      ORDER BY ranked.result_order
     `;
     const { rows } = await pool.query(sql, params);
     res.json({ items: rows });
@@ -2555,7 +2585,10 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
     const params: any[] = [days];
     const [statsResult, coverageResult] = await Promise.all([
       pool.query(
-        `SELECT upper(i.country_iso2) AS country, COUNT(*)::int AS count
+        `SELECT upper(i.country_iso2) AS country,
+                COUNT(*)::int AS count,
+                MAX(COALESCE(i.event_time, i.created_at)) AS latest_at,
+                COUNT(DISTINCT s.id)::int AS provider_count
          FROM item i JOIN source s ON s.id=i.source_id
          WHERE i.country_iso2 IS NOT NULL
            AND i.kind = 'news_article'

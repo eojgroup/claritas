@@ -143,14 +143,20 @@ enum IntelligenceLinkagePresentation {
         number(factors?.object?[key]) ?? 0
     }
 
+    private static func text(_ key: String, in factors: JSONValue?) -> String? {
+        guard let value = factors?.object?[key]?.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
+    }
+
     static func decision(in factors: JSONValue?) -> String? {
         factors?.object?["decision"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     /// Returns only correlation inputs that were actually recorded by the
-    /// service. Country and time are useful supporting context, while a
-    /// location, spatial, or entity anchor is required before a record can be
-    /// attached to an existing investigation.
+    /// service. Country and time are normally supporting context; the one
+    /// exception is the governed news fallback for exactly one major
+    /// same-family event in that country and time window.
     static func reasons(for factors: JSONValue?) -> [String] {
         guard factors?.object != nil else { return [] }
         var anchorReasons: [String] = []
@@ -158,6 +164,11 @@ enum IntelligenceLinkagePresentation {
         if factor("location", in: factors) >= 1 { anchorReasons.append("the same mapped location") }
         if factor("spatial", in: factors) >= 0.45 { anchorReasons.append("a nearby mapped area") }
         if factor("entity", in: factors) >= 0.5 { anchorReasons.append("shared named entities") }
+        if factors?.object?["unique_country_candidate"]?.bool == true,
+           factor("country", in: factors) >= 1,
+           factor("event_type", in: factors) >= 1 {
+            anchorReasons.append("the only major same-family event in the country and time window")
+        }
         if factor("country", in: factors) >= 1 { supportingReasons.append("the same country as supporting context") }
         if factor("temporal", in: factors) >= 0.5 { supportingReasons.append("nearby timing") }
         // A shared country or clock alone is useful context but never a
@@ -179,6 +190,7 @@ enum IntelligenceLinkagePresentation {
             return "This source record starts the evidence thread for this investigation."
         case "attached":
             let reasons = reasons(for: factors)
+            if let rationale = text("rationale", in: factors) { return rationale }
             if !reasons.isEmpty {
                 return "Likely linked because it shares \(readableList(reasons))."
             }

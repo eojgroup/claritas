@@ -4,6 +4,7 @@ import UIKit
 struct IntelligenceWorkspaceView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var events: [IntelligenceEvent] = []
     @State private var selectedID: String?
     @State private var detail: IntelligenceEventDetail?
@@ -16,95 +17,166 @@ struct IntelligenceWorkspaceView: View {
     @State private var error: String?
     @State private var detailError: String?
     @State private var includeExpired = false
+    @State private var showsCompactDetail = false
 
     var body: some View {
         BrandBackground {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    BrandSectionHeader(
-                        kicker: "One event · every evidence lens",
-                        title: "Signal desk",
-                        detail: "Follow a development from first report through physical observation, operational effects, market response, and assessed meaning."
-                    )
-
-                    Picker("Event visibility", selection: $includeExpired) {
-                        Text("Current").tag(false)
-                        Text("Archive").tag(true)
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityHint("Current hides events after their visibility window. Archive includes expired events.")
-
-                    if let error {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .padding()
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
-                    }
-
-                    if !alerts.isEmpty {
-                        BrandCard(title: "Watchlist alerts", icon: "bell.badge") {
-                            ForEach(alerts.prefix(6)) { alert in
-                                Button {
-                                    Task { await open(alert) }
-                                } label: {
-                                    HStack(alignment: .top, spacing: 9) {
-                                        Circle()
-                                            .fill(alert.severity == .critical ? Color.red : Color.orange)
-                                            .frame(width: 7, height: 7)
-                                            .padding(.top, 5)
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(alert.title).font(.caption.weight(.semibold)).foregroundStyle(.primary)
-                                            Text(alert.location_name ?? alert.primary_country_iso2 ?? "Global")
-                                                .font(.caption2).foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                if alert.id != alerts.prefix(6).last?.id { Divider() }
-                            }
-                        }
-                    }
-
-                    if isLoading && events.isEmpty {
-                        ProgressView("Loading correlated events")
-                            .frame(maxWidth: .infinity, minHeight: 160)
-                    } else if events.isEmpty {
-                        emptyState
-                    } else {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(alignment: .top, spacing: 14) {
-                                eventList.frame(width: 330)
-                                eventDetail.frame(maxWidth: .infinity)
-                            }
-                            VStack(spacing: 14) {
-                                eventList
-                                eventDetail
-                            }
-                        }
-                    }
-                }
-                .padding()
+            if horizontalSizeClass == .regular {
+                regularWorkspace
+            } else {
+                compactWorkspace
             }
-            .refreshable { await load() }
         }
         .task(id: includeExpired) { await load() }
         .task(id: selectedID) { await loadDetail() }
         .task(id: selectedID) { await loadGibsContext() }
+        .navigationDestination(isPresented: $showsCompactDetail) {
+            BrandBackground {
+                ScrollView {
+                    eventDetail
+                        .padding(14)
+                }
+                .refreshable {
+                    await loadDetail()
+                    await loadGibsContext()
+                }
+            }
+            .navigationTitle(detail?.event.event_type.replacingOccurrences(of: "_", with: " ").capitalized ?? "Investigation")
+            .navigationBarTitleDisplayMode(.inline)
+        }
         .onChange(of: model.selectedIntelligenceEventID) { requested in
             guard let requested, !requested.isEmpty else { return }
-            selectedID = requested
+            selectEvent(requested, revealDetail: true)
             model.selectedIntelligenceEventID = nil
+        }
+        .onChange(of: horizontalSizeClass) { next in
+            if next == .regular {
+                showsCompactDetail = false
+                if selectedID == nil { selectedID = events.first?.id }
+            }
+        }
+    }
+
+    private var compactWorkspace: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                workspaceHeader
+                alertsCard
+                eventCollection
+            }
+            .padding(14)
+        }
+        .refreshable { await load() }
+    }
+
+    private var regularWorkspace: some View {
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        workspaceHeader
+                        alertsCard
+                        eventCollection
+                    }
+                    .padding(16)
+                }
+                .frame(width: min(max(proxy.size.width * 0.34, 340), 430))
+                .refreshable { await load() }
+
+                Divider()
+
+                ScrollView {
+                    eventDetail
+                        .padding(16)
+                }
+                .frame(maxWidth: .infinity)
+                .refreshable {
+                    await loadDetail()
+                    await loadGibsContext()
+                }
+            }
+        }
+    }
+
+    private var workspaceHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            BrandSectionHeader(
+                kicker: "One event · every evidence lens",
+                title: "Signal desk",
+                detail: horizontalSizeClass == .compact
+                    ? "Choose an investigation to open its assessment, imagery, and linked evidence immediately."
+                    : "Choose an investigation on the left; its complete evidence thread stays visible on the right."
+            )
+
+            Picker("Event visibility", selection: $includeExpired) {
+                Text("Current").tag(false)
+                Text("Archive").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityHint("Current hides events after their visibility window. Archive includes expired events.")
+
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var alertsCard: some View {
+        if !alerts.isEmpty {
+            BrandCard(title: "Watchlist alerts", icon: "bell.badge") {
+                ForEach(alerts.prefix(6)) { alert in
+                    Button {
+                        Task { await open(alert) }
+                    } label: {
+                        HStack(alignment: .top, spacing: 9) {
+                            Circle()
+                                .fill(alert.severity == .critical ? Color.red : Color.orange)
+                                .frame(width: 7, height: 7)
+                                .padding(.top, 5)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(alert.title).font(.caption.weight(.semibold)).foregroundStyle(.primary)
+                                Text(alert.location_name ?? alert.primary_country_iso2 ?? "Global")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        }
+                        .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if alert.id != alerts.prefix(6).last?.id { Divider() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var eventCollection: some View {
+        if isLoading && events.isEmpty {
+            ProgressView("Loading correlated events")
+                .frame(maxWidth: .infinity, minHeight: 160)
+        } else if events.isEmpty {
+            emptyState
+        } else {
+            eventList
         }
     }
 
     private var eventList: some View {
         BrandCard(title: "Investigations", icon: "dot.radiowaves.left.and.right") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Select an investigation to make it active. Its assessment, imagery, and linked evidence appear alongside this list.")
+                Text(horizontalSizeClass == .compact
+                    ? "Tap an investigation to open its detail now. Back returns to this list without losing the active selection."
+                    : "Select an investigation to keep its assessment, imagery, and linked evidence open in the detail pane.")
                     .font(.caption)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
 
@@ -112,7 +184,7 @@ struct IntelligenceWorkspaceView: View {
                     ForEach(events) { event in
                         let isSelected = event.id == selectedID
                         Button {
-                            selectedID = event.id
+                            selectEvent(event.id, revealDetail: true)
                         } label: {
                             HStack(alignment: .top, spacing: 10) {
                                 RoundedRectangle(cornerRadius: 2)
@@ -516,7 +588,7 @@ struct IntelligenceWorkspaceView: View {
                             .font(.caption2)
                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         ForEach(detail.related_events) { event in
-                            Button { selectedID = event.id } label: {
+                            Button { selectEvent(event.id, revealDetail: true) } label: {
                                 HStack(alignment: .top, spacing: 9) {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text("LIKELY RELATED · \(event.relationship.replacingOccurrences(of: "_", with: " ").uppercased())")
@@ -605,6 +677,19 @@ struct IntelligenceWorkspaceView: View {
         }
     }
 
+    private func selectEvent(_ id: String, revealDetail: Bool) {
+        if selectedID != id {
+            detail = nil
+            gibsContext = nil
+            detailError = nil
+            detailLoading = true
+        }
+        selectedID = id
+        if revealDetail && horizontalSizeClass != .regular {
+            showsCompactDetail = true
+        }
+    }
+
     private func load() async {
         isLoading = true
         defer { isLoading = false }
@@ -618,7 +703,7 @@ struct IntelligenceWorkspaceView: View {
             )
             events = rows
             if let requested = model.selectedIntelligenceEventID {
-                selectedID = requested
+                selectEvent(requested, revealDetail: true)
                 model.selectedIntelligenceEventID = nil
             } else if selectedID == nil || !rows.contains(where: { $0.id == selectedID }) {
                 selectedID = rows.first?.id
@@ -717,7 +802,7 @@ struct IntelligenceWorkspaceView: View {
     }
 
     private func open(_ alert: IntelligenceAlert) async {
-        selectedID = alert.event_id
+        selectEvent(alert.event_id, revealDetail: true)
         do {
             try await model.api.acknowledgeIntelligenceAlert(id: alert.id)
             alerts.removeAll { $0.id == alert.id }

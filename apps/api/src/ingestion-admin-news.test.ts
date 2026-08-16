@@ -15,7 +15,7 @@ test("scheduled news defaults enable governed providers within the hourly headli
   const plan = buildNewsRunPlan({});
 
   assert.deepEqual(plan.providers, { gdelt: true, institutionalRss: true, govUk: true });
-  assert.deepEqual(plan.gdelt, { timespan: "1h", maxRecords: 25, maxRawRows: 190 });
+  assert.deepEqual(plan.gdelt, { timespan: "30min", maxRecords: 25, maxRawRows: 190 });
 });
 
 test("news run plan caps GDELT volume and validates duration syntax", async () => {
@@ -56,6 +56,18 @@ test("news scheduling migration preserves an explicit GOV.UK opt-out", () => {
   assert.doesNotMatch(migration, /UPDATE item/i);
 });
 
+test("scheduled GDELT discovery uses a bounded overlapping candidate window", () => {
+  const migration = readFileSync(resolve(
+    __dirname,
+    "../../../infra/gcp/sql/V48__diverse_news_candidate_window.sql",
+  ), "utf8");
+
+  assert.match(migration, /"timespan":"30min"/);
+  assert.match(migration, /schedule_interval_minutes = 15/);
+  assert.match(migration, /default_payload#>>'\{gdelt,timespan\}'/);
+  assert.doesNotMatch(migration, /maxRecords/i);
+});
+
 test("news freshness excludes machine-coded GDELT records", () => {
   const automation = readFileSync(resolve(__dirname, "ingestion-automation.ts"), "utf8");
   const latestDataCte = automation.slice(
@@ -75,4 +87,30 @@ test("reader and investigation queries require an accepted quality marker for GD
   assert.match(api, /lower\(s\.name\) <> 'gdelt' OR i\.payload->>'quality_status' = 'accepted'/);
   assert.match(intelligence, /lower\(COALESCE\(evidence_source\.name, ''\)\) = 'gdelt'/);
   assert.match(intelligence, /source_item\.payload->>'quality_status' = 'accepted'/);
+});
+
+test("global news discovery is country-balanced while a selected country stays newest-first", () => {
+  const api = readFileSync(resolve(__dirname, "index.ts"), "utf8");
+  const route = api.slice(
+    api.indexOf('// List recent news items with optional filters'),
+    api.indexOf('app.post("/api/news/:id/translation"'),
+  );
+
+  assert.match(route, /const newsCandidateOrderSql = country/);
+  assert.match(route, /ROW_NUMBER\(\) OVER \(/);
+  assert.match(route, /PARTITION BY COALESCE\(i\.country_iso2, 'ZZ'::char\(2\)\)/);
+  assert.match(route, /\? "candidate\.event_time DESC NULLS LAST, candidate\.id DESC"/);
+  assert.match(route, /WITH eligible_news AS MATERIALIZED/);
+  assert.match(route, /FROM ranked_news ranked/);
+});
+
+test("news country coverage exposes freshness and provider depth", () => {
+  const api = readFileSync(resolve(__dirname, "index.ts"), "utf8");
+  const route = api.slice(
+    api.indexOf('app.get("/api/news/country-stats"'),
+    api.indexOf("// Admin user/role management"),
+  );
+
+  assert.match(route, /MAX\(COALESCE\(i\.event_time, i\.created_at\)\) AS latest_at/);
+  assert.match(route, /COUNT\(DISTINCT s\.id\)::int AS provider_count/);
 });

@@ -135,7 +135,12 @@ export type PodcastEpisode = {
   evidence: PodcastEvidence[];
 };
 
-export type CountryStat = { country: string; count: number };
+export type CountryStat = {
+  country: string;
+  count: number;
+  latest_at?: string | null;
+  provider_count?: number;
+};
 export type CountryStatsCoverage = {
   window_days: number;
   total: number;

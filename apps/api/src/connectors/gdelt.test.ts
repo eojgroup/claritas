@@ -21,7 +21,10 @@ test("GDELT timestamp parsing never fabricates current recency", async () => {
   assert.equal(parseGdeltTimestamp("20260814091500"), "2026-08-14T09:15:00Z");
   assert.equal(parseGdeltTimestamp("not-a-provider-time"), null);
   assert.equal(parseGdeltTimestamp(undefined), null);
-  for (const materialDomain of ["energy", "disaster", "shipping", "transport", "logistics", "agriculture", "food", "public health"]) {
+  for (const materialDomain of [
+    "energy", "disaster", "earthquake", "aftershock", "tsunami", "volcano", "landslide",
+    "shipping", "transport", "logistics", "agriculture", "food", "public health",
+  ]) {
     assert.match(DEFAULT_GDELT_DOC_QUERY, new RegExp(materialDomain));
   }
   assert.equal(hasUsableGdeltDocCoverage({ latest_event_time: null }), false);
@@ -30,6 +33,47 @@ test("GDELT timestamp parsing never fabricates current recency", async () => {
   assert.equal(hasUsableGdeltFallbackCoverage({ selected: 0, latest_event_time: null }), false);
   assert.equal(hasUsableGdeltFallbackCoverage({ selected: 1, latest_event_time: "not-a-time" }), false);
   assert.equal(hasUsableGdeltFallbackCoverage({ selected: 1, latest_event_time: "2026-08-14T09:15:00Z" }), true);
+});
+
+test("GDELT reserves GAL coverage without exceeding the headline budget", async () => {
+  const { planGdeltHeadlineBudgets } = await connector;
+  assert.deepEqual(planGdeltHeadlineBudgets(25), { total: 25, doc: 20, galReserve: 5 });
+  assert.deepEqual(planGdeltHeadlineBudgets(5), { total: 5, doc: 4, galReserve: 1 });
+  assert.deepEqual(planGdeltHeadlineBudgets(4), { total: 4, doc: 4, galReserve: 0 });
+
+  const source = readFileSync(resolve(__dirname, "gdelt.ts"), "utf8");
+  const ingest = source.slice(source.indexOf("export async function ingestGdelt"), source.indexOf("export async function getGdeltEvents"));
+  assert.match(ingest, /coverage_diversity_supplement/);
+  assert.match(ingest, /headlineBudgets\.total - doc\.accepted/);
+});
+
+test("GDELT DOC candidate selection protects major events and publisher diversity", async () => {
+  const { selectGdeltDocCandidates } = await connector;
+  const routine = Array.from({ length: 20 }, (_, index) => ({
+    title: `Government policy update ${index} for the national parliament`,
+    url: `https://routine.example.com/politics/update-${index}`,
+    domain: "routine.example.com",
+    seendate: `20260816${String(95900 - index * 100).padStart(6, "0")}`,
+  }));
+  const selected = selectGdeltDocCandidates([
+    ...routine,
+    {
+      title: "Major M7.7 earthquake near Ende Indonesia leaves roads blocked",
+      url: "https://disaster.example.com/world/indonesia-earthquake",
+      domain: "disaster.example.com",
+      seendate: "20260816070000",
+    },
+    {
+      title: "Port transport update after an emergency",
+      url: "https://second.example.com/world/port-update",
+      domain: "second.example.com",
+      seendate: "20260816095830",
+    },
+  ], { limit: 6, now: new Date("2026-08-16T10:00:00Z") });
+
+  assert.equal(selected.length, 6);
+  assert.ok(selected.some((article) => article.url?.includes("indonesia-earthquake")));
+  assert.ok(new Set(selected.map((article) => article.domain)).size >= 3);
 });
 
 test("GDELT DOC requires a verified, timely publisher date instead of trusting provider discovery time", async () => {
@@ -220,6 +264,41 @@ test("GAL relevance is an admission gate and cannot displace newer headlines", a
   });
 
   assert.equal(parsed.articles[0].url, "https://current.example.com/news/port-update");
+});
+
+test("GAL selection retains a major disaster inside the current freshness band", async () => {
+  const { parseGdeltGalRss } = await connector;
+  const routineItems = Array.from({ length: 12 }, (_, index) => `
+    <item><title>Government policy update ${index} for the national parliament</title><link>https://routine.example.com/politics/update-${index}</link><pubDate>16 Aug 2026 09:${String(59 - index).padStart(2, "0")}:00 +0000</pubDate></item>
+  `).join("");
+  const parsed = parseGdeltGalRss(`
+    <rss><channel>
+      ${routineItems}
+      <item><title>Major M7.7 earthquake near Ende Indonesia leaves roads blocked</title><link>https://disaster.example.com/world/indonesia-earthquake</link><pubDate>16 Aug 2026 07:00:00 +0000</pubDate></item>
+    </channel></rss>`, {
+    limit: 3,
+    now: new Date("2026-08-16T10:00:00Z"),
+    maxAgeHours: 48,
+  });
+
+  assert.equal(parsed.articles[0].url, "https://disaster.example.com/world/indonesia-earthquake");
+  assert.ok(parsed.articles[0].materialityScore >= 7);
+  assert.ok(parsed.articles.some((article) => article.domain === "routine.example.com"));
+});
+
+test("GAL selection prevents one publisher from monopolising a bounded sample", async () => {
+  const { parseGdeltGalRss } = await connector;
+  const parsed = parseGdeltGalRss(`
+    <rss><channel>
+      <item><title>Major earthquake warning after severe damage</title><link>https://wire-a.example.com/world/quake-one</link><pubDate>16 Aug 2026 09:59:00 +0000</pubDate></item>
+      <item><title>Major earthquake warning after more damage</title><link>https://wire-a.example.com/world/quake-two</link><pubDate>16 Aug 2026 09:58:00 +0000</pubDate></item>
+      <item><title>Major earthquake warning as roads are blocked</title><link>https://wire-b.example.com/world/quake-three</link><pubDate>16 Aug 2026 09:57:00 +0000</pubDate></item>
+    </channel></rss>`, {
+    limit: 2,
+    now: new Date("2026-08-16T10:00:00Z"),
+  });
+
+  assert.deepEqual(new Set(parsed.articles.map((article) => article.domain)).size, 2);
 });
 
 test("GAL fallback accepts only defensibly English headlines and avoids short-stem false positives", async () => {

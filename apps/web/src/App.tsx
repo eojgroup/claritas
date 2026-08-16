@@ -46,11 +46,17 @@ import {
   CartesianGrid,
   Legend,
   Brush,
-  ReferenceDot,
   Line,
 } from "recharts";
 import worldCountries from "world-countries";
 import PriorityNewsList from "./components/PriorityNewsList";
+import {
+  describeNewsEmptyState,
+  describeNewsFreshness,
+  mergeNewsTranslationIntoItems,
+  resolveNewsCoverageSelection,
+  sliceNewsTrendForExport,
+} from "./components/newsWorkspacePresentation";
 
 const legalPolicies = [
   {
@@ -936,6 +942,12 @@ export default function ClaritasDashboard() {
   );
   const [isLoadingNews, setIsLoadingNews] = useState(false);
   const [newsLoadError, setNewsLoadError] = useState<string | null>(null);
+  const [newsMapCountry, setNewsMapCountry] = useState<string | null>(null);
+  const [newsCountryItems, setNewsCountryItems] = useState<NewsItem[] | null>(null);
+  const [newsCountryLoadMode, setNewsCountryLoadMode] = useState<"recent" | "archive">("recent");
+  const [isLoadingNewsCountry, setIsLoadingNewsCountry] = useState(false);
+  const [newsCountryLoadError, setNewsCountryLoadError] = useState<string | null>(null);
+  const [newsMapNotice, setNewsMapNotice] = useState<string | null>(null);
   const [newsTranslationPendingIds, setNewsTranslationPendingIds] = useState<Set<number>>(
     () => new Set(),
   );
@@ -955,9 +967,12 @@ export default function ClaritasDashboard() {
     startIndex?: number;
     endIndex?: number;
   }>({});
+  const [newsWorkspaceChartRange, setNewsWorkspaceChartRange] = useState<{
+    startIndex?: number;
+    endIndex?: number;
+  }>({});
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
   const [newsSourceFilter, setNewsSourceFilter] = useState<string>("all");
-  const [newsCountryFilter, setNewsCountryFilter] = useState("");
   const [newsLanguageFilter, setNewsLanguageFilter] = useState("all");
   const [newsHasImageOnly, setNewsHasImageOnly] = useState(false);
   const [newsSortBy, setNewsSortBy] = useState<"newest" | "oldest" | "source">("newest");
@@ -1008,6 +1023,7 @@ export default function ClaritasDashboard() {
   const dashboardFeedPanelRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const newsRequestIdRef = useRef(0);
+  const newsCountryRequestIdRef = useRef(0);
   const podcastRequestIdRef = useRef(0);
   const [viewportSize, setViewportSize] = useState(() => ({
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
@@ -1325,6 +1341,72 @@ export default function ClaritasDashboard() {
     }
   }, []);
 
+  const loadNewsCountryData = useCallback(async (
+    country: string | null,
+    mode: "recent" | "archive" = "recent",
+  ) => {
+    const requestId = newsCountryRequestIdRef.current + 1;
+    newsCountryRequestIdRef.current = requestId;
+    if (!country) {
+      setNewsMapCountry(null);
+      setNewsCountryItems(null);
+      setNewsCountryLoadError(null);
+      setIsLoadingNewsCountry(false);
+      setNewsMapNotice(null);
+      setNewsWorkspaceChartRange({});
+      return;
+    }
+
+    const normalizedCountry = country.toUpperCase();
+    setNewsCountryLoadMode(mode);
+    setNewsMapCountry(normalizedCountry);
+    setNewsCountryItems(null);
+    setNewsCountryLoadError(null);
+    setNewsMapNotice(null);
+    setNewsWorkspaceChartRange({});
+    setIsLoadingNewsCountry(true);
+    try {
+      if (mode === "recent") {
+        const items = await fetchNews({
+          country: normalizedCountry,
+          limit: NEWS_FETCH_LIMIT,
+        });
+        if (newsCountryRequestIdRef.current !== requestId) return;
+        setNewsCountryItems(items);
+        return;
+      }
+
+      const items: NewsItem[] = [];
+      const seenIds = new Set<number>();
+      let offset = 0;
+      for (let page = 0; page < NEWS_ARCHIVE_MAX_PAGES; page += 1) {
+        const batch = await fetchNews({
+          country: normalizedCountry,
+          limit: NEWS_ARCHIVE_PAGE_SIZE,
+          offset,
+        });
+        if (newsCountryRequestIdRef.current !== requestId) return;
+        if (batch.length === 0) break;
+        batch.forEach((item) => {
+          if (seenIds.has(item.id)) return;
+          seenIds.add(item.id);
+          items.push(item);
+        });
+        offset += batch.length;
+        if (batch.length < NEWS_ARCHIVE_PAGE_SIZE) break;
+      }
+      setNewsCountryItems(items);
+    } catch (err) {
+      if (newsCountryRequestIdRef.current !== requestId) return;
+      setNewsCountryItems([]);
+      setNewsCountryLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (newsCountryRequestIdRef.current === requestId) {
+        setIsLoadingNewsCountry(false);
+      }
+    }
+  }, []);
+
   const requestNewsTranslationSummary = useCallback(async (item: NewsItem) => {
     if (
       !isNewsTranslationRequired(item) ||
@@ -1342,24 +1424,10 @@ export default function ClaritasDashboard() {
     setNewsTranslationPendingIds((current) => new Set(current).add(item.id));
     try {
       const translation = await ensureNewsTranslationSummary(item.id);
-      setNews((current) =>
-        current.map((entry) =>
-          entry.id === item.id
-            ? {
-                ...entry,
-                translated_title:
-                  translation.translated_title ?? entry.translated_title ?? null,
-                ai_summary: translation.generated_summary ?? null,
-                translation: {
-                  ...translation,
-                  headline_kind: "ai_translation",
-                  summary_kind:
-                    translation.summary_status === "generated" ? "ai_generated" : null,
-                },
-              }
-            : entry,
-        ),
-      );
+      setNews((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
+      setNewsCountryItems((current) => current
+        ? mergeNewsTranslationIntoItems(current, item.id, translation)
+        : current);
     } catch {
       // The original source remains usable when optional AI enrichment is unavailable.
       setNewsTranslationErrorIds((current) => new Set(current).add(item.id));
@@ -1796,11 +1864,6 @@ export default function ClaritasDashboard() {
     };
   }, [newsDateBounds, selectedWindowDays]);
 
-  const trendWindowLabel = useMemo(() => {
-    if (selectedWindowDays == null) return "all available dates";
-    return `the last ${selectedWindowDays} days`;
-  }, [selectedWindowDays]);
-
   const newsTrend = useMemo(() => {
     if (!defaultRange) return [];
     const formatter = new Intl.DateTimeFormat("en-US", {
@@ -1883,11 +1946,6 @@ export default function ClaritasDashboard() {
     return points;
   }, [newsSearchScope, selectedCountry, comparisonCountry, defaultRange]);
 
-  const newsTrendTotal = useMemo(
-    () => newsTrend.reduce((sum, item) => sum + item.count, 0),
-    [newsTrend],
-  );
-
   const trendAnomalies = useMemo(() => {
     if (newsTrend.length === 0) return [];
     const mean = newsTrend.reduce((sum, d) => sum + d.count, 0) / newsTrend.length;
@@ -1927,16 +1985,6 @@ export default function ClaritasDashboard() {
   }, [activeRange, defaultRange, newsTrend, selectedWindowLabel]);
 
   const effectiveRange = activeRange ?? defaultRange;
-
-  const newsRangeTotal = useMemo(() => {
-    if (!activeRange) return newsTrendTotal;
-    return newsTrend.reduce((sum, item) => {
-      if (item.dateKey < activeRange.start || item.dateKey > activeRange.end) {
-        return sum;
-      }
-      return sum + item.count;
-    }, 0);
-  }, [activeRange, newsTrend, newsTrendTotal]);
 
   const filteredNews = useMemo(() => {
     let items = newsSearchScope;
@@ -2420,21 +2468,42 @@ export default function ClaritasDashboard() {
     return marketSearchScope;
   }, [marketSearchScope]);
 
+  const newsWorkspaceScope = useMemo(() => {
+    if (!newsMapCountry) return newsSearchScope;
+    const countryItems = newsCountryItems ?? [];
+    if (!searchAppliesToNews || searchTerms.length === 0) return countryItems;
+    return countryItems.filter(matchesNewsSearch);
+  }, [
+    matchesNewsSearch,
+    newsCountryItems,
+    newsMapCountry,
+    newsSearchScope,
+    searchAppliesToNews,
+    searchTerms.length,
+  ]);
+
   const newsSourceOptions = useMemo(() => {
     const sources = new Set<string>();
-    newsSearchScope.forEach((item) => {
+    newsWorkspaceScope.forEach((item) => {
       const source = getSourceLabel(item);
       if (source) sources.add(source);
     });
+    if (newsSourceFilter !== "all") sources.add(newsSourceFilter);
     return Array.from(sources).sort((a, b) => a.localeCompare(b));
-  }, [getSourceLabel, newsSearchScope]);
+  }, [getSourceLabel, newsSourceFilter, newsWorkspaceScope]);
 
-  const newsLanguageOptions = useMemo(() =>
-    Array.from(new Set(newsSearchScope.map((item) => item.language_code?.toLowerCase()).filter((value): value is string => Boolean(value))))
-      .sort((a, b) => a.localeCompare(b)), [newsSearchScope]);
+  const newsLanguageOptions = useMemo(() => {
+    const languages = new Set(
+      newsWorkspaceScope
+        .map((item) => item.language_code?.toLowerCase())
+        .filter((value): value is string => Boolean(value)),
+    );
+    if (newsLanguageFilter !== "all") languages.add(newsLanguageFilter);
+    return Array.from(languages).sort((a, b) => a.localeCompare(b));
+  }, [newsLanguageFilter, newsWorkspaceScope]);
 
   const newsPageItems = useMemo(() => {
-    let items = filteredNews;
+    let items = newsWorkspaceScope;
     if (newsSourceFilter !== "all") {
       const normalized = newsSourceFilter.trim().toLowerCase();
       items = items.filter((item) => (getSourceLabel(item) ?? "").toLowerCase() === normalized);
@@ -2444,10 +2513,6 @@ export default function ClaritasDashboard() {
     }
     if (newsHasImageOnly) {
       items = items.filter((item) => Boolean(getNewsImageUrl(item)));
-    }
-    const countryTerm = newsCountryFilter.trim().toUpperCase();
-    if (countryTerm) {
-      items = items.filter((item) => (item.country_iso2 ?? "").toUpperCase().includes(countryTerm));
     }
     const sorted = [...items];
     if (newsSortBy === "newest") {
@@ -2463,13 +2528,12 @@ export default function ClaritasDashboard() {
     }
     return sorted;
   }, [
-    filteredNews,
     getSourceLabel,
-    newsCountryFilter,
     newsHasImageOnly,
     newsLanguageFilter,
     newsSortBy,
     newsSourceFilter,
+    newsWorkspaceScope,
   ]);
 
   const newsPageTimelineData = useMemo(() => {
@@ -2483,6 +2547,42 @@ export default function ClaritasDashboard() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, stories]) => ({ date, stories }));
   }, [newsPageItems]);
+
+  const newsPageTrendData = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+    return newsPageTimelineData.map((row, index, rows) => {
+      const window = rows.slice(Math.max(0, index - 6), index + 1);
+      const rollingAvg = window.reduce((sum, item) => sum + item.stories, 0) / window.length;
+      return {
+        dateKey: row.date,
+        label: formatter.format(new Date(`${row.date}T00:00:00Z`)),
+        count: row.stories,
+        comparisonCount: 0,
+        rollingAvg: Number(rollingAvg.toFixed(2)),
+        comparisonRollingAvg: 0,
+        topCountries: [] as string[],
+      };
+    });
+  }, [newsPageTimelineData]);
+  const newsPageTrendTotal = useMemo(
+    () => newsPageTrendData.reduce((sum, row) => sum + row.count, 0),
+    [newsPageTrendData],
+  );
+  const newsPageTrendRangeLabel = useMemo(() => {
+    const first = newsPageTrendData[0]?.dateKey;
+    const last = newsPageTrendData[newsPageTrendData.length - 1]?.dateKey;
+    if (!first || !last) return "No dated stories in the loaded scope";
+    const formatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return `${formatter.format(new Date(`${first}T00:00:00Z`))} – ${formatter.format(new Date(`${last}T00:00:00Z`))}`;
+  }, [newsPageTrendData]);
+  const handleNewsWorkspaceExportCsv = useCallback(() => {
+    const series = sliceNewsTrendForExport(newsPageTrendData, newsWorkspaceChartRange);
+    const rows = series.map((row) => [row.dateKey, row.count, row.rollingAvg].join(","));
+    safeDownload(
+      `news-workspace-${newsMapCountry ?? "global"}-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["date,stories,rolling_7d", ...rows].join("\n"),
+    );
+  }, [newsMapCountry, newsPageTrendData, newsWorkspaceChartRange]);
 
   const newsPageSourceData = useMemo(() => {
     const bySource = new Map<string, number>();
@@ -2515,28 +2615,62 @@ export default function ClaritasDashboard() {
     return byCountry;
   }, [getSourceLabel, newsPageItems]);
 
+  const newsMapCoverageStats = useMemo(() => {
+    const databaseRows = (regionCountries
+      ? countryStats.filter((row) => regionCountries.has(row.country.toUpperCase()))
+      : countryStats)
+      .filter((row) => Number(row.count) > 0)
+      .map((row) => ({
+        country: row.country.toUpperCase(),
+        count: Number(row.count),
+        latest_at: row.latest_at ?? null,
+        provider_count: Number(row.provider_count ?? 0),
+      }));
+    if (databaseRows.length > 0) return databaseRows;
+    return Array.from(newsPageCountryStats.entries()).map(([country, value]) => ({
+      country,
+      count: value.count,
+      latest_at: null,
+      provider_count: value.sources.size,
+    }));
+  }, [countryStats, newsPageCountryStats, regionCountries]);
+
   const newsPageMapData = useMemo(() => {
-    return Array.from(newsPageCountryStats.entries()).map(([country, value]) => {
-      const topSource = Array.from(value.sources.entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(([name]) => name)[0];
-      return {
-        country,
-        count: value.count,
-        tone: "news" as const,
-        meta: {
-          subtitle: `${value.count} ${value.count === 1 ? "story" : "stories"}`,
-          lines: [topSource ? `Top source: ${topSource}` : "Top source: —"],
-        },
-      };
-    });
-  }, [newsPageCountryStats]);
+    return newsMapCoverageStats.map((row) => ({
+      country: row.country,
+      count: row.count,
+      tone: "news" as const,
+      meta: {
+        subtitle: `${row.count} ${row.count === 1 ? "story" : "stories"}`,
+        lines: countryStats.length > 0
+          ? [
+              `Quality-checked database coverage · last ${mapWindowDays} days`,
+              row.latest_at ? describeNewsFreshness(row.latest_at).label : "Latest publication time unavailable",
+              `${row.provider_count || 0} ${row.provider_count === 1 ? "provider" : "providers"}`,
+            ]
+          : ["Coverage estimated from the currently loaded story stream"],
+      },
+    }));
+  }, [countryStats.length, mapWindowDays, newsMapCoverageStats]);
 
   const highestNewsCountry = useMemo(
     () =>
       [...newsPageMapData].sort((a, b) => b.count - a.count)[0] ?? null,
     [newsPageMapData],
   );
+
+  const handleNewsMapSelect = useCallback((iso: string) => {
+    const selection = resolveNewsCoverageSelection(iso, newsMapCountry);
+    if (selection.action === "unavailable") {
+      setNewsMapNotice(`${iso.toUpperCase()} is not a valid country code.`);
+      return;
+    }
+    if (selection.action === "clear") {
+      void loadNewsCountryData(null);
+      return;
+    }
+    void loadNewsCountryData(selection.country, "recent");
+  }, [loadNewsCountryData, newsMapCountry]);
 
   const weatherConditionOptions = useMemo(() => {
     const values = new Set<string>();
@@ -3035,12 +3169,13 @@ export default function ClaritasDashboard() {
   }, [selectedSymbolQuote]);
 
   const relationCountry = useMemo(() => {
+    if (activeView === "news") return newsMapCountry?.toUpperCase() ?? null;
     const fromCountry = selectedCountry?.toUpperCase();
     if (fromCountry) return fromCountry;
     const fromSymbol = selectedSymbolQuote?.scope === "country" ? selectedSymbolQuote.country?.toUpperCase() : null;
     if (fromSymbol) return fromSymbol;
     return null;
-  }, [selectedCountry, selectedSymbolQuote]);
+  }, [activeView, newsMapCountry, selectedCountry, selectedSymbolQuote]);
 
   const relatedWeather = useMemo(() => {
     if (!relationCountry) return null;
@@ -3118,6 +3253,92 @@ export default function ClaritasDashboard() {
       withImages,
     };
   }, [newsPageCountryStats.size, newsPageItems, newsPageSourceData, newsPageTimelineData.length]);
+
+  const newsLatestTimestamp = useMemo(() => (
+    newsPageItems
+      .map((item) => item.event_time)
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => right.localeCompare(left))[0] ?? null
+  ), [newsPageItems]);
+  const newsFreshness = useMemo(
+    () => describeNewsFreshness(newsLatestTimestamp),
+    [newsLatestTimestamp],
+  );
+  const newsMapCountryLabel = newsMapCountry
+    ? countryMeta.get(newsMapCountry)?.name ?? newsMapCountry
+    : null;
+  const activeNewsLoading = newsMapCountry ? isLoadingNewsCountry : isLoadingNews;
+  const newsHasWorkspaceFilters = Boolean(
+    newsSourceFilter !== "all"
+    || newsLanguageFilter !== "all"
+    || newsHasImageOnly
+    || (searchAppliesToNews && searchTerms.length > 0)
+  );
+  const newsEmptyPresentation = useMemo(() => describeNewsEmptyState({
+    loading: activeNewsLoading,
+    loadError: newsMapCountry ? newsCountryLoadError : newsLoadError,
+    country: newsMapCountryLabel,
+    region: !newsMapCountry && regionFilter !== "global" ? regionLabel : null,
+    hasFilters: newsHasWorkspaceFilters,
+    rawItemCount: newsMapCountry ? newsCountryItems?.length ?? 0 : news.length,
+  }), [
+    activeNewsLoading,
+    news.length,
+    newsCountryItems,
+    newsCountryLoadError,
+    newsHasWorkspaceFilters,
+    newsLoadError,
+    newsMapCountry,
+    newsMapCountryLabel,
+    regionFilter,
+    regionLabel,
+  ]);
+  const newsCoverageTopCountries = useMemo(
+    () => [...newsMapCoverageStats].sort((left, right) => right.count - left.count).slice(0, 7),
+    [newsMapCoverageStats],
+  );
+  const activeNewsCoverage = useMemo(
+    () => newsMapCountry
+      ? newsMapCoverageStats.find((row) => row.country === newsMapCountry) ?? null
+      : null,
+    [newsMapCountry, newsMapCoverageStats],
+  );
+  const newsCountryScopeOptions = useMemo(() => {
+    const coverageByCountry = new Map(newsMapCoverageStats.map((row) => [row.country, row]));
+    return Array.from(countryMeta.entries())
+      .filter(([iso]) => /^[A-Z]{2}$/.test(iso) && iso !== "UK")
+      .map(([country, meta]) => ({
+        country,
+        name: meta.name ?? country,
+        count: coverageByCountry.get(country)?.count ?? 0,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [countryMeta, newsMapCoverageStats]);
+  const activeNewsLoadMode = newsMapCountry ? newsCountryLoadMode : newsLoadMode;
+  const activeNewsLoadError = newsMapCountry ? newsCountryLoadError : newsLoadError;
+
+  const clearNewsStoryFilters = useCallback(() => {
+    setNewsSourceFilter("all");
+    setNewsLanguageFilter("all");
+    setNewsHasImageOnly(false);
+    setNewsSortBy("newest");
+    setNewsWorkspaceChartRange({});
+    if (searchAppliesToNews && searchTerms.length > 0) setQuery("");
+  }, [searchAppliesToNews, searchTerms.length]);
+
+  const resetNewsWorkspaceToGlobal = useCallback(() => {
+    clearNewsStoryFilters();
+    setRegionFilter("global");
+    void loadNewsCountryData(null);
+  }, [clearNewsStoryFilters, loadNewsCountryData]);
+
+  const retryNewsWorkspace = useCallback(() => {
+    if (newsMapCountry) {
+      void loadNewsCountryData(newsMapCountry, newsCountryLoadMode);
+      return;
+    }
+    void loadNewsData(newsLoadMode);
+  }, [loadNewsCountryData, loadNewsData, newsCountryLoadMode, newsLoadMode, newsMapCountry]);
 
   const newsCountryCoverageRows = useMemo(() => {
     return Array.from(newsPageCountryStats.entries())
@@ -3724,6 +3945,21 @@ export default function ClaritasDashboard() {
     }
   }, [chartRange.endIndex, chartRange.startIndex, newsTrend.length]);
 
+  useEffect(() => {
+    if (
+      (newsWorkspaceChartRange.startIndex != null
+        && newsWorkspaceChartRange.startIndex >= newsPageTrendData.length)
+      || (newsWorkspaceChartRange.endIndex != null
+        && newsWorkspaceChartRange.endIndex >= newsPageTrendData.length)
+    ) {
+      setNewsWorkspaceChartRange({});
+    }
+  }, [
+    newsPageTrendData.length,
+    newsWorkspaceChartRange.endIndex,
+    newsWorkspaceChartRange.startIndex,
+  ]);
+
   const handleMapSelect = (iso: string) => {
     const key = iso.toUpperCase();
     if (compareMode && selectedCountry) {
@@ -3740,13 +3976,20 @@ export default function ClaritasDashboard() {
     setSelectedCountry(key);
   };
 
-  const handleOpenIntelligence = useCallback((eventId?: string) => {
+  const handleOpenIntelligence = useCallback((eventId?: string | null) => {
     if (eventId) {
       setSelectedIntelligenceEventId(eventId);
       const nextUrl = new URL(window.location.href);
       if (nextUrl.searchParams.get("event") !== eventId) {
         nextUrl.searchParams.set("event", eventId);
         window.history.pushState({ eventId }, "", nextUrl);
+      }
+    } else {
+      setSelectedIntelligenceEventId(null);
+      const nextUrl = new URL(window.location.href);
+      if (nextUrl.searchParams.has("event")) {
+        nextUrl.searchParams.delete("event");
+        window.history.replaceState(null, "", nextUrl);
       }
     }
     setActiveView("intelligence");
@@ -3836,35 +4079,6 @@ export default function ClaritasDashboard() {
       );
     }
     setNotificationsOpen(false);
-  };
-
-  const handleExportCsv = () => {
-    const range = activeRange;
-    const series = range
-      ? newsTrend.filter(
-          (d) => d.dateKey >= range.start && d.dateKey <= range.end,
-        )
-      : newsTrend;
-    const header = [
-      "date",
-      "label",
-      "primary_scope",
-      "comparison",
-      "rolling_avg",
-    ];
-    const rows = series.map((d) =>
-      [
-        d.dateKey,
-        d.label,
-        d.count,
-        d.comparisonCount,
-        d.rollingAvg,
-      ].join(","),
-    );
-    safeDownload(
-      `news-volume-${new Date().toISOString().slice(0, 10)}.csv`,
-      [header.join(","), ...rows].join("\n"),
-    );
   };
 
   const handleExportPng = () => {
@@ -4966,7 +5180,7 @@ export default function ClaritasDashboard() {
                             ? "Loading…"
                             : newsLoadMode === "archive"
                               ? "Use recent"
-                              : "Load all data"}
+                              : "Load archive"}
                         </button>
                       </div>
                     </div>
@@ -6083,7 +6297,7 @@ export default function ClaritasDashboard() {
                                         disabled={isLoadingNews}
                                         className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
                                       >
-                                        {isLoadingNews ? "Loading…" : "Load all data"}
+                                        {isLoadingNews ? "Loading…" : "Load archive"}
                                       </button>
                                     )}
                                   </div>
@@ -6337,7 +6551,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
-                <IntelligenceEventStrip country={selectedCountry} onOpen={handleOpenIntelligence} />
+                <IntelligenceEventStrip country={newsMapCountry} onOpen={handleOpenIntelligence} />
                 <section
                   className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3"
                 >
@@ -6346,30 +6560,37 @@ export default function ClaritasDashboard() {
                       News workspace
                     </div>
                     <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                      Region: {regionLabel} · Showing {newsPageItems.length} stories
+                      {newsMapCountryLabel ? `Country: ${newsMapCountryLabel}` : `Region: ${regionLabel}`} · Showing {newsPageItems.length} stories
                     </div>
                   </div>
                   <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
                     <button
-                      onClick={() =>
-                        void loadNewsData(
-                          newsLoadMode === "archive" ? "recent" : "archive",
-                        )
-                      }
-                      disabled={isLoadingNews}
+                      onClick={() => {
+                        const nextMode = activeNewsLoadMode === "archive" ? "recent" : "archive";
+                        if (newsMapCountry) {
+                          setNewsCountryLoadMode(nextMode);
+                          void loadNewsCountryData(newsMapCountry, nextMode);
+                        } else {
+                          setNewsLoadMode(nextMode);
+                          void loadNewsData(nextMode);
+                        }
+                      }}
+                      disabled={isLoadingNews || isLoadingNewsCountry}
                       className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
                     >
-                      {isLoadingNews
+                      {isLoadingNews || isLoadingNewsCountry
                         ? "Loading…"
-                        : newsLoadMode === "archive"
+                        : activeNewsLoadMode === "archive"
                           ? "Use recent"
-                          : "Load all data"}
+                          : newsMapCountry
+                            ? "Load country archive"
+                            : "Load archive"}
                     </button>
                     <button
-                      onClick={() => setRegionFilter("global")}
-                      className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                      onClick={resetNewsWorkspaceToGlobal}
+                      className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                     >
-                      Global
+                      <X className="h-3 w-3" /> Reset to global
                     </button>
                   </div>
                   <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
@@ -6402,13 +6623,23 @@ export default function ClaritasDashboard() {
                       </select>
                     </label>
                     <label className="text-[color:var(--shell-muted)]">
-                      Country
-                      <input
-                        value={newsCountryFilter}
-                        onChange={(event) => setNewsCountryFilter(event.currentTarget.value)}
-                        placeholder="e.g. US"
+                      Country scope
+                      <select
+                        value={newsMapCountry ?? ""}
+                        onChange={(event) => {
+                          const country = event.currentTarget.value;
+                          if (country) handleNewsMapSelect(country);
+                          else void loadNewsCountryData(null);
+                        }}
                         className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
-                      />
+                      >
+                        <option value="">All countries</option>
+                        {newsCountryScopeOptions.map((row) => (
+                          <option key={row.country} value={row.country}>
+                            {row.name} · {row.count > 0 ? `${row.count} in ${mapWindowDays}d` : "inspect directly"}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                     <label className="text-[color:var(--shell-muted)]">
                       Sort
@@ -6435,7 +6666,41 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="kpi-strip grid grid-cols-2 gap-3 xl:grid-cols-6">
+                {(newsMapCountry || newsMapNotice || activeNewsLoadError || isLoadingNews || isLoadingNewsCountry) && (
+                  <section
+                    role={activeNewsLoadError ? "alert" : "status"}
+                    className={`news-scope-status flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-sm ${activeNewsLoadError ? "event-error" : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"}`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-[color:var(--shell-ink)]">
+                        {isLoadingNewsCountry && newsMapCountryLabel
+                          ? `Loading ${newsMapCountryLabel} reporting…`
+                          : isLoadingNews
+                            ? "Refreshing the global reporting stream…"
+                            : activeNewsLoadError
+                              ? "Reporting update failed"
+                              : newsMapNotice || `${newsMapCountryLabel} is the active map and story filter`}
+                      </div>
+                      {newsMapCountry && !newsCountryLoadError && !isLoadingNewsCountry && (
+                        <div className="mt-1 text-xs text-[color:var(--shell-muted)]">The highlight and headline stream now use the same explicit country scope. Select the country again or reset to return to the global overview.</div>
+                      )}
+                      {activeNewsCoverage && !isLoadingNewsCountry && (
+                        <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+                          Coverage index: {activeNewsCoverage.count} stories · {activeNewsCoverage.provider_count || 0} {activeNewsCoverage.provider_count === 1 ? "provider" : "providers"} · {describeNewsFreshness(activeNewsCoverage.latest_at).label}.
+                        </div>
+                      )}
+                      {activeNewsLoadError && <div className="mt-1 text-xs">{friendlyWorkspaceError(activeNewsLoadError)}</div>}
+                    </div>
+                    {activeNewsLoadError && (
+                      <button type="button" onClick={retryNewsWorkspace} className="rounded-full border border-current px-3 py-1.5 text-xs font-semibold">Retry</button>
+                    )}
+                    {newsMapCountry && (
+                      <button type="button" onClick={() => void loadNewsCountryData(null)} className="rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]">Clear country</button>
+                    )}
+                  </section>
+                )}
+
+                <section className={`kpi-strip grid-cols-2 gap-3 xl:grid-cols-4 ${!activeNewsLoading && newsPageItems.length > 0 ? "grid" : "hidden"}`}>
                   <div className="app-stat-card rounded-2xl p-4">
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                       Stories
@@ -6482,29 +6747,66 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
+                <section className="app-card rounded-xl p-4" aria-label="News coverage overview">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">Coverage overview</div>
+                      <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                        {countryStatsCoverage
+                          ? `${countryStatsCoverage.mapped} mapped quality-checked stories across ${newsPageMapData.length} countries · last ${countryStatsCoverage.window_days} days`
+                          : `${newsPageMapData.length} countries represented in the loaded stream`}
+                      </div>
+                      <p className="mt-1 text-xs text-[color:var(--shell-muted)]">Choose a country to request its reporting directly. The map no longer depends on whichever publishers happen to fill the first global result page.</p>
+                    </div>
+                    <span className={`news-freshness-chip is-${newsFreshness.tone}`}>{newsFreshness.label}</span>
+                  </div>
+                  {newsCoverageTopCountries.length > 0 && (
+                    <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Countries with the most recent news coverage">
+                      {newsCoverageTopCountries.map((row, index) => {
+                        const active = newsMapCountry === row.country;
+                        return (
+                          <button
+                            key={row.country}
+                            type="button"
+                            onClick={() => handleNewsMapSelect(row.country)}
+                            aria-pressed={active}
+                            className={`news-country-shortcut shrink-0 rounded-lg border px-3 py-2 text-left ${active ? "is-active" : ""}`}
+                          >
+                            <span className="block text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-muted)]">#{index + 1} coverage</span>
+                            <span className="mt-0.5 block text-sm font-semibold text-[color:var(--shell-ink)]">{countryMeta.get(row.country)?.name ?? row.country}</span>
+                            <span className="block text-[10px] text-[color:var(--shell-muted)]">{row.count} {row.count === 1 ? "story" : "stories"} · {row.provider_count || 0} {row.provider_count === 1 ? "provider" : "providers"}</span>
+                            {row.latest_at && <span className="mt-0.5 block text-[9px] text-[color:var(--shell-muted)]">{describeNewsFreshness(row.latest_at).label}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
                 <section className="news-primary-grid grid grid-cols-1 gap-4 xl:grid-cols-[minmax(20rem,0.72fr)_minmax(32rem,1.28fr)]">
                   <div className={`${cardBase} geo-panel news-map-panel overflow-hidden`}>
-                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                        News map
+                    <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          News map
+                        </div>
+                        <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                          Country coverage · select to filter
+                        </div>
+                        <div className="mt-1 text-[10px] text-[color:var(--shell-muted)]">Map: {mapWindowDays}-day database coverage · Select any country, including an unfilled one, to inspect it directly</div>
                       </div>
-                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                        Country coverage
-                      </div>
+                      {newsMapCountry && <span className="event-list-active-indicator">{newsMapCountry} active</span>}
                     </div>
-                    <div className="h-[min(64vh,680px)] min-h-[24rem] p-3">
+                    <div className="h-[clamp(18rem,38vw,30rem)] min-h-[18rem] p-3">
                       <div className="app-map-frame">
                         <WorldMapBubbles
                           variant="default"
                           data={newsPageMapData}
-                          onSelect={(iso) => {
-                            setSelectedCountry(iso);
-                            setActiveView("news");
-                          }}
+                          onSelect={handleNewsMapSelect}
                           dark={dark}
-                          primaryCountry={selectedCountry}
-                          secondaryCountry={comparisonCountry}
-                          pinnedCountry={pinnedCountry}
+                          primaryCountry={newsMapCountry}
+                          secondaryCountry={null}
+                          pinnedCountry={null}
                           featuredCountry={highestNewsCountry?.country}
                           featuredLabel="Highest story concentration"
                           scale="log"
@@ -6517,24 +6819,27 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
 
-                  <div className={`${cardBase} feed-panel news-stream-panel overflow-hidden`}>
-                    <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                        Headlines
+                  <div className={`${cardBase} feed-panel news-stream-panel overflow-hidden ${newsPageItems.length === 0 ? "is-empty" : ""}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[color:var(--shell-border)] px-4 py-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                          Headlines
+                        </div>
+                        <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
+                          {newsMapCountryLabel ? `${newsMapCountryLabel} story stream` : "Global story stream"}
+                        </div>
                       </div>
-                      <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                        Filtered story stream
-                      </div>
+                      <span className={`news-freshness-chip is-${newsFreshness.tone}`}>{newsFreshness.label}</span>
                     </div>
                     <div
                       ref={feedRef}
-                      className="app-scroll-panel h-[min(64vh,680px)] min-h-[24rem] overflow-y-auto"
+                      className={`app-scroll-panel overflow-y-auto ${newsPageItems.length > 0 ? "h-[clamp(22rem,38vw,30rem)] min-h-[22rem]" : "min-h-[14rem]"}`}
                     >
                       <PriorityNewsList
                         items={newsPageItems}
                         selectedId={selectedDashboardNewsId}
-                        primaryCountry={selectedCountry}
-                        secondaryCountry={comparisonCountry}
+                        primaryCountry={newsMapCountry}
+                        secondaryCountry={null}
                         getImageUrl={(item) =>
                           imageProxy(getNewsImageUrl(item))
                         }
@@ -6542,24 +6847,29 @@ export default function ClaritasDashboard() {
                         getCountryName={(iso) =>
                           countryMeta.get(iso)?.name ?? iso
                         }
-                        onToggle={(item, iso) => {
+                        onToggle={(item) => {
                           const nextId =
                             selectedDashboardNewsId === item.id ? null : item.id;
                           setSelectedDashboardNewsId(nextId);
-                          if (nextId && iso) setSelectedCountry(iso);
                         }}
                         onRequestTranslation={requestNewsTranslationSummary}
                         translationPendingIds={newsTranslationPendingIds}
                         translationErrorIds={newsTranslationErrorIds}
                         onOpenEvent={handleOpenIntelligence}
-                        onSelectCountry={(iso) => {
-                          setSelectedCountry(iso);
-                          setMapMode("signals");
-                          setActiveView("dashboard");
-                        }}
+                        onSelectCountry={handleNewsMapSelect}
                         emptyState={
-                          <div className="m-3 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)]">
-                            No stories match the current filters.
+                          <div className="news-empty-state m-3 flex min-h-44 flex-col items-center justify-center rounded-xl border border-dashed border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-5 text-center">
+                            {activeNewsLoading && <RefreshCw className="mb-3 h-5 w-5 animate-spin text-[color:var(--shell-accent-2)]" />}
+                            <div className="text-sm font-semibold text-[color:var(--shell-ink)]">{newsEmptyPresentation.title}</div>
+                            <p className="mt-1 max-w-md text-xs leading-5 text-[color:var(--shell-muted)]">{newsEmptyPresentation.detail}</p>
+                            {newsEmptyPresentation.action !== "none" && (
+                              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                                {newsEmptyPresentation.action === "retry" && <button type="button" onClick={retryNewsWorkspace} className="rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]">Retry reporting</button>}
+                                {newsEmptyPresentation.action === "clear-filters" && <button type="button" onClick={clearNewsStoryFilters} className="rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]">Clear story filters</button>}
+                                {newsEmptyPresentation.action === "clear-country" && <button type="button" onClick={() => void loadNewsCountryData(null)} className="rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]">Clear country scope</button>}
+                                {newsEmptyPresentation.action === "reset-scope" && <button type="button" onClick={resetNewsWorkspaceToGlobal} className="rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]">Reset to global news</button>}
+                              </div>
+                            )}
                           </div>
                         }
                       />
@@ -6567,7 +6877,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="news-analysis-grid grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,0.9fr)]">
+                <section className={`news-analysis-grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,0.9fr)] ${newsPageItems.length > 0 ? "grid" : "hidden"}`}>
                   <div
                     className={`${cardBase} news-volume-panel primary-analytics-panel flex min-h-0 flex-col overflow-hidden`}
                   >
@@ -6577,14 +6887,14 @@ export default function ClaritasDashboard() {
                           News volume
                         </div>
                         <div className="text-sm font-semibold">
-                          Articles over {trendWindowLabel}
+                          Articles in the loaded story scope
                         </div>
                         <div className="text-xs text-[color:var(--shell-muted)]">
-                          {activeRangeLabel}
+                          {newsPageTrendRangeLabel}
                         </div>
                       </div>
                       <div className="text-xs text-[color:var(--shell-muted)]">
-                        {newsRangeTotal} stories
+                        {newsPageTrendTotal} stories
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-4 py-2 text-xs">
@@ -6612,14 +6922,14 @@ export default function ClaritasDashboard() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setChartRange({})}
+                        onClick={() => setNewsWorkspaceChartRange({})}
                         className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                       >
                         Reset range
                       </button>
                       <button
                         type="button"
-                        onClick={handleExportCsv}
+                        onClick={handleNewsWorkspaceExportCsv}
                         className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                       >
                         Export CSV
@@ -6633,7 +6943,7 @@ export default function ClaritasDashboard() {
                       </button>
                     </div>
                     <div ref={chartRef} className="h-[22rem] min-h-[18rem] p-4">
-                      {newsTrendTotal === 0 ? (
+                      {newsPageTrendTotal === 0 ? (
                         <div className="grid h-full place-items-center text-sm text-[color:var(--shell-muted)]">
                           No timestamped articles in the current country scope.
                         </div>
@@ -6642,18 +6952,12 @@ export default function ClaritasDashboard() {
                           <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
                             <span className="inline-flex items-center gap-2">
                               <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
-                              {selectedCountry?.toUpperCase() ?? regionLabel}
+                              {newsMapCountryLabel ?? regionLabel}
                             </span>
-                            {comparisonCountry && (
-                              <span className="inline-flex items-center gap-2">
-                                <span className="h-2 w-2 rounded-full bg-[color:var(--signal-amber)]" />
-                                {comparisonCountry.toUpperCase()}
-                              </span>
-                            )}
                           </div>
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart
-                              data={newsTrend}
+                              data={newsPageTrendData}
                               margin={{ top: 10, right: 16, left: -8, bottom: 0 }}
                             >
                               <defs>
@@ -6708,38 +7012,14 @@ export default function ClaritasDashboard() {
                                   dot={false}
                                 />
                               )}
-                              {comparisonCountry && (
-                                <Line
-                                  type="monotone"
-                                  dataKey={
-                                    chartView === "rolling"
-                                      ? "comparisonRollingAvg"
-                                      : "comparisonCount"
-                                  }
-                                  stroke="var(--signal-amber)"
-                                  strokeWidth={2}
-                                  dot={false}
-                                />
-                              )}
-                              {trendAnomalies.map((point) => (
-                                <ReferenceDot
-                                  key={point.dateKey}
-                                  x={point.label}
-                                  y={point.count}
-                                  r={5}
-                                  fill="var(--signal-rose)"
-                                  stroke="var(--viz-negative)"
-                                  onClick={() => handleAnomalyClick(point.dateKey)}
-                                />
-                              ))}
                               <Brush
                                 dataKey="label"
                                 height={24}
                                 stroke="var(--shell-muted)"
-                                startIndex={chartRange.startIndex}
-                                endIndex={chartRange.endIndex}
+                                startIndex={newsWorkspaceChartRange.startIndex}
+                                endIndex={newsWorkspaceChartRange.endIndex}
                                 onChange={(range) =>
-                                  setChartRange({
+                                  setNewsWorkspaceChartRange({
                                     startIndex: range?.startIndex,
                                     endIndex: range?.endIndex,
                                   })
@@ -6845,7 +7125,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                <section className={`min-w-0 grid-cols-1 gap-4 xl:grid-cols-[1.05fr_0.95fr] ${newsPageItems.length > 0 ? "grid" : "hidden"}`}>
                   <div className={`${cardBase} overflow-hidden`}>
                     <div className="border-b border-[color:var(--shell-border)] px-4 py-3">
                       <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -6859,11 +7139,11 @@ export default function ClaritasDashboard() {
                       <div className="app-map-frame">
                         <WorldMapBubbles
                           data={newsMarketContextData}
-                          onSelect={(iso) => setSelectedCountry(iso)}
+                          onSelect={handleNewsMapSelect}
                           dark={dark}
-                          primaryCountry={selectedCountry}
-                          secondaryCountry={comparisonCountry}
-                          pinnedCountry={pinnedCountry}
+                          primaryCountry={newsMapCountry}
+                          secondaryCountry={null}
+                          pinnedCountry={null}
                           featuredCountry={featuredNewsMarketCountry?.country}
                           featuredLabel={marketMapLayer === "filings" ? "Highest filing activity" : marketMapLayer === "growth" ? "Largest GDP growth move" : "Strongest market move"}
                           scale="linear"
@@ -6893,7 +7173,7 @@ export default function ClaritasDashboard() {
                             <button
                               key={`news-country-${row.country}`}
                               type="button"
-                              onClick={() => setSelectedCountry(row.country)}
+                              onClick={() => handleNewsMapSelect(row.country)}
                               className="w-full rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-left text-xs transition hover:border-[color:var(--shell-ink)]"
                             >
                               <div className="flex items-center justify-between gap-3">
@@ -6956,7 +7236,7 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                <section className={`${cardBase} p-4`}>
+                <section className={`${cardBase} p-4 ${newsPageItems.length > 0 ? "" : "hidden"}`}>
                   <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
                     Cross-signal context
                   </div>

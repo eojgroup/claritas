@@ -619,7 +619,7 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
   if (!providers.gdelt && !providers.institutionalRss && !providers.govUk) {
     throw new IngestionValidationError("Select at least one news provider.");
   }
-  const requestedTimespan = asString(gdeltRaw.timespan) ?? "1h";
+  const requestedTimespan = asString(gdeltRaw.timespan) ?? "30min";
   if (!/^\d+(?:min|h|d)$/i.test(requestedTimespan)) {
     throw new IngestionValidationError("gdelt.timespan must use GDELT duration syntax such as 15min, 1h, or 1d.");
   }

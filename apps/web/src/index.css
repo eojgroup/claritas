@@ -404,6 +404,61 @@ a {
   color: var(--shell-ink);
 }
 
+.event-mobile-picker {
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--shell-accent-2) 32%, var(--shell-border));
+}
+
+.event-mobile-active {
+  background: linear-gradient(120deg, var(--shell-selected), color-mix(in srgb, var(--shell-surface) 82%, transparent));
+  box-shadow: inset 3px 0 0 var(--shell-accent-2);
+}
+
+.news-freshness-chip {
+  display: inline-flex;
+  width: fit-content;
+  flex: none;
+  align-items: center;
+  border: 1px solid var(--shell-border);
+  border-radius: 999px;
+  padding: 0.35rem 0.55rem;
+  background: var(--shell-bg);
+  color: var(--shell-muted);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.news-freshness-chip.is-fresh {
+  border-color: color-mix(in srgb, var(--signal-emerald) 55%, var(--shell-border));
+  background: var(--signal-emerald-soft);
+  color: var(--shell-ink);
+}
+
+.news-freshness-chip.is-aging {
+  border-color: color-mix(in srgb, var(--signal-amber) 64%, var(--shell-border));
+  background: var(--signal-amber-soft);
+  color: var(--shell-ink);
+}
+
+.news-freshness-chip.is-stale {
+  border-color: color-mix(in srgb, var(--signal-coral) 64%, var(--shell-border));
+  background: color-mix(in srgb, var(--signal-coral) 14%, var(--shell-surface));
+  color: var(--shell-ink);
+}
+
+.news-country-shortcut {
+  min-width: 9.25rem;
+  border-color: var(--shell-border);
+  background: var(--shell-surface);
+}
+
+.news-country-shortcut.is-active {
+  border-color: color-mix(in srgb, var(--shell-accent-2) 68%, var(--shell-border));
+  background: var(--shell-selected);
+  box-shadow: inset 0 -2px 0 var(--shell-accent-2);
+}
+
 .event-link-chip {
   padding: 0.3rem 0.45rem;
 }
@@ -2954,6 +3009,15 @@ body {
     height: auto;
     max-height: none;
     min-height: 20rem;
+  }
+
+  .news-stream-panel.is-empty,
+  .news-stream-panel.is-empty .app-scroll-panel {
+    min-height: 0;
+  }
+
+  .news-stream-panel.is-empty .news-empty-state {
+    min-height: 11rem;
   }
 
   .threshold-summary {

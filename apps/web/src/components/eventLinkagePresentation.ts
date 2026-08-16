@@ -19,8 +19,9 @@ function factorString(factors: CorrelationFactors, key: string) {
 
 /**
  * Turns governed correlation components into reader-facing language. The
- * service deliberately refuses country-only matches, so this never calls a
- * country match a sufficient connection on its own.
+ * Country alone is never sufficient. The sole exception surfaced here is the
+ * governed news fallback where the backend proves there is exactly one major
+ * same-family event in that country and time window.
  */
 export function presentEventLinkage(
   correlationScore?: number | null,
@@ -33,6 +34,8 @@ export function presentEventLinkage(
   const temporal = factorNumber(factors, "temporal");
   const eventType = factorNumber(factors, "event_type");
   const country = factorNumber(factors, "country");
+  const governedRationale = factorString(factors, "rationale");
+  const uniqueCountryCandidate = factors?.unique_country_candidate === true;
   const anchorReasons: string[] = [];
   const supportingReasons: string[] = [];
 
@@ -42,6 +45,9 @@ export function presentEventLinkage(
 
   if (entity >= 0.5) anchorReasons.push("shared named entities");
   else if (entity >= 0.25) anchorReasons.push("partly shared named entities");
+  if (uniqueCountryCandidate && country >= 0.99 && eventType >= 0.99) {
+    anchorReasons.push("the only major same-family event in the country and time window");
+  }
   if (temporal >= 0.5) supportingReasons.push("closely aligned timing");
   if (eventType >= 0.99) supportingReasons.push("a matching event family");
 
@@ -65,7 +71,8 @@ export function presentEventLinkage(
     return {
       label: "Likely linked",
       shortReason: joinReasons(reasons),
-      explanation: `Shown as a likely connection because of ${joinReasons(reasons)}. This is an evidence-graph association, not a claim of causation.`,
+      explanation: governedRationale
+        ?? `Shown as a likely connection because of ${joinReasons(reasons)}. This is an evidence-graph association, not a claim of causation.`,
     };
   }
 
@@ -75,9 +82,9 @@ export function presentEventLinkage(
   return {
     label: "Likely linked",
     shortReason: score ?? "Evidence-graph association",
-    explanation: score
+    explanation: governedRationale ?? (score
       ? `Shown because it passed the evidence-graph connection assessment (${score}); individual matching factors are unavailable. This is not a claim of causation.`
-      : "Included in this event’s evidence graph. A more specific matching rationale is unavailable, and no causal relationship is implied.",
+      : "Included in this event’s evidence graph. A more specific matching rationale is unavailable, and no causal relationship is implied."),
   };
 }
 

@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
     @Published var isRefreshingMarketQuotes: Bool = false
     @Published var isRefreshingTransport: Bool = false
     @Published var newsLoadMode: NewsLoadMode = .recent
+    @Published private(set) var newsScopeCountry: String? = nil
     @Published var newsLoadError: String? = nil
     @Published var podcastLoadError: String? = nil
     @Published var transportLoadError: String? = nil
@@ -68,6 +69,7 @@ final class AppModel: ObservableObject {
     private let recentNewsLimit = 120
     private let archiveNewsPageSize = 100
     private let archiveNewsMaxPages = 4
+    private var newsRequestID = UUID()
     private var transportRefreshTask: Task<Void, Never>?
     private var transportRequestID = UUID()
 
@@ -308,6 +310,10 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let initialNewsCountry = normalizedCountry(selectedCountry)
+        let initialNewsRequestID = UUID()
+        newsRequestID = initialNewsRequestID
+
         async let statsResult: Result<[CountryStat], Error> = {
             do { return .success(try await api.fetchCountryStats(days: 30)) }
             catch { return .failure(error) }
@@ -329,7 +335,7 @@ final class AppModel: ObservableObject {
             catch { return .failure(error) }
         }()
         async let newsResult: Result<[NewsItem], Error> = {
-            do { return .success(try await fetchNewsBatch(mode: .recent, country: nil)) }
+            do { return .success(try await fetchNewsBatch(mode: .recent, country: initialNewsCountry)) }
             catch { return .failure(error) }
         }()
         async let podcastResult: Result<[PodcastEpisode], Error> = {
@@ -416,9 +422,10 @@ final class AppModel: ObservableObject {
         if case .success(let leadershipRows) = resolvedLeadership {
             leadership = leadershipRows
         }
-        if case .success(let newsItems) = resolvedNews {
+        if case .success(let newsItems) = resolvedNews, newsRequestID == initialNewsRequestID {
             news = newsItems
             newsLoadMode = .recent
+            newsScopeCountry = initialNewsCountry
             newsLoadError = nil
         }
         if case .success(let podcastItems) = resolvedPodcasts {
@@ -455,6 +462,9 @@ final class AppModel: ObservableObject {
         weather = []
         leadership = []
         news = []
+        newsScopeCountry = nil
+        newsRequestID = UUID()
+        isRefreshingNews = false
         podcasts = []
         marketQuotes = []
         countryMarkets = []
@@ -575,20 +585,30 @@ final class AppModel: ObservableObject {
     }
 
     func refreshNews(mode: NewsLoadMode = .recent, country: String? = nil) async {
-        guard !isRefreshingNews else { return }
         guard hasPaidAccess else {
             clearAppData()
             return
         }
 
+        let requestedCountry = normalizedCountry(country)
+        let requestID = UUID()
+        newsRequestID = requestID
         isRefreshingNews = true
         newsLoadError = nil
-        defer { isRefreshingNews = false }
+        defer {
+            if newsRequestID == requestID {
+                isRefreshingNews = false
+            }
+        }
 
         do {
-            news = try await fetchNewsBatch(mode: mode, country: country)
+            let loaded = try await fetchNewsBatch(mode: mode, country: requestedCountry)
+            guard newsRequestID == requestID else { return }
+            news = loaded
             newsLoadMode = mode
+            newsScopeCountry = requestedCountry
         } catch {
+            guard newsRequestID == requestID else { return }
             if isPaymentRequired(error) {
                 clearAppData()
                 await refreshAccess()

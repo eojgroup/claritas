@@ -1230,11 +1230,39 @@ struct NewsWorkspaceView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var query: String = ""
     @State private var sourceFilter: String = "all"
-    @State private var countryFilter: String = ""
+    @State private var countryScopeInput: String = ""
     @State private var imagesOnly: Bool = false
     @State private var sort: Sort = .newest
     @State private var loadMode: AppModel.NewsLoadMode = .recent
     @State private var showsFilters = false
+    @State private var newsMapResetToken = 0
+    @State private var isRefreshingNewsCoverage = false
+    @State private var newsCoverageError: String?
+
+    private var selectedNewsCountry: String? {
+        guard let country = model.selectedCountry?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return country
+    }
+
+    private var newsRequestKey: String {
+        "\(loadMode.rawValue)|\(selectedNewsCountry ?? "global")"
+    }
+
+    private var loadedScopeMatchesSelection: Bool {
+        model.newsLoadMode == loadMode && model.newsScopeCountry == selectedNewsCountry
+    }
+
+    private var newestLoadedStoryDate: Date? {
+        model.news.compactMap(\.eventDate).max()
+    }
+
+    private var recentFeedLooksStale: Bool {
+        guard loadMode == .recent, let newestLoadedStoryDate else { return false }
+        return Date().timeIntervalSince(newestLoadedStoryDate) > 24 * 60 * 60
+    }
 
     private var sourceOptions: [String] {
         let sources = Set(model.news.compactMap(newsSourceLabel))
@@ -1242,23 +1270,15 @@ struct NewsWorkspaceView: View {
     }
 
     private var rows: [NewsItem] {
+        guard loadedScopeMatchesSelection else { return [] }
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var filtered = model.news
-
-        if let selectedCountry = model.selectedCountry?.uppercased(), !selectedCountry.isEmpty {
-            filtered = filtered.filter { ($0.country_iso2 ?? "").uppercased() == selectedCountry }
-        }
 
         if sourceFilter != "all" {
             filtered = filtered.filter { (newsSourceLabel($0) ?? "").lowercased() == sourceFilter.lowercased() }
         }
         if imagesOnly {
             filtered = filtered.filter(newsHasImage)
-        }
-
-        let typedCountry = countryFilter.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if !typedCountry.isEmpty {
-            filtered = filtered.filter { ($0.country_iso2 ?? "").uppercased().contains(typedCountry) }
         }
 
         if !term.isEmpty {
@@ -1322,7 +1342,24 @@ struct NewsWorkspaceView: View {
     }
 
     private var hasActiveFilters: Bool {
-        model.selectedCountry != nil || !query.isEmpty || sourceFilter != "all" || !countryFilter.isEmpty || imagesOnly || sort != .newest
+        model.selectedCountry != nil || !query.isEmpty || sourceFilter != "all" || imagesOnly || sort != .newest
+    }
+
+    private var hasLocalFilters: Bool {
+        !query.isEmpty || sourceFilter != "all" || imagesOnly
+    }
+
+    private var newsCoveragePoints: [CountryBubblePoint] {
+        SignalMapDataBuilder.points(
+            for: .news,
+            region: .global,
+            countryStats: model.countryStats,
+            podcasts: model.podcasts,
+            weather: model.weather,
+            countryMarkets: model.countryMarkets,
+            leadership: model.leadership,
+            transport: nil
+        )
     }
 
     var body: some View {
@@ -1334,7 +1371,7 @@ struct NewsWorkspaceView: View {
                     regularNewsContent
                 }
             }
-            .refreshable { await model.refreshNews(mode: loadMode) }
+            .refreshable { await refreshNewsWorkspace() }
         }
         .sheet(isPresented: $showsFilters) {
             NavigationStack {
@@ -1358,14 +1395,22 @@ struct NewsWorkspaceView: View {
             }
             .presentationDetents([.medium, .large])
         }
-        .task {
+        .onAppear {
             loadMode = model.newsLoadMode
-            if model.news.isEmpty {
-                await model.refreshNews(mode: loadMode)
+            countryScopeInput = selectedNewsCountry ?? ""
+        }
+        .onChange(of: model.selectedCountry) { _ in
+            countryScopeInput = selectedNewsCountry ?? ""
+        }
+        .task(id: newsRequestKey) {
+            if model.news.isEmpty || !loadedScopeMatchesSelection {
+                await reloadNews()
             }
         }
-        .onChange(of: loadMode) { next in
-            Task { await model.refreshNews(mode: next) }
+        .task {
+            if model.countryStats.isEmpty {
+                await reloadNewsCoverage()
+            }
         }
     }
 
@@ -1386,7 +1431,7 @@ struct NewsWorkspaceView: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Filter news")
-                Button { Task { await model.refreshNews(mode: loadMode) } } label: {
+                Button { Task { await refreshNewsWorkspace() } } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.title3)
                 }
@@ -1412,15 +1457,9 @@ struct NewsWorkspaceView: View {
                 .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
             }
 
-            if let error = model.newsLoadError, !error.isEmpty {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
-            }
-
-            NewsListView(items: rows, compact: true) { iso in
-                model.selectedCountry = iso
-            }
+            newsScopeBar
+            newsCoverageMapCard(height: 224, compact: true)
+            storyResults(compact: true)
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
@@ -1433,8 +1472,8 @@ struct NewsWorkspaceView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     BrandSectionHeader(
                         kicker: "News",
-                        title: "Global signal stream",
-                        detail: "Browse publisher reporting first; use filters and coverage analytics to narrow the stream."
+                        title: selectedNewsCountry == nil ? "Global signal stream" : "\(newsScopeTitle) reporting",
+                        detail: "Browse quality-checked publisher reporting. The map changes country scope; filters refine the server-loaded feed below."
                     )
                     HStack(spacing: 8) {
                         Picker("Load mode", selection: $loadMode) {
@@ -1443,13 +1482,15 @@ struct NewsWorkspaceView: View {
                         }
                         .pickerStyle(.segmented)
                         Button(model.isRefreshingNews ? "Refreshing…" : "Refresh") {
-                            Task { await model.refreshNews(mode: loadMode) }
+                            Task { await refreshNewsWorkspace() }
                         }
                         .buttonStyle(.bordered)
                         .disabled(model.isRefreshingNews)
                     }
                 }
             }
+            newsScopeBar
+            newsCoverageMapCard(height: 310, compact: false)
             filterPanel
             storyPanel(compact: false)
             analyticsPanels
@@ -1472,17 +1513,25 @@ struct NewsWorkspaceView: View {
                 .padding(10)
                 .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+                Picker("Source", selection: $sourceFilter) {
+                    Text("All sources").tag("all")
+                    ForEach(sourceOptions, id: \.self) { source in Text(source).tag(source) }
+                }
+                .pickerStyle(.menu)
                 HStack(spacing: 10) {
-                    Picker("Source", selection: $sourceFilter) {
-                        Text("All sources").tag("all")
-                        ForEach(sourceOptions, id: \.self) { source in Text(source).tag(source) }
-                    }
-                    .pickerStyle(.menu)
-                    TextField("Country", text: $countryFilter)
+                    TextField("Country scope · e.g. CN", text: $countryScopeInput)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
+                        .onSubmit { applyCountryScope() }
+                        .accessibilityHint("Enter a two-letter country code, then choose Load country.")
+                    Button("Load country", action: applyCountryScope)
+                        .buttonStyle(.bordered)
+                        .disabled(normalizedCountryScopeInput == nil)
                 }
+                Text("Country scope reloads the complete server feed, including countries with zero map coverage. Search and source remain local filters.")
+                    .font(.caption2)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 Toggle("Only articles with images", isOn: $imagesOnly)
                 Picker("Sort", selection: $sort) {
                     ForEach(Sort.allCases) { sort in Text(sort.title).tag(sort) }
@@ -1490,6 +1539,269 @@ struct NewsWorkspaceView: View {
                 .pickerStyle(.segmented)
             }
         }
+    }
+
+    private var newsScopeBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: selectedNewsCountry == nil ? "globe" : "mappin.and.ellipse")
+                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(selectedNewsCountry == nil ? "GLOBAL NEWS SCOPE" : "COUNTRY NEWS SCOPE")
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.8)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                Text(newsScopeTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                Text(newsScopeStatus)
+                    .font(.caption2)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                if loadedScopeMatchesSelection, let newestLoadedStoryDate {
+                    Label(
+                        "Newest verified story \(newestLoadedStoryDate.formatted(date: .abbreviated, time: .shortened))",
+                        systemImage: recentFeedLooksStale ? "exclamationmark.triangle" : "clock"
+                    )
+                    .font(.caption2.weight(recentFeedLooksStale ? .semibold : .regular))
+                    .foregroundStyle(recentFeedLooksStale
+                        ? ClaritasPalette.negativeText(for: colorScheme)
+                        : ClaritasPalette.shellMuted(for: colorScheme))
+                }
+            }
+            Spacer(minLength: 4)
+            if selectedNewsCountry != nil {
+                Button("Global") {
+                    countryScopeInput = ""
+                    model.selectedCountry = nil
+                }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(12)
+        .background(ClaritasPalette.shellBackgroundElevated(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+    }
+
+    private func newsCoverageMapCard(height: CGFloat, compact: Bool) -> some View {
+        BrandCard(title: "News coverage map", icon: "map") {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Verified publisher coverage · trailing 30 days")
+                        .font(.caption.weight(.semibold))
+                    Text("Tap a country to load its full feed. The map window is stated separately from the Recent/Archive list window.")
+                        .font(.caption2)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+                Spacer(minLength: 4)
+                Button {
+                    newsMapResetToken += 1
+                } label: {
+                    Image(systemName: "scope")
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Reset news map")
+            }
+
+            if newsCoveragePoints.isEmpty {
+                VStack(spacing: 8) {
+                    if isRefreshingNewsCoverage {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "map")
+                            .font(.title2)
+                    }
+                    Text("Coverage map is waiting for verified country totals.")
+                        .font(.subheadline.weight(.semibold))
+                    Text(newsCoverageError ?? "The story feed remains available below while coverage totals refresh.")
+                        .font(.caption)
+                        .foregroundStyle(newsCoverageError == nil ? Color.secondary : ClaritasPalette.negativeText(for: colorScheme))
+                        .multilineTextAlignment(.center)
+                    Button(isRefreshingNewsCoverage ? "Refreshing…" : "Retry coverage") {
+                        Task { await reloadNewsCoverage() }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isRefreshingNewsCoverage)
+                }
+                .frame(maxWidth: .infinity, minHeight: min(height, 190))
+            } else {
+                NativeSignalMap(
+                    points: newsCoveragePoints,
+                    events: [],
+                    mode: .news,
+                    mapRegion: .global,
+                    compactPresentation: compact,
+                    selectedCountry: selectedNewsCountry,
+                    comparisonCountry: nil,
+                    pinnedCountry: nil,
+                    featuredCountry: newsCoveragePoints.first?.iso,
+                    transportEntities: [],
+                    resetToken: newsMapResetToken,
+                    onSelectCountry: { iso in
+                        countryScopeInput = iso.uppercased()
+                        model.selectedCountry = iso.uppercased()
+                    },
+                    onSelectEvent: { _ in }
+                )
+                .frame(height: height)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorderStrong(for: colorScheme), lineWidth: 1))
+
+                HStack {
+                    Label("\(newsCoveragePoints.count) mapped countries", systemImage: "globe")
+                    Spacer()
+                    Text("Pinch to zoom · tap a country")
+                }
+                .font(.caption2)
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                if let newsCoverageError {
+                    Label("Coverage refresh failed: \(newsCoverageError)", systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func storyResults(compact: Bool) -> some View {
+        if let error = model.newsLoadError, !error.isEmpty, !model.isRefreshingNews {
+            VStack(spacing: 10) {
+                Label("News could not be loaded", systemImage: "exclamationmark.triangle")
+                    .font(.headline)
+                    .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Retry this scope") { Task { await reloadNews() } }
+                    .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity, minHeight: 150)
+            .padding()
+            .brandGlass(cornerRadius: 12)
+        } else if !loadedScopeMatchesSelection || (model.isRefreshingNews && model.news.isEmpty) {
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Loading \(newsScopeTitle) reporting")
+                    .font(.subheadline.weight(.semibold))
+                Text("The previous scope is hidden so it cannot be mistaken for this country’s feed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, minHeight: 150)
+            .padding()
+            .brandGlass(cornerRadius: 12)
+        } else if rows.isEmpty {
+            newsEmptyState
+        } else {
+            NewsListView(items: rows, compact: compact) { iso in
+                model.selectedCountry = iso.uppercased()
+            }
+        }
+    }
+
+    private var newsEmptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: hasLocalFilters ? "line.3.horizontal.decrease.circle" : "newspaper")
+                .font(.title2)
+                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+            Text(hasLocalFilters ? "No stories match these filters" : "No verified stories in this window")
+                .font(.headline)
+            Text(newsEmptyExplanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 8) {
+                if hasLocalFilters {
+                    Button("Clear filters") { clearLocalFilters() }
+                        .buttonStyle(.borderedProminent)
+                } else if loadMode == .recent {
+                    Button("Check archive") { loadMode = .archive }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Refresh") { Task { await refreshNewsWorkspace() } }
+                        .buttonStyle(.borderedProminent)
+                }
+                if selectedNewsCountry != nil {
+                    Button("View global") { model.selectedCountry = nil }
+                        .buttonStyle(.bordered)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 170)
+        .padding()
+        .brandGlass(cornerRadius: 12)
+    }
+
+    private var newsEmptyExplanation: String {
+        if hasLocalFilters {
+            return "The server returned stories for \(newsScopeTitle), but none match the filters currently applied on this device."
+        }
+        if selectedNewsCountry != nil, loadMode == .recent {
+            return "No quality-checked recent reporting was returned for \(newsScopeTitle). This is a verified empty result, not a map failure; the archive may contain older coverage."
+        }
+        return "No quality-checked reporting was returned for \(newsScopeTitle) in the selected window. Try refreshing or changing scope."
+    }
+
+    private var newsScopeTitle: String {
+        guard let country = selectedNewsCountry else { return "Global" }
+        let name = Locale(identifier: "en_US").localizedString(forRegionCode: country) ?? country
+        return "\(name) (\(country))"
+    }
+
+    private var newsScopeStatus: String {
+        if model.isRefreshingNews {
+            return "Loading the complete \(loadMode.rawValue) feed for this scope…"
+        }
+        if let error = model.newsLoadError, !error.isEmpty, !loadedScopeMatchesSelection {
+            return "This scope could not be loaded. Retry below."
+        }
+        if !loadedScopeMatchesSelection {
+            return "Waiting to load the complete \(loadMode.rawValue) feed for this scope…"
+        }
+        return "\(model.news.count) verified \(loadMode.rawValue) stories loaded from the server"
+    }
+
+    private var normalizedCountryScopeInput: String? {
+        let country = countryScopeInput.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else { return nil }
+        return country
+    }
+
+    private func applyCountryScope() {
+        guard let country = normalizedCountryScopeInput else { return }
+        countryScopeInput = country
+        model.selectedCountry = country
+    }
+
+    private func reloadNews() async {
+        await model.refreshNews(mode: loadMode, country: selectedNewsCountry)
+    }
+
+    private func reloadNewsCoverage() async {
+        guard !isRefreshingNewsCoverage else { return }
+        isRefreshingNewsCoverage = true
+        newsCoverageError = nil
+        defer { isRefreshingNewsCoverage = false }
+        do {
+            model.countryStats = try await model.api.fetchCountryStats(days: 30)
+        } catch {
+            newsCoverageError = error.localizedDescription
+        }
+    }
+
+    private func refreshNewsWorkspace() async {
+        async let stories: Void = reloadNews()
+        async let coverage: Void = reloadNewsCoverage()
+        _ = await (stories, coverage)
+    }
+
+    private func clearLocalFilters() {
+        query = ""
+        sourceFilter = "all"
+        imagesOnly = false
+        sort = .newest
     }
 
     private var analyticsPanels: some View {
@@ -1526,19 +1838,14 @@ struct NewsWorkspaceView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Stories")
                     .font(.headline)
-                NewsListView(items: rows, compact: compact) { iso in
-                    model.selectedCountry = iso
-                }
+                storyResults(compact: compact)
             }
         }
     }
 
     private func resetFilters() {
-        query = ""
-        sourceFilter = "all"
-        countryFilter = ""
-        imagesOnly = false
-        sort = .newest
+        clearLocalFilters()
+        countryScopeInput = ""
         model.selectedCountry = nil
     }
 }

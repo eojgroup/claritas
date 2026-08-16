@@ -45,7 +45,7 @@ const severities: Array<IntelligenceSeverity | "all"> = ["all", "critical", "hig
 type Props = {
   initialCountry?: string | null;
   initialEventId?: string | null;
-  onSelectEvent?: (eventId: string) => void;
+  onSelectEvent?: (eventId: string | null) => void;
   onOpenImagery?: (eventId?: string) => void;
 };
 
@@ -163,24 +163,37 @@ export default function IntelligenceWorkspace({
   const [alerts, setAlerts] = useState<IntelligenceAlert[]>([]);
   const [watchPending, setWatchPending] = useState(false);
   const detailPanelRef = useRef<HTMLElement | null>(null);
+  const eventScopeRef = useRef<string | null>(null);
+  const eventRequestIdRef = useRef(0);
+  const selectedIdRef = useRef<string | null>(initialEventId ?? null);
 
   const selectEvent = useCallback((eventId: string) => {
     setDetail(null);
     setDetailError(null);
+    selectedIdRef.current = eventId;
     setSelectedId(eventId);
     onSelectEvent?.(eventId);
     if (typeof window !== "undefined" && window.matchMedia?.("(max-width: 1279px)").matches) {
       window.setTimeout(() => {
         detailPanelRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+        detailPanelRef.current?.focus?.({ preventScroll: true });
       }, 0);
     }
   }, [onSelectEvent]);
 
   useEffect(() => {
-    if (initialEventId !== undefined) setSelectedId(initialEventId);
+    if (initialEventId !== undefined) {
+      selectedIdRef.current = initialEventId;
+      setSelectedId(initialEventId);
+    }
   }, [initialEventId]);
 
   const loadEvents = useCallback(async () => {
+    const requestId = eventRequestIdRef.current + 1;
+    eventRequestIdRef.current = requestId;
+    const scopeKey = `${initialCountry ?? ""}:${severity}:${includeExpired ? "archive" : "current"}`;
+    const scopeChanged = eventScopeRef.current !== null && eventScopeRef.current !== scopeKey;
+    eventScopeRef.current = scopeKey;
     setLoading(true);
     setError(null);
     const optionalData = Promise.allSettled([
@@ -194,20 +207,40 @@ export default function IntelligenceWorkspace({
         severity: severity === "all" ? undefined : severity,
         includeExpired,
       });
+      if (eventRequestIdRef.current !== requestId) return;
       setEvents(rows);
-      setSelectedId((current) => {
-        if (initialEventId === null) return null;
-        return current ?? initialEventId ?? rows[0]?.id ?? null;
-      });
+      const current = selectedIdRef.current;
+      const requested = current ?? initialEventId;
+      let nextSelection: string | null;
+      if (initialEventId === null) {
+        nextSelection = null;
+      } else if (requested && rows.some((event) => event.id === requested)) {
+        nextSelection = requested;
+      } else if (!scopeChanged && requested && requested === initialEventId) {
+        // An exact deep link or alert may not be present in the prioritised
+        // list. Preserve it until the user changes the visible event scope;
+        // filters must never leave hidden detail presented as active.
+        nextSelection = requested;
+      } else {
+        nextSelection = rows[0]?.id ?? null;
+      }
+      if (nextSelection !== current) {
+        selectedIdRef.current = nextSelection;
+        setSelectedId(nextSelection);
+        onSelectEvent?.(nextSelection);
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      if (eventRequestIdRef.current === requestId) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
     } finally {
-      setLoading(false);
+      if (eventRequestIdRef.current === requestId) setLoading(false);
     }
     const [watchResult, alertResult] = await optionalData;
+    if (eventRequestIdRef.current !== requestId) return;
     if (watchResult.status === "fulfilled") setWatches(watchResult.value);
     if (alertResult.status === "fulfilled") setAlerts(alertResult.value);
-  }, [includeExpired, initialCountry, initialEventId, severity]);
+  }, [includeExpired, initialCountry, initialEventId, onSelectEvent, severity]);
 
   useEffect(() => { void loadEvents(); }, [loadEvents]);
 
@@ -309,6 +342,14 @@ export default function IntelligenceWorkspace({
     });
     return [...groups.values()].sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
   }, [evidenceThread]);
+  const selectedEvent = useMemo(
+    () => events.find((event) => event.id === selectedId) ?? detail?.event ?? null,
+    [detail?.event, events, selectedId],
+  );
+  const selectedEventPresentation = useMemo(
+    () => selectedEvent ? presentEvent(selectedEvent) : null,
+    [selectedEvent],
+  );
 
   const watchTarget = detail?.event.primary_country_iso2
     ? { type: "country", key: detail.event.primary_country_iso2 }
@@ -423,13 +464,64 @@ export default function IntelligenceWorkspace({
         </section>
       )}
 
+      <section className="event-mobile-picker app-card rounded-xl xl:hidden" aria-label="Choose an event investigation">
+        <div className="border-b border-[color:var(--shell-border)] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-accent-2)]">Investigation navigator</div>
+              <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                {selectedEventPresentation ? "Active investigation" : "Choose an event to investigate"}
+              </div>
+            </div>
+            <span className="event-list-selection-status">{events.length} events</span>
+          </div>
+          <label className="mt-3 block text-xs font-semibold text-[color:var(--shell-muted)]" htmlFor="mobile-investigation-select">
+            Event
+          </label>
+          <select
+            id="mobile-investigation-select"
+            value={selectedId ?? ""}
+            onChange={(event) => {
+              const eventId = event.currentTarget.value;
+              if (eventId) selectEvent(eventId);
+            }}
+            className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2.5 text-sm font-semibold text-[color:var(--shell-ink)]"
+          >
+            <option value="">Select an investigation…</option>
+            {events.map((event) => {
+              const presentation = presentEvent(event);
+              return <option key={event.id} value={event.id}>{presentation.headline} · {event.severity}</option>;
+            })}
+          </select>
+        </div>
+        {selectedEvent && selectedEventPresentation && (
+          <button
+            type="button"
+            onClick={() => detailPanelRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" })}
+            className="event-mobile-active w-full p-4 text-left"
+            aria-controls="selected-event-investigation"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="event-list-active-indicator">Viewing now</span>
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${severityClass(selectedEvent.severity)}`}>{selectedEvent.severity}</span>
+            </div>
+            <div className="mt-2 text-base font-semibold leading-6 text-[color:var(--shell-ink)]">{selectedEventPresentation.headline}</div>
+            <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[color:var(--shell-muted)]">
+              <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{selectedEventPresentation.locationLabel}</span>
+              <span>{selectedEvent.evidence_count} linked signals</span>
+            </div>
+            <div className="mt-3 text-xs font-semibold text-[color:var(--signal-sky)]">Jump to the selected evidence thread ↓</div>
+          </button>
+        )}
+      </section>
+
       <div className="grid min-h-[34rem] gap-4 xl:grid-cols-[minmax(19rem,0.68fr)_minmax(0,1.32fr)]">
-        <section className="app-card overflow-hidden rounded-xl" aria-label="Prioritized event investigations">
+        <section className="app-card hidden self-start overflow-hidden rounded-xl xl:sticky xl:top-24 xl:block" aria-label="Prioritized event investigations">
           <div className="flex items-center justify-between gap-3 border-b border-[color:var(--shell-border)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
             <span>Prioritized investigations · {events.length}</span>
             <span className="event-list-selection-status">{selectedId ? "1 viewing" : "Choose one"}</span>
           </div>
-          <div className="max-h-[42vh] overflow-y-auto sm:max-h-[34rem] xl:max-h-[72vh]">
+          <div className="overflow-y-auto xl:max-h-[calc(100vh-12rem)]">
             {!loading && events.length === 0 && <div className="p-6 text-sm text-[color:var(--shell-muted)]">No events meet this scope. Source explorers remain available without implying a cross-domain connection.</div>}
             {events.map((event) => {
               const presentation = presentEvent(event);

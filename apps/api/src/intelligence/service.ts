@@ -22,6 +22,7 @@ import {
   shouldReplaceCanonicalSignal,
   type ScoredCorrelationCandidate,
 } from "./correlation";
+import { contextualLinkagePolicy, scoreContextualLinkage } from "./contextual-linkage";
 import type { CorrelationCandidate, IntelligenceSignalInput } from "./types";
 import {
   intelligenceEventExpiresAtSql,
@@ -68,6 +69,11 @@ type CorrelationCandidateRow = EventRow & {
   candidate_longitude: number | null;
   location_type: string | null;
   entity_keys: string[];
+};
+
+type MajorEventContextCandidateRow = CorrelationCandidateRow & {
+  start_latitude: number | null;
+  start_longitude: number | null;
 };
 
 type SignalLocation = {
@@ -334,11 +340,13 @@ export async function getIntelligenceEvent(eventId: string) {
               location.canonical_name AS location_name,
               COALESCE(source_item.title, podcast_signal.title,
                 NULLIF(concat_ws(' / ',global_source.actor1_name,global_source.actor2_name),''),
-                global_source.action_geo_name) AS source_title,
+                global_source.action_geo_name,
+                NULLIF(evidence.metadata->>'title','')) AS source_title,
               COALESCE(source_item.summary, podcast_signal.summary,
                 CASE WHEN global_source.id IS NOT NULL THEN
                   'Structured GDELT event near ' || COALESCE(global_source.action_geo_name,'an unspecified location')
-                END) AS source_summary,
+                END,
+                NULLIF(evidence.metadata->>'description','')) AS source_summary,
               COALESCE(source_item.url,podcast_item.url,global_source.url,evidence.provenance->>'url') AS source_url,
               global_source.event_code AS gdelt_event_code,
               global_source.event_root_code AS gdelt_event_root_code,
@@ -661,6 +669,67 @@ async function findCorrelationCandidates(
   return rows;
 }
 
+async function findMajorEventContextCandidates(
+  client: PoolClient,
+  input: IntelligenceSignalInput,
+  location: SignalLocation | null,
+  entityKeys: string[],
+  policy: NonNullable<ReturnType<typeof contextualLinkagePolicy>>,
+  options: { excludeEventId?: string | null; onlyEventId?: string | null },
+) {
+  const anchoredLocationId = location?.location_type === "country" ? null : location?.id ?? null;
+  const latitude = finiteCoordinate(input.latitude) ? input.latitude : null;
+  const longitude = finiteCoordinate(input.longitude) ? input.longitude : null;
+  const country = input.primaryCountryIso2?.trim().toUpperCase() || null;
+  const { rows } = await client.query<MajorEventContextCandidateRow>(
+    `SELECT event.*,
+            location.location_type,
+            CASE WHEN event.geography IS NULL THEN NULL
+              ELSE ST_Y(ST_PointOnSurface(event.geography)) END::double precision AS candidate_latitude,
+            CASE WHEN event.geography IS NULL THEN NULL
+              ELSE ST_X(ST_PointOnSurface(event.geography)) END::double precision AS candidate_longitude,
+            CASE WHEN event.geography IS NULL THEN NULL
+              ELSE ST_Y(ST_PointOnSurface(event.geography)) END::double precision AS start_latitude,
+            CASE WHEN event.geography IS NULL THEN NULL
+              ELSE ST_X(ST_PointOnSurface(event.geography)) END::double precision AS start_longitude,
+            COALESCE((
+              SELECT array_agg(DISTINCT entity.entity_key ORDER BY entity.entity_key)
+              FROM intelligence_event_entity entity WHERE entity.event_id=event.id
+            ),ARRAY[]::text[]) AS entity_keys
+     FROM intelligence_event event
+     LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
+     WHERE event.status IN ('emerging','active','monitoring')
+       AND event.event_type='earthquake'
+       AND event.severity IN ('high','critical')
+       AND event.geography IS NOT NULL
+       AND event.metadata @> '{"exact_geography":true}'::jsonb
+       AND event.start_time BETWEEN
+         $1::timestamptz-make_interval(secs=>$2::int)
+         AND $1::timestamptz+make_interval(secs=>$3::int)
+       AND ($10::uuid IS NULL OR event.id=$10::uuid)
+       AND ($11::uuid IS NULL OR event.id<>$11::uuid)
+       AND (
+         ($4::uuid IS NOT NULL AND event.primary_location_id=$4::uuid)
+         OR ($5::double precision IS NOT NULL AND $6::double precision IS NOT NULL
+             AND ST_DWithin(event.geography::geography,
+               ST_SetSRID(ST_MakePoint($6,$5),4326)::geography,$7::double precision*1000))
+         OR ($8::text IS NOT NULL AND event.primary_country_iso2=$8)
+         OR (cardinality($9::text[])>0 AND EXISTS (
+           SELECT 1 FROM intelligence_event_entity entity
+           WHERE entity.event_id=event.id AND entity.entity_key=ANY($9::text[])
+         ))
+       )
+     ORDER BY CASE event.severity WHEN 'critical' THEN 2 ELSE 1 END DESC,
+              event.relevance_score DESC,event.start_time DESC,event.id
+     LIMIT 20`,
+    [input.evidence.observedAt, Math.round(policy.afterHours * 3_600),
+     Math.round(policy.beforeHours * 3_600), anchoredLocationId, latitude, longitude,
+     policy.maxDistanceKm, country, entityKeys, options.onlyEventId ?? null,
+     options.excludeEventId ?? null],
+  );
+  return rows;
+}
+
 async function persistCorrelationDecision(
   client: PoolClient,
   input: IntelligenceSignalInput,
@@ -736,6 +805,9 @@ async function correlateIntelligenceSignal(
   options: { createWhenUnmatched: boolean },
 ) {
   return withTransaction(async (client) => {
+    const upsertOptions = options.createWhenUnmatched
+      ? {}
+      : { suppressAlertCandidate: true, suppressEarthObservation: true };
     const entityKeys = normalizedEntityKeys(input.entityKeys);
     const location = await loadSignalLocation(client, input.primaryLocationId);
     const coordinates = resolveSignalCoordinates({
@@ -764,7 +836,7 @@ async function correlateIntelligenceSignal(
           correlationFactors: storedFactors,
         },
       };
-      const selected = await upsertIntelligenceSignalTx(client, existingInput);
+      const selected = await upsertIntelligenceSignalTx(client, existingInput, upsertOptions);
       await persistCorrelationDecision(
         client, normalizedInput, selected.id, storedDecision, storedDecision === "attached" ? selected.id : null,
         storedDecision === "attached" ? Number(existingSource.correlation_score ?? 1) : null,
@@ -827,7 +899,7 @@ async function correlateIntelligenceSignal(
         correlationFactors: factors,
       },
     };
-    const selected = await upsertIntelligenceSignalTx(client, correlatedInput);
+    const selected = await upsertIntelligenceSignalTx(client, correlatedInput, upsertOptions);
     await persistCorrelationDecision(
       client, normalizedInput, selected.id, decision, decisionSubject?.candidate.id ?? null,
       decisionSubject?.correlation.score ?? null, bounds.threshold, factors, methodology,
@@ -864,11 +936,150 @@ export async function attachIntelligenceSignalToExistingEvent(input: Intelligenc
   return correlateIntelligenceSignal(input, { createWhenUnmatched: false });
 }
 
+/**
+ * Adds a signal as non-causal context to one precisely located major event.
+ * This is intentionally separate from canonical correlation: a weather model
+ * sample or transport comparison remains its own kind of signal and cannot
+ * turn the canonical earthquake into a weather/transport event (or vice
+ * versa). The strongest accepted major-event candidate wins; ambiguous
+ * country-only reporting is rejected by the pure policy.
+ */
+export async function attachIntelligenceSignalToMajorEventContext(
+  input: IntelligenceSignalInput,
+  options: { excludeEventId?: string | null; onlyEventId?: string | null } = {},
+) {
+  const policy = contextualLinkagePolicy("earthquake", input.evidence.domain);
+  if (!policy) return null;
+  return withTransaction(async (client) => {
+    const entityKeys = normalizedEntityKeys(input.entityKeys);
+    const location = await loadSignalLocation(client, input.primaryLocationId);
+    const coordinates = resolveSignalCoordinates({
+      latitude: input.latitude,
+      longitude: input.longitude,
+      coordinatesAreExact: input.coordinatesAreExact,
+      locationType: location?.location_type,
+    });
+    const normalizedInput: IntelligenceSignalInput = coordinates
+      ? { ...input, latitude: coordinates.latitude, longitude: coordinates.longitude }
+      : { ...input, latitude: null, longitude: null };
+    const candidates = await findMajorEventContextCandidates(
+      client, normalizedInput, location, entityKeys, policy, options,
+    );
+    if (!candidates.length) return null;
+
+    const country = normalizedInput.primaryCountryIso2?.trim().toUpperCase() || null;
+    const countryCandidateCount = country
+      ? candidates.filter((candidate) => candidate.primary_country_iso2?.trim().toUpperCase() === country).length
+      : 0;
+    const signalCandidate: CorrelationCandidate = {
+      eventType: normalizedInput.eventType,
+      observedAt: normalizedInput.evidence.observedAt,
+      latitude: normalizedInput.latitude ?? null,
+      longitude: normalizedInput.longitude ?? null,
+      locationId: location?.location_type === "country" ? null : location?.id ?? null,
+      countryIso2: country,
+      entityKeys,
+      sourceReliability: normalizedInput.evidence.confidence,
+    };
+    const ranked = candidates.map((candidate) => {
+      const anchor: CorrelationCandidate = {
+        eventType: candidate.event_type,
+        observedAt: new Date(candidate.start_time),
+        latitude: candidate.start_latitude == null ? null : Number(candidate.start_latitude),
+        longitude: candidate.start_longitude == null ? null : Number(candidate.start_longitude),
+        locationId: candidate.location_type === "country" ? null : candidate.primary_location_id,
+        countryIso2: candidate.primary_country_iso2,
+        entityKeys: candidate.entity_keys ?? [],
+        sourceReliability: Number(candidate.confidence),
+      };
+      return {
+        candidate,
+        linkage: scoreContextualLinkage({
+          anchor,
+          signal: signalCandidate,
+          domain: normalizedInput.evidence.domain,
+          policy,
+          uniqueCountryCandidate: countryCandidateCount === 1,
+        }),
+      };
+    }).sort((left, right) => right.linkage.score - left.linkage.score);
+    const selected = ranked.find(({ linkage }) => linkage.accepted);
+    if (!selected) return null;
+
+    await client.query(`SELECT id FROM intelligence_event WHERE id=$1::uuid FOR UPDATE`, [selected.candidate.id]);
+    const candidate = selected.candidate;
+    const candidateLastActivity = new Date(candidate.last_activity_time);
+    const contextObservedAt = normalizedInput.evidence.observedAt;
+    const lastActivityTime = candidateLastActivity.getTime() >= contextObservedAt.getTime()
+      ? candidateLastActivity : contextObservedAt;
+    const contextualInput: IntelligenceSignalInput = {
+      dedupeKey: candidate.dedupe_key,
+      eventType: candidate.event_type,
+      title: candidate.title,
+      summary: candidate.summary,
+      status: candidate.status as IntelligenceSignalInput["status"],
+      severity: candidate.severity,
+      confidence: Number(candidate.confidence),
+      startTime: new Date(candidate.start_time),
+      lastActivityTime,
+      primaryLocationId: candidate.primary_location_id,
+      primaryCountryIso2: candidate.primary_country_iso2,
+      latitude: candidate.start_latitude == null ? null : Number(candidate.start_latitude),
+      longitude: candidate.start_longitude == null ? null : Number(candidate.start_longitude),
+      coordinatesAreExact: false,
+      relevanceScore: Number(candidate.relevance_score),
+      urgencyScore: Number(candidate.urgency_score),
+      materialityScore: Number(candidate.materiality_score),
+      scoreComponents: candidate.score_components ?? {},
+      metadata: candidate.metadata ?? {},
+      // Do not promote every contextual mention into a future canonical
+      // entity anchor. The shared entities used for this decision are already
+      // retained in the auditable factors below.
+      entityKeys: candidate.entity_keys ?? [],
+      evidence: {
+        ...normalizedInput.evidence,
+        relationship: "context",
+        correlationScore: selected.linkage.score,
+        correlationFactors: selected.linkage.factors,
+        provenance: {
+          ...normalizedInput.evidence.provenance,
+          contextual_association: "major-event-context-v1",
+        },
+        metadata: {
+          ...(normalizedInput.evidence.metadata ?? {}),
+          title: normalizedInput.title,
+          description: normalizedInput.summary,
+          original_relationship: normalizedInput.evidence.relationship,
+          linkage_rationale: selected.linkage.rationale,
+          assessment_boundary: "Contextual association only. It neither establishes earthquake causation nor confirms physical or operational impact.",
+        },
+      },
+    };
+    const event = await upsertIntelligenceSignalTx(client, contextualInput, {
+      // Context updates may advance the evidence timeline, but they must not
+      // create a fresh high-severity notification or repeat EO discovery for
+      // the already-established physical event.
+      suppressAlertCandidate: true,
+      suppressEarthObservation: true,
+    });
+    await persistCorrelationDecision(
+      client, normalizedInput, event.id, "attached", candidate.id,
+      selected.linkage.score, policy.threshold, selected.linkage.factors,
+      "major-event-context-v1", selected.linkage.rationale,
+    );
+    return { event, linkage: selected.linkage };
+  });
+}
+
 export async function upsertIntelligenceSignal(input: IntelligenceSignalInput) {
   return withTransaction(async (client) => upsertIntelligenceSignalTx(client, input));
 }
 
-export async function upsertIntelligenceSignalTx(client: PoolClient, input: IntelligenceSignalInput) {
+export async function upsertIntelligenceSignalTx(
+  client: PoolClient,
+  input: IntelligenceSignalInput,
+  options: { suppressAlertCandidate?: boolean; suppressEarthObservation?: boolean } = {},
+) {
   const existing = await client.query<Pick<EventRow, "id" | "severity" | "confidence" | "metadata">>(
     `SELECT id,severity,confidence,metadata FROM intelligence_event WHERE dedupe_key = $1 FOR UPDATE`,
     [input.dedupeKey],
@@ -1020,7 +1231,8 @@ export async function upsertIntelligenceSignalTx(client: PoolClient, input: Inte
     ],
   );
   const currentEvent = await recomputeIntelligenceEventAggregateTx(client, event.id) ?? event;
-  if (["high", "critical"].includes(severity)
+  if (!options.suppressAlertCandidate
+      && ["high", "critical"].includes(severity)
       && Number(currentEvent.relevance_score) >= Number(process.env.EVENT_ALERT_RELEVANCE_THRESHOLD ?? 0.72)
       && process.env.EVENT_ALERTS_ENABLED?.toLowerCase() === "true") {
     const candidateResult = await client.query<{ id: string }>(
@@ -1043,7 +1255,8 @@ export async function upsertIntelligenceSignalTx(client: PoolClient, input: Inte
     0.25,
     1,
   ) + (severity === "low" ? 0.08 : 0);
-  if (process.env.EARTH_OBSERVATION_ENABLED?.toLowerCase() === "true"
+  if (!options.suppressEarthObservation
+      && process.env.EARTH_OBSERVATION_ENABLED?.toLowerCase() === "true"
       && requestedProducts
       && Number(currentEvent.relevance_score) >= observableThreshold) {
     let canonicalCoordinates: { latitude: number | null; longitude: number | null } | undefined;

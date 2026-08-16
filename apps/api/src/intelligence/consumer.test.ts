@@ -45,3 +45,14 @@ test("podcast context requires a transcript-backed, confident concrete finding",
     entities: [],
   }), false);
 });
+
+test("seismic language, offshore place country, and local aliases survive normalization", async () => {
+  const { classifyEventType, earthquakeCountryFromPlace, earthquakePlaceEntityKeys } = await consumer;
+  assert.equal(classifyEventType("Tsunami warning after M7.7 quake near Ende"), "earthquake");
+  assert.equal(classifyEventType("Strong aftershock reported near the epicentre"), "earthquake");
+  assert.equal(earthquakeCountryFromPlace("68 km NNW of Ende, Indonesia"), "ID");
+  const keys = earthquakePlaceEntityKeys("68 km NNW of Ende, Indonesia", "us6000-test");
+  assert.ok(keys.includes("Ende"));
+  assert.ok(keys.includes("Indonesia"));
+  assert.ok(keys.includes("us6000-test"));
+});

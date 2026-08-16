@@ -29,6 +29,21 @@ describe("event linkage presentation", () => {
     expect(presentation.explanation).not.toMatch(/same country/i);
   });
 
+  it("discloses the governed unique-country earthquake fallback", () => {
+    const rationale = "Included as contextual news evidence because it was the only major same-family event in the country and time window. This association does not establish causation.";
+    const presentation = presentEventLinkage(0.46, {
+      decision: "attached",
+      country: 1,
+      temporal: 0.9,
+      event_type: 1,
+      unique_country_candidate: true,
+      rationale,
+    });
+
+    expect(presentation.shortReason).toContain("only major same-family event");
+    expect(presentation.explanation).toBe(rationale);
+  });
+
   it("distinguishes the source signal that started an investigation", () => {
     const presentation = presentEventLinkage(1, { decision: "created", temporal: 1 });
     expect(presentation.label).toBe("Starting signal");

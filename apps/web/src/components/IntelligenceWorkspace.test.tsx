@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import IntelligenceWorkspace from "./IntelligenceWorkspace";
 import {
@@ -187,6 +187,124 @@ describe("IntelligenceWorkspace", () => {
 
     expect(onSelectEvent).toHaveBeenCalledWith(nextEvent.id);
     expect(nextButton.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("provides a compact mobile and tablet navigator without traversing the event list", async () => {
+    const nextEvent: IntelligenceEvent = {
+      ...event,
+      id: "e1880c12-a54e-4b02-b207-b29f95aec9c0",
+      title: "Earthquake impact assessment",
+      event_type: "earthquake",
+    };
+    const onSelectEvent = vi.fn();
+    vi.mocked(fetchIntelligenceEvents).mockResolvedValue([event, nextEvent]);
+
+    render(<IntelligenceWorkspace initialEventId={event.id} onSelectEvent={onSelectEvent} />);
+    const navigator = await screen.findByRole("combobox", { name: "Event" });
+    expect((navigator as HTMLSelectElement).value).toBe(event.id);
+    expect(screen.getByText("Active investigation")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Jump to the selected evidence thread/i })).toBeTruthy();
+
+    fireEvent.change(navigator, { target: { value: nextEvent.id } });
+    expect(onSelectEvent).toHaveBeenCalledWith(nextEvent.id);
+  });
+
+  it("reconciles the active investigation when a filter removes the selected event", async () => {
+    const criticalEvent: IntelligenceEvent = {
+      ...event,
+      id: "4ae6e4da-e831-48e4-8dd4-0657729ca166",
+      event_type: "earthquake",
+      title: "Critical earthquake impact assessment",
+      severity: "critical",
+      earth_observation_available: false,
+    };
+    const onSelectEvent = vi.fn();
+    vi.mocked(fetchIntelligenceEvents).mockImplementation(async (params) => {
+      if (params?.severity === "critical") return [criticalEvent];
+      if (params?.severity === "low") return [];
+      return [event, criticalEvent];
+    });
+    vi.mocked(fetchIntelligenceEvent).mockImplementation(async (id) => ({
+      event: id === criticalEvent.id ? criticalEvent : event,
+      evidence: [],
+      locations: [],
+      earth_observations: [],
+      related_events: [],
+      epistemic_notice: "Correlation does not establish causation.",
+    }));
+
+    render(<IntelligenceWorkspace initialEventId={event.id} onSelectEvent={onSelectEvent} />);
+    expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "critical" }));
+
+    const navigator = screen.getByRole("combobox", { name: "Event" }) as HTMLSelectElement;
+    await waitFor(() => expect(navigator.value).toBe(criticalEvent.id));
+    expect(await screen.findByRole("button", {
+      name: `Currently viewing investigation: ${criticalEvent.title}`,
+    })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: criticalEvent.title })).toBeTruthy();
+    expect(screen.queryByRole("button", {
+      name: `Currently viewing investigation: ${event.title}`,
+    })).toBeNull();
+    expect(onSelectEvent).toHaveBeenLastCalledWith(criticalEvent.id);
+
+    fireEvent.click(screen.getByRole("button", { name: "low" }));
+    await waitFor(() => expect(navigator.value).toBe(""));
+    expect(onSelectEvent).toHaveBeenLastCalledWith(null);
+  });
+
+  it("ignores an older event response after the user changes filters again", async () => {
+    const criticalEvent: IntelligenceEvent = {
+      ...event,
+      id: "204c3d97-ee60-41ed-8239-a2d029b7460a",
+      title: "Critical event from the older request",
+      severity: "critical",
+    };
+    const lowEvent: IntelligenceEvent = {
+      ...event,
+      id: "f54bec53-2690-4a37-801f-10c48928858a",
+      title: "Low-severity event from the latest request",
+      severity: "low",
+    };
+    let resolveCriticalRequest!: (rows: IntelligenceEvent[]) => void;
+    const criticalRequest = new Promise<IntelligenceEvent[]>((resolve) => {
+      resolveCriticalRequest = resolve;
+    });
+    vi.mocked(fetchIntelligenceEvents).mockImplementation((params) => {
+      if (params?.severity === "critical") return criticalRequest;
+      if (params?.severity === "low") return Promise.resolve([lowEvent]);
+      return Promise.resolve([event]);
+    });
+    vi.mocked(fetchIntelligenceEvent).mockImplementation(async (id) => ({
+      event: id === lowEvent.id ? lowEvent : id === criticalEvent.id ? criticalEvent : event,
+      evidence: [],
+      locations: [],
+      earth_observations: [],
+      related_events: [],
+      epistemic_notice: "Correlation does not establish causation.",
+    }));
+
+    render(<IntelligenceWorkspace initialEventId={event.id} />);
+    expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "critical" }));
+    await waitFor(() => expect(fetchIntelligenceEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: "critical" }),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "low" }));
+
+    const navigator = screen.getByRole("combobox", { name: "Event" }) as HTMLSelectElement;
+    await waitFor(() => expect(navigator.value).toBe(lowEvent.id));
+    expect(await screen.findByRole("heading", { name: lowEvent.title })).toBeTruthy();
+
+    await act(async () => {
+      resolveCriticalRequest([criticalEvent]);
+      await criticalRequest;
+    });
+
+    expect(navigator.value).toBe(lowEvent.id);
+    expect(screen.queryByText(criticalEvent.title)).toBeNull();
   });
 
   it("labels likely linked weather, transport, podcast, and news signals with their rationale", async () => {
