@@ -101,7 +101,14 @@ struct DashboardView: View {
                     .padding(.vertical, 8)
             } else {
                 ForEach(Array(latest.prefix(3).enumerated()), id: \.element.id) { index, item in
-                    Button { openCompactDestination("news") } label: {
+                    Button {
+                        if let event = item.linked_events.first {
+                            model.selectedIntelligenceEventID = event.id
+                            openCompactDestination("intelligence")
+                        } else {
+                            openCompactDestination("news")
+                        }
+                    } label: {
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.presentationTitle)
@@ -116,14 +123,20 @@ struct DashboardView: View {
                                         Text(date.formatted(date: .omitted, time: .shortened))
                                             .monospacedDigit()
                                     }
-                                    if !item.linked_events.isEmpty {
-                                        Text("· Linked event")
+                                    if let event = item.linked_events.first {
+                                        Text("· \(IntelligenceLinkagePresentation.label(for: event.correlation_factors).capitalized)")
                                             .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                                     }
                                 }
                                 .font(.caption2)
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 .lineLimit(1)
+                                if let event = item.linked_events.first {
+                                    Text("Open: \(event.title)")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                        .lineLimit(1)
+                                }
                             }
                             Spacer(minLength: 4)
                             Image(systemName: "chevron.right")
@@ -135,6 +148,9 @@ struct DashboardView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(item.linked_events.first.map {
+                        "Open \(IntelligenceLinkagePresentation.label(for: $0.correlation_factors).lowercased()): \($0.title)"
+                    } ?? "Open reporting: \(item.presentationTitle)")
                     if index < min(latest.count, 3) - 1 { Divider() }
                 }
             }
@@ -1695,7 +1711,7 @@ struct WeatherWorkspaceView: View {
         BrandBackground {
             ScrollView {
                 VStack(spacing: 18) {
-                    IntelligenceEventPulseView()
+                    IntelligenceEventPulseView(sourceLens: "weather")
                     BrandCard {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(
@@ -2001,7 +2017,7 @@ struct MarketsWorkspaceView: View {
         BrandBackground {
             ScrollView {
                 VStack(spacing: 18) {
-                    IntelligenceEventPulseView()
+                    IntelligenceEventPulseView(sourceLens: "market")
                     BrandCard {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(

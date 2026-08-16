@@ -157,7 +157,7 @@ describe("IntelligenceWorkspace", () => {
     expect(screen.getByText("What happened")).toBeTruthy();
     expect(screen.getByText("Port of Fujairah, United Arab Emirates")).toBeTruthy();
     expect(screen.getByText("The location supports strategically important energy flows.")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "What news is connected to this event?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Which reporting is likely associated with this event?" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Port operator responds to reported fire" })).toBeTruthy();
     expect(screen.getByText("Event-linked observation available")).toBeTruthy();
     expect(screen.getByRole("link", { name: /NASA GIBS provenance/i }).getAttribute("href")).toBe("https://gibs.earthdata.nasa.gov/wms/example.jpg");
@@ -166,6 +166,107 @@ describe("IntelligenceWorkspace", () => {
     expect(screen.getByRole("link", { name: /Open source/i }).getAttribute("href")).toBe("https://firms.modaps.eosdis.nasa.gov/");
     expect(screen.getByText("Attribution: NASA FIRMS")).toBeTruthy();
     expect(screen.getByText(/Correlation does not establish causation/i)).toBeTruthy();
+  });
+
+  it("makes the active investigation explicit and opens another event from its full card", async () => {
+    const nextEvent: IntelligenceEvent = {
+      ...event,
+      id: "3f92373b-a9fe-422f-b640-cb48dfec43af",
+      title: "Port access restrictions under assessment",
+    };
+    const onSelectEvent = vi.fn();
+    vi.mocked(fetchIntelligenceEvents).mockResolvedValue([event, nextEvent]);
+
+    render(<IntelligenceWorkspace initialEventId={event.id} onSelectEvent={onSelectEvent} />);
+    const currentButton = await screen.findByRole("button", { name: `Currently viewing investigation: ${event.title}` });
+    expect(currentButton.getAttribute("aria-pressed")).toBe("true");
+    expect(currentButton.getAttribute("aria-controls")).toBe("selected-event-investigation");
+
+    const nextButton = screen.getByRole("button", { name: `Open investigation: ${nextEvent.title}` });
+    fireEvent.click(nextButton);
+
+    expect(onSelectEvent).toHaveBeenCalledWith(nextEvent.id);
+    expect(nextButton.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("labels likely linked weather, transport, podcast, and news signals with their rationale", async () => {
+    vi.mocked(fetchIntelligenceEvent).mockResolvedValue({
+      event,
+      linked_news: [],
+      evidence: [
+        {
+          id: "news-evidence",
+          domain: "news",
+          evidence_type: "article",
+          source_record_type: "item",
+          source_record_id: "42",
+          observed_at: "2026-08-11T08:15:00Z",
+          confidence: 0.86,
+          relationship: "reported",
+          source_name: "Example Wire",
+          source_title: "Port operator responds to reported fire",
+          correlation_score: 0.88,
+          correlation_factors: { decision: "attached", location: 1, temporal: 0.9, event_type: 1 },
+        },
+        {
+          id: "weather-evidence",
+          domain: "weather_forecast",
+          evidence_type: "wind_warning",
+          source_record_type: "openweather_forecast",
+          source_record_id: "weather-1",
+          observed_at: "2026-08-11T08:20:00Z",
+          confidence: 0.79,
+          relationship: "context",
+          source_name: "OpenWeather",
+          source_title: "High wind forecast",
+          correlation_score: 0.73,
+          correlation_factors: { decision: "attached", spatial: 0.72, temporal: 0.8 },
+        },
+        {
+          id: "transport-evidence",
+          domain: "transport",
+          evidence_type: "maritime_delay",
+          source_record_type: "ais_vessel",
+          source_record_id: "transport-1",
+          observed_at: "2026-08-11T08:25:00Z",
+          confidence: 0.81,
+          relationship: "context",
+          source_name: "AISstream",
+          source_title: "Vessel movement anomaly",
+          correlation_score: 0.76,
+          correlation_factors: { decision: "attached", entity: 0.7, temporal: 0.8 },
+        },
+        {
+          id: "podcast-evidence",
+          domain: "podcast",
+          evidence_type: "podcast_context",
+          source_record_type: "podcast_episode",
+          source_record_id: "podcast-1",
+          observed_at: "2026-08-11T08:30:00Z",
+          confidence: 0.67,
+          relationship: "context",
+          source_name: "Example Briefing",
+          source_title: "Port security podcast",
+          correlation_score: 0.71,
+          correlation_factors: { decision: "attached", entity: 0.5, temporal: 0.7 },
+        },
+      ],
+      locations: [],
+      earth_observations: [],
+      related_events: [],
+      epistemic_notice: "Correlation does not establish causation.",
+    });
+
+    render(<IntelligenceWorkspace initialEventId={event.id} />);
+    expect(await screen.findByRole("heading", { name: "What other signals are associated with this event?" })).toBeTruthy();
+    expect(screen.getAllByText("News report").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Weather signal").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Transport signal").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Podcast episode").length).toBeGreaterThan(0);
+    expect([...document.querySelectorAll(".event-link-explanation")].some((element) => (
+      element.textContent?.includes("Why shown: Shown as a likely connection because of")
+    ))).toBe(true);
+    expect(screen.getAllByText("Context").length).toBeGreaterThan(0);
   });
 
   it("opens the exact event id supplied by an alert", async () => {

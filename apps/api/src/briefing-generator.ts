@@ -285,6 +285,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
         AND translation.source_title_hash = md5(COALESCE(i.title, ''))
         AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
        WHERE i.kind = 'news_article'
+         AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
          AND COALESCE(i.event_time, i.created_at) >= $1::timestamptz
          AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
          AND (

@@ -266,10 +266,15 @@ struct PadOverviewView: View {
             VStack(spacing: 0) {
                 ForEach(focusedNews.prefix(7)) { item in
                     Button {
-                        if let country = item.country_iso2 {
-                            model.selectedCountry = country.uppercased()
+                        if let event = item.linked_events.first {
+                            model.selectedIntelligenceEventID = event.id
+                            destination = .intelligence
+                        } else {
+                            if let country = item.country_iso2 {
+                                model.selectedCountry = country.uppercased()
+                            }
+                            destination = .news
                         }
-                        destination = .news
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 5) {
@@ -285,6 +290,12 @@ struct PadOverviewView: View {
                                         .font(.caption2.weight(.semibold))
                                         .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                                 }
+                                if let event = item.linked_events.first {
+                                    Text("\(IntelligenceLinkagePresentation.label(for: event.correlation_factors).capitalized) · \(event.title)")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                        .lineLimit(1)
+                                }
                             }
                             Spacer()
                             Text(item.country_iso2?.uppercased() ?? "GL")
@@ -294,6 +305,9 @@ struct PadOverviewView: View {
                         .padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(item.linked_events.first.map {
+                        "Open \(IntelligenceLinkagePresentation.label(for: $0.correlation_factors).lowercased()): \($0.title)"
+                    } ?? "Open reporting: \(item.presentationTitle)")
                     Divider()
                 }
                 if focusedNews.isEmpty {
@@ -377,9 +391,13 @@ struct OverviewSatelliteContextView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     ZStack(alignment: .topLeading) {
                         if let asset = observation?.preferredDisplayAsset {
-                            AuthenticatedEarthImage(path: asset.url)
+                            AuthenticatedEarthImage(path: asset.url, contentMode: .fit)
                         } else if let layer = gibsLayer {
-                            AuthenticatedRemoteImage(url: layer.preview_url, unavailableLabel: "Satellite context unavailable")
+                            AuthenticatedRemoteImage(
+                                url: layer.preview_url,
+                                unavailableLabel: "Satellite context unavailable",
+                                contentMode: .fit
+                            )
                         } else {
                             satellitePlaceholder
                         }
@@ -392,6 +410,19 @@ struct OverviewSatelliteContextView: View {
                                 .foregroundStyle(.white)
                             Spacer()
                         }
+                        .padding(12)
+
+                        VStack(alignment: .leading) {
+                            Spacer()
+                            Text(selectedEvent.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .lineLimit(2)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 7)
+                                .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(12)
                     }
                     .frame(height: 270)

@@ -775,6 +775,11 @@ async function selectSignals(
        WHERE COALESCE(i.event_time, i.created_at) >= $1::timestamptz
          AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
          AND (
+           i.kind <> 'news_article'
+           OR lower(s.name) <> 'gdelt'
+           OR i.payload->>'quality_status' = 'accepted'
+         )
+         AND (
            NULLIF(btrim(translation.translated_title), '') IS NOT NULL
            OR i.kind <> 'news_article'
            OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) IN ('en', 'eng', 'english')

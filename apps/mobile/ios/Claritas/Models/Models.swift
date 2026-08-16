@@ -124,8 +124,82 @@ struct NewsLinkedEvent: Codable, Identifiable {
     let evidence_count: Int
     let domains: [String]
     let correlation_score: Double?
+    // The API keeps the governed correlation components alongside the link.
+    // Preserve them so the UI can explain the link without turning a score
+    // into an unsupported causal claim.
+    let correlation_factors: JSONValue?
     let earth_observation_state: String
     let best_thumbnail_url: String?
+}
+
+enum IntelligenceLinkagePresentation {
+    private static func number(_ value: JSONValue?) -> Double? {
+        if let number = value?.number { return number }
+        guard let text = value?.string else { return nil }
+        return Double(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private static func factor(_ key: String, in factors: JSONValue?) -> Double {
+        number(factors?.object?[key]) ?? 0
+    }
+
+    static func decision(in factors: JSONValue?) -> String? {
+        factors?.object?["decision"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    /// Returns only correlation inputs that were actually recorded by the
+    /// service. Country and time are useful supporting context, while a
+    /// location, spatial, or entity anchor is required before a record can be
+    /// attached to an existing investigation.
+    static func reasons(for factors: JSONValue?) -> [String] {
+        guard factors?.object != nil else { return [] }
+        var anchorReasons: [String] = []
+        var supportingReasons: [String] = []
+        if factor("location", in: factors) >= 1 { anchorReasons.append("the same mapped location") }
+        if factor("spatial", in: factors) >= 0.45 { anchorReasons.append("a nearby mapped area") }
+        if factor("entity", in: factors) >= 0.5 { anchorReasons.append("shared named entities") }
+        if factor("country", in: factors) >= 1 { supportingReasons.append("the same country as supporting context") }
+        if factor("temporal", in: factors) >= 0.5 { supportingReasons.append("nearby timing") }
+        // A shared country or clock alone is useful context but never a
+        // reader-facing justification for calling a record likely linked.
+        return anchorReasons.isEmpty ? [] : anchorReasons + supportingReasons
+    }
+
+    static func label(for factors: JSONValue?) -> String {
+        switch decision(in: factors) {
+        case "attached": return "LIKELY LINKED EVENT"
+        case "created": return "EVENT SOURCE"
+        default: return reasons(for: factors).isEmpty ? "LINKED EVENT" : "LIKELY LINKED EVENT"
+        }
+    }
+
+    static func explanation(for factors: JSONValue?) -> String {
+        switch decision(in: factors) {
+        case "created":
+            return "This source record starts the evidence thread for this investigation."
+        case "attached":
+            let reasons = reasons(for: factors)
+            if !reasons.isEmpty {
+                return "Likely linked because it shares \(readableList(reasons))."
+            }
+            return "This source record met the investigation’s governed linkage threshold."
+        default:
+            let reasons = reasons(for: factors)
+            if !reasons.isEmpty {
+                return "Linked through \(readableList(reasons))."
+            }
+            return "This source record is attached to this investigation; it does not establish causation."
+        }
+    }
+
+    private static func readableList(_ values: [String]) -> String {
+        switch values.count {
+        case 0: return "recorded evidence"
+        case 1: return values[0]
+        case 2: return "\(values[0]) and \(values[1])"
+        default: return "\(values.dropLast().joined(separator: ", ")), and \(values.last ?? "recorded evidence")"
+        }
+    }
 }
 
 struct NewsItem: Codable, Identifiable {
@@ -1901,6 +1975,7 @@ struct IntelligenceEvidence: Codable, Identifiable {
     let source_summary: String?
     let source_url: String?
     let correlation_score: Double?
+    let correlation_factors: JSONValue?
     let provenance: JSONValue?
 }
 

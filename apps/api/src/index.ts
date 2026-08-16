@@ -2171,7 +2171,13 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
 
     const params: any[] = [displayLanguage];
     const displayLanguageIndex = 1;
-    const where: string[] = ["i.kind = 'news_article'"];
+    // A discovery timestamp is not a publication timestamp. Connectors mark
+    // an article rejected when its publisher date cannot be verified or is
+    // outside the freshness policy; never let that record enter a reader view.
+    const where: string[] = [
+      "i.kind = 'news_article'",
+      "(lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')",
+    ];
     if (q) {
       const i1 = params.push(`%${q}%`); // returns new length as index
       const i2 = params.push(`%${q}%`);
@@ -2327,6 +2333,7 @@ app.get("/api/news/coverage", requireAuthenticated, async (req, res) => {
               MAX(COALESCE(i.event_time, i.created_at)) AS latest_at
        FROM item i JOIN source s ON s.id = i.source_id
        WHERE i.kind = 'news_article'
+         AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
          AND COALESCE(i.event_time, i.created_at) >= now() - ($1 || ' days')::interval
        GROUP BY COALESCE(i.language_code, 'unknown'), i.source_country_iso2, s.name
        ORDER BY article_count DESC`,
@@ -2548,12 +2555,13 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
     const params: any[] = [days];
     const [statsResult, coverageResult] = await Promise.all([
       pool.query(
-        `SELECT upper(country_iso2) AS country, COUNT(*)::int AS count
-         FROM item
-         WHERE country_iso2 IS NOT NULL
-           AND kind = 'news_article'
-           AND COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval
-         GROUP BY upper(country_iso2)
+        `SELECT upper(i.country_iso2) AS country, COUNT(*)::int AS count
+         FROM item i JOIN source s ON s.id=i.source_id
+         WHERE i.country_iso2 IS NOT NULL
+           AND i.kind = 'news_article'
+           AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
+           AND COALESCE(i.event_time, i.created_at) >= now() - ($1 || ' days')::interval
+         GROUP BY upper(i.country_iso2)
          ORDER BY count DESC`,
         params
       ),
@@ -2561,9 +2569,10 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
         `SELECT
            COUNT(*)::int AS total,
            COUNT(*) FILTER (WHERE country_iso2 IS NOT NULL)::int AS mapped
-         FROM item
-         WHERE kind = 'news_article'
-           AND COALESCE(event_time, created_at) >= now() - ($1 || ' days')::interval`,
+         FROM item i JOIN source s ON s.id=i.source_id
+         WHERE i.kind = 'news_article'
+           AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
+           AND COALESCE(i.event_time, i.created_at) >= now() - ($1 || ' days')::interval`,
         params
       ),
     ]);

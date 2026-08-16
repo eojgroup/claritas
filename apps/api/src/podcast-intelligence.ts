@@ -222,6 +222,7 @@ export async function extractPodcastIntelligence(
       const risk = clean(raw.risk_level, 20)?.toLowerCase() || null;
       const confidenceValue = Number(raw.confidence);
       const confidence = Number.isFinite(confidenceValue) ? Math.min(Math.max(confidenceValue, 0), 1) : null;
+      const key = canonicalKey(title);
       const inserted = await client.query<{ id: number }>(
         `INSERT INTO intelligence_signal (
            episode_id, signal_type, title, summary, canonical_key, entities, topics,
@@ -235,7 +236,7 @@ export async function extractPodcastIntelligence(
            updated_at = now()
          RETURNING id`,
         [
-          episodeId, type, title, clean(raw.summary, 1200), canonicalKey(title),
+          episodeId, type, title, clean(raw.summary, 1200), key,
           JSON.stringify(entities), JSON.stringify(topics),
           risk && RISK_LEVELS.has(risk) ? risk : null, confidence,
           clean(raw.method, 80) || "metadata",
@@ -249,6 +250,7 @@ export async function extractPodcastIntelligence(
       );
       stored += 1;
       const evidenceIndexes = Array.isArray(raw.evidence) ? raw.evidence.map(Number) : [];
+      let linkedEvidenceCount = 0;
       for (const index of evidenceIndexes) {
         const segment = segmentByIndex.get(index);
         if (!segment) continue;
@@ -257,6 +259,39 @@ export async function extractPodcastIntelligence(
            VALUES ($1,$2,$3,$4)
            ON CONFLICT (signal_id, evidence_segment_id) DO UPDATE SET relevance = EXCLUDED.relevance, quote = EXCLUDED.quote`,
           [inserted.rows[0].id, segment.id, confidence, segment.text.slice(0, 800)]
+        );
+        linkedEvidenceCount += 1;
+      }
+      // Transcript extraction is deliberately a contextual source. It can ask
+      // the evidence graph to consider an existing event only when a finding
+      // is directly supported by one or more timestamped transcript segments
+      // and names a concrete entity; it can never create an event by itself.
+      if (
+        ["event", "risk", "claim"].includes(type)
+        && confidence != null && confidence >= 0.55
+        && entities.length > 0 && linkedEvidenceCount > 0
+      ) {
+        const fingerprint = crypto.createHash("sha256").update(JSON.stringify({
+          title, summary: clean(raw.summary, 1200), entities, countries,
+          confidence, evidenceIndexes: evidenceIndexes.filter((index) => segmentByIndex.has(index)),
+        })).digest("hex").slice(0, 20);
+        await client.query(
+          `INSERT INTO event_outbox (
+             event_type, aggregate_type, aggregate_id, dedupe_key, payload, occurred_at
+           ) VALUES (
+             'podcast.signal.extracted', 'intelligence_signal', $1,
+             $2, $3::jsonb, now()
+           ) ON CONFLICT (dedupe_key) DO NOTHING`,
+          [
+            String(inserted.rows[0].id),
+            `podcast.signal.extracted:${episodeId}:${type}:${key}:${fingerprint}`,
+            JSON.stringify({
+              episode_id: episodeId,
+              signal_type: type,
+              canonical_key: key,
+              contextual_only: true,
+            }),
+          ],
         );
       }
     }

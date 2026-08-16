@@ -65,7 +65,7 @@ struct TransportWorkspaceView: View {
                 detail: "Live tracks, flight numbers, transport corridors, and country relationships."
             )
 
-            IntelligenceEventPulseView()
+            IntelligenceEventPulseView(sourceLens: "transport")
 
             if let detailError {
                 BrandCard(title: "Transport data unavailable", icon: "exclamationmark.triangle") {
@@ -133,7 +133,7 @@ struct TransportWorkspaceView: View {
                 detail: "Current aircraft, vessels, routes, and country relationships in the country scope selected from the overview map."
             )
 
-            IntelligenceEventPulseView()
+            IntelligenceEventPulseView(sourceLens: "transport")
 
             Picker("Movement layer", selection: $mode) {
                 Text("Combined").tag(Optional<TransportMode>.none)

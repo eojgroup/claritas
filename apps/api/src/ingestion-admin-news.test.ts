@@ -67,3 +67,12 @@ test("news freshness excludes machine-coded GDELT records", () => {
   assert.match(latestDataCte, /MAX\(i\.event_time\)/);
   assert.doesNotMatch(latestDataCte, /MAX\(i\.created_at\)/);
 });
+
+test("reader and investigation queries require an accepted quality marker for GDELT articles", () => {
+  const api = readFileSync(resolve(__dirname, "index.ts"), "utf8");
+  const intelligence = readFileSync(resolve(__dirname, "intelligence/service.ts"), "utf8");
+
+  assert.match(api, /lower\(s\.name\) <> 'gdelt' OR i\.payload->>'quality_status' = 'accepted'/);
+  assert.match(intelligence, /lower\(COALESCE\(evidence_source\.name, ''\)\) = 'gdelt'/);
+  assert.match(intelligence, /source_item\.payload->>'quality_status' = 'accepted'/);
+});

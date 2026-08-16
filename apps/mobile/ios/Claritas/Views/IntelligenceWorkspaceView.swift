@@ -102,45 +102,74 @@ struct IntelligenceWorkspaceView: View {
     }
 
     private var eventList: some View {
-        BrandCard(title: "Prioritized stream", icon: "dot.radiowaves.left.and.right") {
-            LazyVStack(spacing: 0) {
-                ForEach(events) { event in
-                    Button {
-                        selectedID = event.id
-                    } label: {
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack {
-                                Text(event.event_type.replacingOccurrences(of: "_", with: " ").uppercased())
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                severityBadge(event.severity)
-                            }
-                            Text(event.title)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .multilineTextAlignment(.leading)
-                            HStack(spacing: 8) {
-                                Label(event.location_name ?? event.primary_country_iso2 ?? "Global", systemImage: "mappin")
-                                Text("\(event.evidence_count) evidence")
-                            }
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Updated \(event.last_activity_time.formatted(date: .abbreviated, time: .standard))")
-                                if let expiresAt = event.expires_at {
-                                    Text("\(event.freshness_state == "expired" ? "Expired" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .standard))")
-                                        .foregroundStyle(event.freshness_state == "expired" ? ClaritasPalette.negativeText(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
+        BrandCard(title: "Investigations", icon: "dot.radiowaves.left.and.right") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Select an investigation to make it active. Its assessment, imagery, and linked evidence appear alongside this list.")
+                    .font(.caption)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+
+                LazyVStack(spacing: 6) {
+                    ForEach(events) { event in
+                        let isSelected = event.id == selectedID
+                        Button {
+                            selectedID = event.id
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(isSelected ? ClaritasPalette.shellAccent(for: colorScheme) : Color.clear)
+                                    .frame(width: 4)
+                                    .padding(.vertical, 2)
+
+                                VStack(alignment: .leading, spacing: 7) {
+                                    HStack {
+                                        Text(isSelected ? "ACTIVE INVESTIGATION" : event.event_type.replacingOccurrences(of: "_", with: " ").uppercased())
+                                            .font(.caption2.weight(.bold))
+                                            .tracking(isSelected ? 0.7 : 0)
+                                            .foregroundStyle(isSelected ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
+                                        Spacer()
+                                        severityBadge(event.severity)
+                                    }
+                                    Text(event.title)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                                        .multilineTextAlignment(.leading)
+                                    HStack(spacing: 8) {
+                                        Label(event.location_name ?? event.primary_country_iso2 ?? "Global", systemImage: "mappin")
+                                        Text("\(event.domain_count) lenses · \(event.evidence_count) evidence")
+                                    }
+                                    .font(.caption2)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Updated \(event.last_activity_time.formatted(date: .abbreviated, time: .standard))")
+                                        if let expiresAt = event.expires_at {
+                                            Text("\(event.freshness_state == "expired" ? "Expired" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .standard))")
+                                                .foregroundStyle(event.freshness_state == "expired" ? ClaritasPalette.negativeText(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
+                                        }
+                                    }
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 }
                             }
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .padding(11)
+                            .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                            .background(
+                                isSelected ? ClaritasPalette.shellHighlight(for: colorScheme) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(
+                                        isSelected ? ClaritasPalette.shellAccent(for: colorScheme).opacity(0.48) : Color.clear,
+                                        lineWidth: 1
+                                    )
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 12))
                         }
-                        .padding(.vertical, 11)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("\(isSelected ? "Active investigation" : "Open investigation"): \(event.title)")
+                        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    if event.id != events.last?.id { Divider() }
                 }
             }
         }
@@ -164,6 +193,10 @@ struct IntelligenceWorkspaceView: View {
         } else if let detail, detail.event.id == selectedID {
             VStack(alignment: .leading, spacing: 14) {
                 BrandCard(title: "Assessment", icon: "scope") {
+                    Label("ACTIVE INVESTIGATION", systemImage: "scope")
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.9)
+                        .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                     HStack(spacing: 8) {
                         severityBadge(detail.event.severity)
                         Text(detail.event.status.uppercased())
@@ -239,66 +272,85 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
-                BrandCard(title: "Satellite context", icon: "sensor.tag.radiowaves.forward") {
-                    Text("Event-scoped imagery can show physical conditions at this area of interest. It is context—not automatic proof of a report or its cause.")
+                BrandCard(title: "Event imagery", icon: "sensor.tag.radiowaves.forward") {
+                    Text("Visual context for the active investigation: \(detail.event.title)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    Text("Images stay with the selected event so their location and evidence status remain clear. They provide context, not automatic proof of a report or its cause.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
 
-                    if !detail.earth_observations.isEmpty {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label("PROCESSED EVENT EVIDENCE", systemImage: "checkmark.seal")
+                    if let observation = detail.earth_observations.sortedForDisplay.first(where: { $0.preferredDisplayAsset != nil }) {
+                        VStack(alignment: .leading, spacing: 9) {
+                            EventImageryHero(observation: observation)
+                            Label("EVENT-SPECIFIC OBSERVATION", systemImage: "checkmark.seal")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(alignment: .top, spacing: 10) {
-                                    ForEach(detail.earth_observations.sortedForDisplay.prefix(5)) { observation in
-                                        EarthObservationTile(observation: observation)
-                                            .frame(width: 250)
+                            Text("Linked to this investigation and its mapped area · \(observation.displayProductName) captured \(observation.capture_start.formatted(date: .abbreviated, time: .shortened)).")
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            if let interpretation = observation.model_interpretation?.summary, !interpretation.isEmpty {
+                                Text(interpretation)
+                                    .font(.caption2)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    .lineLimit(3)
+                            }
+                        }
+
+                        let additionalObservations = Array(detail.earth_observations.sortedForDisplay
+                            .filter { $0.preferredDisplayAsset != nil }
+                            .dropFirst()
+                            .prefix(4))
+                        if !additionalObservations.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("MORE OBSERVATIONS FOR THIS EVENT")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        ForEach(additionalObservations) { observation in
+                                            EarthObservationTile(observation: observation)
+                                                .frame(width: 250)
+                                        }
                                     }
+                                    .padding(.vertical, 1)
                                 }
                             }
                         }
-                    }
-
-                    if let layer = gibsTrueColorLayer {
-                        VStack(alignment: .leading, spacing: 8) {
+                    } else if let layer = gibsTrueColorLayer {
+                        VStack(alignment: .leading, spacing: 9) {
+                            EventImageryHero(browseLayer: layer, unavailableLabel: "NASA context preview unavailable")
                             HStack {
-                                Text("REGIONAL BROWSE FALLBACK · NOT PROOF")
+                                Text("REGIONAL BROWSE CONTEXT · NOT PROOF")
                                     .font(.caption2.weight(.bold))
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 4)
-                                    .background(.secondary.opacity(0.12), in: Capsule())
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 Spacer()
-                                Text(layer.date).font(.caption2).foregroundStyle(.secondary)
+                                Text(layer.date)
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                             }
-                            if URL(string: layer.preview_url) != nil {
-                                AuthenticatedRemoteImage(url: layer.preview_url, unavailableLabel: "NASA context preview unavailable")
-                                .frame(height: 120)
-                                .background(.secondary.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            }
-                            Text(layer.title).font(.caption.weight(.semibold))
+                            Text("\(layer.title) is associated with this event’s mapped area, but it is not event-specific observation evidence.")
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                             Text(gibsContext?.notice ?? "NASA GIBS browse imagery provides context and is not proof of physical change or causation.")
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                             if let sourceURL = URL(string: layer.provenance.source_url) {
                                 Link("NASA GIBS provenance", destination: sourceURL)
                                     .font(.caption2.weight(.semibold))
                             }
                             Text(layer.provenance.attribution)
                                 .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         }
                         .padding(10)
-                        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-                    }
-
-                    if detail.earth_observations.isEmpty {
+                        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 14))
+                    } else {
                         Label("No defensible event-specific observation is available yet", systemImage: "photo.badge.exclamationmark")
                             .font(.subheadline.weight(.semibold))
                         Text("The evidence thread remains usable without imagery. Claritas never substitutes a scene from an unrelated event or location.")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                     }
                 }
 
@@ -334,6 +386,42 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
+                if !detail.evidence.isEmpty {
+                    let evidenceByDomain = Dictionary(grouping: detail.evidence, by: \.domain)
+                    BrandCard(title: "How signals link to this event", icon: "link") {
+                        Text("Every source below is attached to the active investigation. “Likely linked” means the recorded linkage passed a governed threshold; it does not mean one signal caused another.")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], spacing: 10) {
+                            ForEach(evidenceByDomain.keys.sorted(), id: \.self) { domain in
+                                let records = evidenceByDomain[domain] ?? []
+                                let hasLikelyLink = records.contains {
+                                    IntelligenceLinkagePresentation.decision(in: $0.correlation_factors) == "attached"
+                                }
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 7) {
+                                        Image(systemName: signalDomainIcon(domain))
+                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                        Text("\(signalDomainLabel(domain)) · \(records.count)")
+                                            .font(.caption.weight(.bold))
+                                        Spacer(minLength: 0)
+                                    }
+                                    Text(hasLikelyLink ? "LIKELY LINKED SIGNALS" : "EVENT EVIDENCE")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(hasLikelyLink ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
+                                    Text(signalLinkExplanation(records))
+                                        .font(.caption2)
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                        .lineLimit(3)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+                                .padding(10)
+                                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 11))
+                            }
+                        }
+                    }
+                }
+
                 BrandCard(title: "Evidence thread", icon: "point.topleft.down.to.point.bottomright.curvepath") {
                     ForEach(detail.evidence.sorted { $0.observed_at < $1.observed_at }) { item in
                         HStack(alignment: .top, spacing: 10) {
@@ -353,6 +441,26 @@ struct IntelligenceWorkspaceView: View {
                                     Text(item.observed_at.formatted(date: .abbreviated, time: .shortened))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
+                                }
+                                if item.correlation_factors != nil {
+                                    HStack(spacing: 6) {
+                                        Label(
+                                            IntelligenceLinkagePresentation.label(for: item.correlation_factors),
+                                            systemImage: "link.badge.plus"
+                                        )
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                                        if IntelligenceLinkagePresentation.decision(in: item.correlation_factors) == "attached",
+                                           let score = item.correlation_score {
+                                            Text("Match score \(Int((score * 100).rounded()))%")
+                                                .font(.caption2.monospacedDigit())
+                                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                        }
+                                    }
+                                    Text(IntelligenceLinkagePresentation.explanation(for: item.correlation_factors))
+                                        .font(.caption2)
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                        .lineLimit(2)
                                 }
                                 Text(item.source_title ?? item.evidence_type.replacingOccurrences(of: "_", with: " ").capitalized)
                                     .font(.caption.weight(.semibold))
@@ -403,33 +511,40 @@ struct IntelligenceWorkspaceView: View {
                 }
 
                 if !detail.related_events.isEmpty {
-                    BrandCard(title: "Related investigations", icon: "point.3.connected.trianglepath.dotted") {
-                        Text("Relationships are qualified context, not asserted causation.")
+                    BrandCard(title: "Likely related investigations", icon: "point.3.connected.trianglepath.dotted") {
+                        Text("These investigations met a qualified location, spatial, or entity anchor. They are contextual links, not asserted causation.")
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         ForEach(detail.related_events) { event in
                             Button { selectedID = event.id } label: {
                                 HStack(alignment: .top, spacing: 9) {
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Text(event.relationship.replacingOccurrences(of: "_", with: " ").uppercased())
+                                        Text("LIKELY RELATED · \(event.relationship.replacingOccurrences(of: "_", with: " ").uppercased())")
                                             .font(.caption2.weight(.bold))
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                                         Text(event.title)
                                             .font(.subheadline.weight(.semibold))
-                                            .foregroundStyle(.primary)
+                                            .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                         Text("\(Int(event.confidence * 100))% relationship confidence · \(Int(event.relevance_score * 100))% relevance")
                                             .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                         if let rationale = event.rationale, !rationale.isEmpty {
-                                            Text(rationale).font(.caption2).foregroundStyle(.secondary)
+                                            Text(rationale).font(.caption2).foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                         }
                                     }
                                     Spacer()
                                     severityBadge(event.severity)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 }
+                                .padding(10)
+                                .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Open likely related investigation: \(event.title)")
                             if event.id != detail.related_events.last?.id { Divider() }
                         }
                     }
@@ -505,7 +620,7 @@ struct IntelligenceWorkspaceView: View {
             if let requested = model.selectedIntelligenceEventID {
                 selectedID = requested
                 model.selectedIntelligenceEventID = nil
-            } else if selectedID == nil {
+            } else if selectedID == nil || !rows.contains(where: { $0.id == selectedID }) {
                 selectedID = rows.first?.id
             }
             error = nil
@@ -628,6 +743,46 @@ struct IntelligenceWorkspaceView: View {
             .background((severity == .critical ? Color.red : severity == .high ? Color.orange : Color.secondary).opacity(0.12), in: Capsule())
     }
 
+    private func signalDomainLabel(_ domain: String) -> String {
+        switch domain {
+        case "news": return "News reporting"
+        case "weather": return "Weather"
+        case "transport": return "Transport"
+        case "podcast": return "Podcast"
+        case "earth_observation": return "Earth observation"
+        case "market": return "Market"
+        case "disaster": return "Disaster monitoring"
+        default: return domain.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    private func signalDomainIcon(_ domain: String) -> String {
+        switch domain {
+        case "news": return "newspaper"
+        case "weather": return "cloud.sun"
+        case "transport": return "point.topleft.down.to.point.bottomright.curvepath"
+        case "podcast": return "mic"
+        case "earth_observation", "disaster": return "sensor.tag.radiowaves.forward"
+        case "market": return "chart.line.uptrend.xyaxis"
+        default: return "dot.radiowaves.left.and.right"
+        }
+    }
+
+    private func signalLinkExplanation(_ records: [IntelligenceEvidence]) -> String {
+        let attached = records.filter {
+            IntelligenceLinkagePresentation.decision(in: $0.correlation_factors) == "attached"
+        }
+        if let linked = attached.first {
+            return IntelligenceLinkagePresentation.explanation(for: linked.correlation_factors)
+        }
+        if let sourceRecord = records.first(where: {
+            IntelligenceLinkagePresentation.decision(in: $0.correlation_factors) == "created"
+        }) {
+            return IntelligenceLinkagePresentation.explanation(for: sourceRecord.correlation_factors)
+        }
+        return "\(records.count) \(records.count == 1 ? "record is" : "records are") attached as labelled event evidence."
+    }
+
     private func evidenceLabel(_ relationship: String) -> String {
         switch relationship {
         case "reported": return "Reported"
@@ -714,7 +869,7 @@ struct EarthObservationWorkspaceView: View {
                         detail: "Browse governed acquisitions here. Open Signal desk to understand why an image matters to a specific event."
                     )
 
-                    IntelligenceEventPulseView()
+                    IntelligenceEventPulseView(sourceLens: "imagery")
 
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -823,17 +978,28 @@ struct IntelligenceEventPulseView: View {
     @State private var events: [IntelligenceEvent] = []
     @State private var isLoading = true
     var presentation: Presentation = .list
+    var sourceLens: String? = nil
+
+    private var pulseTitle: String {
+        guard let sourceLens, !sourceLens.isEmpty else { return "Correlated event pulse" }
+        return "Investigations in \(sourceLens) scope"
+    }
 
     var body: some View {
         Group {
             if isLoading {
-                BrandCard(title: "Correlated event pulse", icon: "dot.radiowaves.left.and.right") {
+                BrandCard(title: pulseTitle, icon: "dot.radiowaves.left.and.right") {
                     ProgressView("Loading linked events")
                         .font(.caption)
                         .frame(maxWidth: .infinity, minHeight: 46)
                 }
             } else if !events.isEmpty {
-                BrandCard(title: "Correlated event pulse", icon: "dot.radiowaves.left.and.right") {
+                BrandCard(title: pulseTitle, icon: "dot.radiowaves.left.and.right") {
+                    if let sourceLens, !sourceLens.isEmpty {
+                        Text("Shown because these investigations are active in the current geography. Open one to verify whether \(sourceLens) evidence is attached; scope overlap alone is not a causal link.")
+                            .font(.caption2)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    }
                     if presentation == .horizontal {
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(spacing: 10) {
@@ -933,6 +1099,70 @@ struct IntelligenceEventPulseView: View {
     }
 }
 
+private struct EventImageryHero: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let observation: EarthObservation?
+    let browseLayer: GibsEventLayer?
+    let unavailableLabel: String
+
+    init(observation: EarthObservation) {
+        self.observation = observation
+        self.browseLayer = nil
+        self.unavailableLabel = "Event observation unavailable"
+    }
+
+    init(browseLayer: GibsEventLayer, unavailableLabel: String) {
+        self.observation = nil
+        self.browseLayer = browseLayer
+        self.unavailableLabel = unavailableLabel
+    }
+
+    private var contextLabel: String {
+        if let observation { return observation.displayProductName.uppercased() }
+        return "REGIONAL BROWSE CONTEXT"
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let asset = observation?.preferredDisplayAsset {
+                AuthenticatedEarthImage(path: asset.url, contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let browseLayer {
+                AuthenticatedRemoteImage(
+                    url: browseLayer.preview_url,
+                    unavailableLabel: unavailableLabel,
+                    contentMode: .fit
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Image(systemName: "photo.badge.exclamationmark")
+                    .font(.title2)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            Text(contextLabel)
+                .font(.caption2.weight(.bold))
+                .tracking(0.7)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.black.opacity(0.68), in: Capsule())
+                .padding(10)
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .background(ClaritasPalette.shellSidebar(for: colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(ClaritasPalette.shellBorderStrong(for: colorScheme), lineWidth: 1)
+        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(observation == nil ? "Regional browse context image" : "Event-specific observation image")
+    }
+}
+
 private struct EarthObservationTile: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
@@ -942,12 +1172,14 @@ private struct EarthObservationTile: View {
         VStack(alignment: .leading, spacing: 9) {
             if let asset = observation.preferredDisplayAsset {
                 AuthenticatedEarthImage(path: asset.url, contentMode: .fit)
-                    .frame(height: 145)
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .background(ClaritasPalette.shellSidebar(for: colorScheme))
                     .clipShape(RoundedRectangle(cornerRadius: 11))
             } else {
                 Image(systemName: "photo.badge.exclamationmark")
-                    .frame(maxWidth: .infinity, minHeight: 145)
+                    .frame(maxWidth: .infinity)
+                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
                     .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 11))
             }
             Text(observation.location_name ?? "Monitored area").font(.subheadline.weight(.semibold))
@@ -1092,6 +1324,7 @@ struct AuthenticatedRemoteImage: View {
     @EnvironmentObject private var model: AppModel
     let url: String
     var unavailableLabel = "Satellite image unavailable"
+    var contentMode: ContentMode = .fit
     @State private var image: UIImage?
     @State private var loadError: String?
     @State private var retryID = 0
@@ -1099,7 +1332,7 @@ struct AuthenticatedRemoteImage: View {
     var body: some View {
         Group {
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+                Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else if let loadError {
                 VStack(spacing: 8) {
                     Label(unavailableLabel, systemImage: "photo.badge.exclamationmark")

@@ -39,6 +39,11 @@ private struct NewsRow: View {
     var onSelectCountry: (String) -> Void
     var onOpenEvent: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    private var regularThumbnailSize: CGSize {
+        horizontalSizeClass == .regular ? CGSize(width: 176, height: 110) : CGSize(width: 120, height: 75)
+    }
 
     var body: some View {
         if compact {
@@ -52,7 +57,7 @@ private struct NewsRow: View {
         HStack(alignment: .top, spacing: 10) {
             if let imageURL = proxiedImageURL() {
                 RemoteImage(url: imageURL)
-                    .frame(width: 74, height: 54)
+                    .frame(width: 84, height: 60)
                     .background(ClaritasPalette.shellSurface(for: colorScheme))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
@@ -100,12 +105,33 @@ private struct NewsRow: View {
                     Button {
                         onOpenEvent(event.id)
                     } label: {
-                        Label("\(item.linked_events.count) linked \(item.linked_events.count == 1 ? "event" : "events")", systemImage: "link")
-                            .font(.caption2.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 5) {
+                                Label(IntelligenceLinkagePresentation.label(for: event.correlation_factors), systemImage: "link.badge.plus")
+                                if item.linked_events.count > 1 {
+                                    Text("+\(item.linked_events.count - 1)")
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                            }
+                            .font(.caption2.weight(.bold))
+                            Text(event.title)
+                                .font(.caption2.weight(.semibold))
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(1)
+                            Text(IntelligenceLinkagePresentation.explanation(for: event.correlation_factors))
+                                .font(.caption2)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                        .padding(8)
+                        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 9))
+                        .contentShape(RoundedRectangle(cornerRadius: 9))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                    .accessibilityLabel("Open linked event: \(event.title)")
+                    .accessibilityLabel("Open \(IntelligenceLinkagePresentation.label(for: event.correlation_factors).lowercased()): \(event.title)")
                 }
             }
             Spacer(minLength: 0)
@@ -118,7 +144,7 @@ private struct NewsRow: View {
         HStack(alignment: .top, spacing: 12) {
             if let imageURL = proxiedImageURL() {
                 RemoteImage(url: imageURL)
-                    .frame(width: 120, height: 75)
+                    .frame(width: regularThumbnailSize.width, height: regularThumbnailSize.height)
                     .background(ClaritasPalette.shellSurface(for: colorScheme))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
@@ -195,9 +221,9 @@ private struct NewsRow: View {
                 }
                 if !item.linked_events.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("LINKED SIGNALS · \(item.linked_events.count)")
+                        Text("EVENT LINKS · \(item.linked_events.count)")
                             .font(.caption2.weight(.bold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         ForEach(item.linked_events.prefix(3)) { event in
                             Button {
                                 onOpenEvent(event.id)
@@ -207,19 +233,40 @@ private struct NewsRow: View {
                                         ? "sensor.tag.radiowaves.forward"
                                         : "dot.radiowaves.left.and.right")
                                     VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 5) {
+                                            Text(IntelligenceLinkagePresentation.label(for: event.correlation_factors))
+                                                .font(.caption2.weight(.bold))
+                                                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                                            if IntelligenceLinkagePresentation.decision(in: event.correlation_factors) == "attached",
+                                               let score = event.correlation_score {
+                                                Text("Match score \(Int((score * 100).rounded()))%")
+                                                    .font(.caption2.monospacedDigit())
+                                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                            }
+                                        }
                                         Text(event.title)
                                             .font(.caption.weight(.semibold))
                                             .lineLimit(2)
                                         Text("\(event.domain_count) lenses · \(event.evidence_count) records · \(Int(event.confidence * 100))% confidence")
                                             .font(.caption2)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                        Text(IntelligenceLinkagePresentation.explanation(for: event.correlation_factors))
+                                            .font(.caption2)
+                                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                            .lineLimit(2)
                                     }
+                                    Spacer(minLength: 4)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
+                                .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                                .padding(9)
+                                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
+                                .contentShape(RoundedRectangle(cornerRadius: 10))
                             }
-                            .buttonStyle(.bordered)
-                            .accessibilityLabel("Open linked signal: \(event.title)")
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Open \(IntelligenceLinkagePresentation.label(for: event.correlation_factors).lowercased()): \(event.title)")
                         }
                         if item.linked_events.count > 3 {
                             Text("+\(item.linked_events.count - 3) more linked investigations")

@@ -23,13 +23,23 @@ describe("PriorityNewsList", () => {
         title: "Fire near energy infrastructure",
         severity: "high",
         correlation_score: 0.87,
+        correlation_factors: {
+          decision: "attached",
+          location: 1,
+          temporal: 0.9,
+          event_type: 1,
+        },
         earth_observation_state: "imagery_available",
       }],
     };
     render(<PriorityNewsList items={[item]} selectedId={item.id} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountryName={() => "United Arab Emirates"} onToggle={() => undefined} onSelectCountry={() => undefined} onOpenEvent={onOpenEvent} />);
     expect(screen.getAllByText(/imagery available/i).length).toBeGreaterThan(0);
-    expect(screen.getByTitle(/Aug 11, 2026.*08:00:00/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Fire near energy infrastructure/i }));
+    expect(screen.getByText("Likely linked investigations")).toBeTruthy();
+    expect(screen.getByText(/Why shown: the same named location/i)).toBeTruthy();
+    expect(document.querySelector('time[datetime="2026-08-11T08:00:00Z"]')).toBeTruthy();
+    const linkedEventButton = screen.getByRole("button", { name: /Open likely linked event investigation: Fire near energy infrastructure/i });
+    expect((linkedEventButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(linkedEventButton);
     expect(onOpenEvent).toHaveBeenCalledWith(item.linked_events?.[0].id);
   });
 

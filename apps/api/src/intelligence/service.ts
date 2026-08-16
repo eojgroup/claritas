@@ -203,6 +203,33 @@ export function intelligenceEventEarthObservationStateSql() {
   END`;
 }
 
+/**
+ * Prevent an event backed only by a rejected article from remaining visible
+ * merely because a provider rediscovered it. Non-news evidence stays eligible;
+ * an event with independent weather, transport, or observation evidence is
+ * therefore still available even when one attached article fails quality.
+ */
+function intelligenceEventHasDisplayableEvidenceSql(eventAlias = "event") {
+  return `EXISTS (
+    SELECT 1
+    FROM intelligence_event_evidence evidence
+    LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
+    LEFT JOIN item source_item ON source_item.id=CASE
+      WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
+        THEN evidence.source_record_id::bigint END
+    WHERE evidence.event_id=${eventAlias}.id
+      AND (
+        evidence.source_record_type <> 'item'
+        OR (
+          CASE WHEN lower(COALESCE(evidence_source.name, '')) = 'gdelt'
+            THEN source_item.payload->>'quality_status' = 'accepted'
+            ELSE COALESCE(source_item.payload->>'quality_status', 'accepted') = 'accepted'
+          END
+        )
+      )
+  )`;
+}
+
 export async function listIntelligenceEvents(options: {
   limit?: number;
   offset?: number;
@@ -222,6 +249,7 @@ export async function listIntelligenceEvents(options: {
       AND event.source_diversity <= 1
       AND event.relevance_score < 0.65
     )`,
+    intelligenceEventHasDisplayableEvidenceSql("event"),
   ];
   const add = (value: unknown) => { params.push(value); return `$${params.length}`; };
   const explicitlyArchivedStatus = options.status === "resolved" || options.status === "dismissed";
@@ -251,7 +279,17 @@ export async function listIntelligenceEvents(options: {
             COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,location.latitude) AS latitude,
             COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude,
             location.monitoring_tier,
-            (SELECT count(*)::int FROM intelligence_event_evidence evidence WHERE evidence.event_id = event.id) AS evidence_count,
+            (SELECT count(*)::int FROM intelligence_event_evidence evidence
+             LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
+             LEFT JOIN item source_item ON source_item.id=CASE
+               WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
+                 THEN evidence.source_record_id::bigint END
+             WHERE evidence.event_id = event.id
+               AND (evidence.source_record_type <> 'item'
+                 OR (CASE WHEN lower(COALESCE(evidence_source.name, '')) = 'gdelt'
+                     THEN source_item.payload->>'quality_status' = 'accepted'
+                     ELSE COALESCE(source_item.payload->>'quality_status', 'accepted') = 'accepted'
+                   END))) AS evidence_count,
             ${intelligenceEventExpiresAtSql("event")} AS expires_at,
             (${intelligenceEventEarthObservationStateSql()}) AS earth_observation_state
      FROM intelligence_event event
@@ -272,25 +310,36 @@ export async function getIntelligenceEvent(eventId: string) {
               COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,location.latitude) AS latitude,
               COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude,
               location.monitoring_tier,
-              (SELECT count(*)::int FROM intelligence_event_evidence evidence WHERE evidence.event_id = event.id) AS evidence_count,
+              (SELECT count(*)::int FROM intelligence_event_evidence evidence
+               LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
+               LEFT JOIN item source_item ON source_item.id=CASE
+                 WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
+                   THEN evidence.source_record_id::bigint END
+               WHERE evidence.event_id = event.id
+                 AND (evidence.source_record_type <> 'item'
+                   OR (CASE WHEN lower(COALESCE(evidence_source.name, '')) = 'gdelt'
+                       THEN source_item.payload->>'quality_status' = 'accepted'
+                       ELSE COALESCE(source_item.payload->>'quality_status', 'accepted') = 'accepted'
+                     END))) AS evidence_count,
               ${intelligenceEventExpiresAtSql("event")} AS expires_at,
               (${intelligenceEventEarthObservationStateSql()}) AS earth_observation_state
        FROM intelligence_event event
        LEFT JOIN intelligence_location location ON location.id = event.primary_location_id
-       WHERE event.id = $1::uuid`,
+       WHERE event.id = $1::uuid
+         AND ${intelligenceEventHasDisplayableEvidenceSql("event")}`,
       [eventId],
     ),
     query(
       `SELECT evidence.*, source.name AS source_name,
               location.canonical_name AS location_name,
-              COALESCE(source_item.title,
+              COALESCE(source_item.title, podcast_signal.title,
                 NULLIF(concat_ws(' / ',global_source.actor1_name,global_source.actor2_name),''),
                 global_source.action_geo_name) AS source_title,
-              COALESCE(source_item.summary,
+              COALESCE(source_item.summary, podcast_signal.summary,
                 CASE WHEN global_source.id IS NOT NULL THEN
                   'Structured GDELT event near ' || COALESCE(global_source.action_geo_name,'an unspecified location')
                 END) AS source_summary,
-              COALESCE(source_item.url,global_source.url,evidence.provenance->>'url') AS source_url,
+              COALESCE(source_item.url,podcast_item.url,global_source.url,evidence.provenance->>'url') AS source_url,
               global_source.event_code AS gdelt_event_code,
               global_source.event_root_code AS gdelt_event_root_code,
               global_source.actor1_name AS gdelt_actor1_name,
@@ -309,7 +358,21 @@ export async function getIntelligenceEvent(eventId: string) {
        LEFT JOIN global_event global_source ON global_source.id=CASE
          WHEN evidence.source_record_type='global_event' AND evidence.source_record_id ~ '^[0-9]+$'
            THEN evidence.source_record_id::bigint END
+       LEFT JOIN intelligence_signal podcast_signal
+         ON evidence.source_record_type='intelligence_signal'
+        AND evidence.source_record_id=concat(
+          'podcast:',podcast_signal.episode_id::text,':',podcast_signal.signal_type,':',podcast_signal.canonical_key
+        )
+       LEFT JOIN podcast_episode podcast_episode ON podcast_episode.id=podcast_signal.episode_id
+       LEFT JOIN item podcast_item ON podcast_item.id=podcast_episode.item_id
        WHERE evidence.event_id = $1::uuid
+         AND (
+           evidence.source_record_type <> 'item'
+           OR (CASE WHEN lower(COALESCE(source.name, '')) = 'gdelt'
+               THEN source_item.payload->>'quality_status' = 'accepted'
+               ELSE COALESCE(source_item.payload->>'quality_status', 'accepted') = 'accepted'
+             END)
+         )
        ORDER BY evidence.observed_at DESC, evidence.id`,
       [eventId],
     ),
@@ -662,8 +725,16 @@ async function persistRelatedEventRelationships(
  * Resolves stable source identity first, then evaluates recent event candidates.
  * The advisory lock serializes signals sharing the same defensible anchor so
  * independent consumers cannot create parallel canonical events concurrently.
+ *
+ * Some evidence (for example a podcast transcript claim) is valuable only as
+ * qualified context for an event that already exists. Those callers use
+ * `createWhenUnmatched: false` so a loose mention cannot create a standalone
+ * investigation merely because it shares a country or a topical phrase.
  */
-export async function correlateAndUpsertIntelligenceSignal(input: IntelligenceSignalInput) {
+async function correlateIntelligenceSignal(
+  input: IntelligenceSignalInput,
+  options: { createWhenUnmatched: boolean },
+) {
   return withTransaction(async (client) => {
     const entityKeys = normalizedEntityKeys(input.entityKeys);
     const location = await loadSignalLocation(client, input.primaryLocationId);
@@ -729,6 +800,11 @@ export async function correlateAndUpsertIntelligenceSignal(input: IntelligenceSi
     const { strongest, accepted, decisionSubject } = selectCorrelationOutcome(ranked);
     if (accepted) await client.query(`SELECT id FROM intelligence_event WHERE id=$1::uuid FOR UPDATE`, [accepted.candidate.id]);
 
+    // An attach-only source must have passed the same anchored correlation
+    // guard as every other cross-domain link. Country and time coincidence are
+    // intentionally insufficient and therefore leave the source unlinked.
+    if (!accepted && !options.createWhenUnmatched) return null;
+
     const decision = accepted ? "attached" as const : "created" as const;
     const methodology = accepted?.correlation.methodology ?? strongest?.correlation.methodology ?? "source-origin-v2";
     const factors = accepted
@@ -766,6 +842,26 @@ export async function correlateAndUpsertIntelligenceSignal(input: IntelligenceSi
     );
     return selected;
   });
+}
+
+/**
+ * Correlates a source into an existing event where possible, creating a new
+ * canonical event only for sources that are themselves event-generating.
+ */
+export async function correlateAndUpsertIntelligenceSignal(input: IntelligenceSignalInput) {
+  const selected = await correlateIntelligenceSignal(input, { createWhenUnmatched: true });
+  if (!selected) throw new Error("Event-generating signal unexpectedly had no correlation outcome.");
+  return selected;
+}
+
+/**
+ * Adds qualified contextual evidence only when it passes the anchored
+ * correlation policy. This is used for inherently interpretive sources such
+ * as podcast extraction, which must not create a new investigation on their
+ * own.
+ */
+export async function attachIntelligenceSignalToExistingEvent(input: IntelligenceSignalInput) {
+  return correlateIntelligenceSignal(input, { createWhenUnmatched: false });
 }
 
 export async function upsertIntelligenceSignal(input: IntelligenceSignalInput) {

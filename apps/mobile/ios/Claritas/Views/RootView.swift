@@ -740,7 +740,7 @@ struct PodcastWorkspaceView: View {
         BrandBackground {
             ScrollView {
                 LazyVStack(spacing: 16) {
-                    IntelligenceEventPulseView()
+                    IntelligenceEventPulseView(sourceLens: "podcast")
                     controls
                     metrics
                     if !model.podcasts.isEmpty {

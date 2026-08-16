@@ -1,4 +1,8 @@
 import crypto from "node:crypto";
+import { lookup as dnsLookup } from "node:dns/promises";
+import http from "node:http";
+import https from "node:https";
+import { isIP } from "node:net";
 import { unzipSync } from "fflate";
 import worldCountries from "world-countries";
 import { query } from "../db";
@@ -9,6 +13,11 @@ const DEFAULT_DATA_BASE_URL = "https://storage.googleapis.com/data.gdeltproject.
 const GAL_RSS_URL = "https://storage.googleapis.com/data.gdeltproject.org/gdeltv3/gal/feed.rss";
 export const DEFAULT_GDELT_DOC_QUERY = "(geopolitics OR security OR technology OR markets OR climate OR energy OR disaster OR emergency OR shipping OR transport OR logistics OR agriculture OR food OR \"public health\")";
 const ATTRIBUTION = "GDELT Project";
+const GDELT_DOC_DEFAULT_MAX_PUBLISH_AGE_HOURS = 72;
+const GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS = 3;
+const GDELT_MAX_FUTURE_SKEW_MS = 5 * 60_000;
+const GDELT_ARTICLE_HTML_MAX_BYTES = 350_000;
+const GDELT_ARTICLE_VERIFICATION_CONCURRENCY = 4;
 
 type GdeltDocArticle = {
   url?: string;
@@ -22,6 +31,35 @@ type GdeltDocArticle = {
 };
 
 type GdeltDocResponse = { articles?: GdeltDocArticle[] };
+
+export type GdeltPublicationTime = {
+  /**
+   * A date published by the source itself, never GDELT's discovery time.
+   * `url_date` is intentionally marked as day precision because it is a
+   * conservative fallback when a publisher does not expose structured data.
+   */
+  publishedAt: string;
+  source: "article_metadata" | "json_ld" | "html_time" | "url_date";
+  precision: "second" | "day";
+};
+
+export type GdeltDocQualityResult = {
+  accepted: boolean;
+  reason:
+    | "accepted"
+    | "missing_title"
+    | "missing_or_unsafe_url"
+    | "non_article_url"
+    | "invalid_provider_seen_at"
+    | "provider_seen_at_in_future"
+    | "provider_seen_at_outside_window"
+    | "publisher_publication_unverified"
+    | "publisher_published_at_invalid"
+    | "publisher_published_at_in_future"
+    | "publisher_published_at_stale"
+    | "publisher_date_after_provider_seen";
+  publication: GdeltPublicationTime | null;
+};
 
 export type GdeltGalArticle = {
   title: string;
@@ -135,6 +173,492 @@ function asNumber(value: string | undefined): number | null {
 function nonEmpty(value: string | undefined | null): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function clampHours(value: unknown, fallback: number): number {
+  return clampInt(value, 1, 168, fallback);
+}
+
+function parseGdeltTimespanHours(value: string | undefined): number {
+  const match = /^(\d+)\s*(min|m|h|d|w)$/i.exec(value?.trim() ?? "");
+  if (!match) return 1;
+  const amount = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(amount) || amount <= 0) return 1;
+  const hoursByUnit: Record<string, number> = { min: 1 / 60, m: 1 / 60, h: 1, d: 24, w: 168 };
+  return Math.min(amount * (hoursByUnit[match[2].toLowerCase()] ?? 1), 168);
+}
+
+function gdeltProviderSeenMaxAgeHours(params: GdeltIngestParams): number {
+  const derived = Math.max(
+    GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS,
+    Math.ceil(parseGdeltTimespanHours(params.timespan) + 1),
+  );
+  return clampHours(process.env.GDELT_DOC_MAX_PROVIDER_SEEN_AGE_HOURS, derived);
+}
+
+function gdeltPublisherMaxAgeHours(): number {
+  return clampHours(process.env.GDELT_DOC_MAX_PUBLISH_AGE_HOURS, GDELT_DOC_DEFAULT_MAX_PUBLISH_AGE_HOURS);
+}
+
+function unbracketHostname(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, "");
+}
+
+function isUnsafeArticleHost(hostname: string): boolean {
+  const host = unbracketHostname(hostname).trim().toLowerCase().replace(/\.$/, "");
+  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+  if (/^127\./.test(host) || /^0\./.test(host) || /^169\.254\./.test(host) || /^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  return host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:");
+}
+
+function usableGdeltArticleUrl(value: string | null | undefined): URL | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      !url.hostname ||
+      url.username ||
+      url.password ||
+      isUnsafeArticleHost(url.hostname)
+    ) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+const GDELT_NON_ARTICLE_PATH = /\/(?:author|authors|tag|tags|category|categories|search|profile|profiles|topic|topics|archive|archives)(?:\/|$)/i;
+const GDELT_LOW_VALUE_TITLE = /^(?:home|homepage|latest news|news|world|sports|weather|login|sign in|subscribe|contact us|about us|privacy policy)$/i;
+
+function isLikelyArticleUrl(url: URL): boolean {
+  return url.pathname.length >= 5 && url.pathname !== "/" && !GDELT_NON_ARTICLE_PATH.test(url.pathname);
+}
+
+const RFC_MONTHS: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
+function isValidCalendarDate(year: number, monthIndex: number, day: number): boolean {
+  const candidate = new Date(Date.UTC(year, monthIndex, day));
+  return candidate.getUTCFullYear() === year
+    && candidate.getUTCMonth() === monthIndex
+    && candidate.getUTCDate() === day;
+}
+
+function hasValidPublisherCalendarDate(value: string): boolean {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (iso) {
+    return isValidCalendarDate(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  }
+  const rfc = /^(?:[A-Za-z]{3},\s*)?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s/.exec(value);
+  if (!rfc) return false;
+  const monthIndex = RFC_MONTHS[rfc[2].toLowerCase()];
+  return monthIndex != null && isValidCalendarDate(Number(rfc[3]), monthIndex, Number(rfc[1]));
+}
+
+function normalizePublisherDate(value: unknown): { iso: string; precision: "second" | "day" } | null {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  if (!raw || raw.length > 200) return null;
+  // Do not allow JavaScript's permissive date parser to turn arbitrary prose
+  // into a current-looking timestamp. These cover ISO metadata and RFC 822
+  // dates used by publisher markup while retaining an explicit source trail.
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+  // A wall-clock time without an offset is ambiguous across publishers and
+  // must not become an apparently precise UTC timestamp in the briefing.
+  const isIso = /^\d{4}-\d{2}-\d{2}[Tt ][0-2]\d:[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:[Zz]|[+-][0-2]\d:?[0-5]\d)$/.test(raw);
+  const isRfcLike = /^(?:[A-Za-z]{3},\s*)?\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:GMT|UTC|[+-]\d{4})$/.test(raw);
+  if (!isDateOnly && !isIso && !isRfcLike) return null;
+  // Date.parse intentionally normalizes overflow (for example, 2026-02-31
+  // becomes March 3). Publisher metadata must be a real calendar date before
+  // it can pass a freshness policy.
+  if (!hasValidPublisherCalendarDate(raw)) return null;
+  const parsed = Date.parse(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return { iso: new Date(parsed).toISOString(), precision: isDateOnly ? "day" : "second" };
+}
+
+function publicationTimeFromUrl(value: string): GdeltPublicationTime | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+  const separated = /(?:^|[\/_\-.])((?:19|20)\d{2})[\/_\-.](0[1-9]|1[0-2])[\/_\-.](0[1-9]|[12]\d|3[01])(?:$|[\/_\-.])/u.exec(path);
+  const compact = /(?:^|[\/_\-.])((?:19|20)\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?:$|[\/_\-.])/u.exec(path);
+  const match = separated ?? compact;
+  if (!match) return null;
+  const parsed = normalizePublisherDate(`${match[1]}-${match[2]}-${match[3]}`);
+  return parsed
+    ? { publishedAt: parsed.iso, source: "url_date", precision: "day" }
+    : null;
+}
+
+function htmlAttributes(tag: string): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  const matcher = /([^\s"'=<>`/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/gu;
+  for (const match of tag.matchAll(matcher)) {
+    const name = match[1]?.toLowerCase();
+    if (!name || name === "meta" || name === "script" || name === "time") continue;
+    attributes[name] = match[2] ?? match[3] ?? match[4] ?? "";
+  }
+  return attributes;
+}
+
+function publicationCandidate(
+  value: unknown,
+  source: GdeltPublicationTime["source"],
+): GdeltPublicationTime | null {
+  const normalized = normalizePublisherDate(value);
+  return normalized ? { publishedAt: normalized.iso, source, precision: normalized.precision } : null;
+}
+
+function jsonLdPublicationCandidates(value: unknown, candidates: GdeltPublicationTime[], depth = 0): void {
+  if (depth > 12 || value === null || value === undefined) return;
+  if (Array.isArray(value)) {
+    for (const child of value) jsonLdPublicationCandidates(child, candidates, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey === "datepublished" || normalizedKey === "datecreated") {
+      const candidate = publicationCandidate(child, "json_ld");
+      if (candidate) candidates.push(candidate);
+    }
+    jsonLdPublicationCandidates(child, candidates, depth + 1);
+  }
+}
+
+function selectConservativePublicationTime(candidates: GdeltPublicationTime[]): GdeltPublicationTime | null {
+  if (!candidates.length) return null;
+  const byDay = [...candidates].sort((left, right) => {
+    const dayOrder = left.publishedAt.slice(0, 10).localeCompare(right.publishedAt.slice(0, 10));
+    if (dayOrder !== 0) return dayOrder;
+    // When a URL and publisher metadata agree on the day, retain the most
+    // precise first-party timestamp rather than manufacturing midnight.
+    const precisionOrder = (right.precision === "second" ? 1 : 0) - (left.precision === "second" ? 1 : 0);
+    if (precisionOrder !== 0) return precisionOrder;
+    const sourceOrder: Record<GdeltPublicationTime["source"], number> = {
+      article_metadata: 4,
+      json_ld: 3,
+      html_time: 2,
+      url_date: 1,
+    };
+    return sourceOrder[right.source] - sourceOrder[left.source] || left.publishedAt.localeCompare(right.publishedAt);
+  });
+  return byDay[0] ?? null;
+}
+
+/**
+ * Extracts only publisher-originating publication dates. GDELT's `seendate`
+ * is deliberately not considered here: it tells us when GDELT discovered a
+ * URL, not when the publisher released the article.
+ */
+export function extractGdeltPublisherPublicationTime(html: string, url: string): GdeltPublicationTime | null {
+  const candidates: GdeltPublicationTime[] = [];
+  const urlCandidate = publicationTimeFromUrl(url);
+  if (urlCandidate) candidates.push(urlCandidate);
+
+  for (const match of html.matchAll(/<meta\b[^>]*>/giu)) {
+    const attributes = htmlAttributes(match[0]);
+    const keys = [attributes.property, attributes.name, attributes.itemprop]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.trim().toLowerCase());
+    if (!keys.some((key) => [
+      "article:published_time",
+      "article:published",
+      "og:published_time",
+      "datepublished",
+      "datecreated",
+      "publishdate",
+      "publication_date",
+    ].includes(key))) continue;
+    const candidate = publicationCandidate(attributes.content, "article_metadata");
+    if (candidate) candidates.push(candidate);
+  }
+
+  for (const match of html.matchAll(/<time\b[^>]*>/giu)) {
+    const attributes = htmlAttributes(match[0]);
+    const marker = `${attributes.itemprop ?? ""} ${attributes.class ?? ""}`.toLowerCase();
+    if (!/datepublished|datecreated|publish/.test(marker) && !("pubdate" in attributes)) continue;
+    const candidate = publicationCandidate(attributes.datetime, "html_time");
+    if (candidate) candidates.push(candidate);
+  }
+
+  for (const match of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/giu)) {
+    const openingTag = match[0].slice(0, match[0].indexOf(">") + 1);
+    const attributes = htmlAttributes(openingTag);
+    if (!/application\/ld\+json/i.test(attributes.type ?? "")) continue;
+    try {
+      jsonLdPublicationCandidates(JSON.parse(match[1]), candidates);
+    } catch {
+      // One malformed JSON-LD block must not invalidate other first-party
+      // metadata on the page.
+    }
+  }
+  return selectConservativePublicationTime(candidates);
+}
+
+function isPublicIpv4(address: string): boolean {
+  const octets = address.split(".").map((part) => Number(part));
+  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [first, second] = octets;
+  if (first === 0 || first === 10 || first === 127 || first >= 224) return false;
+  if (first === 100 && second >= 64 && second <= 127) return false;
+  if (first === 169 && second === 254) return false;
+  if (first === 172 && second >= 16 && second <= 31) return false;
+  if (first === 192 && (second === 0 || second === 168)) return false;
+  if (first === 198 && (second === 18 || second === 19 || second === 51)) return false;
+  if (first === 203 && second === 0) return false;
+  return true;
+}
+
+function isPublicIpAddress(address: string): boolean {
+  const normalizedAddress = unbracketHostname(address);
+  const family = isIP(normalizedAddress);
+  if (family === 4) return isPublicIpv4(normalizedAddress);
+  if (family !== 6) return false;
+  const normalized = normalizedAddress.toLowerCase();
+  const mappedIpv4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(normalized)?.[1];
+  if (mappedIpv4) return isPublicIpv4(mappedIpv4);
+  // Allow globally routed IPv6 only. This rejects loopback, unspecified,
+  // link-local, unique-local, multicast, documentation and IPv4-compatible
+  // address ranges before a request can leave the service.
+  return /^(?:2(?!001:db8:)[0-9a-f]{3}|3[0-9a-f]{3}):/i.test(normalized);
+}
+
+export function isPublicGdeltArticleAddress(address: string): boolean {
+  return isPublicIpAddress(address);
+}
+
+async function resolvePublicArticleAddress(url: URL): Promise<{ address: string; family: 4 | 6 }> {
+  const hostname = unbracketHostname(url.hostname);
+  if (isIP(hostname)) {
+    if (!isPublicIpAddress(hostname)) throw new Error("GDELT article URL resolved to a non-public address.");
+    return { address: hostname, family: isIP(hostname) as 4 | 6 };
+  }
+  const addresses = await dnsLookup(hostname, { all: true, verbatim: true });
+  const publicAddress = addresses.find((entry) => isPublicIpAddress(entry.address));
+  if (!publicAddress) throw new Error("GDELT article hostname has no public address.");
+  return { address: publicAddress.address, family: publicAddress.family as 4 | 6 };
+}
+
+type VerifiedPublisherPage = { html: string; finalUrl: string };
+
+async function requestVerifiedPublisherPage(urlValue: string, redirects = 0): Promise<VerifiedPublisherPage | null> {
+  if (redirects > 3) return null;
+  const url = usableGdeltArticleUrl(urlValue);
+  if (!url) return null;
+  const address = await resolvePublicArticleAddress(url);
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value: VerifiedPublisherPage | null): void => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    const transport = url.protocol === "https:" ? https : http;
+    const request = transport.request({
+      protocol: url.protocol,
+      hostname: unbracketHostname(url.hostname),
+      port: url.port || undefined,
+      path: `${url.pathname}${url.search}`,
+      method: "GET",
+      headers: {
+        accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+        "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
+      },
+      // Pin the request to the just-vetted DNS result. Calling global fetch
+      // after a separate lookup would permit a DNS-rebinding race.
+      lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
+      agent: false,
+    }, (response) => {
+      const statusCode = response.statusCode ?? 0;
+      const location = typeof response.headers.location === "string" ? response.headers.location : null;
+      if ([301, 302, 303, 307, 308].includes(statusCode) && location) {
+        response.resume();
+        let redirect: string;
+        try {
+          redirect = new URL(location, url).toString();
+        } catch {
+          finish(null);
+          return;
+        }
+        void requestVerifiedPublisherPage(redirect, redirects + 1).then(finish).catch(() => finish(null));
+        return;
+      }
+      if (statusCode < 200 || statusCode >= 300) {
+        response.resume();
+        finish(null);
+        return;
+      }
+      const contentType = String(response.headers["content-type"] ?? "").toLowerCase();
+      const advertisedLength = Number(response.headers["content-length"]);
+      if (
+        (contentType && !/(?:text\/html|application\/xhtml\+xml)/.test(contentType)) ||
+        (Number.isFinite(advertisedLength) && advertisedLength > GDELT_ARTICLE_HTML_MAX_BYTES)
+      ) {
+        response.resume();
+        finish(null);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let total = 0;
+      response.on("data", (chunk: Buffer | string) => {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        total += buffer.byteLength;
+        if (total > GDELT_ARTICLE_HTML_MAX_BYTES) {
+          request.destroy();
+          finish(null);
+          return;
+        }
+        chunks.push(buffer);
+      });
+      response.on("error", () => finish(null));
+      response.on("end", () => finish({ html: Buffer.concat(chunks).toString("utf8"), finalUrl: url.toString() }));
+    });
+    request.setTimeout(8_000, () => {
+      request.destroy();
+      finish(null);
+    });
+    request.on("error", () => finish(null));
+    request.end();
+  });
+}
+
+async function resolveGdeltPublisherPublicationTime(url: string): Promise<GdeltPublicationTime | null> {
+  const urlCandidate = publicationTimeFromUrl(url);
+  try {
+    const page = await requestVerifiedPublisherPage(url);
+    if (!page) return urlCandidate;
+    // The final URL receives the same conservative date check. A redirect
+    // cannot remove an older date embedded in the original canonical URL.
+    const original = extractGdeltPublisherPublicationTime(page.html, url);
+    const redirected = page.finalUrl === url
+      ? null
+      : extractGdeltPublisherPublicationTime(page.html, page.finalUrl);
+    return selectConservativePublicationTime([original, redirected].filter((value): value is GdeltPublicationTime => Boolean(value)));
+  } catch {
+    // An unambiguous publication date embedded in a canonical article URL is
+    // still more defensible than GDELT discovery time when a publisher blocks
+    // metadata requests. With neither, the article is rejected below.
+    return urlCandidate;
+  }
+}
+
+export function assessGdeltDocArticleQuality(input: {
+  title?: string | null;
+  url?: string | null;
+  providerSeenAt?: string | null;
+  publication?: GdeltPublicationTime | null;
+  now?: Date;
+  maxPublisherAgeHours?: number;
+  maxProviderSeenAgeHours?: number;
+}): GdeltDocQualityResult {
+  const title = input.title?.trim() ?? "";
+  if (!title || title.length < 12 || title.length > 500 || GDELT_LOW_VALUE_TITLE.test(title)) {
+    return { accepted: false, reason: "missing_title", publication: null };
+  }
+  const url = usableGdeltArticleUrl(input.url);
+  if (!url) return { accepted: false, reason: "missing_or_unsafe_url", publication: null };
+  if (!isLikelyArticleUrl(url)) return { accepted: false, reason: "non_article_url", publication: null };
+
+  const seenAt = input.providerSeenAt ? Date.parse(input.providerSeenAt) : Number.NaN;
+  if (!Number.isFinite(seenAt)) return { accepted: false, reason: "invalid_provider_seen_at", publication: null };
+  const now = input.now ?? new Date();
+  const nowMs = now.getTime();
+  if (seenAt > nowMs + GDELT_MAX_FUTURE_SKEW_MS) {
+    return { accepted: false, reason: "provider_seen_at_in_future", publication: null };
+  }
+  const maxProviderSeenAgeMs = clampHours(input.maxProviderSeenAgeHours, GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS) * 3_600_000;
+  if (nowMs - seenAt > maxProviderSeenAgeMs) {
+    return { accepted: false, reason: "provider_seen_at_outside_window", publication: null };
+  }
+
+  const publication = input.publication ?? null;
+  if (!publication) return { accepted: false, reason: "publisher_publication_unverified", publication: null };
+  const publishedAt = Date.parse(publication.publishedAt);
+  if (!Number.isFinite(publishedAt)) return { accepted: false, reason: "publisher_published_at_invalid", publication: null };
+  if (publishedAt > nowMs + GDELT_MAX_FUTURE_SKEW_MS) {
+    return { accepted: false, reason: "publisher_published_at_in_future", publication: null };
+  }
+  const maxPublisherAgeMs = clampHours(input.maxPublisherAgeHours, GDELT_DOC_DEFAULT_MAX_PUBLISH_AGE_HOURS) * 3_600_000;
+  if (nowMs - publishedAt > maxPublisherAgeMs) {
+    return { accepted: false, reason: "publisher_published_at_stale", publication };
+  }
+  if (publishedAt > seenAt + GDELT_MAX_FUTURE_SKEW_MS) {
+    return { accepted: false, reason: "publisher_date_after_provider_seen", publication };
+  }
+  return { accepted: true, reason: "accepted", publication };
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  callback: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(Math.max(concurrency, 1), values.length) }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= values.length) return;
+      results[index] = await callback(values[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * A quality rejection must also win against any previous copy of the same URL.
+ * Without this tombstone, a stale item that was accepted before this policy
+ * could remain sorted as current even after a later verification rejects it.
+ */
+async function quarantineGdeltArticle(
+  sourceId: number,
+  url: string | null,
+  reason: GdeltDocQualityResult["reason"],
+  checkedAt: string,
+  providerSeenAt: string | null,
+): Promise<boolean> {
+  if (!url) return false;
+  const { rows } = await query<{ id: number }>(
+    `UPDATE item
+     SET payload = item.payload || jsonb_build_object(
+           'quality_status', 'rejected',
+           'quality_rejection_reason', $3,
+           'quality_checked_at', $4
+         ) || CASE
+           WHEN $5::text IS NULL THEN '{}'::jsonb
+           ELSE jsonb_build_object('last_provider_seen_at', $5::text)
+         END,
+         updated_at = now()
+     WHERE source_id = $1
+       AND external_id = $2
+       AND kind = 'news_article'
+       AND (
+         item.payload->>'quality_status' IS DISTINCT FROM 'rejected'
+         OR item.payload->>'quality_rejection_reason' IS DISTINCT FROM $3
+       )
+     RETURNING id`,
+    [sourceId, url, reason, checkedAt, providerSeenAt],
+  );
+  return rows.length > 0;
 }
 
 export function parseGdeltTimestamp(value: string | undefined): string | null {
@@ -547,6 +1071,8 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   updated: number;
   unchanged: number;
   skipped: number;
+  quality_quarantined: number;
+  quality_rejections: Record<string, number>;
   latest_event_time: string | null;
 }> {
   const apiUrl = new URL(process.env.GDELT_DOC_API_URL || DOC_API_URL);
@@ -570,18 +1096,64 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
       )
     : { rows: [] };
   const signalsByUrl = new Map(signals.rows.map((row) => [row.url, row]));
+  const verificationNow = new Date();
+  const maxPublisherAgeHours = gdeltPublisherMaxAgeHours();
+  const maxProviderSeenAgeHours = gdeltProviderSeenMaxAgeHours(params);
+  const verifiedArticles = await mapWithConcurrency(
+    articles,
+    GDELT_ARTICLE_VERIFICATION_CONCURRENCY,
+    async (article) => {
+      const url = nonEmpty(article.url);
+      const providerSeenAt = parseGdeltTimestamp(article.seendate);
+      const preflight = assessGdeltDocArticleQuality({
+        title: article.title,
+        url,
+        providerSeenAt,
+        publication: null,
+        now: verificationNow,
+        maxPublisherAgeHours,
+        maxProviderSeenAgeHours,
+      });
+      if (preflight.reason !== "publisher_publication_unverified" || !url) {
+        return { article, url, providerSeenAt, quality: preflight };
+      }
+      const publication = await resolveGdeltPublisherPublicationTime(url);
+      return {
+        article,
+        url,
+        providerSeenAt,
+        quality: assessGdeltDocArticleQuality({
+          title: article.title,
+          url,
+          providerSeenAt,
+          publication,
+          now: verificationNow,
+          maxPublisherAgeHours,
+          maxProviderSeenAgeHours,
+        }),
+      };
+    },
+  );
   let inserted = 0;
   let updated = 0;
   let unchanged = 0;
   let skipped = 0;
+  let quarantined = 0;
+  const qualityRejections: Record<string, number> = {};
   let latestEventTime: string | null = null;
-  for (const article of articles) {
-    const url = nonEmpty(article.url);
-    const eventTime = parseGdeltTimestamp(article.seendate);
-    if (!url || !eventTime) {
+  for (const candidate of verifiedArticles) {
+    const { article, url, providerSeenAt, quality } = candidate;
+    if (!quality.accepted || !url || !providerSeenAt || !quality.publication) {
       skipped += 1;
+      qualityRejections[quality.reason] = (qualityRejections[quality.reason] ?? 0) + 1;
+      if (await quarantineGdeltArticle(sourceId, url, quality.reason, verificationNow.toISOString(), providerSeenAt)) {
+        quarantined += 1;
+      }
       continue;
     }
+    // GDELT's seendate is evidence of discovery only. Event ordering uses the
+    // verified publisher date, so a re-indexed old URL cannot become new again.
+    const eventTime = quality.publication.publishedAt;
     if (!latestEventTime || eventTime > latestEventTime) latestEventTime = eventTime;
     const publisherDomain = nonEmpty(article.domain) ?? hostnameFromUrl(url);
     const languageCode = normalizeLanguage(article.language);
@@ -609,13 +1181,25 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
       source_country_iso2: sourceCountry, language: article.language || null,
       language_code: languageCode, image_url: article.socialimage || null,
       mobile_url: article.url_mobile || null, country_inference: inference,
-      // GDELT DOC's `seendate` is a provider first-seen value emitted on the
-      // 15-minute GDELT heartbeat. It is not an exact publisher publication
-      // timestamp, even when many records share the same value.
-      time_basis: "provider_first_seen",
-      time_precision: "15_minutes",
-      provider_seen_at: eventTime,
-      publisher_published_at: null,
+      // `seendate` is GDELT's first-seen value, not an article publication
+      // timestamp. We retain it for provenance but only expose a source date
+      // that passed the publisher-date and freshness checks above.
+      time_basis: "publisher_published_verified",
+      time_precision: quality.publication.precision,
+      publication_time_source: quality.publication.source,
+      provider_seen_at: providerSeenAt,
+      first_provider_seen_at: providerSeenAt,
+      last_provider_seen_at: providerSeenAt,
+      publisher_published_at: eventTime,
+      quality_status: "accepted",
+      quality_checked_at: verificationNow.toISOString(),
+      quality_checks: {
+        provider_seen_at_valid: true,
+        publisher_date_verified: true,
+        publisher_date_fresh: true,
+        publisher_date_not_after_provider_seen: true,
+        article_url_valid: true,
+      },
       country_attribution:
         inference.source === "feed_hint" && !gkgCountry && sourceCountry
           ? "publisher_country_fallback"
@@ -637,16 +1221,38 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
        ) VALUES ($1,$2,'news_article',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        ON CONFLICT (source_id, external_id) DO UPDATE SET
          title = COALESCE(EXCLUDED.title, item.title), summary = COALESCE(EXCLUDED.summary, item.summary),
-         country_iso2 = COALESCE(EXCLUDED.country_iso2, item.country_iso2), event_time = EXCLUDED.event_time,
-         payload = item.payload || EXCLUDED.payload, dedupe_hash = EXCLUDED.dedupe_hash,
+         country_iso2 = COALESCE(EXCLUDED.country_iso2, item.country_iso2),
+         -- Preserve the earliest verified publisher date. A subsequent GDELT
+         -- rediscovery must update provenance, never promote an old URL.
+         event_time = COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time),
+         payload = item.payload || EXCLUDED.payload || jsonb_build_object(
+           'first_provider_seen_at', COALESCE(
+             item.payload->>'first_provider_seen_at',
+             item.payload->>'provider_seen_at',
+             EXCLUDED.payload->>'first_provider_seen_at'
+           ),
+           'last_provider_seen_at', EXCLUDED.payload->>'last_provider_seen_at',
+           'provider_seen_at', EXCLUDED.payload->>'provider_seen_at',
+           'publisher_published_at', to_jsonb(COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time))
+         ),
+         dedupe_hash = EXCLUDED.dedupe_hash,
          language_code = COALESCE(EXCLUDED.language_code, item.language_code),
          source_country_iso2 = COALESCE(EXCLUDED.source_country_iso2, item.source_country_iso2),
          tone = COALESCE(EXCLUDED.tone, item.tone), updated_at = now()
        WHERE item.title IS DISTINCT FROM COALESCE(EXCLUDED.title, item.title)
           OR item.summary IS DISTINCT FROM COALESCE(EXCLUDED.summary, item.summary)
           OR item.country_iso2 IS DISTINCT FROM COALESCE(EXCLUDED.country_iso2, item.country_iso2)
-          OR item.event_time IS DISTINCT FROM EXCLUDED.event_time
-          OR item.payload IS DISTINCT FROM item.payload || EXCLUDED.payload
+          OR item.event_time IS DISTINCT FROM COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time)
+          OR item.payload IS DISTINCT FROM item.payload || EXCLUDED.payload || jsonb_build_object(
+            'first_provider_seen_at', COALESCE(
+              item.payload->>'first_provider_seen_at',
+              item.payload->>'provider_seen_at',
+              EXCLUDED.payload->>'first_provider_seen_at'
+            ),
+            'last_provider_seen_at', EXCLUDED.payload->>'last_provider_seen_at',
+            'provider_seen_at', EXCLUDED.payload->>'provider_seen_at',
+            'publisher_published_at', to_jsonb(COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time))
+          )
           OR item.dedupe_hash IS DISTINCT FROM EXCLUDED.dedupe_hash
           OR item.language_code IS DISTINCT FROM COALESCE(EXCLUDED.language_code, item.language_code)
           OR item.source_country_iso2 IS DISTINCT FROM COALESCE(EXCLUDED.source_country_iso2, item.source_country_iso2)
@@ -667,6 +1273,8 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
     updated,
     unchanged,
     skipped,
+    quality_quarantined: quarantined,
+    quality_rejections: qualityRejections,
     latest_event_time: latestEventTime,
   };
 }
@@ -691,20 +1299,73 @@ export function hasUsableGdeltFallbackCoverage(result: {
 async function ingestGalFallback(sourceId: number, params: GdeltIngestParams): Promise<Record<string, unknown>> {
   const response = await fetchRetry(process.env.GDELT_GAL_RSS_URL?.trim() || GAL_RSS_URL);
   const xml = await response.text();
+  const selectedLimit = clampInt(params.maxRecords ?? process.env.GDELT_GAL_MAX_ARTICLES, 1, 250, 25);
+  const maxProviderSeenAgeHours = clampHours(process.env.GDELT_GAL_MAX_AGE_HOURS, 48);
   const parsed = parseGdeltGalRss(xml, {
-    // Scheduled runs use 25 DOC rows every 15 minutes. Keep the degraded
-    // fallback within that same headline budget rather than expanding storage
-    // or translation load merely because DOC is unavailable.
-    limit: clampInt(params.maxRecords ?? process.env.GDELT_GAL_MAX_ARTICLES, 1, 250, 25),
-    maxAgeHours: clampInt(process.env.GDELT_GAL_MAX_AGE_HOURS, 1, 168, 48),
+    // Inspect a small bounded superset before source-date verification so a
+    // few unverifiable results cannot starve the degraded fallback entirely.
+    limit: Math.min(selectedLimit * 4, 250),
+    maxAgeHours: maxProviderSeenAgeHours,
   });
+  const verificationNow = new Date();
+  const maxPublisherAgeHours = gdeltPublisherMaxAgeHours();
+  const verifiedArticles = await mapWithConcurrency(
+    parsed.articles,
+    GDELT_ARTICLE_VERIFICATION_CONCURRENCY,
+    async (article) => {
+      const preflight = assessGdeltDocArticleQuality({
+        title: article.title,
+        url: article.url,
+        providerSeenAt: article.eventTime,
+        publication: null,
+        now: verificationNow,
+        maxPublisherAgeHours,
+        maxProviderSeenAgeHours,
+      });
+      if (preflight.reason !== "publisher_publication_unverified") return { article, quality: preflight };
+      const publication = await resolveGdeltPublisherPublicationTime(article.url);
+      return {
+        article,
+        quality: assessGdeltDocArticleQuality({
+          title: article.title,
+          url: article.url,
+          providerSeenAt: article.eventTime,
+          publication,
+          now: verificationNow,
+          maxPublisherAgeHours,
+          maxProviderSeenAgeHours,
+        }),
+      };
+    },
+  );
   let inserted = 0;
   let updated = 0;
   let unchanged = 0;
+  let skipped = parsed.skipped;
+  let quarantined = 0;
+  const qualityRejections: Record<string, number> = {};
   let latestEventTime: string | null = null;
+  let selected = 0;
 
-  for (const article of parsed.articles) {
-    if (!latestEventTime || article.eventTime > latestEventTime) latestEventTime = article.eventTime;
+  for (const candidate of verifiedArticles) {
+    const { article, quality } = candidate;
+    if (!quality.accepted || !quality.publication) {
+      skipped += 1;
+      qualityRejections[quality.reason] = (qualityRejections[quality.reason] ?? 0) + 1;
+      if (await quarantineGdeltArticle(sourceId, article.url, quality.reason, verificationNow.toISOString(), article.eventTime)) {
+        quarantined += 1;
+      }
+      continue;
+    }
+    if (selected >= selectedLimit) {
+      // This is a bounded ingest, not a quality rejection. Keep the overflow
+      // out of storage so degraded operation cannot grow the headline budget.
+      skipped += 1;
+      continue;
+    }
+    selected += 1;
+    const eventTime = quality.publication.publishedAt;
+    if (!latestEventTime || eventTime > latestEventTime) latestEventTime = eventTime;
     const inference = inferNewsCountry({ title: article.title, url: article.url });
     await ensureCountry(inference.iso2);
     const payload = {
@@ -719,13 +1380,23 @@ async function ingestGalFallback(sourceId: number, params: GdeltIngestParams): P
       country_inference: inference,
       country_attribution: inference.source,
       relevance_filter_score: article.relevanceScore,
-      // GAL documents an exact publisher timestamp for only a minority of
-      // records; otherwise pubDate is when GDELT discovered the URL. Never
-      // present it as an exact publisher publication time.
-      time_basis: "publisher_published_or_provider_discovered",
-      time_precision: "source_ambiguous",
+      time_basis: "publisher_published_verified",
+      time_precision: quality.publication.precision,
+      publication_time_source: quality.publication.source,
       provider_time_at: article.eventTime,
-      publisher_published_at: null,
+      provider_seen_at: article.eventTime,
+      first_provider_seen_at: article.eventTime,
+      last_provider_seen_at: article.eventTime,
+      publisher_published_at: eventTime,
+      quality_status: "accepted",
+      quality_checked_at: verificationNow.toISOString(),
+      quality_checks: {
+        provider_seen_at_valid: true,
+        publisher_date_verified: true,
+        publisher_date_fresh: true,
+        publisher_date_not_after_provider_seen: true,
+        article_url_valid: true,
+      },
       fallback_reason: "gdelt_doc_unavailable",
       license: { data: "GDELT unrestricted use with attribution", article: "Third-party publisher content" },
     };
@@ -738,13 +1409,26 @@ async function ingestGalFallback(sourceId: number, params: GdeltIngestParams): P
        ON CONFLICT (source_id, external_id) DO UPDATE SET
          title = COALESCE(item.title, EXCLUDED.title),
          country_iso2 = COALESCE(item.country_iso2, EXCLUDED.country_iso2),
+         event_time = CASE
+           WHEN item.payload->>'product' = 'doc-2.0' THEN item.event_time
+           ELSE COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time)
+         END,
          payload = CASE
            WHEN item.payload->>'product' = 'doc-2.0'
              THEN item.payload || jsonb_build_object(
-               'gal_fallback_seen_at', EXCLUDED.payload->>'provider_time_at',
+               'gal_fallback_seen_at', EXCLUDED.payload->>'provider_seen_at',
                'gal_fallback_relevance_score', EXCLUDED.payload->'relevance_filter_score'
              )
-           ELSE EXCLUDED.payload
+           ELSE item.payload || EXCLUDED.payload || jsonb_build_object(
+             'first_provider_seen_at', COALESCE(
+               item.payload->>'first_provider_seen_at',
+               item.payload->>'provider_seen_at',
+               EXCLUDED.payload->>'first_provider_seen_at'
+             ),
+             'last_provider_seen_at', EXCLUDED.payload->>'last_provider_seen_at',
+             'provider_seen_at', EXCLUDED.payload->>'provider_seen_at',
+             'publisher_published_at', to_jsonb(COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time))
+           )
          END,
          dedupe_hash = EXCLUDED.dedupe_hash,
          updated_at = now()
@@ -753,14 +1437,26 @@ async function ingestGalFallback(sourceId: number, params: GdeltIngestParams): P
           OR (item.country_iso2 IS NULL AND EXCLUDED.country_iso2 IS NOT NULL)
           OR (
             item.payload->>'product' = 'doc-2.0'
-            AND item.payload->>'gal_fallback_seen_at' IS DISTINCT FROM EXCLUDED.payload->>'provider_time_at'
+            AND item.payload->>'gal_fallback_seen_at' IS DISTINCT FROM EXCLUDED.payload->>'provider_seen_at'
           )
           OR (
             item.payload->>'product' IS DISTINCT FROM 'doc-2.0'
-            AND item.payload IS DISTINCT FROM EXCLUDED.payload
+            AND (
+              item.event_time IS DISTINCT FROM COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time)
+              OR item.payload IS DISTINCT FROM item.payload || EXCLUDED.payload || jsonb_build_object(
+                'first_provider_seen_at', COALESCE(
+                  item.payload->>'first_provider_seen_at',
+                  item.payload->>'provider_seen_at',
+                  EXCLUDED.payload->>'first_provider_seen_at'
+                ),
+                'last_provider_seen_at', EXCLUDED.payload->>'last_provider_seen_at',
+                'provider_seen_at', EXCLUDED.payload->>'provider_seen_at',
+                'publisher_published_at', to_jsonb(COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time))
+              )
+            )
           )
        RETURNING (xmax = 0) AS inserted`,
-      [sourceId, article.url, article.title, article.url, inference.iso2, article.eventTime, JSON.stringify(payload), dedupeHash],
+      [sourceId, article.url, article.title, article.url, inference.iso2, eventTime, JSON.stringify(payload), dedupeHash],
     );
     if (!result.rows[0]) unchanged += 1;
     else if (result.rows[0].inserted) inserted += 1;
@@ -772,11 +1468,13 @@ async function ingestGalFallback(sourceId: number, params: GdeltIngestParams): P
     product: "gal-rss",
     health: "degraded_fallback",
     fetched: parsed.feed_items,
-    selected: parsed.articles.length,
+    selected,
     inserted,
     updated,
     unchanged,
-    skipped: parsed.skipped,
+    skipped,
+    quality_quarantined: quarantined,
+    quality_rejections: qualityRejections,
     latest_event_time: latestEventTime,
     coverage: "bounded relevance-filtered sample from GDELT's rolling 15-minute global feed",
   };

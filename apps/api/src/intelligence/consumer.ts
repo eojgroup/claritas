@@ -1,7 +1,10 @@
 import { query, withTransaction } from "../db";
 import { buildEventDedupeKey, computeSignalPriority, evaluateMarketMove } from "./correlation";
 import { resolveLocationFromText, resolveNearestLocation } from "./location-resolver";
-import { correlateAndUpsertIntelligenceSignal } from "./service";
+import {
+  attachIntelligenceSignalToExistingEvent,
+  correlateAndUpsertIntelligenceSignal,
+} from "./service";
 import { calculateRollingBaseline, detectTransportAnomaly } from "./transport-anomaly";
 import { trustedGdeltActionCoordinate, trustedGdeltLocations } from "./gdelt-geography";
 import { buildGdeltEventPresentation } from "./event-presentation";
@@ -39,6 +42,55 @@ function collectEntityKeys(...values: unknown[]) {
   };
   values.forEach(visit);
   return [...new Set(collected)].slice(0, 40);
+}
+
+function stringList(value: unknown, maximum = 40) {
+  if (!Array.isArray(value)) return [] as string[];
+  return Array.from(new Set(value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2 && item.length <= 180)))
+    .slice(0, maximum);
+}
+
+function countryList(value: unknown) {
+  return stringList(value, 8)
+    .map((item) => item.toUpperCase())
+    .filter((item) => /^[A-Z]{2}$/.test(item));
+}
+
+function podcastSignalRecordId(episodeId: number, signalType: string, canonicalKey: string) {
+  return `podcast:${episodeId}:${signalType}:${canonicalKey}`;
+}
+
+/**
+ * Podcast extraction is interpretive context, not an event detector. Only a
+ * transcript-supported, sufficiently confident finding with a concrete entity
+ * anchor is allowed to attempt the existing anchored-correlation policy.
+ */
+export function podcastSignalQualifiesForEventContext(input: {
+  signalType: string;
+  confidence: unknown;
+  evidenceCount: unknown;
+  entities: unknown;
+}) {
+  const confidence = Number(input.confidence);
+  const evidenceCount = Number(input.evidenceCount);
+  return ["event", "risk", "claim"].includes(input.signalType)
+    && Number.isFinite(confidence) && confidence >= 0.55
+    && Number.isFinite(evidenceCount) && evidenceCount > 0
+    && stringList(input.entities).length > 0;
+}
+
+export function isAcceptedNewsQuality(payload: unknown, sourceName: unknown) {
+  // GDELT records are discovery candidates until the connector has verified
+  // a publisher date. Older GDELT rows predate that marker, so treating a
+  // missing status as accepted would let the exact stale rediscoveries this
+  // policy fixes keep generating investigation events.
+  const requiresVerifiedQuality = String(sourceName ?? "").toLowerCase() === "gdelt";
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return !requiresVerifiedQuality;
+  const status = (payload as Record<string, unknown>).quality_status;
+  return status === "accepted" || (status == null && !requiresVerifiedQuality);
 }
 
 function classifyEventType(text: string) {
@@ -84,7 +136,7 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     [itemId],
   );
   const story = rows[0];
-  if (!story) return;
+  if (!story || !isAcceptedNewsQuality(story.payload, story.source_name)) return;
   const occurred = new Date(story.event_time ?? story.created_at);
   const text = `${story.title ?? ""} ${story.summary ?? ""}`;
   const gkgCoordinate = trustedGdeltLocations(story.payload)[0] ?? null;
@@ -152,6 +204,120 @@ async function handleNewsStory(event: DomainEventEnvelope) {
         original_summary: story.summary,
         language_code: story.language_code,
         extracted_coordinate: gkgCoordinate,
+      },
+    },
+  });
+}
+
+async function handlePodcastSignal(event: DomainEventEnvelope) {
+  const episodeId = Number(event.payload.episode_id);
+  const signalType = typeof event.payload.signal_type === "string"
+    ? event.payload.signal_type.trim().toLowerCase()
+    : "";
+  const canonicalKey = typeof event.payload.canonical_key === "string"
+    ? event.payload.canonical_key.trim()
+    : "";
+  if (!Number.isSafeInteger(episodeId) || episodeId <= 0 || !signalType || !canonicalKey) return;
+
+  const { rows } = await query<any>(
+    `SELECT signal.id, signal.episode_id, signal.signal_type, signal.title, signal.summary,
+            signal.canonical_key, signal.entities,
+            COALESCE(signal.metadata->'countries', '[]'::jsonb) AS countries,
+            signal.risk_level, signal.confidence, signal.extraction_method,
+            (SELECT count(*)::int FROM intelligence_signal_evidence evidence
+             WHERE evidence.signal_id=signal.id) AS evidence_count,
+            episode.item_id, item.source_id, item.event_time, item.url AS episode_url,
+            feed.title AS feed_title
+     FROM intelligence_signal signal
+     JOIN podcast_episode episode ON episode.id=signal.episode_id
+     JOIN item ON item.id=episode.item_id
+     JOIN podcast_feed feed ON feed.id=episode.feed_id
+     WHERE signal.episode_id=$1 AND signal.signal_type=$2 AND signal.canonical_key=$3
+     LIMIT 1`,
+    [episodeId, signalType, canonicalKey],
+  );
+  const signal = rows[0];
+  if (!signal || !podcastSignalQualifiesForEventContext({
+    signalType: signal.signal_type,
+    confidence: signal.confidence,
+    evidenceCount: signal.evidence_count,
+    entities: signal.entities,
+  })) return;
+
+  const entities = stringList(signal.entities);
+  const countries = countryList(signal.countries);
+  // Country match is intentionally not used as a correlation anchor. It only
+  // supplies navigational context once the entity/location policy accepts a
+  // link, and ambiguous country extraction is not promoted at all.
+  const country = countries.length === 1 ? countries[0] : null;
+  const location = country ? await countryLocation(country) : null;
+  const sourceTime = new Date(signal.event_time ?? event.occurred_at);
+  const occurred = Number.isNaN(sourceTime.getTime()) ? new Date(event.occurred_at) : sourceTime;
+  if (Number.isNaN(occurred.getTime())) return;
+  const confidence = Math.min(0.75, Math.max(0.55, Number(signal.confidence)));
+  const text = `${signal.title ?? ""} ${signal.summary ?? ""}`;
+  const eventType = classifyEventType(text);
+  const recordId = podcastSignalRecordId(episodeId, signal.signal_type, signal.canonical_key);
+  const priority = computeSignalPriority({
+    sourceReliability: confidence,
+    sourceDiversity: 1,
+    freshnessHours: Math.max(0, (Date.now() - occurred.getTime()) / 3_600_000),
+    // A podcast signal never escalates an event by itself. Its role is limited
+    // to contextual evidence after a governed attach decision.
+    severity: "low",
+    locationImportance: Number(location?.importance_score ?? 0.35),
+    domainCount: 1,
+  });
+  await attachIntelligenceSignalToExistingEvent({
+    dedupeKey: buildEventDedupeKey(["podcast-context", recordId]),
+    eventType,
+    title: `Podcast context: ${signal.title}`.slice(0, 300),
+    summary: String(signal.summary || signal.title || "Podcast transcript context.").slice(0, 1_800),
+    status: "monitoring",
+    severity: "low",
+    confidence,
+    startTime: occurred,
+    lastActivityTime: occurred,
+    primaryLocationId: location?.id ?? null,
+    primaryCountryIso2: country,
+    relevanceScore: Math.min(0.55, priority.score),
+    urgencyScore: 0.2,
+    materialityScore: 0.2,
+    scoreComponents: { ...priority.components, contextual_only: true },
+    metadata: {
+      source_kind: "podcast_transcript",
+      podcast_context_only: true,
+    },
+    entityKeys: collectEntityKeys(entities),
+    evidence: {
+      domain: "podcast",
+      evidenceType: `podcast_${signal.signal_type}`,
+      sourceRecordType: "intelligence_signal",
+      sourceRecordId: recordId,
+      sourceId: Number.isSafeInteger(Number(signal.source_id)) ? Number(signal.source_id) : null,
+      observedAt: occurred,
+      publishedAt: occurred,
+      locationId: location?.id ?? null,
+      confidence,
+      relationship: "context",
+      provenance: {
+        provider: "podcastindex",
+        publisher: signal.feed_title,
+        episode_url: signal.episode_url,
+        source_url: signal.episode_url,
+        episode_id: episodeId,
+        signal_type: signal.signal_type,
+        canonical_key: signal.canonical_key,
+        extraction_method: signal.extraction_method,
+      },
+      attribution: signal.feed_title || "Podcast publisher",
+      metadata: {
+        title: signal.title,
+        summary: signal.summary,
+        countries,
+        transcript_evidence_count: Number(signal.evidence_count),
+        podcast_signal_type: signal.signal_type,
+        assessment_boundary: "Podcast transcript extraction is contextual and does not independently confirm the event or establish causation.",
       },
     },
   });
@@ -472,6 +638,7 @@ export async function processDomainEvent(event: DomainEventEnvelope) {
       case "earth.fire.detected": return handleFire(event);
       case "transport.movement.recorded": return handleTransportMovement(event);
       case "market.instrument.observed": return handleMarketIndicator(event);
+      case "podcast.signal.extracted": return handlePodcastSignal(event);
       default: return;
     }
   }

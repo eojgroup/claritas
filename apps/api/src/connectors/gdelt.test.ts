@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
 process.env.DB_HOST ||= "127.0.0.1";
@@ -28,6 +30,157 @@ test("GDELT timestamp parsing never fabricates current recency", async () => {
   assert.equal(hasUsableGdeltFallbackCoverage({ selected: 0, latest_event_time: null }), false);
   assert.equal(hasUsableGdeltFallbackCoverage({ selected: 1, latest_event_time: "not-a-time" }), false);
   assert.equal(hasUsableGdeltFallbackCoverage({ selected: 1, latest_event_time: "2026-08-14T09:15:00Z" }), true);
+});
+
+test("GDELT DOC requires a verified, timely publisher date instead of trusting provider discovery time", async () => {
+  const { assessGdeltDocArticleQuality, extractGdeltPublisherPublicationTime } = await connector;
+  const now = new Date("2026-08-16T03:00:00Z");
+  const freshUrl = "https://publisher.example.com/news/2026/08/16/port-disruption";
+  const metadataPublication = extractGdeltPublisherPublicationTime(
+    `<html><head><meta property="article:published_time" content="2026-08-16T02:31:00Z"></head></html>`,
+    freshUrl,
+  );
+  assert.deepEqual(metadataPublication, {
+    publishedAt: "2026-08-16T02:31:00.000Z",
+    source: "article_metadata",
+    precision: "second",
+  });
+
+  assert.equal(assessGdeltDocArticleQuality({
+    title: "Port disruption affects regional shipping",
+    url: freshUrl,
+    providerSeenAt: "2026-08-16T02:45:00Z",
+    publication: metadataPublication,
+    now,
+    maxPublisherAgeHours: 72,
+    maxProviderSeenAgeHours: 3,
+  }).accepted, true);
+
+  const stalePublication = extractGdeltPublisherPublicationTime(
+    "",
+    "https://publisher.example.com/politics/2021/09/13/old-government-story",
+  );
+  assert.deepEqual(stalePublication, {
+    publishedAt: "2021-09-13T00:00:00.000Z",
+    source: "url_date",
+    precision: "day",
+  });
+  assert.equal(assessGdeltDocArticleQuality({
+    title: "Historic government announcement is rediscovered",
+    url: "https://publisher.example.com/politics/2021/09/13/old-government-story",
+    // This deliberately looks current: it models a GDELT rediscovery that
+    // used to promote old articles to the top of the product.
+    providerSeenAt: "2026-08-16T02:45:00Z",
+    publication: stalePublication,
+    now,
+    maxPublisherAgeHours: 72,
+    maxProviderSeenAgeHours: 3,
+  }).reason, "publisher_published_at_stale");
+
+  assert.equal(assessGdeltDocArticleQuality({
+    title: "A current-looking headline without publisher metadata",
+    url: "https://publisher.example.com/news/current-story",
+    providerSeenAt: "2026-08-16T02:45:00Z",
+    publication: null,
+    now,
+    maxPublisherAgeHours: 72,
+    maxProviderSeenAgeHours: 3,
+  }).reason, "publisher_publication_unverified");
+});
+
+test("GDELT source-date extraction chooses the conservative date when metadata conflicts", async () => {
+  const { assessGdeltDocArticleQuality, extractGdeltPublisherPublicationTime } = await connector;
+  const url = "https://publisher.example.com/world/2023/10/14/old-story-republished";
+  const publication = extractGdeltPublisherPublicationTime(
+    `<script type="application/ld+json">{"@type":"NewsArticle","datePublished":"2026-08-16T01:00:00Z"}</script>`,
+    url,
+  );
+  // A newer structured date cannot erase an unambiguous older canonical URL
+  // date. This errs on the side of hiding a potentially stale resurfacing.
+  assert.deepEqual(publication, {
+    publishedAt: "2023-10-14T00:00:00.000Z",
+    source: "url_date",
+    precision: "day",
+  });
+  assert.equal(assessGdeltDocArticleQuality({
+    title: "Old story appears in a new provider batch",
+    url,
+    providerSeenAt: "2026-08-16T02:00:00Z",
+    publication,
+    now: new Date("2026-08-16T03:00:00Z"),
+    maxPublisherAgeHours: 72,
+    maxProviderSeenAgeHours: 3,
+  }).accepted, false);
+});
+
+test("GDELT rejects impossible publisher calendar dates instead of normalizing them forward", async () => {
+  const { extractGdeltPublisherPublicationTime } = await connector;
+  assert.equal(extractGdeltPublisherPublicationTime(
+    `<meta property="article:published_time" content="2026-02-31T01:00:00Z">`,
+    "https://publisher.example.com/news/current-story",
+  ), null);
+  assert.equal(extractGdeltPublisherPublicationTime(
+    "",
+    "https://publisher.example.com/news/2026/02/31/current-story",
+  ), null);
+});
+
+test("GDELT rejects private article addresses and pins publisher verification to public DNS answers", async () => {
+  const { assessGdeltDocArticleQuality, isPublicGdeltArticleAddress } = await connector;
+  for (const address of ["127.0.0.1", "10.0.0.8", "172.16.0.1", "192.168.1.9", "169.254.169.254", "::1", "[::1]", "fd12::1"]) {
+    assert.equal(isPublicGdeltArticleAddress(address), false, address);
+  }
+  assert.equal(isPublicGdeltArticleAddress("8.8.8.8"), true);
+  assert.equal(isPublicGdeltArticleAddress("2606:4700:4700::1111"), true);
+  assert.equal(assessGdeltDocArticleQuality({
+    title: "A headline that should never trigger an internal request",
+    url: "http://127.0.0.1/internal/news",
+    providerSeenAt: "2026-08-16T02:45:00Z",
+    publication: null,
+    now: new Date("2026-08-16T03:00:00Z"),
+  }).reason, "missing_or_unsafe_url");
+  assert.equal(assessGdeltDocArticleQuality({
+    title: "An IPv6 loopback headline should also be rejected",
+    url: "http://[::1]/internal/news",
+    providerSeenAt: "2026-08-16T02:45:00Z",
+    publication: null,
+    now: new Date("2026-08-16T03:00:00Z"),
+  }).reason, "missing_or_unsafe_url");
+
+  const source = readFileSync(resolve(__dirname, "gdelt.ts"), "utf8");
+  const verifier = source.slice(
+    source.indexOf("async function requestVerifiedPublisherPage"),
+    source.indexOf("async function resolveGdeltPublisherPublicationTime"),
+  );
+  assert.match(verifier, /resolvePublicArticleAddress/);
+  assert.match(verifier, /lookup: \(_hostname, _options, callback\) => callback\(null, address\.address, address\.family\)/);
+});
+
+test("a stale GDELT rediscovery quarantines its prior item without rewriting its publication time", async () => {
+  const { assessGdeltDocArticleQuality } = await connector;
+  const staleRediscovery = assessGdeltDocArticleQuality({
+    title: "Previously accepted story is rediscovered years later",
+    url: "https://publisher.example.com/news/2021/09/13/previously-accepted-story",
+    providerSeenAt: "2026-08-16T02:45:00Z",
+    publication: {
+      publishedAt: "2021-09-13T00:00:00.000Z",
+      source: "url_date",
+      precision: "day",
+    },
+    now: new Date("2026-08-16T03:00:00Z"),
+    maxPublisherAgeHours: 72,
+    maxProviderSeenAgeHours: 3,
+  });
+  assert.equal(staleRediscovery.reason, "publisher_published_at_stale");
+
+  const source = readFileSync(resolve(__dirname, "gdelt.ts"), "utf8");
+  const quarantine = source.slice(
+    source.indexOf("async function quarantineGdeltArticle"),
+    source.indexOf("export function parseGdeltTimestamp"),
+  );
+  assert.match(quarantine, /'quality_status', 'rejected'/);
+  assert.match(quarantine, /'quality_rejection_reason', \$3/);
+  assert.doesNotMatch(quarantine, /event_time\s*=/);
 });
 
 test("GAL fallback is relevance filtered, deduplicated and bounded", async () => {

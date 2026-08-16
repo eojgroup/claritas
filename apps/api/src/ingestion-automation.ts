@@ -628,6 +628,7 @@ async function getPipelineEvaluationStates(): Promise<PipelineEvaluationState[]>
        WHERE i.kind = 'news_article'
          AND s.name IN ('gdelt', 'institutional_rss', 'govuk_search')
          AND COALESCE(s.metadata->>'retired', 'false') <> 'true'
+         AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
        UNION ALL
        SELECT 'weather', MAX(latest_data_at) FROM (
          SELECT MAX(observed_at) AS latest_data_at FROM weather_snapshot
@@ -655,6 +656,7 @@ async function getPipelineEvaluationStates(): Promise<PipelineEvaluationState[]>
        WHERE i.kind = 'news_article'
          AND s.name IN ('gdelt', 'institutional_rss', 'govuk_search')
          AND COALESCE(s.metadata->>'retired', 'false') <> 'true'
+         AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
      ), demand AS (
        SELECT
          rule.pipeline,

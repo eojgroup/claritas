@@ -6,6 +6,7 @@ import {
   newsDisplayTitle,
   type NewsItem,
 } from "../lib/api";
+import { presentEventLinkage } from "./eventLinkagePresentation";
 
 const LEADERSHIP_ROLE_PATTERN =
   "(?:president|prime minister|premier|chancellor|monarch|king|queen|head of state|head of government)";
@@ -247,10 +248,10 @@ export default function PriorityNewsList({
                 )}
                 {linkedEvents.length > 0 && (
                   <span
-                    className="news-leadership-change"
-                    title={`${linkedEvents.length} event ${linkedEvents.length === 1 ? "investigation" : "investigations"} linked by the Claritas evidence graph`}
+                    className="news-event-link-summary"
+                    title={`${linkedEvents.length} likely linked ${linkedEvents.length === 1 ? "event investigation" : "event investigations"}. Claritas shows the matching rationale after the story is opened.`}
                   >
-                    {linkedEvents.length} linked {linkedEvents.length === 1 ? "event" : "events"}
+                    {linkedEvents.length} likely linked {linkedEvents.length === 1 ? "event" : "events"}
                     {satelliteLabel ? ` · ${satelliteLabel}` : ""}
                   </span>
                 )}
@@ -284,10 +285,10 @@ export default function PriorityNewsList({
             {selectedStory && (
               <div className="dashboard-news-detail">
                 {img && (
-                  <figure>
+                  <figure className="dashboard-news-image">
                     <img
                       src={img}
-                      alt=""
+                      alt={`Image supplied with the report: ${displayTitle}`}
                       loading="lazy"
                       decoding="async"
                       referrerPolicy="no-referrer"
@@ -295,6 +296,7 @@ export default function PriorityNewsList({
                         event.currentTarget.style.display = "none";
                       }}
                     />
+                    <figcaption>Image supplied with this report · it is not evidence for a linked event by itself.</figcaption>
                   </figure>
                 )}
                 <div>
@@ -373,43 +375,51 @@ export default function PriorityNewsList({
                     <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--signal-sky-soft)] p-3">
                       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
                         <RadioTower className="h-3.5 w-3.5" />
-                        Event investigations
+                        Likely linked investigations
                       </div>
+                      <p className="event-link-panel-intro">These connections are ranked from matching evidence such as location, timing, or entities. They are not claims that one signal caused another.</p>
                       <div className="mt-2 space-y-2">
-                        {linkedEvents.slice(0, 3).map((linkedEvent) => (
-                          <button
-                            key={linkedEvent.id}
-                            type="button"
-                            onClick={() => onOpenEvent?.(linkedEvent.id)}
-                            className="flex w-full items-start gap-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-2 text-left hover:border-[color:var(--shell-ink)]"
-                          >
-                            <span className="mt-0.5 rounded-full border border-[color:var(--shell-border)] px-2 py-0.5 text-[9px] font-semibold uppercase text-[color:var(--shell-muted)]">
-                              {linkedEvent.severity}
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <strong className="block text-xs text-[color:var(--shell-ink)]">
-                                {linkedEvent.title}
-                              </strong>
-                              <small className="mt-0.5 block text-[color:var(--shell-muted)]">
-                                {linkedEvent.correlation_score == null
-                                  ? "linked evidence"
-                                  : `${Math.round(linkedEvent.correlation_score * 100)}% correlation score`}
-                                {linkedEvent.earth_observation_state === "imagery_available"
-                                  ? " · imagery available"
-                                  : linkedEvent.earth_observation_state === "processing"
-                                    ? " · imagery processing"
-                                    : linkedEvent.earth_observation_state === "queued"
-                                      ? " · imagery queued"
-                                      : ""}
-                              </small>
-                            </span>
-                            {linkedEvent.earth_observation_state === "imagery_available" ? (
-                              <Satellite className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--signal-sky)]" />
-                            ) : (
-                              <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0" />
-                            )}
-                          </button>
-                        ))}
+                        {linkedEvents.slice(0, 3).map((linkedEvent) => {
+                          const linkage = presentEventLinkage(
+                            linkedEvent.correlation_score,
+                            linkedEvent.correlation_factors,
+                          );
+                          return (
+                            <button
+                              key={linkedEvent.id}
+                              type="button"
+                              disabled={!onOpenEvent}
+                              onClick={() => onOpenEvent?.(linkedEvent.id)}
+                              aria-label={`Open ${linkage.label.toLocaleLowerCase()} event investigation: ${linkedEvent.title}`}
+                              className="event-link-card flex w-full items-start gap-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-2.5 text-left disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <span className="mt-0.5 rounded-full border border-[color:var(--shell-border)] px-2 py-0.5 text-[9px] font-semibold uppercase text-[color:var(--shell-muted)]">
+                                {linkedEvent.severity}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <strong className="block text-xs text-[color:var(--shell-ink)]">
+                                  {linkedEvent.title}
+                                </strong>
+                                <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px]">
+                                  <span className="event-link-chip">{linkage.label} event</span>
+                                  {linkedEvent.earth_observation_state === "imagery_available"
+                                    ? <span className="text-[color:var(--signal-emerald)]">Imagery available</span>
+                                    : linkedEvent.earth_observation_state === "processing"
+                                      ? <span>Imagery processing</span>
+                                      : linkedEvent.earth_observation_state === "queued"
+                                        ? <span>Imagery queued</span>
+                                        : null}
+                                </span>
+                                <small className="event-link-reason">Why shown: {linkage.shortReason}</small>
+                              </span>
+                              {linkedEvent.earth_observation_state === "imagery_available" ? (
+                                <Satellite className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--signal-sky)]" />
+                              ) : (
+                                <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
