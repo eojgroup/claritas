@@ -310,7 +310,24 @@ describe("IntelligenceWorkspace", () => {
   it("labels likely linked weather, transport, podcast, and news signals with their rationale", async () => {
     vi.mocked(fetchIntelligenceEvent).mockResolvedValue({
       event,
-      linked_news: [],
+      understanding: {
+        what_happened: event.summary,
+        where: event.location_name ?? "Mapped event location",
+        why_interesting: "Coverage is still being assessed.",
+        linked_news_count: 1,
+        physical_observation_count: 0,
+      },
+      linked_news: [{
+        id: "reporting-coverage-assessment",
+        evidence_type: "reporting_coverage_assessment",
+        relationship: " assessment ",
+        title: "Automated reporting coverage assessment",
+        summary: "This is not a publisher report.",
+        url: null,
+        publisher: "Claritas",
+        observed_at: "2026-08-11T09:10:00Z",
+        confidence: 0.9,
+      }],
       evidence: [
         {
           id: "news-evidence",
@@ -385,6 +402,92 @@ describe("IntelligenceWorkspace", () => {
       element.textContent?.includes("Why shown: Shown as a likely connection because of")
     ))).toBe(true);
     expect(screen.getAllByText("Context").length).toBeGreaterThan(0);
+  });
+
+  it("presents coverage assessments as explicit statuses instead of likely linked signals", async () => {
+    vi.mocked(fetchIntelligenceEvent).mockResolvedValue({
+      event,
+      linked_news: [],
+      evidence: [
+        {
+          id: "weather-coverage-assessment",
+          domain: "weather",
+          evidence_type: "event_area_weather_unavailable",
+          source_record_type: "event_weather_coverage",
+          source_record_id: event.id,
+          observed_at: "2026-08-11T09:15:00Z",
+          confidence: 0.95,
+          relationship: "assessment",
+          source_name: "Claritas weather coverage assessment",
+          source_title: "No local weather sample available",
+          source_summary: "No provider sample was available inside the governed event window.",
+          metadata: { coverage_status: "no_local_sample" },
+        },
+        {
+          id: "transport-pending-assessment",
+          domain: "transport",
+          evidence_type: "event_area_activity_comparison",
+          source_record_type: "event_transport_window",
+          source_record_id: event.id,
+          observed_at: "2026-08-11T09:20:00Z",
+          confidence: 0.35,
+          relationship: "derived",
+          source_name: "Claritas transport comparison",
+          source_title: "Nearby transport comparison pending",
+          source_summary: "Less than one complete post-event hour has elapsed.",
+          metadata: { classification: "comparison_pending" },
+        },
+        {
+          id: "transport-thin-assessment",
+          domain: "transport",
+          evidence_type: "event_area_activity_comparison",
+          source_record_type: "event_transport_window",
+          source_record_id: `${event.id}-thin`,
+          observed_at: "2026-08-11T09:25:00Z",
+          confidence: 0.5,
+          relationship: "derived",
+          source_name: "Claritas transport comparison",
+          source_title: "Nearby transport coverage assessment",
+          source_summary: "The baseline is too small for a reliable change assessment.",
+          correlation_factors: { coverage_status: "insufficient_comparable_coverage" },
+        },
+        {
+          id: "transport-empty-assessment",
+          domain: "transport",
+          evidence_type: "event_area_activity_comparison",
+          source_record_type: "event_transport_window",
+          source_record_id: `${event.id}-empty`,
+          observed_at: "2026-08-11T09:30:00Z",
+          confidence: 0.35,
+          relationship: "assessment",
+          source_name: "Claritas transport comparison",
+          source_title: "Nearby transport coverage assessment",
+          source_summary: "No transport track points were available near the event.",
+          metadata: { classification: "no_nearby_coverage" },
+        },
+      ],
+      locations: [],
+      earth_observations: [],
+      related_events: [],
+      epistemic_notice: "Correlation does not establish causation.",
+    });
+
+    render(<IntelligenceWorkspace initialEventId={event.id} />);
+
+    expect(await screen.findByRole("heading", { name: "What can Claritas assess around this event?" })).toBeTruthy();
+    expect(screen.getAllByText("No local weather coverage").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Transport comparison pending").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Insufficient nearby transport coverage").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("No nearby transport coverage").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("heading", { name: "What other signals are associated with this event?" })).toBeNull();
+    expect(screen.getByText(/No news record is explicitly linked to this event yet/i)).toBeTruthy();
+    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.getByText("0 source records")).toBeTruthy();
+    expect(screen.getByText(/0 linked reports/i)).toBeTruthy();
+    expect(screen.queryByText("Automated reporting coverage assessment")).toBeNull();
+    expect(screen.getByRole("heading", { name: "No local weather sample available" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Nearby transport comparison pending" })).toBeTruthy();
+    expect(screen.getAllByText(/not a positive linked signal/i).length).toBe(4);
   });
 
   it("opens the exact event id supplied by an alert", async () => {

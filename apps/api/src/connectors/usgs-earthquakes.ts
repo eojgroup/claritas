@@ -1,4 +1,8 @@
 import { withTransaction, query } from "../db";
+import {
+  earthquakeCountryIso2FromPlace,
+  enqueueEarthquakeNewsDiscovery,
+} from "./event-news-discovery";
 
 const DEFAULT_FEED = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson";
 
@@ -99,6 +103,7 @@ export async function ingestUsgsEarthquakes(options: { fetchImpl?: typeof fetch;
   const sourceId = await ensureUsgsSource();
   let inserted = 0;
   let updated = 0;
+  let newsDiscoveryScheduled = 0;
   for (const record of material) {
     await withTransaction(async (client) => {
       const { rows } = await client.query<{ id: string; inserted: boolean }>(
@@ -127,7 +132,29 @@ export async function ingestUsgsEarthquakes(options: { fetchImpl?: typeof fetch;
          JSON.stringify({ earthquake_observation_id: rows[0].id, usgs_event_id: record.eventId, source_id: sourceId }),
          record.observedAt],
       );
+      if (await enqueueEarthquakeNewsDiscovery(client, {
+        earthquakeObservationId: rows[0].id,
+        usgsEventId: record.eventId,
+        place: record.place,
+        countryIso2: earthquakeCountryIso2FromPlace(record.place),
+        magnitude: record.magnitude,
+        significance: record.significance,
+        tsunami: record.tsunami,
+        latitude: record.latitude,
+        longitude: record.longitude,
+        observedAt: record.observedAt,
+        sourceUpdatedAt: record.updatedAt,
+      })) {
+        newsDiscoveryScheduled += 1;
+      }
     });
   }
-  return { provider: "usgs_earthquakes", fetched: records.length, material: material.length, inserted, updated };
+  return {
+    provider: "usgs_earthquakes",
+    fetched: records.length,
+    material: material.length,
+    inserted,
+    updated,
+    news_discovery_scheduled: newsDiscoveryScheduled,
+  };
 }

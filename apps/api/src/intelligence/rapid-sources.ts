@@ -1,7 +1,12 @@
 import { query, withTransaction, withWorkerLease } from "../db";
 import { ingestUsgsEarthquakes } from "../connectors/usgs-earthquakes";
+import {
+  getEarthquakeNewsDiscoveryStatus,
+  processEarthquakeNewsDiscoveryQueue,
+} from "../connectors/event-news-discovery";
 import { NasaFirmsProvider } from "../earth-observation/providers/nasa-firms";
 import { boundBoundingBox, type BoundingBox } from "../earth-observation/types";
+import { refreshPendingEarthquakeTransportContexts } from "./major-event-context";
 
 const firms = new NasaFirmsProvider();
 let rapidSourceTimer: NodeJS.Timeout | null = null;
@@ -11,6 +16,7 @@ let lastUsgsPollAt = 0;
 let lastFirmsPollAt = 0;
 
 const flag = (name: string) => ["1", "true", "yes", "on"].includes(process.env[name]?.trim().toLowerCase() ?? "");
+const enabledUnlessFalse = (name: string) => !["0", "false", "no", "off"].includes(process.env[name]?.trim().toLowerCase() ?? "");
 const intEnv = (name: string, fallback: number, min: number, max: number) => {
   const value = Number.parseInt(process.env[name] ?? "", 10);
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : fallback));
@@ -56,6 +62,9 @@ export async function getRapidSourceStatus() {
   );
   const runtime = new Map(rows.map((row) => [row.provider, row]));
   const firmsStatus = firms.status();
+  const targetedNewsDiscovery = enabledUnlessFalse("EVENT_NEWS_DISCOVERY_ENABLED")
+    ? await getEarthquakeNewsDiscoveryStatus()
+    : { state: "disabled" };
   return [
     {
       provider: "usgs_earthquakes",
@@ -65,6 +74,7 @@ export async function getRapidSourceStatus() {
       state: !flag("USGS_EARTHQUAKES_ENABLED") ? "disabled" : "ready",
       reason: !flag("USGS_EARTHQUAKES_ENABLED") ? "Feature flag disabled." : undefined,
       attribution: "U.S. Geological Survey real-time GeoJSON earthquake feed.",
+      targeted_news_discovery: targetedNewsDiscovery,
     },
     {
       ...firmsStatus,
@@ -169,6 +179,18 @@ async function rapidSourceCycle() {
       console.error(JSON.stringify({ event: "firms_poll_failed", message: error instanceof Error ? error.message : String(error) }));
     });
   }
+  if (flag("USGS_EARTHQUAKES_ENABLED") && enabledUnlessFalse("EVENT_NEWS_DISCOVERY_ENABLED")) {
+    const discovery = await processEarthquakeNewsDiscoveryQueue();
+    if (discovery.processed > 0) {
+      console.log(JSON.stringify({ event: "earthquake_news_discovery_cycle", ...discovery }));
+    }
+  }
+  await refreshPendingEarthquakeTransportContexts().catch((error) => {
+    console.warn(JSON.stringify({
+      event: "earthquake_transport_context_refresh_failed",
+      message: error instanceof Error ? error.message : String(error),
+    }));
+  });
 }
 
 export function startRapidSourceWorker() {

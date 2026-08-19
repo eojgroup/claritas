@@ -1989,6 +1989,7 @@ struct IntelligenceEvidence: Codable, Identifiable {
     let correlation_score: Double?
     let correlation_factors: JSONValue?
     let provenance: JSONValue?
+    let metadata: JSONValue?
 }
 
 struct PushDeviceRegistration: Codable, Identifiable {

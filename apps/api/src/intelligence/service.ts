@@ -22,7 +22,12 @@ import {
   shouldReplaceCanonicalSignal,
   type ScoredCorrelationCandidate,
 } from "./correlation";
-import { contextualLinkagePolicy, scoreContextualLinkage } from "./contextual-linkage";
+import {
+  contextualLinkagePolicy,
+  scoreContextualLinkage,
+  type ContextualLinkagePolicy,
+  type EarthquakeContextAttributes,
+} from "./contextual-linkage";
 import type { CorrelationCandidate, IntelligenceSignalInput } from "./types";
 import {
   intelligenceEventExpiresAtSql,
@@ -82,6 +87,31 @@ type SignalLocation = {
   latitude: number | null;
   longitude: number | null;
 };
+
+export type TargetedEarthquakeContextAudit = {
+  earthquakeObservationId: string;
+  usgsEventId: string;
+  place: string;
+  confidence: number;
+  scope: "local_place" | "event_signature";
+  factors: string[];
+  rationale: string;
+  assessmentBoundary: string;
+  methodology: "deterministic_gdelt_doc_event_query_v1";
+};
+
+function storedEarthquakeContextAttributes(
+  event: Pick<EventRow, "severity" | "score_components" | "metadata">,
+): EarthquakeContextAttributes {
+  return {
+    severity: event.severity,
+    magnitude: event.score_components?.magnitude ?? event.metadata?.magnitude,
+    significance: event.score_components?.significance ?? event.metadata?.significance,
+    tsunami: event.metadata?.tsunami,
+    alertLevel: event.metadata?.alert_level,
+    felt: event.metadata?.felt,
+  };
+}
 
 const correlationNumberEnv = (name: string, fallback: number, min: number, max: number) => {
   const parsed = Number(process.env[name] ?? "");
@@ -515,8 +545,9 @@ function normalizeEarthObservationRow(row: any) {
 
 /**
  * Recomputes the canonical event aggregate after any evidence mutation. Model
- * interpretation is intentionally not counted as an independent source, and
- * only observed physical evidence earns the physical-observation component.
+ * interpretation and coverage-only assessments are not counted as independent
+ * corroboration, and only observed physical evidence earns the physical-
+ * observation component.
  */
 export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, eventId: string) {
   const { rows } = await client.query<EventRow>(
@@ -543,7 +574,7 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
      FROM (
        SELECT event_id,
               (count(DISTINCT domain)
-                FILTER (WHERE relationship <> 'model_interpretation'))::int AS domain_count,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')))::int AS domain_count,
               (count(DISTINCT COALESCE(
                 NULLIF(provenance->>'source_diversity_key',''),
                 NULLIF(provenance->>'publisher',''),
@@ -551,17 +582,17 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
                 source_id::text,
                 source_record_type
               ))
-                FILTER (WHERE relationship <> 'model_interpretation'))::int AS source_diversity,
-              avg(confidence) FILTER (WHERE relationship <> 'model_interpretation') AS average_confidence,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')))::int AS source_diversity,
+              avg(confidence) FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS average_confidence,
               max(CASE WHEN jsonb_typeof(metadata->'signal_relevance_score')='number'
                 THEN (metadata->>'signal_relevance_score')::double precision END)
-                FILTER (WHERE relationship <> 'model_interpretation') AS base_relevance,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS base_relevance,
               max(CASE WHEN jsonb_typeof(metadata->'signal_urgency_score')='number'
                 THEN (metadata->>'signal_urgency_score')::double precision END)
-                FILTER (WHERE relationship <> 'model_interpretation') AS max_urgency,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS max_urgency,
               max(CASE WHEN jsonb_typeof(metadata->'signal_materiality_score')='number'
                 THEN (metadata->>'signal_materiality_score')::double precision END)
-                FILTER (WHERE relationship <> 'model_interpretation') AS max_materiality,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS max_materiality,
               bool_or(relationship='observed' AND domain IN ('earth_observation','disaster')) AS has_physical_observation
        FROM intelligence_event_evidence WHERE event_id = $1 GROUP BY event_id
      ) aggregate
@@ -700,13 +731,12 @@ async function findMajorEventContextCandidates(
      LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
      WHERE event.status IN ('emerging','active','monitoring')
        AND event.event_type='earthquake'
-       AND event.severity IN ('high','critical')
+       AND event.severity IN ('medium','high','critical')
        AND event.geography IS NOT NULL
        AND event.metadata @> '{"exact_geography":true}'::jsonb
        AND event.start_time BETWEEN
          $1::timestamptz-make_interval(secs=>$2::int)
          AND $1::timestamptz+make_interval(secs=>$3::int)
-       AND ($10::uuid IS NULL OR event.id=$10::uuid)
        AND ($11::uuid IS NULL OR event.id<>$11::uuid)
        AND (
          ($4::uuid IS NOT NULL AND event.primary_location_id=$4::uuid)
@@ -719,7 +749,8 @@ async function findMajorEventContextCandidates(
            WHERE entity.event_id=event.id AND entity.entity_key=ANY($9::text[])
          ))
        )
-     ORDER BY CASE event.severity WHEN 'critical' THEN 2 ELSE 1 END DESC,
+     ORDER BY CASE WHEN $10::uuid IS NOT NULL AND event.id=$10::uuid THEN 1 ELSE 0 END DESC,
+              CASE event.severity WHEN 'critical' THEN 3 WHEN 'high' THEN 2 ELSE 1 END DESC,
               event.relevance_score DESC,event.start_time DESC,event.id
      LIMIT 20`,
     [input.evidence.observedAt, Math.round(policy.afterHours * 3_600),
@@ -936,20 +967,43 @@ export async function attachIntelligenceSignalToExistingEvent(input: Intelligenc
   return correlateIntelligenceSignal(input, { createWhenUnmatched: false });
 }
 
+export function contextualEvidenceLastActivity(input: {
+  candidateLastActivity: Date;
+  evidenceObservedAt: Date;
+  relationship: IntelligenceSignalInput["evidence"]["relationship"];
+}) {
+  if (input.relationship === "assessment") return input.candidateLastActivity;
+  return input.candidateLastActivity.getTime() >= input.evidenceObservedAt.getTime()
+    ? input.candidateLastActivity : input.evidenceObservedAt;
+}
+
 /**
- * Adds a signal as non-causal context to one precisely located major event.
+ * Adds a signal as non-causal context to one precisely located, context-
+ * eligible earthquake (M7+ or a materially significant moderate event).
  * This is intentionally separate from canonical correlation: a weather model
  * sample or transport comparison remains its own kind of signal and cannot
  * turn the canonical earthquake into a weather/transport event (or vice
- * versa). The strongest accepted major-event candidate wins; ambiguous
+ * versa). The strongest accepted earthquake candidate wins; ambiguous
  * country-only reporting is rejected by the pure policy.
  */
 export async function attachIntelligenceSignalToMajorEventContext(
   input: IntelligenceSignalInput,
-  options: { excludeEventId?: string | null; onlyEventId?: string | null } = {},
+  options: {
+    excludeEventId?: string | null;
+    onlyEventId?: string | null;
+    targetedDiscovery?: TargetedEarthquakeContextAudit | null;
+  } = {},
 ) {
   const policy = contextualLinkagePolicy("earthquake", input.evidence.domain);
   if (!policy) return null;
+  const targetedDiscovery = options.targetedDiscovery ?? null;
+  if (targetedDiscovery && (
+    !options.onlyEventId
+    || !["local_place", "event_signature"].includes(targetedDiscovery.scope)
+    || !Number.isFinite(targetedDiscovery.confidence)
+    || targetedDiscovery.confidence < 0.75
+    || targetedDiscovery.confidence > 1
+  )) return null;
   return withTransaction(async (client) => {
     const entityKeys = normalizedEntityKeys(input.entityKeys);
     const location = await loadSignalLocation(client, input.primaryLocationId);
@@ -967,9 +1021,28 @@ export async function attachIntelligenceSignalToMajorEventContext(
     );
     if (!candidates.length) return null;
 
+    const eligibleCandidates: Array<{
+      candidate: MajorEventContextCandidateRow;
+      candidatePolicy: ContextualLinkagePolicy;
+    }> = [];
+    for (const candidate of candidates) {
+      const candidatePolicy = contextualLinkagePolicy(
+        candidate.event_type,
+        normalizedInput.evidence.domain,
+        storedEarthquakeContextAttributes(candidate),
+      );
+      if (candidatePolicy) eligibleCandidates.push({ candidate, candidatePolicy });
+    }
+    if (!eligibleCandidates.length) return null;
+
     const country = normalizedInput.primaryCountryIso2?.trim().toUpperCase() || null;
     const countryCandidateCount = country
-      ? candidates.filter((candidate) => candidate.primary_country_iso2?.trim().toUpperCase() === country).length
+      ? eligibleCandidates.filter(({ candidate, candidatePolicy }) => {
+          if (candidate.primary_country_iso2?.trim().toUpperCase() !== country) return false;
+          const deltaHours = (normalizedInput.evidence.observedAt.getTime()
+            - new Date(candidate.start_time).getTime()) / 3_600_000;
+          return deltaHours >= -candidatePolicy.beforeHours && deltaHours <= candidatePolicy.afterHours;
+        }).length
       : 0;
     const signalCandidate: CorrelationCandidate = {
       eventType: normalizedInput.eventType,
@@ -981,7 +1054,7 @@ export async function attachIntelligenceSignalToMajorEventContext(
       entityKeys,
       sourceReliability: normalizedInput.evidence.confidence,
     };
-    const ranked = candidates.map((candidate) => {
+    const ranked = eligibleCandidates.map(({ candidate, candidatePolicy }) => {
       const anchor: CorrelationCandidate = {
         eventType: candidate.event_type,
         observedAt: new Date(candidate.start_time),
@@ -998,20 +1071,59 @@ export async function attachIntelligenceSignalToMajorEventContext(
           anchor,
           signal: signalCandidate,
           domain: normalizedInput.evidence.domain,
-          policy,
+          policy: candidatePolicy,
           uniqueCountryCandidate: countryCandidateCount === 1,
         }),
+        policy: candidatePolicy,
       };
     }).sort((left, right) => right.linkage.score - left.linkage.score);
-    const selected = ranked.find(({ linkage }) => linkage.accepted);
+    const selected = ranked.find(({ candidate, linkage }) => linkage.accepted
+      && (!options.onlyEventId || candidate.id === options.onlyEventId));
     if (!selected) return null;
+
+    const originalRelationship = normalizedInput.evidence.relationship;
+    const contextualRelationship = originalRelationship === "assessment"
+      ? "assessment" : "context";
+    const coverageStatus = normalizedInput.evidence.metadata?.coverage_status
+      ?? normalizedInput.evidence.metadata?.classification
+      ?? null;
+    const targetedFactors = targetedDiscovery ? {
+      targeted_discovery: true,
+      targeted_discovery_methodology: targetedDiscovery.methodology,
+      targeted_earthquake_observation_id: targetedDiscovery.earthquakeObservationId,
+      targeted_usgs_event_id: targetedDiscovery.usgsEventId,
+      targeted_event_place: targetedDiscovery.place,
+      targeted_match_scope: targetedDiscovery.scope,
+      targeted_match_confidence: targetedDiscovery.confidence,
+      targeted_match_factors: targetedDiscovery.factors,
+      targeted_match_rationale: targetedDiscovery.rationale,
+    } : {};
+    const linkage = {
+      ...selected.linkage,
+      factors: {
+        ...selected.linkage.factors,
+        evidence_relationship: contextualRelationship,
+        coverage_assessment: contextualRelationship === "assessment",
+        coverage_status: coverageStatus,
+        ...targetedFactors,
+      },
+      rationale: targetedDiscovery
+        ? `${selected.linkage.rationale} Exact target selection was additionally constrained by validated ${targetedDiscovery.scope.replace("_", " ")} metadata from a bounded event-specific discovery query: ${targetedDiscovery.rationale}`
+        : selected.linkage.rationale,
+    };
 
     await client.query(`SELECT id FROM intelligence_event WHERE id=$1::uuid FOR UPDATE`, [selected.candidate.id]);
     const candidate = selected.candidate;
     const candidateLastActivity = new Date(candidate.last_activity_time);
     const contextObservedAt = normalizedInput.evidence.observedAt;
-    const lastActivityTime = candidateLastActivity.getTime() >= contextObservedAt.getTime()
-      ? candidateLastActivity : contextObservedAt;
+    // A coverage assessment says only what Claritas could or could not
+    // compare. It has its own evidence timestamp, but must not make the
+    // underlying physical event appear newly active.
+    const lastActivityTime = contextualEvidenceLastActivity({
+      candidateLastActivity,
+      evidenceObservedAt: contextObservedAt,
+      relationship: contextualRelationship,
+    });
     const contextualInput: IntelligenceSignalInput = {
       dedupeKey: candidate.dedupe_key,
       eventType: candidate.event_type,
@@ -1038,20 +1150,39 @@ export async function attachIntelligenceSignalToMajorEventContext(
       entityKeys: candidate.entity_keys ?? [],
       evidence: {
         ...normalizedInput.evidence,
-        relationship: "context",
-        correlationScore: selected.linkage.score,
-        correlationFactors: selected.linkage.factors,
+        relationship: contextualRelationship,
+        correlationScore: linkage.score,
+        correlationFactors: linkage.factors,
         provenance: {
           ...normalizedInput.evidence.provenance,
-          contextual_association: "major-event-context-v1",
+          contextual_association: selected.policy.policyVersion ?? "significant-earthquake-context-v2",
+          ...(targetedDiscovery ? {
+            targeted_discovery_methodology: targetedDiscovery.methodology,
+            targeted_earthquake_observation_id: targetedDiscovery.earthquakeObservationId,
+            targeted_usgs_event_id: targetedDiscovery.usgsEventId,
+          } : {}),
         },
         metadata: {
           ...(normalizedInput.evidence.metadata ?? {}),
           title: normalizedInput.title,
           description: normalizedInput.summary,
-          original_relationship: normalizedInput.evidence.relationship,
-          linkage_rationale: selected.linkage.rationale,
-          assessment_boundary: "Contextual association only. It neither establishes earthquake causation nor confirms physical or operational impact.",
+          original_relationship: originalRelationship,
+          linkage_rationale: linkage.rationale,
+          context_evidence_kind: contextualRelationship === "assessment" ? "coverage_assessment" : "likely_linked_signal",
+          ...(targetedDiscovery ? {
+            targeted_discovery: {
+              methodology: targetedDiscovery.methodology,
+              earthquake_observation_id: targetedDiscovery.earthquakeObservationId,
+              usgs_event_id: targetedDiscovery.usgsEventId,
+              place: targetedDiscovery.place,
+              match_scope: targetedDiscovery.scope,
+              match_confidence: targetedDiscovery.confidence,
+              match_factors: targetedDiscovery.factors,
+              match_rationale: targetedDiscovery.rationale,
+            },
+          } : {}),
+          assessment_boundary: targetedDiscovery?.assessmentBoundary
+            ?? "Contextual association only. It neither establishes earthquake causation nor confirms physical or operational impact.",
         },
       },
     };
@@ -1064,15 +1195,28 @@ export async function attachIntelligenceSignalToMajorEventContext(
     });
     await persistCorrelationDecision(
       client, normalizedInput, event.id, "attached", candidate.id,
-      selected.linkage.score, policy.threshold, selected.linkage.factors,
-      "major-event-context-v1", selected.linkage.rationale,
+      linkage.score, selected.policy.threshold, linkage.factors,
+      selected.policy.policyVersion ?? "significant-earthquake-context-v2", linkage.rationale,
     );
-    return { event, linkage: selected.linkage };
+    return { event, linkage };
   });
 }
 
 export async function upsertIntelligenceSignal(input: IntelligenceSignalInput) {
   return withTransaction(async (client) => upsertIntelligenceSignalTx(client, input));
+}
+
+/**
+ * Persists an independently reviewable context source without correlating it
+ * to an arbitrary event or generating notification/imagery side effects.
+ * A caller may subsequently attach the evidence to one explicitly validated
+ * target through `attachIntelligenceSignalToMajorEventContext`.
+ */
+export async function upsertStandaloneContextSourceSignal(input: IntelligenceSignalInput) {
+  return withTransaction(async (client) => upsertIntelligenceSignalTx(client, input, {
+    suppressAlertCandidate: true,
+    suppressEarthObservation: true,
+  }));
 }
 
 export async function upsertIntelligenceSignalTx(

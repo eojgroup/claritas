@@ -4,11 +4,64 @@ import type { CorrelationCandidate, IntelligenceDomain } from "./types";
 const clamp = (value: number, minimum = 0, maximum = 1) =>
   Math.min(maximum, Math.max(minimum, value));
 
+export function pendingEarthquakeContextRefreshDue(input: {
+  lastRunAt: number;
+  now: number;
+  minimumIntervalMinutes?: number;
+}) {
+  const intervalMinutes = Math.min(60, Math.max(
+    5,
+    input.minimumIntervalMinutes ?? 15,
+  ));
+  return Number.isFinite(input.now)
+    && (!Number.isFinite(input.lastRunAt)
+      || input.lastRunAt <= 0
+      || input.now - input.lastRunAt >= intervalMinutes * 60_000);
+}
+
+export function transportContextRefreshMilestone(input: {
+  elapsedHours: number;
+  windowHours: number;
+  maximumWindowHours?: number;
+}) {
+  const elapsedHours = Math.max(0, Number(input.elapsedHours) || 0);
+  const windowHours = Math.max(0, Number(input.windowHours) || 0);
+  const maximumWindowHours = Math.min(24, Math.max(1, Number(input.maximumWindowHours) || 24));
+  const milestones = Array.from(new Set([maximumWindowHours, 6, 1]
+    .filter((milestone) => milestone <= maximumWindowHours)))
+    .sort((left, right) => right - left);
+  return milestones.find((milestone) => elapsedHours >= milestone && windowHours < milestone) ?? null;
+}
+
 export type ContextualLinkagePolicy = {
   beforeHours: number;
   afterHours: number;
   maxDistanceKm: number;
   threshold: number;
+  contextTier?: EarthquakeContextTier;
+  policyVersion?: "significant-earthquake-context-v2";
+};
+
+export type EarthquakeContextTier = "significant_moderate" | "major";
+
+export type EarthquakeContextAttributes = {
+  magnitude?: unknown;
+  significance?: unknown;
+  tsunami?: unknown;
+  alertLevel?: unknown;
+  felt?: unknown;
+  severity?: unknown;
+};
+
+export type EarthquakeContextEligibility = {
+  eligible: boolean;
+  tier: EarthquakeContextTier | null;
+  magnitude: number | null;
+  significance: number | null;
+  tsunami: boolean;
+  alertLevel: string | null;
+  felt: number | null;
+  reasons: string[];
 };
 
 export type ContextualLinkageResult = {
@@ -29,26 +82,139 @@ export type ContextualLinkageResult = {
   rationale: string;
 };
 
-const EARTHQUAKE_CONTEXT_POLICIES: Partial<Record<IntelligenceDomain, ContextualLinkagePolicy>> = {
-  news: { beforeHours: 6, afterHours: 72, maxDistanceKm: 450, threshold: 0.44 },
-  weather: { beforeHours: 12, afterHours: 48, maxDistanceKm: 250, threshold: 0.42 },
-  transport: { beforeHours: 24, afterHours: 72, maxDistanceKm: 450, threshold: 0.42 },
-  podcast: { beforeHours: 24, afterHours: 168, maxDistanceKm: 450, threshold: 0.48 },
+const EARTHQUAKE_CONTEXT_POLICY_RANGES: Partial<Record<IntelligenceDomain, {
+  minimum: ContextualLinkagePolicy;
+  maximum: ContextualLinkagePolicy;
+}>> = {
+  news: {
+    minimum: { beforeHours: 6, afterHours: 48, maxDistanceKm: 350, threshold: 0.44 },
+    maximum: { beforeHours: 6, afterHours: 72, maxDistanceKm: 650, threshold: 0.44 },
+  },
+  weather: {
+    minimum: { beforeHours: 12, afterHours: 36, maxDistanceKm: 200, threshold: 0.42 },
+    maximum: { beforeHours: 12, afterHours: 48, maxDistanceKm: 350, threshold: 0.42 },
+  },
+  transport: {
+    minimum: { beforeHours: 18, afterHours: 48, maxDistanceKm: 300, threshold: 0.42 },
+    maximum: { beforeHours: 24, afterHours: 72, maxDistanceKm: 600, threshold: 0.42 },
+  },
+  podcast: {
+    minimum: { beforeHours: 24, afterHours: 120, maxDistanceKm: 350, threshold: 0.48 },
+    maximum: { beforeHours: 24, afterHours: 168, maxDistanceKm: 650, threshold: 0.48 },
+  },
 };
+
+function finiteNumber(value: unknown) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizedBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  return ["true", "1", "yes"].includes(String(value ?? "").trim().toLowerCase());
+}
+
+/**
+ * Selects earthquakes that merit cross-signal investigation without turning
+ * every routine seismic observation into an expanded incident. M7+ events
+ * remain eligible, while M5.5-M6.9 events require a materiality indicator.
+ * M5.8+ is itself treated as a strong-moderate indicator because those events
+ * can be widely felt even when PAGER/significance fields arrive later.
+ */
+export function earthquakeContextEligibility(
+  attributes: EarthquakeContextAttributes,
+): EarthquakeContextEligibility {
+  const magnitude = finiteNumber(attributes.magnitude);
+  const significance = finiteNumber(attributes.significance);
+  const felt = finiteNumber(attributes.felt);
+  const tsunami = normalizedBoolean(attributes.tsunami);
+  const alertValue = String(attributes.alertLevel ?? "").trim().toLowerCase();
+  const alertLevel = ["green", "yellow", "orange", "red"].includes(alertValue)
+    ? alertValue : null;
+  const severity = String(attributes.severity ?? "").trim().toLowerCase();
+  const major = (magnitude != null && magnitude >= 7)
+    || ["high", "critical"].includes(severity)
+    || alertLevel === "orange" || alertLevel === "red";
+  const moderateMagnitude = magnitude != null && magnitude >= 5.5;
+  const reasons = [
+    magnitude != null && magnitude >= 7 ? "magnitude_at_least_7" : null,
+    moderateMagnitude && magnitude! >= 5.8 ? "strong_moderate_magnitude" : null,
+    significance != null && significance >= 450 ? "usgs_significance_at_least_450" : null,
+    tsunami ? "source_tsunami_flag" : null,
+    alertLevel ? `pager_alert_${alertLevel}` : null,
+    felt != null && felt >= 10 ? "felt_reports_at_least_10" : null,
+    ["high", "critical"].includes(severity) ? `canonical_severity_${severity}` : null,
+  ].filter((value): value is string => Boolean(value));
+  const materiallySignificantModerate = moderateMagnitude && (
+    magnitude! >= 5.8
+    || (significance != null && significance >= 450)
+    || tsunami
+    || alertLevel === "yellow"
+    || alertLevel === "orange"
+    || alertLevel === "red"
+    || (felt != null && felt >= 10)
+  );
+  const eligible = major || materiallySignificantModerate;
+  return {
+    eligible,
+    tier: eligible ? major ? "major" : "significant_moderate" : null,
+    magnitude,
+    significance,
+    tsunami,
+    alertLevel,
+    felt,
+    reasons,
+  };
+}
+
+const lerp = (minimum: number, maximum: number, ratio: number) =>
+  minimum + (maximum - minimum) * ratio;
+
+function scaledEarthquakeContextPolicy(
+  domain: IntelligenceDomain,
+  eligibility: EarthquakeContextEligibility,
+) {
+  const range = EARTHQUAKE_CONTEXT_POLICY_RANGES[domain];
+  if (!range || !eligibility.eligible || !eligibility.tier) return null;
+  const magnitudeRatio = eligibility.tier === "major"
+    ? 1
+    : clamp(((eligibility.magnitude ?? 5.5) - 5.5) / 1.5);
+  return {
+    beforeHours: Number(lerp(range.minimum.beforeHours, range.maximum.beforeHours, magnitudeRatio).toFixed(2)),
+    afterHours: Number(lerp(range.minimum.afterHours, range.maximum.afterHours, magnitudeRatio).toFixed(2)),
+    maxDistanceKm: Math.round(lerp(range.minimum.maxDistanceKm, range.maximum.maxDistanceKm, magnitudeRatio)),
+    threshold: range.maximum.threshold,
+    contextTier: eligibility.tier,
+    policyVersion: "significant-earthquake-context-v2" as const,
+  };
+}
 
 /**
  * Cross-domain context is deliberately narrower than canonical event merging.
- * For now only a major, precisely located earthquake opens these windows. The
- * linked signal remains independently labelled and never becomes proof of
+ * A precisely located earthquake must also pass `earthquakeContextEligibility`.
+ * Supplying no attributes returns the maximum search envelope; callers must
+ * then apply the per-candidate eligibility/policy before attaching anything.
+ * The linked signal remains independently labelled and never becomes proof of
  * damage, disruption, or causation.
  */
 export function contextualLinkagePolicy(
   anchorEventType: string,
   domain: IntelligenceDomain,
+  attributes?: EarthquakeContextAttributes,
 ): ContextualLinkagePolicy | null {
-  return eventFamilyTypes(anchorEventType)[0] === "earthquake"
-    ? EARTHQUAKE_CONTEXT_POLICIES[domain] ?? null
-    : null;
+  if (eventFamilyTypes(anchorEventType)[0] !== "earthquake") return null;
+  const range = EARTHQUAKE_CONTEXT_POLICY_RANGES[domain];
+  if (!range) return null;
+  if (attributes === undefined) {
+    return {
+      ...range.maximum,
+      contextTier: "major",
+      policyVersion: "significant-earthquake-context-v2",
+    };
+  }
+  return scaledEarthquakeContextPolicy(domain, earthquakeContextEligibility(attributes));
 }
 
 function normalizedEntities(values: string[] | undefined) {
@@ -130,7 +296,7 @@ export function scoreContextualLinkage(input: {
   const sameFamily = eventFamilyTypes(input.anchor.eventType)[0]
     === eventFamilyTypes(input.signal.eventType)[0] ? 1 : 0;
   const sourceReliability = clamp(input.signal.sourceReliability ?? 0.7);
-  // Major-event follow-up reporting often arrives the next publication day.
+  // Significant-event follow-up reporting often arrives the next publication day.
   // Give the narrowly governed, unambiguous same-country seismic fallback an
   // explicit score component for up to 48 hours; country coincidence by
   // itself still contributes nothing and weather/transport remain excluded.
@@ -154,7 +320,7 @@ export function scoreContextualLinkage(input: {
   );
   const concreteAnchor = withinDistance || location === 1 || entity >= 0.25;
   // A country-only fallback is allowed only for reporting that is explicitly
-  // in the same event family, close in time, and has exactly one major event
+  // in the same event family, close in time, and has exactly one eligible event
   // candidate in that country/window. It is never available to weather or
   // transport signals and therefore cannot turn national conditions into an
   // asserted earthquake impact.
@@ -171,7 +337,7 @@ export function scoreContextualLinkage(input: {
       : null,
     location === 1 ? "the same specific mapped location" : null,
     entity >= 0.25 ? "shared named-place or entity anchors" : null,
-    uniqueCountryNewsFallback ? "the only major same-family event in the country and time window" : null,
+    uniqueCountryNewsFallback ? "the only eligible same-family event in the country and time window" : null,
   ].filter((value): value is string => Boolean(value));
   const timing = deltaHours < -1 / 60
     ? `${hourLabel(Math.abs(deltaHours))} before the event`
@@ -180,7 +346,7 @@ export function scoreContextualLinkage(input: {
       : hourLabel(0);
   const rationale = accepted
     ? `Included as contextual ${input.domain} evidence because it was observed ${timing} and matched ${supports.join(" and ")}. This association does not establish that the earthquake caused the signal, that the signal confirms impact, or that the sources describe the same phenomenon.`
-    : `Not attached: the ${input.domain} signal did not meet the governed time/space/entity threshold for this major event.`;
+    : `Not attached: the ${input.domain} signal did not meet the governed time/space/entity threshold for this eligible earthquake.`;
 
   return {
     accepted,
@@ -202,11 +368,14 @@ export function scoreContextualLinkage(input: {
       window_after_hours: policy.afterHours,
       distance_km: distanceKm == null ? null : Number(distanceKm.toFixed(2)),
       max_distance_km: policy.maxDistanceKm,
+      earthquake_context_tier: policy.contextTier ?? null,
       unique_country_candidate: input.uniqueCountryCandidate === true,
+      unique_eligible_event: uniqueMajorEvent,
+      // Retained for readers of v1 audit records.
       unique_major_event: uniqueMajorEvent,
       rationale,
       causality_notice: "Contextual association only; no causal relationship or impact confirmation is asserted.",
-      methodology: "major-event-context-v1",
+      methodology: policy.policyVersion ?? "significant-earthquake-context-v2",
     },
     rationale,
   };

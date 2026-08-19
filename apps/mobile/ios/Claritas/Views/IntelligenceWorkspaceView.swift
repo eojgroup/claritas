@@ -426,9 +426,19 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
-                if !detail.linked_news.isEmpty {
-                    BrandCard(title: "Linked reporting", icon: "newspaper") {
-                        ForEach(detail.linked_news) { report in
+                let linkedReporting = detail.linked_news.filter {
+                    $0.relationship.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "assessment"
+                }
+                BrandCard(title: "Linked reporting", icon: "newspaper") {
+                    if linkedReporting.isEmpty {
+                        Label("No linked reporting yet", systemImage: "newspaper.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                        Text("No news record is explicitly linked to this event yet. Sensor and official evidence below remain available, but Claritas does not imply a reporting connection.")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    } else {
+                        ForEach(linkedReporting) { report in
                             VStack(alignment: .leading, spacing: 5) {
                                 HStack(alignment: .firstTextBaseline) {
                                     Text(report.publisher ?? "Publisher record")
@@ -453,13 +463,35 @@ struct IntelligenceWorkspaceView: View {
                                 }
                             }
                             .padding(.vertical, 6)
-                            if report.id != detail.linked_news.last?.id { Divider() }
+                            if report.id != linkedReporting.last?.id { Divider() }
                         }
                     }
                 }
 
-                if !detail.evidence.isEmpty {
-                    let evidenceByDomain = Dictionary(grouping: detail.evidence, by: \.domain)
+                let contextAssessments = detail.evidence.filter(isContextAssessment)
+                if !contextAssessments.isEmpty {
+                    BrandCard(title: "Context coverage status", icon: "eye") {
+                        Text("Coverage and comparison assessments describe what the available data can support. They are not counted as linked observations or reports.")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        ForEach(contextAssessments) { item in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Label(contextStatusLabel(for: item), systemImage: contextStatusIcon(for: item))
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                                Text(item.source_summary ?? "Claritas recorded a qualified coverage assessment for this event.")
+                                    .font(.caption2)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            }
+                            .padding(.vertical, 5)
+                            if item.id != contextAssessments.last?.id { Divider() }
+                        }
+                    }
+                }
+
+                let linkedSignalEvidence = detail.evidence.filter { !isContextAssessment($0) }
+                if !linkedSignalEvidence.isEmpty {
+                    let evidenceByDomain = Dictionary(grouping: linkedSignalEvidence, by: \.domain)
                     BrandCard(title: "How signals link to this event", icon: "link") {
                         Text("Every source below is attached to the active investigation. “Likely linked” means the recorded linkage passed a governed threshold; it does not mean one signal caused another.")
                             .font(.caption)
@@ -514,7 +546,14 @@ struct IntelligenceWorkspaceView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                 }
-                                if item.correlation_factors != nil {
+                                if isContextAssessment(item) {
+                                    Label(contextStatusLabel(for: item).uppercased(), systemImage: contextStatusIcon(for: item))
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    Text("This status describes data availability or comparison readiness; it is not a positive linked signal.")
+                                        .font(.caption2)
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                } else if item.correlation_factors != nil {
                                     HStack(spacing: 6) {
                                         Label(
                                             IntelligenceLinkagePresentation.label(for: item.correlation_factors),
@@ -853,6 +892,81 @@ struct IntelligenceWorkspaceView: View {
         }
     }
 
+    private func contextStatusCode(for item: IntelligenceEvidence) -> String? {
+        let metadata = item.metadata?.object
+        let factors = item.correlation_factors?.object
+        let declaredStatus = metadata?["coverage_status"]?.string
+            ?? metadata?["classification"]?.string
+            ?? factors?["coverage_status"]?.string
+            ?? factors?["classification"]?.string
+        let knownStatuses = Set([
+            "no_local_sample",
+            "comparison_pending",
+            "no_nearby_coverage",
+            "insufficient_comparable_coverage",
+        ])
+        if let declaredStatus, knownStatuses.contains(declaredStatus) {
+            return declaredStatus
+        }
+
+        // Conservative fallback for payloads produced before assessment
+        // metadata was exposed to the Apple clients.
+        let evidenceType = item.evidence_type.lowercased()
+        let sourceRecordType = item.source_record_type.lowercased()
+        let assessmentText = [item.source_title, item.source_summary]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+        if evidenceType == "event_area_weather_unavailable"
+            || sourceRecordType == "event_weather_coverage" {
+            return "no_local_sample"
+        }
+        if evidenceType == "event_area_activity_comparison" {
+            if assessmentText.contains("comparison pending")
+                || assessmentText.contains("complete post-event hour") {
+                return "comparison_pending"
+            }
+            if assessmentText.contains("no transport track points")
+                || assessmentText.contains("no nearby transport coverage") {
+                return "no_nearby_coverage"
+            }
+            if assessmentText.contains("baseline is too small")
+                || assessmentText.contains("insufficient comparable coverage")
+                || assessmentText.contains("insufficient nearby transport coverage") {
+                return "insufficient_comparable_coverage"
+            }
+        }
+        return nil
+    }
+
+    private func isContextAssessment(_ item: IntelligenceEvidence) -> Bool {
+        item.relationship.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "assessment"
+            || contextStatusCode(for: item) != nil
+    }
+
+    private func contextStatusLabel(for item: IntelligenceEvidence) -> String {
+        switch contextStatusCode(for: item) {
+        case "no_local_sample": return "No local weather coverage"
+        case "comparison_pending": return "Transport comparison pending"
+        case "no_nearby_coverage": return "No nearby transport coverage"
+        case "insufficient_comparable_coverage": return "Insufficient nearby transport coverage"
+        default:
+            let domain = item.domain.lowercased()
+            if domain.contains("news") { return "Reporting coverage assessment" }
+            if domain.contains("weather") { return "Weather coverage assessment" }
+            if domain.contains("transport") { return "Transport coverage assessment" }
+            return "Context coverage assessment"
+        }
+    }
+
+    private func contextStatusIcon(for item: IntelligenceEvidence) -> String {
+        let domain = item.domain.lowercased()
+        if domain.contains("weather") { return "cloud.slash" }
+        if domain.contains("transport") { return "arrow.triangle.2.circlepath" }
+        if domain.contains("news") { return "newspaper.fill" }
+        return "info.circle"
+    }
+
     private func signalLinkExplanation(_ records: [IntelligenceEvidence]) -> String {
         let attached = records.filter {
             IntelligenceLinkagePresentation.decision(in: $0.correlation_factors) == "attached"
@@ -869,7 +983,7 @@ struct IntelligenceWorkspaceView: View {
     }
 
     private func evidenceLabel(_ relationship: String) -> String {
-        switch relationship {
+        switch relationship.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "reported": return "Reported"
         case "observed": return "Observed"
         case "corroborates": return "Corroborates"
@@ -882,7 +996,7 @@ struct IntelligenceWorkspaceView: View {
     }
 
     private func evidenceIcon(_ relationship: String) -> String {
-        switch relationship {
+        switch relationship.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "reported": return "newspaper"
         case "observed", "corroborates": return "sensor.tag.radiowaves.forward"
         case "derived": return "function"

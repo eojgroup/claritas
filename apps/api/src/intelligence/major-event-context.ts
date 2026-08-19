@@ -1,6 +1,15 @@
 import { query } from "../db";
-import { assessTransportActivityComparison, contextualLinkagePolicy } from "./contextual-linkage";
-import { attachIntelligenceSignalToMajorEventContext } from "./service";
+import {
+  assessTransportActivityComparison,
+  contextualLinkagePolicy,
+  earthquakeContextEligibility,
+  pendingEarthquakeContextRefreshDue,
+  type EarthquakeContextAttributes,
+} from "./contextual-linkage";
+import {
+  attachIntelligenceSignalToMajorEventContext,
+  type TargetedEarthquakeContextAudit,
+} from "./service";
 import type { IntelligenceDomain, IntelligenceSignalInput } from "./types";
 
 type MajorEarthquakeRow = {
@@ -9,6 +18,10 @@ type MajorEarthquakeRow = {
   latitude: number;
   longitude: number;
   country_iso2: string | null;
+  earthquake_observation_ids: string[];
+  severity: string;
+  score_components: Record<string, unknown>;
+  metadata: Record<string, unknown>;
 };
 
 const boundedNumberEnv = (name: string, fallback: number, minimum: number, maximum: number) => {
@@ -16,24 +29,125 @@ const boundedNumberEnv = (name: string, fallback: number, minimum: number, maxim
   return Math.min(maximum, Math.max(minimum, Number.isFinite(parsed) ? parsed : fallback));
 };
 
+const PENDING_TRANSPORT_REFRESH_INTERVAL_MINUTES = 15;
+let lastPendingTransportRefreshAt = 0;
+
+function earthquakeContextAttributes(row: Pick<MajorEarthquakeRow, "severity" | "score_components" | "metadata">): EarthquakeContextAttributes {
+  return {
+    severity: row.severity,
+    magnitude: row.score_components?.magnitude ?? row.metadata?.magnitude,
+    significance: row.score_components?.significance ?? row.metadata?.significance,
+    tsunami: row.metadata?.tsunami,
+    alertLevel: row.metadata?.alert_level,
+    felt: row.metadata?.felt,
+  };
+}
+
+function contextPolicy(anchor: MajorEarthquakeRow, domain: IntelligenceDomain) {
+  return contextualLinkagePolicy("earthquake", domain, earthquakeContextAttributes(anchor));
+}
+
+function targetedAuditFromEvidenceMetadata(
+  metadata: unknown,
+): TargetedEarthquakeContextAudit | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+  const routing = (metadata as Record<string, unknown>).targeted_discovery_routing;
+  if (!routing || typeof routing !== "object" || Array.isArray(routing)) return null;
+  const value = routing as Record<string, unknown>;
+  const scope = value.match_scope === "local_place" || value.match_scope === "event_signature"
+    ? value.match_scope : null;
+  const confidence = Number(value.match_confidence);
+  const factors = Array.isArray(value.match_factors)
+    ? value.match_factors.filter((factor): factor is string => typeof factor === "string").slice(0, 12)
+    : [];
+  if (value.methodology !== "deterministic_gdelt_doc_event_query_v1"
+      || typeof value.earthquake_observation_id !== "string"
+      || typeof value.usgs_event_id !== "string"
+      || typeof value.place !== "string"
+      || !scope || !Number.isFinite(confidence) || confidence < 0.75 || confidence > 1
+      || !factors.length || typeof value.match_rationale !== "string"
+      || typeof value.assessment_boundary !== "string") return null;
+  return {
+    methodology: value.methodology,
+    earthquakeObservationId: value.earthquake_observation_id,
+    usgsEventId: value.usgs_event_id,
+    place: value.place,
+    confidence,
+    scope,
+    factors,
+    rationale: value.match_rationale,
+    assessmentBoundary: value.assessment_boundary,
+  };
+}
+
+function normalizedEarthquakeIdentityPlace(value: unknown) {
+  return typeof value === "string"
+    ? value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim()
+    : "";
+}
+
+export function targetedEarthquakeAuditMatchesAnchor(
+  audit: TargetedEarthquakeContextAudit | null,
+  anchor: {
+    earthquakeObservationId: string | null;
+    usgsEventId: string | null;
+    place: string | null;
+  } | null,
+) {
+  return Boolean(audit && anchor
+    && audit.earthquakeObservationId === anchor.earthquakeObservationId
+    && audit.usgsEventId === anchor.usgsEventId
+    && normalizedEarthquakeIdentityPlace(audit.place)
+      === normalizedEarthquakeIdentityPlace(anchor.place));
+}
+
+export function pendingEarthquakeContextRefreshDomains(input: {
+  hasWeatherContext: boolean;
+  hasTransportContext: boolean;
+}): IntelligenceDomain[] {
+  return input.hasWeatherContext && input.hasTransportContext
+    ? ["transport"] : ["news", "weather", "transport"];
+}
+
 async function loadMajorEarthquake(eventId: string) {
   const { rows } = await query<MajorEarthquakeRow>(
     `SELECT event.id,event.start_time,event.primary_country_iso2 AS country_iso2,
+            event.severity,event.score_components,event.metadata,
+            COALESCE((SELECT array_agg(
+               evidence.source_record_id
+               ORDER BY CASE WHEN evidence.relationship='observed' THEN 0 ELSE 1 END,
+                        evidence.created_at
+             )
+             FROM intelligence_event_evidence evidence
+             WHERE evidence.event_id=event.id
+               AND evidence.domain='disaster'
+               AND evidence.evidence_type='seismic_observation'
+               AND evidence.source_record_type='earthquake_observation'
+            ),ARRAY[]::text[]) AS earthquake_observation_ids,
             ST_Y(ST_PointOnSurface(event.geography))::double precision AS latitude,
             ST_X(ST_PointOnSurface(event.geography))::double precision AS longitude
      FROM intelligence_event event
      WHERE event.id=$1::uuid AND event.event_type='earthquake'
-       AND event.severity IN ('high','critical')
+       AND event.severity IN ('medium','high','critical')
        AND event.geography IS NOT NULL
        AND event.metadata @> '{"exact_geography":true}'::jsonb`,
     [eventId],
   );
-  return rows[0] ?? null;
+  const anchor = rows[0] ?? null;
+  return anchor && earthquakeContextEligibility(earthquakeContextAttributes(anchor)).eligible
+    ? anchor : null;
 }
 
 async function attachExistingNews(anchor: MajorEarthquakeRow) {
-  const policy = contextualLinkagePolicy("earthquake", "news");
+  const policy = contextPolicy(anchor, "news");
   if (!policy) return 0;
+  const targetIdentities = anchor.earthquake_observation_ids.length
+    ? await query<{ id: string; usgs_event_id: string; place: string }>(
+        `SELECT id::text AS id,usgs_event_id,place
+         FROM earthquake_observation WHERE id::text=ANY($1::text[])`,
+        [anchor.earthquake_observation_ids],
+      )
+    : { rows: [] };
   const { rows } = await query<any>(
     `SELECT evidence.*,source.name AS source_name,source.metadata AS source_metadata,
             source_event.id AS source_event_id,source_event.event_type,
@@ -73,19 +187,40 @@ async function attachExistingNews(anchor: MajorEarthquakeRow) {
            THEN source_item.payload->>'quality_status'='accepted'
            ELSE COALESCE(source_item.payload->>'quality_status','accepted')='accepted' END)
        AND (
-         (source_event.geography IS NOT NULL AND ST_DWithin(
+         (evidence.metadata->>'targeted_discovery_present'='true'
+           AND evidence.metadata->'targeted_discovery_routing'->>'earthquake_observation_id'=ANY($9::text[]))
+         OR (source_event.geography IS NOT NULL AND ST_DWithin(
            source_event.geography::geography,
            ST_SetSRID(ST_MakePoint($6,$5),4326)::geography,$7::double precision*1000))
          OR ($8::text IS NOT NULL AND source_event.primary_country_iso2=$8)
        )
-     ORDER BY evidence.observed_at DESC,evidence.confidence DESC
+     ORDER BY CASE
+                WHEN evidence.metadata->>'targeted_discovery_present'='true'
+                 AND evidence.metadata->'targeted_discovery_routing'->>'earthquake_observation_id'=ANY($9::text[])
+                  THEN 0 ELSE 1
+              END,
+              evidence.observed_at DESC,evidence.confidence DESC
      LIMIT 100`,
     [anchor.id, anchor.start_time, Math.round(policy.beforeHours * 3_600),
      Math.round(policy.afterHours * 3_600), anchor.latitude, anchor.longitude,
-     policy.maxDistanceKm, anchor.country_iso2],
+     policy.maxDistanceKm, anchor.country_iso2, anchor.earthquake_observation_ids],
   );
   let attached = 0;
   for (const row of rows) {
+    const targetedItem = row.metadata?.targeted_discovery_present === true;
+    const targetedAudit = targetedAuditFromEvidenceMetadata(row.metadata);
+    const observation = targetedAudit
+      ? targetIdentities.rows.find((identity) => identity.id === targetedAudit.earthquakeObservationId)
+      : null;
+    // A stamped targeted result never re-enters generic fallback during
+    // replay. Eligible results recover from outbox ordering only at the exact
+    // observation-backed anchor; review-only, malformed, or identity-
+    // inconsistent results remain news.
+    if (targetedItem && !targetedEarthquakeAuditMatchesAnchor(targetedAudit, observation ? {
+      earthquakeObservationId: observation.id,
+      usgsEventId: observation.usgs_event_id,
+      place: observation.place,
+    } : null)) continue;
     const input: IntelligenceSignalInput = {
       dedupeKey: String(row.source_event_id),
       eventType: row.event_type,
@@ -125,6 +260,7 @@ async function attachExistingNews(anchor: MajorEarthquakeRow) {
     if (await attachIntelligenceSignalToMajorEventContext(input, {
       excludeEventId: row.source_event_id,
       onlyEventId: anchor.id,
+      targetedDiscovery: targetedAudit,
     })) attached += 1;
   }
   return attached;
@@ -211,7 +347,7 @@ async function attachWeatherCoverageAssessment(
   anchor: MajorEarthquakeRow,
   nearest: { id: number; distance_km: number } | null,
 ) {
-  const policy = contextualLinkagePolicy("earthquake", "weather");
+  const policy = contextPolicy(anchor, "weather");
   if (!policy) return 0;
   const startedAt = new Date(anchor.start_time);
   const boundedAssessmentTime = Math.min(
@@ -280,7 +416,7 @@ async function attachWeatherCoverageAssessment(
 }
 
 async function attachNearbyWeather(anchor: MajorEarthquakeRow) {
-  const policy = contextualLinkagePolicy("earthquake", "weather");
+  const policy = contextPolicy(anchor, "weather");
   if (!policy) return 0;
   const { rows } = await query<{ id: number; distance_km: number }>(
     `SELECT snapshot.id,
@@ -326,54 +462,74 @@ async function attachNearbyWeather(anchor: MajorEarthquakeRow) {
 }
 
 async function attachTransportComparison(anchor: MajorEarthquakeRow) {
-  const policy = contextualLinkagePolicy("earthquake", "transport");
+  const policy = contextPolicy(anchor, "transport");
   if (!policy) return 0;
   const startedAt = new Date(anchor.start_time);
   const elapsedHours = (Date.now() - startedAt.getTime()) / 3_600_000;
   const configuredWindow = boundedNumberEnv("EVENT_TRANSPORT_CONTEXT_WINDOW_HOURS", 24, 2, 48);
+  const terminalWindowHours = Math.floor(Math.min(
+    configuredWindow,
+    policy.beforeHours,
+    policy.afterHours,
+  ));
   // Compare only completed whole-hour windows. Besides making the before and
   // after populations genuinely symmetric, this gives redeliveries the same
   // evidence/outbox timestamp within an hour.
   const windowHours = Math.floor(Math.min(
-    configuredWindow,
-    policy.beforeHours,
-    policy.afterHours,
+    terminalWindowHours,
     Math.max(0, elapsedHours),
   ));
-  if (windowHours < 1) return 0;
-  const { rows } = await query<any>(
-    `SELECT
-       count(*) FILTER (WHERE point.observed_at<$1::timestamptz)::int AS before_samples,
-       count(*) FILTER (WHERE point.observed_at>=$1::timestamptz)::int AS after_samples,
-       count(DISTINCT point.mode || ':' || point.entity_id)
-         FILTER (WHERE point.observed_at<$1::timestamptz)::int AS before_entities,
-       count(DISTINCT point.mode || ':' || point.entity_id)
-         FILTER (WHERE point.observed_at>=$1::timestamptz)::int AS after_entities,
-       COALESCE(array_agg(DISTINCT point.source_name)
-         FILTER (WHERE point.source_name IS NOT NULL),ARRAY[]::text[]) AS providers
-     FROM transport_track_point point
-     WHERE point.observed_at BETWEEN
-       $1::timestamptz-make_interval(secs=>$2::int)
-       AND $1::timestamptz+make_interval(secs=>$2::int)
-       AND ST_DWithin(
-         ST_SetSRID(ST_MakePoint(point.longitude,point.latitude),4326)::geography,
-         ST_SetSRID(ST_MakePoint($4,$3),4326)::geography,$5::double precision*1000)`,
-    [startedAt, Math.round(windowHours * 3_600), anchor.latitude, anchor.longitude, policy.maxDistanceKm],
-  );
-  const row = rows[0] ?? {};
-  const assessment = assessTransportActivityComparison({
-    beforeEntities: Number(row.before_entities ?? 0),
-    afterEntities: Number(row.after_entities ?? 0),
-    beforeSamples: Number(row.before_samples ?? 0),
-    afterSamples: Number(row.after_samples ?? 0),
-    windowHours,
-  });
+  let row: any = { providers: [] };
+  const assessment = windowHours < 1
+    ? {
+        beforeEntities: 0,
+        afterEntities: 0,
+        beforeSamples: 0,
+        afterSamples: 0,
+        windowHours: 0,
+        percentChange: null,
+        classification: "comparison_pending",
+        confidence: 0.35,
+        summary: "A symmetric nearby transport comparison is not yet available because less than one complete post-event hour has elapsed. Claritas cannot infer whether activity changed.",
+        methodology: "symmetric-event-area-transport-v1",
+      }
+    : await (async () => {
+        const result = await query<any>(
+          `SELECT
+             count(*) FILTER (WHERE point.observed_at<$1::timestamptz)::int AS before_samples,
+             count(*) FILTER (WHERE point.observed_at>=$1::timestamptz)::int AS after_samples,
+             count(DISTINCT point.mode || ':' || point.entity_id)
+               FILTER (WHERE point.observed_at<$1::timestamptz)::int AS before_entities,
+             count(DISTINCT point.mode || ':' || point.entity_id)
+               FILTER (WHERE point.observed_at>=$1::timestamptz)::int AS after_entities,
+             COALESCE(array_agg(DISTINCT point.source_name)
+               FILTER (WHERE point.source_name IS NOT NULL),ARRAY[]::text[]) AS providers
+           FROM transport_track_point point
+           WHERE point.observed_at BETWEEN
+             $1::timestamptz-make_interval(secs=>$2::int)
+             AND $1::timestamptz+make_interval(secs=>$2::int)
+             AND ST_DWithin(
+               ST_SetSRID(ST_MakePoint(point.longitude,point.latitude),4326)::geography,
+               ST_SetSRID(ST_MakePoint($4,$3),4326)::geography,$5::double precision*1000)`,
+          [startedAt, Math.round(windowHours * 3_600), anchor.latitude, anchor.longitude, policy.maxDistanceKm],
+        );
+        row = result.rows[0] ?? row;
+        return assessTransportActivityComparison({
+          beforeEntities: Number(row.before_entities ?? 0),
+          afterEntities: Number(row.after_entities ?? 0),
+          beforeSamples: Number(row.before_samples ?? 0),
+          afterSamples: Number(row.after_samples ?? 0),
+          windowHours,
+        });
+      })();
   const title = assessment.classification === "lower_activity_observed"
     ? "Lower nearby transport activity after the earthquake"
     : assessment.classification === "higher_activity_observed"
       ? "Higher nearby transport activity after the earthquake"
       : assessment.classification === "no_material_change_detected"
         ? "No material nearby transport change detected"
+        : assessment.classification === "comparison_pending"
+          ? "Nearby transport comparison pending"
         : "Nearby transport coverage assessment";
   const observedAt = new Date(startedAt.getTime() + windowHours * 3_600_000);
   const attached = await attachIntelligenceSignalToMajorEventContext({
@@ -401,7 +557,11 @@ async function attachTransportComparison(anchor: MajorEarthquakeRow) {
       sourceRecordId: anchor.id,
       observedAt,
       confidence: assessment.confidence,
-      relationship: "derived",
+      relationship: [
+        "comparison_pending",
+        "no_nearby_coverage",
+        "insufficient_comparable_coverage",
+      ].includes(assessment.classification) ? "assessment" : "derived",
       provenance: {
         provider: "claritas_transport_comparison",
         underlying_providers: row.providers ?? [],
@@ -412,12 +572,156 @@ async function attachTransportComparison(anchor: MajorEarthquakeRow) {
         title,
         description: assessment.summary,
         ...assessment,
+        terminalWindowHours,
         radius_km: policy.maxDistanceKm,
         comparison_boundary: "Tracked-entity counts reflect Claritas source coverage, not total port, maritime, or aviation activity.",
       },
     },
   }, { onlyEventId: anchor.id });
   return attached ? 1 : 0;
+}
+
+/**
+ * Advances transport assessments at bounded 1h, 6h, and proportional terminal
+ * milestones (at most 24h) even when no country-tagged movement event arrives
+ * to trigger the normal refresh
+ * path. It also bootstraps a missing first context pass for recent eligible
+ * earthquakes, so a migration replay consumed by a pre-rollout worker cannot
+ * strand the event. It is safe to call from a fast worker loop: the process-
+ * local 15-minute throttle prevents per-tick queries and every scan is bounded.
+ * The magnitude-scaled terminal transport milestone is final.
+ */
+export async function refreshPendingEarthquakeTransportContexts(
+  options: { force?: boolean; now?: Date; limit?: number } = {},
+) {
+  const now = options.now ?? new Date();
+  const nowMs = now.getTime();
+  if (Number.isNaN(nowMs)) return { throttled: false, scanned: 0, refreshed: 0 };
+  if (!options.force && !pendingEarthquakeContextRefreshDue({
+    lastRunAt: lastPendingTransportRefreshAt,
+    now: nowMs,
+    minimumIntervalMinutes: PENDING_TRANSPORT_REFRESH_INTERVAL_MINUTES,
+  })) return { throttled: true, scanned: 0, refreshed: 0 };
+  // Claim this process interval before awaiting I/O so overlapping worker
+  // ticks cannot start the same bounded scan concurrently.
+  lastPendingTransportRefreshAt = nowMs;
+  const limit = Math.min(25, Math.max(1, Math.trunc(options.limit ?? 10)));
+  const terminalWindowHours = Math.floor(Math.min(
+    24,
+    boundedNumberEnv("EVENT_TRANSPORT_CONTEXT_WINDOW_HOURS", 24, 2, 48),
+  ));
+  const { rows } = await query<{
+    id: string;
+    has_weather_context: boolean;
+    has_transport_context: boolean;
+  }>(
+    `SELECT event.id,
+            EXISTS (
+              SELECT 1 FROM intelligence_event_evidence evidence
+              WHERE evidence.event_id=event.id
+                AND evidence.domain='weather'
+                AND evidence.source_record_type IN ('weather_snapshot','event_weather_coverage')
+            ) AS has_weather_context,
+            EXISTS (
+              SELECT 1 FROM intelligence_event_evidence evidence
+              WHERE evidence.event_id=event.id
+                AND evidence.domain='transport'
+                AND evidence.source_record_type='event_transport_window'
+            ) AS has_transport_context
+     FROM intelligence_event event
+     WHERE event.event_type='earthquake'
+       AND event.severity IN ('medium','high','critical')
+       AND event.status IN ('emerging','active','monitoring')
+       AND event.geography IS NOT NULL
+       AND event.metadata @> '{"exact_geography":true}'::jsonb
+       AND event.start_time BETWEEN $1::timestamptz-interval '8 days'
+                                AND $1::timestamptz-interval '1 hour'
+       AND EXISTS (
+         SELECT 1
+         FROM intelligence_event_evidence seismic
+         JOIN earthquake_observation observation
+           ON observation.id::text=seismic.source_record_id
+         WHERE seismic.event_id=event.id
+           AND seismic.domain='disaster'
+           AND seismic.evidence_type='seismic_observation'
+           AND seismic.source_record_type='earthquake_observation'
+           AND (
+             observation.magnitude>=7
+             OR lower(COALESCE(observation.alert_level,'')) IN ('orange','red')
+             OR (
+               observation.magnitude>=5.5
+               AND (
+                 observation.magnitude>=5.8
+                 OR COALESCE(observation.significance,0)>=450
+                 OR observation.tsunami
+                 OR lower(COALESCE(observation.alert_level,''))='yellow'
+                 OR COALESCE(observation.felt,0)>=10
+               )
+             )
+           )
+       )
+       AND (
+         NOT EXISTS (
+           SELECT 1 FROM intelligence_event_evidence evidence
+           WHERE evidence.event_id=event.id
+             AND evidence.domain='weather'
+             AND evidence.source_record_type IN ('weather_snapshot','event_weather_coverage')
+         )
+         OR
+         NOT EXISTS (
+           SELECT 1 FROM intelligence_event_evidence evidence
+           WHERE evidence.event_id=event.id
+             AND evidence.domain='transport'
+             AND evidence.source_record_type='event_transport_window'
+         )
+         OR (
+           event.start_time>=$1::timestamptz-interval '72 hours'
+           AND EXISTS (
+             SELECT 1 FROM intelligence_event_evidence evidence
+             CROSS JOIN LATERAL (
+               SELECT GREATEST(1,LEAST(
+                 $3::int,
+                 COALESCE(
+                   CASE WHEN evidence.metadata->>'terminalWindowHours' ~ '^[0-9]+(?:[.][0-9]+)?$'
+                     THEN floor((evidence.metadata->>'terminalWindowHours')::double precision)::int END,
+                   $3::int
+                 )
+               )) AS terminal_window_hours
+             ) refresh_policy
+             WHERE evidence.event_id=event.id
+               AND evidence.domain='transport'
+               AND evidence.source_record_type='event_transport_window'
+               AND COALESCE(
+                 CASE WHEN evidence.metadata->>'windowHours' ~ '^[0-9]+(?:[.][0-9]+)?$'
+                   THEN (evidence.metadata->>'windowHours')::double precision END,
+                 0
+               ) < CASE
+                 WHEN event.start_time<=$1::timestamptz-
+                   (refresh_policy.terminal_window_hours::double precision*interval '1 hour')
+                   THEN refresh_policy.terminal_window_hours
+                 WHEN refresh_policy.terminal_window_hours>=6
+                   AND event.start_time<=$1::timestamptz-interval '6 hours' THEN 6
+                 ELSE 1
+               END
+           )
+         )
+       )
+     ORDER BY event.start_time DESC,event.id
+     LIMIT $2`,
+    [now, limit, terminalWindowHours],
+  );
+  let refreshed = 0;
+  for (const row of rows) {
+    const result = await refreshMajorEarthquakeContext(
+      row.id,
+      pendingEarthquakeContextRefreshDomains({
+        hasWeatherContext: row.has_weather_context,
+        hasTransportContext: row.has_transport_context,
+      }),
+    );
+    if (result.eligible) refreshed += 1;
+  }
+  return { throttled: false, scanned: rows.length, refreshed };
 }
 
 export async function refreshMajorEarthquakeContext(
@@ -427,11 +731,12 @@ export async function refreshMajorEarthquakeContext(
   const anchor = await loadMajorEarthquake(eventId);
   if (!anchor) return { eligible: false, news: 0, weather: 0, transport: 0 };
   const selected = new Set(domains);
-  const [news, weather, transport] = await Promise.all([
-    selected.has("news") ? attachExistingNews(anchor) : 0,
-    selected.has("weather") ? attachNearbyWeather(anchor) : 0,
-    selected.has("transport") ? attachTransportComparison(anchor) : 0,
-  ]);
+  // Keep transport last: its stable event_transport_window evidence is also
+  // the runtime bootstrap checkpoint. If an earlier domain fails, no partial
+  // checkpoint can suppress the next bounded retry.
+  const news = selected.has("news") ? await attachExistingNews(anchor) : 0;
+  const weather = selected.has("weather") ? await attachNearbyWeather(anchor) : 0;
+  const transport = selected.has("transport") ? await attachTransportComparison(anchor) : 0;
   return { eligible: true, news, weather, transport };
 }
 
@@ -443,13 +748,17 @@ export async function refreshRecentMajorEarthquakeTransportContext(
   if (!country || Number.isNaN(observedAt.getTime())) return 0;
   const { rows } = await query<{ id: string }>(
     `SELECT id FROM intelligence_event
-     WHERE event_type='earthquake' AND severity IN ('high','critical')
+     WHERE event_type='earthquake' AND severity IN ('medium','high','critical')
        AND status IN ('emerging','active','monitoring')
        AND primary_country_iso2=$1
        AND start_time BETWEEN $2::timestamptz-interval '72 hours' AND $2::timestamptz+interval '24 hours'
-     ORDER BY start_time DESC LIMIT 5`,
+     ORDER BY start_time DESC LIMIT 10`,
     [country, observedAt],
   );
-  for (const row of rows) await refreshMajorEarthquakeContext(row.id, ["transport"]);
-  return rows.length;
+  let refreshed = 0;
+  for (const row of rows) {
+    const result = await refreshMajorEarthquakeContext(row.id, ["transport"]);
+    if (result.eligible) refreshed += 1;
+  }
+  return refreshed;
 }

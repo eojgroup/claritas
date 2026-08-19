@@ -1,11 +1,14 @@
 import { query, withTransaction } from "../db";
 import worldCountries from "world-countries";
+import { hasEarthquakeHeadlineSignal } from "../earthquake-language";
 import { buildEventDedupeKey, computeSignalPriority, evaluateMarketMove } from "./correlation";
 import { resolveLocationFromText, resolveNearestLocation } from "./location-resolver";
 import {
   attachIntelligenceSignalToExistingEvent,
   attachIntelligenceSignalToMajorEventContext,
   correlateAndUpsertIntelligenceSignal,
+  upsertStandaloneContextSourceSignal,
+  type TargetedEarthquakeContextAudit,
 } from "./service";
 import {
   attachWeatherSnapshotToMajorEventContext,
@@ -15,6 +18,7 @@ import {
 import { calculateRollingBaseline, detectTransportAnomaly } from "./transport-anomaly";
 import { trustedGdeltActionCoordinate, trustedGdeltLocations } from "./gdelt-geography";
 import { buildGdeltEventPresentation } from "./event-presentation";
+import { earthquakeContextEligibility } from "./contextual-linkage";
 import type { DomainEventEnvelope, IntelligenceSeverity } from "./types";
 
 const sourceReliability: Record<string, number> = {
@@ -102,8 +106,11 @@ export function isAcceptedNewsQuality(payload: unknown, sourceName: unknown) {
 
 export function classifyEventType(text: string) {
   const normalized = text.toLowerCase();
+  // News classification receives headline + summary. Keep the detector's
+  // bounded-input guarantee without letting a long summary hide a clear
+  // earthquake headline at the start of the record.
+  if (hasEarthquakeHeadlineSignal(text.slice(0, 1_000))) return "earthquake";
   const mappings: Array<[RegExp, string]> = [
-    [/earthquake|\bquake\b|seismic|tremor|aftershock|epicent(?:er|re)|tsunami/, "earthquake"],
     [/wildfire|forest fire|bushfire|active fire/, "wildfire"],
     [/flood|inundation|flash flood/, "flood"],
     [/hurricane|typhoon|cyclone|storm/, "severe_storm"],
@@ -140,6 +147,169 @@ export function earthquakePlaceEntityKeys(place: unknown, eventId: unknown) {
   return collectEntityKeys(values, localPlace, commaParts.at(-1));
 }
 
+type TargetedEarthquakeDiscoveryDecision = {
+  present: boolean;
+  linkEligible: boolean;
+  rejectionReason: string | null;
+  audit: TargetedEarthquakeContextAudit | null;
+  observedAt: Date | null;
+};
+
+const TARGETED_DISCOVERY_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function boundedContractString(value: unknown, minimum: number, maximum: number) {
+  if (typeof value !== "string") return null;
+  const normalized = value.normalize("NFKC").replace(/\s+/g, " ").trim();
+  return normalized.length >= minimum && normalized.length <= maximum ? normalized : null;
+}
+
+/**
+ * Treats the presence of `targeted_discovery` as a routing decision even when
+ * the payload is malformed. Review-only or invalid candidates must never fall
+ * through to broad country/time context attachment.
+ */
+export function targetedEarthquakeDiscoveryDecision(payload: unknown): TargetedEarthquakeDiscoveryDecision {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)
+      || !Object.prototype.hasOwnProperty.call(payload, "targeted_discovery")) {
+    return { present: false, linkEligible: false, rejectionReason: null, audit: null, observedAt: null };
+  }
+  const raw = (payload as Record<string, unknown>).targeted_discovery;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { present: true, linkEligible: false, rejectionReason: "invalid_targeted_discovery", audit: null, observedAt: null };
+  }
+  const discovery = raw as Record<string, unknown>;
+  const match = discovery.match;
+  if (!match || typeof match !== "object" || Array.isArray(match)
+      || (match as Record<string, unknown>).link_eligible !== true) {
+    return { present: true, linkEligible: false, rejectionReason: "targeted_match_not_link_eligible", audit: null, observedAt: null };
+  }
+  const matchRecord = match as Record<string, unknown>;
+  const earthquakeObservationId = boundedContractString(discovery.earthquake_observation_id, 36, 36);
+  const usgsEventId = boundedContractString(discovery.usgs_event_id, 3, 100);
+  const place = boundedContractString(discovery.place, 2, 300);
+  const methodology = discovery.method === "deterministic_gdelt_doc_event_query_v1"
+    ? discovery.method : null;
+  const eventType = discovery.event_type === "earthquake" ? "earthquake" : null;
+  const scope = matchRecord.scope === "local_place" || matchRecord.scope === "event_signature"
+    ? matchRecord.scope : null;
+  const confidence = Number(matchRecord.confidence);
+  const rationale = boundedContractString(matchRecord.rationale, 10, 1_000);
+  const assessmentBoundary = boundedContractString(matchRecord.assessment_boundary, 10, 1_000);
+  const factors = Array.isArray(matchRecord.factors)
+    ? matchRecord.factors
+      .map((factor) => boundedContractString(factor, 2, 240))
+      .filter((factor): factor is string => Boolean(factor))
+      .slice(0, 12)
+    : [];
+  const observedAtValue = boundedContractString(discovery.observed_at, 10, 80);
+  const observedAt = observedAtValue ? new Date(observedAtValue) : null;
+  if (!earthquakeObservationId || !TARGETED_DISCOVERY_UUID.test(earthquakeObservationId)
+      || !usgsEventId || !/^[a-z0-9._-]+$/i.test(usgsEventId)
+      || !place || !methodology || !eventType || !scope
+      || !Number.isFinite(confidence) || confidence < 0.75 || confidence > 1
+      || !rationale || !assessmentBoundary || factors.length === 0
+      || !observedAt || Number.isNaN(observedAt.getTime())) {
+    return { present: true, linkEligible: false, rejectionReason: "invalid_link_eligible_target_contract", audit: null, observedAt: null };
+  }
+  return {
+    present: true,
+    linkEligible: true,
+    rejectionReason: null,
+    observedAt,
+    audit: {
+      earthquakeObservationId,
+      usgsEventId,
+      place,
+      confidence,
+      scope,
+      factors,
+      rationale,
+      assessmentBoundary,
+      methodology,
+    },
+  };
+}
+
+function normalizedTargetPlace(value: unknown) {
+  return typeof value === "string"
+    ? value.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, " ").trim()
+    : "";
+}
+
+export function targetedEarthquakeIdentityMatches(
+  decision: TargetedEarthquakeDiscoveryDecision,
+  observation: {
+    id: unknown;
+    usgsEventId: unknown;
+    place: unknown;
+    observedAt: Date;
+  },
+) {
+  return Boolean(decision.linkEligible && decision.audit && decision.observedAt
+    && observation.id === decision.audit.earthquakeObservationId
+    && observation.usgsEventId === decision.audit.usgsEventId
+    && normalizedTargetPlace(observation.place) === normalizedTargetPlace(decision.audit.place)
+    && !Number.isNaN(observation.observedAt.getTime())
+    && Math.abs(observation.observedAt.getTime() - decision.observedAt.getTime()) <= 5 * 60_000);
+}
+
+export function targetedEarthquakeEntityKeys(
+  decision: TargetedEarthquakeDiscoveryDecision,
+) {
+  return decision.linkEligible && decision.audit
+    ? collectEntityKeys(
+        earthquakePlaceEntityKeys(decision.audit.place, decision.audit.usgsEventId),
+        decision.audit.earthquakeObservationId,
+      )
+    : [];
+}
+
+export function newsEventTypeForTargetedDiscovery(
+  text: string,
+  decision: Pick<TargetedEarthquakeDiscoveryDecision, "linkEligible">,
+) {
+  return decision.linkEligible ? "earthquake" : classifyEventType(text);
+}
+
+async function resolveTargetedEarthquakeEvent(
+  decision: TargetedEarthquakeDiscoveryDecision,
+) {
+  if (!decision.linkEligible || !decision.audit || !decision.observedAt) return null;
+  const { rows } = await query<{
+    event_id: string;
+    observation_id: string;
+    usgs_event_id: string;
+    place: string;
+    observed_at: string | Date;
+  }>(
+    `SELECT linked_event.id AS event_id,observation.id::text AS observation_id,
+            observation.usgs_event_id,observation.place,observation.observed_at
+     FROM earthquake_observation observation
+     JOIN intelligence_event_evidence evidence
+       ON evidence.source_record_type='earthquake_observation'
+      AND evidence.source_record_id=observation.id::text
+      AND evidence.domain='disaster'
+      AND evidence.evidence_type='seismic_observation'
+     JOIN intelligence_event linked_event ON linked_event.id=evidence.event_id
+     WHERE observation.id=$1::uuid
+       AND linked_event.event_type='earthquake'
+     ORDER BY CASE WHEN evidence.relationship='observed' THEN 0 ELSE 1 END,
+              linked_event.start_time DESC,linked_event.id
+     LIMIT 1`,
+    [decision.audit.earthquakeObservationId],
+  );
+  const target = rows[0];
+  if (!target || !targetedEarthquakeIdentityMatches(decision, {
+    id: target.observation_id,
+    usgsEventId: target.usgs_event_id,
+    place: target.place,
+    observedAt: new Date(target.observed_at),
+  })) {
+    return null;
+  }
+  return target.event_id;
+}
+
 function weatherSeverity(value: string | null): IntelligenceSeverity {
   const normalized = value?.toLowerCase();
   if (normalized === "extreme") return "critical";
@@ -169,6 +339,7 @@ async function handleNewsStory(event: DomainEventEnvelope) {
   );
   const story = rows[0];
   if (!story || !isAcceptedNewsQuality(story.payload, story.source_name)) return;
+  const targetedDiscovery = targetedEarthquakeDiscoveryDecision(story.payload);
   const occurred = new Date(story.event_time ?? story.created_at);
   const text = `${story.title ?? ""} ${story.summary ?? ""}`;
   const gkgCoordinate = trustedGdeltLocations(story.payload)[0] ?? null;
@@ -178,9 +349,23 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     ?? await resolveLocationFromText(text, story.country_iso2)
     ?? await countryLocation(story.country_iso2);
   // Precisely located offshore/local reporting remains usable even when the
-  // provider omitted a country and no catalogue location is nearby.
-  if (!location && !story.country_iso2 && !gkgCoordinate) return;
-  const eventType = classifyEventType(text);
+  // provider omitted a country and no catalogue location is nearby. A valid
+  // targeted contract may also continue without article coordinates because
+  // its event identity is verified separately and never reused as article
+  // geography.
+  if (!location && !story.country_iso2 && !gkgCoordinate && !targetedDiscovery.linkEligible) return;
+  // A fully validated targeted contract already carries an exact
+  // observation-backed earthquake identity. It may therefore supply the
+  // family for a local-language title; malformed and review-only contracts
+  // remain on the fail-closed targeted routing path below.
+  const eventType = newsEventTypeForTargetedDiscovery(text, targetedDiscovery);
+  const targetedEventId = targetedDiscovery.linkEligible
+    ? await resolveTargetedEarthquakeEvent(targetedDiscovery)
+    : null;
+  // Contract identity is retained even when the news outbox wins the race
+  // against canonical USGS event creation. The standalone source can then be
+  // recovered by `attachExistingNews` during the earthquake context refresh.
+  const targetedEntityKeys = targetedEarthquakeEntityKeys(targetedDiscovery);
   const reliability = sourceReliability[story.source_name] ?? 0.68;
   const priority = computeSignalPriority({
     sourceReliability: reliability,
@@ -194,7 +379,9 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     ? `${Math.round(gkgCoordinate.latitude * 10) / 10},${Math.round(gkgCoordinate.longitude * 10) / 10}`
     : location?.id ?? story.country_iso2;
   const signalInput = {
-    dedupeKey: buildEventDedupeKey([eventType, newsAnchor, dayKey(occurred)]),
+    dedupeKey: targetedDiscovery.present
+      ? buildEventDedupeKey(["targeted-news-source", itemId])
+      : buildEventDedupeKey([eventType, newsAnchor, dayKey(occurred)]),
     eventType,
     title: String(story.title ?? "Reported development"),
     summary: String(story.summary ?? "A publisher reported a development. Independent corroboration may still be limited.").slice(0, 1_800),
@@ -216,13 +403,21 @@ async function handleNewsStory(event: DomainEventEnvelope) {
       extraction: "deterministic-keyword-v2",
       source_title_preserved: true,
       coordinate_source: gkgCoordinate ? "gdelt_gkg_location" : location?.match_basis ?? null,
+      targeted_discovery_present: targetedDiscovery.present,
+      targeted_discovery_link_eligible: targetedDiscovery.linkEligible,
+      targeted_discovery_target_resolved: Boolean(targetedEventId),
+      targeted_discovery_rejection: targetedDiscovery.present && !targetedEventId
+        ? targetedDiscovery.rejectionReason ?? "target_identity_not_resolved" : null,
+      targeted_event_coordinates_used_as_article_geography: false,
     },
-    entityKeys: collectEntityKeys(
-      gkgCoordinate?.name,
-      story.payload?.gkg?.persons,
-      story.payload?.gkg?.organizations,
-      story.payload?.gkg?.locations,
-    ),
+    entityKeys: targetedEntityKeys.length
+      ? targetedEntityKeys
+      : collectEntityKeys(
+          gkgCoordinate?.name,
+          story.payload?.gkg?.persons,
+          story.payload?.gkg?.organizations,
+          story.payload?.gkg?.locations,
+        ),
     evidence: {
       domain: "news",
       evidenceType: "reported_event",
@@ -242,9 +437,44 @@ async function handleNewsStory(event: DomainEventEnvelope) {
         original_summary: story.summary,
         language_code: story.language_code,
         extracted_coordinate: gkgCoordinate,
+        targeted_discovery_present: targetedDiscovery.present,
+        targeted_discovery_link_eligible: targetedDiscovery.linkEligible,
+        targeted_discovery_target_resolved: Boolean(targetedEventId),
+        targeted_event_coordinates_used_as_article_geography: false,
+        ...(targetedDiscovery.audit ? {
+          targeted_discovery_routing: {
+            methodology: targetedDiscovery.audit.methodology,
+            earthquake_observation_id: targetedDiscovery.audit.earthquakeObservationId,
+            usgs_event_id: targetedDiscovery.audit.usgsEventId,
+            place: targetedDiscovery.audit.place,
+            match_scope: targetedDiscovery.audit.scope,
+            match_confidence: targetedDiscovery.audit.confidence,
+            match_factors: targetedDiscovery.audit.factors,
+            match_rationale: targetedDiscovery.audit.rationale,
+            assessment_boundary: targetedDiscovery.audit.assessmentBoundary,
+          },
+        } : {}),
       },
     },
   } satisfies Parameters<typeof correlateAndUpsertIntelligenceSignal>[0];
+  if (targetedDiscovery.present) {
+    if (targetedEventId && targetedDiscovery.audit) {
+      await attachIntelligenceSignalToMajorEventContext(signalInput, {
+        onlyEventId: targetedEventId,
+        targetedDiscovery: targetedDiscovery.audit,
+      });
+    } else if (targetedDiscovery.linkEligible && targetedDiscovery.audit) {
+      // Preserve a validated but not-yet-resolvable source for the USGS/news
+      // outbox ordering race. Review-only or malformed targeted results stay
+      // in the news stream and do not become investigation events.
+      await upsertStandaloneContextSourceSignal(signalInput);
+    }
+    // The targeted contract is a fail-closed routing boundary. Review-only,
+    // malformed, or unresolved candidates never enter generic country/time
+    // contextual fallback and an eligible match can reach only its exact
+    // observation-backed canonical event.
+    return;
+  }
   const selected = await correlateAndUpsertIntelligenceSignal(signalInput);
   await attachIntelligenceSignalToMajorEventContext(signalInput, { excludeEventId: selected.id });
 }
@@ -484,6 +714,14 @@ async function handleEarthquake(event: DomainEventEnvelope) {
   const severity: IntelligenceSeverity = magnitude >= 8 || quake.alert_level === "red" ? "critical"
     : magnitude >= 7 || quake.alert_level === "orange" ? "high"
       : magnitude >= 5.5 ? "medium" : "low";
+  const contextEligibility = earthquakeContextEligibility({
+    magnitude: quake.magnitude,
+    significance: quake.significance,
+    tsunami: quake.tsunami,
+    alertLevel: quake.alert_level,
+    felt: quake.felt,
+    severity,
+  });
   const radius = magnitude >= 7 ? 300 : magnitude >= 6 ? 180 : 100;
   const location = await resolveNearestLocation(quake.latitude, quake.longitude, radius,
     ["port", "airport", "city", "refinery", "lng_terminal", "power_station", "mine", "industrial_facility", "country"]);
@@ -504,8 +742,22 @@ async function handleEarthquake(event: DomainEventEnvelope) {
     coordinatesAreExact: true,
     relevanceScore: Math.max(priority.score, Math.min(1, magnitude / 9)), urgencyScore: Math.min(1, magnitude / 8),
     materialityScore: Math.min(1, (Number(quake.significance ?? 0) / 1_000) + (location?.importance_score ?? 0) * 0.25),
-    scoreComponents: { ...priority.components, magnitude, significance: quake.significance, proximity_radius_km: radius },
-    metadata: { tsunami: quake.tsunami, depth_km: quake.depth_km, alert_level: quake.alert_level, felt: quake.felt },
+    scoreComponents: {
+      ...priority.components,
+      magnitude,
+      significance: quake.significance,
+      proximity_radius_km: radius,
+      context_eligibility: contextEligibility,
+    },
+    metadata: {
+      magnitude: quake.magnitude,
+      significance: quake.significance,
+      tsunami: quake.tsunami,
+      depth_km: quake.depth_km,
+      alert_level: quake.alert_level,
+      felt: quake.felt,
+      context_eligibility: contextEligibility,
+    },
     entityKeys: earthquakePlaceEntityKeys(quake.place, quake.usgs_event_id),
     evidence: {
       domain: "disaster", evidenceType: "seismic_observation", sourceRecordType: "earthquake_observation", sourceRecordId: id,
@@ -515,7 +767,7 @@ async function handleEarthquake(event: DomainEventEnvelope) {
       metadata: { magnitude: quake.magnitude, magnitude_type: quake.magnitude_type, depth_km: quake.depth_km, tsunami: quake.tsunami },
     },
   });
-  if (severity === "high" || severity === "critical") {
+  if (contextEligibility.eligible) {
     await refreshMajorEarthquakeContext(intelligenceEvent.id);
   }
 }
@@ -529,7 +781,7 @@ async function handleEarthquakeContextRecheck(event: DomainEventEnvelope) {
      WHERE evidence.source_record_type='earthquake_observation'
        AND evidence.source_record_id=$1
        AND linked_event.event_type='earthquake'
-       AND linked_event.severity IN ('high','critical')
+       AND linked_event.severity IN ('medium','high','critical')
      ORDER BY CASE WHEN evidence.relationship='observed' THEN 0 ELSE 1 END,
               linked_event.start_time DESC,linked_event.id
      LIMIT 1`,

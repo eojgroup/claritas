@@ -6,6 +6,7 @@ import { isIP } from "node:net";
 import { unzipSync } from "fflate";
 import worldCountries from "world-countries";
 import { query } from "../db";
+import { hasEarthquakeHeadlineSignal } from "../earthquake-language";
 import { inferNewsCountry } from "./country-inference";
 
 const DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc";
@@ -18,6 +19,9 @@ const GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS = 3;
 const GDELT_MAX_FUTURE_SKEW_MS = 5 * 60_000;
 const GDELT_ARTICLE_HTML_MAX_BYTES = 350_000;
 const GDELT_ARTICLE_VERIFICATION_CONCURRENCY = 4;
+const GDELT_DOC_MIN_REQUEST_SPACING_MS = 5_500;
+let gdeltDocRequestTail: Promise<void> = Promise.resolve();
+let gdeltDocNextRequestAt = 0;
 
 export type GdeltDocArticle = {
   url?: string;
@@ -78,6 +82,29 @@ export type GdeltIngestParams = {
   includeDoc?: boolean;
   includeEvents?: boolean;
   includeGkg?: boolean;
+  targetedDiscovery?: GdeltTargetedDiscoveryContext;
+};
+
+export type GdeltTargetedDiscoveryContext = {
+  earthquakeObservationId: string;
+  usgsEventId: string;
+  place: string;
+  countryIso2: string | null;
+  magnitude: number | null;
+  latitude: number;
+  longitude: number;
+  observedAt: string;
+  query: string;
+  anchorTerms: string[];
+};
+
+export type GdeltTargetedMatch = {
+  confidence: number;
+  scope: "local_place" | "event_signature" | "country" | "full_text_query";
+  link_eligible: boolean;
+  factors: string[];
+  rationale: string;
+  assessment_boundary: string;
 };
 
 export type GdeltHeadlineBudgets = {
@@ -915,6 +942,169 @@ export function selectGdeltDocCandidates(
   return selected.map((candidate) => candidate.article);
 }
 
+const TARGETED_NATIVE_COUNTRY_SIGNALS: ReadonlyArray<readonly [string, RegExp]> = [
+  ["CN", /(?:中国|中國)/u],
+  ["JP", /日本/u],
+  ["KR", /(?:韩国|韓國|한국|대한민국)/u],
+  ["KP", /(?:朝鲜|朝鮮|북한)/u],
+  ["ID", /(?:印度尼西亚|印度尼西亞|印尼)/u],
+  ["IN", /(?:印度|भारत)/u],
+  ["US", /(?:美国|美國|الولايات\s+المتحدة|США)/u],
+  ["RU", /(?:俄罗斯|俄羅斯|Россия)/u],
+  ["UA", /(?:乌克兰|烏克蘭|Україна)/u],
+  ["IR", /(?:伊朗|ایران)/u],
+  ["PK", /(?:巴基斯坦|پاکستان)/u],
+  ["AF", /(?:阿富汗|افغانستان)/u],
+  ["PH", /(?:菲律宾|菲律賓|Pilipinas)/iu],
+];
+
+export function describeTargetedGdeltMatch(
+  article: Pick<GdeltDocArticle, "title">,
+  context: GdeltTargetedDiscoveryContext,
+): GdeltTargetedMatch {
+  const title = article.title?.toLocaleLowerCase() ?? "";
+  const normalizedAnchors = context.anchorTerms
+    .map((term) => term.trim().toLocaleLowerCase())
+    .filter((term) => term.length >= 2);
+  const localAnchor = normalizedAnchors[0] ?? "";
+  const countryAnchors = normalizedAnchors.slice(1);
+  const titleMentionsHazard = hasEarthquakeHeadlineSignal(article.title);
+  const titleMentionsLocalPlace = Boolean(localAnchor && title.includes(localAnchor));
+  const headlineInference = inferNewsCountry({ title: article.title });
+  const headlineCountries = new Set<string>();
+  if (headlineInference.source === "content_alias" && headlineInference.iso2) {
+    headlineCountries.add(headlineInference.iso2);
+  }
+  for (const [iso2, pattern] of TARGETED_NATIVE_COUNTRY_SIGNALS) {
+    if (pattern.test(article.title ?? "")) headlineCountries.add(iso2);
+  }
+  const targetCountry = context.countryIso2?.trim().toUpperCase() ?? null;
+  const titleMentionsCountry = countryAnchors.some((anchor) => title.includes(anchor))
+    || Boolean(targetCountry && headlineCountries.has(targetCountry));
+  const headlineCountryConflicts = Boolean(
+    targetCountry && Array.from(headlineCountries).some((country) => country !== targetCountry),
+  );
+  const headlineMagnitudes = Array.from(title.matchAll(/\b(?:m(?:agnitude)?\s*)?([4-9](?:[.,]\d)?)\b/gi))
+    .map((match) => Number(match[1].replace(",", ".")))
+    .filter(Number.isFinite);
+  const observedMagnitudeAtHeadlinePrecision = context.magnitude == null
+    ? null
+    : Math.round(Number(context.magnitude) * 10) / 10;
+  const magnitudeMatches = observedMagnitudeAtHeadlinePrecision != null
+    && headlineMagnitudes.some((magnitude) => (
+      Math.round(magnitude * 10) / 10 === observedMagnitudeAtHeadlinePrecision
+    ));
+  const factors = [
+    "bounded GDELT full-text query for earthquake terminology",
+    "publisher publication time falls within 6 hours before to 72 hours after the event",
+    "publisher-originating publication date independently verified",
+  ];
+  if (titleMentionsHazard) factors.push("headline contains earthquake terminology");
+  if (titleMentionsLocalPlace) factors.push(`headline names ${context.anchorTerms[0]}`);
+  else if (titleMentionsCountry) factors.push("headline names the event country");
+  if (magnitudeMatches) factors.push("headline magnitude matches the observed event at one-decimal precision");
+  if (magnitudeMatches && !headlineCountryConflicts && !titleMentionsCountry) {
+    factors.push("headline contains no country that conflicts with the event country");
+  }
+  if (headlineCountryConflicts) factors.push("headline names a country that conflicts with the event country");
+
+  const scope = titleMentionsLocalPlace
+    ? "local_place"
+    : titleMentionsHazard && magnitudeMatches && !headlineCountryConflicts
+      ? "event_signature"
+    : titleMentionsCountry
+      ? "country"
+      : "full_text_query";
+  const confidence = titleMentionsHazard && titleMentionsLocalPlace
+    ? 0.9
+    : titleMentionsHazard && magnitudeMatches && titleMentionsCountry
+      ? 0.84
+      : titleMentionsHazard && magnitudeMatches && !headlineCountryConflicts
+        ? 0.76
+    : titleMentionsHazard && titleMentionsCountry
+      ? 0.68
+      : titleMentionsLocalPlace
+        ? 0.74
+        : 0.52;
+  const linkEligible = !headlineCountryConflicts && titleMentionsHazard
+    && (titleMentionsLocalPlace || magnitudeMatches);
+  return {
+    confidence,
+    scope,
+    link_eligible: linkEligible,
+    factors,
+    rationale: scope === "local_place"
+      ? "The publisher headline and the targeted full-text result share the local place and event family."
+      : scope === "event_signature"
+        ? "The headline shares the event family and observed magnitude while the bounded query supplies the place/country retrieval anchor."
+      : scope === "country"
+        ? "The publisher headline and the targeted full-text result share only the country and event family; it is retained as a review candidate, not auto-linked locally."
+        : "GDELT matched the bounded event query in the article text, but the headline does not expose a local place or event-signature anchor.",
+    assessment_boundary: "Likely contextual reporting only. Retrieval proximity does not prove that the article describes this earthquake or any resulting impact.",
+  };
+}
+
+export function eligibleTargetedGdeltCountryFallback(
+  match: GdeltTargetedMatch | null,
+  countryIso2: string | null,
+): string | null {
+  const normalized = countryIso2?.trim().toUpperCase() ?? "";
+  return match?.link_eligible && /^[A-Z]{2}$/.test(normalized) ? normalized : null;
+}
+
+export function targetedGdeltPublicationIsTimely(
+  publishedAt: string,
+  context: Pick<GdeltTargetedDiscoveryContext, "observedAt">,
+): boolean {
+  const published = Date.parse(publishedAt);
+  const observed = Date.parse(context.observedAt);
+  if (!Number.isFinite(published) || !Number.isFinite(observed)) return false;
+  return published >= observed - 6 * 3_600_000
+    && published <= observed + 72 * 3_600_000;
+}
+
+export function selectTargetedGdeltDocCandidates(
+  articles: GdeltDocArticle[],
+  context: GdeltTargetedDiscoveryContext,
+  options: { limit?: number; now?: Date } = {},
+): GdeltDocArticle[] {
+  const limit = clampInt(options.limit, 1, 12, 8);
+  const scopeOrder: GdeltTargetedMatch["scope"][] = [
+    "local_place",
+    "event_signature",
+    "country",
+    "full_text_query",
+  ];
+  const ranked = scopeOrder.flatMap((scope) => selectGdeltDocCandidates(
+    articles.filter((article) => describeTargetedGdeltMatch(article, context).scope === scope),
+    { limit, now: options.now },
+  ));
+  const domainLimit = Math.max(1, Math.ceil(limit / 4));
+  const selected: GdeltDocArticle[] = [];
+  const overflow: GdeltDocArticle[] = [];
+  const urls = new Set<string>();
+  const domains = new Map<string, number>();
+  for (const article of ranked) {
+    const url = article.url ?? "";
+    if (!url || urls.has(url)) continue;
+    urls.add(url);
+    const domain = nonEmpty(article.domain) ?? hostnameFromUrl(url) ?? "unknown";
+    const count = domains.get(domain) ?? 0;
+    if (count >= domainLimit) {
+      overflow.push(article);
+      continue;
+    }
+    selected.push(article);
+    domains.set(domain, count + 1);
+    if (selected.length >= limit) return selected;
+  }
+  for (const article of overflow) {
+    selected.push(article);
+    if (selected.length >= limit) break;
+  }
+  return selected;
+}
+
 function usableGalUrl(value: string): { url: string; domain: string } | null {
   try {
     const url = new URL(value);
@@ -1009,16 +1199,36 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function withGdeltDocRateLimit<T>(operation: () => Promise<T>): Promise<T> {
+  let release!: () => void;
+  const turn = new Promise<void>((resolve) => { release = resolve; });
+  const previous = gdeltDocRequestTail;
+  gdeltDocRequestTail = previous.then(() => turn);
+  await previous;
+  try {
+    const waitMs = Math.max(0, gdeltDocNextRequestAt - Date.now());
+    if (waitMs > 0) await sleep(waitMs);
+    return await operation();
+  } finally {
+    gdeltDocNextRequestAt = Date.now() + GDELT_DOC_MIN_REQUEST_SPACING_MS;
+    release();
+  }
+}
+
 async function fetchRetry(url: string, attempts = 2): Promise<Response> {
   let lastResponse: Response | null = null;
+  const hostname = new URL(url).hostname.toLowerCase();
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await fetch(url, {
+    const request = () => fetch(url, {
       headers: {
         accept: "application/json, text/plain;q=0.9, */*;q=0.8",
         "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
       },
       signal: AbortSignal.timeout(20_000),
     });
+    const response = hostname === "api.gdeltproject.org"
+      ? await withGdeltDocRateLimit(request)
+      : await request();
     if (response.ok) return response;
     lastResponse = response;
     if (![429, 500, 502, 503, 504].includes(response.status) || attempt === attempts - 1) break;
@@ -1217,6 +1427,7 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   fetched: number;
   selected_candidates: number;
   accepted: number;
+  link_eligible: number;
   inserted: number;
   updated: number;
   unchanged: number;
@@ -1240,7 +1451,9 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   const response = await fetchRetry(apiUrl.toString());
   const data = (await response.json()) as GdeltDocResponse;
   const rawArticles = Array.isArray(data.articles) ? data.articles : [];
-  const articles = selectGdeltDocCandidates(rawArticles, { limit: selectionLimit });
+  const articles = params.targetedDiscovery
+    ? selectTargetedGdeltDocCandidates(rawArticles, params.targetedDiscovery, { limit: selectionLimit })
+    : selectGdeltDocCandidates(rawArticles, { limit: selectionLimit });
   const urls = articles.map((article) => article.url).filter((value): value is string => Boolean(value));
   const signals = urls.length > 0
     ? await query<{ url: string; tone: number | null; themes: unknown; persons: unknown; organizations: unknown; locations: unknown; payload: unknown }>(
@@ -1294,6 +1507,7 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   let quarantined = 0;
   const qualityRejections: Record<string, number> = {};
   let latestEventTime: string | null = null;
+  let linkEligible = 0;
   for (const candidate of verifiedArticles) {
     const { article, url, providerSeenAt, quality } = candidate;
     if (!quality.accepted || !url || !providerSeenAt || !quality.publication) {
@@ -1302,6 +1516,12 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
       if (await quarantineGdeltArticle(sourceId, url, quality.reason, verificationNow.toISOString(), providerSeenAt)) {
         quarantined += 1;
       }
+      continue;
+    }
+    if (params.targetedDiscovery
+        && !targetedGdeltPublicationIsTimely(quality.publication.publishedAt, params.targetedDiscovery)) {
+      skipped += 1;
+      qualityRejections.target_event_time_mismatch = (qualityRejections.target_event_time_mismatch ?? 0) + 1;
       continue;
     }
     // GDELT's seendate is evidence of discovery only. Event ordering uses the
@@ -1323,7 +1543,18 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
       url,
       feedCountryHint: gkgCountry ?? sourceCountry,
     });
-    const countryIso2 = inference.iso2 ?? gkgCountry ?? null;
+    const targetedMatch = params.targetedDiscovery
+      ? describeTargetedGdeltMatch(article, params.targetedDiscovery)
+      : null;
+    const targetCountry = params.targetedDiscovery?.countryIso2?.trim().toUpperCase() ?? null;
+    const eligibleTargetCountry = eligibleTargetedGdeltCountryFallback(targetedMatch, targetCountry);
+    if (targetedMatch?.link_eligible) linkEligible += 1;
+    const contentCountry = inference.source === "content_alias" ? inference.iso2 : null;
+    // Publisher country and URL TLD are low-confidence hints. For a targeted
+    // event query they must not relabel a China story as U.S. merely because a
+    // U.S. publisher reported it. Explicit article text/GKG geography still
+    // wins, followed by the event-query country with its visible attribution.
+    const countryIso2 = contentCountry ?? gkgCountry ?? eligibleTargetCountry ?? inference.iso2 ?? null;
     await ensureCountry(countryIso2);
     await ensureCountry(sourceCountry);
     const externalId = url;
@@ -1354,11 +1585,29 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
         article_url_valid: true,
       },
       country_attribution:
-        inference.source === "feed_hint" && !gkgCountry && sourceCountry
+        eligibleTargetCountry && !contentCountry && !gkgCountry
+          ? "targeted_event_query_fallback"
+          : inference.source === "feed_hint" && !gkgCountry && sourceCountry
           ? "publisher_country_fallback"
-          : gkgCountry && inference.iso2 === gkgCountry
+          : gkgCountry && countryIso2 === gkgCountry
             ? "gkg_location"
             : inference.source,
+      ...(params.targetedDiscovery ? {
+        targeted_discovery: {
+          method: "deterministic_gdelt_doc_event_query_v1",
+          event_type: "earthquake",
+          earthquake_observation_id: params.targetedDiscovery.earthquakeObservationId,
+          usgs_event_id: params.targetedDiscovery.usgsEventId,
+          place: params.targetedDiscovery.place,
+          country_iso2: targetCountry,
+          magnitude: params.targetedDiscovery.magnitude,
+          latitude: params.targetedDiscovery.latitude,
+          longitude: params.targetedDiscovery.longitude,
+          observed_at: params.targetedDiscovery.observedAt,
+          query: params.targetedDiscovery.query,
+          match: targetedMatch,
+        },
+      } : {}),
       gkg: signal ? {
         tone: signal.tone, themes: signal.themes, persons: signal.persons,
         organizations: signal.organizations, locations: signal.locations,
@@ -1424,6 +1673,7 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
     fetched: rawArticles.length,
     selected_candidates: articles.length,
     accepted: inserted + updated + unchanged,
+    link_eligible: linkEligible,
     inserted,
     updated,
     unchanged,
@@ -1637,6 +1887,56 @@ async function ingestGalFallback(
     quality_rejections: qualityRejections,
     latest_event_time: latestEventTime,
     coverage: "bounded materiality- and publisher-diverse sample from GDELT's rolling 15-minute global feed",
+  };
+}
+
+/**
+ * Runs one small event-specific DOC search. It deliberately reuses the same
+ * publisher-date verification, URL safety, diversity and URL idempotency path
+ * as the scheduled global feed, but does not fetch the unrelated Event/GKG
+ * archives or the global GAL supplement.
+ */
+export async function ingestTargetedGdeltNews(
+  context: GdeltTargetedDiscoveryContext,
+  options: { timespan?: string; maxRecords?: number } = {},
+): Promise<Record<string, unknown>> {
+  if (!context.query.trim() || !context.earthquakeObservationId || !context.usgsEventId) {
+    throw new Error("Targeted GDELT discovery requires an earthquake identity and a non-empty query.");
+  }
+  const sourceId = await ensureSource();
+  const articles = await ingestDocArticles(sourceId, {
+    query: context.query,
+    timespan: options.timespan?.trim() || "3d",
+    maxRecords: clampInt(options.maxRecords, 1, 12, 8),
+    includeDoc: true,
+    includeEvents: false,
+    includeGkg: false,
+    targetedDiscovery: context,
+  });
+  return {
+    provider: "gdelt",
+    product: "doc-2.0-targeted-event",
+    health: articles.link_eligible > 0
+      ? "likely_coverage_found"
+      : articles.accepted > 0
+        ? "review_candidates_only"
+        : "no_verified_coverage",
+    target: {
+      event_type: "earthquake",
+      earthquake_observation_id: context.earthquakeObservationId,
+      usgs_event_id: context.usgsEventId,
+      country_iso2: context.countryIso2,
+      observed_at: context.observedAt,
+    },
+    query: context.query,
+    articles,
+    accepted: articles.accepted,
+    link_eligible: articles.link_eligible,
+    inserted: articles.inserted,
+    updated: articles.updated,
+    unchanged: articles.unchanged,
+    skipped: articles.skipped,
+    latest_event_time: articles.latest_event_time,
   };
 }
 

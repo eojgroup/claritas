@@ -135,6 +135,50 @@ function evidenceUrl(item: IntelligenceEvidence) {
   return item.source_url || recordString(item.provenance, "url") || null;
 }
 
+const contextStatusLabels: Record<string, string> = {
+  no_local_sample: "No local weather coverage",
+  comparison_pending: "Transport comparison pending",
+  no_nearby_coverage: "No nearby transport coverage",
+  insufficient_comparable_coverage: "Insufficient nearby transport coverage",
+};
+
+function contextStatus(item: IntelligenceEvidence) {
+  const declaredStatus = recordString(item.metadata, "coverage_status")
+    ?? recordString(item.metadata, "classification")
+    ?? recordString(item.correlation_factors, "coverage_status")
+    ?? recordString(item.correlation_factors, "classification");
+  if (declaredStatus && contextStatusLabels[declaredStatus]) return declaredStatus;
+
+  // Older event-detail payloads did not always expose assessment metadata.
+  // Keep their coverage records out of positive linkage counts by using the
+  // governed evidence type and assessment wording as a conservative fallback.
+  const evidenceType = item.evidence_type.toLocaleLowerCase();
+  const assessmentText = [evidenceTitle(item), evidenceSummary(item)]
+    .filter(Boolean)
+    .join(" ")
+    .toLocaleLowerCase();
+  if (evidenceType === "event_area_weather_unavailable") return "no_local_sample";
+  if (evidenceType === "event_area_activity_comparison") {
+    if (/comparison pending|complete post-event hour/.test(assessmentText)) return "comparison_pending";
+    if (/no transport track points|no nearby (transport )?coverage/.test(assessmentText)) return "no_nearby_coverage";
+    if (/baseline is too small|insufficient (comparable|nearby).*coverage/.test(assessmentText)) return "insufficient_comparable_coverage";
+  }
+  return null;
+}
+
+function isContextAssessment(item: IntelligenceEvidence) {
+  return item.relationship.trim().toLocaleLowerCase() === "assessment" || contextStatus(item) !== null;
+}
+
+function contextStatusLabel(item: IntelligenceEvidence) {
+  const status = contextStatus(item);
+  if (status) return contextStatusLabels[status];
+  const domain = signalDomainLabel(item.domain, item.source_record_type);
+  return domain === "News report"
+    ? "Reporting coverage assessment"
+    : `${domain.replace(/ signal$/i, "")} coverage assessment`;
+}
+
 function severityClass(severity: IntelligenceSeverity) {
   if (severity === "critical") return "event-severity-critical";
   if (severity === "high") return "event-severity-high";
@@ -290,14 +334,17 @@ export default function IntelligenceWorkspace({
   );
   const linkedReporting = useMemo(
     () => evidenceThread.filter((item) => (
-      item.domain.toLocaleLowerCase() === "news"
-      || item.source_record_type.toLocaleLowerCase().includes("news")
-      || item.evidence_type.toLocaleLowerCase().includes("news")
+      !isContextAssessment(item)
+      && (item.domain.toLocaleLowerCase() === "news"
+        || item.source_record_type.toLocaleLowerCase().includes("news")
+        || item.evidence_type.toLocaleLowerCase().includes("news"))
     )),
     [evidenceThread],
   );
   const linkedNews = useMemo(() => {
-    if (detail?.linked_news) return detail.linked_news;
+    if (detail?.linked_news) {
+      return detail.linked_news.filter((item) => item.relationship.trim().toLocaleLowerCase() !== "assessment");
+    }
     return linkedReporting.map((item) => ({
       id: item.id,
       evidence_type: item.evidence_type,
@@ -334,7 +381,7 @@ export default function IntelligenceWorkspace({
     ?? null;
   const linkedSignalGroups = useMemo(() => {
     const groups = new Map<string, { label: string; count: number; first: IntelligenceEvidence }>();
-    evidenceThread.forEach((item) => {
+    evidenceThread.filter((item) => !isContextAssessment(item)).forEach((item) => {
       const label = signalDomainLabel(item.domain, item.source_record_type);
       const existing = groups.get(label);
       if (existing) existing.count += 1;
@@ -342,6 +389,10 @@ export default function IntelligenceWorkspace({
     });
     return [...groups.values()].sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
   }, [evidenceThread]);
+  const contextAssessments = useMemo(
+    () => evidenceThread.filter(isContextAssessment),
+    [evidenceThread],
+  );
   const selectedEvent = useMemo(
     () => events.find((event) => event.id === selectedId) ?? detail?.event ?? null,
     [detail?.event, events, selectedId],
@@ -652,13 +703,34 @@ export default function IntelligenceWorkspace({
                   </article>
                   <article className="event-answer-card">
                     <div className="event-answer-label">Evidence state</div>
-                    <p>{detail.understanding?.linked_news_count ?? linkedNews.length} linked {(detail.understanding?.linked_news_count ?? linkedNews.length) === 1 ? "report" : "reports"} · {detail.understanding?.physical_observation_count ?? displayedEarthObservations.length} physical {(detail.understanding?.physical_observation_count ?? displayedEarthObservations.length) === 1 ? "observation" : "observations"} · {satelliteAssessment}.</p>
+                    <p>{linkedNews.length} linked {linkedNews.length === 1 ? "report" : "reports"} · {detail.understanding?.physical_observation_count ?? displayedEarthObservations.length} physical {(detail.understanding?.physical_observation_count ?? displayedEarthObservations.length) === 1 ? "observation" : "observations"} · {satelliteAssessment}.</p>
                   </article>
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-border)]">
                   {[["Relevance", detail.event.relevance_score], ["Urgency", detail.event.urgency_score], ["Materiality", detail.event.materiality_score]].map(([label, value]) => <div key={String(label)} className="bg-[color:var(--shell-surface)] p-3"><div className="text-[9px] uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">{label}</div><div className="mt-1 text-base font-semibold text-[color:var(--shell-ink)]">{confidenceLabel(Number(value))}</div></div>)}
                 </div>
               </section>
+
+              {contextAssessments.length > 0 && (
+                <section className="rounded-xl border border-[color:var(--shell-border)] p-4" aria-labelledby="context-coverage-heading">
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Eye className="h-3.5 w-3.5" />Context coverage status</div>
+                      <h3 id="context-coverage-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">What can Claritas assess around this event?</h3>
+                    </div>
+                    <span className="text-xs text-[color:var(--shell-muted)]">{contextAssessments.length} {contextAssessments.length === 1 ? "assessment" : "assessments"}</span>
+                  </div>
+                  <p className="mt-2 max-w-3xl text-xs leading-5 text-[color:var(--shell-muted)]">Coverage and comparison assessments describe what the available data can support. They are not counted as linked observations or reports.</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {contextAssessments.map((item) => (
+                      <article key={`context-status-${item.id}`} className="rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+                        <h4 className="text-xs font-semibold text-[color:var(--shell-ink)]">{contextStatusLabel(item)}</h4>
+                        <p className="mt-2 text-[10px] leading-4 text-[color:var(--shell-muted)]">{evidenceSummary(item) || "Claritas recorded a qualified coverage assessment for this event."}</p>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {linkedSignalGroups.length > 0 && (
                 <section className="rounded-xl border border-[color:var(--shell-border)] p-4" aria-labelledby="linked-signals-heading">
@@ -691,7 +763,7 @@ export default function IntelligenceWorkspace({
               <section aria-labelledby="linked-reporting-heading">
                 <div className="flex flex-wrap items-end justify-between gap-3">
                   <div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Newspaper className="h-3.5 w-3.5" />Likely linked reporting</div><h3 id="linked-reporting-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">Which reporting is likely associated with this event?</h3></div>
-                  <span className="text-xs text-[color:var(--shell-muted)]">{detail.understanding?.linked_news_count ?? linkedNews.length} source {(detail.understanding?.linked_news_count ?? linkedNews.length) === 1 ? "record" : "records"}</span>
+                  <span className="text-xs text-[color:var(--shell-muted)]">{linkedNews.length} source {linkedNews.length === 1 ? "record" : "records"}</span>
                 </div>
                 <p className="mt-2 max-w-3xl text-xs leading-5 text-[color:var(--shell-muted)]">A report can be relevant without confirming the event. Where matching factors are available, they are disclosed on each card.</p>
                 {linkedNews.length > 0 ? (
@@ -717,7 +789,7 @@ export default function IntelligenceWorkspace({
                     })}
                   </div>
                 ) : (
-                  <div className="mt-3 rounded-xl border border-dashed border-[color:var(--shell-border)] p-4 text-xs leading-5 text-[color:var(--shell-muted)]">No news record is explicitly linked to this event yet. Sensor and official evidence below remain available, but Claritas does not imply a reporting connection.</div>
+                  <div role="status" className="mt-3 rounded-xl border border-dashed border-[color:var(--shell-border)] p-4 text-xs leading-5 text-[color:var(--shell-muted)]">No news record is explicitly linked to this event yet. Sensor and official evidence below remain available, but Claritas does not imply a reporting connection.</div>
                 )}
               </section>
 
@@ -726,19 +798,22 @@ export default function IntelligenceWorkspace({
                   <div><div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Evidence timeline</div><h3 id="evidence-thread-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">Sources and observations in chronological order</h3></div>
                   <span className="text-xs text-[color:var(--shell-muted)]">{evidenceThread.length} items · {detail.event.domain_count} domains</span>
                 </div>
-                <p className="mt-2 max-w-3xl text-xs leading-5 text-[color:var(--shell-muted)]">Every item is labelled by what it contributes and why it is likely associated with the selected event. Association gives investigation context; it is not a causal conclusion.</p>
+                <p className="mt-2 max-w-3xl text-xs leading-5 text-[color:var(--shell-muted)]">Every item is labelled by what it contributes and why it is included. Coverage assessments describe data availability; associated signals remain qualified and do not establish cause.</p>
                 <ol className="mt-4 space-y-3 border-l border-[color:var(--shell-border)] pl-4">
                   {evidenceThread.map((item) => {
-                    const relationship = relationshipLabels[item.relationship] ?? relationshipLabels.context;
+                    const relationship = relationshipLabels[item.relationship.trim().toLocaleLowerCase()] ?? relationshipLabels.context;
                     const sourceUrl = evidenceUrl(item);
                     const summary = evidenceSummary(item);
                     const linkage = presentEventLinkage(item.correlation_score, item.correlation_factors);
+                    const assessment = isContextAssessment(item);
                     const domainLabel = signalDomainLabel(item.domain, item.source_record_type);
                     return (
                       <li id={`event-evidence-${item.id}`} key={item.id} className="relative rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-4 before:absolute before:-left-[1.31rem] before:top-5 before:h-2.5 before:w-2.5 before:rounded-full before:border-2 before:border-[color:var(--shell-surface)] before:bg-[color:var(--signal-sky)]">
                         <div className="flex flex-wrap items-center gap-2">
                           <span title={relationship.explanation} className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${relationship.className}`}>{relationship.label}</span>
-                          <span title={linkage.explanation} className="event-link-chip">{linkage.label}</span>
+                          {assessment
+                            ? <span className="rounded-full border border-[color:var(--shell-border)] px-2 py-0.5 text-[10px] font-semibold uppercase text-[color:var(--shell-muted)]">{contextStatusLabel(item)}</span>
+                            : <span title={linkage.explanation} className="event-link-chip">{linkage.label}</span>}
                           <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">{domainLabel}</span>
                           <span className="ml-auto text-right text-[10px] leading-4 text-[color:var(--shell-muted)]">
                             {item.published_at ? <>Published {dateLabel(item.published_at)}<br /></> : null}
@@ -747,7 +822,7 @@ export default function IntelligenceWorkspace({
                         </div>
                         <h4 className="mt-2 text-sm font-semibold capitalize text-[color:var(--shell-ink)]">{evidenceTitle(item)}</h4>
                         {summary && <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">{summary}</p>}
-                        <p className="event-link-explanation"><strong>Why shown:</strong> {linkage.explanation}</p>
+                        <p className="event-link-explanation"><strong>{assessment ? "Assessment scope:" : "Why shown:"}</strong> {assessment ? "This status describes data availability or comparison readiness; it is not a positive linked signal." : linkage.explanation}</p>
                         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-[color:var(--shell-muted)]">
                           <span>{item.source_name || item.source_record_type}</span>
                           <span>{confidenceLabel(item.confidence)} confidence</span>

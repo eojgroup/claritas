@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assessTransportActivityComparison, scoreContextualLinkage } from "./contextual-linkage";
+import {
+  assessTransportActivityComparison,
+  contextualLinkagePolicy,
+  earthquakeContextEligibility,
+  pendingEarthquakeContextRefreshDue,
+  scoreContextualLinkage,
+  transportContextRefreshMilestone,
+} from "./contextual-linkage";
 
 const quake = {
   eventType: "earthquake",
@@ -11,6 +18,81 @@ const quake = {
   entityKeys: ["ende", "indonesia"],
   sourceReliability: 0.98,
 };
+
+test("materially significant moderate earthquakes qualify without opening every M5.5 event", () => {
+  const yanglong = earthquakeContextEligibility({
+    magnitude: 5.9,
+    significance: 650,
+    alertLevel: "yellow",
+    felt: 18,
+    severity: "medium",
+  });
+  assert.equal(yanglong.eligible, true);
+  assert.equal(yanglong.tier, "significant_moderate");
+  assert.ok(yanglong.reasons.includes("strong_moderate_magnitude"));
+  assert.ok(yanglong.reasons.includes("usgs_significance_at_least_450"));
+
+  assert.equal(earthquakeContextEligibility({
+    magnitude: 5.5,
+    significance: 120,
+    felt: 0,
+    alertLevel: "green",
+    severity: "medium",
+  }).eligible, false);
+  assert.equal(earthquakeContextEligibility({
+    magnitude: 5.5,
+    significance: 480,
+    severity: "medium",
+  }).eligible, true);
+  assert.equal(earthquakeContextEligibility({
+    magnitude: 7.2,
+    severity: "high",
+  }).tier, "major");
+});
+
+test("pending transport context refresh is bounded to a fifteen-minute cadence", () => {
+  const now = Date.parse("2026-08-19T03:00:00Z");
+  assert.equal(pendingEarthquakeContextRefreshDue({ lastRunAt: 0, now }), true);
+  assert.equal(pendingEarthquakeContextRefreshDue({ lastRunAt: now - 14 * 60_000, now }), false);
+  assert.equal(pendingEarthquakeContextRefreshDue({ lastRunAt: now - 15 * 60_000, now }), true);
+  assert.equal(transportContextRefreshMilestone({ elapsedHours: 1.2, windowHours: 0 }), 1);
+  assert.equal(transportContextRefreshMilestone({ elapsedHours: 7, windowHours: 1 }), 6);
+  assert.equal(transportContextRefreshMilestone({ elapsedHours: 26, windowHours: 7 }), 24);
+  assert.equal(transportContextRefreshMilestone({ elapsedHours: 48, windowHours: 24 }), null);
+  assert.equal(transportContextRefreshMilestone({
+    elapsedHours: 20, windowHours: 6, maximumWindowHours: 19,
+  }), 19);
+  assert.equal(transportContextRefreshMilestone({
+    elapsedHours: 24, windowHours: 19, maximumWindowHours: 19,
+  }), null);
+  assert.equal(transportContextRefreshMilestone({
+    elapsedHours: 8, windowHours: 2, maximumWindowHours: 2,
+  }), null);
+});
+
+test("context windows and radii scale from significant moderate to major earthquakes", () => {
+  const moderateNews = contextualLinkagePolicy("earthquake", "news", {
+    magnitude: 5.9, significance: 536, severity: "medium",
+  });
+  const moderateTransport = contextualLinkagePolicy("earthquake", "transport", {
+    magnitude: 5.9, significance: 536, severity: "medium",
+  });
+  const majorNews = contextualLinkagePolicy("earthquake", "news", {
+    magnitude: 7.7, significance: 900, severity: "high",
+  });
+  assert.ok(moderateNews);
+  assert.ok(moderateTransport);
+  assert.ok(majorNews);
+  assert.ok(moderateNews.maxDistanceKm >= 400);
+  assert.ok(moderateTransport.maxDistanceKm >= 350);
+  assert.ok(moderateNews.maxDistanceKm < majorNews.maxDistanceKm);
+  assert.ok(moderateNews.afterHours < majorNews.afterHours);
+  assert.equal(moderateNews.contextTier, "significant_moderate");
+  assert.equal(majorNews.contextTier, "major");
+  assert.equal(contextualLinkagePolicy("earthquake", "news", {
+    magnitude: 5.5, significance: 100, severity: "medium",
+  }), null);
+});
 
 test("precisely located earthquake reporting links inside the governed window", () => {
   const result = scoreContextualLinkage({
