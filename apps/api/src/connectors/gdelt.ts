@@ -124,6 +124,7 @@ export type GdeltGalArticle = {
 };
 
 export type ExistingGdeltItem = {
+  id: string;
   external_id: string;
   url: string | null;
   dedupe_hash: string | null;
@@ -142,9 +143,11 @@ export type ExistingGdeltItem = {
   country_inference: unknown;
   subject_country_iso2s: unknown;
   gkg: unknown;
+  dependent_count: number;
 };
 
 export type GdeltAliasPersistencePlan = {
+  persistenceItemId: string | null;
   persistenceExternalId: string;
   firstProviderSeenAt: string | null;
   providerFirstSeenEventTime: string | null;
@@ -1541,13 +1544,14 @@ async function requireGdeltCanonicalItemHistory(sourceId: number): Promise<void>
 function existingGdeltPreference(left: ExistingGdeltItem, right: ExistingGdeltItem): number {
   const trust = (item: ExistingGdeltItem) =>
     (item.publication_time_verified ? 4 : 0)
-    + (item.quality_status === "accepted" ? 2 : 0)
     + (item.time_basis === "provider_first_seen" ? 1 : 0);
   const timestamp = (item: ExistingGdeltItem) => {
     const parsed = Date.parse(item.event_time ?? "");
     return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
   };
-  return trust(right) - trust(left)
+  return Number(right.quality_status === "accepted") - Number(left.quality_status === "accepted")
+    || right.dependent_count - left.dependent_count
+    || trust(right) - trust(left)
     // Equally trusted aliases must retain the earliest known effective time.
     // Choosing the newest alias here can promote an old syndicated story when
     // its tracking parameters change.
@@ -1597,7 +1601,6 @@ export function planGdeltAliasPersistence(
   const ranked = [...aliases].sort(existingGdeltPreference);
   const canonicalHash = gdeltArticleDedupeHash(canonicalUrl);
   const persistence = ranked.find((item) => item.dedupe_hash === canonicalHash)
-    ?? ranked.find((item) => item.external_id === canonicalUrl)
     ?? ranked[0];
   const verified = ranked.filter((item) => item.publication_time_verified === true
     || item.time_basis?.startsWith("publisher_published") === true);
@@ -1619,6 +1622,7 @@ export function planGdeltAliasPersistence(
   const historicalGkg = ranked.find((item) => item.gkg && typeof item.gkg === "object")?.gkg ?? null;
 
   return {
+    persistenceItemId: persistence?.id ?? null,
     persistenceExternalId: persistence?.external_id ?? canonicalUrl,
     firstProviderSeenAt: earliestGdeltTimestamp(ranked.flatMap((item) => [
       item.first_provider_seen_at,
@@ -1644,6 +1648,25 @@ export function planGdeltAliasPersistence(
   };
 }
 
+export function gdeltAliasQualityContinuation(
+  aliases: ExistingGdeltItem[],
+  providerSeenAt: string | null,
+): { allowProviderFirstSeen: boolean; preserveAcceptedVerified: boolean } {
+  const providerSeenMs = Date.parse(providerSeenAt ?? "");
+  return {
+    allowProviderFirstSeen: aliases.length === 0 || aliases.some((item) => {
+      const existingSeenMs = Date.parse(item.first_provider_seen_at ?? "");
+      return item.quality_status === "accepted"
+        && item.time_basis === "provider_first_seen"
+        && Number.isFinite(existingSeenMs)
+        && Number.isFinite(providerSeenMs)
+        && Math.abs(existingSeenMs - providerSeenMs) <= GDELT_MAX_FUTURE_SKEW_MS;
+    }),
+    preserveAcceptedVerified: aliases.some((item) => item.quality_status === "accepted"
+      && item.publication_time_verified === true),
+  };
+}
+
 export function mergeGdeltAliasTemporalEvidence(
   aliasHistory: GdeltAliasPersistencePlan,
   incoming: {
@@ -1660,22 +1683,37 @@ export function mergeGdeltAliasTemporalEvidence(
   publicationTimeSource: string | null;
   timePrecision: string;
   firstProviderSeenAt: string;
+  incomingPublicationConsistent: boolean;
 } {
   const historicalPublication = aliasHistory.verifiedPublication;
+  const historicalFirstSeenMs = Date.parse(aliasHistory.firstProviderSeenAt ?? "");
+  const incomingPublicationMs = Date.parse(incoming.publication?.publishedAt ?? "");
+  // An article cannot have been published after Claritas already observed the
+  // same canonical URL. Reused/updated pages commonly rewrite metadata; treat
+  // that newer claim as conflicting provenance, not as fresh publication.
+  const incomingPublicationConsistent = !Number.isFinite(historicalFirstSeenMs)
+    || !Number.isFinite(incomingPublicationMs)
+    || incomingPublicationMs <= historicalFirstSeenMs + GDELT_MAX_FUTURE_SKEW_MS;
+  const admissibleIncomingPublication = incomingPublicationConsistent ? incoming.publication : null;
   const currentVerifiedTime = incoming.timeBasis === "publisher_published_verified"
+      && incomingPublicationConsistent
     ? incoming.eventTime
     : null;
   const publisherPublishedAt = earliestGdeltTimestamp([
-    incoming.publication?.publishedAt,
+    admissibleIncomingPublication?.publishedAt,
     historicalPublication?.publishedAt,
   ]);
   const publicationTimeVerified = publisherPublishedAt !== null;
   const eventTime = publicationTimeVerified
     ? earliestGdeltTimestamp([currentVerifiedTime, historicalPublication?.publishedAt]) ?? incoming.eventTime
-    : earliestGdeltTimestamp([incoming.eventTime, aliasHistory.providerFirstSeenEventTime]) ?? incoming.eventTime;
+    : earliestGdeltTimestamp([
+        aliasHistory.providerFirstSeenEventTime,
+        aliasHistory.firstProviderSeenAt,
+        incoming.providerSeenAt,
+      ]) ?? incoming.providerSeenAt;
   const useHistoricalPublication = Boolean(historicalPublication) && (
-    !incoming.publication
-    || Date.parse(historicalPublication?.publishedAt ?? "") <= Date.parse(incoming.publication.publishedAt)
+    !admissibleIncomingPublication
+    || Date.parse(historicalPublication?.publishedAt ?? "") <= Date.parse(admissibleIncomingPublication.publishedAt)
   );
 
   return {
@@ -1685,14 +1723,15 @@ export function mergeGdeltAliasTemporalEvidence(
     publisherPublishedAt,
     publicationTimeSource: useHistoricalPublication
       ? historicalPublication?.source ?? "historical_alias"
-      : incoming.publication?.source ?? null,
+      : admissibleIncomingPublication?.source ?? null,
     timePrecision: (useHistoricalPublication
       ? historicalPublication?.precision
-      : incoming.publication?.precision) ?? "15_minute",
+      : admissibleIncomingPublication?.precision) ?? "15_minute",
     firstProviderSeenAt: earliestGdeltTimestamp([
       aliasHistory.firstProviderSeenAt,
       incoming.providerSeenAt,
     ]) ?? incoming.providerSeenAt,
+    incomingPublicationConsistent,
   };
 }
 
@@ -1711,7 +1750,7 @@ async function loadExistingGdeltItems(
   await requireGdeltCanonicalItemHistory(sourceId);
   const aliases = Array.from(new Set([...canonicalUrls, ...rawAliases].filter(Boolean)));
   const existing = await query<ExistingGdeltItem>(
-    `SELECT external_id,url,dedupe_hash,
+    `SELECT id::text,external_id,url,dedupe_hash,
             COALESCE(payload->>'first_provider_seen_at',payload->>'provider_seen_at') AS first_provider_seen_at,
             payload->>'quality_status' AS quality_status,
             payload->>'time_basis' AS time_basis,
@@ -1728,7 +1767,16 @@ async function loadExistingGdeltItems(
             payload#>>'{country_inference,confidence}' AS country_inference_confidence,
             payload->'country_inference' AS country_inference,
             payload->'subject_country_iso2s' AS subject_country_iso2s,
-            payload->'gkg' AS gkg
+            payload->'gkg' AS gkg,
+            (
+              (SELECT count(*) FROM news_item_assessment assessment WHERE assessment.item_id=item.id)
+              +(SELECT count(*) FROM item_translation translation WHERE translation.item_id=item.id)
+              +(SELECT count(*) FROM personal_daily_briefing_item briefing WHERE briefing.item_id=item.id)
+              +(SELECT count(*) FROM intelligence_event_evidence evidence
+                WHERE evidence.source_record_type='item' AND evidence.source_record_id=item.id::text)
+              +(SELECT count(*) FROM intelligence_correlation_decision decision
+                WHERE decision.source_record_type='item' AND decision.source_record_id=item.id::text)
+            )::int AS dependent_count
      FROM item
      WHERE source_id=$1 AND kind='news_article'
        AND (
@@ -1748,6 +1796,158 @@ async function loadExistingGdeltItems(
   }
   for (const rows of grouped.values()) rows.sort(existingGdeltPreference);
   return grouped;
+}
+
+async function migrateGdeltAliasDependents(
+  survivorItemId: string | null,
+  aliases: ExistingGdeltItem[],
+): Promise<void> {
+  if (!survivorItemId || !/^\d+$/.test(survivorItemId)) return;
+  const aliasIds = Array.from(new Set(
+    aliases
+      .map((item) => item.id)
+      .filter((id) => /^\d+$/.test(id) && id !== survivorItemId),
+  ));
+  if (aliasIds.length === 0) return;
+
+  await withTransaction(async (client) => {
+    await client.query(
+      `SELECT id FROM item WHERE id=$1::bigint OR id=ANY($2::bigint[]) FOR UPDATE`,
+      [survivorItemId, aliasIds],
+    );
+    await client.query(
+      `WITH preferred AS MATERIALIZED (
+         SELECT methodology_version,primary_category,categories,tags,reasons,components,
+                score,tier,confidence,assessed_at,inputs_hash,created_at,updated_at
+         FROM news_item_assessment
+         WHERE item_id=$1::bigint OR item_id=ANY($2::bigint[])
+         ORDER BY assessed_at DESC,updated_at DESC,(item_id=$1::bigint) DESC
+         LIMIT 1
+       ), preserved AS (
+         INSERT INTO news_item_assessment (
+           item_id,methodology_version,primary_category,categories,tags,reasons,components,
+           score,tier,confidence,assessed_at,inputs_hash,created_at,updated_at
+         )
+         SELECT $1::bigint,methodology_version,primary_category,categories,tags,reasons,components,
+                score,tier,confidence,assessed_at,inputs_hash,created_at,updated_at
+         FROM preferred
+         ON CONFLICT (item_id) DO UPDATE SET
+           methodology_version=EXCLUDED.methodology_version,
+           primary_category=EXCLUDED.primary_category,categories=EXCLUDED.categories,
+           tags=EXCLUDED.tags,reasons=EXCLUDED.reasons,components=EXCLUDED.components,
+           score=EXCLUDED.score,tier=EXCLUDED.tier,confidence=EXCLUDED.confidence,
+           assessed_at=EXCLUDED.assessed_at,inputs_hash=EXCLUDED.inputs_hash
+         RETURNING item_id
+       )
+       DELETE FROM news_item_assessment WHERE item_id=ANY($2::bigint[])`,
+      [survivorItemId, aliasIds],
+    );
+    await client.query(
+      `WITH preferred AS MATERIALIZED (
+         SELECT DISTINCT ON (target_language_code)
+                target_language_code,translated_title,generated_summary,summary_status,
+                source_title_hash,source_summary_hash,provider,model,generation_metadata,
+                title_generated_at,summary_generated_at,created_at,updated_at
+         FROM item_translation
+         WHERE item_id=$1::bigint OR item_id=ANY($2::bigint[])
+         ORDER BY target_language_code,updated_at DESC,title_generated_at DESC,(item_id=$1::bigint) DESC
+       ), preserved AS (
+         INSERT INTO item_translation (
+           item_id,target_language_code,translated_title,generated_summary,summary_status,
+           source_title_hash,source_summary_hash,provider,model,generation_metadata,
+           title_generated_at,summary_generated_at,created_at,updated_at
+         )
+         SELECT $1::bigint,target_language_code,translated_title,generated_summary,summary_status,
+                source_title_hash,source_summary_hash,provider,model,generation_metadata,
+                title_generated_at,summary_generated_at,created_at,updated_at
+         FROM preferred
+         ON CONFLICT (item_id,target_language_code) DO UPDATE SET
+           translated_title=EXCLUDED.translated_title,generated_summary=EXCLUDED.generated_summary,
+           summary_status=EXCLUDED.summary_status,source_title_hash=EXCLUDED.source_title_hash,
+           source_summary_hash=EXCLUDED.source_summary_hash,provider=EXCLUDED.provider,
+           model=EXCLUDED.model,generation_metadata=EXCLUDED.generation_metadata,
+           title_generated_at=EXCLUDED.title_generated_at,
+           summary_generated_at=EXCLUDED.summary_generated_at
+         RETURNING item_id
+       )
+       DELETE FROM item_translation WHERE item_id=ANY($2::bigint[])`,
+      [survivorItemId, aliasIds],
+    );
+    await client.query(
+      `WITH preferred AS MATERIALIZED (
+         SELECT DISTINCT ON (briefing_id)
+                briefing_id,relevance_score,relevance_reasons
+         FROM personal_daily_briefing_item
+         WHERE item_id=$1::bigint OR item_id=ANY($2::bigint[])
+         ORDER BY briefing_id,relevance_score DESC,(item_id=$1::bigint) DESC
+       ), preserved AS (
+         INSERT INTO personal_daily_briefing_item (
+           briefing_id,item_id,relevance_score,relevance_reasons
+         )
+         SELECT briefing_id,$1::bigint,relevance_score,relevance_reasons FROM preferred
+         ON CONFLICT (briefing_id,item_id) DO UPDATE SET
+           relevance_score=GREATEST(personal_daily_briefing_item.relevance_score,EXCLUDED.relevance_score),
+           relevance_reasons=CASE
+             WHEN EXCLUDED.relevance_score>personal_daily_briefing_item.relevance_score
+               THEN EXCLUDED.relevance_reasons
+             ELSE personal_daily_briefing_item.relevance_reasons
+           END
+         RETURNING item_id
+       )
+       DELETE FROM personal_daily_briefing_item WHERE item_id=ANY($2::bigint[])`,
+      [survivorItemId, aliasIds],
+    );
+    await client.query(
+      `DELETE FROM intelligence_event_evidence alias_evidence
+       USING intelligence_event_evidence preferred_evidence
+       WHERE alias_evidence.source_record_type='item'
+         AND alias_evidence.source_record_id=ANY($2::text[])
+         AND preferred_evidence.source_record_type='item'
+         AND preferred_evidence.source_record_id=ANY(array_prepend($1::text,$2::text[]))
+         AND preferred_evidence.event_id=alias_evidence.event_id
+         AND preferred_evidence.domain=alias_evidence.domain
+         AND preferred_evidence.id<>alias_evidence.id
+         AND (
+           preferred_evidence.source_record_id=$1
+           OR (
+             preferred_evidence.source_record_id=ANY($2::text[])
+             AND preferred_evidence.id::text<alias_evidence.id::text
+           )
+         )`,
+      [survivorItemId, aliasIds],
+    );
+    await client.query(
+      `UPDATE intelligence_event_evidence
+       SET source_record_id=$1
+       WHERE source_record_type='item' AND source_record_id=ANY($2::text[])`,
+      [survivorItemId, aliasIds],
+    );
+    await client.query(
+      `DELETE FROM intelligence_correlation_decision alias_decision
+       USING intelligence_correlation_decision preferred_decision
+       WHERE alias_decision.source_record_type='item'
+         AND alias_decision.source_record_id=ANY($2::text[])
+         AND preferred_decision.source_record_type='item'
+         AND preferred_decision.source_record_id=ANY(array_prepend($1::text,$2::text[]))
+         AND preferred_decision.selected_event_id=alias_decision.selected_event_id
+         AND preferred_decision.decision=alias_decision.decision
+         AND preferred_decision.id<>alias_decision.id
+         AND (
+           preferred_decision.source_record_id=$1
+           OR (
+             preferred_decision.source_record_id=ANY($2::text[])
+             AND preferred_decision.id::text<alias_decision.id::text
+           )
+         )`,
+      [survivorItemId, aliasIds],
+    );
+    await client.query(
+      `UPDATE intelligence_correlation_decision
+       SET source_record_id=$1
+       WHERE source_record_type='item' AND source_record_id=ANY($2::text[])`,
+      [survivorItemId, aliasIds],
+    );
+  });
 }
 
 export function parseGdeltTimestamp(value: string | undefined): string | null {
@@ -2981,9 +3181,6 @@ async function ingestDocArticles(
         };
       }
       const evidence = await resolveGdeltPublisherEvidence(url);
-      const existingSeenAt = existing?.first_provider_seen_at;
-      const existingSeenMs = existingSeenAt ? Date.parse(existingSeenAt) : Number.NaN;
-      const providerSeenMs = providerSeenAt ? Date.parse(providerSeenAt) : Number.NaN;
       // A provider discovery timestamp is admitted only for a URL that is new
       // to Claritas, or whose stored first discovery is the same current
       // window. Rediscovery can never promote an older URL.
@@ -2991,13 +3188,8 @@ async function ingestDocArticles(
       // earthquake. That higher-trust path must retain independently verified
       // publisher time; provider discovery is suitable only for the general
       // browse stream.
-      const continuingFirstSeenItem = existing?.quality_status === "accepted"
-        && existing.time_basis === "provider_first_seen";
-      const allowProviderFirstSeen = !params.targetedDiscovery && (
-        !existing
-        || (continuingFirstSeenItem && Number.isFinite(existingSeenMs) && Number.isFinite(providerSeenMs)
-          && Math.abs(existingSeenMs - providerSeenMs) <= GDELT_MAX_FUTURE_SKEW_MS)
-      );
+      const continuation = gdeltAliasQualityContinuation(existingAliases, providerSeenAt);
+      const allowProviderFirstSeen = !params.targetedDiscovery && continuation.allowProviderFirstSeen;
       return {
         ...discovered,
         url,
@@ -3034,9 +3226,11 @@ async function ingestDocArticles(
     if (!quality.accepted || !url || !providerSeenAt || !quality.effectiveTime || !quality.timeBasis) {
       skipped += 1;
       qualityRejections[quality.reason] = (qualityRejections[quality.reason] ?? 0) + 1;
-      const preserveVerified = candidate.existing?.quality_status === "accepted"
-        && candidate.existing.publication_time_verified === true
-        && quality.reason === "publisher_publication_unverified";
+      const preserveVerified = quality.reason === "publisher_publication_unverified"
+        && gdeltAliasQualityContinuation(
+          candidate.existingAliases ?? [],
+          providerSeenAt,
+        ).preserveAcceptedVerified;
       if (preserveVerified) continue;
       const rejectionAliases = Array.from(new Set([
         url,
@@ -3148,8 +3342,11 @@ async function ingestDocArticles(
       quality_checks: {
         provider_seen_at_valid: true,
         publisher_date_verified: temporal.publicationTimeVerified,
-        publisher_date_fresh: quality.publication ? true : null,
+        publisher_date_fresh: quality.publication && temporal.incomingPublicationConsistent ? true : null,
         publisher_date_not_after_provider_seen: quality.publication ? true : null,
+        publisher_date_not_after_historical_first_seen: quality.publication
+          ? temporal.incomingPublicationConsistent
+          : null,
         article_url_valid: true,
       },
       discovery_lane: laneId,
@@ -3182,7 +3379,7 @@ async function ingestDocArticles(
       raw: article,
     };
     const dedupeHash = gdeltArticleDedupeHash(url);
-    const result = await query<{ inserted: boolean; event_time: string }>(
+    const result = await query<{ id: string; inserted: boolean; event_time: string }>(
       `INSERT INTO item (
          source_id, external_id, kind, title, summary, url, country_iso2, event_time,
          payload, dedupe_hash, language_code, source_country_iso2, tone
@@ -3209,7 +3406,7 @@ async function ingestDocArticles(
           OR item.language_code IS DISTINCT FROM COALESCE(EXCLUDED.language_code, item.language_code)
           OR item.source_country_iso2 IS DISTINCT FROM COALESCE(EXCLUDED.source_country_iso2, item.source_country_iso2)
           OR item.tone IS DISTINCT FROM COALESCE(EXCLUDED.tone, item.tone)
-       RETURNING (xmax = 0) AS inserted,event_time::text`,
+       RETURNING id::text,(xmax = 0) AS inserted,event_time::text`,
       [sourceId, externalId, article.title || null,
        signal ? `GDELT themes: ${(signal.themes as string[]).slice(0, 4).join(", ")}` : null,
        url, countryIso2, eventTime, JSON.stringify(payload), dedupeHash,
@@ -3221,6 +3418,10 @@ async function ingestDocArticles(
     acceptedPersistedUrls.add(url);
     const persistedEventTime = result.rows[0]?.event_time ?? candidate.existing?.event_time ?? eventTime;
     if (!latestEventTime || persistedEventTime > latestEventTime) latestEventTime = persistedEventTime;
+    await migrateGdeltAliasDependents(
+      result.rows[0]?.id ?? aliasHistory.persistenceItemId,
+      candidate.existingAliases ?? [],
+    );
     for (const alias of candidate.existingAliases ?? []) {
       if (alias.external_id === externalId) continue;
       if (await quarantineGdeltArticle(
@@ -3347,14 +3548,10 @@ async function ingestGalFallback(
         };
       }
       const evidence = await resolveGdeltPublisherEvidence(article.url);
-      const existingSeenAt = existing?.first_provider_seen_at;
-      const existingSeenMs = existingSeenAt ? Date.parse(existingSeenAt) : Number.NaN;
-      const providerSeenMs = Date.parse(article.eventTime);
-      const continuingFirstSeenItem = existing?.quality_status === "accepted"
-        && existing.time_basis === "provider_first_seen";
-      const allowProviderFirstSeen = !existing
-        || (continuingFirstSeenItem && Number.isFinite(existingSeenMs) && Number.isFinite(providerSeenMs)
-          && Math.abs(existingSeenMs - providerSeenMs) <= GDELT_MAX_FUTURE_SKEW_MS);
+      const allowProviderFirstSeen = gdeltAliasQualityContinuation(
+        existingAliases,
+        article.eventTime,
+      ).allowProviderFirstSeen;
       return {
         article,
         existing,
@@ -3388,9 +3585,11 @@ async function ingestGalFallback(
     if (!quality.accepted || !quality.effectiveTime || !quality.timeBasis) {
       skipped += 1;
       qualityRejections[quality.reason] = (qualityRejections[quality.reason] ?? 0) + 1;
-      const preserveVerified = candidate.existing?.quality_status === "accepted"
-        && candidate.existing.publication_time_verified === true
-        && quality.reason === "publisher_publication_unverified";
+      const preserveVerified = quality.reason === "publisher_publication_unverified"
+        && gdeltAliasQualityContinuation(
+          candidate.existingAliases ?? [],
+          article.eventTime,
+        ).preserveAcceptedVerified;
       if (preserveVerified) continue;
       const rejectionAliases = Array.from(new Set([
         article.url,
@@ -3471,8 +3670,11 @@ async function ingestGalFallback(
       quality_checks: {
         provider_seen_at_valid: true,
         publisher_date_verified: temporal.publicationTimeVerified,
-        publisher_date_fresh: quality.publication ? true : null,
+        publisher_date_fresh: quality.publication && temporal.incomingPublicationConsistent ? true : null,
         publisher_date_not_after_provider_seen: quality.publication ? true : null,
+        publisher_date_not_after_historical_first_seen: quality.publication
+          ? temporal.incomingPublicationConsistent
+          : null,
         article_url_valid: true,
       },
       fallback_reason: reason,
@@ -3487,7 +3689,7 @@ async function ingestGalFallback(
       license: { data: "GDELT unrestricted use with attribution", article: "Third-party publisher content" },
     };
     const dedupeHash = gdeltArticleDedupeHash(article.url);
-    const result = await query<{ inserted: boolean; event_time: string }>(
+    const result = await query<{ id: string; inserted: boolean; event_time: string }>(
       `INSERT INTO item (
          source_id, external_id, kind, title, summary, url, country_iso2, event_time,
          payload, dedupe_hash, language_code, source_country_iso2, tone
@@ -3526,7 +3728,7 @@ async function ingestGalFallback(
               OR item.payload IS DISTINCT FROM ${MERGED_GDELT_PAYLOAD_SQL}
             )
           )
-       RETURNING (xmax = 0) AS inserted,event_time::text`,
+       RETURNING id::text,(xmax = 0) AS inserted,event_time::text`,
       [sourceId, aliasHistory.persistenceExternalId, article.title, article.url, subjectCountry, eventTime, JSON.stringify(payload), dedupeHash],
     );
     if (!result.rows[0]) unchanged += 1;
@@ -3534,6 +3736,10 @@ async function ingestGalFallback(
     else updated += 1;
     const persistedEventTime = result.rows[0]?.event_time ?? candidate.existing?.event_time ?? eventTime;
     if (!latestEventTime || persistedEventTime > latestEventTime) latestEventTime = persistedEventTime;
+    await migrateGdeltAliasDependents(
+      result.rows[0]?.id ?? aliasHistory.persistenceItemId,
+      candidate.existingAliases ?? [],
+    );
     for (const alias of candidate.existingAliases ?? []) {
       if (alias.external_id === aliasHistory.persistenceExternalId) continue;
       if (await quarantineGdeltArticle(

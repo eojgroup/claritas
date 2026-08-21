@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -138,10 +139,15 @@ test("GDELT canonical URLs deduplicate trackers while retaining the legacy alias
 });
 
 test("GDELT canonical rediscovery retains the earliest trusted alias history", async () => {
-  const { mergeGdeltAliasTemporalEvidence, planGdeltAliasPersistence } = await connector;
+  const {
+    gdeltAliasQualityContinuation,
+    mergeGdeltAliasTemporalEvidence,
+    planGdeltAliasPersistence,
+  } = await connector;
   const canonicalUrl = "https://finance.example.com/markets/story?edition=asia";
   const legacyUrl = `${canonicalUrl}&utm_source=wire`;
   const legacy = {
+    id: "18",
     external_id: legacyUrl,
     url: legacyUrl,
     dedupe_hash: null,
@@ -160,6 +166,7 @@ test("GDELT canonical rediscovery retains the earliest trusted alias history", a
     country_inference: { source: "article_structured_location", confidence: "high" },
     subject_country_iso2s: ["SG"],
     gkg: null,
+    dependent_count: 3,
   };
   const aliasHistory = planGdeltAliasPersistence(canonicalUrl, [legacy]);
   const temporal = mergeGdeltAliasTemporalEvidence(aliasHistory, {
@@ -181,6 +188,7 @@ test("GDELT canonical rediscovery retains the earliest trusted alias history", a
 
   const canonicalRow = {
     ...legacy,
+    id: "19",
     external_id: canonicalUrl,
     url: canonicalUrl,
     first_provider_seen_at: "2026-08-19T08:00:00Z",
@@ -188,8 +196,60 @@ test("GDELT canonical rediscovery retains the earliest trusted alias history", a
     event_time: "2026-08-19T07:45:00Z",
   };
   const twoAliasHistory = planGdeltAliasPersistence(canonicalUrl, [canonicalRow, legacy]);
-  assert.equal(twoAliasHistory.persistenceExternalId, canonicalUrl);
+  assert.equal(twoAliasHistory.persistenceExternalId, legacyUrl);
+  assert.equal(twoAliasHistory.persistenceItemId, "18");
   assert.equal(twoAliasHistory.verifiedPublication?.publishedAt, "2026-08-18T07:45:00.000Z");
+  const hashOwner = {
+    ...canonicalRow,
+    dedupe_hash: crypto.createHash("sha256").update(`${canonicalUrl}|gdelt-article`).digest("hex"),
+    dependent_count: 0,
+  };
+  assert.equal(
+    planGdeltAliasPersistence(canonicalUrl, [hashOwner, legacy]).persistenceItemId,
+    "19",
+    "the global canonical-hash owner must survive so the upsert cannot violate item_dedupe_unique",
+  );
+
+  const providerOnlyLegacy = {
+    ...legacy,
+    time_basis: "provider_first_seen",
+    publication_time_verified: false,
+    publisher_published_at: null,
+    publication_time_source: null,
+    time_precision: "15_minute",
+    event_time: "2026-08-18T08:00:00Z",
+  };
+  const providerHistory = planGdeltAliasPersistence(canonicalUrl, [providerOnlyLegacy]);
+  const reusedPage = mergeGdeltAliasTemporalEvidence(providerHistory, {
+    eventTime: "2026-08-21T09:45:00Z",
+    timeBasis: "publisher_published_verified",
+    publication: {
+      publishedAt: "2026-08-21T09:45:00Z",
+      source: "article_metadata",
+      precision: "second",
+    },
+    providerSeenAt: "2026-08-21T10:00:00Z",
+  });
+  assert.equal(reusedPage.incomingPublicationConsistent, false);
+  assert.equal(reusedPage.timeBasis, "provider_first_seen");
+  assert.equal(reusedPage.publicationTimeVerified, false);
+  assert.equal(reusedPage.eventTime, "2026-08-18T08:00:00.000Z");
+
+  const mixedContinuation = gdeltAliasQualityContinuation([
+    { ...legacy, quality_status: "rejected" },
+    {
+      ...providerOnlyLegacy,
+      first_provider_seen_at: "2026-08-21T10:00:00Z",
+      event_time: "2026-08-21T10:00:00Z",
+    },
+  ], "2026-08-21T10:00:00Z");
+  assert.equal(mixedContinuation.allowProviderFirstSeen, true);
+  assert.equal(mixedContinuation.preserveAcceptedVerified, false);
+  assert.equal(
+    gdeltAliasQualityContinuation([legacy, providerOnlyLegacy], "2026-08-21T10:00:00Z")
+      .preserveAcceptedVerified,
+    true,
+  );
 });
 
 test("GDELT canonical history uses the runtime WHATWG URL semantics exactly", async () => {
@@ -382,6 +442,35 @@ test("GDELT conflict updates retain trusted country evidence through a transient
     merge,
     /'gkg',COALESCE\([\s\S]*NULLIF\(EXCLUDED\.payload->'gkg','null'::jsonb\)[\s\S]*NULLIF\(item\.payload->'gkg','null'::jsonb\)/,
   );
+});
+
+test("GDELT alias consolidation preserves item-id dependents before quarantine", () => {
+  const source = readFileSync(resolve(__dirname, "gdelt.ts"), "utf8");
+  const migration = source.slice(
+    source.indexOf("async function migrateGdeltAliasDependents"),
+    source.indexOf("export function parseGdeltTimestamp"),
+  );
+  assert.match(migration, /withTransaction/);
+  for (const relation of [
+    "news_item_assessment",
+    "item_translation",
+    "personal_daily_briefing_item",
+    "intelligence_event_evidence",
+    "intelligence_correlation_decision",
+  ]) {
+    assert.match(migration, new RegExp(relation));
+  }
+  const docPersistence = source.slice(
+    source.indexOf("const dedupeHash = gdeltArticleDedupeHash(url)"),
+    source.indexOf("acceptedByLane.set", source.indexOf("const dedupeHash = gdeltArticleDedupeHash(url)")),
+  );
+  const galPersistence = source.slice(
+    source.indexOf("const dedupeHash = gdeltArticleDedupeHash(article.url)"),
+    source.indexOf("return {", source.indexOf("const dedupeHash = gdeltArticleDedupeHash(article.url)")),
+  );
+  for (const persistence of [docPersistence, galPersistence]) {
+    assert.ok(persistence.indexOf("migrateGdeltAliasDependents") < persistence.indexOf("canonical_duplicate_merged"));
+  }
 });
 
 test("GDELT DOC requires a verified, timely publisher date instead of trusting provider discovery time", async () => {
