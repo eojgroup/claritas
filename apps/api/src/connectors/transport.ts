@@ -2921,12 +2921,26 @@ export async function storeTransportSnapshots(
       ).join(", ")})`;
     });
     await query(
-      `WITH incoming (
-         bucket, mode, origin_country_iso2, destination_country_iso2,
-         peak_active_entities, peak_observed_origins,
-         peak_flag_proxy_origins, observed_hour_mask, first_observed_at,
-         last_observed_at, source_names, daily_cap
-       ) AS (VALUES ${rows.join(", ")}),
+      `WITH incoming AS (
+         SELECT raw.bucket::date AS bucket,
+                raw.mode::text AS mode,
+                raw.origin_country_iso2::char(2) AS origin_country_iso2,
+                raw.destination_country_iso2::char(2) AS destination_country_iso2,
+                raw.peak_active_entities::integer AS peak_active_entities,
+                raw.peak_observed_origins::integer AS peak_observed_origins,
+                raw.peak_flag_proxy_origins::integer AS peak_flag_proxy_origins,
+                raw.observed_hour_mask::bigint AS observed_hour_mask,
+                raw.first_observed_at::timestamptz AS first_observed_at,
+                raw.last_observed_at::timestamptz AS last_observed_at,
+                raw.source_names::text[] AS source_names,
+                raw.daily_cap::integer AS daily_cap
+         FROM (VALUES ${rows.join(", ")}) AS raw (
+           bucket, mode, origin_country_iso2, destination_country_iso2,
+           peak_active_entities, peak_observed_origins,
+           peak_flag_proxy_origins, observed_hour_mask, first_observed_at,
+           last_observed_at, source_names, daily_cap
+         )
+       ),
        ranked AS (
          SELECT incoming.*,
                 EXISTS (
