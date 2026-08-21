@@ -975,7 +975,8 @@ export default function ClaritasDashboard() {
   const [newsSourceFilter, setNewsSourceFilter] = useState<string>("all");
   const [newsLanguageFilter, setNewsLanguageFilter] = useState("all");
   const [newsHasImageOnly, setNewsHasImageOnly] = useState(false);
-  const [newsSortBy, setNewsSortBy] = useState<"newest" | "oldest" | "source">("newest");
+  const [newsCategoryFilter, setNewsCategoryFilter] = useState<string>("all");
+  const [newsSortBy, setNewsSortBy] = useState<"importance" | "newest" | "oldest" | "source">("importance");
   const [weatherConditionFilter, setWeatherConditionFilter] = useState<string>("all");
   const [weatherCountryFilter, setWeatherCountryFilter] = useState("");
   const [weatherHumidityFloor, setWeatherHumidityFloor] = useState<number | undefined>(undefined);
@@ -2514,8 +2515,11 @@ export default function ClaritasDashboard() {
     if (newsHasImageOnly) {
       items = items.filter((item) => Boolean(getNewsImageUrl(item)));
     }
+    if (newsCategoryFilter !== "all") items = items.filter((item) => item.category === newsCategoryFilter);
     const sorted = [...items];
-    if (newsSortBy === "newest") {
+    if (newsSortBy === "importance") {
+      sorted.sort((a, b) => (b.importance_score ?? 0) - (a.importance_score ?? 0) || (b.event_time || "").localeCompare(a.event_time || ""));
+    } else if (newsSortBy === "newest") {
       sorted.sort((a, b) => (b.event_time || "").localeCompare(a.event_time || ""));
     } else if (newsSortBy === "oldest") {
       sorted.sort((a, b) => (a.event_time || "").localeCompare(b.event_time || ""));
@@ -2530,6 +2534,7 @@ export default function ClaritasDashboard() {
   }, [
     getSourceLabel,
     newsHasImageOnly,
+    newsCategoryFilter,
     newsLanguageFilter,
     newsSortBy,
     newsSourceFilter,
@@ -3271,6 +3276,7 @@ export default function ClaritasDashboard() {
   const newsHasWorkspaceFilters = Boolean(
     newsSourceFilter !== "all"
     || newsLanguageFilter !== "all"
+    || newsCategoryFilter !== "all"
     || newsHasImageOnly
     || (searchAppliesToNews && searchTerms.length > 0)
   );
@@ -3321,7 +3327,8 @@ export default function ClaritasDashboard() {
     setNewsSourceFilter("all");
     setNewsLanguageFilter("all");
     setNewsHasImageOnly(false);
-    setNewsSortBy("newest");
+    setNewsCategoryFilter("all");
+    setNewsSortBy("importance");
     setNewsWorkspaceChartRange({});
     if (searchAppliesToNews && searchTerms.length > 0) setQuery("");
   }, [searchAppliesToNews, searchTerms.length]);
@@ -6593,6 +6600,13 @@ export default function ClaritasDashboard() {
                       <X className="h-3 w-3" /> Reset to global
                     </button>
                   </div>
+                  <div className="w-full overflow-x-auto pb-1" aria-label="News categories">
+                    <div className="flex min-w-max gap-2">
+                      {["all", "markets", "economy", "companies", "geopolitics", "policy", "energy", "technology", "climate"].map((category) => (
+                        <button key={category} type="button" aria-pressed={newsCategoryFilter === category} onClick={() => setNewsCategoryFilter(category)} title={`Show ${category === "all" ? "the ranked overview" : `${category} news`}`} className={`rounded-full border px-3 py-1.5 font-semibold capitalize transition ${newsCategoryFilter === category ? "border-[color:var(--shell-accent)] bg-[color:var(--signal-sky-soft)] text-[color:var(--shell-ink)]" : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"}`}>{category === "all" ? "Top stories" : category}</button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
                     <label className="text-[color:var(--shell-muted)]">
                       Source
@@ -6645,9 +6659,10 @@ export default function ClaritasDashboard() {
                       Sort
                       <select
                         value={newsSortBy}
-                        onChange={(event) => setNewsSortBy(event.currentTarget.value as "newest" | "oldest" | "source")}
+                        onChange={(event) => setNewsSortBy(event.currentTarget.value as "importance" | "newest" | "oldest" | "source")}
                         className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
                       >
+                        <option value="importance">Most important</option>
                         <option value="newest">Newest first</option>
                         <option value="oldest">Oldest first</option>
                         <option value="source">By source</option>

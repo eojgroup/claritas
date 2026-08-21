@@ -211,6 +211,10 @@ export default function PriorityNewsList({
               </span>
               <span className="dashboard-news-headline">
                 <strong>{displayTitle}</strong>
+                <span className="mt-1 flex flex-wrap gap-1">
+                  {(item.tags ?? []).map((tag) => <span key={tag} className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-soft)] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[color:var(--shell-muted)]">{tag}</span>)}
+                  {item.importance_score != null && <span className="rounded-full bg-[color:var(--signal-amber-soft)] px-2 py-0.5 text-[9px] font-semibold text-[color:var(--shell-ink)]" title={(item.importance_reasons ?? []).join(" · ")}>Impact {item.importance_score}</span>}
+                </span>
                 {translated && item.translation ? (
                   <span
                     className="news-leadership-change"

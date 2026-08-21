@@ -71,6 +71,7 @@ import {
   ensureNewsSummaryTranslation,
   normalizeNewsLanguageCode,
 } from "./news-translation";
+import { enrichAndRankNews } from "./news-ranking";
 import {
   BriefingGenerationError,
   generateDailySignalBriefing,
@@ -2315,7 +2316,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       ORDER BY ranked.result_order
     `;
     const { rows } = await pool.query(sql, params);
-    res.json({ items: rows });
+    res.json({ items: enrichAndRankNews(rows) });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
   }

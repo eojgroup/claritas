@@ -16,6 +16,10 @@ export type NewsItem = {
   ai_summary?: string | null;
   translation?: NewsTranslation | null;
   linked_events?: NewsLinkedIntelligenceEvent[];
+  category?: "markets" | "economy" | "companies" | "geopolitics" | "policy" | "energy" | "technology" | "climate";
+  tags?: string[];
+  importance_score?: number;
+  importance_reasons?: string[];
 };
 
 export type NewsLinkedIntelligenceEvent = {
