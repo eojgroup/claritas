@@ -5,6 +5,7 @@ import { getTransportOverviewForBriefing } from "./connectors/transport";
 import { getCountryMarketOverview } from "./connectors/market-overview";
 import { getMarketInstrumentSnapshots } from "./connectors/market-instruments";
 import { getCountryWeatherLatest } from "./connectors/weather";
+import { NEWS_ASSESSMENT_METHODOLOGY } from "./news-intelligence";
 import {
   getBriefingIntelligenceEvents,
   projectBriefingPriorityEvents,
@@ -259,41 +260,64 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     intelligenceEventResult,
   ] = await Promise.all([
     query<NewsContextRow>(
-      `SELECT
-         i.id,
-         s.name AS source_name,
-         COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
-         COALESCE(NULLIF(btrim(translation.translated_title), ''), i.title) AS title,
-         i.title AS original_title,
-         CASE
-           WHEN NULLIF(btrim(translation.translated_title), '') IS NOT NULL
-             THEN NULLIF(btrim(translation.generated_summary), '')
-           ELSE i.summary
-         END AS summary,
-         i.url,
-         i.country_iso2,
-         i.language_code,
-         COALESCE(i.event_time, i.created_at) AS event_time,
-         translation.provider AS translation_provider,
-         translation.model AS translation_model,
-         CASE WHEN translation.generated_summary IS NOT NULL THEN 'ai_generated' ELSE NULL END AS summary_kind
-       FROM item i
-       JOIN source s ON s.id = i.source_id
-       LEFT JOIN item_translation translation
-         ON translation.item_id = i.id
-        AND translation.target_language_code = $4
-        AND translation.source_title_hash = md5(COALESCE(i.title, ''))
-        AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
-       WHERE i.kind = 'news_article'
-         AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
-         AND COALESCE(i.event_time, i.created_at) >= $1::timestamptz
-         AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
-         AND (
-           NULLIF(btrim(translation.translated_title), '') IS NOT NULL
-           OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) IN ('en', 'eng', 'english')
-           OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) LIKE 'en-%'
-         )
-       ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC
+      `WITH candidates AS MATERIALIZED (
+         SELECT
+           i.id,
+           s.name AS source_name,
+           COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
+           COALESCE(NULLIF(btrim(translation.translated_title), ''), i.title) AS title,
+           i.title AS original_title,
+           CASE
+             WHEN NULLIF(btrim(translation.translated_title), '') IS NOT NULL
+               THEN NULLIF(btrim(translation.generated_summary), '')
+             ELSE i.summary
+           END AS summary,
+           i.url,
+           i.country_iso2,
+           i.language_code,
+           i.event_time,
+           translation.provider AS translation_provider,
+           translation.model AS translation_model,
+           CASE WHEN translation.generated_summary IS NOT NULL THEN 'ai_generated' ELSE NULL END AS summary_kind,
+           assessment.score AS importance_score,
+           ROW_NUMBER() OVER (
+             PARTITION BY canonical_news_publisher_key(i.url,i.payload,s.name)
+             ORDER BY assessment.score DESC NULLS LAST,i.event_time DESC,i.id DESC
+           ) AS publisher_rank
+         FROM item i
+         JOIN source s ON s.id = i.source_id
+         LEFT JOIN news_item_assessment assessment
+           ON assessment.item_id=i.id
+          AND assessment.methodology_version='${NEWS_ASSESSMENT_METHODOLOGY}'
+         LEFT JOIN item_translation translation
+           ON translation.item_id = i.id
+          AND translation.target_language_code = $4
+          AND translation.source_title_hash = md5(COALESCE(i.title, ''))
+          AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
+         WHERE i.kind = 'news_article'
+           AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
+           AND i.event_time >= $1::timestamptz
+           AND i.event_time < $2::timestamptz
+           AND (
+             NULLIF(btrim(translation.translated_title), '') IS NOT NULL
+             OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) IN ('en', 'eng', 'english')
+             OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) LIKE 'en-%'
+           )
+       )
+       SELECT id,source_name,publisher,title,original_title,summary,url,
+              country_iso2,language_code,event_time,translation_provider,
+              translation_model,summary_kind
+       FROM candidates
+       -- Match Top Reporting's bounded publisher-burst penalty. Pending rows
+       -- stay eligible but sort below assessed material reporting.
+       ORDER BY GREATEST(
+                  0::double precision,
+                  COALESCE(importance_score,0)
+                    - LEAST(24::double precision,(publisher_rank-1)::double precision*8)
+                ) DESC,
+                importance_score DESC NULLS LAST,
+                event_time DESC,
+                id DESC
        LIMIT $3`,
       [start, end, newsLimit, BRIEFING_OUTPUT_LANGUAGE]
     ),

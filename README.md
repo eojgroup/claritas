@@ -434,6 +434,7 @@ The daily briefing generator can use OpenCode as an internal LLM service:
 - **Cloud SQL Export IAM Transition**: [`docs/cloud-sql-export-iam.md`](./docs/cloud-sql-export-iam.md)
 - **Data-source governance**: [`docs/data-source-governance.md`](./docs/data-source-governance.md)
 - **Lightweight news translation**: [`docs/news-translation.md`](./docs/news-translation.md)
+- **Explainable news categories and priority**: [`docs/news-priority.md`](./docs/news-priority.md)
 - **Cost-optimized production baseline**: [`docs/operations/cost-baseline.md`](./docs/operations/cost-baseline.md)
 - **Event intelligence and Earth Observation**: [`docs/architecture/event-earth-observation.md`](./docs/architecture/event-earth-observation.md)
 - **Earth Observation administrator setup**: [`docs/operations/earth-observation-admin-setup.md`](./docs/operations/earth-observation-admin-setup.md)

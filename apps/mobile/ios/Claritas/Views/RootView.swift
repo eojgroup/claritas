@@ -94,11 +94,25 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             guard let destination = note.object as? String else { return }
-            if let country = note.userInfo?["country"] as? String, !country.isEmpty {
-                model.selectedCountry = country.uppercased()
+            if let rawCountry = note.userInfo?["country"] as? String {
+                let country = rawCountry.trimmingCharacters(in: .whitespacesAndNewlines)
+                if destination == "news", country.isEmpty {
+                    model.selectedCountry = nil
+                } else if !country.isEmpty {
+                    model.selectedCountry = country.uppercased()
+                }
             }
             if let eventID = note.userInfo?["eventID"] as? String, !eventID.isEmpty {
                 model.selectedIntelligenceEventID = eventID
+            }
+            if let category = note.userInfo?["category"] as? String, !category.isEmpty {
+                model.setNewsCategory(category)
+            }
+            if let newsID = note.userInfo?["newsID"] as? Int {
+                model.selectedNewsItemID = newsID
+            } else if let newsID = note.userInfo?["newsID"] as? String,
+                      let parsedNewsID = Int(newsID), parsedNewsID > 0 {
+                model.selectedNewsItemID = parsedNewsID
             }
             let next: Tab
             switch destination {
@@ -227,6 +241,7 @@ struct RootView: View {
                 sidebarLink(.intelligence)
             }
             Section("Source lenses") {
+                sidebarLink(.news)
                 sidebarLink(.transport)
             }
             if model.isAdmin {

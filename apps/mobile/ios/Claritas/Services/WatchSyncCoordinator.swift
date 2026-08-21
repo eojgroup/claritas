@@ -50,17 +50,7 @@ final class WatchSyncCoordinator: NSObject, WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        if let destination = message["openOnPhone"] as? String {
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(
-                    name: .claritasWatchOpenDestination,
-                    object: destination,
-                    userInfo: [
-                        "country": message["country"] as? String ?? "",
-                        "eventID": message["eventID"] as? String ?? ""
-                    ]
-                )
-            }
+        if handleOpenDestination(message) {
             replyHandler(["status": "opened"])
             return
         }
@@ -69,6 +59,28 @@ final class WatchSyncCoordinator: NSObject, WCSessionDelegate {
         let nextContext = context
         lock.unlock()
         replyHandler(nextContext)
+    }
+
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        _ = handleOpenDestination(message)
+    }
+
+    @discardableResult
+    private func handleOpenDestination(_ message: [String: Any]) -> Bool {
+        guard let destination = message["openOnPhone"] as? String else { return false }
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .claritasWatchOpenDestination,
+                object: destination,
+                userInfo: [
+                    "country": message["country"] as? String ?? "",
+                    "eventID": message["eventID"] as? String ?? "",
+                    "newsID": message["newsID"] as? String ?? "",
+                    "category": message["category"] as? String ?? ""
+                ]
+            )
+        }
+        return true
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}

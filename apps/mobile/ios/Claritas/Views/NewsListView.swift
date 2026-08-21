@@ -3,6 +3,7 @@ import SwiftUI
 struct NewsListView: View {
     let items: [NewsItem]
     var compact: Bool = false
+    var selectedItemID: Int? = nil
     var onSelectCountry: (String) -> Void
     var onOpenEvent: (String) -> Void = { eventID in
         NotificationCenter.default.post(
@@ -23,7 +24,13 @@ struct NewsListView: View {
         } else {
             VStack(spacing: compact ? 0 : 12) {
                 ForEach(items) { n in
-                    NewsRow(item: n, compact: compact, onSelectCountry: onSelectCountry, onOpenEvent: onOpenEvent)
+                    NewsRow(
+                        item: n,
+                        compact: compact,
+                        selected: selectedItemID == n.id,
+                        onSelectCountry: onSelectCountry,
+                        onOpenEvent: onOpenEvent
+                    )
                     if compact && n.id != items.last?.id {
                         Divider()
                     }
@@ -33,9 +40,69 @@ struct NewsListView: View {
     }
 }
 
+struct NewsPriorityMetadataView: View {
+    let item: NewsItem
+    var compact: Bool = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var tierCode: String? {
+        if item.importance?.is_fallback == true { return "unranked" }
+        item.importance?.tier?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var tierTone: Color {
+        switch tierCode {
+        case "top": return ClaritasPalette.negativeText(for: colorScheme)
+        case "high": return ClaritasPalette.shellAccent(for: colorScheme)
+        case "notable": return ClaritasPalette.dataBlue(for: colorScheme)
+        default: return ClaritasPalette.shellMuted(for: colorScheme)
+        }
+    }
+
+    private var visibleTags: [NewsTag] {
+        item.presentationTags
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 2 : 4) {
+            HStack(spacing: 5) {
+                if let tier = item.importanceTierLabel {
+                    Text(tier.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.6)
+                        .foregroundStyle(tierTone)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(tierTone.opacity(0.12), in: Capsule())
+                }
+                Text(item.primaryCategoryLabel.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.5)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .lineLimit(1)
+            }
+            if let reason = item.primaryImportanceReason, !reason.isEmpty {
+                Text(reason)
+                    .font(.caption2)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .lineLimit(compact ? 1 : 2)
+            }
+            if !visibleTags.isEmpty {
+                Text(visibleTags.map(\.label).joined(separator: " · "))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                    .lineLimit(1)
+                    .accessibilityLabel("Tags: \(visibleTags.map(\.label).joined(separator: ", "))")
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct NewsRow: View {
     let item: NewsItem
     let compact: Bool
+    let selected: Bool
     var onSelectCountry: (String) -> Void
     var onOpenEvent: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -78,6 +145,7 @@ private struct NewsRow: View {
                         .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                         .lineLimit(1)
                 }
+                NewsPriorityMetadataView(item: item, compact: true)
                 HStack(spacing: 5) {
                     if let source = sourceLabel {
                         Text(source).lineLimit(1)
@@ -137,6 +205,11 @@ private struct NewsRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 10)
+        .padding(.horizontal, selected ? 8 : 0)
+        .background(
+            selected ? ClaritasPalette.shellHighlight(for: colorScheme).opacity(0.28) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 10)
+        )
         .contentShape(Rectangle())
     }
 
@@ -165,6 +238,7 @@ private struct NewsRow: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                 }
+                NewsPriorityMetadataView(item: item)
                 HStack(spacing: 8) {
                     if let source = sourceLabel {
                         Text(source)
@@ -280,6 +354,13 @@ private struct NewsRow: View {
         }
         .padding(12)
         .brandGlass(cornerRadius: 12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(
+                    selected ? ClaritasPalette.shellAccent(for: colorScheme) : Color.clear,
+                    lineWidth: selected ? 2 : 0
+                )
+        )
     }
 
     private func proxiedImageURL() -> URL? {
@@ -301,9 +382,11 @@ private struct NewsRow: View {
     }
 
     private var sourceLabel: String? {
+        let explicitPublisher = normalizedSourceName(item.publisher)
         if let sourceName = item.source_name?.lowercased(),
            let payload = item.payload?.object {
-            let publisher = normalizedSourceName(payload["publisher"]?.string)
+            let publisher = explicitPublisher
+                ?? normalizedSourceName(payload["publisher"]?.string)
                 ?? normalizedSourceName(payload["source"]?.string)
             if sourceName == "gdelt", let publisher {
                 return "\(publisher) · via GDELT"
@@ -314,6 +397,9 @@ private struct NewsRow: View {
             if sourceName == "institutional_rss", let publisher {
                 return "\(publisher) · official feed"
             }
+        }
+        if let explicitPublisher {
+            return explicitPublisher
         }
         if let explicit = normalizedSourceName(item.source_name) {
             return explicit

@@ -16,6 +16,11 @@ final class AppModel: ObservableObject {
         case archive
     }
 
+    enum NewsSortMode: String {
+        case importance
+        case newest
+    }
+
     @Published var selectedCountry: String? = nil {
         didSet {
             guard normalizedCountry(selectedCountry) != normalizedCountry(oldValue) else { return }
@@ -23,6 +28,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var selectedSymbol: String? = nil
+    @Published var selectedNewsItemID: Int? = nil
     @Published var selectedIntelligenceEventID: String? = nil
     @Published var dailyBriefing: DailySignalBriefing? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
@@ -42,6 +48,13 @@ final class AppModel: ObservableObject {
     @Published var isRefreshingTransport: Bool = false
     @Published var newsLoadMode: NewsLoadMode = .recent
     @Published private(set) var newsScopeCountry: String? = nil
+    @Published var selectedNewsCategory: String = NewsCategoryCatalog.allCode
+    @Published private(set) var newsScopeCategory: String = NewsCategoryCatalog.allCode
+    @Published private(set) var newsScopeSort: NewsSortMode = .importance
+    @Published private(set) var newsCategoryFacets: [NewsCategoryFacet] = []
+    @Published private(set) var newsPageTotal: Int? = nil
+    @Published private(set) var newsUnassessedCount: Int? = nil
+    @Published private(set) var newsMetadataIncluded: Bool = false
     @Published var newsLoadError: String? = nil
     @Published var podcastLoadError: String? = nil
     @Published var transportLoadError: String? = nil
@@ -311,6 +324,7 @@ final class AppModel: ObservableObject {
         }
 
         let initialNewsCountry = normalizedCountry(selectedCountry)
+        let initialNewsCategory = NewsCategoryCatalog.normalized(selectedNewsCategory)
         let initialNewsRequestID = UUID()
         newsRequestID = initialNewsRequestID
 
@@ -334,8 +348,15 @@ final class AppModel: ObservableObject {
             do { return .success(try await api.fetchCountryLeadership()) }
             catch { return .failure(error) }
         }()
-        async let newsResult: Result<[NewsItem], Error> = {
-            do { return .success(try await fetchNewsBatch(mode: .recent, country: initialNewsCountry)) }
+        async let newsResult: Result<NewsPage, Error> = {
+            do {
+                return .success(try await fetchNewsBatch(
+                    mode: .recent,
+                    country: initialNewsCountry,
+                    category: initialNewsCategory,
+                    sort: .importance
+                ))
+            }
             catch { return .failure(error) }
         }()
         async let podcastResult: Result<[PodcastEpisode], Error> = {
@@ -422,11 +443,16 @@ final class AppModel: ObservableObject {
         if case .success(let leadershipRows) = resolvedLeadership {
             leadership = leadershipRows
         }
-        if case .success(let newsItems) = resolvedNews, newsRequestID == initialNewsRequestID {
-            news = newsItems
+        if case .success(let newsPage) = resolvedNews, newsRequestID == initialNewsRequestID {
+            applyNewsPage(newsPage)
             newsLoadMode = .recent
             newsScopeCountry = initialNewsCountry
+            newsScopeCategory = initialNewsCategory
+            newsScopeSort = .importance
             newsLoadError = nil
+        }
+        if case .failure(let error) = resolvedNews, newsRequestID == initialNewsRequestID {
+            newsLoadError = (error as? APIError)?.message ?? error.localizedDescription
         }
         if case .success(let podcastItems) = resolvedPodcasts {
             podcasts = podcastItems
@@ -463,6 +489,13 @@ final class AppModel: ObservableObject {
         leadership = []
         news = []
         newsScopeCountry = nil
+        selectedNewsCategory = NewsCategoryCatalog.allCode
+        newsScopeCategory = NewsCategoryCatalog.allCode
+        newsScopeSort = .importance
+        newsCategoryFacets = []
+        newsPageTotal = nil
+        newsUnassessedCount = nil
+        newsMetadataIncluded = false
         newsRequestID = UUID()
         isRefreshingNews = false
         podcasts = []
@@ -478,6 +511,7 @@ final class AppModel: ObservableObject {
     func clearSelection() {
         selectedCountry = nil
         selectedSymbol = nil
+        selectedNewsItemID = nil
         selectedIntelligenceEventID = nil
     }
 
@@ -584,13 +618,40 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func refreshNews(mode: NewsLoadMode = .recent, country: String? = nil) async {
+    func setNewsCategory(_ category: String) {
+        let normalized = NewsCategoryCatalog.normalized(category)
+        guard normalized != selectedNewsCategory else { return }
+        selectedNewsItemID = nil
+        newsLoadError = nil
+        selectedNewsCategory = normalized
+    }
+
+    func newsCategoryOptions(mode: NewsLoadMode, country: String?) -> [NewsCategoryOption] {
+        guard newsMetadataIncluded,
+              newsLoadMode == mode,
+              newsScopeCountry == normalizedCountry(country) else {
+            return NewsCategoryCatalog.options
+        }
+        return NewsCategoryCatalog.options(
+            facets: newsCategoryFacets,
+            allCount: newsScopeCategory == NewsCategoryCatalog.allCode ? newsPageTotal : nil,
+            metadataIncluded: true
+        )
+    }
+
+    func refreshNews(
+        mode: NewsLoadMode = .recent,
+        country: String? = nil,
+        category: String? = nil,
+        sort: NewsSortMode = .importance
+    ) async {
         guard hasPaidAccess else {
             clearAppData()
             return
         }
 
         let requestedCountry = normalizedCountry(country)
+        let requestedCategory = NewsCategoryCatalog.normalized(category ?? selectedNewsCategory)
         let requestID = UUID()
         newsRequestID = requestID
         isRefreshingNews = true
@@ -602,11 +663,18 @@ final class AppModel: ObservableObject {
         }
 
         do {
-            let loaded = try await fetchNewsBatch(mode: mode, country: requestedCountry)
+            let loadedPage = try await fetchNewsBatch(
+                mode: mode,
+                country: requestedCountry,
+                category: requestedCategory,
+                sort: sort
+            )
             guard newsRequestID == requestID else { return }
-            news = loaded
+            applyNewsPage(loadedPage)
             newsLoadMode = mode
             newsScopeCountry = requestedCountry
+            newsScopeCategory = requestedCategory
+            newsScopeSort = sort
         } catch {
             guard newsRequestID == requestID else { return }
             if isPaymentRequired(error) {
@@ -850,33 +918,75 @@ final class AppModel: ObservableObject {
         return formatter.string(from: date)
     }
 
-    private func fetchNewsBatch(mode: NewsLoadMode, country: String?) async throws -> [NewsItem] {
+    private func fetchNewsBatch(
+        mode: NewsLoadMode,
+        country: String?,
+        category: String,
+        sort: NewsSortMode
+    ) async throws -> NewsPage {
         switch mode {
         case .recent:
-            return try await api.fetchNews(limit: recentNewsLimit, offset: 0, q: nil, country: country)
+            return try await api.fetchNews(
+                limit: recentNewsLimit,
+                offset: 0,
+                q: nil,
+                country: country,
+                category: category,
+                sort: sort.rawValue,
+                archive: false,
+                includeMetadata: true
+            )
         case .archive:
             var combined: [NewsItem] = []
             var seenIds = Set<Int>()
             var offset = 0
+            var metadataPage: NewsPage?
 
-            for _ in 0..<archiveNewsMaxPages {
+            for pageIndex in 0..<archiveNewsMaxPages {
                 let batch = try await api.fetchNews(
                     limit: archiveNewsPageSize,
                     offset: offset,
                     q: nil,
-                    country: country
+                    country: country,
+                    category: category,
+                    sort: sort.rawValue,
+                    archive: true,
+                    includeMetadata: pageIndex == 0
                 )
-                if batch.isEmpty { break }
+                if metadataPage == nil { metadataPage = batch }
+                if batch.items.isEmpty { break }
 
-                for item in batch where !seenIds.contains(item.id) {
+                for item in batch.items where !seenIds.contains(item.id) {
                     seenIds.insert(item.id)
                     combined.append(item)
                 }
 
-                offset += batch.count
-                if batch.count < archiveNewsPageSize { break }
+                offset += batch.items.count
+                if batch.items.count < archiveNewsPageSize { break }
             }
-            return combined
+
+            let metadata = metadataPage ?? NewsPage(items: [])
+            return NewsPage(
+                items: combined,
+                facets: metadata.facets,
+                ranking: metadata.ranking,
+                page: NewsPageMetadata(
+                    limit: combined.count,
+                    offset: 0,
+                    total: metadata.page.total,
+                    metadataIncluded: metadata.page.metadata_included
+                )
+            )
         }
+    }
+
+    private func applyNewsPage(_ loadedPage: NewsPage) {
+        let includesMetadata = loadedPage.page.metadata_included
+            ?? !loadedPage.facets.categories.isEmpty
+        news = loadedPage.items
+        newsCategoryFacets = includesMetadata ? loadedPage.facets.categories : []
+        newsPageTotal = includesMetadata ? loadedPage.page.total : nil
+        newsUnassessedCount = includesMetadata ? loadedPage.ranking.unassessed_count : nil
+        newsMetadataIncluded = includesMetadata
     }
 }

@@ -50,6 +50,8 @@ import {
 } from "recharts";
 import worldCountries from "world-countries";
 import PriorityNewsList from "./components/PriorityNewsList";
+import NewsCategoryControl from "./components/NewsCategoryControl";
+import { newsCategoryLabel } from "./components/newsCategoryPresentation";
 import {
   describeNewsEmptyState,
   describeNewsFreshness,
@@ -114,7 +116,7 @@ const legalPolicies = [
   },
 ];
 
-const NEWS_FETCH_LIMIT = 250;
+const NEWS_FETCH_LIMIT = 200;
 const NEWS_ARCHIVE_PAGE_SIZE = 200;
 const NEWS_ARCHIVE_MAX_PAGES = 150;
 const NEWS_TREND_WINDOW_DAYS = 30;
@@ -122,6 +124,22 @@ const MAP_WINDOW_MIN = 7;
 const MAP_WINDOW_MAX = 45;
 const SPLIT_VIEW_MIN_WIDTH = 700;
 const SPLIT_VIEW_MIN_HEIGHT = 620;
+
+function metadataFromNewsFeed(response: NewsFeedResponse): NewsFeedMetadata {
+  return {
+    facets: response.facets,
+    ranking: response.ranking,
+    page: response.page,
+  };
+}
+
+function newsCategoryCounts(metadata: NewsFeedMetadata | null): Partial<Record<NewsCategory, number>> {
+  const counts: Partial<Record<NewsCategory, number>> = {};
+  metadata?.facets.categories.forEach((facet) => {
+    counts[facet.category] = facet.count;
+  });
+  return counts;
+}
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
 type SearchTopic = "all" | "news" | "podcasts" | "weather" | "markets";
@@ -817,7 +835,12 @@ import {
   type MarketFiling,
   type MarketIndicator,
   type MarketQuote,
+  type NewsCategory,
+  type NewsCategoryFilter,
+  type NewsFeedMetadata,
+  type NewsFeedResponse,
   type NewsItem,
+  type NewsSort,
   type IntelligenceAlert,
   type IntelligenceEvent,
   type PodcastEpisode,
@@ -929,6 +952,9 @@ export default function ClaritasDashboard() {
   const [transportOverview, setTransportOverview] = useState<TransportOverview | null>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [topNews, setTopNews] = useState<NewsItem[]>([]);
+  const [newsFeedMetadata, setNewsFeedMetadata] = useState<NewsFeedMetadata | null>(null);
+  const [topNewsFeedMetadata, setTopNewsFeedMetadata] = useState<NewsFeedMetadata | null>(null);
   const [selectedDashboardNewsId, setSelectedDashboardNewsId] = useState<
     number | null
   >(null);
@@ -942,8 +968,11 @@ export default function ClaritasDashboard() {
   );
   const [isLoadingNews, setIsLoadingNews] = useState(false);
   const [newsLoadError, setNewsLoadError] = useState<string | null>(null);
+  const [isLoadingTopNews, setIsLoadingTopNews] = useState(false);
+  const [topNewsLoadError, setTopNewsLoadError] = useState<string | null>(null);
   const [newsMapCountry, setNewsMapCountry] = useState<string | null>(null);
   const [newsCountryItems, setNewsCountryItems] = useState<NewsItem[] | null>(null);
+  const [newsCountryFeedMetadata, setNewsCountryFeedMetadata] = useState<NewsFeedMetadata | null>(null);
   const [newsCountryLoadMode, setNewsCountryLoadMode] = useState<"recent" | "archive">("recent");
   const [isLoadingNewsCountry, setIsLoadingNewsCountry] = useState(false);
   const [newsCountryLoadError, setNewsCountryLoadError] = useState<string | null>(null);
@@ -975,7 +1004,8 @@ export default function ClaritasDashboard() {
   const [newsSourceFilter, setNewsSourceFilter] = useState<string>("all");
   const [newsLanguageFilter, setNewsLanguageFilter] = useState("all");
   const [newsHasImageOnly, setNewsHasImageOnly] = useState(false);
-  const [newsSortBy, setNewsSortBy] = useState<"newest" | "oldest" | "source">("newest");
+  const [newsCategory, setNewsCategory] = useState<NewsCategoryFilter>("all");
+  const [newsSortBy, setNewsSortBy] = useState<NewsSort>("importance");
   const [weatherConditionFilter, setWeatherConditionFilter] = useState<string>("all");
   const [weatherCountryFilter, setWeatherCountryFilter] = useState("");
   const [weatherHumidityFloor, setWeatherHumidityFloor] = useState<number | undefined>(undefined);
@@ -1023,7 +1053,9 @@ export default function ClaritasDashboard() {
   const dashboardFeedPanelRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const newsRequestIdRef = useRef(0);
+  const topNewsRequestIdRef = useRef(0);
   const newsCountryRequestIdRef = useRef(0);
+  const newsCountryDataCountryRef = useRef<string | null>(null);
   const podcastRequestIdRef = useRef(0);
   const [viewportSize, setViewportSize] = useState(() => ({
     width: typeof window !== "undefined" ? window.innerWidth : 1280,
@@ -1297,29 +1329,45 @@ export default function ClaritasDashboard() {
     };
   }, []);
 
-  const loadNewsData = useCallback(async (mode: "recent" | "archive") => {
+  const loadNewsData = useCallback(async (
+    mode: "recent" | "archive",
+    category: NewsCategoryFilter = "all",
+    sort: NewsSort = "importance",
+  ) => {
     const requestId = newsRequestIdRef.current + 1;
     newsRequestIdRef.current = requestId;
     setIsLoadingNews(true);
     setNewsLoadError(null);
     try {
       if (mode === "recent") {
-        const items = await fetchNews({ limit: NEWS_FETCH_LIMIT });
+        const response = await fetchNews({
+          limit: NEWS_FETCH_LIMIT,
+          category: category === "all" ? undefined : category,
+          sort,
+        });
         if (newsRequestIdRef.current !== requestId) return;
-        setNews(items);
+        setNews(response.items);
+        setNewsFeedMetadata(metadataFromNewsFeed(response));
         setNewsLoadMode("recent");
         return;
       }
 
       const items: NewsItem[] = [];
       const seenIds = new Set<number>();
+      let metadata: NewsFeedMetadata | null = null;
       let offset = 0;
       for (let page = 0; page < NEWS_ARCHIVE_MAX_PAGES; page += 1) {
-        const batch = await fetchNews({
+        const response = await fetchNews({
           limit: NEWS_ARCHIVE_PAGE_SIZE,
           offset,
+          category: category === "all" ? undefined : category,
+          sort,
+          archive: true,
+          includeMetadata: offset === 0 ? undefined : false,
         });
         if (newsRequestIdRef.current !== requestId) return;
+        if (!metadata) metadata = metadataFromNewsFeed(response);
+        const batch = response.items;
         if (batch.length === 0) break;
         batch.forEach((item) => {
           if (seenIds.has(item.id)) return;
@@ -1327,9 +1375,11 @@ export default function ClaritasDashboard() {
           items.push(item);
         });
         offset += batch.length;
+        if (metadata?.page.total != null && offset >= metadata.page.total) break;
         if (batch.length < NEWS_ARCHIVE_PAGE_SIZE) break;
       }
       setNews(items);
+      if (metadata) setNewsFeedMetadata(metadata);
       setNewsLoadMode("archive");
     } catch (err) {
       if (newsRequestIdRef.current !== requestId) return;
@@ -1341,15 +1391,41 @@ export default function ClaritasDashboard() {
     }
   }, []);
 
+  const loadTopNewsData = useCallback(async (category: NewsCategoryFilter = "all") => {
+    const requestId = topNewsRequestIdRef.current + 1;
+    topNewsRequestIdRef.current = requestId;
+    setIsLoadingTopNews(true);
+    setTopNewsLoadError(null);
+    try {
+      const response = await fetchNews({
+        limit: 3,
+        category: category === "all" ? undefined : category,
+        sort: "importance",
+      });
+      if (topNewsRequestIdRef.current !== requestId) return;
+      setTopNews(response.items.slice(0, 3));
+      setTopNewsFeedMetadata(metadataFromNewsFeed(response));
+    } catch (err) {
+      if (topNewsRequestIdRef.current !== requestId) return;
+      setTopNewsLoadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (topNewsRequestIdRef.current === requestId) setIsLoadingTopNews(false);
+    }
+  }, []);
+
   const loadNewsCountryData = useCallback(async (
     country: string | null,
     mode: "recent" | "archive" = "recent",
+    category: NewsCategoryFilter = "all",
+    sort: NewsSort = "importance",
   ) => {
     const requestId = newsCountryRequestIdRef.current + 1;
     newsCountryRequestIdRef.current = requestId;
     if (!country) {
       setNewsMapCountry(null);
       setNewsCountryItems(null);
+      setNewsCountryFeedMetadata(null);
+      newsCountryDataCountryRef.current = null;
       setNewsCountryLoadError(null);
       setIsLoadingNewsCountry(false);
       setNewsMapNotice(null);
@@ -1358,34 +1434,48 @@ export default function ClaritasDashboard() {
     }
 
     const normalizedCountry = country.toUpperCase();
-    setNewsCountryLoadMode(mode);
     setNewsMapCountry(normalizedCountry);
-    setNewsCountryItems(null);
+    if (newsCountryDataCountryRef.current !== normalizedCountry) {
+      setNewsCountryItems(null);
+      setNewsCountryFeedMetadata(null);
+    }
     setNewsCountryLoadError(null);
     setNewsMapNotice(null);
     setNewsWorkspaceChartRange({});
     setIsLoadingNewsCountry(true);
     try {
       if (mode === "recent") {
-        const items = await fetchNews({
+        const response = await fetchNews({
           country: normalizedCountry,
           limit: NEWS_FETCH_LIMIT,
+          category: category === "all" ? undefined : category,
+          sort,
         });
         if (newsCountryRequestIdRef.current !== requestId) return;
-        setNewsCountryItems(items);
+        setNewsCountryItems(response.items);
+        setNewsCountryFeedMetadata(metadataFromNewsFeed(response));
+        newsCountryDataCountryRef.current = normalizedCountry;
+        setNewsCountryLoadMode("recent");
         return;
       }
 
       const items: NewsItem[] = [];
       const seenIds = new Set<number>();
+      let metadata: NewsFeedMetadata | null = null;
       let offset = 0;
       for (let page = 0; page < NEWS_ARCHIVE_MAX_PAGES; page += 1) {
-        const batch = await fetchNews({
+        const response = await fetchNews({
           country: normalizedCountry,
           limit: NEWS_ARCHIVE_PAGE_SIZE,
           offset,
+          category: category === "all" ? undefined : category,
+          sort,
+          archive: true,
+          includeMetadata: offset === 0 ? undefined : false,
         });
         if (newsCountryRequestIdRef.current !== requestId) return;
+        if (!metadata) metadata = metadataFromNewsFeed(response);
+        const batch = response.items;
         if (batch.length === 0) break;
         batch.forEach((item) => {
           if (seenIds.has(item.id)) return;
@@ -1393,12 +1483,15 @@ export default function ClaritasDashboard() {
           items.push(item);
         });
         offset += batch.length;
+        if (metadata?.page.total != null && offset >= metadata.page.total) break;
         if (batch.length < NEWS_ARCHIVE_PAGE_SIZE) break;
       }
       setNewsCountryItems(items);
+      if (metadata) setNewsCountryFeedMetadata(metadata);
+      newsCountryDataCountryRef.current = normalizedCountry;
+      setNewsCountryLoadMode("archive");
     } catch (err) {
       if (newsCountryRequestIdRef.current !== requestId) return;
-      setNewsCountryItems([]);
       setNewsCountryLoadError(err instanceof Error ? err.message : String(err));
     } finally {
       if (newsCountryRequestIdRef.current === requestId) {
@@ -1406,6 +1499,36 @@ export default function ClaritasDashboard() {
       }
     }
   }, []);
+
+  const selectNewsCategory = useCallback((category: NewsCategoryFilter) => {
+    if (category === newsCategory) return;
+    setNewsCategory(category);
+    setSelectedDashboardNewsId(null);
+    setNewsWorkspaceChartRange({});
+    void loadTopNewsData(category);
+    void loadNewsData("recent", category, newsSortBy);
+    if (newsMapCountry) {
+      void loadNewsCountryData(newsMapCountry, "recent", category, newsSortBy);
+    }
+  }, [
+    loadNewsCountryData,
+    loadNewsData,
+    loadTopNewsData,
+    newsCategory,
+    newsMapCountry,
+    newsSortBy,
+  ]);
+
+  const selectNewsSort = useCallback((sort: NewsSort) => {
+    if (sort === newsSortBy) return;
+    setNewsSortBy(sort);
+    setSelectedDashboardNewsId(null);
+    setNewsWorkspaceChartRange({});
+    void loadNewsData("recent", newsCategory, sort);
+    if (newsMapCountry) {
+      void loadNewsCountryData(newsMapCountry, "recent", newsCategory, sort);
+    }
+  }, [loadNewsCountryData, loadNewsData, newsCategory, newsMapCountry, newsSortBy]);
 
   const requestNewsTranslationSummary = useCallback(async (item: NewsItem) => {
     if (
@@ -1425,6 +1548,7 @@ export default function ClaritasDashboard() {
     try {
       const translation = await ensureNewsTranslationSummary(item.id);
       setNews((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
+      setTopNews((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
       setNewsCountryItems((current) => current
         ? mergeNewsTranslationIntoItems(current, item.id, translation)
         : current);
@@ -1495,9 +1619,10 @@ export default function ClaritasDashboard() {
         setDailyBriefing(null);
         setDailyBriefingError(err instanceof Error ? err.message : String(err));
       });
-    void loadNewsData("recent");
+    void loadNewsData("recent", "all", "importance");
+    void loadTopNewsData("all");
     void loadPodcastData();
-  }, [authStatus, hasPaidAccess, loadNewsData, loadPodcastData]);
+  }, [authStatus, hasPaidAccess, loadNewsData, loadPodcastData, loadTopNewsData]);
 
   useEffect(() => {
     if (authStatus !== "authed") return;
@@ -2514,24 +2639,11 @@ export default function ClaritasDashboard() {
     if (newsHasImageOnly) {
       items = items.filter((item) => Boolean(getNewsImageUrl(item)));
     }
-    const sorted = [...items];
-    if (newsSortBy === "newest") {
-      sorted.sort((a, b) => (b.event_time || "").localeCompare(a.event_time || ""));
-    } else if (newsSortBy === "oldest") {
-      sorted.sort((a, b) => (a.event_time || "").localeCompare(b.event_time || ""));
-    } else {
-      sorted.sort((a, b) => {
-        const sourceCmp = (getSourceLabel(a) ?? "").localeCompare(getSourceLabel(b) ?? "");
-        if (sourceCmp !== 0) return sourceCmp;
-        return (b.event_time || "").localeCompare(a.event_time || "");
-      });
-    }
-    return sorted;
+    return items;
   }, [
     getSourceLabel,
     newsHasImageOnly,
     newsLanguageFilter,
-    newsSortBy,
     newsSourceFilter,
     newsWorkspaceScope,
   ]);
@@ -2669,8 +2781,8 @@ export default function ClaritasDashboard() {
       void loadNewsCountryData(null);
       return;
     }
-    void loadNewsCountryData(selection.country, "recent");
-  }, [loadNewsCountryData, newsMapCountry]);
+    void loadNewsCountryData(selection.country, "recent", newsCategory, newsSortBy);
+  }, [loadNewsCountryData, newsCategory, newsMapCountry, newsSortBy]);
 
   const weatherConditionOptions = useMemo(() => {
     const values = new Set<string>();
@@ -3268,9 +3380,46 @@ export default function ClaritasDashboard() {
     ? countryMeta.get(newsMapCountry)?.name ?? newsMapCountry
     : null;
   const activeNewsLoading = newsMapCountry ? isLoadingNewsCountry : isLoadingNews;
+  const activeNewsFeedMetadata = newsMapCountry ? newsCountryFeedMetadata : newsFeedMetadata;
+  const activeNewsRawCount = newsMapCountry ? newsCountryItems?.length ?? 0 : news.length;
+  const activeNewsTotal = Math.max(activeNewsRawCount, activeNewsFeedMetadata?.page.total ?? 0);
+  const activeNewsAppliedCategory: NewsCategoryFilter = activeNewsFeedMetadata
+    ? activeNewsFeedMetadata.ranking.category ?? "all"
+    : newsCategory;
+  const activeNewsCategoryCounts = useMemo(
+    () => newsCategoryCounts(activeNewsFeedMetadata),
+    [activeNewsFeedMetadata],
+  );
+  const activeNewsResultSummary = useMemo(() => {
+    const categoryLabel = newsCategoryLabel(activeNewsAppliedCategory).toLocaleLowerCase();
+    const loaded = activeNewsTotal > activeNewsRawCount
+      ? `${activeNewsRawCount} loaded of ${activeNewsTotal}`
+      : `${activeNewsRawCount} loaded`;
+    if (newsPageItems.length !== activeNewsRawCount) {
+      return `${newsPageItems.length} shown from ${loaded} in ${categoryLabel}`;
+    }
+    return `${loaded} in ${categoryLabel}`;
+  }, [activeNewsAppliedCategory, activeNewsRawCount, activeNewsTotal, newsPageItems.length]);
+  const topNewsAppliedCategory: NewsCategoryFilter = topNewsFeedMetadata
+    ? topNewsFeedMetadata.ranking.category ?? "all"
+    : newsCategory;
+  const topNewsCategoryCounts = useMemo(
+    () => newsCategoryCounts(topNewsFeedMetadata),
+    [topNewsFeedMetadata],
+  );
+  const topNewsTotal = Math.max(topNews.length, topNewsFeedMetadata?.page.total ?? 0);
+  const topNewsHasPendingAssessment = topNews.some((item) => (
+    !item.importance || item.importance.is_fallback === true
+  ));
+  const topNewsAssessmentIncomplete = topNewsHasPendingAssessment
+    || (topNewsFeedMetadata?.ranking.selected_unassessed_count ?? 0) > 0;
+  const topNewsResultSummary = topNewsLoadError && topNews.length > 0
+    ? `Update failed · showing ${topNews.length} previous ${topNews.length === 1 ? "story" : "stories"}`
+    : `${topNews.length} ${topNews.length === 1 ? "story" : "stories"} shown${topNewsTotal > topNews.length ? ` · ${topNewsTotal} available` : ""} in ${newsCategoryLabel(topNewsAppliedCategory).toLocaleLowerCase()}`;
   const newsHasWorkspaceFilters = Boolean(
     newsSourceFilter !== "all"
     || newsLanguageFilter !== "all"
+    || newsCategory !== "all"
     || newsHasImageOnly
     || (searchAppliesToNews && searchTerms.length > 0)
   );
@@ -3321,10 +3470,24 @@ export default function ClaritasDashboard() {
     setNewsSourceFilter("all");
     setNewsLanguageFilter("all");
     setNewsHasImageOnly(false);
-    setNewsSortBy("newest");
+    setNewsCategory("all");
+    setNewsSortBy("importance");
+    setSelectedDashboardNewsId(null);
     setNewsWorkspaceChartRange({});
+    void loadTopNewsData("all");
+    void loadNewsData("recent", "all", "importance");
+    if (newsMapCountry) {
+      void loadNewsCountryData(newsMapCountry, "recent", "all", "importance");
+    }
     if (searchAppliesToNews && searchTerms.length > 0) setQuery("");
-  }, [searchAppliesToNews, searchTerms.length]);
+  }, [
+    loadNewsCountryData,
+    loadNewsData,
+    loadTopNewsData,
+    newsMapCountry,
+    searchAppliesToNews,
+    searchTerms.length,
+  ]);
 
   const resetNewsWorkspaceToGlobal = useCallback(() => {
     clearNewsStoryFilters();
@@ -3334,11 +3497,19 @@ export default function ClaritasDashboard() {
 
   const retryNewsWorkspace = useCallback(() => {
     if (newsMapCountry) {
-      void loadNewsCountryData(newsMapCountry, newsCountryLoadMode);
+      void loadNewsCountryData(newsMapCountry, newsCountryLoadMode, newsCategory, newsSortBy);
       return;
     }
-    void loadNewsData(newsLoadMode);
-  }, [loadNewsCountryData, loadNewsData, newsCountryLoadMode, newsLoadMode, newsMapCountry]);
+    void loadNewsData(newsLoadMode, newsCategory, newsSortBy);
+  }, [
+    loadNewsCountryData,
+    loadNewsData,
+    newsCategory,
+    newsCountryLoadMode,
+    newsLoadMode,
+    newsMapCountry,
+    newsSortBy,
+  ]);
 
   const newsCountryCoverageRows = useMemo(() => {
     return Array.from(newsPageCountryStats.entries())
@@ -5171,6 +5342,8 @@ export default function ClaritasDashboard() {
                           onClick={() =>
                             void loadNewsData(
                               newsLoadMode === "archive" ? "recent" : "archive",
+                              newsCategory,
+                              newsSortBy,
                             )
                           }
                           disabled={isLoadingNews}
@@ -6185,13 +6358,31 @@ export default function ClaritasDashboard() {
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Live feed
+                            {listMode === "news" ? "Reporting overview" : "Live feed"}
                           </div>
                           <div className="text-sm font-semibold">
-                            Latest intelligence drops
+                            {listMode === "news" ? "Top reporting" : "Latest intelligence drops"}
                           </div>
                           <div className="text-xs text-[color:var(--shell-muted)]">
-                            {regionLabel} · latest source update {latestEventLabel}
+                            {listMode === "news"
+                              ? `Global ${newsCategoryLabel(topNewsAppliedCategory).toLowerCase()} · ${
+                                isLoadingTopNews
+                                  ? topNews.length > 0 && topNewsAppliedCategory !== newsCategory
+                                    ? `showing previous stories while updating to ${newsCategoryLabel(newsCategory).toLowerCase()}`
+                                    : topNews.length > 0
+                                      ? "refreshing the last successful ranking"
+                                      : "loading ranking assessment"
+                                  : topNewsLoadError
+                                    ? topNews.length > 0
+                                      ? "showing the last successful ranking; update failed"
+                                      : "ranking update unavailable"
+                                    : !topNewsFeedMetadata
+                                      ? "ranking metadata unavailable"
+                                      : topNewsAssessmentIncomplete
+                                        ? "assessment coverage incomplete; pending stories are marked unranked"
+                                        : "evidence-ranked importance with publisher balance"
+                              }`
+                              : `${regionLabel} · latest source update ${latestEventLabel}`}
                           </div>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -6244,14 +6435,28 @@ export default function ClaritasDashboard() {
                         </div>
                       </div>
 
-                      <div className="h-[clamp(20rem,42vh,28rem)] min-h-0 overflow-hidden">
+                      {listMode === "news" && (
+                        <NewsCategoryControl
+                          selected={newsCategory}
+                          onSelect={selectNewsCategory}
+                          compact
+                          loading={isLoadingTopNews}
+                          categoryCounts={topNewsCategoryCounts}
+                          allCount={topNewsFeedMetadata?.ranking.category === null && topNewsFeedMetadata.page.total != null
+                            ? topNewsTotal
+                            : undefined}
+                          resultSummary={topNewsResultSummary}
+                        />
+                      )}
+
+                      <div className={listMode === "news" ? "min-h-0 overflow-hidden" : "h-[clamp(20rem,42vh,28rem)] min-h-0 overflow-hidden"}>
                         {listMode === "news" ? (
                           <div
                             ref={feedRef}
-                            className="dashboard-news-stream app-scroll-panel h-full overflow-y-auto"
+                            className="dashboard-news-stream app-scroll-panel max-h-[clamp(20rem,42vh,28rem)] overflow-y-auto"
                           >
                             <PriorityNewsList
-                              items={filteredNews}
+                              items={topNews.slice(0, 3)}
                               selectedId={selectedDashboardNewsId}
                               primaryCountry={selectedCountry}
                               secondaryCountry={comparisonCountry}
@@ -6278,26 +6483,32 @@ export default function ClaritasDashboard() {
                               onOpenEvent={handleOpenIntelligence}
                               emptyState={
                                 <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
-                                  <div>No news items for the current filters.</div>
+                                  <div>
+                                    {isLoadingTopNews
+                                      ? "Loading ranked reporting…"
+                                      : topNewsLoadError
+                                        ? "Top reporting could not be loaded."
+                                        : newsCategory === "all"
+                                          ? "No reporting is currently available."
+                                          : `No ${newsCategoryLabel(newsCategory).toLowerCase()} reporting is currently available.`}
+                                  </div>
                                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                                    {dataWindowPreset !== "all" && (
+                                    {topNewsLoadError && (
                                       <button
-                                        onClick={() => {
-                                          setDataWindowPreset("all");
-                                          setChartRange({});
-                                        }}
-                                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
+                                        type="button"
+                                        onClick={() => void loadTopNewsData(newsCategory)}
+                                        className="min-h-11 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                                       >
-                                        Show all dates
+                                        Retry top reporting
                                       </button>
                                     )}
-                                    {newsLoadMode !== "archive" && (
+                                    {newsCategory !== "all" && !isLoadingTopNews && (
                                       <button
-                                        onClick={() => void loadNewsData("archive")}
-                                        disabled={isLoadingNews}
-                                        className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
+                                        type="button"
+                                        onClick={() => selectNewsCategory("all")}
+                                        className="min-h-11 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                                       >
-                                        {isLoadingNews ? "Loading…" : "Load archive"}
+                                        Show all top stories
                                       </button>
                                     )}
                                   </div>
@@ -6560,7 +6771,7 @@ export default function ClaritasDashboard() {
                       News workspace
                     </div>
                     <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                      {newsMapCountryLabel ? `Country: ${newsMapCountryLabel}` : `Region: ${regionLabel}`} · Showing {newsPageItems.length} stories
+                      {newsMapCountryLabel ? `Country: ${newsMapCountryLabel}` : `Region: ${regionLabel}`} · {activeNewsResultSummary}
                     </div>
                   </div>
                   <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
@@ -6568,11 +6779,9 @@ export default function ClaritasDashboard() {
                       onClick={() => {
                         const nextMode = activeNewsLoadMode === "archive" ? "recent" : "archive";
                         if (newsMapCountry) {
-                          setNewsCountryLoadMode(nextMode);
-                          void loadNewsCountryData(newsMapCountry, nextMode);
+                          void loadNewsCountryData(newsMapCountry, nextMode, newsCategory, newsSortBy);
                         } else {
-                          setNewsLoadMode(nextMode);
-                          void loadNewsData(nextMode);
+                          void loadNewsData(nextMode, newsCategory, newsSortBy);
                         }
                       }}
                       disabled={isLoadingNews || isLoadingNewsCountry}
@@ -6593,6 +6802,16 @@ export default function ClaritasDashboard() {
                       <X className="h-3 w-3" /> Reset to global
                     </button>
                   </div>
+                  <NewsCategoryControl
+                    selected={newsCategory}
+                    onSelect={selectNewsCategory}
+                    loading={activeNewsLoading}
+                    categoryCounts={activeNewsCategoryCounts}
+                    allCount={activeNewsFeedMetadata?.ranking.category === null && activeNewsFeedMetadata.page.total != null
+                      ? activeNewsTotal
+                      : undefined}
+                    resultSummary={activeNewsResultSummary}
+                  />
                   <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
                     <label className="text-[color:var(--shell-muted)]">
                       Source
@@ -6645,12 +6864,11 @@ export default function ClaritasDashboard() {
                       Sort
                       <select
                         value={newsSortBy}
-                        onChange={(event) => setNewsSortBy(event.currentTarget.value as "newest" | "oldest" | "source")}
+                        onChange={(event) => selectNewsSort(event.currentTarget.value as NewsSort)}
                         className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
                       >
-                        <option value="newest">Newest first</option>
-                        <option value="oldest">Oldest first</option>
-                        <option value="source">By source</option>
+                        <option value="importance">Importance</option>
+                        <option value="newest">Latest</option>
                       </select>
                     </label>
                     <div className="flex items-end">

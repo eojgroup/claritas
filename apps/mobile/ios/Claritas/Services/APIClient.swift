@@ -157,16 +157,32 @@ final class APIClient {
         return comps?.url
     }
 
-    func fetchNews(limit: Int = 20, offset: Int = 0, q: String? = nil, country: String? = nil) async throws -> [NewsItem] {
+    func fetchNews(
+        limit: Int = 20,
+        offset: Int = 0,
+        q: String? = nil,
+        country: String? = nil,
+        category: String? = nil,
+        sort: String = "importance",
+        archive: Bool = false,
+        includeMetadata: Bool = true
+    ) async throws -> NewsPage {
         var comps = URLComponents(url: baseURL.appendingPathComponent("/api/news"), resolvingAgainstBaseURL: false)!
         var items: [URLQueryItem] = [URLQueryItem(name: "limit", value: String(limit)),
                                      URLQueryItem(name: "offset", value: String(offset)),
-                                     URLQueryItem(name: "display_language", value: ClaritasInterfaceLanguage.current)]
+                                     URLQueryItem(name: "display_language", value: ClaritasInterfaceLanguage.current),
+                                     URLQueryItem(name: "sort", value: sort == "newest" ? "newest" : "importance"),
+                                     URLQueryItem(name: "archive", value: archive ? "true" : "false"),
+                                     URLQueryItem(name: "include_metadata", value: includeMetadata ? "true" : "false")]
         if let q { items.append(URLQueryItem(name: "q", value: q)) }
         if let country { items.append(URLQueryItem(name: "country", value: country)) }
+        if let category,
+           NewsCategoryCatalog.normalized(category) != NewsCategoryCatalog.allCode {
+            items.append(URLQueryItem(name: "category", value: NewsCategoryCatalog.normalized(category)))
+        }
         comps.queryItems = items
         let req = URLRequest(url: comps.url!)
-        return try await request(req, as: [NewsItem].self, rootKey: "items")
+        return try await request(req, as: NewsPage.self)
     }
 
     func fetchPodcasts(

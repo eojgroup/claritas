@@ -96,6 +96,7 @@ spec:
                   ('alert_candidate'),
                   ('alert_candidate_recipient'),
                   ('alert_email_delivery'),
+                  ('news_item_assessment'),
                   ('news_translation_usage'),
                   ('user_intelligence_watchlist')
                 ) AS t(name)
@@ -127,7 +128,12 @@ spec:
                 ) IS NULL THEN
                   RAISE EXCEPTION 'Required important-event email materialization function is missing.';
                 END IF;
-                RAISE NOTICE 'Required important-event email functions are present.';
+                IF to_regprocedure(
+                  'canonical_news_publisher_key(text,jsonb,text)'
+                ) IS NULL THEN
+                  RAISE EXCEPTION 'Required canonical news publisher function is missing.';
+                END IF;
+                RAISE NOTICE 'Required important-event email and news functions are present.';
               END
               $verify_functions$;
 

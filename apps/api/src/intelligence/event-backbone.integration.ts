@@ -4,11 +4,92 @@ import test from "node:test";
 import { pool, query, withTransaction } from "../db";
 import { consumeDomainEvent } from "./consumer";
 import { buildEventDedupeKey } from "./correlation";
+import { buildNewsReaderQuery } from "../news-reader-query";
 import {
   correlateAndUpsertIntelligenceSignal,
   recomputeIntelligenceEventAggregateTx,
   upsertIntelligenceSignal,
 } from "./service";
+
+test("canonical publisher identity converges direct and aggregator discoveries", async () => {
+  const { rows } = await query<{
+    ecb_direct: string;
+    ecb_aggregated: string;
+    govuk_direct: string;
+    govuk_aggregated: string;
+    unrelated: string;
+  }>(`SELECT
+      canonical_news_publisher_key(
+        'https://www.ecb.europa.eu/press/pr/date/2026/html/example.en.html',
+        '{"publisher":"European Central Bank"}'::jsonb,
+        'institutional-rss'
+      ) AS ecb_direct,
+      canonical_news_publisher_key(
+        'https://ecb.europa.eu/press/pr/date/2026/html/example.en.html',
+        '{"domain":"ecb.europa.eu","provider":"gdelt"}'::jsonb,
+        'gdelt'
+      ) AS ecb_aggregated,
+      canonical_news_publisher_key(
+        'https://www.gov.uk/government/news/example',
+        '{"publisher":"UK Government"}'::jsonb,
+        'govuk-search'
+      ) AS govuk_direct,
+      canonical_news_publisher_key(
+        'https://gov.uk/government/news/example',
+        '{"domain":"gov.uk","provider":"gdelt"}'::jsonb,
+        'gdelt'
+      ) AS govuk_aggregated,
+      canonical_news_publisher_key(
+        'https://example.org/report',
+        '{}'::jsonb,
+        'fixture'
+      ) AS unrelated`);
+
+  assert.equal(rows[0].ecb_direct, "ecb.europa.eu");
+  assert.equal(rows[0].ecb_aggregated, rows[0].ecb_direct);
+  assert.equal(rows[0].govuk_direct, "gov.uk");
+  assert.equal(rows[0].govuk_aggregated, rows[0].govuk_direct);
+  assert.notEqual(rows[0].unrelated, rows[0].ecb_direct);
+});
+
+test("news reader query executes with and without metadata across bind layouts", async () => {
+  const cases = [
+    buildNewsReaderQuery({
+      displayLanguage: "en",
+      limit: 3,
+      offset: 0,
+      q: "",
+      country: "",
+      language: "",
+      sourceCountry: "",
+      provider: "",
+      category: "",
+      sort: "importance",
+      archive: false,
+      includeMetadata: true,
+    }),
+    buildNewsReaderQuery({
+      displayLanguage: "en",
+      limit: 10,
+      offset: 10,
+      q: "rates",
+      country: "US",
+      language: "en",
+      sourceCountry: "US",
+      provider: "institutional_rss",
+      category: "economy",
+      sort: "newest",
+      archive: true,
+      includeMetadata: false,
+    }),
+  ];
+
+  for (const readerQuery of cases) {
+    const result = await pool.query(readerQuery.sql, readerQuery.params);
+    assert.equal(result.rows.length, 1);
+    assert.ok(Array.isArray(result.rows[0].items));
+  }
+});
 
 test("outbox consumption, multi-domain evidence, alerts, and idempotency share one durable graph", async () => {
   const suffix = randomUUID();

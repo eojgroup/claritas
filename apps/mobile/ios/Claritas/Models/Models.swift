@@ -132,6 +132,261 @@ struct NewsLinkedEvent: Codable, Identifiable {
     let best_thumbnail_url: String?
 }
 
+struct NewsCategoryOption: Identifiable, Hashable {
+    let code: String
+    let label: String
+    let count: Int?
+    var id: String { code }
+
+    init(code: String, label: String, count: Int? = nil) {
+        self.code = code
+        self.label = label
+        self.count = count
+    }
+
+    var isKnownEmpty: Bool {
+        count == 0
+    }
+}
+
+enum NewsCategoryCatalog {
+    static let allCode = "all"
+    static let options: [NewsCategoryOption] = [
+        .init(code: allCode, label: "All categories"),
+        .init(code: "markets", label: "Markets"),
+        .init(code: "economy", label: "Economy"),
+        .init(code: "companies", label: "Companies"),
+        .init(code: "geopolitics", label: "Geopolitics"),
+        .init(code: "policy", label: "Policy"),
+        .init(code: "energy", label: "Energy"),
+        .init(code: "technology", label: "Technology"),
+        .init(code: "climate_disasters", label: "Climate & disasters"),
+        .init(code: "health", label: "Health"),
+        .init(code: "transport", label: "Transport"),
+        .init(code: "other", label: "Other")
+    ]
+
+    static func normalized(_ value: String?) -> String {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              options.contains(where: { $0.code == value }) else {
+            return allCode
+        }
+        return value
+    }
+
+    static func label(for code: String?) -> String {
+        let normalized = code?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return options.first(where: { $0.code == normalized })?.label
+            ?? normalized?.replacingOccurrences(of: "_", with: " ").capitalized
+            ?? "Other"
+    }
+
+    static func options(
+        facets: [NewsCategoryFacet],
+        allCount: Int?,
+        metadataIncluded: Bool
+    ) -> [NewsCategoryOption] {
+        guard metadataIncluded else { return options }
+        let counts = Dictionary(
+            facets.map { ($0.category, max(0, $0.count)) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        return options.map { option in
+            NewsCategoryOption(
+                code: option.code,
+                label: option.label,
+                count: option.code == allCode ? allCount : (counts[option.code] ?? 0)
+            )
+        }
+    }
+}
+
+struct NewsCategoryFacet: Codable, Hashable, Identifiable {
+    let category: String
+    let count: Int
+    var id: String { category }
+
+    enum CodingKeys: String, CodingKey {
+        case category, count
+    }
+
+    init(category: String, count: Int) {
+        self.category = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        self.count = max(0, count)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        category = try container.decode(String.self, forKey: .category)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        count = max(0, try container.decodeFlexibleInt(forKey: .count))
+    }
+}
+
+struct NewsFacets: Codable {
+    let categories: [NewsCategoryFacet]
+
+    enum CodingKeys: String, CodingKey {
+        case categories
+    }
+
+    init(categories: [NewsCategoryFacet] = []) {
+        self.categories = categories
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        categories = try container.decodeIfPresent([NewsCategoryFacet].self, forKey: .categories) ?? []
+    }
+}
+
+struct NewsRankingMetadata: Codable {
+    let methodology: String?
+    let sort: String?
+    let category: String?
+    let archive: Bool?
+    let assessed_at: String?
+    let unassessed_count: Int?
+    let selected_unassessed_count: Int?
+    let diversification: String?
+
+    enum CodingKeys: String, CodingKey {
+        case methodology, sort, category, archive, assessed_at, unassessed_count, selected_unassessed_count, diversification
+    }
+
+    init(
+        methodology: String? = nil,
+        sort: String? = nil,
+        category: String? = nil,
+        archive: Bool? = nil,
+        assessedAt: String? = nil,
+        unassessedCount: Int? = nil,
+        selectedUnassessedCount: Int? = nil,
+        diversification: String? = nil
+    ) {
+        self.methodology = methodology
+        self.sort = sort
+        self.category = category
+        self.archive = archive
+        self.assessed_at = assessedAt
+        self.unassessed_count = unassessedCount
+        self.selected_unassessed_count = selectedUnassessedCount
+        self.diversification = diversification
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        methodology = try container.decodeIfPresent(String.self, forKey: .methodology)
+        sort = try container.decodeIfPresent(String.self, forKey: .sort)
+        category = try container.decodeIfPresent(String.self, forKey: .category)
+        archive = try container.decodeIfPresent(Bool.self, forKey: .archive)
+        assessed_at = try container.decodeIfPresent(String.self, forKey: .assessed_at)
+        unassessed_count = try container.decodeFlexibleIntIfPresent(forKey: .unassessed_count)
+        selected_unassessed_count = try container.decodeFlexibleIntIfPresent(forKey: .selected_unassessed_count)
+        diversification = try container.decodeIfPresent(String.self, forKey: .diversification)
+    }
+}
+
+struct NewsPageMetadata: Codable {
+    let limit: Int?
+    let offset: Int?
+    let total: Int?
+    let metadata_included: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case limit, offset, total, metadata_included
+    }
+
+    init(limit: Int? = nil, offset: Int? = nil, total: Int? = nil, metadataIncluded: Bool? = nil) {
+        self.limit = limit
+        self.offset = offset
+        self.total = total
+        self.metadata_included = metadataIncluded
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        limit = try container.decodeFlexibleIntIfPresent(forKey: .limit)
+        offset = try container.decodeFlexibleIntIfPresent(forKey: .offset)
+        total = try container.decodeFlexibleIntIfPresent(forKey: .total)
+        metadata_included = try container.decodeIfPresent(Bool.self, forKey: .metadata_included)
+    }
+}
+
+struct NewsTag: Codable, Hashable, Identifiable {
+    let code: String
+    let label: String
+    let kind: String
+    var id: String { "\(kind):\(code)" }
+
+    enum CodingKeys: String, CodingKey {
+        case code, label, kind
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedLabel = try container.decodeIfPresent(String.self, forKey: .label)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let decodedCode = try container.decodeIfPresent(String.self, forKey: .code)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        label = decodedLabel.flatMap { $0.isEmpty ? nil : $0 }
+            ?? decodedCode.flatMap { $0.isEmpty ? nil : $0 }
+            ?? "Tag"
+        code = decodedCode.flatMap { $0.isEmpty ? nil : $0 }
+            ?? label.lowercased().replacingOccurrences(of: " ", with: "_")
+        kind = (try container.decodeIfPresent(String.self, forKey: .kind)) ?? "topic"
+    }
+}
+
+struct NewsImportanceReason: Codable, Hashable, Identifiable {
+    let code: String
+    let label: String
+    var id: String { code }
+
+    enum CodingKeys: String, CodingKey {
+        case code, label
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedLabel = try container.decodeIfPresent(String.self, forKey: .label)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let decodedCode = try container.decodeIfPresent(String.self, forKey: .code)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        label = decodedLabel.flatMap { $0.isEmpty ? nil : $0 }
+            ?? decodedCode.flatMap { $0.isEmpty ? nil : $0 }
+            ?? "Priority context"
+        code = decodedCode.flatMap { $0.isEmpty ? nil : $0 }
+            ?? label.lowercased().replacingOccurrences(of: " ", with: "_")
+    }
+}
+
+struct NewsImportance: Codable, Hashable {
+    let score: Double?
+    let tier: String?
+    let confidence: Double?
+    let reasons: [NewsImportanceReason]
+    let methodology: String?
+    let calculated_at: String?
+    let is_fallback: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case score, tier, confidence, reasons, methodology, calculated_at, is_fallback
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        score = try container.decodeIfPresent(Double.self, forKey: .score)
+        tier = try container.decodeIfPresent(String.self, forKey: .tier)
+        confidence = try container.decodeIfPresent(Double.self, forKey: .confidence)
+        reasons = try container.decodeIfPresent([NewsImportanceReason].self, forKey: .reasons) ?? []
+        methodology = try container.decodeIfPresent(String.self, forKey: .methodology)
+        calculated_at = try container.decodeIfPresent(String.self, forKey: .calculated_at)
+        is_fallback = try container.decodeIfPresent(Bool.self, forKey: .is_fallback)
+    }
+}
+
 enum IntelligenceLinkagePresentation {
     private static func number(_ value: JSONValue?) -> Double? {
         if let number = value?.number { return number }
@@ -231,6 +486,11 @@ struct NewsItem: Codable, Identifiable {
     let ai_summary: String?
     let translation: NewsTranslation?
     let linked_events: [NewsLinkedEvent]
+    let publisher: String?
+    let primary_category: String?
+    let categories: [String]
+    let tags: [NewsTag]
+    let importance: NewsImportance?
 
     var presentationTitle: String {
         nonBlank(translated_title) ?? nonBlank(title) ?? nonBlank(url) ?? "Untitled"
@@ -263,6 +523,68 @@ struct NewsItem: Codable, Identifiable {
         return APIDateParser.parse(s)
     }
 
+    var primaryCategoryLabel: String {
+        if importance?.is_fallback == true { return "Category pending" }
+        NewsCategoryCatalog.label(for: primary_category ?? categories.first)
+    }
+
+    var importanceTierLabel: String? {
+        if importance?.is_fallback == true { return "Unranked" }
+        guard let tier = importance?.tier?.trimmingCharacters(in: .whitespacesAndNewlines), !tier.isEmpty else {
+            return nil
+        }
+        return tier.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    var primaryImportanceReason: String? {
+        if importance?.is_fallback == true {
+            return importance?.reasons.first?.label ?? "Automated assessment pending"
+        }
+        importance?.reasons.first?.label
+    }
+
+    /// Keeps the most decision-useful tags visible when category tags arrive first.
+    /// Duplicate codes retain their first payload occurrence, matching the web client.
+    var presentationTags: [NewsTag] {
+        let priorities = [
+            "event": 0,
+            "evidence": 1,
+            "topic": 2,
+            "category": 3
+        ]
+        var seenCodes = Set<String>()
+        var ranked: [(tag: NewsTag, index: Int, priority: Int)] = []
+
+        for (index, tag) in tags.enumerated() {
+            let code = tag.code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let label = tag.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !code.isEmpty, !label.isEmpty, seenCodes.insert(code).inserted else { continue }
+            let kind = tag.kind.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            ranked.append((tag, index, priorities[kind] ?? Int.max))
+        }
+
+        return ranked
+            .sorted { left, right in
+                left.priority == right.priority
+                    ? left.index < right.index
+                    : left.priority < right.priority
+            }
+            .prefix(3)
+            .map { $0.tag }
+    }
+
+    var priorityAccessibilitySummary: String {
+        let values: [String?] = [importanceTierLabel, primaryCategoryLabel, primaryImportanceReason]
+        return values
+            .compactMap { value in
+                guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+                    return nil
+                }
+                return value
+            }
+            .joined(separator: ", ")
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
         case kind
@@ -280,6 +602,11 @@ struct NewsItem: Codable, Identifiable {
         case ai_summary
         case translation
         case linked_events
+        case publisher
+        case primary_category
+        case categories
+        case tags
+        case importance
     }
 
     init(from decoder: Decoder) throws {
@@ -300,6 +627,11 @@ struct NewsItem: Codable, Identifiable {
         ai_summary = try container.decodeIfPresent(String.self, forKey: .ai_summary)
         translation = try container.decodeIfPresent(NewsTranslation.self, forKey: .translation)
         linked_events = try container.decodeIfPresent([NewsLinkedEvent].self, forKey: .linked_events) ?? []
+        publisher = try container.decodeIfPresent(String.self, forKey: .publisher)
+        primary_category = try container.decodeIfPresent(String.self, forKey: .primary_category)
+        categories = try container.decodeIfPresent([String].self, forKey: .categories) ?? []
+        tags = try container.decodeIfPresent([NewsTag].self, forKey: .tags) ?? []
+        importance = try container.decodeIfPresent(NewsImportance.self, forKey: .importance)
     }
 
     private func nonBlank(_ value: String?) -> String? {
@@ -314,6 +646,37 @@ struct NewsItem: Codable, Identifiable {
             return nil
         }
         return value
+    }
+}
+
+struct NewsPage: Codable {
+    let items: [NewsItem]
+    let facets: NewsFacets
+    let ranking: NewsRankingMetadata
+    let page: NewsPageMetadata
+
+    enum CodingKeys: String, CodingKey {
+        case items, facets, ranking, page
+    }
+
+    init(
+        items: [NewsItem],
+        facets: NewsFacets = NewsFacets(),
+        ranking: NewsRankingMetadata = NewsRankingMetadata(),
+        page: NewsPageMetadata = NewsPageMetadata()
+    ) {
+        self.items = items
+        self.facets = facets
+        self.ranking = ranking
+        self.page = page
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        items = try container.decodeIfPresent([NewsItem].self, forKey: .items) ?? []
+        facets = try container.decodeIfPresent(NewsFacets.self, forKey: .facets) ?? NewsFacets()
+        ranking = try container.decodeIfPresent(NewsRankingMetadata.self, forKey: .ranking) ?? NewsRankingMetadata()
+        page = try container.decodeIfPresent(NewsPageMetadata.self, forKey: .page) ?? NewsPageMetadata()
     }
 }
 
@@ -1905,6 +2268,11 @@ enum APIDateParser {
 }
 
 private extension KeyedDecodingContainer {
+    func decodeFlexibleIntIfPresent(forKey key: Key) throws -> Int? {
+        guard contains(key), try !decodeNil(forKey: key) else { return nil }
+        return try decodeFlexibleInt(forKey: key)
+    }
+
     func decodeFlexibleInt(forKey key: Key) throws -> Int {
         if let value = try? decode(Int.self, forKey: key) {
             return value

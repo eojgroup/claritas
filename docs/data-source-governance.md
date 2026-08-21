@@ -24,6 +24,11 @@ Institutional feeds are normalized through one connector and source record, but
 the publishing institution is retained on every item. Repeated polls do not write
 unchanged items, which avoids PostgreSQL churn while preserving idempotency.
 
+News categories and priority are derived navigation metadata, not new source
+facts or content rights. Their evidence order, fallback behavior and
+corroboration boundary are documented in
+[News categories and priority](./news-priority.md).
+
 GOV.UK ingestion is restricted to the Search API document types `news_story`,
 `press_release` and `world_news_story`; external search results and other GOV.UK
 document types are rejected. The connector stores the publishing organisation,

@@ -40,3 +40,15 @@ test("RSS and Atom entries use the same bounded parser", async () => {
   assert.equal(atom.length, 1);
   assert.match(atom[0], /<title>C<\/title>/);
 });
+
+test("institutional publication time rejects invalid and future feed dates", async () => {
+  const { parseInstitutionalPublicationTime } = await connector;
+  const now = Date.parse("2026-08-21T12:00:00.000Z");
+
+  assert.equal(
+    parseInstitutionalPublicationTime("Fri, 21 Aug 2026 11:55:00 GMT", now),
+    "2026-08-21T11:55:00.000Z",
+  );
+  assert.equal(parseInstitutionalPublicationTime("not-a-date", now), null);
+  assert.equal(parseInstitutionalPublicationTime("2026-08-21T12:05:01.000Z", now), null);
+});

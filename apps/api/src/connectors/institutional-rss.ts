@@ -96,6 +96,16 @@ export const INSTITUTIONAL_RSS_FEEDS: InstitutionalFeed[] = [
   },
 ];
 
+export function parseInstitutionalPublicationTime(
+  value: string | null | undefined,
+  now = Date.now(),
+): string | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed) || parsed > now + 5 * 60_000) return null;
+  return new Date(parsed).toISOString();
+}
+
 function decodeXml(value: string): string {
   return value
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
@@ -176,8 +186,7 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
         if (!title || !url) { skipped += 1; continue; }
         const summary = tag(block, "description") ?? tag(block, "summary") ?? tag(block, "content");
         const publishedRaw = tag(block, "pubDate") ?? tag(block, "published") ?? tag(block, "updated");
-        const parsed = publishedRaw ? Date.parse(publishedRaw) : Number.NaN;
-        const eventTime = Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+        const eventTime = parseInstitutionalPublicationTime(publishedRaw);
         if (eventTime && (!latestEventTime || eventTime > latestEventTime)) latestEventTime = eventTime;
         const inference = inferNewsCountry({ title, summary, url, feedCountryHint: feed.sourceCountryIso2 });
         if (inference.iso2) {

@@ -22,7 +22,13 @@ final class WatchConnectivityClient: NSObject, WCSessionDelegate {
         })
     }
 
-    func openOnPhone(_ destination: String, country: String? = nil, eventID: String? = nil) {
+    func openOnPhone(
+        _ destination: String,
+        country: String? = nil,
+        eventID: String? = nil,
+        newsID: Int? = nil,
+        category: String? = nil
+    ) {
         guard WCSession.isSupported(), WCSession.default.isReachable else { return }
         var message = ["openOnPhone": destination]
         if let country, !country.isEmpty {
@@ -30,6 +36,12 @@ final class WatchConnectivityClient: NSObject, WCSessionDelegate {
         }
         if let eventID, !eventID.isEmpty {
             message["eventID"] = eventID
+        }
+        if let newsID {
+            message["newsID"] = String(newsID)
+        }
+        if let category {
+            message["category"] = NewsCategoryCatalog.normalized(category)
         }
         WCSession.default.sendMessage(
             message,

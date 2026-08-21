@@ -11,6 +11,7 @@ struct WatchRootView: View {
             } else {
                 TabView {
                     WatchBriefingView()
+                    WatchNewsView()
                     WatchIntelligencePulseView()
                     WatchPulseView()
                     WatchSignalGlanceView()
@@ -1047,6 +1048,8 @@ private struct WatchPulseView: View {
                             icon: "newspaper",
                             title: headline.presentationTitle,
                             detail: [
+                                headline.importanceTierLabel,
+                                headline.primaryCategoryLabel,
                                 headline.translationDisclosure,
                                 headline.country_iso2?.uppercased(),
                                 headline.source_name
@@ -1235,18 +1238,60 @@ private struct WatchNewsView: View {
         NavigationStack {
             List {
                 Section {
-                    ForEach(model.news.prefix(6)) { item in
+                    NavigationLink {
+                        WatchNewsCategorySelection()
+                    } label: {
+                        HStack {
+                            Label("Category", systemImage: "line.3.horizontal.decrease.circle")
+                            Spacer()
+                            Text(NewsCategoryCatalog.label(for: model.selectedNewsCategory))
+                                .foregroundStyle(WatchPalette.orange)
+                                .lineLimit(1)
+                        }
+                        .font(.caption2.weight(.semibold))
+                    }
+                }
+                Section {
+                    watchNewsEmptyState
+                    ForEach(model.selectedCategoryNews.prefix(3)) { item in
                         VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 5) {
+                                if let tier = item.importanceTierLabel {
+                                    Text(tier.uppercased())
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(
+                                            item.importance?.is_fallback == true
+                                                ? Color.secondary
+                                                : WatchPalette.orange
+                                        )
+                                }
+                                Text(item.primaryCategoryLabel.uppercased())
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(WatchPalette.sage)
+                                    .lineLimit(1)
+                            }
                             Text(item.presentationTitle)
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(3)
+                            if let reason = item.primaryImportanceReason {
+                                Text(reason)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            if !item.presentationTags.isEmpty {
+                                Text(item.presentationTags.map(\.label).joined(separator: " · "))
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(WatchPalette.orange)
+                                    .lineLimit(1)
+                            }
                             if let disclosure = item.translationDisclosure {
                                 Text(disclosure)
                                     .font(.caption2.weight(.semibold))
                                     .foregroundStyle(WatchPalette.orange)
                             }
                             HStack {
-                                Text(item.source_name ?? "News")
+                                Text(item.publisher ?? item.source_name ?? "News")
                                 Spacer()
                                 if let country = item.country_iso2 {
                                     Text(country.uppercased())
@@ -1254,15 +1299,104 @@ private struct WatchNewsView: View {
                             }
                             .font(.caption2)
                             .foregroundStyle(WatchPalette.sage)
+                            Button {
+                                model.openOnPhone(
+                                    "news",
+                                    country: item.country_iso2,
+                                    newsID: item.id,
+                                    category: model.selectedNewsCategory
+                                )
+                            } label: {
+                                Label("Open on iPhone", systemImage: "iphone")
+                            }
+                            .buttonStyle(.bordered)
+                            .font(.caption2)
+                            .accessibilityLabel(
+                                "Open \(item.presentationTitle) on iPhone. \(item.priorityAccessibilitySummary)"
+                            )
                         }
                     }
                 } header: {
-                    WatchSectionLabel(title: "Headline alerts", icon: "newspaper")
+                    HStack {
+                        WatchSectionLabel(title: "Top reporting", icon: "newspaper")
+                        Spacer()
+                        WatchRefreshStatus()
+                    }
                 }
             }
             .navigationTitle("News")
             .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+            .refreshable { await model.refresh() }
         }
+    }
+
+    @ViewBuilder
+    private var watchNewsEmptyState: some View {
+        if model.selectedCategoryNews.isEmpty {
+            if model.isRefreshingNews {
+                HStack(spacing: 7) {
+                    ProgressView()
+                    Text("Loading ranked stories…")
+                }
+                .font(.caption2)
+            } else if let error = model.newsLoadError, !error.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("News update failed", systemImage: "exclamationmark.triangle")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(WatchPalette.negative)
+                    Text(error)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                    Button("Retry") {
+                        Task { await model.refresh() }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.caption2)
+                }
+            } else {
+                Text("No ranked stories in this category.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct WatchNewsCategorySelection: View {
+    @EnvironmentObject private var model: WatchAppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ForEach(model.newsCategoryOptions) { category in
+                Button {
+                    dismiss()
+                    Task { await model.selectNewsCategory(category.code) }
+                } label: {
+                    HStack {
+                        Text(category.label)
+                        Spacer()
+                        if let count = category.count {
+                            Text("\(count)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        if model.selectedNewsCategory == category.code {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(WatchPalette.orange)
+                        }
+                    }
+                }
+                .disabled(category.isKnownEmpty)
+                .accessibilityLabel("\(category.label) news")
+                .accessibilityValue(
+                    "\(model.selectedNewsCategory == category.code ? "Selected" : "Not selected")"
+                    + (category.count.map { ", \($0) stories" } ?? "")
+                )
+            }
+        }
+        .navigationTitle("Category")
     }
 }
 

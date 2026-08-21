@@ -263,6 +263,12 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MAX_DAILY_TOKEN_UNITS, optional: true } }
             - name: NEWS_TRANSLATION_SUMMARY_MAX_WORDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_SUMMARY_MAX_WORDS, optional: true } }
+            - name: NEWS_ASSESSMENT_WORKER_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_ASSESSMENT_WORKER_ENABLED, optional: true } }
+            - name: NEWS_ASSESSMENT_BATCH_SIZE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_ASSESSMENT_BATCH_SIZE, optional: true } }
+            - name: NEWS_ASSESSMENT_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_ASSESSMENT_POLL_SECONDS, optional: true } }
             - name: OPENCODE_SERVER_USERNAME
               valueFrom: { secretKeyRef: { name: claritas-opencode, key: OPENCODE_SERVER_USERNAME, optional: true } }
             - name: OPENCODE_SERVER_PASSWORD

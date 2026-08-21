@@ -1,3 +1,74 @@
+export const NEWS_CATEGORIES = [
+  "markets",
+  "economy",
+  "companies",
+  "geopolitics",
+  "policy",
+  "energy",
+  "technology",
+  "climate_disasters",
+  "health",
+  "transport",
+  "other",
+] as const;
+
+export type NewsCategory = (typeof NEWS_CATEGORIES)[number];
+export type NewsCategoryFilter = NewsCategory | "all";
+export type NewsSort = "importance" | "newest";
+
+export type NewsTag = {
+  code: string;
+  label: string;
+  kind: "category" | "topic" | "event" | "evidence";
+};
+
+export type NewsImportanceReason = {
+  code: string;
+  label: string;
+};
+
+export type NewsImportance = {
+  score: number;
+  tier: "top" | "high" | "notable" | "routine";
+  confidence: number;
+  reasons: NewsImportanceReason[];
+  methodology: string;
+  calculated_at: string | null;
+  is_fallback?: boolean;
+  components?: Record<string, unknown>;
+};
+
+export type NewsCategoryFacet = {
+  category: NewsCategory;
+  count: number;
+};
+
+export type NewsFeedMetadata = {
+  facets: {
+    categories: NewsCategoryFacet[];
+  };
+  ranking: {
+    methodology: string;
+    sort: NewsSort;
+    category: NewsCategory | null;
+    archive: boolean;
+    assessed_at: string | null;
+    unassessed_count: number | null;
+    selected_unassessed_count: number | null;
+    diversification: string | null;
+  };
+  page: {
+    limit: number;
+    offset: number;
+    total: number | null;
+    metadata_included: boolean;
+  };
+};
+
+export type NewsFeedResponse = NewsFeedMetadata & {
+  items: NewsItem[];
+};
+
 export type NewsItem = {
   id: number;
   kind: string | null;
@@ -16,6 +87,10 @@ export type NewsItem = {
   ai_summary?: string | null;
   translation?: NewsTranslation | null;
   linked_events?: NewsLinkedIntelligenceEvent[];
+  primary_category?: NewsCategory | null;
+  categories?: NewsCategory[];
+  tags?: NewsTag[];
+  importance?: NewsImportance | null;
 };
 
 export type NewsLinkedIntelligenceEvent = {
@@ -26,6 +101,9 @@ export type NewsLinkedIntelligenceEvent = {
   status?: IntelligenceEvent["status"];
   confidence?: number;
   relevance_score?: number;
+  urgency_score?: number;
+  materiality_score?: number;
+  source_diversity?: number;
   domain_count?: number;
   evidence_count?: number;
   domains?: string[];
@@ -1656,9 +1734,24 @@ export function getAuthStartUrl(provider: AuthProviderId, redirectUrl?: string):
   return `${API_BASE}/api/auth/${provider}/start${qs ? `?${qs}` : ""}`;
 }
 
-export async function fetchNews(params?: { limit?: number; offset?: number; q?: string; country?: string; language?: string; sourceCountry?: string; provider?: string; displayLanguage?: string }) {
+export async function fetchNews(params?: {
+  limit?: number;
+  offset?: number;
+  q?: string;
+  country?: string;
+  language?: string;
+  sourceCountry?: string;
+  provider?: string;
+  displayLanguage?: string;
+  category?: NewsCategory;
+  sort?: NewsSort;
+  archive?: boolean;
+  includeMetadata?: boolean;
+}): Promise<NewsFeedResponse> {
   const sp = new URLSearchParams();
+  const requestedSort = params?.sort ?? "importance";
   sp.set("display_language", params?.displayLanguage ?? CURRENT_INTERFACE_LANGUAGE);
+  sp.set("sort", requestedSort);
   if (params?.limit) sp.set("limit", String(params.limit));
   if (params?.offset) sp.set("offset", String(params.offset));
   if (params?.q) sp.set("q", params.q);
@@ -1666,10 +1759,62 @@ export async function fetchNews(params?: { limit?: number; offset?: number; q?: 
   if (params?.language) sp.set("language", params.language);
   if (params?.sourceCountry) sp.set("source_country", params.sourceCountry);
   if (params?.provider) sp.set("provider", params.provider);
+  if (params?.category) sp.set("category", params.category);
+  if (params?.archive) sp.set("archive", "true");
+  if (params?.includeMetadata === false) sp.set("include_metadata", "false");
   const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`, { credentials: "include" });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch news"));
-  const data = await resp.json();
-  return (data.items ?? []) as NewsItem[];
+  const data = await resp.json() as Partial<NewsFeedResponse>;
+  const items = Array.isArray(data.items) ? data.items : [];
+  const categoryFacets = Array.isArray(data.facets?.categories)
+    ? data.facets.categories.filter((facet): facet is NewsCategoryFacet => (
+      Boolean(facet)
+      && NEWS_CATEGORIES.some((category) => category === facet.category)
+      && Number.isFinite(Number(facet.count))
+    )).map((facet) => ({
+      category: facet.category,
+      count: Math.max(0, Math.trunc(Number(facet.count))),
+    }))
+    : [];
+  const rankingCategory = data.ranking?.category;
+  const rankingSort = data.ranking?.sort;
+  const nullableNonNegativeInteger = (value: unknown): number | null => {
+    if (value == null) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
+  };
+  return {
+    items,
+    facets: { categories: categoryFacets },
+    ranking: {
+      methodology: typeof data.ranking?.methodology === "string"
+        ? data.ranking.methodology
+        : "unavailable",
+      sort: rankingSort === "newest" || rankingSort === "importance"
+        ? rankingSort
+        : requestedSort,
+      category: rankingCategory && NEWS_CATEGORIES.some((category) => category === rankingCategory)
+        ? rankingCategory
+        : null,
+      archive: typeof data.ranking?.archive === "boolean"
+        ? data.ranking.archive
+        : params?.archive === true,
+      assessed_at: typeof data.ranking?.assessed_at === "string" ? data.ranking.assessed_at : null,
+      unassessed_count: nullableNonNegativeInteger(data.ranking?.unassessed_count),
+      selected_unassessed_count: nullableNonNegativeInteger(data.ranking?.selected_unassessed_count),
+      diversification: typeof data.ranking?.diversification === "string"
+        ? data.ranking.diversification
+        : null,
+    },
+    page: {
+      limit: Math.max(0, Math.trunc(Number(data.page?.limit) || params?.limit || items.length)),
+      offset: Math.max(0, Math.trunc(Number(data.page?.offset) || params?.offset || 0)),
+      total: nullableNonNegativeInteger(data.page?.total),
+      metadata_included: typeof data.page?.metadata_included === "boolean"
+        ? data.page.metadata_included
+        : false,
+    },
+  };
 }
 
 export async function ensureNewsTranslationSummary(

@@ -5,6 +5,7 @@ import {
   newsDisplaySummary,
   newsDisplayTitle,
   type NewsItem,
+  type NewsTag,
 } from "../lib/api";
 import { presentEventLinkage } from "./eventLinkagePresentation";
 
@@ -67,6 +68,31 @@ function isLeadershipChangeStory(item: NewsItem): boolean {
   );
 }
 
+const NEWS_TAG_PRESENTATION_PRIORITY: Record<NewsTag["kind"], number> = {
+  event: 0,
+  evidence: 1,
+  topic: 2,
+  category: 3,
+};
+
+function presentationTags(tags: NewsTag[] | undefined): NewsTag[] {
+  const seen = new Set<string>();
+  return (tags ?? [])
+    .map((tag, index) => ({ tag, index }))
+    .filter(({ tag }) => {
+      const code = tag.code.trim().toLocaleLowerCase();
+      if (!code || !tag.label.trim() || seen.has(code)) return false;
+      seen.add(code);
+      return true;
+    })
+    .sort((left, right) => (
+      NEWS_TAG_PRESENTATION_PRIORITY[left.tag.kind] - NEWS_TAG_PRESENTATION_PRIORITY[right.tag.kind]
+      || left.index - right.index
+    ))
+    .slice(0, 3)
+    .map(({ tag }) => tag);
+}
+
 type PriorityNewsListProps = {
   items: NewsItem[];
   selectedId: number | null;
@@ -109,7 +135,7 @@ export default function PriorityNewsList({
     <div className="priority-news-list">
       {items.length > 0 && (
         <div className="dashboard-news-columns" aria-hidden="true">
-          <span>Priority</span>
+          <span>Importance</span>
           <span>Time</span>
           <span>Place</span>
           <span>Headline</span>
@@ -118,7 +144,7 @@ export default function PriorityNewsList({
         </div>
       )}
       {items.length === 0 && emptyState}
-      {items.map((item, index) => {
+      {items.map((item) => {
         const img = getImageUrl(item);
         const sourceLabel = getSourceLabel(item);
         const iso = item.country_iso2?.toUpperCase();
@@ -136,7 +162,18 @@ export default function PriorityNewsList({
         const selectedStory = selectedId === item.id;
         const isPrimary = Boolean(iso && primaryIso === iso);
         const isSecondary = Boolean(iso && secondaryIso === iso);
-        const priorityBand = index < 3 ? "P1" : index < 10 ? "P2" : "P3";
+        const rankingPending = !item.importance || item.importance.is_fallback === true;
+        const importanceTier = rankingPending ? null : item.importance?.tier ?? null;
+        const importanceTierLabel = importanceTier
+          ? `${importanceTier[0].toUpperCase()}${importanceTier.slice(1)}`
+          : "Unranked";
+        const firstImportanceReason = item.importance?.reasons.find((reason) => reason.label.trim())?.label.trim() ?? null;
+        const importanceReason = rankingPending
+          ? firstImportanceReason && !/assessment pending/i.test(firstImportanceReason)
+            ? `Assessment pending · ${firstImportanceReason}`
+            : "Assessment pending"
+          : firstImportanceReason;
+        const evidenceTags = presentationTags(item.tags);
         const isLeadershipChange = isLeadershipChangeStory(item);
         const translationRequired = isNewsTranslationRequired(item);
         const translated = Boolean(item.translated_title?.trim());
@@ -181,11 +218,13 @@ export default function PriorityNewsList({
               aria-expanded={selectedStory}
             >
               <span
-                className={`news-priority-marker ${index < 3 ? "is-high" : ""}`}
-                title={`Priority band ${priorityBand}; rank ${index + 1}`}
+                className={`news-priority-marker ${importanceTier ? `is-${importanceTier}` : "is-unranked"}`}
+                aria-label={rankingPending
+                  ? "Unranked: assessment pending"
+                  : `Importance ${importanceTierLabel}${importanceReason ? `: ${importanceReason}` : ""}`}
               >
-                <small>{priorityBand}</small>
-                {String(index + 1).padStart(2, "0")}
+                <small>{rankingPending ? "Assessment" : "Importance"}</small>
+                <span>{importanceTierLabel}</span>
               </span>
               <time
                 className="dashboard-news-time"
@@ -211,6 +250,18 @@ export default function PriorityNewsList({
               </span>
               <span className="dashboard-news-headline">
                 <strong>{displayTitle}</strong>
+                {importanceReason && (
+                  <span className="news-importance-reason">
+                    {rankingPending ? "Ranking status" : "Why it ranks"}: {importanceReason}
+                  </span>
+                )}
+                {evidenceTags.length > 0 && (
+                  <span className="news-evidence-tags" aria-label="Story tags">
+                    {evidenceTags.map((tag) => (
+                      <span key={tag.code} className="news-evidence-tag">{tag.label}</span>
+                    ))}
+                  </span>
+                )}
                 {translated && item.translation ? (
                   <span
                     className="news-leadership-change"
@@ -266,6 +317,7 @@ export default function PriorityNewsList({
                         : "Select for source and country context.")}
                 </small>
                 <span className="dashboard-news-mobile-source">
+                  {timestamp.time} · {iso ?? "Global"} · {" "}
                   {publisherLabel || sourceLabel || "Unknown"}
                   {providerLabel ? ` · via ${providerLabel}` : ""}
                 </span>
@@ -314,6 +366,13 @@ export default function PriorityNewsList({
                       <span>Geography inferred from publisher country · low confidence</span>
                     )}
                     {typeof item.tone === "number" && <span>Tone {item.tone.toFixed(1)}</span>}
+                    <span>
+                      {rankingPending
+                        ? "Unranked · assessment pending"
+                        : item.importance
+                          ? `${importanceTierLabel} importance · ${Math.round(Math.max(0, Math.min(1, item.importance.confidence)) * 100)}% confidence`
+                          : "Unranked · assessment pending"}
+                    </span>
                     <span>
                       {iso
                         ? `${getCountryName(iso)} · ${iso}`

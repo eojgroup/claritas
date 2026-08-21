@@ -45,10 +45,7 @@ struct PadOverviewView: View {
     }
 
     private var focusedNews: [NewsItem] {
-        guard let selected = model.selectedCountry?.uppercased() else {
-            return model.news
-        }
-        return model.news.filter { ($0.country_iso2 ?? "").uppercased() == selected }
+        padNewsScopeMatchesSelection ? model.news : []
     }
 
     var body: some View {
@@ -100,6 +97,19 @@ struct PadOverviewView: View {
                 }
                 .padding(22)
             }
+        }
+        .task(id: padNewsRequestKey) {
+            guard model.authStatus == .authed, model.hasPaidAccess else { return }
+            guard model.newsLoadMode != .recent
+                    || model.newsScopeCountry != selectedNewsCountry
+                    || model.newsScopeCategory != model.selectedNewsCategory
+                    || model.newsScopeSort != .importance else { return }
+            await model.refreshNews(
+                mode: .recent,
+                country: selectedNewsCountry,
+                category: model.selectedNewsCategory,
+                sort: .importance
+            )
         }
     }
 
@@ -262,19 +272,17 @@ struct PadOverviewView: View {
     }
 
     private var newsPanel: some View {
-        BrandCard(title: "Latest intelligence", icon: "newspaper") {
+        BrandCard(title: "Top reporting", icon: "newspaper") {
             VStack(spacing: 0) {
-                ForEach(focusedNews.prefix(7)) { item in
+                padNewsCategorySelector
+                    .padding(.bottom, 6)
+                ForEach(focusedNews.prefix(3)) { item in
                     Button {
-                        if let event = item.linked_events.first {
-                            model.selectedIntelligenceEventID = event.id
-                            destination = .intelligence
-                        } else {
-                            if let country = item.country_iso2 {
-                                model.selectedCountry = country.uppercased()
-                            }
-                            destination = .news
+                        model.selectedNewsItemID = item.id
+                        if let country = item.country_iso2 {
+                            model.selectedCountry = country.uppercased()
                         }
+                        destination = .news
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 5) {
@@ -282,7 +290,8 @@ struct PadOverviewView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                     .lineLimit(2)
-                                Text(item.source_name ?? "News")
+                                NewsPriorityMetadataView(item: item, compact: true)
+                                Text(item.publisher ?? item.source_name ?? "News")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if let disclosure = item.translationDisclosure {
@@ -305,19 +314,116 @@ struct PadOverviewView: View {
                         .padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(item.linked_events.first.map {
-                        "Open \(IntelligenceLinkagePresentation.label(for: $0.correlation_factors).lowercased()): \($0.title)"
-                    } ?? "Open reporting: \(item.presentationTitle)")
+                    .accessibilityLabel(
+                        "Open reporting: \(item.presentationTitle). \(item.priorityAccessibilitySummary)"
+                    )
                     Divider()
                 }
-                if focusedNews.isEmpty {
-                    Text("No recent intelligence matches the current country focus.")
+                if let error = model.newsLoadError, !error.isEmpty, !model.isRefreshingNews {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Ranked reporting could not be loaded", systemImage: "exclamationmark.triangle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            .lineLimit(3)
+                        Button("Retry") {
+                            Task {
+                                await model.refreshNews(
+                                    mode: .recent,
+                                    country: selectedNewsCountry,
+                                    category: model.selectedNewsCategory,
+                                    sort: .importance
+                                )
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 18)
+                } else if focusedNews.isEmpty {
+                    HStack(spacing: 8) {
+                        if model.isRefreshingNews || !padNewsScopeMatchesSelection {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(
+                            model.isRefreshingNews || !padNewsScopeMatchesSelection
+                                ? "Loading ranked reporting for this category…"
+                                : "No ranked reporting matches the current scope."
+                        )
                         .font(.subheadline)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                        .padding(.vertical, 18)
+                    }
+                    .padding(.vertical, 18)
                 }
             }
         }
+    }
+
+    private var padNewsCategorySelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(model.newsCategoryOptions(mode: .recent, country: selectedNewsCountry)) { category in
+                    let selected = model.selectedNewsCategory == category.code
+                    Button {
+                        model.setNewsCategory(category.code)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(category.label)
+                            if let count = category.count {
+                                Text("\(count)")
+                                    .monospacedDigit()
+                                    .opacity(0.72)
+                            }
+                        }
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                            .foregroundStyle(
+                                selected
+                                    ? ClaritasPalette.shellInk(for: colorScheme)
+                                    : ClaritasPalette.shellMuted(for: colorScheme)
+                            )
+                            .background(
+                                selected
+                                    ? ClaritasPalette.shellHighlight(for: colorScheme)
+                                    : ClaritasPalette.shellSurface(for: colorScheme),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(category.isKnownEmpty)
+                    .accessibilityLabel("\(category.label) news")
+                    .accessibilityValue(
+                        "\(selected ? "Selected" : "Not selected")"
+                        + (category.count.map { ", \($0) stories" } ?? "")
+                    )
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("News categories")
+    }
+
+    private var selectedNewsCountry: String? {
+        guard let country = model.selectedCountry?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return country
+    }
+
+    private var padNewsRequestKey: String {
+        "\(model.selectedNewsCategory)|\(selectedNewsCountry ?? "global")"
+    }
+
+    private var padNewsScopeMatchesSelection: Bool {
+        model.newsLoadMode == .recent
+            && model.newsScopeCountry == selectedNewsCountry
+            && model.newsScopeCategory == model.selectedNewsCategory
+            && model.newsScopeSort == .importance
     }
 
     private var marketPanel: some View {

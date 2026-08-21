@@ -17,6 +17,23 @@ describe("PriorityNewsList", () => {
       url: "https://example.com/report",
       country_iso2: "AE",
       event_time: "2026-08-11T08:00:00Z",
+      primary_category: "transport",
+      categories: ["transport", "energy"],
+      tags: [
+        { code: "category:transport", label: "Transport", kind: "category" },
+        { code: "category:energy", label: "Energy", kind: "category" },
+        { code: "event:port", label: "Port disruption", kind: "event" },
+        { code: "evidence:ae", label: "United Arab Emirates", kind: "evidence" },
+        { code: "topic:tanker", label: "Tankers", kind: "topic" },
+      ],
+      importance: {
+        score: 81,
+        tier: "high",
+        confidence: 0.91,
+        reasons: [{ code: "transport_materiality", label: "Material transport interruption" }],
+        methodology: "news_importance_v1",
+        calculated_at: "2026-08-11T08:05:00Z",
+      },
       linked_events: [{
         id: "a1139da5-2bcf-486a-817b-10b52fb21a2f",
         event_type: "wildfire",
@@ -36,6 +53,14 @@ describe("PriorityNewsList", () => {
     expect(screen.getAllByText(/imagery available/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Likely linked investigations")).toBeTruthy();
     expect(screen.getByText(/Why shown: the same named location/i)).toBeTruthy();
+    expect(screen.getByText("High")).toBeTruthy();
+    expect(screen.getByText(/Why it ranks: Material transport interruption/i)).toBeTruthy();
+    expect(screen.getByText("Port disruption")).toBeTruthy();
+    expect(screen.getByText("Tankers")).toBeTruthy();
+    expect(screen.getByText("United Arab Emirates")).toBeTruthy();
+    expect(screen.queryByText("Transport")).toBeNull();
+    expect(screen.queryByText("Energy")).toBeNull();
+    expect(screen.queryByText("P1")).toBeNull();
     expect(document.querySelector('time[datetime="2026-08-11T08:00:00Z"]')).toBeTruthy();
     const linkedEventButton = screen.getByRole("button", { name: /Open likely linked event investigation: Fire near energy infrastructure/i });
     expect((linkedEventButton as HTMLButtonElement).disabled).toBe(false);
@@ -93,5 +118,36 @@ describe("PriorityNewsList", () => {
 
     render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example · via GDELT"} getCountryName={() => "United Kingdom"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
     expect(screen.getByText(/First seen · Aug 14, 2026/i)).toBeTruthy();
+  });
+
+  it("discloses when ranking evidence is still limited", () => {
+    const item: NewsItem = {
+      id: 45,
+      kind: "news",
+      title: "New report awaiting assessment",
+      summary: null,
+      url: "https://example.com/pending",
+      country_iso2: null,
+      event_time: "2026-08-14T09:15:00Z",
+      importance: {
+        score: 0,
+        tier: "routine",
+        confidence: 0,
+        reasons: [{ code: "assessment_pending", label: "Automated assessment pending" }],
+        methodology: "news_importance_v1",
+        calculated_at: null,
+        is_fallback: true,
+        components: { assessment_pending: true },
+      },
+    };
+
+    render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountryName={() => "Global"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
+
+    expect(screen.getAllByText(/Unranked/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/assessment pending/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Ranking status: Assessment pending/i)).toBeTruthy();
+    expect(screen.queryByText(/Why it ranks: Assessment pending/i)).toBeNull();
+    expect(screen.queryByText(/Routine importance/i)).toBeNull();
+    expect(screen.queryByText(/recency-only/i)).toBeNull();
   });
 });

@@ -72,6 +72,12 @@ import {
   normalizeNewsLanguageCode,
 } from "./news-translation";
 import {
+  NEWS_ASSESSMENT_METHODOLOGY,
+  NEWS_CATEGORIES,
+} from "./news-intelligence";
+import { startNewsAssessmentWorker } from "./news-assessment-worker";
+import { buildNewsReaderQuery } from "./news-reader-query";
+import {
   BriefingGenerationError,
   generateDailySignalBriefing,
   getDailyBriefingGeneratorConfig,
@@ -96,7 +102,6 @@ import {
 import {
   getAlertCandidates,
   getIntelligenceEvent,
-  intelligenceEventEarthObservationStateSql,
   listIntelligenceEvents,
   listIntelligenceLocations,
 } from "./intelligence/service";
@@ -2162,6 +2167,16 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     const language = typeof req.query.language === "string" ? req.query.language.trim().toLowerCase() : "";
     const sourceCountry = typeof req.query.source_country === "string" ? req.query.source_country.trim().toUpperCase() : "";
     const provider = typeof req.query.provider === "string" ? req.query.provider.trim().toLowerCase() : "";
+    const category = typeof req.query.category === "string" ? req.query.category.trim().toLowerCase() : "";
+    const sort = typeof req.query.sort === "string" ? req.query.sort.trim().toLowerCase() : "importance";
+    const archive = ["1", "true"].includes(String(req.query.archive ?? "").trim().toLowerCase());
+    const includeMetadata = !["0", "false"].includes(String(req.query.include_metadata ?? "").trim().toLowerCase());
+    if (category && !NEWS_CATEGORIES.some((candidate) => candidate === category)) {
+      return res.status(400).json({ error: `category must be one of: ${NEWS_CATEGORIES.join(", ")}.` });
+    }
+    if (!['importance', 'newest'].includes(sort)) {
+      return res.status(400).json({ error: "sort must be importance or newest." });
+    }
     const displayLanguage = normalizeNewsLanguageCode(
       typeof req.query.display_language === "string" ? req.query.display_language : "en",
     );
@@ -2169,153 +2184,44 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       return res.status(400).json({ error: "display_language must be a valid BCP 47 language code." });
     }
 
-    const params: any[] = [displayLanguage];
-    const displayLanguageIndex = 1;
-    // A discovery timestamp is not a publication timestamp. Connectors mark
-    // an article rejected when its publisher date cannot be verified or is
-    // outside the freshness policy; never let that record enter a reader view.
-    const where: string[] = [
-      "i.kind = 'news_article'",
-      "(lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')",
-    ];
-    if (q) {
-      const i1 = params.push(`%${q}%`); // returns new length as index
-      const i2 = params.push(`%${q}%`);
-      const i3 = params.push(`%${q}%`);
-      const i4 = params.push(`%${q}%`);
-      where.push(`(
-        i.title ILIKE $${i1}
-        OR i.summary ILIKE $${i2}
-        OR translation.translated_title ILIKE $${i3}
-        OR translation.generated_summary ILIKE $${i4}
-      )`);
-    }
-    if (country) {
-      const ci = params.push(country);
-      where.push(`upper(i.country_iso2) = $${ci}`);
-    }
-    if (language) {
-      const li = params.push(language);
-      where.push(`lower(i.language_code) = $${li}`);
-    }
-    if (sourceCountry) {
-      const sci = params.push(sourceCountry);
-      where.push(`upper(i.source_country_iso2) = $${sci}`);
-    }
-    if (provider) {
-      const pi = params.push(provider);
-      where.push(`lower(s.name) = $${pi}`);
-    }
-    const li = params.push(limit);
-    const oi = params.push(offset);
-    // A globally newest-first page is easily monopolised by a high-volume
-    // national publisher (for example, a burst of U.S. regulatory releases).
-    // Interleave the newest record from each mapped country before taking the
-    // next record from that country. Country-scoped reads retain strict
-    // newest-first ordering, and the reader may still sort its bounded result.
-    const newsCandidateOrderSql = country
-      ? "candidate.event_time DESC NULLS LAST, candidate.id DESC"
-      : `candidate.country_rank ASC,
-         candidate.event_time DESC NULLS LAST,
-         candidate.id DESC`;
-
-    const sql = `
-      WITH eligible_news AS MATERIALIZED (
-        SELECT i.id, i.event_time,
-               ROW_NUMBER() OVER (
-                 PARTITION BY COALESCE(i.country_iso2, 'ZZ'::char(2))
-                 ORDER BY i.event_time DESC NULLS LAST, i.id DESC
-               ) AS country_rank
-        FROM item i
-        JOIN source s ON s.id = i.source_id
-        LEFT JOIN item_translation translation
-          ON translation.item_id = i.id
-         AND translation.target_language_code = $${displayLanguageIndex}
-         AND translation.source_title_hash = md5(COALESCE(i.title, ''))
-         AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
-        ${where.length ? "WHERE " + where.join(" AND ") : ""}
-      ), ranked_news AS MATERIALIZED (
-        SELECT candidate.id,
-               ROW_NUMBER() OVER (ORDER BY ${newsCandidateOrderSql}) AS result_order
-        FROM eligible_news candidate
-        ORDER BY ${newsCandidateOrderSql}
-        LIMIT $${li} OFFSET $${oi}
-      )
-      SELECT i.id, i.kind, i.title, i.summary, i.url, i.country_iso2,
-             i.language_code, i.source_country_iso2, i.tone,
-             i.event_time, i.payload, s.name AS source_name,
-             COALESCE(NULLIF(i.payload->>'source', ''), NULLIF(i.payload->>'domain', ''), s.name) AS publisher,
-             translation.translated_title,
-             translation.generated_summary AS ai_summary,
-             CASE WHEN translation.item_id IS NULL THEN NULL ELSE jsonb_build_object(
-               'target_language_code', translation.target_language_code,
-               'headline_kind', 'ai_translation',
-               'summary_kind', CASE
-                 WHEN translation.summary_status = 'generated' THEN 'ai_generated'
-                 ELSE NULL
-               END,
-               'summary_status', translation.summary_status,
-               'provider', translation.provider,
-               'model', translation.model,
-               'title_generated_at', translation.title_generated_at,
-               'summary_generated_at', translation.summary_generated_at,
-               'source_content_preserved', true,
-               'article_body_used', false
-             ) END AS translation,
-             COALESCE(linked.linked_events, '[]'::jsonb) AS linked_events
-      FROM ranked_news ranked
-      JOIN item i ON i.id = ranked.id
-      JOIN source s ON s.id = i.source_id
-      LEFT JOIN item_translation translation
-        ON translation.item_id = i.id
-       AND translation.target_language_code = $${displayLanguageIndex}
-       AND translation.source_title_hash = md5(COALESCE(i.title, ''))
-       AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
-      LEFT JOIN LATERAL (
-        SELECT jsonb_agg(jsonb_build_object(
-          'id', event.id,
-          'title', event.title,
-          'event_type', event.event_type,
-          'status', event.status,
-          'severity', event.severity,
-          'confidence', event.confidence,
-          'relevance_score', event.relevance_score,
-          'domain_count', event.domain_count,
-          'evidence_count', (
-            SELECT count(*)::int FROM intelligence_event_evidence all_evidence
-            WHERE all_evidence.event_id=event.id
-          ),
-          'domains', (
-            SELECT COALESCE(jsonb_agg(domain ORDER BY domain), '[]'::jsonb)
-            FROM (SELECT DISTINCT all_evidence.domain
-                  FROM intelligence_event_evidence all_evidence
-                  WHERE all_evidence.event_id=event.id) domains
-          ),
-          'correlation_score', evidence.correlation_score,
-          'correlation_factors', evidence.correlation_factors,
-          'earth_observation_state', (${intelligenceEventEarthObservationStateSql()}),
-          'best_thumbnail_url', (
-            SELECT '/api/earth-observation/assets/' || asset.id::text
-            FROM earth_observation observation
-            JOIN earth_observation_asset asset ON asset.observation_id=observation.id
-            WHERE observation.event_id=event.id AND observation.status='available'
-              AND (asset.expires_at IS NULL OR asset.expires_at > now())
-            ORDER BY CASE asset.asset_type WHEN 'thumbnail' THEN 0 WHEN 'preview' THEN 1 ELSE 2 END,
-                     observation.captured_at DESC
-            LIMIT 1
-          )
-        ) ORDER BY event.relevance_score DESC,event.last_activity_time DESC) AS linked_events
-        FROM intelligence_event_evidence evidence
-        JOIN intelligence_event event ON event.id=evidence.event_id
-        WHERE evidence.domain='news'
-          AND evidence.source_record_type='item'
-          AND evidence.source_record_id=i.id::text
-          AND event.status <> 'dismissed'
-      ) linked ON true
-      ORDER BY ranked.result_order
-    `;
-    const { rows } = await pool.query(sql, params);
-    res.json({ items: rows });
+    const newsQuery = buildNewsReaderQuery({
+      displayLanguage,
+      limit,
+      offset,
+      q,
+      country,
+      language,
+      sourceCountry,
+      provider,
+      category,
+      sort: sort as "importance" | "newest",
+      archive,
+      includeMetadata,
+    });
+    const { rows } = await pool.query(newsQuery.sql, newsQuery.params);
+    const result = rows[0] ?? {};
+    res.json({
+      items: Array.isArray(result.items) ? result.items : [],
+      facets: { categories: Array.isArray(result.category_facets) ? result.category_facets : [] },
+      ranking: {
+        methodology: NEWS_ASSESSMENT_METHODOLOGY,
+        sort,
+        category: category || null,
+        archive,
+        assessed_at: result.latest_assessed_at ?? null,
+        unassessed_count: result.unassessed_count == null ? null : Number(result.unassessed_count),
+        selected_unassessed_count: result.selected_unassessed_count == null
+          ? null
+          : Number(result.selected_unassessed_count),
+        diversification: sort === "importance" ? "bounded-publisher-penalty-v1" : "none",
+      },
+      page: {
+        limit,
+        offset,
+        total: result.total_count == null ? null : Number(result.total_count),
+        metadata_included: includeMetadata,
+      },
+    });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
   }
@@ -3649,6 +3555,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
 
 startDatabasePoolMonitoring();
 startIngestionAutomationWorker();
+startNewsAssessmentWorker();
 startDailyBriefingSchedulerWorker();
 startPersonalBriefingWorker();
 startImportantEventEmailWorker();

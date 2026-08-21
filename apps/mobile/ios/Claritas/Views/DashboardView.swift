@@ -76,15 +76,28 @@ struct DashboardView: View {
                 }
             }
         }
+        .task(id: mobileNewsRequestKey) {
+            guard model.authStatus == .authed, model.hasPaidAccess else { return }
+            let country = mobileNewsCountry
+            guard model.newsLoadMode != .recent
+                    || model.newsScopeCountry != country
+                    || model.newsScopeCategory != model.selectedNewsCategory
+                    || model.newsScopeSort != .importance else { return }
+            await model.refreshNews(
+                mode: .recent,
+                country: country,
+                category: model.selectedNewsCategory,
+                sort: .importance
+            )
+        }
     }
 
     private var mobileNewsPulse: some View {
-        let latest = model.news
-            .sorted { ($0.eventDate ?? .distantPast) > ($1.eventDate ?? .distantPast) }
+        let ranked = mobileNewsScopeMatchesSelection ? model.news : []
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Label("LATEST REPORTING", systemImage: "newspaper")
+                Label("TOP REPORTING", systemImage: "newspaper")
                     .font(.caption2.weight(.bold))
                     .tracking(1.1)
                     .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
@@ -94,20 +107,51 @@ struct DashboardView: View {
             }
             .padding(.bottom, 9)
 
-            if latest.isEmpty {
-                Text("Reporting is updating. Pull to refresh or open the news lens.")
+            mobileNewsCategorySelector
+                .padding(.bottom, 8)
+
+            if let error = model.newsLoadError, !error.isEmpty, !model.isRefreshingNews {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Ranked reporting could not be loaded", systemImage: "exclamationmark.triangle")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .lineLimit(3)
+                    Button("Retry") {
+                        Task {
+                            await model.refreshNews(
+                                mode: .recent,
+                                country: mobileNewsCountry,
+                                category: model.selectedNewsCategory,
+                                sort: .importance
+                            )
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.vertical, 8)
+            } else if ranked.isEmpty {
+                HStack(spacing: 8) {
+                    if model.isRefreshingNews || !mobileNewsScopeMatchesSelection {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(
+                        model.isRefreshingNews || !mobileNewsScopeMatchesSelection
+                            ? "Loading ranked reporting for this category…"
+                            : "No ranked reporting is available in this category."
+                    )
                     .font(.subheadline)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    .padding(.vertical, 8)
+                }
+                .padding(.vertical, 8)
             } else {
-                ForEach(Array(latest.prefix(3).enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(ranked.prefix(3).enumerated()), id: \.element.id) { index, item in
                     Button {
-                        if let event = item.linked_events.first {
-                            model.selectedIntelligenceEventID = event.id
-                            openCompactDestination("intelligence")
-                        } else {
-                            openCompactDestination("news")
-                        }
+                        model.selectedNewsItemID = item.id
+                        openCompactDestination("news")
                     } label: {
                         HStack(alignment: .top, spacing: 10) {
                             VStack(alignment: .leading, spacing: 4) {
@@ -116,8 +160,9 @@ struct DashboardView: View {
                                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                     .multilineTextAlignment(.leading)
                                     .lineLimit(index == 0 ? 2 : 1)
+                                NewsPriorityMetadataView(item: item, compact: true)
                                 HStack(spacing: 6) {
-                                    Text(item.source_name ?? "Reporting source")
+                                    Text(newsSourceLabel(item) ?? "Reporting source")
                                     if let date = item.eventDate {
                                         Text("·")
                                         Text(date.formatted(date: .omitted, time: .shortened))
@@ -148,15 +193,86 @@ struct DashboardView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(item.linked_events.first.map {
-                        "Open \(IntelligenceLinkagePresentation.label(for: $0.correlation_factors).lowercased()): \($0.title)"
-                    } ?? "Open reporting: \(item.presentationTitle)")
-                    if index < min(latest.count, 3) - 1 { Divider() }
+                    .accessibilityLabel(
+                        "Open reporting: \(item.presentationTitle). \(item.priorityAccessibilitySummary)"
+                    )
+                    if index < min(ranked.count, 3) - 1 { Divider() }
                 }
             }
         }
         .padding(14)
         .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
+    }
+
+    private var mobileNewsCategorySelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(model.newsCategoryOptions(mode: .recent, country: mobileNewsCountry)) { category in
+                    let selected = model.selectedNewsCategory == category.code
+                    Button {
+                        model.setNewsCategory(category.code)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(category.label)
+                            if let count = category.count {
+                                Text("\(count)")
+                                    .monospacedDigit()
+                                    .opacity(0.72)
+                            }
+                        }
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                            .foregroundStyle(
+                                selected
+                                    ? ClaritasPalette.shellInk(for: colorScheme)
+                                    : ClaritasPalette.shellMuted(for: colorScheme)
+                            )
+                            .background(
+                                selected
+                                    ? ClaritasPalette.shellHighlight(for: colorScheme)
+                                    : ClaritasPalette.shellSurface(for: colorScheme),
+                                in: Capsule()
+                            )
+                            .overlay(
+                                Capsule().stroke(
+                                    selected
+                                        ? ClaritasPalette.shellAccent(for: colorScheme)
+                                        : ClaritasPalette.shellBorder(for: colorScheme),
+                                    lineWidth: 1
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(category.isKnownEmpty)
+                    .accessibilityLabel("\(category.label) news")
+                    .accessibilityValue(
+                        "\(selected ? "Selected" : "Not selected")"
+                        + (category.count.map { ", \($0) stories" } ?? "")
+                    )
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+    }
+
+    private var mobileNewsRequestKey: String {
+        "\(model.selectedNewsCategory)|\(mobileNewsCountry ?? "global")"
+    }
+
+    private var mobileNewsScopeMatchesSelection: Bool {
+        model.newsLoadMode == .recent
+            && model.newsScopeCountry == mobileNewsCountry
+            && model.newsScopeCategory == model.selectedNewsCategory
+            && model.newsScopeSort == .importance
+    }
+
+    private var mobileNewsCountry: String? {
+        guard let country = model.selectedCountry?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return country
     }
 
     private var mobileQuickActions: some View {
@@ -1217,12 +1333,24 @@ private struct MarketOption: Identifiable {
 
 struct NewsWorkspaceView: View {
     enum Sort: String, CaseIterable, Identifiable {
+        case importance
         case newest
         case oldest
         case source
 
         var id: String { rawValue }
-        var title: String { rawValue.capitalized }
+        var title: String {
+            switch self {
+            case .importance: return "Importance"
+            case .newest: return "Latest"
+            case .oldest: return "Oldest"
+            case .source: return "Source"
+            }
+        }
+
+        var serverSort: AppModel.NewsSortMode {
+            self == .importance ? .importance : .newest
+        }
     }
 
     @EnvironmentObject private var model: AppModel
@@ -1232,7 +1360,7 @@ struct NewsWorkspaceView: View {
     @State private var sourceFilter: String = "all"
     @State private var countryScopeInput: String = ""
     @State private var imagesOnly: Bool = false
-    @State private var sort: Sort = .newest
+    @State private var sort: Sort = .importance
     @State private var loadMode: AppModel.NewsLoadMode = .recent
     @State private var showsFilters = false
     @State private var newsMapResetToken = 0
@@ -1248,11 +1376,14 @@ struct NewsWorkspaceView: View {
     }
 
     private var newsRequestKey: String {
-        "\(loadMode.rawValue)|\(selectedNewsCountry ?? "global")"
+        "\(loadMode.rawValue)|\(selectedNewsCountry ?? "global")|\(model.selectedNewsCategory)|\(sort.serverSort.rawValue)"
     }
 
     private var loadedScopeMatchesSelection: Bool {
-        model.newsLoadMode == loadMode && model.newsScopeCountry == selectedNewsCountry
+        model.newsLoadMode == loadMode
+            && model.newsScopeCountry == selectedNewsCountry
+            && model.newsScopeCategory == model.selectedNewsCategory
+            && model.newsScopeSort == sort.serverSort
     }
 
     private var newestLoadedStoryDate: Date? {
@@ -1297,19 +1428,27 @@ struct NewsWorkspaceView: View {
             }
         }
 
+        let ordered: [NewsItem]
         switch sort {
+        case .importance:
+            ordered = filtered
         case .newest:
-            return filtered.sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
+            ordered = filtered.sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
         case .oldest:
-            return filtered.sorted { ($0.event_time ?? "") < ($1.event_time ?? "") }
+            ordered = filtered.sorted { ($0.event_time ?? "") < ($1.event_time ?? "") }
         case .source:
-            return filtered.sorted {
+            ordered = filtered.sorted {
                 let lhs = newsSourceLabel($0) ?? ""
                 let rhs = newsSourceLabel($1) ?? ""
                 if lhs != rhs { return lhs < rhs }
                 return ($0.event_time ?? "") > ($1.event_time ?? "")
             }
         }
+        guard let selectedID = model.selectedNewsItemID,
+              let selected = ordered.first(where: { $0.id == selectedID }) else {
+            return ordered
+        }
+        return [selected] + ordered.filter { $0.id != selectedID }
     }
 
     private var timelineData: [ChartDateCount] {
@@ -1342,7 +1481,12 @@ struct NewsWorkspaceView: View {
     }
 
     private var hasActiveFilters: Bool {
-        model.selectedCountry != nil || !query.isEmpty || sourceFilter != "all" || imagesOnly || sort != .newest
+        model.selectedCountry != nil
+            || model.selectedNewsCategory != NewsCategoryCatalog.allCode
+            || !query.isEmpty
+            || sourceFilter != "all"
+            || imagesOnly
+            || sort != .importance
     }
 
     private var hasLocalFilters: Bool {
@@ -1397,6 +1541,7 @@ struct NewsWorkspaceView: View {
         }
         .onAppear {
             loadMode = model.newsLoadMode
+            sort = model.newsScopeSort == .newest ? .newest : .importance
             countryScopeInput = selectedNewsCountry ?? ""
         }
         .onChange(of: model.selectedCountry) { _ in
@@ -1418,7 +1563,9 @@ struct NewsWorkspaceView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(loadMode == .recent ? "Latest news" : "News archive")
+                    Text(loadMode == .recent
+                        ? (sort == .importance ? "Top news" : "Latest news")
+                        : "News archive")
                         .font(.title2.weight(.bold))
                     Text("\(rows.count) stories · \(coverageLabel)")
                         .font(.caption)
@@ -1446,10 +1593,12 @@ struct NewsWorkspaceView: View {
             }
             .pickerStyle(.segmented)
 
+            newsCategorySelector
+
             if hasActiveFilters {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle.fill")
-                    Text(model.selectedCountry.map { "Country \($0.uppercased())" } ?? "Filtered news")
+                    Text(activeNewsFilterSummary)
                     Spacer()
                     Button("Clear") { resetFilters() }
                 }
@@ -1490,6 +1639,7 @@ struct NewsWorkspaceView: View {
                 }
             }
             newsScopeBar
+            newsCategorySelector
             newsCoverageMapCard(height: 310, compact: false)
             filterPanel
             storyPanel(compact: false)
@@ -1580,6 +1730,60 @@ struct NewsWorkspaceView: View {
         .padding(12)
         .background(ClaritasPalette.shellBackgroundElevated(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+    }
+
+    private var newsCategorySelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(model.newsCategoryOptions(mode: loadMode, country: selectedNewsCountry)) { category in
+                    let selected = model.selectedNewsCategory == category.code
+                    Button {
+                        model.setNewsCategory(category.code)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(category.label)
+                            if let count = category.count {
+                                Text("\(count)")
+                                    .monospacedDigit()
+                                    .opacity(0.72)
+                            }
+                        }
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                            .foregroundStyle(
+                                selected
+                                    ? ClaritasPalette.shellInk(for: colorScheme)
+                                    : ClaritasPalette.shellMuted(for: colorScheme)
+                            )
+                            .background(
+                                selected
+                                    ? ClaritasPalette.shellHighlight(for: colorScheme)
+                                    : ClaritasPalette.shellSurface(for: colorScheme),
+                                in: Capsule()
+                            )
+                            .overlay(
+                                Capsule().stroke(
+                                    selected
+                                        ? ClaritasPalette.shellAccent(for: colorScheme)
+                                        : ClaritasPalette.shellBorder(for: colorScheme),
+                                    lineWidth: 1
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(category.isKnownEmpty)
+                    .accessibilityLabel("\(category.label) news")
+                    .accessibilityValue(
+                        "\(selected ? "Selected" : "Not selected")"
+                        + (category.count.map { ", \($0) stories" } ?? "")
+                    )
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("News categories")
     }
 
     private func newsCoverageMapCard(height: CGFloat, compact: Bool) -> some View {
@@ -1684,7 +1888,7 @@ struct NewsWorkspaceView: View {
                 ProgressView()
                 Text("Loading \(newsScopeTitle) reporting")
                     .font(.subheadline.weight(.semibold))
-                Text("The previous scope is hidden so it cannot be mistaken for this country’s feed.")
+                Text("The previous scope is hidden so it cannot be mistaken for the selected feed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -1695,7 +1899,7 @@ struct NewsWorkspaceView: View {
         } else if rows.isEmpty {
             newsEmptyState
         } else {
-            NewsListView(items: rows, compact: compact) { iso in
+            NewsListView(items: rows, compact: compact, selectedItemID: model.selectedNewsItemID) { iso in
                 model.selectedCountry = iso.uppercased()
             }
         }
@@ -1750,6 +1954,23 @@ struct NewsWorkspaceView: View {
         return "\(name) (\(country))"
     }
 
+    private var activeNewsFilterSummary: String {
+        var labels: [String] = []
+        if model.selectedNewsCategory != NewsCategoryCatalog.allCode {
+            labels.append(NewsCategoryCatalog.label(for: model.selectedNewsCategory))
+        }
+        if let country = model.selectedCountry?.uppercased() {
+            labels.append("Country \(country)")
+        }
+        if !query.isEmpty || sourceFilter != "all" || imagesOnly {
+            labels.append("Local filters")
+        }
+        if sort != .importance {
+            labels.append(sort.title)
+        }
+        return labels.isEmpty ? "Filtered news" : labels.joined(separator: " · ")
+    }
+
     private var newsScopeStatus: String {
         if model.isRefreshingNews {
             return "Loading the complete \(loadMode.rawValue) feed for this scope…"
@@ -1776,7 +1997,12 @@ struct NewsWorkspaceView: View {
     }
 
     private func reloadNews() async {
-        await model.refreshNews(mode: loadMode, country: selectedNewsCountry)
+        await model.refreshNews(
+            mode: loadMode,
+            country: selectedNewsCountry,
+            category: model.selectedNewsCategory,
+            sort: sort.serverSort
+        )
     }
 
     private func reloadNewsCoverage() async {
@@ -1801,7 +2027,7 @@ struct NewsWorkspaceView: View {
         query = ""
         sourceFilter = "all"
         imagesOnly = false
-        sort = .newest
+        sort = .importance
     }
 
     private var analyticsPanels: some View {
@@ -1846,6 +2072,7 @@ struct NewsWorkspaceView: View {
     private func resetFilters() {
         clearLocalFilters()
         countryScopeInput = ""
+        model.setNewsCategory(NewsCategoryCatalog.allCode)
         model.selectedCountry = nil
     }
 }
@@ -3300,9 +3527,12 @@ private func newsHasImage(_ item: NewsItem) -> Bool {
 
 private func newsSourceLabel(_ item: NewsItem) -> String? {
     if item.source_name?.lowercased() == "gdelt",
-       let payload = item.payload?.object,
-       let publisher = trimmed(payload["source"]?.string) {
+       let publisher = trimmed(item.publisher)
+            ?? trimmed(item.payload?.object?["source"]?.string) {
         return "\(publisher) · via GDELT"
+    }
+    if let publisher = trimmed(item.publisher) {
+        return publisher
     }
     if let source = normalizedProviderName(item.source_name) {
         return source
