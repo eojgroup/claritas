@@ -1378,6 +1378,27 @@ struct TransportTrackPoint: Codable, Identifiable {
     var id: String { "\(observed_at)-\(latitude)-\(longitude)" }
 }
 
+struct RegionalMaritimeCoverageSource: Codable, Identifiable {
+    let source_name: String
+    let provider: String
+    let transport: String?
+    let coverage: String?
+    let configured: Bool
+    let last_refresh_at: String?
+    let last_snapshot_at: String?
+    let last_stored_at: String?
+    let error: Bool?
+    let snapshots_accepted: Int?
+    let snapshots_stored: Int?
+    let license: String?
+    let global: Bool?
+    let source_url: String?
+    let terms_url: String?
+    let attribution: String?
+
+    var id: String { source_name }
+}
+
 struct MaritimeTransportCoverage: Codable {
     let source: String
     let transport: String
@@ -1409,6 +1430,7 @@ struct MaritimeTransportCoverage: Codable {
     let fallback_snapshots_accepted: Int?
     let fallback_snapshots_stored: Int?
     let fallback_license: String?
+    let regional_sources: [RegionalMaritimeCoverageSource]?
     let freshness_minutes: Int
     let movement_method: String?
     let cargo_method: String?

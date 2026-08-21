@@ -3,6 +3,7 @@ import worldCountries from "world-countries";
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon, Position } from "geojson";
 import type { GeometryCollection, Properties, Topology } from "topojson-specification";
 import WebSocket from "ws";
+import { createConnection, type Socket } from "node:net";
 import { getCountryFromMMSI } from "mmsi-country-lookup";
 import { pool, query } from "../db";
 import {
@@ -11,8 +12,11 @@ import {
 } from "./transport-route-enrichment";
 import {
   GLOBAL_AIS_BOUNDING_BOX,
+  aisReconnectDelayMilliseconds,
   buildAisSubscription,
+  isAisCoordinateMessageType,
   normalizeAisBoundingBoxes,
+  normalizeAisObservedAt,
   shouldQueueAisSnapshot,
   type AisBoundingBox,
 } from "./ais-subscription";
@@ -20,6 +24,29 @@ import {
   parseDigitrafficMaritimeObservations,
   type DigitrafficMaritimeObservation,
 } from "./digitraffic-maritime";
+import {
+  parseBarentsWatchMaritimeObservations,
+  parseBarentsWatchToken,
+  type BarentsWatchMaritimeObservation,
+  type BarentsWatchToken,
+} from "./barentswatch-maritime";
+import {
+  parseMpaMaritimeObservations,
+  type MpaMaritimeObservation,
+} from "./mpa-maritime";
+import {
+  MARITIME_SOURCE_DEFINITIONS,
+  maritimeStaticCacheKey,
+  shouldAcceptSampledMaritimeSnapshot,
+  shouldReplaceMaritimeSnapshot,
+  type MaritimeSourceName,
+  type RegionalMaritimeSourceName,
+} from "./maritime-source";
+import {
+  RegionalAisNmeaDecoder,
+  parseRegionalAisNmeaLine,
+  type RegionalAisObservation,
+} from "./regional-ais-nmea";
 import {
   transportHistoryModeValue,
   transportHistoryWindow,
@@ -81,10 +108,15 @@ type TransportSnapshotInput = {
   linkage_confidence?: "high" | "medium" | "low" | "none";
   status?: string | null;
   is_alert?: boolean;
-  source_name: "aisstream" | "digitraffic" | "adsb_lol";
+  source_name: MaritimeSourceName | "adsb_lol";
   observed_at: string;
   payload: JsonRecord;
 };
+
+type MaritimeTransportSnapshotInput = Omit<
+  TransportSnapshotInput,
+  "source_name"
+> & { source_name: MaritimeSourceName };
 
 type TransportSnapshotRow = Omit<TransportSnapshotInput, "linkage_basis"> & {
   id: string | number;
@@ -228,6 +260,12 @@ type MaritimeStatic = {
   route_label?: string | null;
 };
 
+type RegionalMaritimeObservation =
+  | DigitrafficMaritimeObservation
+  | BarentsWatchMaritimeObservation
+  | MpaMaritimeObservation
+  | RegionalAisObservation;
+
 type MaritimePort = {
   name: string;
   iso2: string;
@@ -239,6 +277,11 @@ type MaritimePort = {
 
 const AIS_STREAM_URL = "wss://stream.aisstream.io/v0/stream";
 const DIGITRAFFIC_MARITIME_BASE_URL = "https://meri.digitraffic.fi/api/ais/v1";
+const BARENTSWATCH_TOKEN_URL = "https://id.barentswatch.no/connect/token";
+const BARENTSWATCH_AIS_URL =
+  "https://live.ais.barentswatch.no/v1/latest/combined?modelType=Full";
+const MPA_OCEANS_X_AIS_URL =
+  "https://oceans-x.mpa.gov.sg/api/v1/vessel/positions/1.0.0/snapshot";
 const ADSB_BASE_URL = "https://api.adsb.lol";
 const ADSB_STANDING_DATA_BASE_URL = "https://vrs-standing-data.adsb.lol";
 const WORKER_LOCK_NAMESPACE = 9433;
@@ -349,6 +392,10 @@ const firstMaritimePosition = new Map<
   { latitude: number; longitude: number }
 >();
 const lastMaritimeQueuedAt = new Map<string, number>();
+const lastMaritimeSnapshot = new Map<
+  string,
+  { observed_at: string; source_name: MaritimeSourceName }
+>();
 const lastTrackAt = new Map<string, number>();
 const routeCache = new Map<string, { expiresAt: number; value: AdsbRoute | null }>();
 
@@ -374,14 +421,36 @@ let aisSnapshotsStored = 0;
 let aisSnapshotsDropped = 0;
 let aisMalformedMessages = 0;
 let aisLastProgressLogAt = 0;
+type RegionalMaritimeRuntimeState = {
+  lastRefreshAt: number | null;
+  lastSnapshotAt: number | null;
+  lastStoredAt: number | null;
+  lastError: string | null;
+  snapshotsAccepted: number;
+  snapshotsStored: number;
+};
+
+const regionalMaritimeRuntime: Record<
+  RegionalMaritimeSourceName,
+  RegionalMaritimeRuntimeState
+> = {
+  digitraffic: regionalMaritimeRuntimeState(),
+  barentswatch: regionalMaritimeRuntimeState(),
+  mpa_oceans_x: regionalMaritimeRuntimeState(),
+  kystverket: regionalMaritimeRuntimeState(),
+};
 let digitrafficRefresh: Promise<{ fetched: number; queued: number }> | null = null;
 let digitrafficTimer: NodeJS.Timeout | null = null;
-let digitrafficLastRefreshAt: number | null = null;
-let digitrafficLastSnapshotAt: number | null = null;
-let digitrafficLastStoredAt: number | null = null;
-let digitrafficLastError: string | null = null;
-let digitrafficSnapshotsAccepted = 0;
-let digitrafficSnapshotsStored = 0;
+let barentswatchRefresh: Promise<{ fetched: number; queued: number }> | null = null;
+let barentswatchTimer: NodeJS.Timeout | null = null;
+let barentswatchToken: BarentsWatchToken | null = null;
+let mpaOceansXRefresh: Promise<{ fetched: number; queued: number }> | null = null;
+let mpaOceansXTimer: NodeJS.Timeout | null = null;
+let kystverketSocket: Socket | null = null;
+let kystverketReconnectTimer: NodeJS.Timeout | null = null;
+let kystverketReconnectAttempt = 0;
+let kystverketLineBuffer = "";
+let kystverketDecoder: RegionalAisNmeaDecoder | null = null;
 let aviationRefresh: Promise<{ fetched: number; stored: number }> | null = null;
 let lastAviationRefreshAt = 0;
 let aviationRouteLookupGeneration = 0;
@@ -410,6 +479,81 @@ function enabledFromEnv(name: string, fallback = true): boolean {
   const value = process.env[name]?.trim().toLowerCase();
   if (!value) return fallback;
   return !["0", "false", "no", "off"].includes(value);
+}
+
+function deleteMaritimeStatic(mmsi: string): void {
+  for (const sourceName of Object.keys(
+    MARITIME_SOURCE_DEFINITIONS,
+  ) as MaritimeSourceName[]) {
+    maritimeStatic.delete(maritimeStaticCacheKey(sourceName, mmsi));
+  }
+}
+
+function regionalMaritimeRuntimeState(): RegionalMaritimeRuntimeState {
+  return {
+    lastRefreshAt: null,
+    lastSnapshotAt: null,
+    lastStoredAt: null,
+    lastError: null,
+    snapshotsAccepted: 0,
+    snapshotsStored: 0,
+  };
+}
+
+function regionalSourceConfigured(source: RegionalMaritimeSourceName): boolean {
+  switch (source) {
+    case "digitraffic":
+      return enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED");
+    case "barentswatch":
+      return (
+        enabledFromEnv("BARENTSWATCH_AIS_ENABLED") &&
+        Boolean(process.env.BARENTSWATCH_AIS_CLIENT_ID?.trim()) &&
+        Boolean(process.env.BARENTSWATCH_AIS_CLIENT_SECRET?.trim())
+      );
+    case "mpa_oceans_x":
+      return (
+        enabledFromEnv("MPA_OCEANS_X_ENABLED") &&
+        Boolean(process.env.MPA_OCEANS_X_API_KEY?.trim())
+      );
+    case "kystverket":
+      return enabledFromEnv("KYSTVERKET_AIS_TCP_ENABLED", false);
+  }
+}
+
+function regionalTransport(source: RegionalMaritimeSourceName): "https" | "tcp" {
+  return source === "kystverket" ? "tcp" : "https";
+}
+
+function regionalRuntimeHealthSources() {
+  return (
+    Object.keys(regionalMaritimeRuntime) as RegionalMaritimeSourceName[]
+  ).map((id) => {
+    const definition = MARITIME_SOURCE_DEFINITIONS[id];
+    const runtime = regionalMaritimeRuntime[id];
+    return {
+      id,
+      provider: definition.provider,
+      configured: regionalSourceConfigured(id),
+      readinessEligible: id !== "kystverket",
+      transport: regionalTransport(id),
+      lastRefreshAt: runtime.lastRefreshAt,
+      lastSnapshotAt: runtime.lastSnapshotAt,
+      lastStoredAt: runtime.lastStoredAt,
+      error: Boolean(runtime.lastError),
+      coverage: definition.coverage,
+      license: definition.license,
+      global: false,
+    };
+  });
+}
+
+function mostRecentRuntimeTimestamp(
+  values: Array<number | null>,
+): number | null {
+  const present = values.filter(
+    (value): value is number => value != null && Number.isFinite(value),
+  );
+  return present.length ? Math.max(...present) : null;
 }
 
 function boundedIntegerFromEnv(
@@ -501,23 +645,96 @@ function count(value: string | number | null | undefined): number {
 }
 
 function maritimeCoverageRuntime(latestObservedAt: string | null) {
+  const runtimeFreshnessMilliseconds =
+    boundedIntegerFromEnv(
+      "TRANSPORT_RUNTIME_FRESHNESS_SECONDS",
+      900,
+      60,
+      1_800,
+    ) * 1_000;
   const primaryConfigured =
     enabledFromEnv("AISSTREAM_ENABLED") &&
     Boolean(process.env.AISSTREAM_API_KEY?.trim());
-  const fallbackConfigured = enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED");
+  const regionalSources = (
+    Object.keys(regionalMaritimeRuntime) as RegionalMaritimeSourceName[]
+  ).map((sourceName) => {
+    const runtime = regionalMaritimeRuntime[sourceName];
+    const definition = MARITIME_SOURCE_DEFINITIONS[sourceName];
+    const sourceDetails =
+      sourceName === "barentswatch"
+        ? {
+            terms_url: "https://www.barentswatch.no/en/articles/api-terms-and-conditions/",
+            attribution:
+              "Data delivered by BarentsWatch; source: Norwegian Coastal Administration",
+          }
+        : sourceName === "mpa_oceans_x"
+          ? {
+              terms_url: "https://oceans-x.mpa.gov.sg/api-terms-of-service",
+              attribution:
+                "Source: Maritime and Port Authority of Singapore OCEANS-X",
+            }
+          : sourceName === "digitraffic"
+            ? {
+                terms_url: "https://creativecommons.org/licenses/by/4.0/",
+                attribution: "Source: Fintraffic Digitraffic",
+              }
+            : {
+                terms_url: "https://data.norge.no/nlod/en/2.0",
+                attribution: "Source: Norwegian Coastal Administration",
+              };
+    return {
+      source_name: sourceName,
+      provider: definition.provider,
+      transport: regionalTransport(sourceName),
+      coverage: definition.coverage,
+      configured: regionalSourceConfigured(sourceName),
+      readiness_eligible: sourceName !== "kystverket",
+      last_refresh_at: runtime.lastRefreshAt
+        ? isoDate(runtime.lastRefreshAt)
+        : null,
+      last_snapshot_at: runtime.lastSnapshotAt
+        ? isoDate(runtime.lastSnapshotAt)
+        : null,
+      last_stored_at: runtime.lastStoredAt
+        ? isoDate(runtime.lastStoredAt)
+        : null,
+      error: Boolean(runtime.lastError),
+      snapshots_accepted: runtime.snapshotsAccepted,
+      snapshots_stored: runtime.snapshotsStored,
+      license: definition.license,
+      global: false,
+      source_url: definition.sourceUrl,
+      ...sourceDetails,
+    };
+  });
+  const configuredRegionalSources = regionalSources.filter(
+    (source) => source.configured && source.readiness_eligible,
+  );
+  const fallbackConfigured = configuredRegionalSources.length > 0;
   const configured = primaryConfigured || fallbackConfigured;
   const latestObservedMilliseconds = latestObservedAt
     ? Date.parse(latestObservedAt)
     : Number.NaN;
   const hasFreshStoredData =
     Number.isFinite(latestObservedMilliseconds) &&
-    Date.now() - latestObservedMilliseconds <= 5 * 60_000;
+    Date.now() - latestObservedMilliseconds <= runtimeFreshnessMilliseconds;
   const connected = aisSocket?.readyState === WebSocket.OPEN;
   const recentlyReceiving =
-    aisLastPositionAt != null && Date.now() - aisLastPositionAt <= 5 * 60_000;
+    aisLastPositionAt != null &&
+    Date.now() - aisLastPositionAt <= runtimeFreshnessMilliseconds;
+  const fallbackLastSnapshotAt = mostRecentRuntimeTimestamp(
+    configuredRegionalSources.map((source) =>
+      source.last_snapshot_at ? Date.parse(source.last_snapshot_at) : null,
+    ),
+  );
+  const fallbackLastStoredAt = mostRecentRuntimeTimestamp(
+    configuredRegionalSources.map((source) =>
+      source.last_stored_at ? Date.parse(source.last_stored_at) : null,
+    ),
+  );
   const fallbackRecentlyReceiving =
-    digitrafficLastSnapshotAt != null &&
-    Date.now() - digitrafficLastSnapshotAt <= 5 * 60_000;
+    fallbackLastSnapshotAt != null &&
+    Date.now() - fallbackLastSnapshotAt <= runtimeFreshnessMilliseconds;
   const subscriptionBoxes = getAisSubscriptionBoxes();
   const upstreamStalled = Boolean(
     connected &&
@@ -573,22 +790,33 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     subscription_batch: 1,
     subscription_batches: 1,
     subscription_boxes: subscriptionBoxes.length,
-    fallback_source: "Fintraffic Digitraffic",
-    fallback_coverage: "Finland and nearby Baltic reception",
+    fallback_source: "Official regional AIS providers",
+    fallback_coverage: configuredRegionalSources.length
+      ? configuredRegionalSources.map((source) => source.coverage).join("; ")
+      : "No regional source is currently configured",
     global_fallback_available: false,
     fallback_configured: fallbackConfigured,
-    fallback_last_snapshot_at: digitrafficLastSnapshotAt
-      ? isoDate(digitrafficLastSnapshotAt)
+    fallback_last_snapshot_at: fallbackLastSnapshotAt
+      ? isoDate(fallbackLastSnapshotAt)
       : null,
-    fallback_last_stored_at: digitrafficLastStoredAt
-      ? isoDate(digitrafficLastStoredAt)
+    fallback_last_stored_at: fallbackLastStoredAt
+      ? isoDate(fallbackLastStoredAt)
       : null,
-    fallback_error: Boolean(digitrafficLastError),
-    fallback_snapshots_accepted: digitrafficSnapshotsAccepted,
-    fallback_snapshots_stored: digitrafficSnapshotsStored,
-    fallback_license: "CC BY 4.0",
+    fallback_error:
+      configuredRegionalSources.length > 0 &&
+      configuredRegionalSources.every((source) => source.error),
+    fallback_snapshots_accepted: configuredRegionalSources.reduce(
+      (sum, source) => sum + source.snapshots_accepted,
+      0,
+    ),
+    fallback_snapshots_stored: configuredRegionalSources.reduce(
+      (sum, source) => sum + source.snapshots_stored,
+      0,
+    ),
+    fallback_license: "Provider-specific; see regional_sources",
+    regional_sources: regionalSources,
     coverage_note:
-      "No verified keyless REST provider currently supplies complete global live AIS. AISstream remains a best-effort beta source; Fintraffic is an official regional fallback and must not be presented as global coverage.",
+      "No verified regional source supplies complete global live AIS. AISstream remains a best-effort beta source; each official fallback covers only its stated region and attribution terms.",
   };
 }
 
@@ -599,7 +827,7 @@ export function getTransportRuntimeHealth() {
     freshnessMilliseconds:
       boundedIntegerFromEnv(
         "TRANSPORT_RUNTIME_FRESHNESS_SECONDS",
-        300,
+        900,
         60,
         1_800,
       ) * 1_000,
@@ -613,11 +841,7 @@ export function getTransportRuntimeHealth() {
     primaryLastSnapshotAt: aisLastPositionAt,
     primaryLastStoredAt: aisLastPositionStoredAt,
     primaryError: Boolean(aisLastError || aisLastFlushError),
-    fallbackConfigured: enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED"),
-    fallbackLastRefreshAt: digitrafficLastRefreshAt,
-    fallbackLastSnapshotAt: digitrafficLastSnapshotAt,
-    fallbackLastStoredAt: digitrafficLastStoredAt,
-    fallbackError: Boolean(digitrafficLastError),
+    regionalSources: regionalRuntimeHealthSources(),
     retention: {
       ...transportRetentionHealth,
       running: transportRetentionRun != null,
@@ -876,6 +1100,79 @@ function startAisWatchdog(): void {
   aisWatchdogTimer.unref();
 }
 
+function canQueueMaritimeSnapshot(
+  mmsi: string,
+  sourceName: MaritimeSourceName,
+  observedAt: string,
+  now: number,
+): boolean {
+  const candidate = { source_name: sourceName, observed_at: observedAt };
+  const lastAccepted = lastMaritimeSnapshot.get(mmsi);
+  // Preserve the global per-vessel sampling budget. Inside that window an
+  // official source may replace a lower-priority source, but providers may not
+  // alternate on every poll merely because their timestamps differ slightly.
+  if (
+    !shouldAcceptSampledMaritimeSnapshot({
+      candidate,
+      current: lastAccepted,
+      now,
+      lastQueuedAt: lastMaritimeQueuedAt.get(mmsi),
+      sampleMilliseconds: aisSampleMilliseconds(),
+    })
+  ) return false;
+  const queued = maritimeQueue.get(mmsi);
+  if (
+    queued &&
+    queued.source_name !== "adsb_lol" &&
+    !shouldReplaceMaritimeSnapshot(candidate, {
+      source_name: queued.source_name,
+      observed_at: queued.observed_at,
+    })
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function enqueueMaritimeSnapshot(
+  snapshot: MaritimeTransportSnapshotInput,
+  now: number,
+): boolean {
+  if (
+    !canQueueMaritimeSnapshot(
+      snapshot.entity_id,
+      snapshot.source_name,
+      snapshot.observed_at,
+      now,
+    )
+  ) {
+    return false;
+  }
+  maritimeQueue.set(snapshot.entity_id, snapshot);
+  lastMaritimeQueuedAt.set(snapshot.entity_id, now);
+  lastMaritimeSnapshot.set(snapshot.entity_id, {
+    observed_at: snapshot.observed_at,
+    source_name: snapshot.source_name,
+  });
+  const maximumQueue = Math.max(
+    500,
+    Math.min(
+      Number.parseInt(process.env.AISSTREAM_MAX_QUEUE || "5000", 10) || 5_000,
+      25_000,
+    ),
+  );
+  if (maritimeQueue.size > maximumQueue) {
+    const oldest = maritimeQueue.keys().next().value;
+    if (oldest) {
+      maritimeQueue.delete(oldest);
+      lastMaritimeQueuedAt.delete(oldest);
+      lastMaritimeSnapshot.delete(oldest);
+      aisSnapshotsDropped += 1;
+    }
+  }
+  return true;
+}
+
 function queueMaritimeMessage(message: unknown): void {
   const envelope = asRecord(message);
   if (!envelope) return;
@@ -903,11 +1200,27 @@ function queueMaritimeMessage(message: unknown): void {
     asString(metadata.MMSI);
   if (!mmsi || !/^\d{9}$/.test(mmsi)) return;
 
-  const latitude = asFinite(body.Latitude ?? metadata.latitude ?? metadata.Latitude);
-  const longitude = asFinite(body.Longitude ?? metadata.longitude ?? metadata.Longitude);
-  const observedAt = isoDate(metadata.time_utc);
   const now = Date.now();
-  const isPosition = shouldQueueAisSnapshot(latitude, longitude);
+  const observedAt = normalizeAisObservedAt(
+    metadata.time_utc,
+    now,
+    boundedIntegerFromEnv(
+      "AISSTREAM_FRESHNESS_MINUTES",
+      15,
+      5,
+      120,
+    ) * 60_000,
+  );
+  if (!observedAt) return;
+  const coordinateMessage = isAisCoordinateMessageType(messageType);
+  const latitude = coordinateMessage
+    ? asFinite(body.Latitude ?? metadata.latitude ?? metadata.Latitude)
+    : null;
+  const longitude = coordinateMessage
+    ? asFinite(body.Longitude ?? metadata.longitude ?? metadata.Longitude)
+    : null;
+  const isPosition =
+    coordinateMessage && shouldQueueAisSnapshot(latitude, longitude);
 
   const displayName =
     asString(body.Name) ??
@@ -916,28 +1229,33 @@ function queueMaritimeMessage(message: unknown): void {
   const callsign = asString(body.CallSign ?? reportB.CallSign);
   const destinationName = asString(body.Destination);
   const shipType = asString(body.Type ?? reportB.ShipType);
+  const staticKey = maritimeStaticCacheKey("aisstream", mmsi);
 
   if (displayName || callsign || destinationName || shipType) {
     const destinationPort = destinationPortFromText(destinationName);
     const destinationCountry =
       destinationPort?.iso2 ?? destinationCountryFromText(destinationName);
-    maritimeStatic.set(mmsi, {
-      ...maritimeStatic.get(mmsi),
-      display_name: displayName ?? maritimeStatic.get(mmsi)?.display_name,
-      callsign: callsign ?? maritimeStatic.get(mmsi)?.callsign,
-      vehicle_type: shipType ?? maritimeStatic.get(mmsi)?.vehicle_type,
+    maritimeStatic.set(staticKey, {
+      ...maritimeStatic.get(staticKey),
+      display_name: displayName ?? maritimeStatic.get(staticKey)?.display_name,
+      callsign: callsign ?? maritimeStatic.get(staticKey)?.callsign,
+      vehicle_type: shipType ?? maritimeStatic.get(staticKey)?.vehicle_type,
       vehicle_category:
-        maritimeCategory(shipType) ?? maritimeStatic.get(mmsi)?.vehicle_category,
-      destination_name: destinationName ?? maritimeStatic.get(mmsi)?.destination_name,
+        maritimeCategory(shipType) ?? maritimeStatic.get(staticKey)?.vehicle_category,
+      destination_name:
+        destinationName ?? maritimeStatic.get(staticKey)?.destination_name,
       destination_country_iso2:
-        destinationCountry ?? maritimeStatic.get(mmsi)?.destination_country_iso2,
+        destinationCountry ??
+        maritimeStatic.get(staticKey)?.destination_country_iso2,
       destination_latitude:
-        destinationPort?.latitude ?? maritimeStatic.get(mmsi)?.destination_latitude,
+        destinationPort?.latitude ??
+        maritimeStatic.get(staticKey)?.destination_latitude,
       destination_longitude:
-        destinationPort?.longitude ?? maritimeStatic.get(mmsi)?.destination_longitude,
+        destinationPort?.longitude ??
+        maritimeStatic.get(staticKey)?.destination_longitude,
       route_label: destinationName
         ? `Destination ${destinationName}`
-        : maritimeStatic.get(mmsi)?.route_label,
+        : maritimeStatic.get(staticKey)?.route_label,
     });
   }
 
@@ -945,12 +1263,15 @@ function queueMaritimeMessage(message: unknown): void {
   // but a coordinate-free record must not replace a fresh/current database
   // position. The next usable position carries the cached static fields.
   if (!isPosition) return;
+  // Recovery is proven by a decoded coordinate, not merely by a WebSocket
+  // handshake or control/static frame. Update this before the sampling gate so
+  // a healthy busy vessel cannot be mistaken for an idle upstream.
+  aisLastPositionAt = now;
+  aisReconnectAttempt = 0;
+  aisLastError = null;
+  if (!canQueueMaritimeSnapshot(mmsi, "aisstream", observedAt, now)) return;
 
-  if (now - (lastMaritimeQueuedAt.get(mmsi) ?? 0) < aisSampleMilliseconds()) {
-    return;
-  }
-
-  const staticData = maritimeStatic.get(mmsi);
+  const staticData = maritimeStatic.get(staticKey);
   const registration = getCountryFromMMSI(mmsi);
   const registrationCountry = registration.valid ? normalizeIso2(registration.alpha2) : null;
   const currentPort =
@@ -995,7 +1316,7 @@ function queueMaritimeMessage(message: unknown): void {
     registrationCountry ? "mmsi_flag" : null,
   ].filter((value): value is string => Boolean(value));
 
-  const snapshot: TransportSnapshotInput = {
+  const snapshot: MaritimeTransportSnapshotInput = {
     mode: "maritime",
     entity_id: mmsi,
     display_name: displayName ?? staticData?.display_name ?? asString(metadata.ShipName),
@@ -1039,24 +1360,9 @@ function queueMaritimeMessage(message: unknown): void {
     },
   };
 
-  maritimeQueue.set(mmsi, snapshot);
+  if (!enqueueMaritimeSnapshot(snapshot, now)) return;
   aisSnapshotsAccepted += 1;
   aisLastSnapshotAt = now;
-  if (isPosition && latitude != null && longitude != null) {
-    aisLastPositionAt = now;
-    lastMaritimeQueuedAt.set(mmsi, now);
-  }
-  const maximumQueue = Math.max(
-    500,
-    Math.min(Number.parseInt(process.env.AISSTREAM_MAX_QUEUE || "5000", 10) || 5000, 25000)
-  );
-  if (maritimeQueue.size > maximumQueue) {
-    const oldest = maritimeQueue.keys().next().value;
-    if (oldest) {
-      maritimeQueue.delete(oldest);
-      aisSnapshotsDropped += 1;
-    }
-  }
 }
 
 function connectAisStream(): void {
@@ -1084,7 +1390,6 @@ function connectAisStream(): void {
   aisSocket = socket;
 
   socket.on("open", () => {
-    aisReconnectAttempt = 0;
     aisConnectedAt = Date.now();
     sendAisSubscription(socket, apiKey);
     console.info("AISstream transport subscription connected.");
@@ -1093,7 +1398,6 @@ function connectAisStream(): void {
   socket.on("message", (raw) => {
     aisMessagesReceived += 1;
     aisLastMessageAt = Date.now();
-    aisLastError = null;
     try {
       queueMaritimeMessage(JSON.parse(raw.toString()));
     } catch (error) {
@@ -1129,7 +1433,7 @@ function scheduleAisReconnect(): void {
   ) {
     return;
   }
-  const delay = Math.min(60_000, 2_000 * 2 ** Math.min(aisReconnectAttempt, 5));
+  const delay = aisReconnectDelayMilliseconds(aisReconnectAttempt);
   aisReconnectAttempt += 1;
   aisReconnectTimer = setTimeout(() => {
     aisReconnectTimer = null;
@@ -1156,9 +1460,11 @@ function logAisProgressIfDue(): void {
       subscription_boxes: getAisSubscriptionBoxes().length,
       last_stream_error: aisLastError,
       last_flush_error: aisLastFlushError,
-      digitraffic_snapshots_accepted: digitrafficSnapshotsAccepted,
-      digitraffic_snapshots_stored: digitrafficSnapshotsStored,
-      digitraffic_last_error: digitrafficLastError,
+      regional_sources: Object.fromEntries(
+        (Object.keys(regionalMaritimeRuntime) as RegionalMaritimeSourceName[]).map(
+          (sourceName) => [sourceName, regionalMaritimeRuntime[sourceName]],
+        ),
+      ),
     }),
   );
 }
@@ -1186,14 +1492,20 @@ async function flushMaritimeQueue(): Promise<void> {
             && snapshot.latitude != null
             && snapshot.longitude != null,
         ).length;
-        const digitrafficStored = snapshots.filter(
-          (snapshot) => snapshot.source_name === "digitraffic",
-        ).length;
         aisSnapshotsStored += aisStored;
-        digitrafficSnapshotsStored += digitrafficStored;
         if (aisStored > 0) aisLastStoredAt = storedAt;
         if (aisPositionsStored > 0) aisLastPositionStoredAt = storedAt;
-        if (digitrafficStored > 0) digitrafficLastStoredAt = storedAt;
+        for (const sourceName of Object.keys(
+          regionalMaritimeRuntime,
+        ) as RegionalMaritimeSourceName[]) {
+          const stored = snapshots.filter(
+            (snapshot) => snapshot.source_name === sourceName,
+          ).length;
+          if (stored === 0) continue;
+          const runtime = regionalMaritimeRuntime[sourceName];
+          runtime.snapshotsStored += stored;
+          runtime.lastStoredAt = storedAt;
+        }
         aisLastFlushAt = storedAt;
         aisLastFlushError = null;
       } catch (error) {
@@ -1205,7 +1517,21 @@ async function flushMaritimeQueue(): Promise<void> {
         );
         for (const snapshot of snapshots) {
           const queued = maritimeQueue.get(snapshot.entity_id);
-          if (!queued || Date.parse(snapshot.observed_at) > Date.parse(queued.observed_at)) {
+          if (
+            !queued ||
+            (snapshot.source_name !== "adsb_lol" &&
+              queued.source_name !== "adsb_lol" &&
+              shouldReplaceMaritimeSnapshot(
+                {
+                  source_name: snapshot.source_name,
+                  observed_at: snapshot.observed_at,
+                },
+                {
+                  source_name: queued.source_name,
+                  observed_at: queued.observed_at,
+                },
+              ))
+          ) {
             maritimeQueue.set(snapshot.entity_id, snapshot);
           }
         }
@@ -1218,13 +1544,19 @@ async function flushMaritimeQueue(): Promise<void> {
   }
 }
 
-function queueDigitrafficObservation(
-  observation: DigitrafficMaritimeObservation,
+function queueRegionalMaritimeObservation(
+  observation: RegionalMaritimeObservation,
+  sourceName: RegionalMaritimeSourceName,
 ): boolean {
   const now = Date.now();
-  if (now - (lastMaritimeQueuedAt.get(observation.mmsi) ?? 0) < aisSampleMilliseconds()) {
-    return false;
-  }
+  if (
+    !canQueueMaritimeSnapshot(
+      observation.mmsi,
+      sourceName,
+      observation.observedAt,
+      now,
+    )
+  ) return false;
   const destinationPort = destinationPortFromText(observation.destination);
   const destinationCountry =
     destinationPort?.iso2 ?? destinationCountryFromText(observation.destination);
@@ -1263,36 +1595,38 @@ function queueDigitrafficObservation(
     destinationCountry ? "declared_destination" : null,
     registrationCountry ? "mmsi_flag" : null,
   ].filter((value): value is string => Boolean(value));
-  maritimeStatic.set(observation.mmsi, {
-    ...maritimeStatic.get(observation.mmsi),
+  const staticKey = maritimeStaticCacheKey(sourceName, observation.mmsi);
+  maritimeStatic.set(staticKey, {
+    ...maritimeStatic.get(staticKey),
     display_name:
-      observation.displayName ?? maritimeStatic.get(observation.mmsi)?.display_name,
-    callsign: observation.callsign ?? maritimeStatic.get(observation.mmsi)?.callsign,
+      observation.displayName ?? maritimeStatic.get(staticKey)?.display_name,
+    callsign:
+      observation.callsign ?? maritimeStatic.get(staticKey)?.callsign,
     vehicle_type:
       observation.shipType == null
-        ? maritimeStatic.get(observation.mmsi)?.vehicle_type
+        ? maritimeStatic.get(staticKey)?.vehicle_type
         : String(observation.shipType),
     vehicle_category:
       maritimeCategory(
         observation.shipType == null ? null : String(observation.shipType),
-      ) ?? maritimeStatic.get(observation.mmsi)?.vehicle_category,
+      ) ?? maritimeStatic.get(staticKey)?.vehicle_category,
     destination_name:
-      observation.destination ?? maritimeStatic.get(observation.mmsi)?.destination_name,
+      observation.destination ?? maritimeStatic.get(staticKey)?.destination_name,
     destination_country_iso2:
       destinationCountry ??
-      maritimeStatic.get(observation.mmsi)?.destination_country_iso2,
+      maritimeStatic.get(staticKey)?.destination_country_iso2,
     destination_latitude:
       destinationPort?.latitude ??
-      maritimeStatic.get(observation.mmsi)?.destination_latitude,
+      maritimeStatic.get(staticKey)?.destination_latitude,
     destination_longitude:
       destinationPort?.longitude ??
-      maritimeStatic.get(observation.mmsi)?.destination_longitude,
+      maritimeStatic.get(staticKey)?.destination_longitude,
     route_label: observation.destination
       ? `Destination ${observation.destination}`
-      : maritimeStatic.get(observation.mmsi)?.route_label,
+      : maritimeStatic.get(staticKey)?.route_label,
   });
-  const staticData = maritimeStatic.get(observation.mmsi);
-  const snapshot: TransportSnapshotInput = {
+  const staticData = maritimeStatic.get(staticKey);
+  const snapshot: MaritimeTransportSnapshotInput = {
     mode: "maritime",
     entity_id: observation.mmsi,
     display_name: observation.displayName ?? staticData?.display_name,
@@ -1337,36 +1671,30 @@ function queueDigitrafficObservation(
         : NAVIGATION_STATUS[navigationStatus] ??
           `Navigation status ${navigationStatus}`,
     is_alert: navigationStatus != null && [2, 6, 14].includes(navigationStatus),
-    source_name: "digitraffic",
+    source_name: sourceName,
     observed_at: observation.observedAt,
     payload: {
-      provider: "Fintraffic Digitraffic",
-      license: "CC BY 4.0",
-      source_url: "https://www.digitraffic.fi/en/marine-traffic/",
+      provider: MARITIME_SOURCE_DEFINITIONS[sourceName].provider,
+      license: MARITIME_SOURCE_DEFINITIONS[sourceName].license,
+      source_url: MARITIME_SOURCE_DEFINITIONS[sourceName].sourceUrl,
+      attribution:
+        sourceName === "barentswatch"
+          ? "Data delivered by BarentsWatch; source: Norwegian Coastal Administration"
+          : sourceName === "mpa_oceans_x"
+            ? "Source: Maritime and Port Authority of Singapore OCEANS-X"
+            : sourceName === "kystverket"
+              ? "Source: Norwegian Coastal Administration"
+              : "Source: Fintraffic Digitraffic",
       mmsi_type: registration.type,
     },
   };
-  maritimeQueue.set(observation.mmsi, snapshot);
-  lastMaritimeQueuedAt.set(observation.mmsi, now);
-  digitrafficLastSnapshotAt = Math.max(
-    digitrafficLastSnapshotAt ?? 0,
+  if (!enqueueMaritimeSnapshot(snapshot, now)) return false;
+  const runtime = regionalMaritimeRuntime[sourceName];
+  runtime.lastSnapshotAt = Math.max(
+    runtime.lastSnapshotAt ?? 0,
     Date.parse(observation.observedAt),
   );
-  digitrafficSnapshotsAccepted += 1;
-  const maximumQueue = Math.max(
-    500,
-    Math.min(
-      Number.parseInt(process.env.AISSTREAM_MAX_QUEUE || "5000", 10) || 5_000,
-      25_000,
-    ),
-  );
-  if (maritimeQueue.size > maximumQueue) {
-    const oldest = maritimeQueue.keys().next().value;
-    if (oldest) {
-      maritimeQueue.delete(oldest);
-      aisSnapshotsDropped += 1;
-    }
-  }
+  runtime.snapshotsAccepted += 1;
   return true;
 }
 
@@ -1410,10 +1738,10 @@ async function runDigitrafficMaritimeRefresh(): Promise<{
     );
     let queued = 0;
     for (const observation of observations) {
-      if (queueDigitrafficObservation(observation)) queued += 1;
+      if (queueRegionalMaritimeObservation(observation, "digitraffic")) queued += 1;
     }
-    digitrafficLastRefreshAt = Date.now();
-    digitrafficLastError = null;
+    regionalMaritimeRuntime.digitraffic.lastRefreshAt = Date.now();
+    regionalMaritimeRuntime.digitraffic.lastError = null;
     console.info(
       JSON.stringify({
         event: "digitraffic_maritime_refresh",
@@ -1424,8 +1752,11 @@ async function runDigitrafficMaritimeRefresh(): Promise<{
     );
     return { fetched: observations.length, queued };
   } catch (error) {
-    digitrafficLastError = error instanceof Error ? error.message : String(error);
-    console.warn(`Digitraffic maritime refresh failed: ${digitrafficLastError}`);
+    regionalMaritimeRuntime.digitraffic.lastError =
+      error instanceof Error ? error.message : String(error);
+    console.warn(
+      `Digitraffic maritime refresh failed: ${regionalMaritimeRuntime.digitraffic.lastError}`,
+    );
     return { fetched: 0, queued: 0 };
   }
 }
@@ -1446,6 +1777,341 @@ function startDigitrafficMaritimeWorker(): void {
     void refreshDigitrafficMaritime();
   }, boundedIntegerFromEnv("DIGITRAFFIC_MARITIME_POLL_SECONDS", 60, 60, 900) * 1_000);
   digitrafficTimer.unref();
+}
+
+async function getBarentsWatchAccessToken(): Promise<string> {
+  const now = Date.now();
+  if (barentswatchToken && barentswatchToken.expiresAt > now) {
+    return barentswatchToken.accessToken;
+  }
+  const clientId = process.env.BARENTSWATCH_AIS_CLIENT_ID?.trim();
+  const clientSecret = process.env.BARENTSWATCH_AIS_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret) {
+    throw new Error("BarentsWatch AIS OAuth credentials are not configured");
+  }
+  const response = await fetch(BARENTSWATCH_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      scope: "ais",
+      grant_type: "client_credentials",
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(`BarentsWatch OAuth HTTP ${response.status}`);
+  }
+  const parsed = parseBarentsWatchToken(await response.json(), now);
+  if (!parsed) throw new Error("BarentsWatch OAuth response was invalid");
+  barentswatchToken = parsed;
+  return parsed.accessToken;
+}
+
+async function runBarentsWatchMaritimeRefresh(): Promise<{
+  fetched: number;
+  queued: number;
+}> {
+  if (!regionalSourceConfigured("barentswatch")) {
+    return { fetched: 0, queued: 0 };
+  }
+  try {
+    const accessToken = await getBarentsWatchAccessToken();
+    const response = await fetch(BARENTSWATCH_AIS_URL, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) {
+      if (response.status === 401) barentswatchToken = null;
+      throw new Error(`BarentsWatch live AIS HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    if (!Array.isArray(payload)) {
+      throw new Error("BarentsWatch live AIS returned an invalid snapshot");
+    }
+    const observations = parseBarentsWatchMaritimeObservations(
+      payload,
+      Date.now(),
+      boundedIntegerFromEnv(
+        "BARENTSWATCH_AIS_FRESHNESS_MINUTES",
+        15,
+        5,
+        120,
+      ) * 60_000,
+    );
+    let queued = 0;
+    for (const observation of observations) {
+      if (queueRegionalMaritimeObservation(observation, "barentswatch")) {
+        queued += 1;
+      }
+    }
+    const runtime = regionalMaritimeRuntime.barentswatch;
+    runtime.lastRefreshAt = Date.now();
+    runtime.lastError = null;
+    console.info(
+      JSON.stringify({
+        event: "barentswatch_maritime_refresh",
+        fetched: observations.length,
+        queued,
+        queue_depth: maritimeQueue.size,
+      }),
+    );
+    return { fetched: observations.length, queued };
+  } catch (error) {
+    const runtime = regionalMaritimeRuntime.barentswatch;
+    runtime.lastError = error instanceof Error ? error.message : String(error);
+    console.warn(`BarentsWatch maritime refresh failed: ${runtime.lastError}`);
+    return { fetched: 0, queued: 0 };
+  }
+}
+
+function refreshBarentsWatchMaritime(): Promise<{
+  fetched: number;
+  queued: number;
+}> {
+  if (!barentswatchRefresh) {
+    barentswatchRefresh = runBarentsWatchMaritimeRefresh().finally(() => {
+      barentswatchRefresh = null;
+    });
+  }
+  return barentswatchRefresh;
+}
+
+function startBarentsWatchMaritimeWorker(): void {
+  if (barentswatchTimer) return;
+  if (!regionalSourceConfigured("barentswatch")) {
+    if (enabledFromEnv("BARENTSWATCH_AIS_ENABLED")) {
+      console.info(
+        "BarentsWatch AIS fallback is disabled until both OAuth credentials are configured.",
+      );
+    }
+    return;
+  }
+  void refreshBarentsWatchMaritime();
+  barentswatchTimer = setInterval(() => {
+    void refreshBarentsWatchMaritime();
+  }, boundedIntegerFromEnv("BARENTSWATCH_AIS_POLL_SECONDS", 60, 60, 900) * 1_000);
+  barentswatchTimer.unref();
+}
+
+async function runMpaOceansXMaritimeRefresh(): Promise<{
+  fetched: number;
+  queued: number;
+}> {
+  if (!regionalSourceConfigured("mpa_oceans_x")) {
+    return { fetched: 0, queued: 0 };
+  }
+  try {
+    const apiKey = process.env.MPA_OCEANS_X_API_KEY?.trim();
+    if (!apiKey) throw new Error("MPA OCEANS-X API key is not configured");
+    const response = await fetch(MPA_OCEANS_X_AIS_URL, {
+      headers: {
+        accept: "application/json",
+        ApiKey: apiKey,
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) {
+      throw new Error(`MPA OCEANS-X vessel snapshot HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    if (!Array.isArray(payload)) {
+      throw new Error("MPA OCEANS-X returned an invalid vessel snapshot");
+    }
+    const observations = parseMpaMaritimeObservations(
+      payload,
+      Date.now(),
+      boundedIntegerFromEnv(
+        "MPA_OCEANS_X_FRESHNESS_MINUTES",
+        15,
+        5,
+        120,
+      ) * 60_000,
+    );
+    let queued = 0;
+    for (const observation of observations) {
+      if (queueRegionalMaritimeObservation(observation, "mpa_oceans_x")) {
+        queued += 1;
+      }
+    }
+    const runtime = regionalMaritimeRuntime.mpa_oceans_x;
+    runtime.lastRefreshAt = Date.now();
+    runtime.lastError = null;
+    console.info(
+      JSON.stringify({
+        event: "mpa_oceans_x_maritime_refresh",
+        fetched: observations.length,
+        queued,
+        queue_depth: maritimeQueue.size,
+      }),
+    );
+    return { fetched: observations.length, queued };
+  } catch (error) {
+    const runtime = regionalMaritimeRuntime.mpa_oceans_x;
+    runtime.lastError = error instanceof Error ? error.message : String(error);
+    console.warn(`MPA OCEANS-X maritime refresh failed: ${runtime.lastError}`);
+    return { fetched: 0, queued: 0 };
+  }
+}
+
+function refreshMpaOceansXMaritime(): Promise<{
+  fetched: number;
+  queued: number;
+}> {
+  if (!mpaOceansXRefresh) {
+    mpaOceansXRefresh = runMpaOceansXMaritimeRefresh().finally(() => {
+      mpaOceansXRefresh = null;
+    });
+  }
+  return mpaOceansXRefresh;
+}
+
+function startMpaOceansXMaritimeWorker(): void {
+  if (mpaOceansXTimer) return;
+  if (!regionalSourceConfigured("mpa_oceans_x")) {
+    if (enabledFromEnv("MPA_OCEANS_X_ENABLED")) {
+      console.info(
+        "MPA OCEANS-X AIS fallback is disabled until an API key is configured.",
+      );
+    }
+    return;
+  }
+  void refreshMpaOceansXMaritime();
+  mpaOceansXTimer = setInterval(() => {
+    void refreshMpaOceansXMaritime();
+  }, boundedIntegerFromEnv("MPA_OCEANS_X_POLL_SECONDS", 180, 180, 900) * 1_000);
+  mpaOceansXTimer.unref();
+}
+
+function kystverketFreshnessMilliseconds(): number {
+  return (
+    boundedIntegerFromEnv(
+      "KYSTVERKET_AIS_TCP_FRESHNESS_MINUTES",
+      15,
+      5,
+      120,
+    ) * 60_000
+  );
+}
+
+function handleKystverketLine(line: string): void {
+  const now = Date.now();
+  const parsed = parseRegionalAisNmeaLine(line);
+  const observedAt = parsed?.timestampMilliseconds ?? now;
+  if (
+    parsed &&
+    observedAt <= now + 5 * 60_000 &&
+    now - observedAt <= kystverketFreshnessMilliseconds()
+  ) {
+    const runtime = regionalMaritimeRuntime.kystverket;
+    runtime.lastRefreshAt = now;
+    runtime.lastError = null;
+  }
+  const observation = kystverketDecoder?.consumeLine(line, now);
+  if (!observation) return;
+  kystverketReconnectAttempt = 0;
+  if (enabledFromEnv("KYSTVERKET_AIS_TCP_PERSIST_ENABLED", false)) {
+    queueRegionalMaritimeObservation(observation, "kystverket");
+    return;
+  }
+  // The public raw socket is unauthenticated plaintext. Decode it for endpoint
+  // diagnostics, but require a separate explicit opt-in before its positions
+  // can enter the shared vessel store.
+  const runtime = regionalMaritimeRuntime.kystverket;
+  runtime.lastSnapshotAt = Math.max(
+    runtime.lastSnapshotAt ?? 0,
+    Date.parse(observation.observedAt),
+  );
+  runtime.snapshotsAccepted += 1;
+}
+
+function scheduleKystverketReconnect(): void {
+  if (
+    kystverketReconnectTimer ||
+    !regionalSourceConfigured("kystverket")
+  ) {
+    return;
+  }
+  const delay = aisReconnectDelayMilliseconds(kystverketReconnectAttempt);
+  kystverketReconnectAttempt += 1;
+  kystverketReconnectTimer = setTimeout(() => {
+    kystverketReconnectTimer = null;
+    connectKystverketAisTcp();
+  }, delay);
+  kystverketReconnectTimer.unref();
+}
+
+function connectKystverketAisTcp(): void {
+  if (!regionalSourceConfigured("kystverket") || kystverketSocket) return;
+  const host =
+    process.env.KYSTVERKET_AIS_TCP_HOST?.trim() || "153.44.253.27";
+  const port = boundedIntegerFromEnv(
+    "KYSTVERKET_AIS_TCP_PORT",
+    5_631,
+    1,
+    65_535,
+  );
+  const socket = createConnection({ host, port, timeout: 15_000 });
+  kystverketSocket = socket;
+  socket.setEncoding("utf8");
+  socket.setKeepAlive(true, 30_000);
+
+  socket.on("connect", () => {
+    kystverketLineBuffer = "";
+    socket.setTimeout(180_000);
+    console.info(`Kystverket regional AIS TCP connected to ${host}:${port}.`);
+  });
+
+  socket.on("data", (chunk) => {
+    kystverketLineBuffer += chunk.toString();
+    if (kystverketLineBuffer.length > 256 * 1_024) {
+      regionalMaritimeRuntime.kystverket.lastError =
+        "Kystverket AIS line buffer exceeded its safety limit";
+      socket.destroy(new Error("Kystverket AIS line buffer overflow"));
+      return;
+    }
+    let newlineIndex = kystverketLineBuffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = kystverketLineBuffer.slice(0, newlineIndex).replace(/\r$/, "");
+      kystverketLineBuffer = kystverketLineBuffer.slice(newlineIndex + 1);
+      if (line) handleKystverketLine(line);
+      newlineIndex = kystverketLineBuffer.indexOf("\n");
+    }
+  });
+
+  socket.on("timeout", () => {
+    socket.destroy(new Error("Kystverket AIS TCP stream timed out"));
+  });
+
+  socket.on("error", (error) => {
+    regionalMaritimeRuntime.kystverket.lastError = error.message;
+    console.warn(`Kystverket regional AIS TCP error: ${error.message}`);
+  });
+
+  socket.on("close", () => {
+    if (kystverketSocket === socket) {
+      kystverketSocket = null;
+      kystverketLineBuffer = "";
+    }
+    scheduleKystverketReconnect();
+  });
+}
+
+function startKystverketMaritimeWorker(): void {
+  if (!regionalSourceConfigured("kystverket")) return;
+  if (!kystverketDecoder) {
+    kystverketDecoder = new RegionalAisNmeaDecoder({
+      freshnessMilliseconds: kystverketFreshnessMilliseconds(),
+    });
+  }
+  connectKystverketAisTcp();
 }
 
 function configuredAdsbPollPoints(): typeof ADSB_POLL_POINTS {
@@ -1795,7 +2461,27 @@ export async function refreshAviationNow(
   return aviationRefresh;
 }
 
-async function storeTransportSnapshots(snapshots: TransportSnapshotInput[]): Promise<void> {
+export async function storeTransportSnapshots(
+  snapshots: TransportSnapshotInput[],
+): Promise<void> {
+  const sourcePrioritySql = (alias: string) =>
+    `CASE ${alias}.source_name ${Object.entries(MARITIME_SOURCE_DEFINITIONS)
+      .map(([sourceName, definition]) =>
+        `WHEN '${sourceName}' THEN ${definition.priority}`,
+      )
+      .join(" ")} ELSE 0 END`;
+  const candidateWinsSql = `(
+    EXCLUDED.observed_at > transport_snapshot.observed_at
+    OR (
+      EXCLUDED.observed_at = transport_snapshot.observed_at
+      AND ${sourcePrioritySql("EXCLUDED")} >= ${sourcePrioritySql("transport_snapshot")}
+    )
+  )`;
+  const coherentNullableSql = (column: string) => `CASE
+    WHEN EXCLUDED.source_name = transport_snapshot.source_name
+      THEN COALESCE(EXCLUDED.${column}, transport_snapshot.${column})
+    ELSE EXCLUDED.${column}
+  END`;
   for (let offset = 0; offset < snapshots.length; offset += 100) {
     const batch = snapshots.slice(offset, offset + 100);
     if (batch.length === 0) continue;
@@ -1852,86 +2538,57 @@ async function storeTransportSnapshots(snapshots: TransportSnapshotInput[]): Pro
          payload, vehicle_category, current_location_name
        ) VALUES ${rows.join(", ")}
        ON CONFLICT (mode, entity_id) DO UPDATE SET
-         display_name = COALESCE(EXCLUDED.display_name, transport_snapshot.display_name),
-         callsign = COALESCE(EXCLUDED.callsign, transport_snapshot.callsign),
-         flight_number = COALESCE(EXCLUDED.flight_number, transport_snapshot.flight_number),
-         registration = COALESCE(EXCLUDED.registration, transport_snapshot.registration),
-         vehicle_type = COALESCE(EXCLUDED.vehicle_type, transport_snapshot.vehicle_type),
-         latitude = CASE
-           WHEN EXCLUDED.latitude IS NULL
-             OR EXCLUDED.observed_at < transport_snapshot.observed_at
-             THEN transport_snapshot.latitude
-           ELSE EXCLUDED.latitude
-         END,
-         longitude = CASE
-           WHEN EXCLUDED.longitude IS NULL
-             OR EXCLUDED.observed_at < transport_snapshot.observed_at
-             THEN transport_snapshot.longitude
-           ELSE EXCLUDED.longitude
-         END,
-         heading = CASE
-           WHEN EXCLUDED.latitude IS NULL
-             OR EXCLUDED.observed_at < transport_snapshot.observed_at
-             THEN transport_snapshot.heading
-           ELSE COALESCE(EXCLUDED.heading, transport_snapshot.heading)
-         END,
-         speed = CASE
-           WHEN EXCLUDED.latitude IS NULL
-             OR EXCLUDED.observed_at < transport_snapshot.observed_at
-             THEN transport_snapshot.speed
-           ELSE COALESCE(EXCLUDED.speed, transport_snapshot.speed)
-         END,
-         altitude = CASE
-           WHEN EXCLUDED.latitude IS NULL
-             OR EXCLUDED.observed_at < transport_snapshot.observed_at
-             THEN transport_snapshot.altitude
-           ELSE COALESCE(EXCLUDED.altitude, transport_snapshot.altitude)
-         END,
-         vertical_rate = CASE
-           WHEN EXCLUDED.latitude IS NULL
-             OR EXCLUDED.observed_at < transport_snapshot.observed_at
-             THEN transport_snapshot.vertical_rate
-           ELSE COALESCE(EXCLUDED.vertical_rate, transport_snapshot.vertical_rate)
-         END,
-         current_country_iso2 = CASE
-           WHEN EXCLUDED.latitude IS NULL
-             OR EXCLUDED.observed_at < transport_snapshot.observed_at
-             THEN transport_snapshot.current_country_iso2
-           ELSE EXCLUDED.current_country_iso2
-         END,
-         origin_country_iso2 = COALESCE(EXCLUDED.origin_country_iso2, transport_snapshot.origin_country_iso2),
-         destination_country_iso2 = COALESCE(EXCLUDED.destination_country_iso2, transport_snapshot.destination_country_iso2),
-         registration_country_iso2 = COALESCE(EXCLUDED.registration_country_iso2, transport_snapshot.registration_country_iso2),
-         origin_name = COALESCE(EXCLUDED.origin_name, transport_snapshot.origin_name),
-         destination_name = COALESCE(EXCLUDED.destination_name, transport_snapshot.destination_name),
-         origin_latitude = COALESCE(EXCLUDED.origin_latitude, transport_snapshot.origin_latitude),
-         origin_longitude = COALESCE(EXCLUDED.origin_longitude, transport_snapshot.origin_longitude),
-         destination_latitude = COALESCE(EXCLUDED.destination_latitude, transport_snapshot.destination_latitude),
-         destination_longitude = COALESCE(EXCLUDED.destination_longitude, transport_snapshot.destination_longitude),
-         route_label = COALESCE(EXCLUDED.route_label, transport_snapshot.route_label),
+         display_name = ${coherentNullableSql("display_name")},
+         callsign = ${coherentNullableSql("callsign")},
+         flight_number = ${coherentNullableSql("flight_number")},
+         registration = ${coherentNullableSql("registration")},
+         vehicle_type = ${coherentNullableSql("vehicle_type")},
+         latitude = ${coherentNullableSql("latitude")},
+         longitude = ${coherentNullableSql("longitude")},
+         heading = ${coherentNullableSql("heading")},
+         speed = ${coherentNullableSql("speed")},
+         altitude = ${coherentNullableSql("altitude")},
+         vertical_rate = ${coherentNullableSql("vertical_rate")},
+         current_country_iso2 = ${coherentNullableSql("current_country_iso2")},
+         origin_country_iso2 = ${coherentNullableSql("origin_country_iso2")},
+         destination_country_iso2 = ${coherentNullableSql("destination_country_iso2")},
+         registration_country_iso2 = ${coherentNullableSql("registration_country_iso2")},
+         origin_name = ${coherentNullableSql("origin_name")},
+         destination_name = ${coherentNullableSql("destination_name")},
+         origin_latitude = ${coherentNullableSql("origin_latitude")},
+         origin_longitude = ${coherentNullableSql("origin_longitude")},
+         destination_latitude = ${coherentNullableSql("destination_latitude")},
+         destination_longitude = ${coherentNullableSql("destination_longitude")},
+         route_label = ${coherentNullableSql("route_label")},
          linkage_basis = CASE
-           WHEN cardinality(EXCLUDED.linkage_basis) > 0 THEN EXCLUDED.linkage_basis
-           ELSE transport_snapshot.linkage_basis
+           WHEN EXCLUDED.source_name = transport_snapshot.source_name
+             AND cardinality(EXCLUDED.linkage_basis) = 0
+             THEN transport_snapshot.linkage_basis
+           ELSE EXCLUDED.linkage_basis
          END,
          linkage_confidence = CASE
-           WHEN EXCLUDED.linkage_confidence <> 'none' THEN EXCLUDED.linkage_confidence
-           ELSE transport_snapshot.linkage_confidence
+           WHEN EXCLUDED.source_name = transport_snapshot.source_name
+             AND EXCLUDED.linkage_confidence = 'none'
+             THEN transport_snapshot.linkage_confidence
+           ELSE EXCLUDED.linkage_confidence
          END,
-         status = COALESCE(EXCLUDED.status, transport_snapshot.status),
+         status = CASE
+           WHEN EXCLUDED.source_name = transport_snapshot.source_name
+             THEN COALESCE(EXCLUDED.status, transport_snapshot.status)
+           ELSE EXCLUDED.status
+         END,
          is_alert = CASE
-           WHEN EXCLUDED.status IS NULL THEN transport_snapshot.is_alert
+           WHEN EXCLUDED.source_name = transport_snapshot.source_name
+             AND EXCLUDED.status IS NULL
+             THEN transport_snapshot.is_alert
            ELSE EXCLUDED.is_alert
          END,
          source_name = EXCLUDED.source_name,
-         observed_at = GREATEST(EXCLUDED.observed_at, transport_snapshot.observed_at),
-         payload = transport_snapshot.payload || EXCLUDED.payload,
-         vehicle_category = COALESCE(EXCLUDED.vehicle_category, transport_snapshot.vehicle_category),
-         current_location_name = CASE
-           WHEN EXCLUDED.latitude IS NULL
-             OR EXCLUDED.observed_at < transport_snapshot.observed_at
-             THEN transport_snapshot.current_location_name
-           ELSE EXCLUDED.current_location_name
-         END`,
+         observed_at = EXCLUDED.observed_at,
+         payload = EXCLUDED.payload,
+         vehicle_category = ${coherentNullableSql("vehicle_category")},
+         current_location_name = ${coherentNullableSql("current_location_name")}
+       WHERE ${candidateWinsSql}`,
       values
     );
   }
@@ -2039,11 +2696,33 @@ async function storeTransportSnapshots(snapshots: TransportSnapshotInput[]): Pro
            transport_entity_activity_hour.last_observed_at,
            EXCLUDED.last_observed_at
          ),
-         source_name = EXCLUDED.source_name,
-         vehicle_category = COALESCE(
-           EXCLUDED.vehicle_category,
-           transport_entity_activity_hour.vehicle_category
-         )`,
+         source_name = CASE
+           WHEN EXCLUDED.last_observed_at >
+               transport_entity_activity_hour.last_observed_at
+             OR (
+               EXCLUDED.last_observed_at =
+                 transport_entity_activity_hour.last_observed_at
+               AND ${sourcePrioritySql("EXCLUDED")} >=
+                 ${sourcePrioritySql("transport_entity_activity_hour")}
+             )
+             THEN EXCLUDED.source_name
+           ELSE transport_entity_activity_hour.source_name
+         END,
+         vehicle_category = CASE
+           WHEN EXCLUDED.last_observed_at >
+               transport_entity_activity_hour.last_observed_at
+             OR (
+               EXCLUDED.last_observed_at =
+                 transport_entity_activity_hour.last_observed_at
+               AND ${sourcePrioritySql("EXCLUDED")} >=
+                 ${sourcePrioritySql("transport_entity_activity_hour")}
+             )
+             THEN COALESCE(
+               EXCLUDED.vehicle_category,
+               transport_entity_activity_hour.vehicle_category
+             )
+           ELSE transport_entity_activity_hour.vehicle_category
+         END`,
       values,
     );
   }
@@ -3729,7 +4408,8 @@ async function pruneTransportHistory(): Promise<void> {
   for (const [mmsi, observedAt] of lastMaritimeQueuedAt) {
     if (observedAt >= memoryCutoff) continue;
     lastMaritimeQueuedAt.delete(mmsi);
-    maritimeStatic.delete(mmsi);
+    lastMaritimeSnapshot.delete(mmsi);
+    deleteMaritimeStatic(mmsi);
     firstMaritimeCountry.delete(mmsi);
     firstMaritimePosition.delete(mmsi);
   }
@@ -3822,6 +4502,9 @@ async function acquireTransportWorkerLock(): Promise<void> {
     connectAisStream();
     startAisWatchdog();
     startDigitrafficMaritimeWorker();
+    startBarentsWatchMaritimeWorker();
+    startMpaOceansXMaritimeWorker();
+    startKystverketMaritimeWorker();
     startTransportRetentionWorker();
     aisFlushTimer = setInterval(() => {
       void flushMaritimeQueue();

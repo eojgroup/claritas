@@ -32,6 +32,7 @@ import {
 import {
   fetchTransportEntity,
   fetchTransportOverview,
+  type RegionalMaritimeCoverageSource,
   type TransportEntity,
   type TransportMode,
   type TransportOverview,
@@ -93,13 +94,69 @@ function changeLabel(value: number | null, direction: "up" | "down" | "flat" | "
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
+function regionalMaritimeSources(
+  coverage: TransportOverview["coverage"]["maritime"] | undefined,
+): RegionalMaritimeCoverageSource[] {
+  if (!coverage) return [];
+  if (coverage.regional_sources?.length) return coverage.regional_sources;
+  return [
+    {
+      source_name: "digitraffic",
+      provider: coverage.fallback_source,
+      transport: "REST",
+      coverage: coverage.fallback_coverage,
+      configured: coverage.fallback_configured,
+      last_snapshot_at: coverage.fallback_last_snapshot_at,
+      last_stored_at: coverage.fallback_last_stored_at,
+      error: coverage.fallback_error,
+      snapshots_accepted: coverage.fallback_snapshots_accepted,
+      snapshots_stored: coverage.fallback_snapshots_stored,
+      license: coverage.fallback_license,
+      global: coverage.global_fallback_available,
+      source_url: "https://www.digitraffic.fi/en/marine-traffic/",
+    },
+  ];
+}
+
+function configuredRegionalMaritimeSources(
+  coverage: TransportOverview["coverage"]["maritime"] | undefined,
+) {
+  return regionalMaritimeSources(coverage).filter((source) => source.configured);
+}
+
+function regionalProviderLabel(sources: RegionalMaritimeCoverageSource[]) {
+  if (!sources.length) return "no configured official regional provider";
+  return sources.map((source) => source.provider).join(", ");
+}
+
+function regionalTimestampSummary(sources: RegionalMaritimeCoverageSource[]) {
+  return sources
+    .flatMap((source) => {
+      const timestamp = transportTimestamp(
+        source.last_snapshot_at ?? source.last_stored_at ?? source.last_refresh_at,
+      );
+      return timestamp
+        ? [`${source.provider}: ${timestamp.relative} · ${timestamp.exact}`]
+        : [];
+    })
+    .join(" · ");
+}
+
 function maritimeRuntimeLabel(
   coverage: TransportOverview["coverage"]["maritime"] | undefined,
 ): string | null {
   if (!coverage) return null;
-  if (coverage.status === "disabled") return "server credential not configured";
+  const regionalSources = configuredRegionalMaritimeSources(coverage);
+  const regionalTrafficAvailable = regionalSources.some(
+    (source) => source.last_snapshot_at || source.last_stored_at,
+  );
+  if (coverage.primary_status === "disabled" || coverage.status === "disabled") {
+    return regionalSources.length
+      ? `AISstream credential not configured; regional coverage remains configured through ${regionalProviderLabel(regionalSources)}`
+      : "server credential not configured";
+  }
   if (coverage.primary_status === "upstream_stalled" || coverage.status === "upstream_stalled") {
-    return coverage.fallback_last_snapshot_at
+    return regionalTrafficAvailable
       ? "AISstream is connected but its upstream feed is silent; official regional fallback remains active"
       : "AISstream is connected but its upstream feed is silent; automatic recovery is active";
   }
@@ -111,8 +168,12 @@ function maritimeRuntimeLabel(
   if (coverage.queue_depth > 0) {
     return `incrementally persisting ${coverage.queue_depth.toLocaleString()} queued vessel snapshots`;
   }
-  if (coverage.fallback_error && coverage.messages_received === 0) {
-    return "global AIS is silent and the official Baltic fallback is retrying";
+  if (
+    regionalSources.length > 0 &&
+    regionalSources.every((source) => source.error) &&
+    coverage.messages_received === 0
+  ) {
+    return "global AIS is silent and the configured official regional sources are retrying";
   }
   if (coverage.connected && coverage.messages_received === 0) {
     return `connected with ${coverage.subscription_boxes ?? 1} coverage area; global provider has not delivered AIS frames yet`;
@@ -636,8 +697,9 @@ export default function TransportWorkspace({ initialCountry }: Props) {
   const primaryMaritimeTimestamp = transportTimestamp(
     maritimeCoverage?.last_message_at ?? maritimeCoverage?.last_snapshot_at,
   );
-  const fallbackMaritimeTimestamp = transportTimestamp(
-    maritimeCoverage?.fallback_last_snapshot_at,
+  const configuredRegionalMaritime = configuredRegionalMaritimeSources(maritimeCoverage);
+  const regionalMaritimeTimestamps = regionalTimestampSummary(
+    configuredRegionalMaritime,
   );
 
   if (!country) {
@@ -782,7 +844,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
               {generatedTimestamp ? ` · ${generatedTimestamp.exact}` : ""}. Counts represent provider records linked to this scope, not complete national or global traffic.
             </span>
             <span>
-              Aviation samples {overview.coverage.aviation.poll_areas} configured poll {overview.coverage.aviation.poll_areas === 1 ? "area" : "areas"}; maritime uses AISstream with Fintraffic as a regional fallback. Missing positions can reflect provider coverage, freshness limits, unresolved routes, or vessels outside the fallback region.
+              Aviation samples {overview.coverage.aviation.poll_areas} configured poll {overview.coverage.aviation.poll_areas === 1 ? "area" : "areas"}; maritime uses AISstream with {regionalProviderLabel(configuredRegionalMaritime)}. Missing positions can reflect provider coverage, freshness limits, unresolved routes, or vessels outside the configured regional reception areas.
             </span>
           </div>
         </div>
@@ -796,7 +858,7 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             <span>{maritimeRuntimeLabel(maritimeCoverage)}.</span>
             <span>
               AISstream: {primaryMaritimeTimestamp ? `${primaryMaritimeTimestamp.relative} · ${primaryMaritimeTimestamp.exact}` : "no usable timestamp"}
-              {fallbackMaritimeTimestamp ? ` · Fintraffic fallback: ${fallbackMaritimeTimestamp.relative} · ${fallbackMaritimeTimestamp.exact}` : ""}
+              {regionalMaritimeTimestamps ? ` · ${regionalMaritimeTimestamps}` : ""}
             </span>
           </div>
         </div>
@@ -1751,16 +1813,19 @@ export default function TransportWorkspace({ initialCountry }: Props) {
             AISstream <ExternalLink />
           </a>
         </span>
-        <span>
-          <Ship /> Baltic AIS fallback: {" "}
-          <a
-            href="https://www.digitraffic.fi/en/marine-traffic/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Fintraffic Digitraffic (CC BY 4.0) <ExternalLink />
-          </a>
-        </span>
+        {configuredRegionalMaritime.map((source) => (
+          <span key={source.source_name}>
+            <Ship /> Official regional AIS: {" "}
+            {source.source_url ? (
+              <a href={source.source_url} target="_blank" rel="noreferrer">
+                {source.provider} ({source.license}) <ExternalLink />
+              </a>
+            ) : (
+              <>{source.provider} ({source.license})</>
+            )}
+            {source.attribution ? ` · ${source.attribution}` : ""}
+          </span>
+        ))}
         {maritimeRuntimeLabel(overview?.coverage.maritime) && (
           <span>
             <RefreshCw /> Maritime feed:{" "}

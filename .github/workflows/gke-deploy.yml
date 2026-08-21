@@ -22,6 +22,7 @@ on:
       - '.github/workflows/**'
       - 'infra/gcp/terraform/**'
       - 'infra/k8s/api-deployment.yaml'
+      - 'infra/k8s/config/claritas-config.yaml'
       - 'infra/gcp/sql/**'
       - 'infra/k8s/migrations/**'
       - 'infra/scripts/check-flyway-migrations.py'
@@ -501,6 +502,9 @@ jobs:
           PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
           PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+          BARENTSWATCH_AIS_CLIENT_ID: ${{ secrets.BARENTSWATCH_AIS_CLIENT_ID }}
+          BARENTSWATCH_AIS_CLIENT_SECRET: ${{ secrets.BARENTSWATCH_AIS_CLIENT_SECRET }}
+          MPA_OCEANS_X_API_KEY: ${{ secrets.MPA_OCEANS_X_API_KEY }}
           COPERNICUS_CLIENT_ID: ${{ secrets.COPERNICUS_CLIENT_ID }}
           COPERNICUS_CLIENT_SECRET: ${{ secrets.COPERNICUS_CLIENT_SECRET }}
           NASA_FIRMS_MAP_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
@@ -546,7 +550,30 @@ jobs:
               --from-literal=AISSTREAM_API_KEY="$AISSTREAM_API_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
           else
-            echo "::warning::AISSTREAM_API_KEY not provided; global maritime ingestion is unavailable and only the configured regional fallback can run"
+            echo "::warning::AISSTREAM_API_KEY not provided; global maritime ingestion is unavailable and only configured regional fallbacks can run"
+          fi
+
+          # BarentsWatch exposes Norwegian Coastal Administration AIS through
+          # an OAuth client-credentials pair. It is an optional regional path.
+          if [ -n "${BARENTSWATCH_AIS_CLIENT_ID:-}" ] && [ -n "${BARENTSWATCH_AIS_CLIENT_SECRET:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-barentswatch-ais \
+              --from-literal=BARENTSWATCH_AIS_CLIENT_ID="$BARENTSWATCH_AIS_CLIENT_ID" \
+              --from-literal=BARENTSWATCH_AIS_CLIENT_SECRET="$BARENTSWATCH_AIS_CLIENT_SECRET" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          elif [ -n "${BARENTSWATCH_AIS_CLIENT_ID:-}" ] || [ -n "${BARENTSWATCH_AIS_CLIENT_SECRET:-}" ]; then
+            echo "::warning::BarentsWatch AIS credentials are incomplete; the Norwegian HTTPS fallback remains not configured"
+          else
+            echo "::notice::BarentsWatch AIS credentials not provided; skipping optional Norwegian HTTPS fallback secret"
+          fi
+
+          # MPA OCEANS-X uses one server-side API key for its Singapore vessel
+          # position snapshot. Missing credentials do not block other sources.
+          if [ -n "${MPA_OCEANS_X_API_KEY:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-mpa-oceans-x \
+              --from-literal=MPA_OCEANS_X_API_KEY="$MPA_OCEANS_X_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::notice::MPA_OCEANS_X_API_KEY not provided; skipping optional Singapore regional fallback secret"
           fi
 
           eo_args=()
@@ -933,8 +960,11 @@ jobs:
             if (!process.env.FRED_API_KEY?.trim()) missing.push("FRED_API_KEY");
             const disabled = (value) => ["0", "false", "no", "off"].includes((value || "true").toLowerCase());
             const primaryConfigured = !disabled(process.env.AISSTREAM_ENABLED) && Boolean(process.env.AISSTREAM_API_KEY?.trim());
-            const fallbackConfigured = !disabled(process.env.DIGITRAFFIC_MARITIME_ENABLED);
-            if (!primaryConfigured && !fallbackConfigured) missing.push("AISstream credentials or DIGITRAFFIC_MARITIME_ENABLED=true");
+            const regionalConfigured =
+              !disabled(process.env.DIGITRAFFIC_MARITIME_ENABLED) ||
+              (!disabled(process.env.BARENTSWATCH_AIS_ENABLED) && Boolean(process.env.BARENTSWATCH_AIS_CLIENT_ID?.trim()) && Boolean(process.env.BARENTSWATCH_AIS_CLIENT_SECRET?.trim())) ||
+              (!disabled(process.env.MPA_OCEANS_X_ENABLED) && Boolean(process.env.MPA_OCEANS_X_API_KEY?.trim()));
+            if (!primaryConfigured && !regionalConfigured) missing.push("an enabled, configured maritime provider");
             if (["0", "false", "no", "off"].includes((process.env.DAILY_BRIEFING_SCHEDULER_ENABLED || "true").toLowerCase())) {
               missing.push("DAILY_BRIEFING_SCHEDULER_ENABLED=true");
             }

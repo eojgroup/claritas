@@ -134,6 +134,7 @@ data:
   # keyless; AISstream remains disabled until AISSTREAM_API_KEY is supplied.
   AISSTREAM_ENABLED: "true"
   AISSTREAM_SAMPLE_SECONDS: "600"
+  AISSTREAM_FRESHNESS_MINUTES: "15"
   AISSTREAM_IDLE_TIMEOUT_SECONDS: "120"
   # Persist the documented global subscription in bounded batches so a
   # full-world vessel burst cannot monopolize the API database pool.
@@ -144,9 +145,28 @@ data:
   DIGITRAFFIC_MARITIME_ENABLED: "true"
   DIGITRAFFIC_MARITIME_POLL_SECONDS: "60"
   DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES: "15"
-  # Deployment health accepts a recent AISstream message or a successful
-  # Fintraffic poll. Empty regional polls still prove provider availability.
-  TRANSPORT_RUNTIME_FRESHNESS_SECONDS: "300"
+  # Official Norwegian AIS through the credentialed BarentsWatch HTTPS API.
+  # The connector remains not_configured until both OAuth credentials exist.
+  BARENTSWATCH_AIS_ENABLED: "true"
+  BARENTSWATCH_AIS_POLL_SECONDS: "60"
+  BARENTSWATCH_AIS_FRESHNESS_MINUTES: "15"
+  # Optional keyless Norwegian Coastal Administration raw NMEA stream. It is
+  # diagnostic-only unless persistence is separately enabled, and never makes
+  # release readiness green. Keep both switches off unless plaintext TCP and
+  # endpoint monitoring are acceptable operational tradeoffs.
+  KYSTVERKET_AIS_TCP_ENABLED: "false"
+  KYSTVERKET_AIS_TCP_PERSIST_ENABLED: "false"
+  KYSTVERKET_AIS_TCP_HOST: "153.44.253.27"
+  KYSTVERKET_AIS_TCP_PORT: "5631"
+  # Official Singapore snapshot API through MPA OCEANS-X. The connector
+  # remains not_configured until an API key is supplied.
+  MPA_OCEANS_X_ENABLED: "true"
+  MPA_OCEANS_X_POLL_SECONDS: "180"
+  MPA_OCEANS_X_FRESHNESS_MINUTES: "15"
+  # Deployment health accepts a recent AISstream position or a successful
+  # official regional refresh. This exceeds the 10-minute AIS persistence
+  # sample interval so a healthy stream does not oscillate out of readiness.
+  TRANSPORT_RUNTIME_FRESHNESS_SECONDS: "900"
   TRANSPORT_WORKER_LOCK_RETRY_SECONDS: "10"
   ADSB_LOL_POLL_ENABLED: "true"
   ADSB_LOL_POLL_SECONDS: "600"

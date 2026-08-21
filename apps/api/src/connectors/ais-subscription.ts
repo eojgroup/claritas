@@ -17,6 +17,69 @@ export const AIS_POSITION_MESSAGE_TYPES = [
   "StaticDataReport",
 ] as const;
 
+const AIS_COORDINATE_MESSAGE_TYPES = new Set<string>([
+  "PositionReport",
+  "StandardClassBPositionReport",
+  "ExtendedClassBPositionReport",
+  "LongRangeAisBroadcastMessage",
+]);
+
+export function isAisCoordinateMessageType(
+  messageType: string | null | undefined,
+): boolean {
+  return Boolean(messageType && AIS_COORDINATE_MESSAGE_TYPES.has(messageType));
+}
+
+/**
+ * AISstream is a live feed. Reject missing, stale, and implausibly future
+ * provider timestamps before they can prove liveness or enter arbitration.
+ */
+export function normalizeAisObservedAt(
+  value: unknown,
+  nowMilliseconds = Date.now(),
+  freshnessMilliseconds = 15 * 60_000,
+  futureToleranceMilliseconds = 5 * 60_000,
+): string | null {
+  let observedMilliseconds: number;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    observedMilliseconds =
+      Math.abs(value) < 1_000_000_000_000 ? value * 1_000 : value;
+  } else if (typeof value === "string" && value.trim()) {
+    observedMilliseconds = Date.parse(value);
+  } else {
+    return null;
+  }
+  if (
+    !Number.isFinite(observedMilliseconds) ||
+    !Number.isFinite(nowMilliseconds) ||
+    observedMilliseconds > nowMilliseconds + futureToleranceMilliseconds ||
+    nowMilliseconds - observedMilliseconds > freshnessMilliseconds
+  ) {
+    return null;
+  }
+  return new Date(observedMilliseconds).toISOString();
+}
+
+const AIS_RECONNECT_DELAYS_MILLISECONDS = [
+  2_000,
+  10_000,
+  30_000,
+  60_000,
+  5 * 60_000,
+  15 * 60_000,
+  30 * 60_000,
+  60 * 60_000,
+] as const;
+
+export function aisReconnectDelayMilliseconds(attempt: number): number {
+  const normalizedAttempt = Number.isFinite(attempt)
+    ? Math.max(0, Math.floor(attempt))
+    : 0;
+  return AIS_RECONNECT_DELAYS_MILLISECONDS[
+    Math.min(normalizedAttempt, AIS_RECONNECT_DELAYS_MILLISECONDS.length - 1)
+  ];
+}
+
 export function buildAisSubscription(
   apiKey: string,
   boundingBoxes: AisBoundingBox[],

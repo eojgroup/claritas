@@ -28,6 +28,9 @@ const sourceReliability: Record<string, number> = {
   gdelt: 0.72,
   aisstream: 0.72,
   digitraffic: 0.9,
+  barentswatch: 0.92,
+  kystverket: 0.92,
+  mpa_oceans_x: 0.9,
   "adsb-lol": 0.72,
 };
 

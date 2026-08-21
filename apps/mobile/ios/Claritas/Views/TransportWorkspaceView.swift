@@ -4,6 +4,16 @@ import MapKit
 import SwiftUI
 import UIKit
 
+private struct PresentedRegionalMaritimeSource: Identifiable {
+    let id: String
+    let provider: String
+    let license: String?
+    let attribution: String?
+    let lastSnapshotAt: String?
+    let lastStoredAt: String?
+    let error: Bool
+}
+
 struct TransportWorkspaceView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
@@ -784,11 +794,13 @@ struct TransportWorkspaceView: View {
                 "Flight positions, callsigns, and plausible airport routes: adsb.lol (ODbL).",
                 systemImage: "airplane"
             )
-            Label(
-                "Baltic AIS fallback: Fintraffic Digitraffic (CC BY 4.0).",
-                systemImage: "ferry"
-            )
-            if overview?.coverage.maritime.configured == false {
+            ForEach(configuredRegionalMaritimeSources) { source in
+                Label(
+                    "Official regional AIS: \(source.provider)\(source.license.map { " (\($0))" } ?? "")\(source.attribution.map { " · \($0)" } ?? "").",
+                    systemImage: "ferry"
+                )
+            }
+            if overview?.coverage.maritime.configured == false && configuredRegionalMaritimeSources.isEmpty {
                 Label(
                     "Maritime feed is awaiting its server-side AISstream credential.",
                     systemImage: "key"
@@ -813,10 +825,21 @@ struct TransportWorkspaceView: View {
 
     private var maritimeRuntimeMessage: String? {
         guard let maritime = overview?.coverage.maritime else { return nil }
+        let regionalSources = configuredRegionalMaritimeSources
+        let regionalTrafficAvailable = regionalSources.contains {
+            $0.lastSnapshotAt != nil || $0.lastStoredAt != nil
+        }
+        if maritime.primary_status == "disabled" || maritime.status == "disabled" {
+            guard !regionalSources.isEmpty else {
+                return "The server-side AISstream credential is not configured."
+            }
+            let providers = regionalSources.map(\.provider).joined(separator: ", ")
+            return "AISstream is not configured; regional coverage remains configured through \(providers)."
+        }
         if maritime.primary_status == "upstream_stalled" || maritime.status == "upstream_stalled" {
-            return maritime.fallback_last_snapshot_at == nil
-                ? "AISstream is connected but its upstream feed is silent; automatic recovery is active."
-                : "AISstream is connected but its upstream feed is silent; the official regional fallback remains active."
+            return regionalTrafficAvailable
+                ? "AISstream is connected but its upstream feed is silent; an official regional fallback remains active."
+                : "AISstream is connected but its upstream feed is silent; automatic recovery is active."
         }
         if maritime.last_error != nil {
             return "AISstream reported a stream error; Claritas is reconnecting automatically."
@@ -828,8 +851,10 @@ struct TransportWorkspaceView: View {
         if (maritime.queue_depth ?? 0) > 0 {
             return "Incrementally persisting \(maritime.queue_depth ?? 0) queued vessel snapshots."
         }
-        if maritime.fallback_error == true && (maritime.messages_received ?? 0) == 0 {
-            return "Global AIS is silent and the official Baltic fallback is retrying."
+        if !regionalSources.isEmpty &&
+            regionalSources.allSatisfy(\.error) &&
+            (maritime.messages_received ?? 0) == 0 {
+            return "Global AIS is silent and the configured official regional sources are retrying."
         }
         if maritime.connected == true && (maritime.messages_received ?? 0) == 0 {
             return "AISstream is connected with \(maritime.subscription_boxes ?? 1) coverage area(s), but no vessel frames have arrived yet."
@@ -844,6 +869,37 @@ struct TransportWorkspaceView: View {
         default:
             return nil
         }
+    }
+
+    private var configuredRegionalMaritimeSources: [PresentedRegionalMaritimeSource] {
+        guard let maritime = overview?.coverage.maritime else { return [] }
+        if let regionalSources = maritime.regional_sources, !regionalSources.isEmpty {
+            return regionalSources
+                .filter(\.configured)
+                .map { source in
+                    PresentedRegionalMaritimeSource(
+                        id: source.source_name,
+                        provider: source.provider,
+                        license: source.license,
+                        attribution: source.attribution,
+                        lastSnapshotAt: source.last_snapshot_at,
+                        lastStoredAt: source.last_stored_at,
+                        error: source.error ?? false
+                    )
+                }
+        }
+        guard maritime.fallback_configured == true else { return [] }
+        return [
+            PresentedRegionalMaritimeSource(
+                id: "digitraffic",
+                provider: maritime.fallback_source ?? "Fintraffic Digitraffic",
+                license: maritime.fallback_license,
+                attribution: "Source: Fintraffic Digitraffic",
+                lastSnapshotAt: maritime.fallback_last_snapshot_at,
+                lastStoredAt: maritime.fallback_last_stored_at,
+                error: maritime.fallback_error ?? false
+            )
+        ]
     }
 
     private func detailRow(label: String, value: String) -> some View {

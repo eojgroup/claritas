@@ -7,6 +7,9 @@ Claritas combines maritime AIS messages and live ADS-B observations into one cou
 ```mermaid
 flowchart LR
   AIS[AISstream WebSocket] --> Normalize[Transport normalizer]
+  Digitraffic[Fintraffic Digitraffic] --> Normalize
+  Norway[BarentsWatch / Kystverket] --> Normalize
+  Singapore[MPA OCEANS-X] --> Normalize
   ADSB[adsb.lol position API] --> Normalize
   ADSBRoute[adsb.lol plausible routes] --> Normalize
   Normalize --> Position[Current position country]
@@ -49,6 +52,7 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - The default is AISstream's documented single global bounding box (`[-90,-180]` to `[90,180]`). `AISSTREAM_BOUNDING_BOXES` can replace it with at most 12 provider-format boxes on that same subscription. Subscription updates replace rather than merge prior coverage, so Claritas does not rotate partial regions.
 - “Global” is geographic subscription scope, not complete ocean coverage. AISstream describes the service as beta with no uptime SLA and reports reception roughly 200 km from most coastlines; vessels far offshore and areas without terrestrial stations can be absent.
 - `AISSTREAM_SAMPLE_SECONDS` controls current-position sampling and defaults to 600 seconds.
+- `AISSTREAM_FRESHNESS_MINUTES` defaults to 15 minutes. Missing, older, or more than five-minutes-future provider timestamps are rejected before they can affect liveness or source arbitration. Static-message metadata coordinates are never treated as new positions.
 - `AISSTREAM_IDLE_TIMEOUT_SECONDS` defaults to 120 seconds. A connected stream that produces no usable vessel snapshot inside this window is terminated and reconnected; this covers the provider failure mode where a WebSocket remains open but silently stops delivering AIS frames.
 - Vessel snapshots drain through one flush at a time, in bounded batches. The production defaults persist at most two 250-vessel batches per five-second cycle, retain newer queued positions while a write is in flight, and requeue failed writes without allowing overlapping flushes to exhaust the database pool.
 - MMSI Maritime Identification Digits link a vessel to its flag country. Position-in-country, monitored-port geofences, the first observed voyage country and position, and recognizable AIS destination/UN LOCODE values add current, origin, and destination relationships. When a declared destination resolves to a monitored port, its coordinates are retained so the individual vessel map can draw a route from the first observed position to that port.
@@ -67,6 +71,79 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - This is an official regional fallback, not a global fallback. Claritas reports
   its Finland/Baltic scope explicitly and never converts a missing regional
   record into evidence that vessel activity stopped.
+
+### Norwegian regional fallback
+
+- The preferred production path is the BarentsWatch HTTPS API, which delivers
+  Norwegian Coastal Administration (Kystverket) AIS. Create an OAuth client and
+  configure `BARENTSWATCH_AIS_CLIENT_ID` and
+  `BARENTSWATCH_AIS_CLIENT_SECRET`; both are required. Kubernetes reads the
+  pair from `claritas-barentswatch-ais`.
+- `BARENTSWATCH_AIS_ENABLED` defaults to `true`, but the connector remains
+  `not_configured` when either credential is absent. Production polls the
+  combined full-model snapshot every 60 seconds and accepts positions observed
+  in the latest 15 minutes; tune those bounds with
+  `BARENTSWATCH_AIS_POLL_SECONDS` and
+  `BARENTSWATCH_AIS_FRESHNESS_MINUTES`.
+- Kystverket also publishes a keyless raw IEC/NMEA feed at
+  `153.44.253.27:5631`. `KYSTVERKET_AIS_TCP_ENABLED` defaults to `false` because
+  that feed is plaintext TCP to a literal IP address. Its host and port are
+  configurable with `KYSTVERKET_AIS_TCP_HOST` and
+  `KYSTVERKET_AIS_TCP_PORT`. The connector is diagnostic-only by default: it
+  never satisfies release readiness and decoded positions are not persisted.
+  Persisting them additionally requires
+  `KYSTVERKET_AIS_TCP_PERSIST_ENABLED=true`; enable either switch only when the
+  deployment accepts the transport-integrity and endpoint-monitoring tradeoffs.
+- Kystverket data is offered under NLOD 2.0, which permits commercial reuse
+  with attribution. When data is delivered through BarentsWatch, retain both
+  the source owner attribution and a conspicuous “Data delivered by
+  BarentsWatch” notice, and disclose material transformations. BarentsWatch's
+  terms also reserve the ability to charge for unusually high traffic, so the
+  polling volume and terms must be monitored. Coverage is regional rather than
+  global, and the official description identifies vessel categories that are
+  excluded.
+
+Official references: [Kystverket AIS access](https://www.kystverket.no/en/sea-transport-and-ports/ais/access-to-ais-data/),
+[BarentsWatch live AIS API](https://developer.barentswatch.no/docs/AIS/live-ais-api/),
+[BarentsWatch API terms](https://www.barentswatch.no/en/articles/api-terms-and-conditions/),
+and [NLOD 2.0](https://data.norge.no/nlod/en/2.0).
+
+### Singapore regional fallback
+
+- The source is the Maritime and Port Authority of Singapore (MPA), not PSA.
+  Claritas uses the MPA OCEANS-X Vessel Positions snapshot product and sends
+  `MPA_OCEANS_X_API_KEY` server-side from Kubernetes secret
+  `claritas-mpa-oceans-x`.
+- `MPA_OCEANS_X_ENABLED` defaults to `true`, but the connector remains
+  `not_configured` without the key. The source publishes a new snapshot roughly
+  every three minutes, so production polls every 180 seconds and accepts
+  positions from the latest 15 minutes. Tune those bounds with
+  `MPA_OCEANS_X_POLL_SECONDS` and `MPA_OCEANS_X_FRESHNESS_MINUTES`.
+- The current marketplace product metadata describes a free, unlimited tier,
+  but it provides no uptime SLA. The OCEANS-X terms allow commercial and
+  non-commercial derived applications while requiring a conspicuous source
+  notice; MPA may change access conditions or withdraw the product. Treat the
+  key and current terms as an operational dependency, not as a permanent
+  entitlement. On termination, the current terms require use to cease and API
+  data to be deleted or returned within 30 days, so offboarding must include a
+  governed data-removal step.
+
+Official references: [OCEANS-X product documentation](https://oceans-x.mpa.gov.sg/marketplace/apis/483131e5-a59d-4dce-901f-597e952e09c4/documents),
+[API terms of service](https://oceans-x.mpa.gov.sg/api-terms-of-service), and
+[OCEANS-X FAQ](https://oceans-x.mpa.gov.sg/faq).
+
+### Regional source commercial-viability review
+
+| Region / official source | Decision | Commercial-use and operational basis |
+| --- | --- | --- |
+| Norway — Kystverket via BarentsWatch, with optional raw Kystverket feed | Include | Live official coverage. NLOD 2.0 permits commercial reuse without ShareAlike, subject to attribution; the BarentsWatch delivery notice and source-owner credit must remain visible, and high-volume access may become chargeable. The preferred HTTPS API requires OAuth credentials; the raw alternative is plaintext TCP and is diagnostic/non-readiness-eligible by default. |
+| Singapore — MPA OCEANS-X | Include when credentialed | Current terms permit commercial derived applications with a source notice. The marketplace currently lists a free tier, but no SLA or permanent access guarantee; terms and product availability must be monitored. |
+| Denmark — Danish Maritime Authority / BRS AIS proxy | Exclude pending contract review | The official live path is a paid subscriber proxy, while the public material does not establish an API contract or redistribution/SaaS-display rights suitable for Claritas. Historical downloads do not provide a live fallback. Obtain endpoint, pricing, and written redistribution rights before implementation. See the [Danish AIS data management policy](https://www.dma.dk/safety-at-sea/navigational-information/ais-data/ais-data-management-policy-). |
+| United States — USCG NAIS / MarineCadastre | Exclude for live fallback | USCG real-time NAIS sharing categories restrict retransmission, sharing, and commercial use outside approved government, contractor, port, or formal-partner arrangements. [MarineCadastre AIS](https://marinecadastre.gov/accessais/) is historical rather than live; its May 2026 FAQ permits derived products and describes the data as generally public domain, but also limits use to the disclosure purpose, repeats redistribution/no-fee conditions, and identifies ocean planning as the intended use. That is not clear enough for Claritas' paid live display without written approval. See the [USCG sharing requirements](https://www.navcen.uscg.gov/ais-data-sharing-categories-requirements), [USCG AIS FAQ](https://www.navcen.uscg.gov/ais-frequently-asked-questions), and [MarineCadastre FAQ](https://coast.noaa.gov/data/marinecadastre/ais/faq.pdf). |
+
+This review covers the source terms available in August 2026. Provider terms,
+tiers, and endpoints can change; production ownership includes periodic review
+and preservation of source/license metadata in user-facing output.
 
 ### Why Marinesia is not an automatic fallback
 

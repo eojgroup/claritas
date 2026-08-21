@@ -145,6 +145,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_ENABLED, optional: true } }
             - name: AISSTREAM_SAMPLE_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_SAMPLE_SECONDS, optional: true } }
+            - name: AISSTREAM_FRESHNESS_MINUTES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_FRESHNESS_MINUTES, optional: true } }
             - name: AISSTREAM_IDLE_TIMEOUT_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_IDLE_TIMEOUT_SECONDS, optional: true } }
             - name: AISSTREAM_FLUSH_INTERVAL_SECONDS
@@ -159,6 +161,32 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_POLL_SECONDS, optional: true } }
             - name: DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DIGITRAFFIC_MARITIME_FRESHNESS_MINUTES, optional: true } }
+            - name: BARENTSWATCH_AIS_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-barentswatch-ais, key: BARENTSWATCH_AIS_CLIENT_ID, optional: true } }
+            - name: BARENTSWATCH_AIS_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-barentswatch-ais, key: BARENTSWATCH_AIS_CLIENT_SECRET, optional: true } }
+            - name: BARENTSWATCH_AIS_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: BARENTSWATCH_AIS_ENABLED, optional: true } }
+            - name: BARENTSWATCH_AIS_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: BARENTSWATCH_AIS_POLL_SECONDS, optional: true } }
+            - name: BARENTSWATCH_AIS_FRESHNESS_MINUTES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: BARENTSWATCH_AIS_FRESHNESS_MINUTES, optional: true } }
+            - name: KYSTVERKET_AIS_TCP_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KYSTVERKET_AIS_TCP_ENABLED, optional: true } }
+            - name: KYSTVERKET_AIS_TCP_PERSIST_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KYSTVERKET_AIS_TCP_PERSIST_ENABLED, optional: true } }
+            - name: KYSTVERKET_AIS_TCP_HOST
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KYSTVERKET_AIS_TCP_HOST, optional: true } }
+            - name: KYSTVERKET_AIS_TCP_PORT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: KYSTVERKET_AIS_TCP_PORT, optional: true } }
+            - name: MPA_OCEANS_X_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-mpa-oceans-x, key: MPA_OCEANS_X_API_KEY, optional: true } }
+            - name: MPA_OCEANS_X_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: MPA_OCEANS_X_ENABLED, optional: true } }
+            - name: MPA_OCEANS_X_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: MPA_OCEANS_X_POLL_SECONDS, optional: true } }
+            - name: MPA_OCEANS_X_FRESHNESS_MINUTES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: MPA_OCEANS_X_FRESHNESS_MINUTES, optional: true } }
             - name: TRANSPORT_RUNTIME_FRESHNESS_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_RUNTIME_FRESHNESS_SECONDS, optional: true } }
             - name: TRANSPORT_WORKER_LOCK_RETRY_SECONDS

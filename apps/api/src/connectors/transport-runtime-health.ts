@@ -11,6 +11,26 @@ export type TransportRetentionHealth = {
   error: boolean;
 };
 
+export type TransportRegionalRuntimeHealthInput = {
+  id: string;
+  provider: string;
+  configured: boolean;
+  /**
+   * Some regional feeds can be connected for diagnostics without being
+   * suitable for release readiness. Callers must make that trust decision
+   * explicitly so a newly added transport cannot silently become a fallback.
+   */
+  readinessEligible: boolean;
+  transport?: string;
+  lastRefreshAt: number | null;
+  lastSnapshotAt: number | null;
+  lastStoredAt: number | null;
+  error: boolean;
+  coverage: string;
+  license?: string | null;
+  global?: boolean;
+};
+
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false;
   const normalized = address.toLowerCase().split("%")[0];
@@ -41,11 +61,7 @@ export type TransportRuntimeHealthInput = {
   primaryLastSnapshotAt: number | null;
   primaryLastStoredAt: number | null;
   primaryError: boolean;
-  fallbackConfigured: boolean;
-  fallbackLastRefreshAt: number | null;
-  fallbackLastSnapshotAt: number | null;
-  fallbackLastStoredAt: number | null;
-  fallbackError: boolean;
+  regionalSources: TransportRegionalRuntimeHealthInput[];
   retention: TransportRetentionHealth;
 };
 
@@ -79,11 +95,6 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
     input.primaryLastSnapshotAt,
     input.primaryLastStoredAt,
   );
-  const fallbackStateAt = input.fallbackLastRefreshAt;
-  const fallbackTrafficAt = mostRecent(
-    input.fallbackLastSnapshotAt,
-    input.fallbackLastStoredAt,
-  );
   const primaryCurrent =
     input.primaryConfigured &&
     input.primaryConnected &&
@@ -94,16 +105,67 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
     // transport feature appear healthy.
     isCurrent(input.now, input.primaryLastSnapshotAt, input.freshnessMilliseconds) &&
     isCurrent(input.now, input.primaryLastStoredAt, input.freshnessMilliseconds);
-  const fallbackCurrent =
-    input.fallbackConfigured &&
-    !input.fallbackError &&
-    isCurrent(input.now, fallbackStateAt, input.freshnessMilliseconds);
   const primaryTrafficCurrent =
     input.primaryConfigured &&
     isCurrent(input.now, primaryTrafficAt, input.freshnessMilliseconds);
-  const fallbackTrafficCurrent =
-    input.fallbackConfigured &&
-    isCurrent(input.now, fallbackTrafficAt, input.freshnessMilliseconds);
+  const regionalSources = input.regionalSources.map((source) => {
+    const readinessEligible = source.readinessEligible;
+    const stateAt = mostRecent(
+      source.lastRefreshAt,
+      source.lastSnapshotAt,
+      source.lastStoredAt,
+    );
+    const trafficAt = mostRecent(source.lastSnapshotAt, source.lastStoredAt);
+    return {
+      id: source.id,
+      provider: source.provider,
+      transport: source.transport ?? null,
+      configured: source.configured,
+      readiness_eligible: readinessEligible,
+      current:
+        source.configured &&
+        readinessEligible &&
+        !source.error &&
+        isCurrent(input.now, stateAt, input.freshnessMilliseconds),
+      traffic_current:
+        source.configured &&
+        isCurrent(input.now, trafficAt, input.freshnessMilliseconds),
+      last_state_at: isoTimestamp(stateAt),
+      last_traffic_at: isoTimestamp(trafficAt),
+      error: source.error,
+      coverage: source.coverage,
+      license: source.license ?? null,
+      global: source.global ?? false,
+    };
+  });
+  const regionalCurrent = regionalSources.some((source) => source.current);
+  const configuredRegionalSources = regionalSources.filter(
+    (source) => source.configured && source.readiness_eligible,
+  );
+  const configuredOrFirstRegionalSource =
+    configuredRegionalSources.length === 1
+      ? configuredRegionalSources[0]
+      : regionalSources[0];
+  const configuredRegionalInputs = input.regionalSources.filter(
+    (source) => source.configured && source.readinessEligible,
+  );
+  const fallbackStateAt = mostRecent(
+    ...configuredRegionalInputs.map((source) =>
+      mostRecent(source.lastRefreshAt, source.lastSnapshotAt, source.lastStoredAt),
+    ),
+  );
+  const fallbackTrafficAt = mostRecent(
+    ...configuredRegionalInputs.map((source) =>
+      mostRecent(source.lastSnapshotAt, source.lastStoredAt),
+    ),
+  );
+  const fallbackConfigured = configuredRegionalSources.length > 0;
+  const fallbackTrafficCurrent = configuredRegionalSources.some(
+    (source) => source.traffic_current,
+  );
+  const fallbackError =
+    configuredRegionalSources.length > 0 &&
+    configuredRegionalSources.every((source) => source.error);
 
   const state = !input.workerStarted
     ? "not_started"
@@ -111,7 +173,7 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
       ? "standby"
       : primaryCurrent
         ? "live_primary"
-        : fallbackCurrent
+        : regionalCurrent
           ? "regional_fallback"
           : "unavailable";
   const ready = state === "live_primary" || state === "regional_fallback";
@@ -137,16 +199,25 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
       service_level: "beta_no_sla",
     },
     fallback: {
-      provider: "Fintraffic Digitraffic",
-      configured: input.fallbackConfigured,
-      current: fallbackCurrent,
+      provider:
+        configuredRegionalSources.length > 1
+          ? "Official regional AIS providers"
+          : configuredOrFirstRegionalSource?.provider ?? "Official regional AIS providers",
+      configured: fallbackConfigured,
+      current: regionalCurrent,
       traffic_current: fallbackTrafficCurrent,
       last_state_at: isoTimestamp(fallbackStateAt),
       last_traffic_at: isoTimestamp(fallbackTrafficAt),
-      error: input.fallbackError,
-      coverage: "finland_and_nearby_baltic_reception",
+      error: fallbackError,
+      coverage:
+        configuredRegionalSources.length === 1
+          ? configuredRegionalSources[0].coverage
+          : configuredRegionalSources.length > 1
+            ? "official_regional_reception_only"
+            : configuredOrFirstRegionalSource?.coverage ?? "regional_reception_only",
       global: false,
     },
+    regional_sources: regionalSources,
     retention: input.retention,
   };
 }

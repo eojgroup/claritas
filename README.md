@@ -215,6 +215,9 @@ The API requires the database environment variables documented in
   - `PODCASTINDEX_API_KEY`
   - `PODCASTINDEX_API_SECRET`
   - `AISSTREAM_API_KEY`
+  - `BARENTSWATCH_AIS_CLIENT_ID`
+  - `BARENTSWATCH_AIS_CLIENT_SECRET`
+  - `MPA_OCEANS_X_API_KEY`
 - Podcast discovery and intelligence:
   - Create a free developer account at `https://api.podcastindex.org` and generate an API key
     and secret. Keep both server-side.
@@ -318,13 +321,28 @@ The API requires the database environment variables documented in
     preserving original publisher evidence. Their prompts can still translate
     uncached evidence, and deterministic fallbacks identify any untranslated
     non-English title instead of silently transforming it.
-- Transport intelligence combines AISstream maritime data with keyless adsb.lol
-  flight positions and plausible routes. See
+- Transport intelligence combines AISstream and official regional maritime
+  sources with keyless adsb.lol flight positions and plausible routes. See
   [transport intelligence](docs/transport-intelligence.md) for sampling,
-  country linkage, platform detail levels, and provider operating notes.
+  country linkage, platform detail levels, provider configuration, and the
+  commercial-use review for included and excluded regional AIS sources.
   - Create the AISstream credential as the GitHub repository secret
     `AISSTREAM_API_KEY`; the deployment writes it to Kubernetes secret
     `claritas-aisstream` under the same key.
+  - For Norwegian AIS over HTTPS, create the repository secrets
+    `BARENTSWATCH_AIS_CLIENT_ID` and `BARENTSWATCH_AIS_CLIENT_SECRET`. The
+    deployment writes a complete pair to `claritas-barentswatch-ais`; a partial
+    pair is ignored so it cannot create a broken connector configuration.
+  - For the Singapore Maritime and Port Authority (MPA) OCEANS-X snapshot API,
+    create `MPA_OCEANS_X_API_KEY`. The deployment writes it to
+    `claritas-mpa-oceans-x`. This source is operated by MPA, not PSA.
+  - Norway and Singapore are enabled as optional regional paths but remain
+    `not_configured` without credentials. The public Kystverket NMEA stream is
+    disabled by default because it uses plaintext TCP; explicitly set
+    `KYSTVERKET_AIS_TCP_ENABLED=true` only after accepting that transport risk.
+    It remains diagnostic-only and cannot satisfy readiness; persisting its
+    positions requires the additional explicit
+    `KYSTVERKET_AIS_TCP_PERSIST_ENABLED=true` opt-in.
   - adsb.lol requires no API key. Its published data is ODbL 1.0.
 - Event-driven intelligence and Earth Observation:
   - `EVENT_CORRELATION_ENABLED`, `EARTH_OBSERVATION_ENABLED`,
@@ -363,6 +381,9 @@ The API requires the database environment variables documented in
   - `claritas-fred` / `FRED_API_KEY`
   - `claritas-podcastindex` / `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`
   - `claritas-aisstream` / `AISSTREAM_API_KEY`
+  - `claritas-barentswatch-ais` / `BARENTSWATCH_AIS_CLIENT_ID`,
+    `BARENTSWATCH_AIS_CLIENT_SECRET`
+  - `claritas-mpa-oceans-x` / `MPA_OCEANS_X_API_KEY`
   - `claritas-earth-observation` / `COPERNICUS_CLIENT_ID`,
     `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY` (only configured keys are written)
   - `claritas-apns` / `APNS_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`, and
@@ -370,6 +391,8 @@ The API requires the database environment variables documented in
 - Production secret source (recommended):
   - GitHub repository secrets: `OPENWEATHER_API_KEY`, `FRED_API_KEY`,
     `PODCASTINDEX_API_KEY`, `PODCASTINDEX_API_SECRET`, `AISSTREAM_API_KEY`,
+    `BARENTSWATCH_AIS_CLIENT_ID`, `BARENTSWATCH_AIS_CLIENT_SECRET`,
+    `MPA_OCEANS_X_API_KEY`,
     `COPERNICUS_CLIENT_ID`, `COPERNICUS_CLIENT_SECRET`, `NASA_FIRMS_MAP_KEY`,
     `APNS_PRIVATE_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`,
     `APNS_SANDBOX_PRIVATE_KEY`, `APNS_SANDBOX_KEY_ID`

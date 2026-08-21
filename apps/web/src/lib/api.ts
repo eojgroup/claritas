@@ -427,6 +427,33 @@ export type CountryMarketDetail = {
 
 export type TransportMode = "maritime" | "aviation";
 
+export type TransportSourceName =
+  | "aisstream"
+  | "digitraffic"
+  | "barentswatch"
+  | "kystverket"
+  | "mpa_oceans_x"
+  | "adsb_lol";
+
+export type RegionalMaritimeCoverageSource = {
+  source_name: Exclude<TransportSourceName, "aisstream" | "adsb_lol">;
+  provider: string;
+  transport: string;
+  coverage: string;
+  configured: boolean;
+  last_refresh_at?: string | null;
+  last_snapshot_at: string | null;
+  last_stored_at: string | null;
+  error: boolean;
+  snapshots_accepted: number;
+  snapshots_stored: number;
+  license: string;
+  global?: boolean;
+  source_url?: string | null;
+  terms_url?: string | null;
+  attribution?: string | null;
+};
+
 export type TransportModeAggregate = {
   active: number;
   routed: number;
@@ -538,7 +565,7 @@ export type TransportEntity = {
   linkage_confidence: "high" | "medium" | "low" | "none";
   status: string | null;
   is_alert: boolean;
-  source_name: "aisstream" | "digitraffic" | "adsb_lol";
+  source_name: TransportSourceName;
   observed_at: string;
   country_links: Array<{
     role: "current" | "origin" | "destination" | "flag" | "registration";
@@ -681,7 +708,7 @@ export type TransportOverview = {
       subscription_batch: number;
       subscription_batches: number;
       subscription_boxes?: number;
-      fallback_source: "Fintraffic Digitraffic";
+      fallback_source: string;
       fallback_coverage: string;
       global_fallback_available: false;
       fallback_configured: boolean;
@@ -690,7 +717,8 @@ export type TransportOverview = {
       fallback_error: boolean;
       fallback_snapshots_accepted: number;
       fallback_snapshots_stored: number;
-      fallback_license: "CC BY 4.0";
+      fallback_license: string;
+      regional_sources?: RegionalMaritimeCoverageSource[];
       coverage_note: string;
       freshness_minutes: number;
       movement_method: string;
