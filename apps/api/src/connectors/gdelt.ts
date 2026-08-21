@@ -143,7 +143,6 @@ export type ExistingGdeltItem = {
   country_inference: unknown;
   subject_country_iso2s: unknown;
   gkg: unknown;
-  dependent_count: number;
 };
 
 export type GdeltAliasPersistencePlan = {
@@ -1130,7 +1129,8 @@ const MERGED_GDELT_COUNTRY_SQL = `COALESCE(EXCLUDED.country_iso2,CASE
   WHEN ${trustedNewsDirectCountrySql("item")} THEN item.country_iso2
   ELSE NULL
 END)`;
-const MERGED_GDELT_PAYLOAD_SQL = `item.payload || EXCLUDED.payload || jsonb_build_object(
+const MERGED_GDELT_PAYLOAD_SQL = `(item.payload-'canonical_alias_of_item_id'-'canonical_alias_synchronized_at')
+  || EXCLUDED.payload || jsonb_build_object(
   'first_provider_seen_at',COALESCE(
     LEAST(
       NULLIF(COALESCE(item.payload->>'first_provider_seen_at',item.payload->>'provider_seen_at'),''),
@@ -1200,7 +1200,8 @@ const MERGED_GDELT_PAYLOAD_SQL = `item.payload || EXCLUDED.payload || jsonb_buil
 // row, retain the richer DOC payload while still merging canonical-alias time
 // and geography history. This keeps event_time and its provenance internally
 // consistent without letting the fallback replace DOC-specific metadata.
-const MERGED_GDELT_DOC_ALIAS_HISTORY_PAYLOAD_SQL = `item.payload || jsonb_build_object(
+const MERGED_GDELT_DOC_ALIAS_HISTORY_PAYLOAD_SQL = `(item.payload-'canonical_alias_of_item_id'-'canonical_alias_synchronized_at')
+  || jsonb_build_object(
   'canonical_url',EXCLUDED.payload->>'canonical_url',
   'canonical_url_algorithm',EXCLUDED.payload->>'canonical_url_algorithm',
   'gal_fallback_seen_at',EXCLUDED.payload->>'provider_seen_at',
@@ -1550,7 +1551,6 @@ function existingGdeltPreference(left: ExistingGdeltItem, right: ExistingGdeltIt
     return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
   };
   return Number(right.quality_status === "accepted") - Number(left.quality_status === "accepted")
-    || right.dependent_count - left.dependent_count
     || trust(right) - trust(left)
     // Equally trusted aliases must retain the earliest known effective time.
     // Choosing the newest alias here can promote an old syndicated story when
@@ -1767,16 +1767,7 @@ async function loadExistingGdeltItems(
             payload#>>'{country_inference,confidence}' AS country_inference_confidence,
             payload->'country_inference' AS country_inference,
             payload->'subject_country_iso2s' AS subject_country_iso2s,
-            payload->'gkg' AS gkg,
-            (
-              (SELECT count(*) FROM news_item_assessment assessment WHERE assessment.item_id=item.id)
-              +(SELECT count(*) FROM item_translation translation WHERE translation.item_id=item.id)
-              +(SELECT count(*) FROM personal_daily_briefing_item briefing WHERE briefing.item_id=item.id)
-              +(SELECT count(*) FROM intelligence_event_evidence evidence
-                WHERE evidence.source_record_type='item' AND evidence.source_record_id=item.id::text)
-              +(SELECT count(*) FROM intelligence_correlation_decision decision
-                WHERE decision.source_record_type='item' AND decision.source_record_id=item.id::text)
-            )::int AS dependent_count
+            payload->'gkg' AS gkg
      FROM item
      WHERE source_id=$1 AND kind='news_article'
        AND (
@@ -1798,156 +1789,128 @@ async function loadExistingGdeltItems(
   return grouped;
 }
 
-async function migrateGdeltAliasDependents(
+/**
+ * Keep pre-normalisation item identities readable instead of rejecting them.
+ * Item-id keyed assessments, translations, briefings and event evidence may
+ * still point at those rows, and queued correlation work may do so after this
+ * ingest returns. Synchronising their canonical story fields makes every
+ * alias converge under reader deduplication without a lossy cross-table move.
+ */
+async function synchronizeAcceptedGdeltAliases(
   survivorItemId: string | null,
   aliases: ExistingGdeltItem[],
-): Promise<void> {
-  if (!survivorItemId || !/^\d+$/.test(survivorItemId)) return;
+): Promise<number> {
+  if (!survivorItemId || !/^\d+$/.test(survivorItemId)) return 0;
   const aliasIds = Array.from(new Set(
     aliases
       .map((item) => item.id)
       .filter((id) => /^\d+$/.test(id) && id !== survivorItemId),
   ));
-  if (aliasIds.length === 0) return;
-
-  await withTransaction(async (client) => {
-    await client.query(
-      `SELECT id FROM item WHERE id=$1::bigint OR id=ANY($2::bigint[]) FOR UPDATE`,
-      [survivorItemId, aliasIds],
-    );
-    await client.query(
-      `WITH preferred AS MATERIALIZED (
-         SELECT methodology_version,primary_category,categories,tags,reasons,components,
-                score,tier,confidence,assessed_at,inputs_hash,created_at,updated_at
-         FROM news_item_assessment
-         WHERE item_id=$1::bigint OR item_id=ANY($2::bigint[])
-         ORDER BY assessed_at DESC,updated_at DESC,(item_id=$1::bigint) DESC
-         LIMIT 1
-       ), preserved AS (
-         INSERT INTO news_item_assessment (
-           item_id,methodology_version,primary_category,categories,tags,reasons,components,
-           score,tier,confidence,assessed_at,inputs_hash,created_at,updated_at
-         )
-         SELECT $1::bigint,methodology_version,primary_category,categories,tags,reasons,components,
-                score,tier,confidence,assessed_at,inputs_hash,created_at,updated_at
-         FROM preferred
-         ON CONFLICT (item_id) DO UPDATE SET
-           methodology_version=EXCLUDED.methodology_version,
-           primary_category=EXCLUDED.primary_category,categories=EXCLUDED.categories,
-           tags=EXCLUDED.tags,reasons=EXCLUDED.reasons,components=EXCLUDED.components,
-           score=EXCLUDED.score,tier=EXCLUDED.tier,confidence=EXCLUDED.confidence,
-           assessed_at=EXCLUDED.assessed_at,inputs_hash=EXCLUDED.inputs_hash
-         RETURNING item_id
+  if (aliasIds.length === 0) return 0;
+  const synchronized = await withTransaction(async (client) => {
+    // Aliases stay addressable for historical item-id dependents, but only
+    // the survivor may emit fresh intelligence work.
+    await client.query(`SELECT set_config('claritas.suppress_item_outbox','on',true)`);
+    return client.query<{ id: string }>(
+      `UPDATE item AS alias
+     SET title=survivor.title,
+         summary=COALESCE(survivor.summary,alias.summary),
+         url=survivor.url,
+         country_iso2=survivor.country_iso2,
+         event_time=survivor.event_time,
+         payload=(alias.payload-'quality_rejection_reason') || jsonb_build_object(
+           'quality_status','accepted',
+           'canonical_url',survivor.payload->>'canonical_url',
+           'canonical_url_algorithm',survivor.payload->>'canonical_url_algorithm',
+           'canonical_alias_of_item_id',survivor.id,
+           'canonical_alias_synchronized_at',now(),
+           'time_basis',survivor.payload->>'time_basis',
+           'time_precision',survivor.payload->>'time_precision',
+           'publication_time_source',survivor.payload->>'publication_time_source',
+           'publication_time_verified',COALESCE(
+             survivor.payload->>'publication_time_verified'='true',false
+           ),
+           'provider_discovery_fallback',COALESCE(
+             survivor.payload->>'provider_discovery_fallback'='true',false
+           ),
+           'quality_checked_at',survivor.payload->>'quality_checked_at',
+           'quality_checks',COALESCE(survivor.payload->'quality_checks','{}'::jsonb),
+           'publisher_published_at',survivor.payload->>'publisher_published_at',
+           'first_provider_seen_at',COALESCE(
+             LEAST(
+               NULLIF(COALESCE(alias.payload->>'first_provider_seen_at',alias.payload->>'provider_seen_at'),''),
+               NULLIF(survivor.payload->>'first_provider_seen_at','')
+             ),
+             NULLIF(COALESCE(alias.payload->>'first_provider_seen_at',alias.payload->>'provider_seen_at'),''),
+             NULLIF(survivor.payload->>'first_provider_seen_at','')
+           ),
+           'country_attribution',survivor.payload->>'country_attribution',
+           'country_inference',survivor.payload->'country_inference',
+           'subject_country_iso2s',COALESCE(survivor.payload->'subject_country_iso2s','[]'::jsonb),
+           'gkg',COALESCE(survivor.payload->'gkg','null'::jsonb)
+         ),
+         language_code=COALESCE(survivor.language_code,alias.language_code),
+         source_country_iso2=COALESCE(survivor.source_country_iso2,alias.source_country_iso2),
+         tone=COALESCE(survivor.tone,alias.tone),
+         updated_at=now()
+     FROM item AS survivor
+     WHERE survivor.id=$1::bigint
+       AND alias.id=ANY($2::bigint[])
+       AND alias.source_id=survivor.source_id
+       AND alias.kind='news_article'
+       AND (
+         alias.title IS DISTINCT FROM survivor.title
+         OR alias.summary IS DISTINCT FROM COALESCE(survivor.summary,alias.summary)
+         OR alias.url IS DISTINCT FROM survivor.url
+         OR alias.country_iso2 IS DISTINCT FROM survivor.country_iso2
+         OR alias.event_time IS DISTINCT FROM survivor.event_time
+         OR alias.payload->>'quality_status' IS DISTINCT FROM 'accepted'
+         OR alias.payload->>'canonical_url' IS DISTINCT FROM survivor.payload->>'canonical_url'
+         OR alias.payload->>'canonical_url_algorithm' IS DISTINCT FROM survivor.payload->>'canonical_url_algorithm'
+         OR alias.payload->>'canonical_alias_of_item_id' IS DISTINCT FROM survivor.id::text
+         OR alias.payload ? 'quality_rejection_reason'
+         OR alias.payload->>'time_basis' IS DISTINCT FROM survivor.payload->>'time_basis'
+         OR alias.payload->>'time_precision' IS DISTINCT FROM survivor.payload->>'time_precision'
+         OR alias.payload->>'publication_time_source' IS DISTINCT FROM survivor.payload->>'publication_time_source'
+         OR alias.payload->'publication_time_verified' IS DISTINCT FROM to_jsonb(COALESCE(
+              survivor.payload->>'publication_time_verified'='true',false
+            ))
+         OR alias.payload->'provider_discovery_fallback' IS DISTINCT FROM to_jsonb(COALESCE(
+              survivor.payload->>'provider_discovery_fallback'='true',false
+            ))
+         OR alias.payload->>'quality_checked_at' IS DISTINCT FROM survivor.payload->>'quality_checked_at'
+         OR alias.payload->'quality_checks' IS DISTINCT FROM COALESCE(
+              survivor.payload->'quality_checks','{}'::jsonb
+            )
+         OR alias.payload->>'publisher_published_at' IS DISTINCT FROM survivor.payload->>'publisher_published_at'
+         OR COALESCE(alias.payload->>'first_provider_seen_at',alias.payload->>'provider_seen_at')
+              IS DISTINCT FROM COALESCE(
+                LEAST(
+                  NULLIF(COALESCE(alias.payload->>'first_provider_seen_at',alias.payload->>'provider_seen_at'),''),
+                  NULLIF(survivor.payload->>'first_provider_seen_at','')
+                ),
+                NULLIF(COALESCE(alias.payload->>'first_provider_seen_at',alias.payload->>'provider_seen_at'),''),
+                NULLIF(survivor.payload->>'first_provider_seen_at','')
+              )
+         OR alias.payload->>'country_attribution' IS DISTINCT FROM survivor.payload->>'country_attribution'
+         OR alias.payload->'country_inference' IS DISTINCT FROM COALESCE(
+              survivor.payload->'country_inference','null'::jsonb
+            )
+         OR alias.payload->'subject_country_iso2s' IS DISTINCT FROM COALESCE(
+              survivor.payload->'subject_country_iso2s','[]'::jsonb
+            )
+         OR alias.payload->'gkg' IS DISTINCT FROM COALESCE(
+              survivor.payload->'gkg','null'::jsonb
+            )
+         OR alias.language_code IS DISTINCT FROM COALESCE(survivor.language_code,alias.language_code)
+         OR alias.source_country_iso2 IS DISTINCT FROM COALESCE(survivor.source_country_iso2,alias.source_country_iso2)
+         OR alias.tone IS DISTINCT FROM COALESCE(survivor.tone,alias.tone)
        )
-       DELETE FROM news_item_assessment WHERE item_id=ANY($2::bigint[])`,
-      [survivorItemId, aliasIds],
-    );
-    await client.query(
-      `WITH preferred AS MATERIALIZED (
-         SELECT DISTINCT ON (target_language_code)
-                target_language_code,translated_title,generated_summary,summary_status,
-                source_title_hash,source_summary_hash,provider,model,generation_metadata,
-                title_generated_at,summary_generated_at,created_at,updated_at
-         FROM item_translation
-         WHERE item_id=$1::bigint OR item_id=ANY($2::bigint[])
-         ORDER BY target_language_code,updated_at DESC,title_generated_at DESC,(item_id=$1::bigint) DESC
-       ), preserved AS (
-         INSERT INTO item_translation (
-           item_id,target_language_code,translated_title,generated_summary,summary_status,
-           source_title_hash,source_summary_hash,provider,model,generation_metadata,
-           title_generated_at,summary_generated_at,created_at,updated_at
-         )
-         SELECT $1::bigint,target_language_code,translated_title,generated_summary,summary_status,
-                source_title_hash,source_summary_hash,provider,model,generation_metadata,
-                title_generated_at,summary_generated_at,created_at,updated_at
-         FROM preferred
-         ON CONFLICT (item_id,target_language_code) DO UPDATE SET
-           translated_title=EXCLUDED.translated_title,generated_summary=EXCLUDED.generated_summary,
-           summary_status=EXCLUDED.summary_status,source_title_hash=EXCLUDED.source_title_hash,
-           source_summary_hash=EXCLUDED.source_summary_hash,provider=EXCLUDED.provider,
-           model=EXCLUDED.model,generation_metadata=EXCLUDED.generation_metadata,
-           title_generated_at=EXCLUDED.title_generated_at,
-           summary_generated_at=EXCLUDED.summary_generated_at
-         RETURNING item_id
-       )
-       DELETE FROM item_translation WHERE item_id=ANY($2::bigint[])`,
-      [survivorItemId, aliasIds],
-    );
-    await client.query(
-      `WITH preferred AS MATERIALIZED (
-         SELECT DISTINCT ON (briefing_id)
-                briefing_id,relevance_score,relevance_reasons
-         FROM personal_daily_briefing_item
-         WHERE item_id=$1::bigint OR item_id=ANY($2::bigint[])
-         ORDER BY briefing_id,relevance_score DESC,(item_id=$1::bigint) DESC
-       ), preserved AS (
-         INSERT INTO personal_daily_briefing_item (
-           briefing_id,item_id,relevance_score,relevance_reasons
-         )
-         SELECT briefing_id,$1::bigint,relevance_score,relevance_reasons FROM preferred
-         ON CONFLICT (briefing_id,item_id) DO UPDATE SET
-           relevance_score=GREATEST(personal_daily_briefing_item.relevance_score,EXCLUDED.relevance_score),
-           relevance_reasons=CASE
-             WHEN EXCLUDED.relevance_score>personal_daily_briefing_item.relevance_score
-               THEN EXCLUDED.relevance_reasons
-             ELSE personal_daily_briefing_item.relevance_reasons
-           END
-         RETURNING item_id
-       )
-       DELETE FROM personal_daily_briefing_item WHERE item_id=ANY($2::bigint[])`,
-      [survivorItemId, aliasIds],
-    );
-    await client.query(
-      `DELETE FROM intelligence_event_evidence alias_evidence
-       USING intelligence_event_evidence preferred_evidence
-       WHERE alias_evidence.source_record_type='item'
-         AND alias_evidence.source_record_id=ANY($2::text[])
-         AND preferred_evidence.source_record_type='item'
-         AND preferred_evidence.source_record_id=ANY(array_prepend($1::text,$2::text[]))
-         AND preferred_evidence.event_id=alias_evidence.event_id
-         AND preferred_evidence.domain=alias_evidence.domain
-         AND preferred_evidence.id<>alias_evidence.id
-         AND (
-           preferred_evidence.source_record_id=$1
-           OR (
-             preferred_evidence.source_record_id=ANY($2::text[])
-             AND preferred_evidence.id::text<alias_evidence.id::text
-           )
-         )`,
-      [survivorItemId, aliasIds],
-    );
-    await client.query(
-      `UPDATE intelligence_event_evidence
-       SET source_record_id=$1
-       WHERE source_record_type='item' AND source_record_id=ANY($2::text[])`,
-      [survivorItemId, aliasIds],
-    );
-    await client.query(
-      `DELETE FROM intelligence_correlation_decision alias_decision
-       USING intelligence_correlation_decision preferred_decision
-       WHERE alias_decision.source_record_type='item'
-         AND alias_decision.source_record_id=ANY($2::text[])
-         AND preferred_decision.source_record_type='item'
-         AND preferred_decision.source_record_id=ANY(array_prepend($1::text,$2::text[]))
-         AND preferred_decision.selected_event_id=alias_decision.selected_event_id
-         AND preferred_decision.decision=alias_decision.decision
-         AND preferred_decision.id<>alias_decision.id
-         AND (
-           preferred_decision.source_record_id=$1
-           OR (
-             preferred_decision.source_record_id=ANY($2::text[])
-             AND preferred_decision.id::text<alias_decision.id::text
-           )
-         )`,
-      [survivorItemId, aliasIds],
-    );
-    await client.query(
-      `UPDATE intelligence_correlation_decision
-       SET source_record_id=$1
-       WHERE source_record_type='item' AND source_record_id=ANY($2::text[])`,
+     RETURNING alias.id::text`,
       [survivorItemId, aliasIds],
     );
   });
+  return synchronized.rows.length;
 }
 
 export function parseGdeltTimestamp(value: string | undefined): string | null {
@@ -3012,6 +2975,7 @@ async function ingestDocArticles(
   unchanged: number;
   skipped: number;
   quality_quarantined: number;
+  canonical_aliases_synchronized: number;
   provider_first_seen_accepted: number;
   gkg_sampled: number;
   gkg_matched: number;
@@ -3215,6 +3179,7 @@ async function ingestDocArticles(
   let unchanged = 0;
   let skipped = Math.max(0, rawArticleCount - articles.length);
   let quarantined = 0;
+  let aliasesSynchronized = 0;
   let providerFirstSeenAccepted = 0;
   const qualityRejections: Record<string, number> = {};
   let latestEventTime: string | null = null;
@@ -3418,21 +3383,10 @@ async function ingestDocArticles(
     acceptedPersistedUrls.add(url);
     const persistedEventTime = result.rows[0]?.event_time ?? candidate.existing?.event_time ?? eventTime;
     if (!latestEventTime || persistedEventTime > latestEventTime) latestEventTime = persistedEventTime;
-    await migrateGdeltAliasDependents(
+    aliasesSynchronized += await synchronizeAcceptedGdeltAliases(
       result.rows[0]?.id ?? aliasHistory.persistenceItemId,
       candidate.existingAliases ?? [],
     );
-    for (const alias of candidate.existingAliases ?? []) {
-      if (alias.external_id === externalId) continue;
-      if (await quarantineGdeltArticle(
-        sourceId,
-        alias.external_id,
-        article.title,
-        "canonical_duplicate_merged",
-        verificationNow.toISOString(),
-        providerSeenAt,
-      )) quarantined += 1;
-    }
     acceptedByLane.set(laneId, (acceptedByLane.get(laneId) ?? 0) + 1);
   }
   for (const lane of discoveryLanes) {
@@ -3449,6 +3403,7 @@ async function ingestDocArticles(
     unchanged,
     skipped,
     quality_quarantined: quarantined,
+    canonical_aliases_synchronized: aliasesSynchronized,
     provider_first_seen_accepted: providerFirstSeenAccepted,
     gkg_sampled: gkg.sampled,
     gkg_matched: gkg.matched,
@@ -3575,6 +3530,7 @@ async function ingestGalFallback(
   let unchanged = 0;
   let skipped = parsed.skipped;
   let quarantined = 0;
+  let aliasesSynchronized = 0;
   let providerFirstSeenAccepted = 0;
   const qualityRejections: Record<string, number> = {};
   let latestEventTime: string | null = null;
@@ -3736,21 +3692,10 @@ async function ingestGalFallback(
     else updated += 1;
     const persistedEventTime = result.rows[0]?.event_time ?? candidate.existing?.event_time ?? eventTime;
     if (!latestEventTime || persistedEventTime > latestEventTime) latestEventTime = persistedEventTime;
-    await migrateGdeltAliasDependents(
+    aliasesSynchronized += await synchronizeAcceptedGdeltAliases(
       result.rows[0]?.id ?? aliasHistory.persistenceItemId,
       candidate.existingAliases ?? [],
     );
-    for (const alias of candidate.existingAliases ?? []) {
-      if (alias.external_id === aliasHistory.persistenceExternalId) continue;
-      if (await quarantineGdeltArticle(
-        sourceId,
-        alias.external_id,
-        article.title,
-        "canonical_duplicate_merged",
-        verificationNow.toISOString(),
-        article.eventTime,
-      )) quarantined += 1;
-    }
   }
 
   return {
@@ -3764,6 +3709,7 @@ async function ingestGalFallback(
     unchanged,
     skipped,
     quality_quarantined: quarantined,
+    canonical_aliases_synchronized: aliasesSynchronized,
     provider_first_seen_accepted: providerFirstSeenAccepted,
     quality_rejections: qualityRejections,
     latest_event_time: latestEventTime,

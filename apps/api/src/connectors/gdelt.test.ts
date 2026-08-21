@@ -444,22 +444,19 @@ test("GDELT conflict updates retain trusted country evidence through a transient
   );
 });
 
-test("GDELT alias consolidation preserves item-id dependents before quarantine", () => {
+test("GDELT alias synchronization preserves item identity without re-emitting news", () => {
   const source = readFileSync(resolve(__dirname, "gdelt.ts"), "utf8");
-  const migration = source.slice(
-    source.indexOf("async function migrateGdeltAliasDependents"),
+  const synchronization = source.slice(
+    source.indexOf("async function synchronizeAcceptedGdeltAliases"),
     source.indexOf("export function parseGdeltTimestamp"),
   );
-  assert.match(migration, /withTransaction/);
-  for (const relation of [
-    "news_item_assessment",
-    "item_translation",
-    "personal_daily_briefing_item",
-    "intelligence_event_evidence",
-    "intelligence_correlation_decision",
-  ]) {
-    assert.match(migration, new RegExp(relation));
-  }
+  assert.match(synchronization, /withTransaction/);
+  assert.match(synchronization, /claritas\.suppress_item_outbox/);
+  assert.match(synchronization, /canonical_alias_of_item_id/);
+  assert.match(synchronization, /'quality_status','accepted'/);
+  assert.match(synchronization, /'quality_checked_at',survivor\.payload->>'quality_checked_at'/);
+  assert.match(synchronization, /'quality_checks',COALESCE\(survivor\.payload->'quality_checks','\{\}'::jsonb\)/);
+  assert.match(synchronization, /alias\.payload->'publication_time_verified' IS DISTINCT FROM to_jsonb\(COALESCE/);
   const docPersistence = source.slice(
     source.indexOf("const dedupeHash = gdeltArticleDedupeHash(url)"),
     source.indexOf("acceptedByLane.set", source.indexOf("const dedupeHash = gdeltArticleDedupeHash(url)")),
@@ -469,7 +466,24 @@ test("GDELT alias consolidation preserves item-id dependents before quarantine",
     source.indexOf("return {", source.indexOf("const dedupeHash = gdeltArticleDedupeHash(article.url)")),
   );
   for (const persistence of [docPersistence, galPersistence]) {
-    assert.ok(persistence.indexOf("migrateGdeltAliasDependents") < persistence.indexOf("canonical_duplicate_merged"));
+    assert.match(persistence, /synchronizeAcceptedGdeltAliases/);
+    assert.doesNotMatch(persistence, /canonical_duplicate_merged/);
+  }
+});
+
+test("canonical GDELT aliases stay addressable but cannot re-enter live news collections", () => {
+  const collectionFiles = [
+    "../personal-briefing.ts",
+    "../index.ts",
+    "../news-translation.ts",
+  ];
+  for (const file of collectionFiles) {
+    const source = readFileSync(resolve(__dirname, file), "utf8");
+    assert.match(
+      source,
+      /NOT\s*\([\s\S]{0,180}canonical_alias_of_item_id/,
+      `${file} must exclude synchronized aliases from new selection or aggregation`,
+    );
   }
 });
 

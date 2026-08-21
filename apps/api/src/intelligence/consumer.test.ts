@@ -18,6 +18,10 @@ test("legacy GDELT articles stay hidden until the publisher-date quality check a
   assert.equal(isAcceptedNewsQuality(null, "GDELT"), false);
   assert.equal(isAcceptedNewsQuality({ quality_status: "rejected" }, "gdelt"), false);
   assert.equal(isAcceptedNewsQuality({ quality_status: "accepted" }, "gdelt"), true);
+  assert.equal(isAcceptedNewsQuality({
+    quality_status: "accepted",
+    canonical_alias_of_item_id: 42,
+  }, "gdelt"), false);
   assert.equal(isAcceptedNewsQuality({}, "institutional_rss"), true);
 });
 

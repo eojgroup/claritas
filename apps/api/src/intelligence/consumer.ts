@@ -103,7 +103,12 @@ export function isAcceptedNewsQuality(payload: unknown, sourceName: unknown) {
   // policy fixes keep generating investigation events.
   const requiresVerifiedQuality = String(sourceName ?? "").toLowerCase() === "gdelt";
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return !requiresVerifiedQuality;
-  const status = (payload as Record<string, unknown>).quality_status;
+  const record = payload as Record<string, unknown>;
+  // Canonical aliases remain readable so historical translations, briefings,
+  // and evidence keep their item identity. Only the survivor is allowed to
+  // create new intelligence evidence or corroboration.
+  if (record.canonical_alias_of_item_id != null) return false;
+  const status = record.quality_status;
   return status === "accepted" || (status == null && !requiresVerifiedQuality);
 }
 

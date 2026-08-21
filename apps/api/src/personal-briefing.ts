@@ -834,6 +834,10 @@ async function selectSignals(
            OR lower(s.name) <> 'gdelt'
            OR i.payload->>'quality_status' = 'accepted'
          )
+         AND NOT (
+           lower(s.name) = 'gdelt'
+           AND i.payload ? 'canonical_alias_of_item_id'
+         )
          AND (
            NULLIF(btrim(translation.translated_title), '') IS NOT NULL
            OR i.kind <> 'news_article'

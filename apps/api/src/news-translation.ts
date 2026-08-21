@@ -310,6 +310,10 @@ async function loadPendingCandidates(
   const ids = itemIds?.filter((value) => Number.isSafeInteger(value) && value > 0).slice(0, 50) ?? [];
   const params: unknown[] = [targetLanguage, limit];
   const idFilter = ids.length > 0 ? `AND i.id = ANY($3::bigint[])` : "";
+  // Explicit item requests remain addressable for historical drill-down. The
+  // automatic queue processes only canonical stories so synchronized aliases
+  // cannot consume translation budget or starve fresh reporting.
+  const aliasFilter = ids.length > 0 ? "" : "AND NOT (i.payload ? 'canonical_alias_of_item_id')";
   if (ids.length > 0) params.push(ids);
   const { rows } = await query<NewsTranslationCandidate>(
     `SELECT i.id, i.title, i.summary, lower(i.language_code) AS language_code
@@ -325,6 +329,7 @@ async function loadPendingCandidates(
        AND i.language_code IS NOT NULL
        AND split_part(lower(i.language_code), '-', 1) <> split_part($1, '-', 1)
        AND translation.item_id IS NULL
+       ${aliasFilter}
        ${idFilter}
      -- Do not let a permanently replenished newest-first window starve stories
      -- that narrowly missed an earlier batch. Keep current reporting ahead of
@@ -830,7 +835,8 @@ export async function runPendingNewsHeadlineTranslations(options: {
        AND i.title IS NOT NULL
        AND i.language_code IS NOT NULL
        AND split_part(lower(i.language_code), '-', 1) <> split_part($1, '-', 1)
-       AND translation.item_id IS NULL`,
+       AND translation.item_id IS NULL
+       AND NOT (i.payload ? 'canonical_alias_of_item_id')`,
     [targetLanguage],
   );
   return {
