@@ -47,7 +47,7 @@ struct NewsPriorityMetadataView: View {
 
     private var tierCode: String? {
         if item.importance?.is_fallback == true { return "unranked" }
-        item.importance?.tier?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return item.importance?.tier?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private var tierTone: Color {
