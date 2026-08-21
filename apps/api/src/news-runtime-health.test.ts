@@ -16,6 +16,8 @@ const healthy: NewsRuntimeHealthRow = {
   publisher_count: 8,
   latest_current_event_time: "2026-08-21T11:58:00Z",
   latest_verified_event_time: "2026-08-21T11:55:00Z",
+  publisher_anchor_24h_count: 12,
+  latest_publisher_anchor_24h_event_time: "2026-08-21T11:55:00Z",
   mapped_24h_count: 14,
   mapped_24h_countries: 7,
   non_gb_24h_count: 12,
@@ -113,7 +115,7 @@ test("news runtime health fails closed for stale markets or a GB-only heatmap", 
 test("first-seen reporting can supply current markets but not the publisher-time anchor", () => {
   const currentFallback = evaluateNewsRuntimeHealth({
     ...healthy,
-    verified_count: 1,
+    verified_count: 0,
     verified_market_count: 0,
     publisher_count: 4,
   }, now);
@@ -125,6 +127,8 @@ test("first-seen reporting can supply current markets but not the publisher-time
     ...healthy,
     verified_count: 0,
     verified_market_count: 0,
+    publisher_anchor_24h_count: 0,
+    latest_publisher_anchor_24h_event_time: null,
   }, now);
   assert.equal(unanchored.ready, false);
   assert.equal(unanchored.checks.publisher_verified, false);
@@ -229,5 +233,6 @@ test("news runtime query shares trusted subject-country and accepted GDELT rules
   assert.match(sql, /result,gal_supplement,selected/);
   assert.match(sql, /result,gal_supplement_error/);
   assert.match(sql, /current_rollup AS/);
-  assert.match(sql, /FROM current_rollup\s+CROSS JOIN geography_rollup/);
+  assert.match(sql, /publisher_time_anchor AS/);
+  assert.match(sql, /FROM current_rollup\s+CROSS JOIN publisher_time_anchor\s+CROSS JOIN geography_rollup/);
 });

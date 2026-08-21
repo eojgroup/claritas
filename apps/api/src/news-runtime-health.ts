@@ -10,6 +10,8 @@ export type NewsRuntimeHealthRow = {
   publisher_count: number | string | null;
   latest_current_event_time: string | null;
   latest_verified_event_time: string | null;
+  publisher_anchor_24h_count: number | string | null;
+  latest_publisher_anchor_24h_event_time: string | null;
   mapped_24h_count: number | string | null;
   mapped_24h_countries: number | string | null;
   non_gb_24h_count: number | string | null;
@@ -61,6 +63,10 @@ export type NewsRuntimeHealth = {
     publishers: number;
     latest_event_time: string | null;
     latest_verified_event_time: string | null;
+  };
+  quality_anchor_24h: {
+    publisher_verified: number;
+    latest_event_time: string | null;
   };
   geography_24h: {
     mapped_stories: number;
@@ -165,6 +171,18 @@ export function buildNewsRuntimeHealthQuery(): string {
         AND (lower(current_source.name)<>'gdelt' OR current_item.payload->>'quality_status'='accepted')
         AND current_item.event_time>=now()-interval '24 hours'
         AND current_item.event_time<=now()+interval '5 minutes'
+    ), publisher_time_anchor AS (
+      SELECT count(DISTINCT story_key) FILTER (
+               WHERE COALESCE(payload->>'time_basis','') LIKE 'publisher_published%'
+                  OR lower(COALESCE(payload->>'publication_time_verified',''))
+                       IN ('true','t','1','yes','y','on')
+             )::int AS publisher_anchor_24h_count,
+             max(event_time) FILTER (
+               WHERE COALESCE(payload->>'time_basis','') LIKE 'publisher_published%'
+                  OR lower(COALESCE(payload->>'publication_time_verified',''))
+                       IN ('true','t','1','yes','y','on')
+             )::text AS latest_publisher_anchor_24h_event_time
+      FROM geography_news
     ), subject_countries AS MATERIALIZED (
       SELECT current_item.story_key,upper(BTRIM(current_item.country_iso2::text)) AS country
       FROM geography_news current_item
@@ -269,6 +287,8 @@ export function buildNewsRuntimeHealthQuery(): string {
            current_rollup.publisher_count,
            current_rollup.latest_current_event_time,
            current_rollup.latest_verified_event_time,
+           publisher_time_anchor.publisher_anchor_24h_count,
+           publisher_time_anchor.latest_publisher_anchor_24h_event_time,
            geography_rollup.mapped_24h_count,
            geography_rollup.mapped_24h_countries,
            geography_rollup.non_gb_24h_count,
@@ -297,6 +317,7 @@ export function buildNewsRuntimeHealthQuery(): string {
            CASE WHEN release_run.release_run_status='success'
              THEN release_run.release_run_finished_at::text ELSE NULL END AS latest_success_at
     FROM current_rollup
+    CROSS JOIN publisher_time_anchor
     CROSS JOIN geography_rollup
     CROSS JOIN release_run`;
 }
@@ -384,6 +405,7 @@ export function evaluateNewsRuntimeHealth(
   const verifiedCount = finiteCount(row?.verified_count ?? 0);
   const verifiedMarketCount = finiteCount(row?.verified_market_count ?? 0);
   const publisherCount = finiteCount(row?.publisher_count ?? 0);
+  const publisherAnchor24hCount = finiteCount(row?.publisher_anchor_24h_count ?? 0);
   const mappedStories = finiteCount(row?.mapped_24h_count ?? 0);
   const mappedCountries = finiteCount(row?.mapped_24h_countries ?? 0);
   const nonGbStories = finiteCount(row?.non_gb_24h_count ?? 0);
@@ -432,10 +454,11 @@ export function evaluateNewsRuntimeHealth(
     assessed: assessedCount >= Math.min(currentCount, 3) && assessmentRatio >= 0.6,
     // Provider discovery time is an honest chronology signal when the UI
     // labels it as first-seen rather than publisher-published. Require one
-    // independent publisher-time anchor for clock/quality sanity, while
-    // allowing the assessed current stream (including markets) to remain
-    // available during nights, weekends, and DOC rate-limit fallback.
-    publisher_verified: verifiedCount >= 1,
+    // independent publisher-time anchor for clock/quality sanity inside the
+    // same daily evidence window as geography, while allowing the assessed
+    // four-hour stream (including markets) to remain available during nights,
+    // weekends, and DOC rate-limit fallback.
+    publisher_verified: publisherAnchor24hCount >= 1,
     markets: marketCount >= 1,
     publisher_diversity: publisherCount >= 2,
     mapped_geography: mappedStories >= 2 && mappedCountries >= 2,
@@ -471,6 +494,10 @@ export function evaluateNewsRuntimeHealth(
       publishers: publisherCount,
       latest_event_time: row?.latest_current_event_time ?? null,
       latest_verified_event_time: row?.latest_verified_event_time ?? null,
+    },
+    quality_anchor_24h: {
+      publisher_verified: publisherAnchor24hCount,
+      latest_event_time: row?.latest_publisher_anchor_24h_event_time ?? null,
     },
     geography_24h: {
       mapped_stories: mappedStories,
