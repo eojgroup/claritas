@@ -1034,7 +1034,9 @@ test("GAL rejects generic market language and court-prefix false positives", asy
       <item><title>Automaker profits jump after quarterly sales</title><link>https://business.example.com/earnings/automaker-profit</link><pubDate>14 Aug 2026 09:47:05 +0000</pubDate></item>
       <item><title>Bank losses widen after loan defaults</title><link>https://business.example.com/earnings/bank-loss</link><pubDate>14 Aug 2026 09:47:00 +0000</pubDate></item>
       <item><title>Retailer warns of annual loss after weak demand</title><link>https://business.example.com/earnings/retailer-loss</link><pubDate>14 Aug 2026 09:46:55 +0000</pubDate></item>
+      <item><title>Bank reports a record loss after loan defaults</title><link>https://business.example.com/earnings/bank-record-loss</link><pubDate>14 Aug 2026 09:46:52 +0000</pubDate></item>
       <item><title>Team suffers painful loss after the final</title><link>https://sports.example.com/match/team-loss</link><pubDate>14 Aug 2026 09:46:50 +0000</pubDate></item>
+      <item><title>Team reports a record loss after the final match</title><link>https://sports.example.com/match/team-record-loss</link><pubDate>14 Aug 2026 09:46:45 +0000</pubDate></item>
       <item><title>Global markets tumble as investors reassess interest-rate risk</title><link>https://markets.example.com/news/global-selloff</link><pubDate>14 Aug 2026 09:47:00 +0000</pubDate></item>
       <item><title>Nasdaq closes at a record high after chip rally</title><link>https://finance.example.com/markets/nasdaq-record</link><pubDate>14 Aug 2026 09:46:00 +0000</pubDate></item>
       <item><title>S&amp;P 500 hits another record as inflation cools</title><link>https://index.example.com/news/sp500-record</link><pubDate>14 Aug 2026 09:45:00 +0000</pubDate></item>
@@ -1049,6 +1051,7 @@ test("GAL rejects generic market language and court-prefix false positives", asy
     "https://business.example.com/earnings/automaker-profit",
     "https://business.example.com/earnings/bank-loss",
     "https://business.example.com/earnings/retailer-loss",
+    "https://business.example.com/earnings/bank-record-loss",
     "https://markets.example.com/news/global-selloff",
     "https://finance.example.com/markets/nasdaq-record",
     "https://index.example.com/news/sp500-record",
@@ -1056,7 +1059,7 @@ test("GAL rejects generic market language and court-prefix false positives", asy
   ]));
   assert.equal(
     parsed.articles.filter((article) => article.discoveryLane === "companies_technology").length,
-    6,
+    7,
   );
   assert.equal(
     parsed.articles.filter((article) => article.discoveryLane === "markets_macro").length,
