@@ -143,6 +143,7 @@ test("GDELT DOC lanes degrade independently behind the shared rate limiter", () 
   );
   assert.match(ingestDoc, /for \(const lane of laneBudgets\)/);
   assert.match(ingestDoc, /const response = await fetchRetry\(apiUrl\.toString\(\), 2\)/);
+  assert.match(ingestDoc, /if \(\/\\bGDELT HTTP 429\\b\/i\.test\(message\)\) break/);
   assert.match(ingestDoc, /parseGdeltDocApiResponse\(await response\.text\(\)/);
   assert.match(ingestDoc, /status: "failed"/);
   assert.match(ingestDoc, /if \(!discoveryLanes\.some\(\(lane\) => lane\.status === "healthy"\)\)/);
@@ -156,6 +157,65 @@ test("GDELT DOC lanes degrade independently behind the shared rate limiter", () 
     source.indexOf("deferGdeltDocRequests(GDELT_DOC_MIN_REQUEST_SPACING_MS)")
       < source.indexOf("release();"),
     "provider cooldown and minimum spacing must be installed before the next queued request",
+  );
+});
+
+test("GDELT GAL isolates record-level persistence failures and gives its rolling feed headroom", async () => {
+  const {
+    canContinueAfterGdeltGalPersistenceFailure,
+    classifyGdeltGalPersistenceFailure,
+    fetchGdeltGalText,
+  } = await connector;
+  assert.equal(classifyGdeltGalPersistenceFailure({ code: "23505" }), "dedupe_conflict");
+  assert.equal(classifyGdeltGalPersistenceFailure({ code: "23503" }), "data_constraint");
+  assert.equal(classifyGdeltGalPersistenceFailure({ code: "57014" }), "database_timeout");
+  assert.equal(classifyGdeltGalPersistenceFailure({ code: "08006" }), "database_unavailable");
+  assert.equal(classifyGdeltGalPersistenceFailure(new Error("unknown persistence failure")), "persistence_error");
+  assert.equal(canContinueAfterGdeltGalPersistenceFailure({ code: "23505" }), true);
+  assert.equal(canContinueAfterGdeltGalPersistenceFailure({ code: "23503" }), true);
+  assert.equal(canContinueAfterGdeltGalPersistenceFailure({ code: "57014" }), false);
+  assert.equal(canContinueAfterGdeltGalPersistenceFailure({ code: "08006" }), false);
+  assert.equal(canContinueAfterGdeltGalPersistenceFailure(new Error("unknown")), false);
+
+  let requests = 0;
+  const recoveredBody = await fetchGdeltGalText("https://example.test/feed.rss", {
+    attempts: 2,
+    timeoutMs: 1_000,
+    wait: async () => undefined,
+    request: async () => {
+      requests += 1;
+      if (requests === 1) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/rss+xml" }),
+          text: async () => {
+            throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+          },
+        } as Response;
+      }
+      return new Response("<rss><channel /></rss>", {
+        status: 200,
+        headers: { "content-type": "application/rss+xml" },
+      });
+    },
+  });
+  assert.equal(recoveredBody, "<rss><channel /></rss>");
+  assert.equal(requests, 2, "a body-download timeout must issue a fresh GAL request");
+
+  const source = readFileSync(resolve(__dirname, "gdelt.ts"), "utf8");
+  const fallback = source.slice(
+    source.indexOf("async function ingestGalFallback"),
+    source.indexOf("export async function ingestTargetedGdeltNews"),
+  );
+  assert.match(fallback, /fetchGdeltGalText\([\s\S]*GDELT_GAL_REQUEST_TIMEOUT_MS/);
+  assert.match(fallback, /persistence_failure_classes/);
+  assert.ok(
+    fallback.indexOf("try {") < fallback.indexOf("const aliasHistory = planGdeltAliasPersistence"),
+  );
+  assert.ok(
+    fallback.indexOf("selected += 1") > fallback.indexOf("const result = await query"),
+    "GAL coverage must count only a successfully persisted or already-present story",
   );
 });
 

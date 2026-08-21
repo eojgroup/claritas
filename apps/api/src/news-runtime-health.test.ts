@@ -61,7 +61,7 @@ test("news runtime health exposes bounded exact-run GDELT diagnostics", () => {
     release_gdelt_doc_error:
       "All GDELT DOC discovery lanes failed: markets_macro: GDELT HTTP 429 for https://api.gdeltproject.org/api/v2/doc/doc?query=secret: token=do-not-log",
     release_gdelt_gal_error:
-      "request to https://example.invalid/feed?api_key=do-not-log timed out with token=do-not-log",
+      "request to https://example.invalid/feed?api_key=do-not-log was aborted due to timeout with token=do-not-log",
     release_gdelt_gal_status: "https://example.invalid/token=do-not-log",
     release_gdelt_doc_quality_rejections: {
       publisher_publication_unverified: "3",

@@ -55,6 +55,8 @@ export const GDELT_DOC_MIN_REQUEST_SPACING_MS = 12_000;
 const GDELT_DOC_REQUEST_TIMEOUT_MS = 35_000;
 const GDELT_DOC_MAX_RETRY_DELAY_MS = 30_000;
 const GDELT_DOC_RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const GDELT_GAL_REQUEST_TIMEOUT_MS = 60_000;
+const GDELT_GAL_MAX_RESPONSE_BYTES = 5_000_000;
 export const GDELT_CANONICAL_URL_ALGORITHM = "whatwg-url-v1";
 const GDELT_CANONICAL_RECONCILIATION_BATCH_SIZE = 500;
 let gdeltDocRequestTail: Promise<void> = Promise.resolve();
@@ -2734,6 +2736,76 @@ async function fetchRetry(url: string, attempts = 2): Promise<Response> {
   );
 }
 
+export async function fetchGdeltGalText(
+  url: string,
+  options: {
+    attempts?: number;
+    timeoutMs?: number;
+    maxBytes?: number;
+    request?: typeof fetch;
+    wait?: (milliseconds: number) => Promise<void>;
+  } = {},
+): Promise<string> {
+  const maximumAttempts = Math.max(1, Math.trunc(options.attempts ?? 3));
+  const timeoutMs = options.timeoutMs ?? GDELT_GAL_REQUEST_TIMEOUT_MS;
+  const maxBytes = options.maxBytes ?? GDELT_GAL_MAX_RESPONSE_BYTES;
+  const request = options.request ?? fetch;
+  const wait = options.wait ?? sleep;
+  const target = new URL(url);
+  let lastStatus: number | "network_error" = "network_error";
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+    let response: Response | null = null;
+    let retryable = true;
+    try {
+      response = await request(url, {
+        headers: {
+          accept: "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8",
+          "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
+        },
+        // Keep the signal alive while response.text() consumes the body. GAL
+        // is a rolling 1MB+ object, so a mid-download stall must be retried.
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      lastStatus = response.status;
+      if (!response.ok) {
+        retryable = GDELT_DOC_RETRYABLE_STATUSES.has(response.status);
+        const detail = (await response.text()).slice(0, 300);
+        lastError = new Error(`HTTP ${response.status}: ${detail}`);
+      } else {
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+        if (contentType && !/(?:application\/(?:rss\+xml|xml|octet-stream)|text\/(?:xml|plain))/.test(contentType)) {
+          retryable = false;
+          throw new Error(`Unexpected GDELT GAL content type: ${contentType}`);
+        }
+        const declaredBytes = Number(response.headers.get("content-length"));
+        if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+          retryable = false;
+          throw new Error(`GDELT GAL response exceeds ${maxBytes} bytes`);
+        }
+        const body = await response.text();
+        if (Buffer.byteLength(body, "utf8") > maxBytes) {
+          retryable = false;
+          throw new Error(`GDELT GAL response exceeds ${maxBytes} bytes`);
+        }
+        return body;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (!retryable || attempt === maximumAttempts - 1) break;
+    await wait(gdeltDocRetryDelayMs(response?.status ?? null, response?.headers.get("retry-after") ?? null, attempt));
+  }
+
+  const errorDetail = lastError instanceof Error ? lastError.message : String(lastError ?? "No response");
+  throw new Error(
+    `GDELT GAL HTTP ${lastStatus} after ${maximumAttempts} attempt(s) `
+    + `for ${target.origin}${target.pathname}: ${errorDetail}`,
+  );
+}
+
 function firstZipText(bytes: Uint8Array): string {
   const files = unzipSync(bytes);
   const first = Object.values(files)[0];
@@ -3226,6 +3298,7 @@ async function ingestDocArticles(
         accepted: 0,
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       discoveryLanes.push({
         id: lane.id,
         budget: lane.budget,
@@ -3233,8 +3306,12 @@ async function ingestDocArticles(
         fetched: 0,
         candidates: 0,
         accepted: 0,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       });
+      // A final 429 is an egress-wide provider throttle, not a topic-specific
+      // query failure. Further lanes from the same process/IP only extend the
+      // outage and can starve the independent GAL fallback behind them.
+      if (/\bGDELT HTTP 429\b/i.test(message)) break;
     }
   }
   if (!discoveryLanes.some((lane) => lane.status === "healthy")) {
@@ -3631,19 +3708,53 @@ export function hasUsableGdeltFallbackCoverage(result: {
     && now - eventTime <= maxAgeHours * 3_600_000;
 }
 
+export function classifyGdeltGalPersistenceFailure(error: unknown): string {
+  const candidate = error && typeof error === "object"
+    ? error as { code?: unknown; message?: unknown }
+    : {};
+  const code = typeof candidate.code === "string" ? candidate.code.toUpperCase() : "";
+  const message = typeof candidate.message === "string"
+    ? candidate.message.toLocaleLowerCase()
+    : String(error ?? "").toLocaleLowerCase();
+  if (code === "23505" || message.includes("duplicate key")) return "dedupe_conflict";
+  if (["23502", "23503", "23514", "22P02"].includes(code)
+      || /(?:foreign key|check constraint|null value|invalid input syntax)/.test(message)) {
+    return "data_constraint";
+  }
+  if (["57014", "55P03"].includes(code)
+      || /(?:statement timeout|query timeout|canceling statement|lock timeout)/.test(message)) {
+    return "database_timeout";
+  }
+  if (/^(?:08|53|57P0)/.test(code)
+      || /(?:connection terminated|connection refused|database system is starting)/.test(message)) {
+    return "database_unavailable";
+  }
+  return "persistence_error";
+}
+
+export function canContinueAfterGdeltGalPersistenceFailure(error: unknown): boolean {
+  return ["dedupe_conflict", "data_constraint"].includes(
+    classifyGdeltGalPersistenceFailure(error),
+  );
+}
+
 async function ingestGalFallback(
   sourceId: number,
   params: GdeltIngestParams,
   reason: "gdelt_doc_unavailable" | "coverage_diversity_supplement" = "gdelt_doc_unavailable",
 ): Promise<Record<string, unknown>> {
-  const response = await fetchRetry(process.env.GDELT_GAL_RSS_URL?.trim() || GAL_RSS_URL);
-  const xml = await response.text();
+  // GAL is a 1MB+ rolling document. Give the TLS-backed object download more
+  // headroom than small metadata requests and retry transient GCS stalls.
+  const xml = await fetchGdeltGalText(
+    process.env.GDELT_GAL_RSS_URL?.trim() || GAL_RSS_URL,
+    { attempts: 3, timeoutMs: GDELT_GAL_REQUEST_TIMEOUT_MS },
+  );
   const selectedLimit = clampInt(params.maxRecords ?? process.env.GDELT_GAL_MAX_ARTICLES, 1, 250, 25);
   const maxProviderSeenAgeHours = clampHours(process.env.GDELT_GAL_MAX_AGE_HOURS, 3);
   const parsed = parseGdeltGalRss(xml, {
     // Inspect a small bounded superset before source-date verification so a
     // few unverifiable results cannot starve the degraded fallback entirely.
-    limit: Math.min(selectedLimit * 4, 250),
+    limit: Math.min(selectedLimit * 3, 150),
     maxAgeHours: maxProviderSeenAgeHours,
   });
   const verificationNow = new Date();
@@ -3706,6 +3817,9 @@ async function ingestGalFallback(
   let skipped = parsed.skipped;
   let quarantined = 0;
   let aliasesSynchronized = 0;
+  let aliasSynchronizationFailures = 0;
+  let persistenceFailures = 0;
+  const persistenceFailureClasses: Record<string, number> = {};
   let providerFirstSeenAccepted = 0;
   const qualityRejections: Record<string, number> = {};
   let latestEventTime: string | null = null;
@@ -3728,8 +3842,15 @@ async function ingestGalFallback(
         ...(candidate.existingAliases ?? []).map((item) => item.external_id),
       ]));
       for (const alias of rejectionAliases) {
-        if (await quarantineGdeltArticle(sourceId, alias, article.title, quality.reason, verificationNow.toISOString(), article.eventTime)) {
-          quarantined += 1;
+        try {
+          if (await quarantineGdeltArticle(sourceId, alias, article.title, quality.reason, verificationNow.toISOString(), article.eventTime)) {
+            quarantined += 1;
+          }
+        } catch (error) {
+          persistenceFailures += 1;
+          const failureClass = classifyGdeltGalPersistenceFailure(error);
+          persistenceFailureClasses[failureClass] = (persistenceFailureClasses[failureClass] ?? 0) + 1;
+          if (!canContinueAfterGdeltGalPersistenceFailure(error)) throw error;
         }
       }
       continue;
@@ -3740,37 +3861,36 @@ async function ingestGalFallback(
       skipped += 1;
       continue;
     }
-    selected += 1;
-    const aliasHistory = planGdeltAliasPersistence(article.url, candidate.existingAliases ?? []);
-    const temporal = mergeGdeltAliasTemporalEvidence(aliasHistory, {
-      eventTime: quality.effectiveTime,
-      timeBasis: quality.timeBasis,
-      publication: quality.publication,
-      providerSeenAt: article.eventTime,
-    });
-    const eventTime = temporal.eventTime;
-    if (temporal.timeBasis === "provider_first_seen") providerFirstSeenAccepted += 1;
-    const subject = resolveGdeltArticleSubject({
-      title: article.title,
-      url: article.url,
-      context: candidate.context,
-    });
-    const hasCurrentSubjectCountry = Boolean(subject.countryIso2 || subject.subjectCountryIso2s.length > 0);
-    const subjectCountry = subject.countryIso2 ?? aliasHistory.countryIso2;
-    const subjectCountryIso2s = Array.from(new Set([
-      ...subject.subjectCountryIso2s,
-      ...aliasHistory.subjectCountryIso2s,
-      ...(subjectCountry ? [subjectCountry] : []),
-    ])).sort();
-    const countryAttribution = hasCurrentSubjectCountry
-      ? subject.countryAttribution
-      : aliasHistory.countryAttribution;
-    const countryInference = hasCurrentSubjectCountry
-      ? subject.inference
-      : aliasHistory.countryInference ?? subject.inference;
-    await ensureCountry(subjectCountry);
-    for (const country of subjectCountryIso2s) await ensureCountry(country);
-    const payload = {
+    try {
+      const aliasHistory = planGdeltAliasPersistence(article.url, candidate.existingAliases ?? []);
+      const temporal = mergeGdeltAliasTemporalEvidence(aliasHistory, {
+        eventTime: quality.effectiveTime,
+        timeBasis: quality.timeBasis,
+        publication: quality.publication,
+        providerSeenAt: article.eventTime,
+      });
+      const eventTime = temporal.eventTime;
+      const subject = resolveGdeltArticleSubject({
+        title: article.title,
+        url: article.url,
+        context: candidate.context,
+      });
+      const hasCurrentSubjectCountry = Boolean(subject.countryIso2 || subject.subjectCountryIso2s.length > 0);
+      const subjectCountry = subject.countryIso2 ?? aliasHistory.countryIso2;
+      const subjectCountryIso2s = Array.from(new Set([
+        ...subject.subjectCountryIso2s,
+        ...aliasHistory.subjectCountryIso2s,
+        ...(subjectCountry ? [subjectCountry] : []),
+      ])).sort();
+      const countryAttribution = hasCurrentSubjectCountry
+        ? subject.countryAttribution
+        : aliasHistory.countryAttribution;
+      const countryInference = hasCurrentSubjectCountry
+        ? subject.inference
+        : aliasHistory.countryInference ?? subject.inference;
+      await ensureCountry(subjectCountry);
+      for (const country of subjectCountryIso2s) await ensureCountry(country);
+      const payload = {
       provider: "gdelt",
       product: "gal-rss",
       canonical_url: article.url,
@@ -3819,9 +3939,9 @@ async function ingestGalFallback(
       } : {}),
       gkg: aliasHistory.gkg,
       license: { data: "GDELT unrestricted use with attribution", article: "Third-party publisher content" },
-    };
-    const dedupeHash = gdeltArticleDedupeHash(article.url);
-    const result = await query<{ id: string; inserted: boolean; event_time: string }>(
+      };
+      const dedupeHash = gdeltArticleDedupeHash(article.url);
+      const result = await query<{ id: string; inserted: boolean; event_time: string }>(
       `INSERT INTO item (
          source_id, external_id, kind, title, summary, url, country_iso2, event_time,
          payload, dedupe_hash, language_code, source_country_iso2, tone
@@ -3861,17 +3981,35 @@ async function ingestGalFallback(
             )
           )
        RETURNING id::text,(xmax = 0) AS inserted,event_time::text`,
-      [sourceId, aliasHistory.persistenceExternalId, article.title, article.url, subjectCountry, eventTime, JSON.stringify(payload), dedupeHash],
-    );
-    if (!result.rows[0]) unchanged += 1;
-    else if (result.rows[0].inserted) inserted += 1;
-    else updated += 1;
-    const persistedEventTime = result.rows[0]?.event_time ?? candidate.existing?.event_time ?? eventTime;
-    if (!latestEventTime || persistedEventTime > latestEventTime) latestEventTime = persistedEventTime;
-    aliasesSynchronized += await synchronizeAcceptedGdeltAliases(
-      result.rows[0]?.id ?? aliasHistory.persistenceItemId,
-      candidate.existingAliases ?? [],
-    );
+        [sourceId, aliasHistory.persistenceExternalId, article.title, article.url, subjectCountry, eventTime, JSON.stringify(payload), dedupeHash],
+      );
+      if (!result.rows[0]) unchanged += 1;
+      else if (result.rows[0].inserted) inserted += 1;
+      else updated += 1;
+      selected += 1;
+      if (temporal.timeBasis === "provider_first_seen") providerFirstSeenAccepted += 1;
+      const persistedEventTime = result.rows[0]?.event_time ?? candidate.existing?.event_time ?? eventTime;
+      if (!latestEventTime || persistedEventTime > latestEventTime) latestEventTime = persistedEventTime;
+      try {
+        aliasesSynchronized += await synchronizeAcceptedGdeltAliases(
+          result.rows[0]?.id ?? aliasHistory.persistenceItemId,
+          candidate.existingAliases ?? [],
+        );
+      } catch (error) {
+        // The canonical survivor is already durable. Historical alias repair
+        // remains resumable and must not discard an otherwise usable headline.
+        aliasSynchronizationFailures += 1;
+        if (!canContinueAfterGdeltGalPersistenceFailure(error)) throw error;
+      }
+    } catch (error) {
+      // A malformed legacy alias or one constraint race must not discard the
+      // entire global feed. Continue until the bounded persisted quota is
+      // filled; database-wide and unknown failures still abort the fallback.
+      persistenceFailures += 1;
+      const failureClass = classifyGdeltGalPersistenceFailure(error);
+      persistenceFailureClasses[failureClass] = (persistenceFailureClasses[failureClass] ?? 0) + 1;
+      if (!canContinueAfterGdeltGalPersistenceFailure(error)) throw error;
+    }
   }
 
   return {
@@ -3886,6 +4024,9 @@ async function ingestGalFallback(
     skipped,
     quality_quarantined: quarantined,
     canonical_aliases_synchronized: aliasesSynchronized,
+    alias_synchronization_failures: aliasSynchronizationFailures,
+    persistence_failures: persistenceFailures,
+    persistence_failure_classes: persistenceFailureClasses,
     provider_first_seen_accepted: providerFirstSeenAccepted,
     quality_rejections: qualityRejections,
     latest_event_time: latestEventTime,

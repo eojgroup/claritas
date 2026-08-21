@@ -359,7 +359,7 @@ function safeGdeltError(value: string | null | undefined, product: "DOC" | "GAL"
       : "All GDELT DOC discovery lanes failed.";
   }
   if (httpStatuses.length > 0) return `GDELT ${product} HTTP ${httpStatuses.join("/")}.`;
-  if (/\b(?:AbortError|TimeoutError|time(?:d)?\s*out)\b/i.test(value)) {
+  if (/\b(?:AbortError|TimeoutError|timeout|time(?:d)?\s*out)\b/i.test(value)) {
     return `GDELT ${product} request timed out.`;
   }
   if (/no current persisted article inside the four-hour coverage window/i.test(value)) {
