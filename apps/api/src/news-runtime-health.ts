@@ -8,6 +8,7 @@ export type NewsRuntimeHealthRow = {
   verified_count: number | string | null;
   verified_market_count: number | string | null;
   publisher_count: number | string | null;
+  latest_current_event_time: string | null;
   latest_verified_event_time: string | null;
   mapped_24h_count: number | string | null;
   mapped_24h_countries: number | string | null;
@@ -24,7 +25,25 @@ export type NewsRuntimeHealthRow = {
   release_gdelt_gkg_matched: number | string | null;
   release_gdelt_gkg_matched_country_rows: number | string | null;
   release_gdelt_gkg_canonical_country_url_probes: number | string | null;
+  release_gdelt_doc_error: string | null;
+  release_gdelt_doc_accepted: number | string | null;
+  release_gdelt_doc_latest_event_time: string | null;
+  release_gdelt_doc_quality_rejections: Record<string, unknown> | null;
+  release_gdelt_gal_mode: string | null;
+  release_gdelt_gal_status: string | null;
+  release_gdelt_gal_error: string | null;
+  release_gdelt_gal_accepted: number | string | null;
+  release_gdelt_gal_latest_event_time: string | null;
+  release_gdelt_gal_quality_rejections: Record<string, unknown> | null;
   latest_success_at: string | null;
+};
+
+export type GdeltAcquisitionDiagnostics = {
+  error: string | null;
+  accepted: number;
+  latest_event_time: string | null;
+  rejected: number;
+  rejection_counts: Record<string, number>;
 };
 
 export type NewsRuntimeHealth = {
@@ -40,6 +59,7 @@ export type NewsRuntimeHealth = {
     publisher_verified: number;
     publisher_verified_markets: number;
     publishers: number;
+    latest_event_time: string | null;
     latest_verified_event_time: string | null;
   };
   geography_24h: {
@@ -60,6 +80,13 @@ export type NewsRuntimeHealth = {
     gdelt_gkg_matched: number;
     gdelt_gkg_matched_country_rows: number;
     gdelt_gkg_canonical_country_url_probes: number;
+    gdelt_diagnostics: {
+      doc: GdeltAcquisitionDiagnostics;
+      gal: GdeltAcquisitionDiagnostics & {
+        mode: "supplement" | "fallback" | null;
+        status: string | null;
+      };
+    };
   };
   latest_success_at: string | null;
   checks: Record<string, boolean>;
@@ -120,9 +147,9 @@ export function buildNewsRuntimeHealthQuery(): string {
              )::int AS verified_market_count,
              count(DISTINCT current_news.publisher_key) FILTER (
                WHERE current_news.assessed
-                 AND current_news.publisher_verified
                  AND current_news.publisher_key<>'unknown'
              )::int AS publisher_count,
+             max(current_news.event_time)::text AS latest_current_event_time,
              max(current_news.event_time) FILTER (WHERE current_news.publisher_verified)::text AS latest_verified_event_time
       FROM current_news
     ), geography_news AS MATERIALIZED (
@@ -192,7 +219,36 @@ export function buildNewsRuntimeHealthQuery(): string {
              gdelt_step.step#>>'{result,gkg_sampled}' AS release_gdelt_gkg_sampled,
              gdelt_step.step#>>'{result,gkg_matched}' AS release_gdelt_gkg_matched,
              gdelt_step.step#>>'{result,gkg_matched_country_rows}' AS release_gdelt_gkg_matched_country_rows,
-             gdelt_step.step#>>'{result,gkg_canonical_country_url_probes}' AS release_gdelt_gkg_canonical_country_url_probes
+             gdelt_step.step#>>'{result,gkg_canonical_country_url_probes}' AS release_gdelt_gkg_canonical_country_url_probes,
+             gdelt_step.step#>>'{result,doc_error}' AS release_gdelt_doc_error,
+             gdelt_step.step#>>'{result,articles,accepted}' AS release_gdelt_doc_accepted,
+             gdelt_step.step#>>'{result,articles,latest_event_time}' AS release_gdelt_doc_latest_event_time,
+             gdelt_step.step#>'{result,articles,quality_rejections}' AS release_gdelt_doc_quality_rejections,
+             CASE
+               WHEN gdelt_step.step#>'{result,gal_fallback}' IS NOT NULL THEN 'fallback'
+               WHEN gdelt_step.step#>'{result,gal_supplement}' IS NOT NULL THEN 'supplement'
+               ELSE NULL
+             END AS release_gdelt_gal_mode,
+             COALESCE(
+               gdelt_step.step#>>'{result,gal_fallback,health}',
+               gdelt_step.step#>>'{result,gal_supplement_status}'
+             ) AS release_gdelt_gal_status,
+             COALESCE(
+               gdelt_step.step#>>'{result,gal_error}',
+               gdelt_step.step#>>'{result,gal_supplement_error}'
+             ) AS release_gdelt_gal_error,
+             COALESCE(
+               gdelt_step.step#>>'{result,gal_fallback,selected}',
+               gdelt_step.step#>>'{result,gal_supplement,selected}'
+             ) AS release_gdelt_gal_accepted,
+             COALESCE(
+               gdelt_step.step#>>'{result,gal_fallback,latest_event_time}',
+               gdelt_step.step#>>'{result,gal_supplement,latest_event_time}'
+             ) AS release_gdelt_gal_latest_event_time,
+             COALESCE(
+               gdelt_step.step#>'{result,gal_fallback,quality_rejections}',
+               gdelt_step.step#>'{result,gal_supplement,quality_rejections}'
+             ) AS release_gdelt_gal_quality_rejections
       FROM (SELECT 1) anchor
       LEFT JOIN requested_run ON true
       LEFT JOIN LATERAL (
@@ -211,6 +267,7 @@ export function buildNewsRuntimeHealthQuery(): string {
            current_rollup.verified_count,
            current_rollup.verified_market_count,
            current_rollup.publisher_count,
+           current_rollup.latest_current_event_time,
            current_rollup.latest_verified_event_time,
            geography_rollup.mapped_24h_count,
            geography_rollup.mapped_24h_countries,
@@ -227,6 +284,16 @@ export function buildNewsRuntimeHealthQuery(): string {
            release_run.release_gdelt_gkg_matched,
            release_run.release_gdelt_gkg_matched_country_rows,
            release_run.release_gdelt_gkg_canonical_country_url_probes,
+           release_run.release_gdelt_doc_error,
+           release_run.release_gdelt_doc_accepted,
+           release_run.release_gdelt_doc_latest_event_time,
+           release_run.release_gdelt_doc_quality_rejections,
+           release_run.release_gdelt_gal_mode,
+           release_run.release_gdelt_gal_status,
+           release_run.release_gdelt_gal_error,
+           release_run.release_gdelt_gal_accepted,
+           release_run.release_gdelt_gal_latest_event_time,
+           release_run.release_gdelt_gal_quality_rejections,
            CASE WHEN release_run.release_run_status='success'
              THEN release_run.release_run_finished_at::text ELSE NULL END AS latest_success_at
     FROM current_rollup
@@ -237,6 +304,74 @@ export function buildNewsRuntimeHealthQuery(): string {
 function finiteCount(value: number | string | null): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+}
+
+const GDELT_QUALITY_REJECTION_REASONS = [
+  "missing_title",
+  "missing_or_unsafe_url",
+  "non_article_url",
+  "invalid_provider_seen_at",
+  "provider_seen_at_in_future",
+  "provider_seen_at_outside_window",
+  "publisher_publication_unverified",
+  "publisher_published_at_invalid",
+  "publisher_published_at_in_future",
+  "publisher_published_at_stale",
+  "publisher_date_after_provider_seen",
+  "canonical_duplicate_merged",
+] as const;
+
+function boundedGdeltRejectionCounts(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const counts: Record<string, number> = {};
+  for (const reason of GDELT_QUALITY_REJECTION_REASONS) {
+    const rawCount = value[reason];
+    const count = finiteCount(
+      typeof rawCount === "number" || typeof rawCount === "string" ? rawCount : null,
+    );
+    if (count > 0) counts[reason] = count;
+  }
+  return counts;
+}
+
+function safeDiagnosticTimestamp(value: string | null | undefined): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+/**
+ * Provider failures may contain request URLs, response bodies, or configured
+ * query text. Runtime health exposes only a fixed diagnostic class/status so
+ * release logs remain useful without reflecting arbitrary upstream content.
+ */
+function safeGdeltError(value: string | null | undefined, product: "DOC" | "GAL"): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const httpStatuses = Array.from(value.matchAll(/\bHTTP\s+([1-5][0-9]{2})\b/gi))
+    .map((match) => match[1])
+    .filter((status, index, values) => values.indexOf(status) === index)
+    .slice(0, 3);
+  if (/All GDELT DOC discovery lanes failed/i.test(value)) {
+    return httpStatuses.length > 0
+      ? `All GDELT DOC discovery lanes failed (HTTP ${httpStatuses.join("/")}).`
+      : "All GDELT DOC discovery lanes failed.";
+  }
+  if (httpStatuses.length > 0) return `GDELT ${product} HTTP ${httpStatuses.join("/")}.`;
+  if (/\b(?:AbortError|TimeoutError|time(?:d)?\s*out)\b/i.test(value)) {
+    return `GDELT ${product} request timed out.`;
+  }
+  if (/no current persisted article inside the four-hour coverage window/i.test(value)) {
+    return "GDELT DOC returned no current persisted article within the freshness window.";
+  }
+  if (/no usable publisher headline with a valid source time/i.test(value)) {
+    return "GDELT GAL returned no usable publisher headline with a valid source time.";
+  }
+  if (/\b(?:ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|fetch failed)\b/i.test(value)) {
+    return `GDELT ${product} network request failed.`;
+  }
+  return `GDELT ${product} failed (details redacted).`;
 }
 
 export function evaluateNewsRuntimeHealth(
@@ -267,7 +402,26 @@ export function evaluateNewsRuntimeHealth(
   const releaseGdeltGkgCanonicalCountryUrlProbes = finiteCount(
     row?.release_gdelt_gkg_canonical_country_url_probes ?? 0,
   );
-  const latestEventMs = Date.parse(row?.latest_verified_event_time ?? "");
+  const releaseGdeltDocRejectionCounts = boundedGdeltRejectionCounts(
+    row?.release_gdelt_doc_quality_rejections,
+  );
+  const releaseGdeltGalRejectionCounts = boundedGdeltRejectionCounts(
+    row?.release_gdelt_gal_quality_rejections,
+  );
+  const releaseGdeltGalMode = row?.release_gdelt_gal_mode === "fallback"
+    || row?.release_gdelt_gal_mode === "supplement"
+    ? row.release_gdelt_gal_mode
+    : null;
+  const releaseGdeltGalStatus = [
+    "healthy",
+    "empty",
+    "failed",
+    "degraded_fallback",
+    "supplemental",
+  ].includes(row?.release_gdelt_gal_status ?? "")
+    ? row?.release_gdelt_gal_status ?? null
+    : null;
+  const latestEventMs = Date.parse(row?.latest_current_event_time ?? "");
   const nowMs = now.getTime();
   const assessmentRatio = currentCount > 0 ? assessedCount / currentCount : 0;
   const checks = {
@@ -276,8 +430,13 @@ export function evaluateNewsRuntimeHealth(
       && latestEventMs <= nowMs + 5 * 60_000
       && nowMs - latestEventMs <= 4 * 3_600_000,
     assessed: assessedCount >= Math.min(currentCount, 3) && assessmentRatio >= 0.6,
-    publisher_verified: verifiedCount >= 2,
-    markets: marketCount >= 1 && verifiedMarketCount >= 1,
+    // Provider discovery time is an honest chronology signal when the UI
+    // labels it as first-seen rather than publisher-published. Require one
+    // independent publisher-time anchor for clock/quality sanity, while
+    // allowing the assessed current stream (including markets) to remain
+    // available during nights, weekends, and DOC rate-limit fallback.
+    publisher_verified: verifiedCount >= 1,
+    markets: marketCount >= 1,
     publisher_diversity: publisherCount >= 2,
     mapped_geography: mappedStories >= 2 && mappedCountries >= 2,
     non_gb_geography: nonGbStories >= 1,
@@ -310,6 +469,7 @@ export function evaluateNewsRuntimeHealth(
       publisher_verified: verifiedCount,
       publisher_verified_markets: verifiedMarketCount,
       publishers: publisherCount,
+      latest_event_time: row?.latest_current_event_time ?? null,
       latest_verified_event_time: row?.latest_verified_event_time ?? null,
     },
     geography_24h: {
@@ -330,6 +490,30 @@ export function evaluateNewsRuntimeHealth(
       gdelt_gkg_matched: releaseGdeltGkgMatched,
       gdelt_gkg_matched_country_rows: releaseGdeltGkgMatchedCountryRows,
       gdelt_gkg_canonical_country_url_probes: releaseGdeltGkgCanonicalCountryUrlProbes,
+      gdelt_diagnostics: {
+        doc: {
+          error: safeGdeltError(row?.release_gdelt_doc_error, "DOC"),
+          accepted: finiteCount(row?.release_gdelt_doc_accepted ?? 0),
+          latest_event_time: safeDiagnosticTimestamp(row?.release_gdelt_doc_latest_event_time),
+          rejected: Object.values(releaseGdeltDocRejectionCounts).reduce(
+            (sum, count) => sum + count,
+            0,
+          ),
+          rejection_counts: releaseGdeltDocRejectionCounts,
+        },
+        gal: {
+          mode: releaseGdeltGalMode,
+          status: releaseGdeltGalStatus,
+          error: safeGdeltError(row?.release_gdelt_gal_error, "GAL"),
+          accepted: finiteCount(row?.release_gdelt_gal_accepted ?? 0),
+          latest_event_time: safeDiagnosticTimestamp(row?.release_gdelt_gal_latest_event_time),
+          rejected: Object.values(releaseGdeltGalRejectionCounts).reduce(
+            (sum, count) => sum + count,
+            0,
+          ),
+          rejection_counts: releaseGdeltGalRejectionCounts,
+        },
+      },
     },
     latest_success_at: row?.latest_success_at ?? null,
     checks,

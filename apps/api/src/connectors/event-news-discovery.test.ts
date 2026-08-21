@@ -296,7 +296,7 @@ test("the persistent queue has retry, capacity, retention, and publisher-quality
   assert.match(moduleSource, /\[15, 45, 120, 360, 720\]/);
   assert.match(gdeltSource, /ingestTargetedGdeltNews[\s\S]*ingestDocArticles/);
   assert.match(gdeltSource, /publisher_published_verified/);
-  assert.match(gdeltSource, /GDELT_DOC_MIN_REQUEST_SPACING_MS = 5_500/);
+  assert.match(gdeltSource, /GDELT_DOC_MIN_REQUEST_SPACING_MS = 12_000/);
   assert.match(gdeltSource, /withGdeltDocRateLimit/);
   assert.match(usgsSource, /enqueueEarthquakeNewsDiscovery/);
   assert.match(migration, /LIMIT 100/);

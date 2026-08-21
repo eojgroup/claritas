@@ -17,22 +17,22 @@ export const GDELT_DISCOVERY_LANES = [
   {
     id: "markets_macro",
     weight: 7,
-    query: "(\"stock market\" OR stocks OR shares OR equities OR bonds OR treasury OR yields OR forex OR currency OR futures OR commodities OR inflation OR \"central bank\" OR \"Wall Street\" OR \"S&P 500\" OR Nasdaq OR FTSE OR DAX OR Nikkei OR \"Hang Seng\" OR rally OR selloff)",
+    query: "(\"stock market\" OR stocks OR shares OR equities OR bonds OR treasury OR yields OR forex OR currency OR futures OR commodities OR inflation OR \"central bank\" OR \"interest rates\")",
   },
   {
     id: "companies_technology",
     weight: 4,
-    query: "(earnings OR merger OR acquisition OR bankruptcy OR IPO OR semiconductor OR cybersecurity OR \"artificial intelligence\")",
+    query: "(earnings OR profit OR loss OR merger OR merges OR merged OR acquisition OR acquires OR acquired OR bankruptcy OR IPO OR \"initial public offering\" OR semiconductor OR cybersecurity OR \"artificial intelligence\")",
   },
   {
     id: "geopolitics_policy",
     weight: 4,
-    query: "(geopolitics OR sanctions OR conflict OR military OR election OR tariff OR regulation OR antitrust)",
+    query: "(geopolitics OR sanctions OR conflict OR military OR election OR tariff OR regulation OR antitrust OR diplomacy)",
   },
   {
     id: "energy_transport",
     weight: 3,
-    query: "(energy OR oil OR gas OR OPEC OR shipping OR port OR aviation OR transport OR logistics OR \"supply chain\" OR agriculture OR food)",
+    query: "(\"energy market\" OR \"crude oil\" OR \"natural gas\" OR OPEC OR shipping OR port OR aviation OR transport OR logistics OR \"supply chain\" OR agriculture OR food)",
   },
   {
     id: "major_hazards_health",
@@ -40,14 +40,21 @@ export const GDELT_DISCOVERY_LANES = [
     query: "(disaster OR earthquake OR aftershock OR tsunami OR volcano OR landslide OR wildfire OR flood OR hurricane OR typhoon OR cyclone OR outbreak OR epidemic OR \"public health\")",
   },
 ] as const;
-export const DEFAULT_GDELT_DOC_QUERY = `(${GDELT_DISCOVERY_LANES.map((lane) => lane.query.slice(1, -1)).join(" OR ")})`;
+// DOC rejects oversized boolean expressions with an HTTP-200 plaintext error.
+// Keep this rarely used configured-query fallback flat and comfortably below
+// the provider's boundary; normal ingestion still runs the narrower lanes.
+export const DEFAULT_GDELT_DOC_QUERY = "(\"stock market\" OR earnings OR sanctions OR conflict OR \"crude oil\" OR shipping OR logistics OR agriculture OR earthquake OR tsunami OR volcano OR wildfire OR flood OR hurricane OR outbreak OR \"public health\")";
+export const GDELT_DOC_MAX_QUERY_CHARS = 240;
 const ATTRIBUTION = "GDELT Project";
 const GDELT_DOC_DEFAULT_MAX_PUBLISH_AGE_HOURS = 72;
 const GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS = 3;
 const GDELT_MAX_FUTURE_SKEW_MS = 5 * 60_000;
 const GDELT_ARTICLE_HTML_MAX_BYTES = 350_000;
 const GDELT_ARTICLE_VERIFICATION_CONCURRENCY = 4;
-const GDELT_DOC_MIN_REQUEST_SPACING_MS = 5_500;
+export const GDELT_DOC_MIN_REQUEST_SPACING_MS = 12_000;
+const GDELT_DOC_REQUEST_TIMEOUT_MS = 35_000;
+const GDELT_DOC_MAX_RETRY_DELAY_MS = 30_000;
+const GDELT_DOC_RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 export const GDELT_CANONICAL_URL_ALGORITHM = "whatwg-url-v1";
 const GDELT_CANONICAL_RECONCILIATION_BATCH_SIZE = 500;
 let gdeltDocRequestTail: Promise<void> = Promise.resolve();
@@ -67,6 +74,49 @@ export type GdeltDocArticle = {
 };
 
 type GdeltDocResponse = { articles?: GdeltDocArticle[] };
+
+export function validateGdeltDocQuery(value: string, laneId = "configured"): string {
+  const normalized = value.normalize("NFKC").replace(/\s+/g, " ").trim();
+  if (normalized.length < 3 || normalized.length > GDELT_DOC_MAX_QUERY_CHARS) {
+    throw new Error(
+      `GDELT DOC lane ${laneId} has an invalid query length `
+      + `(query_chars=${normalized.length}; allowed=3-${GDELT_DOC_MAX_QUERY_CHARS}).`,
+    );
+  }
+  return normalized;
+}
+
+export function parseGdeltDocApiResponse(
+  body: string,
+  context: {
+    laneId: string;
+    status: number;
+    contentType: string | null;
+    queryLength: number;
+  },
+): GdeltDocResponse {
+  const diagnostic = `(HTTP ${context.status}; content-type=${(context.contentType || "unknown").slice(0, 80)}; query_chars=${context.queryLength})`;
+  const excerpt = body.normalize("NFKC").replace(/\s+/g, " ").trim().slice(0, 300) || "empty body";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error(`GDELT DOC lane ${context.laneId} returned a non-JSON response ${diagnostic}: ${excerpt}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`GDELT DOC lane ${context.laneId} returned malformed JSON ${diagnostic}: ${excerpt}`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (record.articles != null && !Array.isArray(record.articles)) {
+    throw new Error(`GDELT DOC lane ${context.laneId} returned malformed articles ${diagnostic}: ${excerpt}`);
+  }
+  const providerError = [record.error, record.message]
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+  if (providerError && !Array.isArray(record.articles)) {
+    throw new Error(`GDELT DOC lane ${context.laneId} returned a provider error ${diagnostic}: ${providerError.trim().slice(0, 300)}`);
+  }
+  return { articles: Array.isArray(record.articles) ? record.articles as GdeltDocArticle[] : [] };
+}
 
 export type GdeltPublicationTime = {
   /**
@@ -1651,19 +1701,36 @@ export function planGdeltAliasPersistence(
 export function gdeltAliasQualityContinuation(
   aliases: ExistingGdeltItem[],
   providerSeenAt: string | null,
-): { allowProviderFirstSeen: boolean; preserveAcceptedVerified: boolean } {
+  options: { now?: Date; maxProviderSeenAgeHours?: number } = {},
+): {
+  allowProviderFirstSeen: boolean;
+  preserveAcceptedVerified: boolean;
+  providerFirstSeenAt: string | null;
+} {
   const providerSeenMs = Date.parse(providerSeenAt ?? "");
+  const nowMs = (options.now ?? new Date()).getTime();
+  const maxAgeMs = clampHours(
+    options.maxProviderSeenAgeHours,
+    GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS,
+  ) * 3_600_000;
+  const acceptedProviderFirstSeenAt = earliestGdeltTimestamp(
+    aliases
+      .filter((item) => item.quality_status === "accepted" && item.time_basis === "provider_first_seen")
+      .flatMap((item) => [item.first_provider_seen_at, item.event_time]),
+  );
+  const acceptedProviderFirstSeenMs = Date.parse(acceptedProviderFirstSeenAt ?? "");
+  const incomingIsFresh = Number.isFinite(providerSeenMs)
+    && providerSeenMs <= nowMs + GDELT_MAX_FUTURE_SKEW_MS
+    && nowMs - providerSeenMs <= maxAgeMs;
+  const acceptedProviderFirstSeenIsFresh = Number.isFinite(acceptedProviderFirstSeenMs)
+    && acceptedProviderFirstSeenMs <= nowMs + GDELT_MAX_FUTURE_SKEW_MS
+    && nowMs - acceptedProviderFirstSeenMs <= maxAgeMs;
+  const allowAcceptedProviderContinuation = incomingIsFresh && acceptedProviderFirstSeenIsFresh;
   return {
-    allowProviderFirstSeen: aliases.length === 0 || aliases.some((item) => {
-      const existingSeenMs = Date.parse(item.first_provider_seen_at ?? "");
-      return item.quality_status === "accepted"
-        && item.time_basis === "provider_first_seen"
-        && Number.isFinite(existingSeenMs)
-        && Number.isFinite(providerSeenMs)
-        && Math.abs(existingSeenMs - providerSeenMs) <= GDELT_MAX_FUTURE_SKEW_MS;
-    }),
+    allowProviderFirstSeen: aliases.length === 0 || allowAcceptedProviderContinuation,
     preserveAcceptedVerified: aliases.some((item) => item.quality_status === "accepted"
       && item.publication_time_verified === true),
+    providerFirstSeenAt: allowAcceptedProviderContinuation ? acceptedProviderFirstSeenAt : null,
   };
 }
 
@@ -2040,13 +2107,14 @@ function rssTag(block: string, name: string): string | null {
 }
 
 const GAL_RELEVANCE_PATTERNS: RegExp[] = [
-  /\b(?:wars?|warfare|wartime|conflicts?|attacks?|attacked|attacking|strikes?|struck|striking|military|defen[cs]e|weapons?|missiles?|drones?|security|terror(?:ism|ist|ists)?|coups?|protests?|unrest|ceasefires?|sanctions?)\b/i,
-  /\b(?:government|minister|president|parliament|election|diplomat|ambassador|treaty|policy|regulat|court|rights?)\w*\b/i,
-  /\b(?:markets?|marketplace|economy|economic|economics|inflation|interest rates?|central banks?|currenc(?:y|ies)|trade|trades|traded|trading|tariffs?|commodit(?:y|ies)|oil|gas|gasoline|energy|supply chains?)\b/i,
-  /\b(?:technology|artificial intelligence|\bAI\b|cyber|semiconductor|telecom|satellite|space|data breach)\w*\b/i,
-  /\b(?:climate|wildfire|fire|flood|storm|hurricane|typhoon|cyclone|earthquake|aftershock|tsunami|volcano|eruption|landslide|drought|heatwave|disaster|emergency)\w*\b/i,
-  /\b(?:shipping|vessel|ship|port|aviation|airline|airport|rail|pipeline|transport|logistics|strait|canal)\w*\b/i,
-  /\b(?:outbreak|epidemic|pandemic|public health|vaccine|disease|hospital)\w*\b/i,
+  /\b(?:wars?|warfare|wartime|conflicts?|attacks?|attacked|attacking|strikes?|struck|striking|military|defen[cs]e|weapons?|missiles?|drones?|national security|border security|security (?:forces?|threats?|risks?|crises|incidents?|alerts?|warnings?|policy|policies|officials?)|terror(?:ism|ist|ists)?|coups?|protests?|unrest|ceasefires?|sanctions?)\b/i,
+  /\b(?:governments?|ministers?|presidents?|parliaments?|elections?|diplomats?|ambassadors?|treat(?:y|ies)|polic(?:y|ies)|regulat(?:e|ed|es|ing|ion|ions|or|ors|ory)|courts?|human rights?|civil rights?)\b/i,
+  /\b(?:stock markets?|stock prices?|stock (?:index|indices|exchanges?)|common stock|equities|bond markets?|bond yields?|government bonds|corporate bonds|treasur(?:y|ies)|forex|currenc(?:y|ies)|futures|wall street|s&p\s*500|dow(?: jones)?|nasdaq|ftse|dax|nikkei|hang seng|economy|economic|economics|inflation|interest rates?|central banks?|(?:global|international|bilateral|free) trade|trade (?:war|deal|agreement|policy|talks|flows|deficit|surplus)|imports?|exports?|tariffs?|commodit(?:y|ies)|crude oil|brent crude|oil (?:prices?|markets?|supply|demand|output|production|exports?|imports?|refiner(?:y|ies))|natural gas(?! (?:relief|remed(?:y|ies)|pain|symptoms?|bloating))|gas (?:prices?|markets?|supply|demand|storage|exports?|imports?)|gasoline prices?|lng|opec|energy (?:markets?|sector|prices?|supply|security|transition|policy|policies)|power (?:markets?|prices?|supply|grid)|renewable energy|supply chains?)\b/i,
+  /\b(?:earnings|revenue|quarterly results?|(?:annual|quarterly|record|operating|net) (?:profits?|loss(?:es)?)|(?:reports?|posts?) (?:an? )?(?:annual|quarterly|record|operating|net) (?:profits?|loss(?:es)?)|warns? of (?:an? )?(?:annual|quarterly|record|operating|net) (?:profits?|loss(?:es)?)|(?:profits?|loss(?:es)?) (?:jump|jumps|jumped|rise|rises|rose|fall|falls|fell|widen|widens|widened|narrow|narrows|narrowed)|merg(?:e|es|ed|ing|er|ers)|acquisitions?|acquir(?:e|es|ed|ing)|takeovers?|bankrupt(?:cy|cies)?|\bipo\b|initial public offerings?)\b/i,
+  /\b(?:technolog(?:y|ies)|artificial intelligence|\bAI\b|cyber(?:security|attack|attacks|incident|incidents|crime|crimes)?|semiconductors?|telecom(?:s|munications)?|satellites?|space(?:craft|flight| launch| mission| agency| industry| station)|data breaches?)\b/i,
+  /\b(?:climate(?: change| crisis)?|wildfires?|(?:forest|brush) fires?|floods?|(?:tropical|winter|severe) storms?|storm (?:warning|warnings|surge)|hurricanes?|typhoons?|cyclones?|earthquakes?|aftershocks?|tsunamis?|volcan(?:o|oes|ic)|eruptions?|landslides?|droughts?|heatwaves?|disasters?|emergenc(?:y|ies))\b/i,
+  /\b(?:shipping|vessels?|ships?|ports?|aviation|airlines?|airports?|railways?|rail (?:services?|networks?|freight|operators?|strikes?|workers?|traffic|transport)|train (?:services?|networks?|operators?|crashes?|collisions?|derailments?|strikes?)|pipelines?|transport(?:ation)?|logistics|straits?|canals?)\b/i,
+  /\b(?:outbreaks?|epidemics?|pandemics?|public health|vaccines?|diseases?|hospitals?)\b/i,
 ];
 
 // GAL is a global rolling feed rather than a result set tailored to our
@@ -2057,11 +2125,12 @@ const GAL_RELEVANCE_PATTERNS: RegExp[] = [
 // causal or impact claim in the reader experience.
 const GAL_MATERIAL_HAZARD_PATTERN = /\b(?:earthquakes?|aftershocks?|tsunamis?|volcan(?:o|oes|ic)|eruptions?|landslides?|wildfires?|hurricanes?|typhoons?|cyclones?|tornado(?:es)?|floods?|droughts?|heatwaves?)\b/gi;
 const GAL_MATERIAL_IMPACT_PATTERN = /\b(?:magnitude\s*[6-9](?:\.\d+)?|m[6-9](?:\.\d+)?|major|severe|dead|deaths?|killed|injured|missing|rescues?|evacuat(?:e|ed|es|ing|ion|ions)|collapsed?|destroyed?|damaged?|blocked?|closed?|outages?|disrupt(?:ed|ion|ions)|emergency|warning|warnings)\b/gi;
+const GDELT_MARKET_MOVEMENT_PATTERN = /(?:\b(?:markets?|equities|currencies|commodities|indices)\b.{0,40}\b(?:rise|rises|rose|fall|falls|fell|gain|gains|gained|drop|drops|dropped|rally|rallies|rallied|slide|slides|slid|selloff|tumble|tumbles|tumbled|surge|surges|surged|climb|climbs|climbed|jump|jumps|jumped|advance|advances|advanced|retreat|retreats|retreated)\b|\b(?:rise|rises|rose|fall|falls|fell|gain|gains|gained|drop|drops|dropped|rally|rallies|rallied|slide|slides|slid|selloff|tumble|tumbles|tumbled|surge|surges|surged|climb|climbs|climbed|jump|jumps|jumped|advance|advances|advanced|retreat|retreats|retreated)\b.{0,40}\b(?:markets?|equities|currencies|commodities|indices)\b|\b(?:stocks?|shares|bonds?)\b(?:[\s,:-]+\w+){0,2}[\s,:-]+\b(?:rise|rises|rose|fall|falls|fell|gain|gains|gained|drop|drops|dropped|rally|rallies|rallied|slide|slides|slid|selloff|tumble|tumbles|tumbled|surge|surges|surged|climb|climbs|climbed|jump|jumps|jumped|advance|advances|advanced|retreat|retreats|retreated)\b|\b(?:rise|rises|rose|fall|falls|fell|gain|gains|gained|drop|drops|dropped|rally|rallies|rallied|slide|slides|slid|selloff|tumble|tumbles|tumbled|surge|surges|surged|climb|climbs|climbed|jump|jumps|jumped|advance|advances|advanced|retreat|retreats|retreated)\b(?:[\s,:-]+\w+){0,2}[\s,:-]+\b(?:stocks?|shares|bonds?)\b)/i;
 const GDELT_LANE_HEADLINE_PATTERNS: Record<GdeltDiscoveryLaneId, RegExp> = {
-  markets_macro: /\b(?:markets?|stocks?|shares?|equities|bonds?|treasur(?:y|ies)|yields?|forex|currenc(?:y|ies)|futures?|commodit(?:y|ies)|inflation|central banks?|interest rates?|wall street|s&p\s*500|dow(?: jones)?|nasdaq|ftse|dax|nikkei|hang seng|rally|rallied|selloff|traders?|investors?)\b/i,
-  companies_technology: /\b(?:earnings|revenue|profits?|losses|mergers?|acquisitions?|takeovers?|bankrupt(?:cy)?|\bipo\b|companies|corporate|semiconductors?|cybersecurity|artificial intelligence|technology|software|cloud computing)\b/i,
-  geopolitics_policy: /\b(?:geopolitic|sanctions?|conflicts?|war|military|elections?|tariffs?|regulat(?:ion|or|ory)|antitrust|government|minister|president|parliament|policy|court)\w*\b/i,
-  energy_transport: /\b(?:energy|oil|gas|opec|shipping|vessels?|ports?|aviation|airlines?|airports?|transport|logistics|supply chains?|agriculture|food|freight|canals?|straits?)\b/i,
+  markets_macro: /\b(?:stock markets?|stock prices?|stock (?:index|indices|exchanges?)|common stock|equities|bond markets?|bond yields?|government bonds|corporate bonds|treasur(?:y|ies)|forex|currenc(?:y|ies)|futures|commodit(?:y|ies)|inflation|central banks?|interest rates?|wall street|s&p\s*500|dow(?: jones)?|nasdaq|ftse|dax|nikkei|hang seng|selloff|traders?|investors?|(?:global|financial|equity|bond|currency|commodity|capital) markets?)\b/i,
+  companies_technology: /\b(?:earnings|revenue|profits?|loss(?:es)?|quarterly results?|merg(?:e|es|ed|ing|er|ers)|acquisitions?|acquir(?:e|es|ed|ing)|takeovers?|bankrupt(?:cy|cies)?|\bipo\b|initial public offerings?|companies|corporate|semiconductors?|cybersecurity|artificial intelligence|technology|software|cloud computing)\b/i,
+  geopolitics_policy: /\b(?:geopolitic(?:s|al)?|sanctions?|conflicts?|war|military|elections?|tariffs?|regulat(?:e|ed|es|ing|ion|ions|or|ors|ory)|antitrust|governments?|ministers?|presidents?|parliaments?|polic(?:y|ies)|courts?|diplomac(?:y|ies)|diplomats?|diplomatic)\b/i,
+  energy_transport: /\b(?:energy (?:markets?|sector|prices?|supply|security|transition|policy|policies)|renewable energy|crude oil|brent crude|oil (?:prices?|markets?|supply|demand|output|production|exports?|imports?|refiner(?:y|ies))|natural gas(?! (?:relief|remed(?:y|ies)|pain|symptoms?|bloating))|gas (?:prices?|markets?|supply|demand|storage|exports?|imports?)|lng|opec|shipping|vessels?|ports?|aviation|airlines?|airports?|railways?|rail (?:services?|networks?|freight|operators?|strikes?|workers?|traffic|transport)|train (?:services?|networks?|operators?|crashes?|collisions?|derailments?|strikes?)|transport|logistics|supply chains?|agriculture|food|freight|canals?|straits?)\b/i,
   major_hazards_health: /\b(?:disasters?|earthquakes?|aftershocks?|tsunamis?|volcan(?:o|oes|ic)|landslides?|wildfires?|floods?|hurricanes?|typhoons?|cyclones?|outbreaks?|epidemics?|pandemics?|public health|diseases?|vaccines?)\b/i,
 };
 
@@ -2078,13 +2147,14 @@ export function isLikelyEnglishGalTitle(title: string): boolean {
 }
 
 function galRelevanceScore(title: string): number {
-  return GAL_RELEVANCE_PATTERNS.reduce((score, pattern) => {
+  const governedSignals = GAL_RELEVANCE_PATTERNS.reduce((score, pattern) => {
     // Count matching signal terms, not only matching topic buckets. Otherwise
     // a generic two-bucket title such as "Port security update" can outrank a
     // materially denser title containing strike, attack, military and port.
     const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
     return score + (title.match(new RegExp(pattern.source, flags))?.length ?? 0);
   }, 0);
+  return governedSignals + (GDELT_MARKET_MOVEMENT_PATTERN.test(title) ? 1 : 0);
 }
 
 function galMaterialityScore(title: string): number {
@@ -2095,7 +2165,7 @@ function galMaterialityScore(title: string): number {
 
 export function gdeltDiscoveryLaneForTitle(title: string): GdeltDiscoveryLaneId {
   for (const lane of GDELT_DISCOVERY_LANES) {
-    if (GDELT_LANE_HEADLINE_PATTERNS[lane.id].test(title)) return lane.id;
+    if (gdeltHeadlineMatchesLane(title, lane.id)) return lane.id;
   }
   // Every admitted GAL item matched at least one governed relevance pattern.
   // The policy/geopolitics lane is the least misleading fallback for broad
@@ -2105,7 +2175,8 @@ export function gdeltDiscoveryLaneForTitle(title: string): GdeltDiscoveryLaneId 
 
 function gdeltHeadlineMatchesLane(title: string, laneId: string): boolean {
   if (!(laneId in GDELT_LANE_HEADLINE_PATTERNS)) return true;
-  return GDELT_LANE_HEADLINE_PATTERNS[laneId as GdeltDiscoveryLaneId].test(title);
+  return GDELT_LANE_HEADLINE_PATTERNS[laneId as GdeltDiscoveryLaneId].test(title)
+    || (laneId === "markets_macro" && GDELT_MARKET_MOVEMENT_PATTERN.test(title));
 }
 
 function galFreshnessBand(eventTime: string, nowMs: number): number {
@@ -2534,45 +2605,129 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withGdeltDocRateLimit<T>(operation: () => Promise<T>): Promise<T> {
+export function gdeltDocRetryDelayMs(
+  status: number | null,
+  retryAfter: string | null,
+  attempt: number,
+  nowMs = Date.now(),
+): number {
+  let providerDelayMs: number | null = null;
+  const normalizedRetryAfter = retryAfter?.trim() ?? "";
+  if (/^\d+(?:\.\d+)?$/.test(normalizedRetryAfter)) {
+    providerDelayMs = Math.ceil(Number(normalizedRetryAfter) * 1000);
+  } else if (normalizedRetryAfter) {
+    const retryAtMs = Date.parse(normalizedRetryAfter);
+    if (Number.isFinite(retryAtMs)) providerDelayMs = Math.max(0, retryAtMs - nowMs);
+  }
+  const retryNumber = Math.max(0, Math.trunc(attempt));
+  const fallbackDelayMs = status === 429
+    ? Math.min(20_000 * (2 ** retryNumber), GDELT_DOC_MAX_RETRY_DELAY_MS)
+    : Math.min(2_000 * (2 ** retryNumber), 15_000);
+  return Math.min(
+    Math.max(fallbackDelayMs, providerDelayMs ?? 0),
+    GDELT_DOC_MAX_RETRY_DELAY_MS,
+  );
+}
+
+function deferGdeltDocRequests(delayMs: number): void {
+  gdeltDocNextRequestAt = Math.max(gdeltDocNextRequestAt, Date.now() + delayMs);
+}
+
+export async function waitForGdeltDocRequestWindow(
+  deadline: () => number,
+  options: {
+    now?: () => number;
+    wait?: (milliseconds: number) => Promise<void>;
+  } = {},
+): Promise<void> {
+  const now = options.now ?? Date.now;
+  const wait = options.wait ?? sleep;
+  // The deadline can move while another request reports Retry-After. Recheck
+  // after every wait so an already queued request cannot escape on the older
+  // process-wide spacing deadline.
+  while (true) {
+    const waitMs = Math.max(0, deadline() - now());
+    if (waitMs <= 0) return;
+    await wait(waitMs);
+  }
+}
+
+async function withGdeltDocRateLimit(
+  operation: () => Promise<Response>,
+  attempt: number,
+): Promise<Response> {
   let release!: () => void;
   const turn = new Promise<void>((resolve) => { release = resolve; });
   const previous = gdeltDocRequestTail;
   gdeltDocRequestTail = previous.then(() => turn);
   await previous;
   try {
-    const waitMs = Math.max(0, gdeltDocNextRequestAt - Date.now());
-    if (waitMs > 0) await sleep(waitMs);
-    return await operation();
+    await waitForGdeltDocRequestWindow(() => gdeltDocNextRequestAt);
+    try {
+      const response = await operation();
+      if (GDELT_DOC_RETRYABLE_STATUSES.has(response.status)) {
+        deferGdeltDocRequests(gdeltDocRetryDelayMs(
+          response.status,
+          response.headers.get("retry-after"),
+          attempt,
+        ));
+      }
+      return response;
+    } catch (error) {
+      deferGdeltDocRequests(gdeltDocRetryDelayMs(null, null, attempt));
+      throw error;
+    }
   } finally {
-    gdeltDocNextRequestAt = Date.now() + GDELT_DOC_MIN_REQUEST_SPACING_MS;
+    // Preserve a longer provider cooldown established above. This occurs
+    // before releasing the next queued request, eliminating a Retry-After
+    // race with targeted-event discovery running in parallel.
+    deferGdeltDocRequests(GDELT_DOC_MIN_REQUEST_SPACING_MS);
     release();
   }
 }
 
 async function fetchRetry(url: string, attempts = 2): Promise<Response> {
   let lastResponse: Response | null = null;
-  const hostname = new URL(url).hostname.toLowerCase();
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  let lastError: unknown = null;
+  const target = new URL(url);
+  const hostname = target.hostname.toLowerCase();
+  const isGdeltDoc = hostname === "api.gdeltproject.org";
+  const maximumAttempts = Math.max(1, Math.trunc(attempts));
+  for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
     const request = () => fetch(url, {
       headers: {
         accept: "application/json, text/plain;q=0.9, */*;q=0.8",
         "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
       },
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(isGdeltDoc ? GDELT_DOC_REQUEST_TIMEOUT_MS : 20_000),
     });
-    const response = hostname === "api.gdeltproject.org"
-      ? await withGdeltDocRateLimit(request)
-      : await request();
+    let response: Response;
+    try {
+      response = isGdeltDoc
+        ? await withGdeltDocRateLimit(request, attempt)
+        : await request();
+    } catch (error) {
+      lastError = error;
+      if (attempt === maximumAttempts - 1) break;
+      const delayMs = gdeltDocRetryDelayMs(null, null, attempt);
+      if (!isGdeltDoc) await sleep(delayMs);
+      continue;
+    }
     if (response.ok) return response;
     lastResponse = response;
-    if (![429, 500, 502, 503, 504].includes(response.status) || attempt === attempts - 1) break;
-    const retryAfter = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
-    const fallbackDelay = response.status === 429 ? 5_500 : 1_500 * (attempt + 1);
-    await sleep(Number.isFinite(retryAfter) ? Math.min(retryAfter * 1000, 10_000) : fallbackDelay);
+    if (!GDELT_DOC_RETRYABLE_STATUSES.has(response.status)) break;
+    const delayMs = gdeltDocRetryDelayMs(response.status, response.headers.get("retry-after"), attempt);
+    // A final 429 must slow the following lane too. Sleeping only inside this
+    // request lets the next lane immediately hit the same provider cooldown.
+    if (!isGdeltDoc && attempt < maximumAttempts - 1) await sleep(delayMs);
+    if (attempt === maximumAttempts - 1) break;
   }
   const body = lastResponse ? (await lastResponse.text()).slice(0, 300) : "No response";
-  throw new Error(`GDELT HTTP ${lastResponse?.status ?? "unknown"} for ${url}: ${body}`);
+  const errorDetail = lastError instanceof Error ? lastError.message : String(lastError ?? body);
+  throw new Error(
+    `GDELT HTTP ${lastResponse?.status ?? "network_error"} after ${maximumAttempts} attempt(s) `
+    + `for ${target.origin}${target.pathname}: ${lastResponse ? body : errorDetail}`,
+  );
 }
 
 function firstZipText(bytes: Uint8Array): string {
@@ -3020,7 +3175,8 @@ async function ingestDocArticles(
   for (const lane of laneBudgets) {
     try {
       const apiUrl = new URL(process.env.GDELT_DOC_API_URL || DOC_API_URL);
-      apiUrl.searchParams.set("query", lane.query);
+      const laneQuery = validateGdeltDocQuery(lane.query, lane.id);
+      apiUrl.searchParams.set("query", laneQuery);
       apiUrl.searchParams.set("mode", "artlist");
       // Preserve each topic's storage lane. Publisher-page verification is
       // supplemented by the explicitly labelled first-discovery path, so a
@@ -3032,10 +3188,15 @@ async function ingestDocArticles(
       apiUrl.searchParams.set("timespan", params.timespan?.trim() || "1h");
       apiUrl.searchParams.set("sort", "datedesc");
       // fetchRetry serializes every DOC request (including retries) through
-      // the process-wide 5.5-second limiter. The per-lane catch lets a 429 in
-      // one topic degrade coverage without discarding successful lanes.
-      const response = await fetchRetry(apiUrl.toString());
-      const data = (await response.json()) as GdeltDocResponse;
+      // the process-wide limiter. The per-lane catch lets a provider failure
+      // in one topic degrade coverage without discarding successful lanes.
+      const response = await fetchRetry(apiUrl.toString(), 2);
+      const data = parseGdeltDocApiResponse(await response.text(), {
+        laneId: lane.id,
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        queryLength: laneQuery.length,
+      });
       const rawArticles = Array.isArray(data.articles) ? data.articles : [];
       rawArticleCount += rawArticles.length;
       const laneInput = !params.targetedDiscovery && lane.id !== "configured"
@@ -3152,8 +3313,14 @@ async function ingestDocArticles(
       // earthquake. That higher-trust path must retain independently verified
       // publisher time; provider discovery is suitable only for the general
       // browse stream.
-      const continuation = gdeltAliasQualityContinuation(existingAliases, providerSeenAt);
+      const continuation = gdeltAliasQualityContinuation(existingAliases, providerSeenAt, {
+        now: verificationNow,
+        maxProviderSeenAgeHours,
+      });
       const allowProviderFirstSeen = !params.targetedDiscovery && continuation.allowProviderFirstSeen;
+      const qualityProviderSeenAt = allowProviderFirstSeen
+        ? continuation.providerFirstSeenAt ?? providerSeenAt
+        : providerSeenAt;
       return {
         ...discovered,
         url,
@@ -3164,7 +3331,7 @@ async function ingestDocArticles(
         quality: assessGdeltDocArticleQuality({
           title: article.title,
           url,
-          providerSeenAt,
+          providerSeenAt: qualityProviderSeenAt,
           publication: evidence.publication,
           now: verificationNow,
           maxPublisherAgeHours,
@@ -3195,6 +3362,7 @@ async function ingestDocArticles(
         && gdeltAliasQualityContinuation(
           candidate.existingAliases ?? [],
           providerSeenAt,
+          { now: verificationNow, maxProviderSeenAgeHours },
         ).preserveAcceptedVerified;
       if (preserveVerified) continue;
       const rejectionAliases = Array.from(new Set([
@@ -3503,10 +3671,13 @@ async function ingestGalFallback(
         };
       }
       const evidence = await resolveGdeltPublisherEvidence(article.url);
-      const allowProviderFirstSeen = gdeltAliasQualityContinuation(
+      const continuation = gdeltAliasQualityContinuation(
         existingAliases,
         article.eventTime,
-      ).allowProviderFirstSeen;
+        { now: verificationNow, maxProviderSeenAgeHours },
+      );
+      const allowProviderFirstSeen = continuation.allowProviderFirstSeen;
+      const qualityProviderSeenAt = continuation.providerFirstSeenAt ?? article.eventTime;
       return {
         article,
         existing,
@@ -3515,7 +3686,7 @@ async function ingestGalFallback(
         quality: assessGdeltDocArticleQuality({
           title: article.title,
           url: article.url,
-          providerSeenAt: article.eventTime,
+          providerSeenAt: qualityProviderSeenAt,
           publication: evidence.publication,
           now: verificationNow,
           maxPublisherAgeHours,
@@ -3545,6 +3716,7 @@ async function ingestGalFallback(
         && gdeltAliasQualityContinuation(
           candidate.existingAliases ?? [],
           article.eventTime,
+          { now: verificationNow, maxProviderSeenAgeHours },
         ).preserveAcceptedVerified;
       if (preserveVerified) continue;
       const rejectionAliases = Array.from(new Set([
@@ -3840,6 +4012,7 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
       result.gkg_archives_scanned = doc.gkg_archives_scanned;
       result.gkg_archive_errors = doc.gkg_archive_errors;
       result.inserted = Number(result.inserted) + doc.gkg_sampled + doc.gkg_matched;
+      result.articles = doc;
       if (!hasUsableGdeltDocCoverage(doc)) {
         throw new Error("GDELT DOC returned no current persisted article inside the four-hour coverage window.");
       }
@@ -3847,7 +4020,6 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
       const emptyLanes = doc.discovery_lanes.filter((lane) => lane.status === "empty");
       const requiredEmptyLanes = emptyLanes.filter((lane) => lane.id === "markets_macro");
       const degradedLanes = [...failedLanes, ...requiredEmptyLanes];
-      result.articles = doc;
       result.doc_status = degradedLanes.length > 0 ? "healthy_partial" : "healthy";
       result.health = degradedLanes.length > 0 ? "degraded" : "healthy";
       if (degradedLanes.length > 0) {

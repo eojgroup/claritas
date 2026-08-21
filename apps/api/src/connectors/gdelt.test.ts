@@ -14,19 +14,29 @@ const connector = import("./gdelt");
 test("GDELT timestamp parsing never fabricates current recency", async () => {
   const {
     DEFAULT_GDELT_DOC_QUERY,
+    GDELT_DISCOVERY_LANES,
+    GDELT_DOC_MAX_QUERY_CHARS,
     hasUsableGdeltDocCoverage,
     hasUsableGdeltFallbackCoverage,
     parseGdeltTimestamp,
+    validateGdeltDocQuery,
   } = await connector;
   assert.equal(parseGdeltTimestamp("20260814T091500Z"), "2026-08-14T09:15:00Z");
   assert.equal(parseGdeltTimestamp("20260814091500"), "2026-08-14T09:15:00Z");
   assert.equal(parseGdeltTimestamp("not-a-provider-time"), null);
   assert.equal(parseGdeltTimestamp(undefined), null);
+  const discoveryQueryCorpus = GDELT_DISCOVERY_LANES.map((lane) => lane.query).join(" ");
   for (const materialDomain of [
-    "energy", "disaster", "earthquake", "aftershock", "tsunami", "volcano", "landslide",
-    "shipping", "transport", "logistics", "agriculture", "food", "public health",
+    "stock market", "earnings", "sanctions", "energy market", "earthquake", "aftershock",
+    "tsunami", "volcano", "landslide", "shipping", "logistics", "agriculture", "public health",
   ]) {
-    assert.match(DEFAULT_GDELT_DOC_QUERY, new RegExp(materialDomain));
+    assert.match(discoveryQueryCorpus, new RegExp(materialDomain));
+  }
+  assert.equal(validateGdeltDocQuery(DEFAULT_GDELT_DOC_QUERY), DEFAULT_GDELT_DOC_QUERY);
+  assert.ok(DEFAULT_GDELT_DOC_QUERY.length <= GDELT_DOC_MAX_QUERY_CHARS);
+  for (const lane of GDELT_DISCOVERY_LANES) {
+    assert.equal(validateGdeltDocQuery(lane.query, lane.id), lane.query);
+    assert.ok(lane.query.length <= GDELT_DOC_MAX_QUERY_CHARS, lane.id);
   }
   assert.equal(hasUsableGdeltDocCoverage({ latest_event_time: null }), false);
   assert.equal(hasUsableGdeltDocCoverage({ latest_event_time: "not-a-time" }), false);
@@ -72,6 +82,57 @@ test("GDELT reserves GAL coverage without exceeding the headline budget", async 
       < ingest.indexOf("if (!hasUsableGdeltDocCoverage(doc))"),
     "GKG success metrics must survive a DOC-empty/GAL-success fallback",
   );
+  assert.ok(
+    ingest.indexOf("result.articles = doc")
+      < ingest.indexOf("if (!hasUsableGdeltDocCoverage(doc))"),
+    "partial DOC diagnostics must survive a coverage failure",
+  );
+});
+
+test("GDELT DOC rejects invalid queries and diagnoses HTTP-200 provider errors", async () => {
+  const {
+    GDELT_DOC_MAX_QUERY_CHARS,
+    gdeltDocRetryDelayMs,
+    parseGdeltDocApiResponse,
+    validateGdeltDocQuery,
+    waitForGdeltDocRequestWindow,
+  } = await connector;
+  assert.throws(() => validateGdeltDocQuery("x", "markets_macro"), /query_chars=1/);
+  assert.throws(
+    () => validateGdeltDocQuery("x".repeat(GDELT_DOC_MAX_QUERY_CHARS + 1), "markets_macro"),
+    new RegExp(`query_chars=${GDELT_DOC_MAX_QUERY_CHARS + 1}`),
+  );
+  assert.deepEqual(parseGdeltDocApiResponse('{"articles":[{"title":"Current market headline"}]}', {
+    laneId: "markets_macro",
+    status: 200,
+    contentType: "application/json",
+    queryLength: 136,
+  }).articles, [{ title: "Current market headline" }]);
+  assert.throws(() => parseGdeltDocApiResponse("Your query was too short or too long", {
+    laneId: "markets_macro",
+    status: 200,
+    contentType: "text/plain",
+    queryLength: 257,
+  }), /markets_macro.*non-JSON.*query_chars=257.*Your query was too short or too long/);
+  assert.equal(gdeltDocRetryDelayMs(429, null, 0, 0), 20_000);
+  assert.equal(gdeltDocRetryDelayMs(429, "45", 0, 0), 30_000);
+  assert.equal(
+    gdeltDocRetryDelayMs(429, "Thu, 01 Jan 1970 00:00:30 GMT", 0, 0),
+    30_000,
+  );
+
+  let virtualNow = 0;
+  let movingDeadline = 12_000;
+  const waits: number[] = [];
+  await waitForGdeltDocRequestWindow(() => movingDeadline, {
+    now: () => virtualNow,
+    wait: async (milliseconds) => {
+      waits.push(milliseconds);
+      virtualNow += milliseconds;
+      if (waits.length === 1) movingDeadline = 30_000;
+    },
+  });
+  assert.deepEqual(waits, [12_000, 18_000]);
 });
 
 test("GDELT DOC lanes degrade independently behind the shared rate limiter", () => {
@@ -81,16 +142,41 @@ test("GDELT DOC lanes degrade independently behind the shared rate limiter", () 
     source.indexOf("export function hasUsableGdeltDocCoverage"),
   );
   assert.match(ingestDoc, /for \(const lane of laneBudgets\)/);
-  assert.match(ingestDoc, /const response = await fetchRetry\(apiUrl\.toString\(\)\)/);
+  assert.match(ingestDoc, /const response = await fetchRetry\(apiUrl\.toString\(\), 2\)/);
+  assert.match(ingestDoc, /parseGdeltDocApiResponse\(await response\.text\(\)/);
   assert.match(ingestDoc, /status: "failed"/);
   assert.match(ingestDoc, /if \(!discoveryLanes\.some\(\(lane\) => lane\.status === "healthy"\)\)/);
   assert.match(ingestDoc, /\(acceptedByLane\.get\(laneId\) \?\? 0\) >= laneBudget/);
   assert.match(ingestDoc, /const allowProviderFirstSeen = !params\.targetedDiscovery/);
-  assert.match(source, /hostname === "api\.gdeltproject\.org"[\s\S]*withGdeltDocRateLimit\(request\)/);
+  assert.match(ingestDoc, /continuation\.providerFirstSeenAt \?\? providerSeenAt/);
+  assert.match(source, /const isGdeltDoc = hostname === "api\.gdeltproject\.org"/);
+  assert.match(source, /withGdeltDocRateLimit\(request, attempt\)/);
+  assert.match(source, /await waitForGdeltDocRequestWindow\(\(\) => gdeltDocNextRequestAt\)/);
+  assert.ok(
+    source.indexOf("deferGdeltDocRequests(GDELT_DOC_MIN_REQUEST_SPACING_MS)")
+      < source.indexOf("release();"),
+    "provider cooldown and minimum spacing must be installed before the next queued request",
+  );
 });
 
 test("GDELT DOC candidate selection protects major events and publisher diversity", async () => {
-  const { selectGdeltDocCandidates } = await connector;
+  const { gdeltDiscoveryLaneForTitle, selectGdeltDocCandidates } = await connector;
+  assert.equal(
+    gdeltDiscoveryLaneForTitle("Manufacturer plans initial public offering after expansion"),
+    "companies_technology",
+  );
+  assert.equal(
+    gdeltDiscoveryLaneForTitle("Chipmaker acquires rival after earnings beat forecasts"),
+    "companies_technology",
+  );
+  assert.equal(
+    gdeltDiscoveryLaneForTitle("Diplomatic talks resume amid regional sanctions"),
+    "geopolitics_policy",
+  );
+  assert.equal(
+    gdeltDiscoveryLaneForTitle("Geopolitics shift as regulators approve new regulations"),
+    "geopolitics_policy",
+  );
   const routine = Array.from({ length: 20 }, (_, index) => ({
     title: `Government policy update ${index} for the national parliament`,
     url: `https://routine.example.com/politics/update-${index}`,
@@ -140,6 +226,7 @@ test("GDELT canonical URLs deduplicate trackers while retaining the legacy alias
 
 test("GDELT canonical rediscovery retains the earliest trusted alias history", async () => {
   const {
+    assessGdeltDocArticleQuality,
     gdeltAliasQualityContinuation,
     mergeGdeltAliasTemporalEvidence,
     planGdeltAliasPersistence,
@@ -235,6 +322,7 @@ test("GDELT canonical rediscovery retains the earliest trusted alias history", a
   assert.equal(reusedPage.publicationTimeVerified, false);
   assert.equal(reusedPage.eventTime, "2026-08-18T08:00:00.000Z");
 
+  const continuationNow = new Date("2026-08-21T10:00:00Z");
   const mixedContinuation = gdeltAliasQualityContinuation([
     { ...legacy, quality_status: "rejected" },
     {
@@ -242,14 +330,47 @@ test("GDELT canonical rediscovery retains the earliest trusted alias history", a
       first_provider_seen_at: "2026-08-21T10:00:00Z",
       event_time: "2026-08-21T10:00:00Z",
     },
-  ], "2026-08-21T10:00:00Z");
+  ], "2026-08-21T10:00:00Z", { now: continuationNow, maxProviderSeenAgeHours: 3 });
   assert.equal(mixedContinuation.allowProviderFirstSeen, true);
   assert.equal(mixedContinuation.preserveAcceptedVerified, false);
   assert.equal(
-    gdeltAliasQualityContinuation([legacy, providerOnlyLegacy], "2026-08-21T10:00:00Z")
+    gdeltAliasQualityContinuation(
+      [legacy, providerOnlyLegacy],
+      "2026-08-21T10:00:00Z",
+      { now: continuationNow, maxProviderSeenAgeHours: 3 },
+    )
       .preserveAcceptedVerified,
     true,
   );
+
+  const acceptedProviderAlias = {
+    ...providerOnlyLegacy,
+    first_provider_seen_at: "2026-08-21T08:30:00Z",
+    event_time: "2026-08-21T08:30:00Z",
+  };
+  const repeatedGal = gdeltAliasQualityContinuation(
+    [acceptedProviderAlias],
+    "2026-08-21T09:15:00Z",
+    { now: continuationNow, maxProviderSeenAgeHours: 3 },
+  );
+  assert.equal(repeatedGal.allowProviderFirstSeen, true);
+  assert.equal(repeatedGal.providerFirstSeenAt, "2026-08-21T08:30:00.000Z");
+  const repeatedQuality = assessGdeltDocArticleQuality({
+    title: "Singapore equities rise after a central bank decision",
+    url: canonicalUrl,
+    providerSeenAt: repeatedGal.providerFirstSeenAt,
+    publication: null,
+    now: continuationNow,
+    maxProviderSeenAgeHours: 3,
+    allowProviderFirstSeen: repeatedGal.allowProviderFirstSeen,
+  });
+  assert.equal(repeatedQuality.reason, "accepted_provider_first_seen");
+  assert.equal(repeatedQuality.effectiveTime, "2026-08-21T08:30:00.000Z");
+  assert.equal(gdeltAliasQualityContinuation(
+    [acceptedProviderAlias],
+    "2026-08-21T11:55:00Z",
+    { now: new Date("2026-08-21T12:00:01Z"), maxProviderSeenAgeHours: 3 },
+  ).allowProviderFirstSeen, false);
 });
 
 test("GDELT canonical history uses the runtime WHATWG URL semantics exactly", async () => {
@@ -879,6 +1000,68 @@ test("GAL fallback accepts only defensibly English headlines and avoids short-st
     </channel></rss>`, { now: new Date("2026-08-14T10:00:00Z") });
 
   assert.deepEqual(parsed.articles.map((article) => article.url), ["https://en.example.com/news/port-strike"]);
+});
+
+test("GAL rejects generic market language and court-prefix false positives", async () => {
+  const { parseGdeltGalRss } = await connector;
+  const parsed = parseGdeltGalRss(`
+    <rss><channel>
+      <item><title>Courtland Sutton fantasy stock may have peaked before the season</title><link>https://sports.example.com/fantasy/courtland-stock</link><pubDate>14 Aug 2026 09:59:00 +0000</pubDate></item>
+      <item><title>Shopping mall celebrates a festive market after the holiday</title><link>https://lifestyle.example.com/events/festive-market</link><pubDate>14 Aug 2026 09:58:00 +0000</pubDate></item>
+      <item><title>Actor shares photos from a holiday with fans</title><link>https://culture.example.com/people/holiday-photos</link><pubDate>14 Aug 2026 09:57:00 +0000</pubDate></item>
+      <item><title>Chef shares recipe for summer pasta with families</title><link>https://food.example.com/recipes/summer-pasta</link><pubDate>14 Aug 2026 09:56:00 +0000</pubDate></item>
+      <item><title>Study yields promising results for classroom learning</title><link>https://education.example.com/research/classroom-results</link><pubDate>14 Aug 2026 09:55:00 +0000</pubDate></item>
+      <item><title>Local store stocks shelves before the festival</title><link>https://local.example.com/news/store-festival</link><pubDate>14 Aug 2026 09:54:00 +0000</pubDate></item>
+      <item><title>Team trades veteran player before the season</title><link>https://sports.example.com/trades/veteran-player</link><pubDate>14 Aug 2026 09:53:00 +0000</pubDate></item>
+      <item><title>Football manager fired after defeat at home</title><link>https://sports.example.com/football/manager-fired</link><pubDate>14 Aug 2026 09:52:00 +0000</pubDate></item>
+      <item><title>Singer storms off stage after the final song</title><link>https://music.example.com/live/singer-stage</link><pubDate>14 Aug 2026 09:51:00 +0000</pubDate></item>
+      <item><title>Hospitality group launches a new hotel after renovation</title><link>https://travel.example.com/hotels/group-launch</link><pubDate>14 Aug 2026 09:50:00 +0000</pubDate></item>
+      <item><title>New office space for rent after renovation</title><link>https://property.example.com/offices/space-rent</link><pubDate>14 Aug 2026 09:49:00 +0000</pubDate></item>
+      <item><title>Choosing the right home for your family</title><link>https://property.example.com/guides/right-home</link><pubDate>14 Aug 2026 09:48:30 +0000</pubDate></item>
+      <item><title>Security camera review for the modern home</title><link>https://consumer.example.com/reviews/security-camera</link><pubDate>14 Aug 2026 09:48:20 +0000</pubDate></item>
+      <item><title>New energy drink launches after a colourful campaign</title><link>https://drinks.example.com/products/energy-drink</link><pubDate>14 Aug 2026 09:48:10 +0000</pubDate></item>
+      <item><title>Natural gas relief tips for stomach pain</title><link>https://wellness.example.com/guides/gas-relief</link><pubDate>14 Aug 2026 09:48:05 +0000</pubDate></item>
+      <item><title>Designer rails against the wall colour trend</title><link>https://decor.example.com/trends/wall-colour</link><pubDate>14 Aug 2026 09:48:01 +0000</pubDate></item>
+      <item><title>Actor shares photos as temperatures rise</title><link>https://culture.example.com/people/actor-photos</link><pubDate>14 Aug 2026 09:48:00 +0000</pubDate></item>
+      <item><title>Chef shares tips as food prices rise</title><link>https://food.example.com/recipes/chef-tips</link><pubDate>14 Aug 2026 09:47:59 +0000</pubDate></item>
+      <item><title>Store stocks shelves as holiday crowds surge</title><link>https://local.example.com/shops/holiday-crowds</link><pubDate>14 Aug 2026 09:47:58 +0000</pubDate></item>
+      <item><title>Family bonds grow as costs rise</title><link>https://lifestyle.example.com/family/bonds-grow</link><pubDate>14 Aug 2026 09:47:57 +0000</pubDate></item>
+      <item><title>Teacher shares ideas as test scores climb</title><link>https://education.example.com/classroom/teacher-ideas</link><pubDate>14 Aug 2026 09:47:56 +0000</pubDate></item>
+      <item><title>Company shares rise after stronger quarterly earnings</title><link>https://finance.example.com/markets/company-shares-rise</link><pubDate>14 Aug 2026 09:48:00 +0000</pubDate></item>
+      <item><title>Startup files for initial public offering after funding round</title><link>https://business.example.com/deals/startup-ipo</link><pubDate>14 Aug 2026 09:47:30 +0000</pubDate></item>
+      <item><title>Chipmaker acquires rival after earnings beat forecasts</title><link>https://business.example.com/deals/chipmaker-acquisition</link><pubDate>14 Aug 2026 09:47:15 +0000</pubDate></item>
+      <item><title>Tesla reports record profit after strong sales</title><link>https://business.example.com/earnings/tesla-profit</link><pubDate>14 Aug 2026 09:47:10 +0000</pubDate></item>
+      <item><title>Automaker profits jump after quarterly sales</title><link>https://business.example.com/earnings/automaker-profit</link><pubDate>14 Aug 2026 09:47:05 +0000</pubDate></item>
+      <item><title>Bank losses widen after loan defaults</title><link>https://business.example.com/earnings/bank-loss</link><pubDate>14 Aug 2026 09:47:00 +0000</pubDate></item>
+      <item><title>Retailer warns of annual loss after weak demand</title><link>https://business.example.com/earnings/retailer-loss</link><pubDate>14 Aug 2026 09:46:55 +0000</pubDate></item>
+      <item><title>Team suffers painful loss after the final</title><link>https://sports.example.com/match/team-loss</link><pubDate>14 Aug 2026 09:46:50 +0000</pubDate></item>
+      <item><title>Global markets tumble as investors reassess interest-rate risk</title><link>https://markets.example.com/news/global-selloff</link><pubDate>14 Aug 2026 09:47:00 +0000</pubDate></item>
+      <item><title>Nasdaq closes at a record high after chip rally</title><link>https://finance.example.com/markets/nasdaq-record</link><pubDate>14 Aug 2026 09:46:00 +0000</pubDate></item>
+      <item><title>S&amp;P 500 hits another record as inflation cools</title><link>https://index.example.com/news/sp500-record</link><pubDate>14 Aug 2026 09:45:00 +0000</pubDate></item>
+      <item><title>Wall Street braces for a volatile opening after the decision</title><link>https://wallstreet.example.com/news/volatile-opening</link><pubDate>14 Aug 2026 09:44:00 +0000</pubDate></item>
+    </channel></rss>`, { now: new Date("2026-08-14T10:00:00Z") });
+
+  assert.deepEqual(new Set(parsed.articles.map((article) => article.url)), new Set([
+    "https://finance.example.com/markets/company-shares-rise",
+    "https://business.example.com/deals/startup-ipo",
+    "https://business.example.com/deals/chipmaker-acquisition",
+    "https://business.example.com/earnings/tesla-profit",
+    "https://business.example.com/earnings/automaker-profit",
+    "https://business.example.com/earnings/bank-loss",
+    "https://business.example.com/earnings/retailer-loss",
+    "https://markets.example.com/news/global-selloff",
+    "https://finance.example.com/markets/nasdaq-record",
+    "https://index.example.com/news/sp500-record",
+    "https://wallstreet.example.com/news/volatile-opening",
+  ]));
+  assert.equal(
+    parsed.articles.filter((article) => article.discoveryLane === "companies_technology").length,
+    6,
+  );
+  assert.equal(
+    parsed.articles.filter((article) => article.discoveryLane === "markets_macro").length,
+    5,
+  );
 });
 
 test("GAL parsing cannot be crashed by an invalid numeric XML entity", async () => {
