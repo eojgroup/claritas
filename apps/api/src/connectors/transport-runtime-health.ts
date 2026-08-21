@@ -15,6 +15,8 @@ export type TransportRegionalRuntimeHealthInput = {
   id: string;
   provider: string;
   configured: boolean;
+  configurationStatus?: string;
+  countryCodes?: string[];
   /**
    * Some regional feeds can be connected for diagnostics without being
    * suitable for release readiness. Callers must make that trust decision
@@ -29,6 +31,9 @@ export type TransportRegionalRuntimeHealthInput = {
   coverage: string;
   license?: string | null;
   global?: boolean;
+  lastFetchedCount?: number | null;
+  lastParsedCount?: number | null;
+  lastQueuedCount?: number | null;
 };
 
 export function isLoopbackAddress(address: string | undefined): boolean {
@@ -56,6 +61,8 @@ export type TransportRuntimeHealthInput = {
   workerStarted: boolean;
   workerLeader: boolean;
   primaryConfigured: boolean;
+  primaryCoverage?: string;
+  primaryGlobal?: boolean;
   primaryConnected: boolean;
   primaryLastMessageAt: number | null;
   primaryLastSnapshotAt: number | null;
@@ -107,7 +114,8 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
     isCurrent(input.now, input.primaryLastStoredAt, input.freshnessMilliseconds);
   const primaryTrafficCurrent =
     input.primaryConfigured &&
-    isCurrent(input.now, primaryTrafficAt, input.freshnessMilliseconds);
+    isCurrent(input.now, input.primaryLastSnapshotAt, input.freshnessMilliseconds) &&
+    isCurrent(input.now, input.primaryLastStoredAt, input.freshnessMilliseconds);
   const regionalSources = input.regionalSources.map((source) => {
     const readinessEligible = source.readinessEligible;
     const stateAt = mostRecent(
@@ -121,6 +129,9 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
       provider: source.provider,
       transport: source.transport ?? null,
       configured: source.configured,
+      configuration_status:
+        source.configurationStatus ?? (source.configured ? "configured" : "not_configured"),
+      country_codes: source.countryCodes ?? [],
       readiness_eligible: readinessEligible,
       current:
         source.configured &&
@@ -129,13 +140,17 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
         isCurrent(input.now, stateAt, input.freshnessMilliseconds),
       traffic_current:
         source.configured &&
-        isCurrent(input.now, trafficAt, input.freshnessMilliseconds),
+        isCurrent(input.now, source.lastSnapshotAt, input.freshnessMilliseconds) &&
+        isCurrent(input.now, source.lastStoredAt, input.freshnessMilliseconds),
       last_state_at: isoTimestamp(stateAt),
       last_traffic_at: isoTimestamp(trafficAt),
       error: source.error,
       coverage: source.coverage,
       license: source.license ?? null,
       global: source.global ?? false,
+      last_fetched_count: source.lastFetchedCount ?? null,
+      last_parsed_count: source.lastParsedCount ?? null,
+      last_queued_count: source.lastQueuedCount ?? null,
     };
   });
   const regionalCurrent = regionalSources.some((source) => source.current);
@@ -195,7 +210,8 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
       last_traffic_at: isoTimestamp(primaryTrafficAt),
       readiness_basis: "accepted_and_persisted_position",
       error: input.primaryError,
-      coverage: "best_effort_global_terrestrial_reception",
+      coverage: input.primaryCoverage ?? "best_effort_global_terrestrial_reception",
+      global: input.primaryGlobal ?? true,
       service_level: "beta_no_sla",
     },
     fallback: {
@@ -218,6 +234,14 @@ export function buildTransportRuntimeHealth(input: TransportRuntimeHealthInput) 
       global: false,
     },
     regional_sources: regionalSources,
+    coverage_state: primaryCurrent
+      ? input.primaryGlobal === false
+        ? "targeted_primary"
+        : "global_primary"
+      : regionalCurrent
+        ? "regional_only"
+        : "unavailable",
+    global_ready: primaryCurrent && (input.primaryGlobal ?? true),
     retention: input.retention,
   };
 }

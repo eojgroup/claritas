@@ -241,6 +241,10 @@ jobs:
     name: Deploy to GKE
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    # Keep enough headroom for bounded rollouts plus a four-workload rollback,
+    # while preventing a stalled production control-plane call from occupying
+    # the serialized deploy lane indefinitely.
+    timeout-minutes: 180
     needs: build
     permissions:
       contents: read
@@ -550,7 +554,7 @@ jobs:
               --from-literal=AISSTREAM_API_KEY="$AISSTREAM_API_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
           else
-            echo "::warning::AISSTREAM_API_KEY not provided; global maritime ingestion is unavailable and only configured regional fallbacks can run"
+            echo "::warning::AISSTREAM_API_KEY not provided; primary maritime ingestion is unavailable and only configured regional fallbacks can run"
           fi
 
           # BarentsWatch exposes Norwegian Coastal Administration AIS through
@@ -573,7 +577,7 @@ jobs:
               --from-literal=MPA_OCEANS_X_API_KEY="$MPA_OCEANS_X_API_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
           else
-            echo "::notice::MPA_OCEANS_X_API_KEY not provided; skipping optional Singapore regional fallback secret"
+            echo "::warning title=Singapore AIS not configured::MPA_OCEANS_X_API_KEY is absent. The OCEANS-X Singapore vessel feed cannot run until the published Vessel Positions API is subscribed and its production key is stored as this repository secret."
           fi
 
           eo_args=()
@@ -797,6 +801,96 @@ jobs:
           EGRESS_IP="$(terraform -chdir=infra/gcp/terraform output -raw api_egress_ip)"
           echo "::notice title=Claritas static egress IP::Authorize ${EGRESS_IP} for SMTP in Brevo."
 
+      - name: 📌 Capture complete immutable rollback state
+        run: |
+          set -euo pipefail
+          ns="${NAMESPACE}"
+
+          snapshot_deployment() {
+            local deployment="$1"
+            local deployment_json="$RUNNER_TEMP/claritas-current-${deployment}.json"
+            local pods_json="$RUNNER_TEMP/claritas-current-${deployment}-pods.json"
+            local snapshot="$RUNNER_TEMP/claritas-rollback-${deployment}.json"
+
+            # Capture what is actually serving before the first workload
+            # manifest is applied. Every regular container (including database
+            # sidecars) is pinned to its runtime digest in the saved full spec.
+            kubectl -n "$ns" rollout status "deployment/${deployment}" --timeout=300s >&2
+            kubectl -n "$ns" get "deployment/${deployment}" -o json > "$deployment_json"
+            kubectl -n "$ns" get pods -l "app=${deployment}" -o json > "$pods_json"
+            env \
+              ROLLBACK_DEPLOYMENT="$deployment" \
+              ROLLBACK_DEPLOYMENT_JSON="$deployment_json" \
+              ROLLBACK_PODS_JSON="$pods_json" \
+              ROLLBACK_SNAPSHOT="$snapshot" \
+              node <<'NODE'
+          const fs = require("node:fs");
+          const deployment = JSON.parse(fs.readFileSync(process.env.ROLLBACK_DEPLOYMENT_JSON, "utf8"));
+          const pods = JSON.parse(fs.readFileSync(process.env.ROLLBACK_PODS_JSON, "utf8"));
+          const name = process.env.ROLLBACK_DEPLOYMENT;
+          const readyPods = (pods.items || []).filter((pod) =>
+            (pod.status?.conditions || []).some((condition) =>
+              condition.type === "Ready" && condition.status === "True"));
+          if (readyPods.length === 0) throw new Error(`No ready pods found for ${name}`);
+
+          const repositoryOf = (image) => {
+            const withoutDigest = image.split("@", 1)[0];
+            const slash = withoutDigest.lastIndexOf("/");
+            const colon = withoutDigest.lastIndexOf(":");
+            return colon > slash ? withoutDigest.slice(0, colon) : withoutDigest;
+          };
+          const immutableImage = (configuredImage, runtimeId) => {
+            const id = runtimeId.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "");
+            let immutable;
+            if (id.includes("@sha256:")) immutable = id;
+            else if (/^sha256:[a-f0-9]{64}$/i.test(id)) {
+              immutable = `${repositoryOf(configuredImage)}@${id}`;
+            } else {
+              throw new Error(`Runtime image for ${configuredImage} is not digest-addressed: ${runtimeId}`);
+            }
+            if (!/@sha256:[a-f0-9]{64}$/i.test(immutable)) {
+              throw new Error(`Invalid immutable image derived for ${configuredImage}: ${immutable}`);
+            }
+            return immutable;
+          };
+
+          const containers = deployment.spec?.template?.spec?.containers || [];
+          if (containers.length === 0) throw new Error(`Deployment ${name} has no containers`);
+          for (const container of containers) {
+            const ids = new Set();
+            for (const pod of readyPods) {
+              const status = (pod.status?.containerStatuses || []).find((entry) =>
+                entry.name === container.name && entry.ready === true);
+              if (status?.imageID) ids.add(status.imageID);
+            }
+            if (ids.size !== 1) {
+              throw new Error(
+                `Expected one serving digest for ${name}/${container.name}; found ${ids.size}: ${Array.from(ids).join(", ")}`,
+              );
+            }
+            container.image = immutableImage(container.image, Array.from(ids)[0]);
+          }
+          fs.writeFileSync(process.env.ROLLBACK_SNAPSHOT, JSON.stringify({ spec: deployment.spec }));
+          NODE
+
+            node -e '
+              const snapshot = require(process.argv[1]);
+              const containers = snapshot.spec?.template?.spec?.containers || [];
+              if (!containers.length || containers.some((container) => !/@sha256:[a-f0-9]{64}$/i.test(container.image || ""))) {
+                process.exit(1);
+              }
+            ' "$snapshot"
+          }
+
+          for deployment in keycloak claritas-web claritas-api opencode; do
+            snapshot_deployment "$deployment"
+          done
+          {
+            echo "APPLICATION_ROLLBACK_ARMED=true"
+            echo "RELEASE_GATE_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
+          } >> "$GITHUB_ENV"
+          echo "Captured four complete pre-release workload specs with every container image pinned by digest."
+
       - name: 🛠️ Apply identity deployment
         run: |
           # Keycloak must be available for the realm bootstrap below. Keep the
@@ -955,10 +1049,11 @@ jobs:
           set -euo pipefail
           # The single quotes intentionally protect JavaScript template literals from Bash.
           # shellcheck disable=SC2016
-          kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
+          timeout --signal=TERM --kill-after=5s 30s \
+            kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
             const missing = [];
             if (!process.env.FRED_API_KEY?.trim()) missing.push("FRED_API_KEY");
-            const disabled = (value) => ["0", "false", "no", "off"].includes((value || "true").toLowerCase());
+            const disabled = (value) => ["0", "false", "no", "off"].includes((value || "true").trim().toLowerCase());
             const primaryConfigured = !disabled(process.env.AISSTREAM_ENABLED) && Boolean(process.env.AISSTREAM_API_KEY?.trim());
             const regionalConfigured =
               !disabled(process.env.DIGITRAFFIC_MARITIME_ENABLED) ||
@@ -968,19 +1063,129 @@ jobs:
             if (["0", "false", "no", "off"].includes((process.env.DAILY_BRIEFING_SCHEDULER_ENABLED || "true").toLowerCase())) {
               missing.push("DAILY_BRIEFING_SCHEDULER_ENABLED=true");
             }
+            if (disabled(process.env.INGEST_AUTOMATION_ENABLED)) {
+              missing.push("INGEST_AUTOMATION_ENABLED=true");
+            }
+            if (disabled(process.env.NEWS_ASSESSMENT_WORKER_ENABLED)) {
+              missing.push("NEWS_ASSESSMENT_WORKER_ENABLED=true");
+            }
             if (missing.length) {
               console.error(`Required production runtime configuration missing: ${missing.join(", ")}`);
               process.exit(1);
             }
-            fetch("http://127.0.0.1:8080/readyz")
+            fetch("http://127.0.0.1:8080/readyz", { signal: AbortSignal.timeout(5_000) })
               .then((response) => {
                 if (!response.ok) throw new Error(`readiness returned ${response.status}`);
-                console.log("FRED, maritime provider path, daily scheduler, and API readiness are configured.");
+                console.log("FRED, maritime provider path, ingestion automation, news assessment, daily scheduler, and API readiness are configured.");
               })
               .catch((error) => {
                 console.error(error);
                 process.exit(1);
               });
+          '
+
+          refresh_queued=0
+          release_news_run_id=""
+          for attempt in $(seq 1 20); do
+            echo "Post-rollout news refresh request ${attempt}/20"
+            refresh_body="$(
+              timeout --signal=TERM --kill-after=5s 20s \
+                kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- \
+                env RELEASE_GATE_ID="$RELEASE_GATE_ID" node -e '
+                  const url = new URL("http://127.0.0.1:8080/internal/news/refresh");
+                  url.searchParams.set("releaseId", process.env.RELEASE_GATE_ID);
+                  fetch(url, { method: "POST", signal: AbortSignal.timeout(10_000) })
+                    .then(async (response) => ({ status: response.status, body: await response.json() }))
+                    .then((result) => process.stdout.write(JSON.stringify(result)))
+                    .catch(() => process.exit(1));
+                ' 2>/dev/null || true
+            )"
+            printf '%s\n' "$refresh_body"
+            refresh_summary="$(
+              printf '%s' "$refresh_body" | node -e '
+                let input = "";
+                process.stdin.on("data", (chunk) => { input += chunk; });
+                process.stdin.on("end", () => {
+                  try {
+                    const result = JSON.parse(input);
+                    const runId = Number(result.body?.runId);
+                    const accepted = result.status === 202 && Number.isSafeInteger(runId) && runId > 0;
+                    process.stdout.write(String(accepted) + "\t" + (accepted ? String(runId) : ""));
+                  } catch { process.stdout.write("false\t"); }
+                });
+              '
+            )"
+            IFS=$'\t' read -r refresh_queued_value release_news_run_id <<< "$refresh_summary"
+            if [ "$refresh_queued_value" = "true" ]; then
+              refresh_queued=1
+              break
+            fi
+            if [ "$attempt" -lt 20 ]; then sleep 15; fi
+          done
+          if [ "$refresh_queued" -ne 1 ]; then
+            echo "::error::Could not queue or reuse a post-rollout governed news refresh." >&2
+            exit 1
+          fi
+          echo "RELEASE_NEWS_RUN_ID=${release_news_run_id}" >> "$GITHUB_ENV"
+          printf '%s' "$release_news_run_id" > "$RUNNER_TEMP/claritas-release-news-run-id"
+          echo "Verifying exact release-owned news run ${release_news_run_id}."
+
+          # Prove the user-visible data outcome, not merely that the scheduler
+          # process started: fresh assessed reporting, a current markets stream,
+          # publisher diversity, and non-GB subject geography must all exist.
+          news_ready=0
+          news_body=""
+          for attempt in $(seq 1 40); do
+            echo "News runtime verification attempt ${attempt}/40"
+            news_body="$(
+              timeout --signal=TERM --kill-after=5s 30s \
+                kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- \
+                env RELEASE_NEWS_RUN_ID="$release_news_run_id" node -e '
+                const url = new URL("http://127.0.0.1:8080/internal/news/runtime-health");
+                url.searchParams.set("runId", process.env.RELEASE_NEWS_RUN_ID);
+                fetch(url, { signal: AbortSignal.timeout(20_000) })
+                  .then((response) => response.text())
+                  .then((value) => process.stdout.write(value))
+                  .catch(() => process.exit(1));
+              ' 2>/dev/null || true
+            )"
+            news_ready_value="$(
+              printf '%s' "$news_body" | env EXPECTED_RELEASE_NEWS_RUN_ID="$release_news_run_id" node -e '
+                let input = "";
+                process.stdin.on("data", (chunk) => { input += chunk; });
+                process.stdin.on("end", () => {
+                  try {
+                    const health = JSON.parse(input);
+                    const expectedRunId = Number(process.env.EXPECTED_RELEASE_NEWS_RUN_ID);
+                    process.stdout.write(String(
+                      health.ready === true && health.release_run?.id === expectedRunId
+                    ));
+                  }
+                  catch { process.stdout.write("false"); }
+                });
+              '
+            )"
+            if [ "$news_ready_value" = "true" ]; then
+              news_ready=1
+              break
+            fi
+            printf '%s\n' "$news_body"
+            if [ "$attempt" -lt 40 ]; then sleep 15; fi
+          done
+          if [ "$news_ready" -ne 1 ]; then
+            echo "::error::News runtime did not prove fresh markets, assessed publisher diversity, and non-GB subject geography." >&2
+            printf '%s\n' "$news_body"
+            kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=20m | \
+              grep -E "(news_assessment|News ingestion|gdelt|GDELT|ingestion_automation)" || true
+            exit 1
+          fi
+          printf '%s' "$news_body" | node -e '
+            let input = "";
+            process.stdin.on("data", (chunk) => { input += chunk; });
+            process.stdin.on("end", () => {
+              const health = JSON.parse(input);
+              console.log("News runtime verified: " + health.current.count + " current; " + health.current.markets + " markets (" + health.current.publisher_verified_markets + " publisher-timed); " + health.current.publishers + " publishers; " + health.geography_24h.countries + " mapped countries; " + health.geography_24h.non_gb_stories + " non-GB stories; " + health.release_run.gdelt_gkg_sampled + " exact-run GKG rows decoded; " + health.release_run.gdelt_gkg_canonical_country_url_probes + " deterministic country/canonical persistence probes; " + health.release_run.gdelt_gkg_matched + " incidental DOC matches (" + health.release_run.gdelt_gkg_matched_country_rows + " accepted with valid country geography).");
+            });
           '
 
           # Query every pod over its loopback interface. Standby replicas are
@@ -989,6 +1194,7 @@ jobs:
           # present in Fintraffic's regional reception area.
           transport_ready=0
           transport_state=""
+          transport_body=""
           for attempt in $(seq 1 24); do
             echo "Transport runtime verification attempt ${attempt}/24"
             mapfile -t pods < <(
@@ -999,8 +1205,9 @@ jobs:
             )
             for pod in "${pods[@]}"; do
               body="$(
-                kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- node -e '
-                  fetch("http://127.0.0.1:8080/internal/transport/runtime-health")
+                timeout --signal=TERM --kill-after=5s 15s \
+                  kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- node -e '
+                  fetch("http://127.0.0.1:8080/internal/transport/runtime-health", { signal: AbortSignal.timeout(5_000) })
                     .then((response) => response.text())
                     .then((value) => process.stdout.write(value))
                     .catch(() => process.exit(1));
@@ -1013,7 +1220,7 @@ jobs:
                   process.stdin.on("end", () => {
                     try {
                       const health = JSON.parse(input);
-                      console.log(String(Boolean(health.ready)) + " " + (health.state || "unknown"));
+                      console.log(String(health.ready === true) + " " + (health.state || "unknown"));
                     } catch {
                       console.log("false unreadable");
                     }
@@ -1022,27 +1229,121 @@ jobs:
               )"
               read -r ready state <<< "$summary"
               echo "${pod}: transport runtime ${state}"
-              if [ "$ready" = "true" ] && { [ "$state" = "live_primary" ] || [ "$state" = "regional_fallback" ]; }; then
+              if [ "$ready" = "true" ] && [ "$state" = "live_primary" ]; then
                 transport_ready=1
                 transport_state="$state"
+                transport_body="$body"
                 break 2
               fi
+              if [ "$ready" = "true" ] && [ "$state" = "regional_fallback" ]; then
+                # Remember an honest degraded fallback, but keep the full
+                # verification window open for a configured AISstream primary.
+                # This prevents a fast Fintraffic poll from hiding a silent
+                # primary immediately after rollout.
+                transport_ready=1
+                transport_state="$state"
+                transport_body="$body"
+              fi
             done
-            sleep 10
+            if [ "$attempt" -lt 24 ]; then sleep 10; fi
           done
           if [ "$transport_ready" -ne 1 ]; then
-            echo "::error::No transport leader reported a current AISstream primary or explicit Fintraffic regional fallback." >&2
+            echo "::error::No transport leader reported a current AISstream primary or an explicit current regional fallback." >&2
             kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
-              grep -E "(AISstream|aisstream_|digitraffic_maritime_refresh|Transport ingestion worker)" || true
+              grep -E "(AISstream|aisstream_|digitraffic_maritime_refresh|barentswatch_maritime_refresh|mpa_oceans_x_maritime_refresh|Transport ingestion worker)" || true
             exit 1
           fi
+
+          printf '%s' "$transport_body" | node -e '
+            let input = "";
+            process.stdin.on("data", (chunk) => { input += chunk; });
+            process.stdin.on("end", () => {
+              const health = JSON.parse(input);
+              const primary = health.primary || {};
+              console.log("Transport coverage: " + (health.coverage_state || "unknown") + "; primary=" + (primary.current ? "current" : "not_current") + "; scope=" + (primary.coverage || "unknown"));
+              for (const source of health.regional_sources || []) {
+                console.log("Regional AIS " + source.id + ": configuration=" + (source.configuration_status || (source.configured ? "configured" : "not_configured")) + "; current=" + Boolean(source.current) + "; traffic=" + Boolean(source.traffic_current) + "; fetched=" + (source.last_fetched_count ?? "n/a") + "; parsed=" + (source.last_parsed_count ?? "n/a") + "; queued=" + (source.last_queued_count ?? "n/a"));
+              }
+              if (primary.configured && !primary.current) {
+                console.log("::warning title=AISstream primary is silent::The configured AISstream connection did not produce and persist a current vessel position during the full verification window; release coverage is regional only.");
+              }
+              const singapore = (health.regional_sources || []).find((source) => source.id === "mpa_oceans_x");
+              if (!singapore?.configured) {
+                console.log("::warning title=Singapore AIS unavailable::MPA OCEANS-X is not configured in the running ingestion leader, so Singapore has no official regional vessel fallback.");
+              } else if (!singapore.current || !singapore.traffic_current) {
+                console.log("::warning title=Singapore AIS has no current traffic::MPA OCEANS-X is configured but did not prove a current provider response and vessel position during release verification.");
+              }
+            });
+          '
           if [ "$transport_state" = "regional_fallback" ]; then
-            echo "::warning::Transport is healthy but degraded to the Finland/Baltic Fintraffic fallback; global AIS is not implied."
+            echo "::warning::Transport readiness is degraded to current official regional source coverage. It does not imply global or Singapore vessel coverage."
           else
-            echo "::notice title=Transport runtime verified::AISstream primary is current."
+            echo "::notice title=Transport runtime verified::AISstream primary is current for its configured subscription areas."
           fi
+
+          # The general transport gate proves provider liveness. Prove the
+          # reported Singapore regression separately against uncached persisted
+          # data: at least one fresh maritime position must currently resolve to
+          # SG. Flag, origin, destination and route links do not qualify.
+          singapore_transport_ready=0
+          singapore_transport_body=""
+          for attempt in $(seq 1 24); do
+            echo "Singapore maritime coverage verification attempt ${attempt}/24"
+            singapore_transport_body="$(
+              timeout --signal=TERM --kill-after=5s 15s \
+                kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
+                  fetch("http://127.0.0.1:8080/internal/transport/singapore-health", { signal: AbortSignal.timeout(5_000) })
+                    .then((response) => response.text())
+                    .then((value) => process.stdout.write(value))
+                    .catch(() => process.exit(1));
+                ' 2>/dev/null || true
+            )"
+            singapore_transport_ready_value="$(
+              printf '%s' "$singapore_transport_body" | node -e '
+                let input = "";
+                process.stdin.on("data", (chunk) => { input += chunk; });
+                process.stdin.on("end", () => {
+                  try {
+                    const health = JSON.parse(input);
+                    process.stdout.write(String(
+                      health.ready === true &&
+                      health.state === "current_singapore_vessel" &&
+                      health.country === "SG" &&
+                      health.mode === "maritime" &&
+                      health.position_basis === "current_country_iso2" &&
+                      health.cache_bypassed === true &&
+                      Number(health.current_vessels) > 0
+                    ));
+                  } catch {
+                    process.stdout.write("false");
+                  }
+                });
+              '
+            )"
+            if [ "$singapore_transport_ready_value" = "true" ]; then
+              singapore_transport_ready=1
+              break
+            fi
+            printf '%s\n' "$singapore_transport_body"
+            if [ "$attempt" -lt 24 ]; then sleep 10; fi
+          done
+          if [ "$singapore_transport_ready" -ne 1 ]; then
+            echo "::error::No fresh position-derived maritime entity is currently in Singapore; flag, origin, destination and route links are intentionally excluded." >&2
+            printf '%s\n' "$singapore_transport_body"
+            kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
+              grep -E "(AISstream|aisstream_|mpa_oceans_x_maritime_refresh|MPA OCEANS-X|singapore_transport_health_failed)" || true
+            exit 1
+          fi
+          printf '%s' "$singapore_transport_body" | node -e '
+            let input = "";
+            process.stdin.on("data", (chunk) => { input += chunk; });
+            process.stdin.on("end", () => {
+              const health = JSON.parse(input);
+              console.log("Singapore maritime coverage verified: " + health.current_vessels + " fresh position-derived vessels; latest=" + health.latest_observed_at + "; sources=" + (health.source_names || []).join(","));
+            });
+          '
           kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
-            grep -E "(Ingestion automation worker started|Daily briefing scheduler started|Transport ingestion worker|AISstream transport subscription connected|aisstream_subscription_started|aisstream_ingestion_progress|aisstream_idle_reconnect|digitraffic_maritime_refresh)" || true
+            grep -E "(Ingestion automation worker started|Daily briefing scheduler started|Transport ingestion worker|AISstream transport subscription connected|aisstream_subscription_started|aisstream_ingestion_progress|aisstream_idle_reconnect|digitraffic_maritime_refresh|barentswatch_maritime_refresh|mpa_oceans_x_maritime_refresh|BarentsWatch|MPA OCEANS-X)" || true
 
       - name: 🌐 Verify API pods use the reserved egress IP
         run: |
@@ -1062,8 +1363,9 @@ jobs:
             actual=""
             for attempt in 1 2 3; do
               actual="$(
-                kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- \
-                  node -e 'fetch("https://api.ipify.org").then((response)=>response.text()).then((ip)=>process.stdout.write(ip.trim()))' \
+                timeout --signal=TERM --kill-after=5s 20s \
+                  kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- \
+                  node -e 'fetch("https://api.ipify.org", { signal: AbortSignal.timeout(10_000) }).then((response)=>response.text()).then((ip)=>process.stdout.write(ip.trim()))' \
                   2>/dev/null || true
               )"
               if [ -n "$actual" ]; then
@@ -1082,7 +1384,8 @@ jobs:
       - name: 🧪 Verify OpenCode tool-free briefing runtime
         run: |
           set -euo pipefail
-          kubectl -n "${NAMESPACE}" exec deployment/opencode -- node -e '
+          timeout --signal=TERM --kill-after=5s 30s \
+            kubectl -n "${NAMESPACE}" exec deployment/opencode -- node -e '
             const config = require("/home/opencode/.config/opencode/opencode.json");
             const failures = [];
             if (config.default_agent !== "briefing") failures.push("default_agent must be briefing");
@@ -1146,3 +1449,85 @@ jobs:
 
           gcloud dns record-sets transaction execute --zone="${DNS_ZONE}"
           echo "A ${DOMAIN} and ${AUTH_DOMAIN} -> ${INGRESS_IP} ensured."
+
+      - name: ↩️ Roll back application workloads after any failed release check
+        if: ${{ always() && env.APPLICATION_ROLLBACK_ARMED == 'true' && job.status != 'success' }}
+        run: |
+          set -uo pipefail
+          echo "::warning::A post-mutation release step failed; restoring all previously serving digest-addressed images."
+
+          # Cancel only the run owned by this exact workflow attempt. If the
+          # new API is already unavailable, stale-run reclamation remains a
+          # durable fallback when the previous release resumes.
+          release_run_id="${RELEASE_NEWS_RUN_ID:-}"
+          if [ -z "$release_run_id" ] && [ -f "$RUNNER_TEMP/claritas-release-news-run-id" ]; then
+            release_run_id="$(<"$RUNNER_TEMP/claritas-release-news-run-id")"
+          fi
+          if [[ "$release_run_id" =~ ^[1-9][0-9]*$ ]]; then
+            mapfile -t api_pods < <(
+              kubectl -n "${NAMESPACE}" get pods \
+                -l app=claritas-api \
+                --field-selector=status.phase=Running \
+                -o name 2>/dev/null || true
+            )
+            for pod in "${api_pods[@]}"; do
+              cancel_result="$(
+                timeout --signal=TERM --kill-after=5s 20s \
+                  kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- \
+                  env RELEASE_NEWS_RUN_ID="$release_run_id" RELEASE_GATE_ID="$RELEASE_GATE_ID" node -e '
+                    const url = new URL("http://127.0.0.1:8080/internal/news/refresh/" + process.env.RELEASE_NEWS_RUN_ID + "/cancel");
+                    url.searchParams.set("releaseId", process.env.RELEASE_GATE_ID);
+                    fetch(url, { method: "POST", signal: AbortSignal.timeout(10_000) })
+                      .then(async (response) => ({ status: response.status, body: await response.json() }))
+                      .then((result) => process.stdout.write(JSON.stringify(result)))
+                      .catch(() => process.exit(1));
+                  ' 2>/dev/null || true
+              )"
+              printf '%s\n' "$cancel_result"
+              if printf '%s' "$cancel_result" | node -e '
+                let input = "";
+                process.stdin.on("data", (chunk) => { input += chunk; });
+                process.stdin.on("end", () => {
+                  try { process.exit(JSON.parse(input).body?.cancelled === true ? 0 : 1); }
+                  catch { process.exit(1); }
+                });
+              '; then
+                break
+              fi
+            done
+          fi
+
+          rollback_failed=0
+          restore_deployment_spec() {
+            local deployment="$1"
+            local snapshot="$RUNNER_TEMP/claritas-rollback-${deployment}.json"
+            local patch
+            if [ ! -s "$snapshot" ]; then
+              echo "::error::Missing pre-apply workload snapshot for ${deployment}." >&2
+              return 1
+            fi
+            patch="$(node -e '
+              const snapshot = require(process.argv[1]);
+              process.stdout.write(JSON.stringify([
+                { op: "replace", path: "/spec", value: snapshot.spec },
+              ]));
+            ' "$snapshot")"
+            kubectl -n "${NAMESPACE}" patch "deployment/${deployment}" --type=json -p "$patch"
+          }
+          for deployment in keycloak claritas-web claritas-api opencode; do
+            if ! restore_deployment_spec "$deployment"; then
+              rollback_failed=1
+            fi
+          done
+          for deployment in keycloak claritas-web claritas-api opencode; do
+            if ! kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s; then
+              echo "::error::Rollback rollout failed for ${deployment}." >&2
+              kubectl -n "${NAMESPACE}" describe "deployment/${deployment}" | sed -n '1,160p' || true
+              rollback_failed=1
+            fi
+          done
+          if [ "$rollback_failed" -ne 0 ]; then
+            echo "::error::Application rollback was incomplete; manual intervention is required." >&2
+            exit 1
+          fi
+          echo "::notice title=Application rollback complete::Restored all four complete pre-release workload specs with every container image digest-pinned."

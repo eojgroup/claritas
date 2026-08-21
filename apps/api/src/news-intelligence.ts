@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const NEWS_ASSESSMENT_METHODOLOGY = "trader-news-priority-v1";
+export const NEWS_ASSESSMENT_METHODOLOGY = "trader-news-priority-v2";
 
 export const NEWS_CATEGORIES = [
   "markets",
@@ -92,7 +92,7 @@ const CATEGORY_LABELS: Record<NewsCategory, string> = {
 const CATEGORY_RULES: Array<{ category: Exclude<NewsCategory, "other">; pattern: RegExp }> = [
   {
     category: "markets",
-    pattern: /\b(?:financial markets?|capital markets?|stock(?:s| market)?|equities|share prices?|equity shares?|bonds?|treasur(?:y|ies)|yield curves?|currenc(?:y|ies)|forex|foreign exchange|securities|stock exchange|market index|futures?|derivatives?|asset prices?)\b/i,
+    pattern: /\b(?:financial markets?|capital markets?|stock(?:s| market)?|equities|share prices?|shares? (?:rise|rose|rises|rally|rallied|gain(?:ed|s)?|fall|fell|falls|drop(?:ped|s)?|slid|slide|sink|sank)|wall street|s&p\s*500|dow jones|nasdaq|ftse(?:\s*100)?|dax(?:\s*40)?|cac(?:\s*40)?|stoxx(?:\s*600)?|nikkei(?:\s*225)?|hang seng|equity shares?|bonds?|treasur(?:y|ies)|bond yields?|yield curves?|currenc(?:y|ies)|forex|foreign exchange|securities|stock exchange|market index|market moves?|market rally|market selloff|futures?|derivatives?|commodit(?:y|ies)|gold prices?|oil prices?|crypto(?:currenc(?:y|ies))?|bitcoin|asset prices?|investors?|traders?|trading session)\b/i,
   },
   {
     category: "economy",
@@ -163,6 +163,11 @@ const STRUCTURED_TOPIC_MATERIALITY_RULES: Array<{ code: string; score: number; p
     pattern: /\b(?:market structure|securities regulation|enforcement|antitrust|competition policy|banking supervision|fraud charges?|charged with fraud)\b/i,
   },
   {
+    code: "market_price_move",
+    score: 0.82,
+    pattern: /\b(?:wall street|s&p\s*500|dow jones|nasdaq|ftse(?:\s*100)?|dax(?:\s*40)?|cac(?:\s*40)?|stoxx(?:\s*600)?|nikkei(?:\s*225)?|hang seng|stock markets?|equities|bond yields?|treasur(?:y|ies)|forex|foreign exchange|shares? (?:rise|rose|rally|rallied|gain(?:ed|s)?|fall|fell|drop(?:ped|s)?|slide|slid|sink|sank)|market (?:rally|selloff)|currenc(?:y|ies) (?:rise|fall|gain|lose|weaken|strengthen))\b/i,
+  },
+  {
     code: "company_corporate_action",
     score: 0.88,
     pattern: /\b(?:earnings|quarterly results?|annual results?|mergers?|acquisitions?|takeovers?|initial public offering|\bipo\b|bankrupt(?:cy)?|insolvenc(?:y|ies))\b/i,
@@ -229,7 +234,7 @@ function collectStrings(value: unknown, output: string[], depth = 0): void {
 
 type StructuredClassificationSignal = {
   signal: string;
-  scope: "feed_topic" | "item_context";
+  scope: "feed_topic" | "item_context" | "provider_topic";
 };
 
 function isBroadInstitutionalFeed(payload: unknown): boolean {
@@ -259,8 +264,11 @@ function structuredClassificationEvidence(payload: unknown): StructuredClassific
   add(source.documentType, "item_context");
   add(source.organisations, "item_context");
   add(source.organizations, "item_context");
-  add(gkg.themes, "item_context");
-  add(gkg.organizations, "item_context");
+  // GKG topics are article-level machine coding rather than publisher-owned
+  // taxonomy. They remain useful, but must not outweigh an explicit headline
+  // or stronger connector metadata by repetition alone.
+  add(gkg.themes, "provider_topic");
+  add(gkg.organizations, "provider_topic");
   add(targeted.event_type, "item_context");
   return Array.from(new Map(
     output.map((entry) => [`${entry.scope}:${entry.signal}`, entry]),
@@ -300,6 +308,16 @@ export function newsStructuredTopicMateriality(
         matched.set(rule.code, { score: rule.score, signal });
       }
     }
+  }
+  // A narrowly worded market-moving headline is useful materiality evidence
+  // even when GDELT has not yet attached a GKG row. It remains publisher text,
+  // so it is deliberately discounted below the equivalent structured signal.
+  for (const rule of STRUCTURED_TOPIC_MATERIALITY_RULES) {
+    if (!rule.pattern.test(itemText) || matched.has(rule.code)) continue;
+    matched.set(rule.code, {
+      score: Number((rule.score * 0.8).toFixed(3)),
+      signal: `headline:${rule.code}`,
+    });
   }
   const ordered = [...matched.entries()].sort((left, right) => (
     right[1].score - left[1].score || left[0].localeCompare(right[0])
@@ -376,8 +394,17 @@ export function classifyNewsItem(input: NewsAssessmentInput): Classification {
   const event = strongestNewsLinkedEvent(input.linkedEvents);
   const points = new Map<NewsCategory, number>();
   const evidence: Classification["evidence"] = [];
+  const evidencePoints = new Map<string, number>();
   const add = (category: NewsCategory, score: number, basis: Classification["evidence"][number]["basis"], signal: string) => {
-    points.set(category, (points.get(category) ?? 0) + score);
+    // Do not let a provider repeat several synonyms from the same taxonomy
+    // family until (for example) climate overwhelms every other category.
+    // Independent evidence bases may reinforce each other, while repeated
+    // signals inside one basis are capped at their strongest value.
+    const key = `${category}:${basis}`;
+    const prior = evidencePoints.get(key) ?? 0;
+    if (score <= prior) return;
+    evidencePoints.set(key, score);
+    points.set(category, (points.get(category) ?? 0) - prior + score);
     evidence.push({ category, basis, signal: signal.slice(0, 120) });
   };
 
@@ -394,17 +421,18 @@ export function classifyNewsItem(input: NewsAssessmentInput): Classification {
       // fields (document type, GDELT themes, targeted event context) remain
       // item-scoped structured evidence.
       if (scope === "feed_topic" && !rule.pattern.test(itemText)) continue;
-      if (rule.pattern.test(signal)) add(rule.category, 2, "structured", signal);
+      if (rule.pattern.test(signal)) {
+        add(rule.category, scope === "provider_topic" ? 2 : 3, "structured", signal);
+      }
     }
   }
 
-  // Publisher text is untrusted and source-specific. Lexical classification is
-  // deliberately a fallback only when no governed event or provider metadata
-  // supplied a category.
-  if (points.size === 0) {
-    for (const rule of CATEGORY_RULES) {
-      if (rule.pattern.test(itemText)) add(rule.category, 1, "lexical", rule.category);
-    }
+  // Headline/excerpt terms are weaker than structured metadata, but they are
+  // still needed to disambiguate broad provider themes. Without this bounded
+  // vote, a single incidental GKG climate theme can classify a clearly worded
+  // stock-market report as climate reporting.
+  for (const rule of CATEGORY_RULES) {
+    if (rule.pattern.test(itemText)) add(rule.category, 2, "lexical", rule.category);
   }
 
   if (points.size === 0) {
@@ -420,7 +448,11 @@ export function classifyNewsItem(input: NewsAssessmentInput): Classification {
     right[1] - left[1]
     || NEWS_CATEGORIES.indexOf(left[0]) - NEWS_CATEGORIES.indexOf(right[0])
   ));
-  const categories = ordered.slice(0, 4).map(([category]) => category);
+  const strongestScore = ordered[0]?.[1] ?? 0;
+  const categories = ordered
+    .filter(([, score]) => score >= Math.max(2, strongestScore * 0.75))
+    .slice(0, 4)
+    .map(([category]) => category);
   const primaryEvidence = evidence.filter((entry) => entry.category === categories[0]);
   const basisConfidence = primaryEvidence.some((entry) => entry.basis === "event")
     ? 0.92
@@ -436,20 +468,41 @@ export function classifyNewsItem(input: NewsAssessmentInput): Classification {
 }
 
 function publicationFreshness(input: NewsAssessmentInput, assessedAt: Date) {
-  // Ingestion time is operational provenance, never evidence that a publisher
-  // released the story recently. Missing publisher time therefore fails closed.
-  const publishedAt = dateValue(input.eventTime);
-  if (!publishedAt || publishedAt.getTime() > assessedAt.getTime() + 5 * 60_000) {
-    return { score: 0, ageHours: null, valid: false };
+  // GDELT first discovery can order a current discovery stream but never
+  // becomes a publisher-publication claim. Both bases decay for queue recency;
+  // components and reasons keep the evidence boundary explicit.
+  const payload = record(input.payload);
+  const timeBasis = String(payload.time_basis ?? "unknown").toLowerCase();
+  const isProviderDiscovery = timeBasis === "provider_first_seen";
+  const publisherTimeVerified = timeBasis.includes("publisher_published")
+    || String(payload.publication_time_verified ?? "").toLowerCase() === "true";
+  const hasGovernedTimeBasis = isProviderDiscovery || publisherTimeVerified;
+  const effectiveAt = dateValue(input.eventTime);
+  if (!hasGovernedTimeBasis || !effectiveAt || effectiveAt.getTime() > assessedAt.getTime() + 5 * 60_000) {
+    return {
+      score: 0,
+      ageHours: null,
+      valid: false,
+      timeBasis,
+      isProviderDiscovery,
+      publisherTimeVerified,
+    };
   }
-  const ageHours = Math.max(0, (assessedAt.getTime() - publishedAt.getTime()) / 3_600_000);
+  const ageHours = Math.max(0, (assessedAt.getTime() - effectiveAt.getTime()) / 3_600_000);
   const score = ageHours <= 1 ? 1
     : ageHours <= 6 ? 0.9
       : ageHours <= 24 ? 0.75
         : ageHours <= 72 ? 0.45
           : ageHours <= 168 ? 0.2
             : 0;
-  return { score, ageHours: Number(ageHours.toFixed(3)), valid: true };
+  return {
+    score,
+    ageHours: Number(ageHours.toFixed(3)),
+    valid: true,
+    timeBasis,
+    isProviderDiscovery,
+    publisherTimeVerified,
+  };
 }
 
 function sourceEvidenceQuality(input: NewsAssessmentInput, publicationValid: boolean): number {
@@ -457,7 +510,10 @@ function sourceEvidenceQuality(input: NewsAssessmentInput, publicationValid: boo
   if (String(payload.quality_status ?? "").toLowerCase() === "rejected") return 0;
   const timeBasis = String(payload.time_basis ?? "").toLowerCase();
   if (publicationValid && (timeBasis.includes("publisher_published") || timeBasis.includes("verified"))) return 1;
-  if (publicationValid && String(payload.quality_status ?? "").toLowerCase() === "accepted") return 0.95;
+  // A fresh GDELT first-discovery time is useful chronology but is not a
+  // publisher timestamp. Keep it below first-party/verified source evidence.
+  if (publicationValid && timeBasis.includes("provider_first_seen")) return 0.55;
+  if (publicationValid && String(payload.quality_status ?? "").toLowerCase() === "accepted") return 0.85;
   if (publicationValid) return 0.75;
   return 0.25;
 }
@@ -533,9 +589,13 @@ export function assessNewsItem(input: NewsAssessmentInput, now = new Date()): Ne
     code: "market_sensitive_source_topic",
     label: "Source metadata identifies a market-sensitive topic",
   });
-  if (freshness.score >= 0.75) reasons.push({ code: "recent_publication", label: "Recently published" });
+  if (freshness.score >= 0.75) {
+    reasons.push(freshness.isProviderDiscovery
+      ? { code: "recent_provider_discovery", label: "Recently discovered by GDELT; publisher time unverified" }
+      : { code: "recent_publication", label: "Recently published" });
+  }
   if (!event) reasons.push({ code: "limited_event_evidence", label: "No qualifying linked-event evidence yet" });
-  if (!freshness.valid) reasons.push({ code: "unverified_publication_time", label: "Publication time unavailable or invalid" });
+  if (!freshness.valid) reasons.push({ code: "unverified_publication_time", label: "Publication/discovery time unavailable or invalid" });
 
   const tags: NewsAssessmentTag[] = classification.categories.slice(0, 3).map((category) => ({
     code: `category:${category}`,
@@ -576,8 +636,12 @@ export function assessNewsItem(input: NewsAssessmentInput, now = new Date()): Ne
     structured_topic_materiality_codes: structuredMateriality.codes,
     structured_topic_materiality_signals: structuredMateriality.signals,
     freshness: freshness.score,
-    publication_age_hours: freshness.ageHours,
-    publication_time_valid: freshness.valid,
+    effective_time_age_hours: freshness.ageHours,
+    effective_time_valid: freshness.valid,
+    time_basis: freshness.timeBasis,
+    publisher_publication_time_verified: freshness.publisherTimeVerified,
+    publication_age_hours: freshness.publisherTimeVerified ? freshness.ageHours : null,
+    publication_time_valid: freshness.publisherTimeVerified,
     evidence_confidence: Number(evidenceConfidence.toFixed(4)),
     distinct_original_publishers: distinctPublishers,
     publisher_diversity: publisherDiversity,

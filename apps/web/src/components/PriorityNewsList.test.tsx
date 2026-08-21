@@ -49,7 +49,7 @@ describe("PriorityNewsList", () => {
         earth_observation_state: "imagery_available",
       }],
     };
-    render(<PriorityNewsList items={[item]} selectedId={item.id} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountryName={() => "United Arab Emirates"} onToggle={() => undefined} onSelectCountry={() => undefined} onOpenEvent={onOpenEvent} />);
+    render(<PriorityNewsList items={[item]} selectedId={item.id} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountries={() => ["AE"]} getCountryName={() => "United Arab Emirates"} onToggle={() => undefined} onSelectCountry={() => undefined} onOpenEvent={onOpenEvent} />);
     expect(screen.getAllByText(/imagery available/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Likely linked investigations")).toBeTruthy();
     expect(screen.getByText(/Why shown: the same named location/i)).toBeTruthy();
@@ -86,6 +86,7 @@ describe("PriorityNewsList", () => {
       emptyState: null,
       getImageUrl: () => undefined,
       getSourceLabel: () => "Example",
+      getCountries: () => ["ES"],
       getCountryName: () => "Spain",
       onToggle: () => undefined,
       onSelectCountry: () => undefined,
@@ -116,7 +117,7 @@ describe("PriorityNewsList", () => {
       payload: { time_basis: "provider_first_seen", time_precision: "15_minutes" },
     };
 
-    render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example · via GDELT"} getCountryName={() => "United Kingdom"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
+    render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example · via GDELT"} getCountries={() => ["GB"]} getCountryName={() => "United Kingdom"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
     expect(screen.getByText(/First seen · Aug 14, 2026/i)).toBeTruthy();
   });
 
@@ -141,7 +142,7 @@ describe("PriorityNewsList", () => {
       },
     };
 
-    render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountryName={() => "Global"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
+    render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountries={() => []} getCountryName={() => "Global"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
 
     expect(screen.getAllByText(/Unranked/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/assessment pending/i).length).toBeGreaterThan(0);
@@ -149,5 +150,39 @@ describe("PriorityNewsList", () => {
     expect(screen.queryByText(/Why it ranks: Assessment pending/i)).toBeNull();
     expect(screen.queryByText(/Routine importance/i)).toBeNull();
     expect(screen.queryByText(/recency-only/i)).toBeNull();
+  });
+
+  it("keeps a selected secondary subject country attached to the story", () => {
+    const onToggle = vi.fn();
+    const item: NewsItem = {
+      id: 46,
+      kind: "news",
+      title: "Cross-border market action",
+      summary: null,
+      url: "https://example.com/cross-border",
+      country_iso2: "US",
+      countries: ["US", "GB"],
+      event_time: "2026-08-14T09:15:00Z",
+    };
+
+    render(
+      <PriorityNewsList
+        items={[item]}
+        selectedId={null}
+        primaryCountry="GB"
+        emptyState={null}
+        getImageUrl={() => undefined}
+        getSourceLabel={() => "Example"}
+        getCountries={() => ["US", "GB"]}
+        getCountryName={(iso) => iso}
+        onToggle={onToggle}
+        onSelectCountry={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Cross-border market action/i }));
+    expect(onToggle).toHaveBeenCalledWith(item, "GB");
+    expect(document.querySelector(".dashboard-news-item.is-primary")).toBeTruthy();
+    expect(screen.getByText("US · GB")).toBeTruthy();
   });
 });

@@ -11,6 +11,7 @@ test("MPA parser uses explicit degree coordinates and Singapore-local timestamps
         callSign: "9VTEST",
         mmsiNumber: "563123456",
         vesselType: "DR",
+        flag: "sg",
       },
       latitude: 0.0241476315047,
       longitude: 1.80084330648,
@@ -35,6 +36,7 @@ test("MPA parser uses explicit degree coordinates and Singapore-local timestamps
     displayName: "CLARITAS TEST",
     callsign: "9VTEST",
     shipType: "DR",
+    registrationCountryIso2: "SG",
     destination: null,
   }]);
 });
@@ -89,4 +91,22 @@ test("MPA parser rejects radians-only, stale, invalid, and future positions", ()
       timeStamp: "2026-08-21 16:20:00",
     },
   ], now), []);
+});
+
+test("MPA parser accepts only ISO alpha-2 provider flags", () => {
+  const now = Date.parse("2026-08-21T08:05:00Z");
+  const base = {
+    latitudeDegrees: 1.3,
+    longitudeDegrees: 103.8,
+    timeStamp: "2026-08-21T16:02:52+08:00",
+  };
+  assert.equal(
+    parseMpaMaritimeObservations([
+      {
+        ...base,
+        vesselParticulars: { mmsiNumber: "563123456", flag: "Singapore" },
+      },
+    ], now)[0]?.registrationCountryIso2,
+    null,
+  );
 });

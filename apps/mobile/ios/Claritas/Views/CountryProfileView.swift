@@ -16,7 +16,7 @@ struct CountryProfileView: View {
     private var countryNews: [NewsItem] {
         guard let iso else { return [] }
         return model.news
-            .filter { ($0.country_iso2 ?? "").uppercased() == iso }
+            .filter { $0.hasSubjectCountry(iso) }
             .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
     }
 

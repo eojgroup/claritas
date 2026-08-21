@@ -477,10 +477,12 @@ struct NewsItem: Codable, Identifiable {
     let summary: String?
     let url: String?
     let country_iso2: String?
+    let countries: [String]
     let language_code: String?
     let source_country_iso2: String?
     let tone: Double?
     let event_time: String?
+    let time: NewsTimeEvidence?
     let payload: JSONValue?
     let translated_title: String?
     let ai_summary: String?
@@ -521,6 +523,29 @@ struct NewsItem: Codable, Identifiable {
     var eventDate: Date? {
         guard let s = event_time else { return nil }
         return APIDateParser.parse(s)
+    }
+
+    var subjectCountries: [String] {
+        let decoded = countries.compactMap { value -> String? in
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            return normalized.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil ? normalized : nil
+        }
+        if !decoded.isEmpty { return Array(Set(decoded)).sorted() }
+        guard let primary = country_iso2?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              primary.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else { return [] }
+        return [primary]
+    }
+
+    func hasSubjectCountry(_ iso2: String?) -> Bool {
+        guard let iso2 else { return false }
+        return subjectCountries.contains(iso2.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
+    }
+
+    var timeBasis: String? {
+        if let basis = time?.basis.trimmingCharacters(in: .whitespacesAndNewlines), !basis.isEmpty {
+            return basis
+        }
+        return payload?.object?["time_basis"]?.string
     }
 
     var primaryCategoryLabel: String {
@@ -593,10 +618,12 @@ struct NewsItem: Codable, Identifiable {
         case summary
         case url
         case country_iso2
+        case countries
         case language_code
         case source_country_iso2
         case tone
         case event_time
+        case time
         case payload
         case translated_title
         case ai_summary
@@ -618,10 +645,12 @@ struct NewsItem: Codable, Identifiable {
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         url = try container.decodeIfPresent(String.self, forKey: .url)
         country_iso2 = try container.decodeIfPresent(String.self, forKey: .country_iso2)
+        countries = try container.decodeIfPresent([String].self, forKey: .countries) ?? []
         language_code = try container.decodeIfPresent(String.self, forKey: .language_code)
         source_country_iso2 = try container.decodeIfPresent(String.self, forKey: .source_country_iso2)
         tone = try container.decodeIfPresent(Double.self, forKey: .tone)
         event_time = try container.decodeIfPresent(String.self, forKey: .event_time)
+        time = try container.decodeIfPresent(NewsTimeEvidence.self, forKey: .time)
         payload = try container.decodeIfPresent(JSONValue.self, forKey: .payload)
         translated_title = try container.decodeIfPresent(String.self, forKey: .translated_title)
         ai_summary = try container.decodeIfPresent(String.self, forKey: .ai_summary)
@@ -647,6 +676,13 @@ struct NewsItem: Codable, Identifiable {
         }
         return value
     }
+}
+
+struct NewsTimeEvidence: Codable {
+    let basis: String
+    let is_publisher_verified: Bool
+    let published_at: String?
+    let discovered_at: String?
 }
 
 struct NewsPage: Codable {
@@ -981,7 +1017,11 @@ struct PodcastIntelligenceSummary {
 struct CountryStat: Codable, Identifiable {
     let country: String
     let count: Int
+    let verified_count: Int?
+    let latest_at: String?
+    let provider_count: Int?
     var id: String { country }
+    var latestDate: Date? { latest_at.flatMap(APIDateParser.parse) }
 }
 
 struct CountryWeather: Codable, Identifiable {
@@ -1445,8 +1485,9 @@ enum CountryRelevanceResolver {
     ) -> [CountryRelevanceScore] {
         var newsCounts: [String: Int] = [:]
         news.forEach { row in
-            guard let country = iso2(row.country_iso2) else { return }
-            newsCounts[country, default: 0] += 1
+            row.subjectCountries.forEach { country in
+                newsCounts[country, default: 0] += 1
+            }
         }
         var marketMoves: [String: Double] = [:]
         marketQuotes.forEach { row in
@@ -1768,6 +1809,9 @@ struct MaritimeTransportCoverage: Codable {
     let configured: Bool
     let primary_configured: Bool?
     let primary_status: String?
+    let primary_coverage: String?
+    let primary_global: Bool?
+    let primary_subscription_mode: String?
     let connected: Bool?
     let status: String?
     let last_message_at: String?

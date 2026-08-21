@@ -36,19 +36,24 @@ source URL, public timestamp, subject-country inference and OGL notice. GOV.UK's
 `public_timestamp` is labelled as the publisher's public timestamp rather than
 silently claiming that every value is the first publication time.
 
-GDELT DOC remains the preferred global publisher-discovery path. If DOC is rate
-limited or unavailable, Claritas records that provider step as degraded and may
+GDELT DOC remains the preferred global publisher-discovery path. Scheduled DOC
+requests are divided into bounded subject lanes so financial reporting is not
+crowded out by a high-volume disaster query. Individual lane failures are
+reported and do not discard other successful lanes. If DOC is rate limited or
+unavailable, Claritas records that provider step as degraded and may
 ingest at most 25 relevance-filtered links from GDELT's official rolling Article
 List RSS feed. This fallback is deliberately a bounded sample, not complete
 global coverage. Because GAL RSS does not declare article language, the fallback
 admits only headlines with defensible English-language signals; ambiguous or
 non-English headlines are rejected instead of bypassing translation policy. The
 feed and raw archives are retrieved from GDELT's TLS-backed Google Cloud Storage
-origin. GAL `pubDate` is an exact publisher time for only a minority of records
-and otherwise represents GDELT discovery, so fallback items carry the
-explicit `publisher_published_or_provider_discovered` time basis. Normal GDELT
-DOC items carry `provider_first_seen` with 15-minute precision. Neither value is
-presented as an exact publisher publication timestamp.
+origin. Publisher-owned metadata or an unambiguous URL date is stored as
+`publisher_published_verified`. Otherwise only a URL's first current discovery
+by Claritas may be stored as `provider_first_seen`; it is lower-ranked, visibly
+labelled, and never refreshed by later rediscovery. Article-body text is not
+stored or parsed for this fallback. Bounded publisher meta description,
+keywords and JSON-LD location fields may be used transiently for subject-country
+inference.
 
 ## Reviewed but not enabled
 

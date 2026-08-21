@@ -143,6 +143,10 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-aisstream, key: AISSTREAM_API_KEY, optional: true } }
             - name: AISSTREAM_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_ENABLED, optional: true } }
+            - name: AISSTREAM_COVERAGE_MODE
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_COVERAGE_MODE, optional: true } }
+            - name: AISSTREAM_MONITORED_PORT_RADIUS_KM
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_MONITORED_PORT_RADIUS_KM, optional: true } }
             - name: AISSTREAM_SAMPLE_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AISSTREAM_SAMPLE_SECONDS, optional: true } }
             - name: AISSTREAM_FRESHNESS_MINUTES

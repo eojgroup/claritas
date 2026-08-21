@@ -45,7 +45,11 @@ struct PadOverviewView: View {
     }
 
     private var focusedNews: [NewsItem] {
-        padNewsScopeMatchesSelection ? model.news : []
+        padNewsScopeMatchesSelection ? model.rankedNews : []
+    }
+
+    private var topFocusedNews: [NewsItem] {
+        Array(focusedNews.prefix(3))
     }
 
     var body: some View {
@@ -100,15 +104,12 @@ struct PadOverviewView: View {
         }
         .task(id: padNewsRequestKey) {
             guard model.authStatus == .authed, model.hasPaidAccess else { return }
-            guard model.newsLoadMode != .recent
-                    || model.newsScopeCountry != selectedNewsCountry
-                    || model.newsScopeCategory != model.selectedNewsCategory
-                    || model.newsScopeSort != .importance else { return }
-            await model.refreshNews(
-                mode: .recent,
+            guard model.rankedNewsScopeCountry != selectedNewsCountry
+                    || model.rankedNewsScopeCategory != model.selectedNewsCategory
+                    || !model.rankedNewsMetadataIncluded else { return }
+            await model.refreshRankedNews(
                 country: selectedNewsCountry,
-                category: model.selectedNewsCategory,
-                sort: .importance
+                category: model.selectedNewsCategory
             )
         }
     }
@@ -276,12 +277,9 @@ struct PadOverviewView: View {
             VStack(spacing: 0) {
                 padNewsCategorySelector
                     .padding(.bottom, 6)
-                ForEach(focusedNews.prefix(3)) { item in
+                ForEach(topFocusedNews) { item in
                     Button {
-                        model.selectedNewsItemID = item.id
-                        if let country = item.country_iso2 {
-                            model.selectedCountry = country.uppercased()
-                        }
+                        model.selectNewsItem(item)
                         destination = .news
                     } label: {
                         HStack(alignment: .top, spacing: 12) {
@@ -307,7 +305,7 @@ struct PadOverviewView: View {
                                 }
                             }
                             Spacer()
-                            Text(item.country_iso2?.uppercased() ?? "GL")
+                            Text(newsCountryLabel(item))
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
                         }
@@ -319,7 +317,7 @@ struct PadOverviewView: View {
                     )
                     Divider()
                 }
-                if let error = model.newsLoadError, !error.isEmpty, !model.isRefreshingNews {
+                if let error = model.rankedNewsLoadError, !error.isEmpty, !model.isRefreshingRankedNews {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Ranked reporting could not be loaded", systemImage: "exclamationmark.triangle")
                             .font(.subheadline.weight(.semibold))
@@ -330,11 +328,9 @@ struct PadOverviewView: View {
                             .lineLimit(3)
                         Button("Retry") {
                             Task {
-                                await model.refreshNews(
-                                    mode: .recent,
+                                await model.refreshRankedNews(
                                     country: selectedNewsCountry,
-                                    category: model.selectedNewsCategory,
-                                    sort: .importance
+                                    category: model.selectedNewsCategory
                                 )
                             }
                         }
@@ -344,12 +340,12 @@ struct PadOverviewView: View {
                     .padding(.vertical, 18)
                 } else if focusedNews.isEmpty {
                     HStack(spacing: 8) {
-                        if model.isRefreshingNews || !padNewsScopeMatchesSelection {
+                        if model.isRefreshingRankedNews || !padNewsScopeMatchesSelection {
                             ProgressView()
                                 .controlSize(.small)
                         }
                         Text(
-                            model.isRefreshingNews || !padNewsScopeMatchesSelection
+                            model.isRefreshingRankedNews || !padNewsScopeMatchesSelection
                                 ? "Loading ranked reporting for this category…"
                                 : "No ranked reporting matches the current scope."
                         )
@@ -365,7 +361,7 @@ struct PadOverviewView: View {
     private var padNewsCategorySelector: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 7) {
-                ForEach(model.newsCategoryOptions(mode: .recent, country: selectedNewsCountry)) { category in
+                ForEach(model.rankedNewsCategoryOptions(country: selectedNewsCountry)) { category in
                     let selected = model.selectedNewsCategory == category.code
                     Button {
                         model.setNewsCategory(category.code)
@@ -419,11 +415,16 @@ struct PadOverviewView: View {
         "\(model.selectedNewsCategory)|\(selectedNewsCountry ?? "global")"
     }
 
+    private func newsCountryLabel(_ item: NewsItem) -> String {
+        if let selectedNewsCountry, item.hasSubjectCountry(selectedNewsCountry) {
+            return selectedNewsCountry
+        }
+        return item.subjectCountries.first ?? "GL"
+    }
+
     private var padNewsScopeMatchesSelection: Bool {
-        model.newsLoadMode == .recent
-            && model.newsScopeCountry == selectedNewsCountry
-            && model.newsScopeCategory == model.selectedNewsCategory
-            && model.newsScopeSort == .importance
+        model.rankedNewsScopeCountry == selectedNewsCountry
+            && model.rankedNewsScopeCategory == model.selectedNewsCategory
     }
 
     private var marketPanel: some View {

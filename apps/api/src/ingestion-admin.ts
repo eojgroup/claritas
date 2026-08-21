@@ -15,7 +15,7 @@ import {
   newsTranslationEnabled,
   runPendingNewsHeadlineTranslations,
 } from "./news-translation";
-import { query } from "./db";
+import { query, withTransaction } from "./db";
 
 export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
@@ -136,7 +136,20 @@ type NewsRunProviders = {
 type NewsRunPlan = {
   providers: NewsRunProviders;
   gdelt: { timespan: string; maxRecords: number; maxRawRows: number };
+  runTranslations: boolean;
+  releaseId?: string;
   requestPayload: Record<string, unknown>;
+};
+
+type TriggerNewsRunOptions = {
+  /** Only a release run with this durable owner may be reused. */
+  releaseId?: string;
+};
+
+type TriggerNewsRunResult = {
+  runId: number;
+  reused: boolean;
+  blockedByOtherRun: boolean;
 };
 
 type WeatherRunPlan = {
@@ -276,6 +289,13 @@ const PIPELINE_SOURCE_DEFAULT: Record<IngestionPipeline, SourceConfigKey> = {
 };
 
 const activeRunPromises = new Map<number, Promise<void>>();
+const NEWS_RUN_LOCK_KEY = "claritas:ingestion-run:news";
+const NEWS_ACTIVE_RUN_STALE_MINUTES = clampInt(
+  process.env.NEWS_ACTIVE_RUN_STALE_MINUTES,
+  15,
+  240,
+  90,
+);
 
 const INGESTION_SOURCE_NAMES = [
   "gdelt",
@@ -549,21 +569,116 @@ async function createRun(input: TriggerRunInput): Promise<{ id: number }> {
   return rows[0];
 }
 
+async function createOrReuseNewsRun(
+  input: TriggerRunInput,
+  options: TriggerNewsRunOptions,
+): Promise<{ id: number; shouldStart: boolean; reused: boolean; blockedByOtherRun: boolean }> {
+  const source = await ensureSource(input.pipeline, input.sourceNameOverride);
+  const stats = {
+    pipeline: input.pipeline,
+    steps: [],
+    totals: emptyTotals(),
+  };
+
+  return withTransaction(async (client) => {
+    // Every news trigger (automation, admin, and release) takes the same
+    // transaction-scoped lock. The active check and insert are therefore one
+    // atomic decision across API replicas without requiring a post-V52 index.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+      [NEWS_RUN_LOCK_KEY],
+    );
+    await client.query(
+      `WITH reclaimed AS (
+         UPDATE ingestion_run
+         SET status='failed',
+             finished_at=now(),
+             updated_at=now(),
+             error=COALESCE(error,$1),
+             stats=COALESCE(stats,'{}'::jsonb) || jsonb_build_object(
+               'reclaimed',true,
+               'reclaimed_at',now(),
+               'stale_timeout_minutes',$2::int
+             )
+         WHERE pipeline='news'
+           AND status IN ('queued','running')
+           AND started_at < now()-make_interval(mins => $2::int)
+         RETURNING id
+       )
+       INSERT INTO ingestion_run_log (run_id,logged_at,level,message,context)
+       SELECT id,now(),'error',$1,jsonb_build_object('stale_timeout_minutes',$2::int)
+       FROM reclaimed`,
+      [
+        "Reclaimed stale news ingestion run before queuing a replacement.",
+        NEWS_ACTIVE_RUN_STALE_MINUTES,
+      ],
+    );
+
+    const active = await client.query<{ id: number; release_id: string | null }>(
+      `SELECT id,request_payload->>'release_id' AS release_id
+       FROM ingestion_run
+       WHERE pipeline='news' AND status IN ('queued','running')
+       ORDER BY started_at DESC,id DESC
+       LIMIT 1
+       FOR UPDATE`,
+    );
+    if (active.rows[0]) {
+      const sameReleaseOwner = !options.releaseId
+        || active.rows[0].release_id === options.releaseId;
+      return {
+        id: active.rows[0].id,
+        shouldStart: false,
+        reused: sameReleaseOwner,
+        blockedByOtherRun: !sameReleaseOwner,
+      };
+    }
+
+    const inserted = await client.query<{ id: number }>(
+      `INSERT INTO ingestion_run (
+         source_id,feed_id,started_at,finished_at,status,error,stats,
+         pipeline,trigger_mode,requested_by_user_id,requested_by_email,request_payload
+       )
+       VALUES ($1,NULL,now(),NULL,'queued',NULL,$2,$3,$4,$5,$6,$7)
+       RETURNING id`,
+      [
+        source.id,
+        JSON.stringify(stats),
+        input.pipeline,
+        input.actor.triggerMode,
+        input.actor.userId,
+        input.actor.email,
+        JSON.stringify(input.requestPayload),
+      ],
+    );
+    return {
+      id: inserted.rows[0].id,
+      shouldStart: true,
+      reused: false,
+      blockedByOtherRun: false,
+    };
+  });
+}
+
 async function updateRunStatus(
   runId: number,
   status: "running" | "success" | "failed",
   details?: { error?: string | null; stats?: Record<string, unknown>; finished?: boolean }
-): Promise<void> {
+): Promise<boolean> {
   const finishedAt = details?.finished ? "now()" : "NULL";
-  await query(
+  const { rows } = await query<{ id: number }>(
     `UPDATE ingestion_run
      SET status = $2,
          error = $3,
          stats = COALESCE($4::jsonb, stats),
-         finished_at = ${finishedAt}
-     WHERE id = $1`,
+         finished_at = ${finishedAt},
+         updated_at = now()
+     WHERE id = $1
+       AND (($2='running' AND status='queued')
+         OR ($2 IN ('success','failed') AND status='running'))
+     RETURNING id`,
     [runId, status, details?.error ?? null, details?.stats ? JSON.stringify(details.stats) : null]
   );
+  return Boolean(rows[0]);
 }
 
 async function appendRunLog(
@@ -619,9 +734,15 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
   if (!providers.gdelt && !providers.institutionalRss && !providers.govUk) {
     throw new IngestionValidationError("Select at least one news provider.");
   }
-  const requestedTimespan = asString(gdeltRaw.timespan) ?? "30min";
-  if (!/^\d+(?:min|h|d)$/i.test(requestedTimespan)) {
-    throw new IngestionValidationError("gdelt.timespan must use GDELT duration syntax such as 15min, 1h, or 1d.");
+  const requestedTimespan = asString(gdeltRaw.timespan) ?? "1h";
+  const timespanMatch = /^(\d+)(min|h|d)$/i.exec(requestedTimespan);
+  if (!timespanMatch) {
+    throw new IngestionValidationError("gdelt.timespan must use GDELT duration syntax such as 1h or 1d.");
+  }
+  const timespanMinutes = Number.parseInt(timespanMatch[1], 10)
+    * ({ min: 1, h: 60, d: 1440 }[timespanMatch[2].toLowerCase()] ?? 0);
+  if (!Number.isFinite(timespanMinutes) || timespanMinutes < 60) {
+    throw new IngestionValidationError("gdelt.timespan must be at least 1h; the DOC API rejects shorter windows.");
   }
   const gdelt = {
     timespan: requestedTimespan.toLowerCase(),
@@ -632,13 +753,36 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
     // Four 190-row polls retain roughly that hourly workload at lower latency.
     maxRawRows: clampInt(gdeltRaw.maxRawRows ?? gdeltRaw.max_raw_rows, 25, 190, 190),
   };
-  return { providers, gdelt, requestPayload: { providers, gdelt } };
+  const runTranslations = asBoolean(
+    body.runTranslations ?? body.run_translations ?? body.translateHeadlines ?? body.translate_headlines,
+    true,
+  );
+  const releaseId = asString(body.releaseId ?? body.release_id);
+  if (releaseId && !/^[A-Za-z0-9._-]{1,128}$/.test(releaseId)) {
+    throw new IngestionValidationError("releaseId must contain only letters, numbers, dots, underscores, or hyphens.");
+  }
+  return {
+    providers,
+    gdelt,
+    runTranslations,
+    ...(releaseId ? { releaseId } : {}),
+    requestPayload: {
+      providers,
+      gdelt,
+      run_translations: runTranslations,
+      ...(releaseId ? { release_id: releaseId } : {}),
+    },
+  };
 }
 
 export function classifyGdeltNewsCoverage(
   result: Record<string, unknown>,
 ): "success" | "degraded" | "failed" {
-  if (result.doc_status === "healthy") return "success";
+  if (result.health === "failed") return "failed";
+  const rawArchiveDegraded = result.raw_archive_status === "degraded"
+    || result.health === "degraded";
+  if (result.doc_status === "healthy") return rawArchiveDegraded ? "degraded" : "success";
+  if (result.doc_status === "healthy_partial") return "degraded";
   if (result.doc_status === "degraded_fallback") {
     const fallback = asRecord(result.gal_fallback);
     const selected = Number(fallback.selected);
@@ -793,7 +937,11 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
   const totals = emptyTotals();
 
   try {
-    await updateRunStatus(runId, "running");
+    const started = await updateRunStatus(runId, "running");
+    if (!started) {
+      await safeAppendRunLog(runId, "warn", "News ingestion task did not start because the run is no longer queued.");
+      return;
+    }
     await safeAppendRunLog(runId, "info", "News ingestion run started.", {
       request: plan.requestPayload,
     });
@@ -830,7 +978,7 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
     const providerSucceeded = providerSteps.filter((step) => step.status !== "failed").length;
     if (providerSucceeded === 0) throw new Error("All selected news providers failed.");
 
-    if (newsTranslationEnabled()) {
+    if (plan.runTranslations && newsTranslationEnabled()) {
       await executeProviderStep(runId, steps, totals, "news-translation/headlines", async () => {
         const targets = [];
         for (const targetLanguage of configuredNewsTranslationTargets()) {
@@ -856,11 +1004,17 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
       totals,
     };
 
-    await updateRunStatus(runId, "success", {
+    const completed = await updateRunStatus(runId, "success", {
       error: degradedSteps.length > 0 ? `Degraded provider steps: ${degradedSteps.join(", ")}` : null,
       stats,
       finished: true,
     });
+    if (!completed) {
+      await safeAppendRunLog(runId, "warn", "News ingestion acquisition completed after the run was cancelled or reclaimed.", {
+        totals,
+      });
+      return;
+    }
     await safeAppendRunLog(runId, health === "degraded" ? "warn" : "info", health === "degraded"
       ? "News ingestion run finished with degraded provider coverage."
       : "News ingestion run finished successfully.", {
@@ -875,11 +1029,12 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
       steps,
       totals,
     };
-    await updateRunStatus(runId, "failed", {
+    const failed = await updateRunStatus(runId, "failed", {
       error: errorMessage,
       stats,
       finished: true,
     });
+    if (!failed) return;
     await safeAppendRunLog(runId, "error", "News ingestion run failed.", {
       error: errorMessage,
       totals,
@@ -1081,21 +1236,82 @@ async function executeLeadershipRun(runId: number, plan: LeadershipRunPlan): Pro
 export async function triggerNewsRun(input: {
   actor: TriggerActor;
   plan: NewsRunPlan;
-}): Promise<{ runId: number }> {
+}, options: TriggerNewsRunOptions = {}): Promise<TriggerNewsRunResult> {
   const sourceNameOverride: SourceConfigKey = input.plan.providers.gdelt
     ? "gdelt"
     : input.plan.providers.govUk ? "govUk" : "institutionalRss";
-  const run = await createRun({
+  const run = await createOrReuseNewsRun({
     pipeline: "news",
     actor: input.actor,
     requestPayload: input.plan.requestPayload,
     sourceNameOverride,
-  });
+  }, options);
+  if (run.blockedByOtherRun) {
+    return {
+      runId: run.id,
+      reused: false,
+      blockedByOtherRun: true,
+    };
+  }
+  if (run.reused) {
+    return {
+      runId: run.id,
+      reused: true,
+      blockedByOtherRun: false,
+    };
+  }
   await safeAppendRunLog(run.id, "info", "News ingestion run queued.", {
     requested_by: input.actor.email || input.actor.userId,
+    release_id: input.plan.releaseId ?? null,
+    run_translations: input.plan.runTranslations,
   });
   startRunTask(run.id, () => executeNewsRun(run.id, input.plan));
-  return { runId: run.id };
+  return {
+    runId: run.id,
+    reused: false,
+    blockedByOtherRun: false,
+  };
+}
+
+export async function cancelReleaseNewsRun(input: {
+  runId: number;
+  releaseId: string;
+}): Promise<boolean> {
+  return withTransaction(async (client) => {
+    await client.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
+      [NEWS_RUN_LOCK_KEY],
+    );
+    const { rows } = await client.query<{ id: number }>(
+      `UPDATE ingestion_run
+       SET status='failed',
+           finished_at=now(),
+           updated_at=now(),
+           error='Cancelled because its owning application release was rolled back.',
+           stats=COALESCE(stats,'{}'::jsonb) || jsonb_build_object(
+             'release_cancelled',true,
+             'release_cancelled_at',now()
+           )
+       WHERE id=$1
+         AND pipeline='news'
+         AND trigger_mode='release_gate'
+         AND request_payload->>'release_id'=$2
+         AND status IN ('queued','running')
+       RETURNING id`,
+      [input.runId, input.releaseId],
+    );
+    if (!rows[0]) return false;
+    await client.query(
+      `INSERT INTO ingestion_run_log (run_id,logged_at,level,message,context)
+       VALUES ($1,now(),'warn',$2,jsonb_build_object('release_id',$3::text))`,
+      [
+        input.runId,
+        "Release-owned news ingestion run cancelled before application rollback.",
+        input.releaseId,
+      ],
+    );
+    return true;
+  });
 }
 
 export async function triggerWeatherRun(input: {

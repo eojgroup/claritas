@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { query } from "../db";
-import { inferNewsCountry } from "./country-inference";
+import {
+  inferNewsCountry,
+  trustedSubjectCountryIso2,
+  type CountryInferenceResult,
+} from "./country-inference";
 
 export type InstitutionalFeed = {
   id: string;
@@ -133,6 +137,29 @@ export function feedItems(xml: string): string[] {
   return rss.length ? rss : [...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].map((match) => match[1]);
 }
 
+export function institutionalSubjectGeography(
+  inference: CountryInferenceResult,
+  jurisdictionIso2: string | null,
+): { primary: string | null; countries: string[]; attribution: string } {
+  const inferredSubject = trustedSubjectCountryIso2(inference);
+  const jurisdiction = /^[A-Z]{2}$/.test(jurisdictionIso2?.trim().toUpperCase() ?? "")
+    ? jurisdictionIso2!.trim().toUpperCase()
+    : null;
+  const countries = Array.from(new Set([
+    ...(inferredSubject ? [inferredSubject] : []),
+    ...(jurisdiction ? [jurisdiction] : []),
+  ]));
+  return {
+    primary: inferredSubject ?? jurisdiction,
+    countries,
+    attribution: inferredSubject
+      ? inference.source
+      : jurisdiction
+        ? "institutional_jurisdiction"
+        : inference.source,
+  };
+}
+
 async function ensureSource(): Promise<number> {
   const { rows } = await query<{ id: number }>(
     `WITH upsert AS (
@@ -189,8 +216,9 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
         const eventTime = parseInstitutionalPublicationTime(publishedRaw);
         if (eventTime && (!latestEventTime || eventTime > latestEventTime)) latestEventTime = eventTime;
         const inference = inferNewsCountry({ title, summary, url, feedCountryHint: feed.sourceCountryIso2 });
-        if (inference.iso2) {
-          await query(`INSERT INTO country (iso2, name) VALUES ($1::char(2), $1) ON CONFLICT (iso2) DO NOTHING`, [inference.iso2]);
+        const subjectGeography = institutionalSubjectGeography(inference, feed.sourceCountryIso2);
+        for (const subjectCountry of subjectGeography.countries) {
+          await query(`INSERT INTO country (iso2, name) VALUES ($1::char(2), $1) ON CONFLICT (iso2) DO NOTHING`, [subjectCountry]);
         }
         const externalId = tag(block, "guid") ?? tag(block, "id") ?? url;
         const result = await query<{ inserted: boolean }>(
@@ -200,7 +228,7 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
            ) VALUES ($1,$2,'news_article',$3,$4,$5,$6,$7,$8,$9,$10,$11)
            ON CONFLICT (source_id, external_id) DO UPDATE SET
              title = EXCLUDED.title, summary = EXCLUDED.summary, url = EXCLUDED.url,
-             country_iso2 = COALESCE(EXCLUDED.country_iso2, item.country_iso2),
+             country_iso2 = EXCLUDED.country_iso2,
              event_time = COALESCE(EXCLUDED.event_time, item.event_time),
              payload = EXCLUDED.payload, dedupe_hash = EXCLUDED.dedupe_hash,
              language_code = EXCLUDED.language_code, source_country_iso2 = EXCLUDED.source_country_iso2,
@@ -208,19 +236,21 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
            WHERE item.title IS DISTINCT FROM EXCLUDED.title
               OR item.summary IS DISTINCT FROM EXCLUDED.summary
               OR item.url IS DISTINCT FROM EXCLUDED.url
-              OR item.country_iso2 IS DISTINCT FROM COALESCE(EXCLUDED.country_iso2, item.country_iso2)
+              OR item.country_iso2 IS DISTINCT FROM EXCLUDED.country_iso2
               OR item.event_time IS DISTINCT FROM COALESCE(EXCLUDED.event_time, item.event_time)
               OR item.payload IS DISTINCT FROM EXCLUDED.payload
               OR item.dedupe_hash IS DISTINCT FROM EXCLUDED.dedupe_hash
               OR item.language_code IS DISTINCT FROM EXCLUDED.language_code
               OR item.source_country_iso2 IS DISTINCT FROM EXCLUDED.source_country_iso2
            RETURNING (xmax = 0) AS inserted`,
-          [sourceId, externalId, title, summary, url, inference.iso2, eventTime,
+          [sourceId, externalId, title, summary, url, subjectGeography.primary, eventTime,
            JSON.stringify({
              provider: "institutional_rss", source: feed.publisher, publisher: feed.publisher,
              feed: feed.id, feed_url: feed.url, publisher_url: feed.homepage,
              attribution: feed.attribution, license: feed.license, license_url: feed.licenseUrl,
              topics: feed.topics, country_inference: inference,
+             subject_country_iso2s: subjectGeography.countries,
+             country_attribution: subjectGeography.attribution,
              time_basis: eventTime ? "publisher_published" : "unavailable",
              time_precision: eventTime ? "source_provided" : "unavailable",
              publisher_published_at: eventTime,

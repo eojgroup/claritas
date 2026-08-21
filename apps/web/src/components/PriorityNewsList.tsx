@@ -52,11 +52,11 @@ const newsTimeBasisLabel = (item: NewsItem) => {
     item.payload && typeof item.payload === "object" && !Array.isArray(item.payload)
       ? (item.payload as Record<string, unknown>)
       : null;
-  const basis = typeof payload?.time_basis === "string" ? payload.time_basis : "";
+  const basis = item.time?.basis || (typeof payload?.time_basis === "string" ? payload.time_basis : "");
   if (basis === "provider_first_seen") return "First seen";
   if (basis === "publisher_published_or_provider_discovered") return "Source time";
   if (basis.startsWith("publisher_")) return "Published";
-  return "Reported";
+  return item.time?.is_publisher_verified ? "Published" : "Reported";
 };
 
 function isLeadershipChangeStory(item: NewsItem): boolean {
@@ -101,6 +101,7 @@ type PriorityNewsListProps = {
   emptyState: ReactNode;
   getImageUrl: (item: NewsItem) => string | undefined;
   getSourceLabel: (item: NewsItem) => string | undefined;
+  getCountries: (item: NewsItem) => string[];
   getCountryName: (iso: string) => string;
   onToggle: (item: NewsItem, iso?: string) => void;
   onRequestTranslation?: (item: NewsItem) => void | Promise<void>;
@@ -119,6 +120,7 @@ export default function PriorityNewsList({
   emptyState,
   getImageUrl,
   getSourceLabel,
+  getCountries,
   getCountryName,
   onToggle,
   onRequestTranslation,
@@ -147,7 +149,12 @@ export default function PriorityNewsList({
       {items.map((item) => {
         const img = getImageUrl(item);
         const sourceLabel = getSourceLabel(item);
-        const iso = item.country_iso2?.toUpperCase();
+        const countries = getCountries(item);
+        const iso = primaryIso && countries.includes(primaryIso)
+          ? primaryIso
+          : secondaryIso && countries.includes(secondaryIso)
+            ? secondaryIso
+            : countries[0];
         const payload =
           item.payload && typeof item.payload === "object" && !Array.isArray(item.payload)
             ? (item.payload as Record<string, unknown>)
@@ -160,8 +167,8 @@ export default function PriorityNewsList({
           countryAttribution === "publisher_country_fallback";
         const [publisherLabel, providerLabel] = sourceLabel?.split(" · via ") ?? [];
         const selectedStory = selectedId === item.id;
-        const isPrimary = Boolean(iso && primaryIso === iso);
-        const isSecondary = Boolean(iso && secondaryIso === iso);
+        const isPrimary = Boolean(primaryIso && countries.includes(primaryIso));
+        const isSecondary = Boolean(secondaryIso && countries.includes(secondaryIso));
         const rankingPending = !item.importance || item.importance.is_fallback === true;
         const importanceTier = rankingPending ? null : item.importance?.tier ?? null;
         const importanceTierLabel = importanceTier
@@ -241,12 +248,12 @@ export default function PriorityNewsList({
                 title={
                   isPublisherCountryFallback
                     ? "Low-confidence geography fallback: publisher country; the story location was not resolved"
-                    : iso
+                    : countries.length > 0
                       ? "Resolved story geography"
                       : "Story geography is not resolved"
                 }
               >
-                {iso ?? "—"}{isPublisherCountryFallback ? "~" : ""}
+                {countries.length > 0 ? countries.join(" · ") : "—"}{isPublisherCountryFallback ? "~" : ""}
               </span>
               <span className="dashboard-news-headline">
                 <strong>{displayTitle}</strong>
@@ -317,7 +324,7 @@ export default function PriorityNewsList({
                         : "Select for source and country context.")}
                 </small>
                 <span className="dashboard-news-mobile-source">
-                  {timestamp.time} · {iso ?? "Global"} · {" "}
+                  {timestamp.time} · {countries.length > 0 ? countries.join("/") : "Global"} · {" "}
                   {publisherLabel || sourceLabel || "Unknown"}
                   {providerLabel ? ` · via ${providerLabel}` : ""}
                 </span>
@@ -374,8 +381,8 @@ export default function PriorityNewsList({
                           : "Unranked · assessment pending"}
                     </span>
                     <span>
-                      {iso
-                        ? `${getCountryName(iso)} · ${iso}`
+                      {countries.length > 0
+                        ? countries.map((country) => `${getCountryName(country)} · ${country}`).join(" / ")
                         : "Unmapped geography"}
                     </span>
                     <span>

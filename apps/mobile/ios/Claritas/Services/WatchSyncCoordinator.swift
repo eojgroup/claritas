@@ -18,11 +18,18 @@ final class WatchSyncCoordinator: NSObject, WCSessionDelegate {
         WCSession.default.activate()
     }
 
-    func update(baseURL: String, authToken: String?) {
+    func update(
+        baseURL: String,
+        authToken: String?,
+        selectedCountry: String?,
+        newsCategory: String
+    ) {
         lock.lock()
         context = [
             "apiBaseURL": baseURL,
             "authToken": authToken ?? "",
+            "selectedCountry": selectedCountry ?? "",
+            "newsCategory": NewsCategoryCatalog.normalized(newsCategory),
             "updatedAt": ISO8601DateFormatter().string(from: Date())
         ]
         let nextContext = context

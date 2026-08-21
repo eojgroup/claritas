@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import worldCountries from "world-countries";
 import { query } from "../db";
-import { inferNewsCountry, type CountryInferenceResult } from "./country-inference";
+import {
+  inferNewsCountry,
+  trustedSubjectCountryIso2,
+  type CountryInferenceResult,
+} from "./country-inference";
 
 const GOVUK_SEARCH_URL = "https://www.gov.uk/api/search.json";
 const GOVUK_HOMEPAGE = "https://www.gov.uk/search/news-and-communications";
@@ -46,6 +50,7 @@ export type NormalizedGovUkNewsItem = {
   publisher: string;
   organisations: Array<{ title: string; acronym: string | null; url: string | null }>;
   worldLocations: Array<{ title: string; url: string | null }>;
+  subjectCountryIso2s: string[];
   countryInference: CountryInferenceResult;
 };
 
@@ -128,6 +133,16 @@ for (const country of worldCountries) {
   }
 }
 
+function structuredGovUkSubjectCountries(
+  worldLocations: NormalizedGovUkNewsItem["worldLocations"],
+): string[] {
+  return Array.from(new Set(
+    worldLocations
+      .map((location) => COUNTRY_BY_EXACT_NAME.get(normalizedCountryName(location.title)) ?? null)
+      .filter((iso2): iso2 is string => Boolean(iso2)),
+  ));
+}
+
 function inferGovUkSubjectCountry(input: {
   title: string;
   summary: string | null;
@@ -141,12 +156,20 @@ function inferGovUkSubjectCountry(input: {
     url: input.url,
     feedCountryHint: "GB",
   });
-  const structuredCountries = Array.from(new Set(
-    input.worldLocations
-      .map((location) => COUNTRY_BY_EXACT_NAME.get(normalizedCountryName(location.title)) ?? null)
-      .filter((iso2): iso2 is string => Boolean(iso2)),
-  ));
-  if (structuredCountries.length !== 1) return inferred;
+  const structuredCountries = structuredGovUkSubjectCountries(input.worldLocations);
+  if (structuredCountries.length === 0) return inferred;
+  if (structuredCountries.length > 1) {
+    const inferredSubject = trustedSubjectCountryIso2(inferred);
+    return inferredSubject && structuredCountries.includes(inferredSubject)
+      ? inferred
+      : {
+          ...inferred,
+          iso2: null,
+          source: "none",
+          confidence: "none",
+          matched_alias: null,
+        };
+  }
 
   // GOV.UK world_locations describe the subject of a world news story. That
   // structured geography is stronger than the .gov.uk publisher origin or a
@@ -184,6 +207,7 @@ export function normalizeGovUkNewsResult(value: unknown): NormalizedGovUkNewsIte
     url,
     worldLocations,
   });
+  const subjectCountryIso2s = structuredGovUkSubjectCountries(worldLocations);
 
   return {
     externalId: text(result._id, 2_000) ?? new URL(url).pathname,
@@ -195,6 +219,7 @@ export function normalizeGovUkNewsResult(value: unknown): NormalizedGovUkNewsIte
     publisher,
     organisations,
     worldLocations,
+    subjectCountryIso2s,
     countryInference,
   };
 }
@@ -310,11 +335,15 @@ export async function ingestGovUkNews(options: {
       continue;
     }
     if (!latestEventTime || item.eventTime > latestEventTime) latestEventTime = item.eventTime;
-    if (item.countryInference.iso2) {
+    const primarySubjectCountry = trustedSubjectCountryIso2(item.countryInference);
+    for (const subjectCountry of new Set([
+      ...item.subjectCountryIso2s,
+      ...(primarySubjectCountry ? [primarySubjectCountry] : []),
+    ])) {
       await query(
         `INSERT INTO country (iso2, name) VALUES ($1::char(2), $1)
          ON CONFLICT (iso2) DO NOTHING`,
-        [item.countryInference.iso2],
+        [subjectCountry],
       );
     }
     const payload = {
@@ -330,6 +359,7 @@ export async function ingestGovUkNews(options: {
       document_type: item.documentType,
       organisations: item.organisations,
       world_locations: item.worldLocations,
+      subject_country_iso2s: item.subjectCountryIso2s,
       country_inference: item.countryInference,
       country_attribution: item.countryInference.source,
       time_basis: "publisher_published",
@@ -349,7 +379,7 @@ export async function ingestGovUkNews(options: {
          title = EXCLUDED.title,
          summary = EXCLUDED.summary,
          url = EXCLUDED.url,
-         country_iso2 = COALESCE(EXCLUDED.country_iso2, item.country_iso2),
+         country_iso2 = EXCLUDED.country_iso2,
          event_time = EXCLUDED.event_time,
          payload = EXCLUDED.payload,
          dedupe_hash = EXCLUDED.dedupe_hash,
@@ -359,7 +389,7 @@ export async function ingestGovUkNews(options: {
        WHERE item.title IS DISTINCT FROM EXCLUDED.title
           OR item.summary IS DISTINCT FROM EXCLUDED.summary
           OR item.url IS DISTINCT FROM EXCLUDED.url
-          OR item.country_iso2 IS DISTINCT FROM COALESCE(EXCLUDED.country_iso2, item.country_iso2)
+          OR item.country_iso2 IS DISTINCT FROM EXCLUDED.country_iso2
           OR item.event_time IS DISTINCT FROM EXCLUDED.event_time
           OR item.payload IS DISTINCT FROM EXCLUDED.payload
           OR item.dedupe_hash IS DISTINCT FROM EXCLUDED.dedupe_hash
@@ -372,7 +402,7 @@ export async function ingestGovUkNews(options: {
         item.title,
         item.summary,
         item.url,
-        item.countryInference.iso2,
+        primarySubjectCountry,
         item.eventTime,
         JSON.stringify(payload),
         dedupeHash,

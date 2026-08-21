@@ -56,6 +56,11 @@ import {
   transportRetentionBudgetAvailable,
   type TransportRetentionHealth,
 } from "./transport-runtime-health";
+import {
+  MARITIME_PORTS,
+  monitoredPortAisBoundingBoxes,
+  type MaritimePort,
+} from "./maritime-ports";
 
 export type TransportMode = "maritime" | "aviation";
 export type TransportDetailLevel = "aggregate" | "full";
@@ -266,15 +271,6 @@ type RegionalMaritimeObservation =
   | MpaMaritimeObservation
   | RegionalAisObservation;
 
-type MaritimePort = {
-  name: string;
-  iso2: string;
-  latitude: number;
-  longitude: number;
-  radius_km: number;
-  pattern: RegExp;
-};
-
 const AIS_STREAM_URL = "wss://stream.aisstream.io/v0/stream";
 const DIGITRAFFIC_MARITIME_BASE_URL = "https://meri.digitraffic.fi/api/ais/v1";
 const BARENTSWATCH_TOKEN_URL = "https://id.barentswatch.no/connect/token";
@@ -312,41 +308,6 @@ const worldAtlas = require("world-atlas/countries-110m.json") as Topology<{
 }>;
 
 const COUNTRY_GEOMETRIES = buildCountryGeometries();
-const MARITIME_PORTS: MaritimePort[] = [
-  { name: "Los Angeles / Long Beach", iso2: "US", latitude: 33.74, longitude: -118.24, radius_km: 42, pattern: /\b(?:USLAX|USLGB|LOS ANGELES|LONG BEACH)\b/i },
-  { name: "New York / Newark", iso2: "US", latitude: 40.67, longitude: -74.08, radius_km: 45, pattern: /\b(?:USNYC|USNWK|NEW YORK|NEWARK)\b/i },
-  { name: "Savannah", iso2: "US", latitude: 32.08, longitude: -81.09, radius_km: 32, pattern: /\b(?:USSAV|SAVANNAH)\b/i },
-  { name: "Vancouver", iso2: "CA", latitude: 49.30, longitude: -123.11, radius_km: 42, pattern: /\b(?:CAVAN|VANCOUVER)\b/i },
-  { name: "Santos", iso2: "BR", latitude: -23.96, longitude: -46.30, radius_km: 36, pattern: /\b(?:BRSSZ|SANTOS)\b/i },
-  { name: "Rotterdam", iso2: "NL", latitude: 51.95, longitude: 4.14, radius_km: 48, pattern: /\b(?:NLRTM|ROTTERDAM)\b/i },
-  { name: "Antwerp-Bruges", iso2: "BE", latitude: 51.27, longitude: 4.34, radius_km: 42, pattern: /\b(?:BEANR|ANTWERP|BRUGES)\b/i },
-  { name: "Hamburg", iso2: "DE", latitude: 53.54, longitude: 9.93, radius_km: 32, pattern: /\b(?:DEHAM|HAMBURG)\b/i },
-  { name: "Felixstowe", iso2: "GB", latitude: 51.95, longitude: 1.31, radius_km: 30, pattern: /\b(?:GBFXT|FELIXSTOWE)\b/i },
-  { name: "Southampton", iso2: "GB", latitude: 50.90, longitude: -1.40, radius_km: 30, pattern: /\b(?:GBSOU|SOUTHAMPTON)\b/i },
-  { name: "Algeciras", iso2: "ES", latitude: 36.13, longitude: -5.44, radius_km: 32, pattern: /\b(?:ESALG|ALGECIRAS)\b/i },
-  { name: "Valencia", iso2: "ES", latitude: 39.44, longitude: -0.31, radius_km: 30, pattern: /\b(?:ESVLC|VALENCIA)\b/i },
-  { name: "Piraeus", iso2: "GR", latitude: 37.94, longitude: 23.63, radius_km: 28, pattern: /\b(?:GRPIR|PIRAEUS)\b/i },
-  { name: "Port Said", iso2: "EG", latitude: 31.25, longitude: 32.31, radius_km: 38, pattern: /\b(?:EGPSD|PORT SAID|SUEZ)\b/i },
-  { name: "Jebel Ali", iso2: "AE", latitude: 25.01, longitude: 55.06, radius_km: 38, pattern: /\b(?:AEJEA|JEBEL ALI|DUBAI)\b/i },
-  { name: "Singapore", iso2: "SG", latitude: 1.25, longitude: 103.82, radius_km: 55, pattern: /\b(?:SGSIN|SINGAPORE)\b/i },
-  { name: "Shanghai", iso2: "CN", latitude: 31.23, longitude: 121.50, radius_km: 55, pattern: /\b(?:CNSHA|SHANGHAI)\b/i },
-  { name: "Ningbo-Zhoushan", iso2: "CN", latitude: 29.87, longitude: 121.84, radius_km: 55, pattern: /\b(?:CNNGB|NINGBO|ZHOUSHAN)\b/i },
-  { name: "Shenzhen", iso2: "CN", latitude: 22.51, longitude: 113.88, radius_km: 42, pattern: /\b(?:CNSZX|SHENZHEN|YANTIAN)\b/i },
-  { name: "Hong Kong", iso2: "HK", latitude: 22.30, longitude: 114.16, radius_km: 38, pattern: /\b(?:HKHKG|HONG KONG)\b/i },
-  { name: "Busan", iso2: "KR", latitude: 35.10, longitude: 129.04, radius_km: 34, pattern: /\b(?:KRPUS|BUSAN)\b/i },
-  { name: "Yokohama", iso2: "JP", latitude: 35.45, longitude: 139.65, radius_km: 32, pattern: /\b(?:JPYOK|YOKOHAMA)\b/i },
-  { name: "Tokyo", iso2: "JP", latitude: 35.62, longitude: 139.78, radius_km: 32, pattern: /\b(?:JPTYO|TOKYO)\b/i },
-  { name: "Port Klang", iso2: "MY", latitude: 3.00, longitude: 101.39, radius_km: 34, pattern: /\b(?:MYPKG|PORT KLANG)\b/i },
-  { name: "Tanjung Pelepas", iso2: "MY", latitude: 1.36, longitude: 103.55, radius_km: 30, pattern: /\b(?:MYTPP|TANJUNG PELEPAS)\b/i },
-  { name: "Colombo", iso2: "LK", latitude: 6.95, longitude: 79.84, radius_km: 32, pattern: /\b(?:LKCMB|COLOMBO)\b/i },
-  { name: "Nhava Sheva", iso2: "IN", latitude: 18.95, longitude: 72.95, radius_km: 36, pattern: /\b(?:INNSA|NHAVA SHEVA|JAWAHARLAL NEHRU)\b/i },
-  { name: "Mundra", iso2: "IN", latitude: 22.74, longitude: 69.71, radius_km: 34, pattern: /\b(?:INMUN|MUNDRA)\b/i },
-  { name: "Sydney", iso2: "AU", latitude: -33.86, longitude: 151.20, radius_km: 32, pattern: /\b(?:AUSYD|SYDNEY)\b/i },
-  { name: "Melbourne", iso2: "AU", latitude: -37.84, longitude: 144.91, radius_km: 34, pattern: /\b(?:AUMEL|MELBOURNE)\b/i },
-  { name: "Durban", iso2: "ZA", latitude: -29.87, longitude: 31.04, radius_km: 32, pattern: /\b(?:ZADUR|DURBAN)\b/i },
-  { name: "Cape Town", iso2: "ZA", latitude: -33.91, longitude: 18.44, radius_km: 32, pattern: /\b(?:ZACPT|CAPE TOWN)\b/i },
-];
-
 const NAVIGATION_STATUS: Record<number, string> = {
   0: "Under way using engine",
   1: "At anchor",
@@ -404,9 +365,15 @@ let aisReconnectTimer: NodeJS.Timeout | null = null;
 let aisFlushTimer: NodeJS.Timeout | null = null;
 let aisWatchdogTimer: NodeJS.Timeout | null = null;
 let aisSubscriptionBoxes: AisBoundingBox[] | null = null;
+type AisSubscriptionCoverageMode = "monitored_ports" | "configured" | "global";
+let aisSubscriptionCoverageMode: AisSubscriptionCoverageMode | null = null;
 let aisReconnectAttempt = 0;
 let aisConnectedAt: number | null = null;
 let aisLastMessageAt: number | null = null;
+// Raw usable coordinates keep the upstream watchdog honest even when the
+// per-vessel sampling gate intentionally suppresses a busy vessel. Reader and
+// release liveness use the accepted/persisted timestamps below instead.
+let aisLastUsablePositionAt: number | null = null;
 let aisLastSnapshotAt: number | null = null;
 let aisLastStoredAt: number | null = null;
 let aisLastPositionAt: number | null = null;
@@ -426,6 +393,9 @@ type RegionalMaritimeRuntimeState = {
   lastSnapshotAt: number | null;
   lastStoredAt: number | null;
   lastError: string | null;
+  lastFetchedCount: number | null;
+  lastParsedCount: number | null;
+  lastQueuedCount: number | null;
   snapshotsAccepted: number;
   snapshotsStored: number;
 };
@@ -495,29 +465,63 @@ function regionalMaritimeRuntimeState(): RegionalMaritimeRuntimeState {
     lastSnapshotAt: null,
     lastStoredAt: null,
     lastError: null,
+    lastFetchedCount: null,
+    lastParsedCount: null,
+    lastQueuedCount: null,
     snapshotsAccepted: 0,
     snapshotsStored: 0,
   };
 }
 
-function regionalSourceConfigured(source: RegionalMaritimeSourceName): boolean {
+type RegionalSourceConfigurationStatus =
+  | "configured"
+  | "disabled"
+  | "missing_credentials"
+  | "diagnostic_only";
+
+function regionalSourceConfigurationStatus(
+  source: RegionalMaritimeSourceName,
+): RegionalSourceConfigurationStatus {
   switch (source) {
     case "digitraffic":
-      return enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED");
+      return enabledFromEnv("DIGITRAFFIC_MARITIME_ENABLED")
+        ? "configured"
+        : "disabled";
     case "barentswatch":
-      return (
-        enabledFromEnv("BARENTSWATCH_AIS_ENABLED") &&
-        Boolean(process.env.BARENTSWATCH_AIS_CLIENT_ID?.trim()) &&
-        Boolean(process.env.BARENTSWATCH_AIS_CLIENT_SECRET?.trim())
-      );
+      if (!enabledFromEnv("BARENTSWATCH_AIS_ENABLED")) return "disabled";
+      return process.env.BARENTSWATCH_AIS_CLIENT_ID?.trim() &&
+        process.env.BARENTSWATCH_AIS_CLIENT_SECRET?.trim()
+        ? "configured"
+        : "missing_credentials";
     case "mpa_oceans_x":
-      return (
-        enabledFromEnv("MPA_OCEANS_X_ENABLED") &&
-        Boolean(process.env.MPA_OCEANS_X_API_KEY?.trim())
-      );
+      if (!enabledFromEnv("MPA_OCEANS_X_ENABLED")) return "disabled";
+      return process.env.MPA_OCEANS_X_API_KEY?.trim()
+        ? "configured"
+        : "missing_credentials";
     case "kystverket":
-      return enabledFromEnv("KYSTVERKET_AIS_TCP_ENABLED", false);
+      return enabledFromEnv("KYSTVERKET_AIS_TCP_ENABLED", false)
+        ? "diagnostic_only"
+        : "disabled";
   }
+}
+
+function regionalSourceCountryCodes(
+  source: RegionalMaritimeSourceName,
+): string[] {
+  switch (source) {
+    case "digitraffic":
+      return ["FI"];
+    case "barentswatch":
+    case "kystverket":
+      return ["NO"];
+    case "mpa_oceans_x":
+      return ["SG"];
+  }
+}
+
+function regionalSourceConfigured(source: RegionalMaritimeSourceName): boolean {
+  const status = regionalSourceConfigurationStatus(source);
+  return status === "configured" || status === "diagnostic_only";
 }
 
 function regionalTransport(source: RegionalMaritimeSourceName): "https" | "tcp" {
@@ -534,6 +538,8 @@ function regionalRuntimeHealthSources() {
       id,
       provider: definition.provider,
       configured: regionalSourceConfigured(id),
+      configurationStatus: regionalSourceConfigurationStatus(id),
+      countryCodes: regionalSourceCountryCodes(id),
       readinessEligible: id !== "kystverket",
       transport: regionalTransport(id),
       lastRefreshAt: runtime.lastRefreshAt,
@@ -543,6 +549,9 @@ function regionalRuntimeHealthSources() {
       coverage: definition.coverage,
       license: definition.license,
       global: false,
+      lastFetchedCount: runtime.lastFetchedCount,
+      lastParsedCount: runtime.lastParsedCount,
+      lastQueuedCount: runtime.lastQueuedCount,
     };
   });
 }
@@ -655,6 +664,7 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
   const primaryConfigured =
     enabledFromEnv("AISSTREAM_ENABLED") &&
     Boolean(process.env.AISSTREAM_API_KEY?.trim());
+  const primaryCoverage = aisPrimaryCoverage();
   const regionalSources = (
     Object.keys(regionalMaritimeRuntime) as RegionalMaritimeSourceName[]
   ).map((sourceName) => {
@@ -688,6 +698,8 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
       transport: regionalTransport(sourceName),
       coverage: definition.coverage,
       configured: regionalSourceConfigured(sourceName),
+      configuration_status: regionalSourceConfigurationStatus(sourceName),
+      country_codes: regionalSourceCountryCodes(sourceName),
       readiness_eligible: sourceName !== "kystverket",
       last_refresh_at: runtime.lastRefreshAt
         ? isoDate(runtime.lastRefreshAt)
@@ -701,6 +713,9 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
       error: Boolean(runtime.lastError),
       snapshots_accepted: runtime.snapshotsAccepted,
       snapshots_stored: runtime.snapshotsStored,
+      last_fetched_count: runtime.lastFetchedCount,
+      last_parsed_count: runtime.lastParsedCount,
+      last_queued_count: runtime.lastQueuedCount,
       license: definition.license,
       global: false,
       source_url: definition.sourceUrl,
@@ -740,7 +755,7 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
     connected &&
     aisConnectedAt &&
     Date.now() - aisConnectedAt > 45_000 &&
-    (!aisLastPositionAt || aisLastPositionAt < aisConnectedAt),
+    (!aisLastUsablePositionAt || aisLastUsablePositionAt < aisConnectedAt),
   );
   const primaryStatus = !primaryConfigured
     ? "disabled"
@@ -765,7 +780,9 @@ function maritimeCoverageRuntime(latestObservedAt: string | null) {
   return {
     configured,
     primary_source: "AISstream",
-    primary_coverage: "best_effort_global",
+    primary_coverage: primaryCoverage.coverage,
+    primary_global: primaryCoverage.global,
+    primary_subscription_mode: primaryCoverage.mode,
     primary_service_level: "beta_no_sla",
     primary_configured: primaryConfigured,
     primary_status: primaryStatus,
@@ -836,6 +853,8 @@ export function getTransportRuntimeHealth() {
     primaryConfigured:
       enabledFromEnv("AISSTREAM_ENABLED") &&
       Boolean(process.env.AISSTREAM_API_KEY?.trim()),
+    primaryCoverage: aisPrimaryCoverage().coverage,
+    primaryGlobal: aisPrimaryCoverage().global,
     primaryConnected: aisSocket?.readyState === WebSocket.OPEN,
     primaryLastMessageAt: aisLastMessageAt,
     primaryLastSnapshotAt: aisLastPositionAt,
@@ -1024,9 +1043,10 @@ function getAisSubscriptionBoxes(): AisBoundingBox[] {
     try {
       const boxes = normalizeAisBoundingBoxes(JSON.parse(configured));
       if (boxes.length > 0) {
-        aisSubscriptionBoxes = boxes.slice(0, 12);
+        aisSubscriptionBoxes = boxes.slice(0, 64);
+        aisSubscriptionCoverageMode = "configured";
         if (boxes.length > aisSubscriptionBoxes.length) {
-          console.warn("AISSTREAM_BOUNDING_BOXES was capped at 12 provider areas.");
+          console.warn("AISSTREAM_BOUNDING_BOXES was capped at 64 provider areas.");
         }
         return aisSubscriptionBoxes;
       }
@@ -1034,11 +1054,60 @@ function getAisSubscriptionBoxes(): AisBoundingBox[] {
       // The warning below covers both malformed JSON and malformed boxes.
     }
     console.warn(
-      "AISSTREAM_BOUNDING_BOXES is invalid; using the documented global subscription.",
+      "AISSTREAM_BOUNDING_BOXES is invalid; using monitored-port coverage.",
     );
   }
-  aisSubscriptionBoxes = [GLOBAL_AIS_BOUNDING_BOX];
+  const coverageMode = process.env.AISSTREAM_COVERAGE_MODE?.trim().toLowerCase();
+  if (coverageMode === "global") {
+    aisSubscriptionBoxes = [GLOBAL_AIS_BOUNDING_BOX];
+    aisSubscriptionCoverageMode = "global";
+    return aisSubscriptionBoxes;
+  }
+  if (coverageMode && coverageMode !== "monitored_ports") {
+    console.warn(
+      `AISSTREAM_COVERAGE_MODE=${coverageMode} is invalid; using monitored_ports.`,
+    );
+  }
+  const minimumRadiusKm = boundedIntegerFromEnv(
+    "AISSTREAM_MONITORED_PORT_RADIUS_KM",
+    110,
+    55,
+    300,
+  );
+  aisSubscriptionBoxes = monitoredPortAisBoundingBoxes(minimumRadiusKm);
+  aisSubscriptionCoverageMode = "monitored_ports";
   return aisSubscriptionBoxes;
+}
+
+function getAisSubscriptionCoverageMode(): AisSubscriptionCoverageMode {
+  getAisSubscriptionBoxes();
+  return aisSubscriptionCoverageMode ?? "monitored_ports";
+}
+
+function aisPrimaryCoverage(): {
+  mode: AisSubscriptionCoverageMode;
+  coverage: string;
+  global: boolean;
+} {
+  const boxes = getAisSubscriptionBoxes();
+  const mode = getAisSubscriptionCoverageMode();
+  const onlyBox = boxes.length === 1 ? boxes[0] : null;
+  const global = Boolean(
+    onlyBox &&
+      onlyBox[0][0] === -90 &&
+      onlyBox[0][1] === -180 &&
+      onlyBox[1][0] === 90 &&
+      onlyBox[1][1] === 180,
+  );
+  return {
+    mode,
+    coverage: global
+      ? "best_effort_global_terrestrial_reception"
+      : mode === "monitored_ports"
+        ? "targeted_monitored_port_reception"
+        : "configured_area_reception",
+    global,
+  };
 }
 
 function aisFlushBatchSize(): number {
@@ -1056,9 +1125,7 @@ function sendAisSubscription(socket: WebSocket, apiKey: string): void {
   console.info(
     JSON.stringify({
       event: "aisstream_subscription_started",
-      mode: boundingBoxes.length === 1 && boundingBoxes[0] === GLOBAL_AIS_BOUNDING_BOX
-        ? "global"
-        : "configured",
+      mode: getAisSubscriptionCoverageMode(),
       boxes: boundingBoxes.length,
       rotating: false,
     }),
@@ -1085,7 +1152,7 @@ function startAisWatchdog(): void {
     if (!socket || socket.readyState !== WebSocket.OPEN || !aisConnectedAt) return;
     // Static/voyage metadata can keep a socket noisy while the live map has no
     // positions. Only a usable coordinate postpones the position watchdog.
-    const lastActivity = Math.max(aisLastPositionAt ?? 0, aisConnectedAt);
+    const lastActivity = Math.max(aisLastUsablePositionAt ?? 0, aisConnectedAt);
     const idleMilliseconds = Date.now() - lastActivity;
     if (idleMilliseconds <= aisIdleTimeoutMilliseconds()) return;
     aisLastError = `No usable AIS vessel snapshots received for ${Math.round(idleMilliseconds / 1_000)} seconds`;
@@ -1266,7 +1333,7 @@ function queueMaritimeMessage(message: unknown): void {
   // Recovery is proven by a decoded coordinate, not merely by a WebSocket
   // handshake or control/static frame. Update this before the sampling gate so
   // a healthy busy vessel cannot be mistaken for an idle upstream.
-  aisLastPositionAt = now;
+  aisLastUsablePositionAt = now;
   aisReconnectAttempt = 0;
   aisLastError = null;
   if (!canQueueMaritimeSnapshot(mmsi, "aisstream", observedAt, now)) return;
@@ -1361,8 +1428,10 @@ function queueMaritimeMessage(message: unknown): void {
   };
 
   if (!enqueueMaritimeSnapshot(snapshot, now)) return;
+  const acceptedObservedAt = Date.parse(observedAt);
+  aisLastPositionAt = Math.max(aisLastPositionAt ?? 0, acceptedObservedAt);
   aisSnapshotsAccepted += 1;
-  aisLastSnapshotAt = now;
+  aisLastSnapshotAt = Math.max(aisLastSnapshotAt ?? 0, acceptedObservedAt);
 }
 
 function connectAisStream(): void {
@@ -1482,29 +1551,38 @@ async function flushMaritimeQueue(): Promise<void> {
       }
       const snapshots = entries.map(([, snapshot]) => snapshot);
       try {
-        await storeTransportSnapshots(snapshots);
+        const storedSnapshots = await storeTransportSnapshots(snapshots);
         const storedAt = Date.now();
-        const aisStored = snapshots.filter(
+        const aisSnapshots = storedSnapshots.filter(
           (snapshot) => snapshot.source_name === "aisstream",
-        ).length;
-        const aisPositionsStored = snapshots.filter(
+        );
+        const aisStored = aisSnapshots.length;
+        const aisPositionsStored = aisSnapshots.filter(
           (snapshot) => snapshot.source_name === "aisstream"
             && snapshot.latitude != null
             && snapshot.longitude != null,
-        ).length;
+        );
         aisSnapshotsStored += aisStored;
         if (aisStored > 0) aisLastStoredAt = storedAt;
-        if (aisPositionsStored > 0) aisLastPositionStoredAt = storedAt;
+        if (aisPositionsStored.length > 0) {
+          aisLastPositionStoredAt = Math.max(
+            aisLastPositionStoredAt ?? 0,
+            ...aisPositionsStored.map((snapshot) => Date.parse(snapshot.observed_at)),
+          );
+        }
         for (const sourceName of Object.keys(
           regionalMaritimeRuntime,
         ) as RegionalMaritimeSourceName[]) {
-          const stored = snapshots.filter(
+          const sourceSnapshots = storedSnapshots.filter(
             (snapshot) => snapshot.source_name === sourceName,
-          ).length;
-          if (stored === 0) continue;
+          );
+          if (sourceSnapshots.length === 0) continue;
           const runtime = regionalMaritimeRuntime[sourceName];
-          runtime.snapshotsStored += stored;
-          runtime.lastStoredAt = storedAt;
+          runtime.snapshotsStored += sourceSnapshots.length;
+          runtime.lastStoredAt = Math.max(
+            runtime.lastStoredAt ?? 0,
+            ...sourceSnapshots.map((snapshot) => Date.parse(snapshot.observed_at)),
+          );
         }
         aisLastFlushAt = storedAt;
         aisLastFlushError = null;
@@ -1561,9 +1639,13 @@ function queueRegionalMaritimeObservation(
   const destinationCountry =
     destinationPort?.iso2 ?? destinationCountryFromText(observation.destination);
   const registration = getCountryFromMMSI(observation.mmsi);
-  const registrationCountry = registration.valid
-    ? normalizeIso2(registration.alpha2)
-    : null;
+  const providerRegistrationCountry =
+    "registrationCountryIso2" in observation
+      ? normalizeIso2(observation.registrationCountryIso2)
+      : null;
+  const registrationCountry =
+    providerRegistrationCountry ??
+    (registration.valid ? normalizeIso2(registration.alpha2) : null);
   const currentPort = maritimePortAtPosition(
     observation.latitude,
     observation.longitude,
@@ -1686,6 +1768,7 @@ function queueRegionalMaritimeObservation(
               ? "Source: Norwegian Coastal Administration"
               : "Source: Fintraffic Digitraffic",
       mmsi_type: registration.type,
+      provider_registration_country_iso2: providerRegistrationCountry,
     },
   };
   if (!enqueueMaritimeSnapshot(snapshot, now)) return false;
@@ -1740,8 +1823,15 @@ async function runDigitrafficMaritimeRefresh(): Promise<{
     for (const observation of observations) {
       if (queueRegionalMaritimeObservation(observation, "digitraffic")) queued += 1;
     }
-    regionalMaritimeRuntime.digitraffic.lastRefreshAt = Date.now();
-    regionalMaritimeRuntime.digitraffic.lastError = null;
+    const runtime = regionalMaritimeRuntime.digitraffic;
+    const locationFeatures = asRecord(locations)?.features;
+    runtime.lastRefreshAt = Date.now();
+    runtime.lastError = null;
+    runtime.lastFetchedCount = Array.isArray(locationFeatures)
+      ? locationFeatures.length
+      : null;
+    runtime.lastParsedCount = observations.length;
+    runtime.lastQueuedCount = queued;
     console.info(
       JSON.stringify({
         event: "digitraffic_maritime_refresh",
@@ -1855,6 +1945,9 @@ async function runBarentsWatchMaritimeRefresh(): Promise<{
     const runtime = regionalMaritimeRuntime.barentswatch;
     runtime.lastRefreshAt = Date.now();
     runtime.lastError = null;
+    runtime.lastFetchedCount = payload.length;
+    runtime.lastParsedCount = observations.length;
+    runtime.lastQueuedCount = queued;
     console.info(
       JSON.stringify({
         event: "barentswatch_maritime_refresh",
@@ -1921,10 +2014,14 @@ async function runMpaOceansXMaritimeRefresh(): Promise<{
     if (!response.ok) {
       throw new Error(`MPA OCEANS-X vessel snapshot HTTP ${response.status}`);
     }
-    const payload = await response.json();
+    const payload = response.status === 204 ? [] : await response.json();
     if (!Array.isArray(payload)) {
       throw new Error("MPA OCEANS-X returned an invalid vessel snapshot");
     }
+    const runtime = regionalMaritimeRuntime.mpa_oceans_x;
+    runtime.lastFetchedCount = payload.length;
+    runtime.lastParsedCount = null;
+    runtime.lastQueuedCount = 0;
     const observations = parseMpaMaritimeObservations(
       payload,
       Date.now(),
@@ -1935,19 +2032,26 @@ async function runMpaOceansXMaritimeRefresh(): Promise<{
         120,
       ) * 60_000,
     );
+    runtime.lastParsedCount = observations.length;
     let queued = 0;
     for (const observation of observations) {
       if (queueRegionalMaritimeObservation(observation, "mpa_oceans_x")) {
         queued += 1;
       }
     }
-    const runtime = regionalMaritimeRuntime.mpa_oceans_x;
+    runtime.lastQueuedCount = queued;
+    if (payload.length > 0 && observations.length === 0) {
+      throw new Error(
+        `MPA OCEANS-X returned ${payload.length} rows but none had a fresh valid position`,
+      );
+    }
     runtime.lastRefreshAt = Date.now();
     runtime.lastError = null;
     console.info(
       JSON.stringify({
         event: "mpa_oceans_x_maritime_refresh",
-        fetched: observations.length,
+        fetched: payload.length,
+        parsed: observations.length,
         queued,
         queue_depth: maritimeQueue.size,
       }),
@@ -2426,7 +2530,7 @@ async function runAviationRefresh(): Promise<{ fetched: number; stored: number }
     );
     return snapshot ? [snapshot] : [];
   });
-  await storeTransportSnapshots(snapshots);
+  const storedSnapshots = await storeTransportSnapshots(snapshots);
   console.info(
     JSON.stringify({
       event: "adsb_route_enrichment",
@@ -2440,7 +2544,7 @@ async function runAviationRefresh(): Promise<{ fetched: number; stored: number }
     }),
   );
   lastAviationRefreshAt = Date.now();
-  return { fetched: byHex.size, stored: snapshots.length };
+  return { fetched: byHex.size, stored: storedSnapshots.length };
 }
 
 export async function refreshAviationNow(
@@ -2463,7 +2567,7 @@ export async function refreshAviationNow(
 
 export async function storeTransportSnapshots(
   snapshots: TransportSnapshotInput[],
-): Promise<void> {
+): Promise<TransportSnapshotInput[]> {
   const sourcePrioritySql = (alias: string) =>
     `CASE ${alias}.source_name ${Object.entries(MARITIME_SOURCE_DEFINITIONS)
       .map(([sourceName, definition]) =>
@@ -2482,6 +2586,7 @@ export async function storeTransportSnapshots(
       THEN COALESCE(EXCLUDED.${column}, transport_snapshot.${column})
     ELSE EXCLUDED.${column}
   END`;
+  const storedSnapshots: TransportSnapshotInput[] = [];
   for (let offset = 0; offset < snapshots.length; offset += 100) {
     const batch = snapshots.slice(offset, offset + 100);
     if (batch.length === 0) continue;
@@ -2527,7 +2632,7 @@ export async function storeTransportSnapshots(
         ", "
       )})`;
     });
-    await query(
+    const stored = await query<{ mode: TransportMode; entity_id: string }>(
       `INSERT INTO transport_snapshot (
          mode, entity_id, display_name, callsign, flight_number, registration,
          vehicle_type, latitude, longitude, heading, speed, altitude, vertical_rate,
@@ -2588,8 +2693,17 @@ export async function storeTransportSnapshots(
          payload = EXCLUDED.payload,
          vehicle_category = ${coherentNullableSql("vehicle_category")},
          current_location_name = ${coherentNullableSql("current_location_name")}
-       WHERE ${candidateWinsSql}`,
+       WHERE ${candidateWinsSql}
+       RETURNING mode,entity_id`,
       values
+    );
+    const storedKeys = new Set(
+      stored.rows.map((row) => `${row.mode}:${row.entity_id}`),
+    );
+    storedSnapshots.push(
+      ...batch.filter((snapshot) =>
+        storedKeys.has(`${snapshot.mode}:${snapshot.entity_id}`),
+      ),
     );
   }
 
@@ -3016,6 +3130,7 @@ export async function storeTransportSnapshots(
       values,
     );
   }
+  return storedSnapshots;
 }
 
 function activeTransportWhere(alias = "s"): string {

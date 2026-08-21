@@ -42,8 +42,26 @@ test("GOV.UK result preserves publisher, public-time basis and subject country",
   assert.ok(result);
   assert.equal(result.publisher, "Foreign, Commonwealth & Development Office");
   assert.equal(result.countryInference.iso2, "NZ");
+  assert.deepEqual(result.subjectCountryIso2s, ["NZ"]);
   assert.equal(result.eventTime, "2024-08-14T06:00:00.000Z");
   assert.equal(result.url, "https://www.gov.uk/government/news/change-of-british-high-commissioner-to-new-zealand");
+});
+
+test("GOV.UK multi-country world locations never collapse to publisher country", async () => {
+  const { normalizeGovUkNewsResult } = await connector;
+  const result = normalizeGovUkNewsResult({
+    _id: "/government/news/regional-operational-update",
+    title: "Regional operational update",
+    description: "Officials published a cross-border operational update.",
+    link: "/government/news/regional-operational-update",
+    public_timestamp: "2026-08-21T06:00:00Z",
+    content_store_document_type: "world_news_story",
+    world_locations: [{ title: "Singapore" }, { title: "Malaysia" }],
+  });
+
+  assert.ok(result);
+  assert.deepEqual(result.subjectCountryIso2s, ["SG", "MY"]);
+  assert.notEqual(result.countryInference.iso2, "GB");
 });
 
 test("GOV.UK normalization rejects unreviewed types, external links and future timestamps", async () => {

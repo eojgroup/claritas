@@ -67,11 +67,13 @@ transport tables. A single pass never overlaps another; unfinished tables
 rotate to the front and remain explicit in internal runtime health until a
 later pass clears them.
 
-AISstream uses one documented global bounding-box subscription and a single
-bounded queue drain. The provider is beta/no-SLA and its terrestrial station
-network reports roughly 200 km of coastal reception, so this is not complete
-ocean coverage. Its five-second flush never overlaps a previous flush and writes at most
-500 vessel snapshots per cycle with the production defaults. The keyless
+AISstream uses one subscription containing bounded approach boxes for the
+governed monitored-port list and a single bounded queue drain. Explicit global
+mode is an opt-in only after load testing. The provider is beta/no-SLA and its
+terrestrial station network reports roughly 200 km of coastal reception, so
+even global mode is not complete ocean coverage. Its five-second flush never
+overlaps a previous flush and writes at most 500 vessel snapshots per cycle
+with the production defaults. The keyless
 Digitraffic fallback adds two compressed HTTP requests per minute for its
 Finland/Baltic region and feeds the same bounded queue; it is not a global
 fallback and does not create a second database writer. Marinesia is not used:

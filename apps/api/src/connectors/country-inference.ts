@@ -1,3 +1,5 @@
+import worldCountries from "world-countries";
+
 type CountryAliasSpec = {
   iso2: string;
   aliases: string[];
@@ -64,6 +66,8 @@ const GENERIC_TLDS = new Set([
   "gg",
 ]);
 
+const VALID_ISO2_CODES = new Set(worldCountries.map((country) => country.cca2));
+
 const COUNTRY_ALIASES: CountryAliasSpec[] = [
   {
     iso2: "US",
@@ -80,13 +84,20 @@ const COUNTRY_ALIASES: CountryAliasSpec[] = [
       "fed policy",
       "fed rate",
       "fed rates",
+      "wall street",
+      "s&p 500",
+      "s&p500",
+      "dow jones",
+      "nasdaq",
+      "new york stock exchange",
+      "nyse",
       "pentagon",
       "white house",
     ],
   },
-  { iso2: "GB", aliases: ["united kingdom", "great britain", "britain", "uk", "british", "england", "london"] },
-  { iso2: "FR", aliases: ["france", "french", "paris"] },
-  { iso2: "DE", aliases: ["germany", "german", "berlin", "dax"] },
+  { iso2: "GB", aliases: ["united kingdom", "great britain", "britain", "uk", "british", "england", "london", "ftse", "ftse 100", "bank of england"] },
+  { iso2: "FR", aliases: ["france", "french", "paris", "cac 40"] },
+  { iso2: "DE", aliases: ["germany", "german", "berlin", "dax", "dax 40"] },
   { iso2: "ES", aliases: ["spain", "spanish", "madrid"] },
   { iso2: "IT", aliases: ["italy", "italian", "rome"] },
   { iso2: "PT", aliases: ["portugal", "portuguese", "lisbon"] },
@@ -132,11 +143,11 @@ const COUNTRY_ALIASES: CountryAliasSpec[] = [
   { iso2: "ZA", aliases: ["south africa", "south african", "johannesburg", "cape town"] },
   { iso2: "ET", aliases: ["ethiopia", "ethiopian", "addis ababa"] },
   { iso2: "SD", aliases: ["sudan", "sudanese", "khartoum"] },
-  { iso2: "CN", aliases: ["china", "chinese", "beijing"] },
-  { iso2: "JP", aliases: ["japan", "japanese", "tokyo"] },
-  { iso2: "KR", aliases: ["south korea", "korean", "seoul"] },
+  { iso2: "CN", aliases: ["china", "chinese", "beijing", "shanghai composite", "csi 300", "people's bank of china", "pboc"] },
+  { iso2: "JP", aliases: ["japan", "japanese", "tokyo", "nikkei", "nikkei 225", "bank of japan"] },
+  { iso2: "KR", aliases: ["south korea", "korean", "seoul", "kospi"] },
   { iso2: "KP", aliases: ["north korea", "dprk", "pyongyang"] },
-  { iso2: "IN", aliases: ["india", "indian", "new delhi"] },
+  { iso2: "IN", aliases: ["india", "indian", "new delhi", "sensex", "nifty 50", "reserve bank of india"] },
   { iso2: "PK", aliases: ["pakistan", "pakistani", "islamabad"] },
   { iso2: "AF", aliases: ["afghanistan", "afghan", "kabul"] },
   { iso2: "BD", aliases: ["bangladesh", "bangladeshi", "dhaka"] },
@@ -147,10 +158,10 @@ const COUNTRY_ALIASES: CountryAliasSpec[] = [
   { iso2: "VN", aliases: ["vietnam", "vietnamese", "hanoi", "ho chi minh"] },
   { iso2: "ID", aliases: ["indonesia", "indonesian", "jakarta"] },
   { iso2: "TW", aliases: ["taiwan", "taipei"] },
-  { iso2: "HK", aliases: ["hong kong"] },
-  { iso2: "AU", aliases: ["australia", "australian", "sydney", "melbourne", "canberra"] },
+  { iso2: "HK", aliases: ["hong kong", "hang seng"] },
+  { iso2: "AU", aliases: ["australia", "australian", "sydney", "melbourne", "canberra", "asx 200", "reserve bank of australia"] },
   { iso2: "NZ", aliases: ["new zealand", "kiwi", "wellington", "auckland"] },
-  { iso2: "CA", aliases: ["canada", "canadian", "ottawa", "toronto"] },
+  { iso2: "CA", aliases: ["canada", "canadian", "ottawa", "toronto", "tsx", "s&p/tsx", "bank of canada"] },
   { iso2: "MX", aliases: ["mexico", "mexican", "mexico city"] },
   { iso2: "BR", aliases: ["brazil", "brazilian", "brasil", "brasilia", "sao paulo", "rio de janeiro"] },
   { iso2: "AR", aliases: ["argentina", "argentine", "buenos aires"] },
@@ -240,10 +251,19 @@ export function inferIso2FromUrl(url?: string | null): string | null {
     if (GENERIC_TLDS.has(tld)) return null;
     if (tld === "uk") return "GB";
     const iso2 = tld.toUpperCase();
-    return /^[A-Z]{2}$/.test(iso2) ? iso2 : null;
+    return VALID_ISO2_CODES.has(iso2) ? iso2 : null;
   } catch {
     return null;
   }
+}
+
+/** Only explicit subject evidence is safe to persist as article geography. */
+export function trustedSubjectCountryIso2(inference: CountryInferenceResult): string | null {
+  if (inference.source !== "content_alias") return null;
+  if (!inference.iso2 || !VALID_ISO2_CODES.has(inference.iso2)) return null;
+  return inference.confidence === "high" || inference.confidence === "medium"
+    ? inference.iso2
+    : null;
 }
 
 export function inferNewsCountry(input: NewsCountryInferenceInput): CountryInferenceResult {

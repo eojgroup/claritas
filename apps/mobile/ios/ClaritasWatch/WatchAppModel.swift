@@ -11,7 +11,7 @@ final class WatchAppModel: ObservableObject {
     }
 
     @Published private(set) var briefing: DailySignalBriefing?
-    /// Unfiltered current reporting used for global signals, transport relevance, and widgets.
+    /// Category-unfiltered reporting within the phone's overarching country scope.
     @Published private(set) var news: [NewsItem] = []
     /// Reporting shown by the News tab for the user's selected category.
     @Published private(set) var selectedCategoryNews: [NewsItem] = []
@@ -26,6 +26,7 @@ final class WatchAppModel: ObservableObject {
     @Published private(set) var briefingScheduleError: String?
     @Published private(set) var connectionState: ConnectionState = .waitingForPhone
     @Published private(set) var lastUpdated: Date?
+    @Published private(set) var selectedCountry: String?
     @Published private(set) var selectedNewsCategory: String = NewsCategoryCatalog.allCode
     @Published private(set) var isRefreshingNews: Bool = false
     @Published private(set) var newsLoadError: String?
@@ -104,6 +105,7 @@ final class WatchAppModel: ObservableObject {
 
         let requestID = UUID()
         refreshRequestID = requestID
+        let requestedCountry = selectedCountry
         let requestedNewsCategory = selectedNewsCategory
         isRefreshingNews = true
         newsLoadError = nil
@@ -121,6 +123,7 @@ final class WatchAppModel: ObservableObject {
         async let newsResult: Result<NewsPage, Error> = result {
             try await requestAPI.fetchNews(
                 limit: 12,
+                country: requestedCountry,
                 category: NewsCategoryCatalog.allCode,
                 sort: "importance",
                 archive: false,
@@ -131,6 +134,7 @@ final class WatchAppModel: ObservableObject {
             guard requestedNewsCategory != NewsCategoryCatalog.allCode else { return nil }
             return try await requestAPI.fetchNews(
                 limit: 12,
+                country: requestedCountry,
                 category: requestedNewsCategory,
                 sort: "importance",
                 archive: false,
@@ -217,12 +221,13 @@ final class WatchAppModel: ObservableObject {
         case .failure(let error): errors.append(error)
         }
 
-        if let country = CountryRelevanceResolver.ranked(
+        let transportCountry = requestedCountry ?? CountryRelevanceResolver.ranked(
             news: news,
             podcasts: podcasts,
             weather: weather,
             marketQuotes: markets
-        ).first?.country {
+        ).first?.country
+        if let country = transportCountry {
             do {
                 let loadedTransport = try await requestAPI.fetchTransportOverview(
                     detail: "aggregate",
@@ -322,6 +327,8 @@ final class WatchAppModel: ObservableObject {
     }
 
     private func apply(context: [String: Any]) {
+        let previousCountry = selectedCountry
+        let previousCategory = selectedNewsCategory
         if let baseURL = context["apiBaseURL"] as? String, !baseURL.isEmpty {
             UserDefaults.standard.set(baseURL, forKey: "API_BASE_URL")
         }
@@ -332,8 +339,35 @@ final class WatchAppModel: ObservableObject {
                 isRefreshingNews = false
             }
         }
+        if let rawCountry = context["selectedCountry"] as? String {
+            selectedCountry = normalizedCountry(rawCountry)
+        }
+        if let rawCategory = context["newsCategory"] as? String {
+            selectedNewsCategory = NewsCategoryCatalog.normalized(rawCategory)
+        }
+        if previousCountry != selectedCountry || previousCategory != selectedNewsCategory {
+            refreshRequestID = UUID()
+            isRefreshingNews = false
+            news = []
+            selectedCategoryNews = []
+            newsCategoryFacets = []
+            newsPageTotal = nil
+            newsUnassessedCount = nil
+            newsMetadataIncluded = false
+        }
+        if previousCountry != selectedCountry {
+            transport = nil
+        }
         api = APIClient()
         Task { await refresh() }
+    }
+
+    private func normalizedCountry(_ value: String?) -> String? {
+        let normalized = value?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard let normalized, normalized.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return normalized == "UK" ? "GB" : normalized
     }
 
     private func result<T>(_ operation: () async throws -> T) async -> Result<T, Error> {
@@ -365,6 +399,7 @@ final class WatchAppModel: ObservableObject {
             transport: transport,
             intelligenceEvents: intelligenceEvents,
             briefingSchedule: briefingSchedule,
+            selectedCountry: selectedCountry,
             selectedNewsCategory: selectedNewsCategory,
             lastUpdated: lastUpdated
         )
@@ -378,6 +413,7 @@ final class WatchAppModel: ObservableObject {
             return
         }
         briefing = snapshot.briefing
+        selectedCountry = normalizedCountry(snapshot.selectedCountry)
         let cachedCategory = NewsCategoryCatalog.normalized(snapshot.selectedNewsCategory)
         selectedNewsCategory = cachedCategory
         if let cachedCategoryNews = snapshot.selectedCategoryNews {
@@ -439,6 +475,7 @@ private struct WatchSnapshot: Codable {
     let transport: TransportOverview?
     let intelligenceEvents: [IntelligenceEvent]
     let briefingSchedule: DailyBriefingSchedule?
+    let selectedCountry: String?
     let selectedNewsCategory: String?
     let lastUpdated: Date?
 }

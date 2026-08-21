@@ -854,7 +854,7 @@ struct TransportWorkspaceView: View {
         if !regionalSources.isEmpty &&
             regionalSources.allSatisfy(\.error) &&
             (maritime.messages_received ?? 0) == 0 {
-            return "Global AIS is silent and the configured official regional sources are retrying."
+            return "AISstream is silent in its configured reception areas and the official regional sources are retrying."
         }
         if maritime.connected == true && (maritime.messages_received ?? 0) == 0 {
             return "AISstream is connected with \(maritime.subscription_boxes ?? 1) coverage area(s), but no vessel frames have arrived yet."

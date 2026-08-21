@@ -6,7 +6,7 @@ Claritas combines maritime AIS messages and live ADS-B observations into one cou
 
 ```mermaid
 flowchart LR
-  AIS[AISstream WebSocket] --> Normalize[Transport normalizer]
+  AIS[AISstream monitored-area WebSocket] --> Normalize[Transport normalizer]
   Digitraffic[Fintraffic Digitraffic] --> Normalize
   Norway[BarentsWatch / Kystverket] --> Normalize
   Singapore[MPA OCEANS-X] --> Normalize
@@ -40,7 +40,7 @@ flowchart LR
   DailyCountry --> Compact[iPhone + Watch pulse]
 ```
 
-Only one API replica holds the PostgreSQL advisory lock for scheduled transport ingestion. This prevents duplicate global WebSocket subscriptions and polling loops while keeping the API itself horizontally scalable. A new rolling-update pod retries lock acquisition every ten seconds until the terminating pod releases the session lock; it cannot permanently start without transport workers after losing the initial race. HTTP refresh requests only bypass the short-lived overview cache; they never launch ingestion work from a request-serving replica.
+Only one API replica holds the PostgreSQL advisory lock for scheduled transport ingestion. This prevents duplicate AISstream WebSocket subscriptions and polling loops while keeping the API itself horizontally scalable. A new rolling-update pod retries lock acquisition every ten seconds until the terminating pod releases the session lock; it cannot permanently start without transport workers after losing the initial race. HTTP refresh requests only bypass the short-lived overview cache; they never launch ingestion work from a request-serving replica.
 
 ## Sources and configuration
 
@@ -49,10 +49,24 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 - Runtime environment variable and GitHub Actions repository secret: `AISSTREAM_API_KEY`.
 - Kubernetes secret: `claritas-aisstream`, key `AISSTREAM_API_KEY`.
 - `AISSTREAM_ENABLED` is the operational safety switch and defaults to `true`.
-- The default is AISstream's documented single global bounding box (`[-90,-180]` to `[90,180]`). `AISSTREAM_BOUNDING_BOXES` can replace it with at most 12 provider-format boxes on that same subscription. Subscription updates replace rather than merge prior coverage, so Claritas does not rotate partial regions.
-- “Global” is geographic subscription scope, not complete ocean coverage. AISstream describes the service as beta with no uptime SLA and reports reception roughly 200 km from most coastlines; vessels far offshore and areas without terrestrial stations can be absent.
+- `AISSTREAM_COVERAGE_MODE=monitored_ports` is the production default. It sends
+  one 110-kilometre approach box for every port in Claritas' governed port
+  list, including Singapore and the governed Norwegian and Danish ports, on the
+  single WebSocket subscription. This avoids
+  asking the bounded database queue to consume AISstream's documented average
+  whole-world rate of roughly 300 messages per second. Tune the approach radius
+  with `AISSTREAM_MONITORED_PORT_RADIUS_KM` (55–300 km).
+- `AISSTREAM_BOUNDING_BOXES` takes precedence and can supply up to 64 explicit
+  provider-format boxes. `AISSTREAM_COVERAGE_MODE=global` remains an explicit
+  operational opt-in only after the ingestion and database write budget has
+  been load-tested. Subscription updates replace rather than merge prior
+  coverage, so Claritas sends all boxes together and never rotates areas.
+- “Global” is only a subscription scope and is never inferred from targeted
+  coverage. AISstream describes the service as beta with no uptime SLA and
+  reports reception roughly 200 km from most coastlines; vessels far offshore
+  and areas without terrestrial stations can be absent.
 - `AISSTREAM_SAMPLE_SECONDS` controls current-position sampling and defaults to 600 seconds.
-- `AISSTREAM_FRESHNESS_MINUTES` defaults to 15 minutes. Missing, older, or more than five-minutes-future provider timestamps are rejected before they can affect liveness or source arbitration. Static-message metadata coordinates are never treated as new positions.
+- `AISSTREAM_FRESHNESS_MINUTES` defaults to 15 minutes. Missing, older, or more than five-minutes-future provider timestamps are rejected before they can affect liveness or source arbitration. Static-message metadata coordinates are never treated as new positions. Raw usable coordinates reset only the upstream watchdog; release traffic becomes current only after a sampled snapshot is accepted and the database confirms that it won current-row source arbitration.
 - `AISSTREAM_IDLE_TIMEOUT_SECONDS` defaults to 120 seconds. A connected stream that produces no usable vessel snapshot inside this window is terminated and reconnected; this covers the provider failure mode where a WebSocket remains open but silently stops delivering AIS frames.
 - Vessel snapshots drain through one flush at a time, in bounded batches. The production defaults persist at most two 250-vessel batches per five-second cycle, retain newer queued positions while a write is in flight, and requeue failed writes without allowing overlapping flushes to exhaust the database pool.
 - MMSI Maritime Identification Digits link a vessel to its flag country. Position-in-country, monitored-port geofences, the first observed voyage country and position, and recognizable AIS destination/UN LOCODE values add current, origin, and destination relationships. When a declared destination resolves to a monitored port, its coordinates are retained so the individual vessel map can draw a route from the first observed position to that port.
@@ -61,7 +75,7 @@ Only one API replica holds the PostgreSQL advisory lock for scheduled transport 
 
 - The official keyless Digitraffic marine API supplies a secondary AIS position
   and vessel-metadata baseline for Baltic and Northern European waters when the
-  global AISstream feed is silent.
+  configured AISstream reception areas are silent.
 - `DIGITRAFFIC_MARITIME_ENABLED` defaults to `true`; production polls the
   `locations` and `vessels` endpoints once per minute with a 15-second request
   timeout and accepts positions observed in the latest 15 minutes.
@@ -119,6 +133,13 @@ and [NLOD 2.0](https://data.norge.no/nlod/en/2.0).
   every three minutes, so production polls every 180 seconds and accepts
   positions from the latest 15 minutes. Tune those bounds with
   `MPA_OCEANS_X_POLL_SECONDS` and `MPA_OCEANS_X_FRESHNESS_MINUTES`.
+- Enabling the connector does not provision access. An operator must register
+  with OCEANS-X, create an application, subscribe that application to the
+  published **Vessel Positions** product, generate its production API key, and
+  store it as the GitHub Actions repository secret `MPA_OCEANS_X_API_KEY`.
+  The next deployment creates or updates Kubernetes secret
+  `claritas-mpa-oceans-x`; never commit the key. The official FAQ documents the
+  subscription and key-generation flow.
 - The current marketplace product metadata describes a free, unlimited tier,
   but it provides no uptime SLA. The OCEANS-X terms allow commercial and
   non-commercial derived applications while requiring a conspicuous source
@@ -131,6 +152,11 @@ and [NLOD 2.0](https://data.norge.no/nlod/en/2.0).
 Official references: [OCEANS-X product documentation](https://oceans-x.mpa.gov.sg/marketplace/apis/483131e5-a59d-4dce-901f-597e952e09c4/documents),
 [API terms of service](https://oceans-x.mpa.gov.sg/api-terms-of-service), and
 [OCEANS-X FAQ](https://oceans-x.mpa.gov.sg/faq).
+
+The OCEANS-X public catalogue currently marks Vessel Positions version 1.0.0
+as `PUBLISHED`, subscription-available, non-monetised, and `FREE`, with an
+Unlimited subscription policy. Those fields establish present operational
+availability, not a permanent price or service guarantee.
 
 ### Regional source commercial-viability review
 
@@ -219,7 +245,23 @@ actual first/last date, observed-day count, source mix, and retention policy.
 - `GET /api/transport/overview?country=SE&corridor=FI&detail=full` adds a two-way SE–FI historical corridor series while preserving the selected country's live relationship context. `corridor` must be a different ISO alpha-2 code.
 - `GET /api/transport/entities/:mode/:entityId` returns the current normalized record and up to 24 hours of sampled track points.
 
-All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Runtime coverage reports distinguish disabled, connecting, reconnecting, receiving, and live states, plus message, accepted-snapshot, persisted-snapshot, queue, drop, malformed-frame, subscription-batch, primary-source, fallback-source, and write-error diagnostics. This separates a configured but silent upstream stream from parsing or database persistence failures and shows whether the official regional fallback is active. Web, iPhone, and iPad resolve an explicit selection first and otherwise use the same highest-relevance country highlighted by the cross-source signal map; Watch uses that same highlighted-country fallback. Interactive clients never request a global overview. Equivalent country overview requests are coalesced and cached for 120 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation retains a private aggregate-only global ranking path because its purpose is to compare country activity; it never loads raw entities, and a transient read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
+All endpoints use the same authenticated paid-access boundary as the other Claritas intelligence domains. The AISstream credential is never returned to a client. Runtime coverage reports distinguish disabled, connecting, reconnecting, receiving, and live states, plus message, accepted-snapshot, persisted-snapshot, queue, drop, malformed-frame, subscription-batch, primary-source, fallback-source, and write-error diagnostics. Each regional source also reports `configuration_status`, intended country codes, last upstream/parsed/queued counts, and provider traffic separately from a successful empty poll. Top-level `coverage_state` distinguishes global primary, targeted primary, regional-only, and unavailable coverage; `global_ready` can be true only for a current explicitly global AISstream subscription. A connected-but-silent AISstream socket therefore cannot be hidden by a fast Fintraffic poll in release diagnostics. Web, iPhone, and iPad resolve an explicit selection first and otherwise use the same highest-relevance country highlighted by the cross-source signal map; Watch uses that same highlighted-country fallback. Interactive clients never request a global overview. Equivalent country overview requests are coalesced and cached for 120 seconds per API replica. Overview refreshes run at most two database reads concurrently, and maritime comparisons read the hourly movement aggregate instead of rescanning event history. Briefing generation retains a private aggregate-only global ranking path because its purpose is to compare country activity; it never loads raw entities, and a transient read failure uses the last successful aggregate when available, or an explicit empty transport context, without blocking the other briefing sources or email delivery.
+
+### Singapore coverage troubleshooting
+
+1. Read `/internal/transport/runtime-health` from loopback on the ingestion
+   leader. `mpa_oceans_x.configuration_status=missing_credentials` means the
+   OCEANS-X subscription/key step above has not reached the pod.
+2. `configured=true` with `error=true` points to authentication, rate-limit, or
+   provider availability. A non-empty upstream response with zero fresh valid
+   positions is treated as an error rather than a healthy empty fallback.
+3. `current=true` but `traffic_current=false` means the provider responded but
+   no usable position was persisted in the freshness window. Inspect the last
+   fetched, parsed, and queued counts before changing the map.
+4. Singapore country scope includes only defensible links: a position in the
+   monitored Singapore port geofence, a declared Singapore destination, or a
+   Singapore MMSI/official provider flag. Claritas does not label every record
+   delivered by MPA as physically in Singapore.
 
 ## Presentation contract
 

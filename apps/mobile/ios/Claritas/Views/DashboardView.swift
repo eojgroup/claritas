@@ -79,21 +79,18 @@ struct DashboardView: View {
         .task(id: mobileNewsRequestKey) {
             guard model.authStatus == .authed, model.hasPaidAccess else { return }
             let country = mobileNewsCountry
-            guard model.newsLoadMode != .recent
-                    || model.newsScopeCountry != country
-                    || model.newsScopeCategory != model.selectedNewsCategory
-                    || model.newsScopeSort != .importance else { return }
-            await model.refreshNews(
-                mode: .recent,
+            guard model.rankedNewsScopeCountry != country
+                    || model.rankedNewsScopeCategory != model.selectedNewsCategory
+                    || !model.rankedNewsMetadataIncluded else { return }
+            await model.refreshRankedNews(
                 country: country,
-                category: model.selectedNewsCategory,
-                sort: .importance
+                category: model.selectedNewsCategory
             )
         }
     }
 
     private var mobileNewsPulse: some View {
-        let ranked = mobileNewsScopeMatchesSelection ? model.news : []
+        let ranked = mobileNewsScopeMatchesSelection ? model.rankedNews : []
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -110,7 +107,7 @@ struct DashboardView: View {
             mobileNewsCategorySelector
                 .padding(.bottom, 8)
 
-            if let error = model.newsLoadError, !error.isEmpty, !model.isRefreshingNews {
+            if let error = model.rankedNewsLoadError, !error.isEmpty, !model.isRefreshingRankedNews {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Ranked reporting could not be loaded", systemImage: "exclamationmark.triangle")
                         .font(.subheadline.weight(.semibold))
@@ -121,11 +118,9 @@ struct DashboardView: View {
                         .lineLimit(3)
                     Button("Retry") {
                         Task {
-                            await model.refreshNews(
-                                mode: .recent,
+                            await model.refreshRankedNews(
                                 country: mobileNewsCountry,
-                                category: model.selectedNewsCategory,
-                                sort: .importance
+                                category: model.selectedNewsCategory
                             )
                         }
                     }
@@ -134,12 +129,12 @@ struct DashboardView: View {
                 .padding(.vertical, 8)
             } else if ranked.isEmpty {
                 HStack(spacing: 8) {
-                    if model.isRefreshingNews || !mobileNewsScopeMatchesSelection {
+                    if model.isRefreshingRankedNews || !mobileNewsScopeMatchesSelection {
                         ProgressView()
                             .controlSize(.small)
                     }
                     Text(
-                        model.isRefreshingNews || !mobileNewsScopeMatchesSelection
+                        model.isRefreshingRankedNews || !mobileNewsScopeMatchesSelection
                             ? "Loading ranked reporting for this category…"
                             : "No ranked reporting is available in this category."
                     )
@@ -150,7 +145,7 @@ struct DashboardView: View {
             } else {
                 ForEach(Array(ranked.prefix(3).enumerated()), id: \.element.id) { index, item in
                     Button {
-                        model.selectedNewsItemID = item.id
+                        model.selectNewsItem(item)
                         openCompactDestination("news")
                     } label: {
                         HStack(alignment: .top, spacing: 10) {
@@ -207,7 +202,7 @@ struct DashboardView: View {
     private var mobileNewsCategorySelector: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 7) {
-                ForEach(model.newsCategoryOptions(mode: .recent, country: mobileNewsCountry)) { category in
+                ForEach(model.rankedNewsCategoryOptions(country: mobileNewsCountry)) { category in
                     let selected = model.selectedNewsCategory == category.code
                     Button {
                         model.setNewsCategory(category.code)
@@ -261,10 +256,8 @@ struct DashboardView: View {
     }
 
     private var mobileNewsScopeMatchesSelection: Bool {
-        model.newsLoadMode == .recent
-            && model.newsScopeCountry == mobileNewsCountry
-            && model.newsScopeCategory == model.selectedNewsCategory
-            && model.newsScopeSort == .importance
+        model.rankedNewsScopeCountry == mobileNewsCountry
+            && model.rankedNewsScopeCategory == model.selectedNewsCategory
     }
 
     private var mobileNewsCountry: String? {
@@ -916,7 +909,7 @@ struct DashboardView: View {
         guard let selected = model.selectedCountry?.uppercased() else {
             return model.news.first
         }
-        return model.news.first { ($0.country_iso2 ?? "").uppercased() == selected }
+        return model.news.first { $0.hasSubjectCountry(selected) }
     }
 
     private var mobilePriorityWeather: CountryWeather? {
@@ -953,7 +946,7 @@ struct DashboardView: View {
 
     private var mobileCountryNews: [NewsItem] {
         guard let selected = model.selectedCountry?.uppercased() else { return [] }
-        return model.news.filter { ($0.country_iso2 ?? "").uppercased() == selected }
+        return model.news.filter { $0.hasSubjectCountry(selected) }
     }
 
     private var mobileCountryWeather: CountryWeather? {
@@ -985,13 +978,13 @@ struct DashboardView: View {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var rows = model.news
         if let iso = model.selectedCountry?.uppercased() {
-            rows = rows.filter { ($0.country_iso2 ?? "").uppercased() == iso }
+            rows = rows.filter { $0.hasSubjectCountry(iso) }
         }
         guard !term.isEmpty else { return rows }
         return rows.filter { item in
             let title = "\(item.presentationTitle) \(item.title ?? "")".lowercased()
             let summary = "\(item.presentationSummary ?? "") \(item.summary ?? "")".lowercased()
-            let country = item.country_iso2?.lowercased() ?? ""
+            let country = item.subjectCountries.joined(separator: " ").lowercased()
             return title.contains(term) || summary.contains(term) || country.contains(term)
         }
     }
@@ -1036,7 +1029,7 @@ struct DashboardView: View {
 
     private var uniqueCountryCount: Int {
         var countries = Set<String>()
-        model.news.compactMap(\.country_iso2).forEach { countries.insert($0.uppercased()) }
+        model.news.flatMap(\.subjectCountries).forEach { countries.insert($0) }
         model.weather.map(\.country).forEach { countries.insert($0.uppercased()) }
         model.marketQuotes.compactMap(\.country).forEach { countries.insert($0.uppercased()) }
         return countries.count
@@ -1217,7 +1210,7 @@ struct DashboardView: View {
     private var relatedNews: [NewsItem] {
         guard let relationCountry else { return [] }
         return model.news
-            .filter { ($0.country_iso2 ?? "").uppercased() == relationCountry }
+            .filter { $0.hasSubjectCountry(relationCountry) }
             .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
     }
 
@@ -1360,7 +1353,7 @@ struct NewsWorkspaceView: View {
     @State private var sourceFilter: String = "all"
     @State private var countryScopeInput: String = ""
     @State private var imagesOnly: Bool = false
-    @State private var sort: Sort = .importance
+    @State private var sort: Sort = .newest
     @State private var loadMode: AppModel.NewsLoadMode = .recent
     @State private var showsFilters = false
     @State private var newsMapResetToken = 0
@@ -1419,7 +1412,7 @@ struct NewsWorkspaceView: View {
                     item.title ?? "",
                     item.presentationSummary ?? "",
                     item.summary ?? "",
-                    item.country_iso2 ?? "",
+                    item.subjectCountries.joined(separator: " "),
                     newsSourceLabel(item) ?? ""
                 ]
                 .joined(separator: " ")
@@ -1444,11 +1437,7 @@ struct NewsWorkspaceView: View {
                 return ($0.event_time ?? "") > ($1.event_time ?? "")
             }
         }
-        guard let selectedID = model.selectedNewsItemID,
-              let selected = ordered.first(where: { $0.id == selectedID }) else {
-            return ordered
-        }
-        return [selected] + ordered.filter { $0.id != selectedID }
+        return ordered
     }
 
     private var timelineData: [ChartDateCount] {
@@ -1486,7 +1475,7 @@ struct NewsWorkspaceView: View {
             || !query.isEmpty
             || sourceFilter != "all"
             || imagesOnly
-            || sort != .importance
+            || sort != .newest
     }
 
     private var hasLocalFilters: Bool {
@@ -1541,7 +1530,6 @@ struct NewsWorkspaceView: View {
         }
         .onAppear {
             loadMode = model.newsLoadMode
-            sort = model.newsScopeSort == .newest ? .newest : .importance
             countryScopeInput = selectedNewsCountry ?? ""
         }
         .onChange(of: model.selectedCountry) { _ in
@@ -1595,6 +1583,8 @@ struct NewsWorkspaceView: View {
 
             newsCategorySelector
 
+            selectedRankedStoryPanel(compact: true)
+
             if hasActiveFilters {
                 HStack(spacing: 6) {
                     Image(systemName: "line.3.horizontal.decrease.circle.fill")
@@ -1640,6 +1630,7 @@ struct NewsWorkspaceView: View {
             }
             newsScopeBar
             newsCategorySelector
+            selectedRankedStoryPanel(compact: false)
             newsCoverageMapCard(height: 310, compact: false)
             filterPanel
             storyPanel(compact: false)
@@ -1708,7 +1699,7 @@ struct NewsWorkspaceView: View {
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 if loadedScopeMatchesSelection, let newestLoadedStoryDate {
                     Label(
-                        "Newest verified story \(newestLoadedStoryDate.formatted(date: .abbreviated, time: .shortened))",
+                        "Newest story \(newestLoadedStoryDate.formatted(date: .abbreviated, time: .shortened))",
                         systemImage: recentFeedLooksStale ? "exclamationmark.triangle" : "clock"
                     )
                     .font(.caption2.weight(recentFeedLooksStale ? .semibold : .regular))
@@ -1790,7 +1781,7 @@ struct NewsWorkspaceView: View {
         BrandCard(title: "News coverage map", icon: "map") {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Verified publisher coverage · trailing 30 days")
+                    Text("Assessed mapped reporting · trailing 30 days")
                         .font(.caption.weight(.semibold))
                     Text("Tap a country to load its full feed. The map window is stated separately from the Recent/Archive list window.")
                         .font(.caption2)
@@ -1814,7 +1805,7 @@ struct NewsWorkspaceView: View {
                         Image(systemName: "map")
                             .font(.title2)
                     }
-                    Text("Coverage map is waiting for verified country totals.")
+                    Text("Coverage map is waiting for assessed country totals.")
                         .font(.subheadline.weight(.semibold))
                     Text(newsCoverageError ?? "The story feed remains available below while coverage totals refresh.")
                         .font(.caption)
@@ -1910,7 +1901,7 @@ struct NewsWorkspaceView: View {
             Image(systemName: hasLocalFilters ? "line.3.horizontal.decrease.circle" : "newspaper")
                 .font(.title2)
                 .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
-            Text(hasLocalFilters ? "No stories match these filters" : "No verified stories in this window")
+            Text(hasLocalFilters ? "No stories match these filters" : "No stories in this window")
                 .font(.headline)
             Text(newsEmptyExplanation)
                 .font(.caption)
@@ -1965,7 +1956,7 @@ struct NewsWorkspaceView: View {
         if !query.isEmpty || sourceFilter != "all" || imagesOnly {
             labels.append("Local filters")
         }
-        if sort != .importance {
+        if sort != .newest {
             labels.append(sort.title)
         }
         return labels.isEmpty ? "Filtered news" : labels.joined(separator: " · ")
@@ -1981,7 +1972,7 @@ struct NewsWorkspaceView: View {
         if !loadedScopeMatchesSelection {
             return "Waiting to load the complete \(loadMode.rawValue) feed for this scope…"
         }
-        return "\(model.news.count) verified \(loadMode.rawValue) stories loaded from the server"
+        return "\(model.news.count) \(loadMode.rawValue) stories loaded from the server"
     }
 
     private var normalizedCountryScopeInput: String? {
@@ -2027,7 +2018,7 @@ struct NewsWorkspaceView: View {
         query = ""
         sourceFilter = "all"
         imagesOnly = false
-        sort = .importance
+        sort = .newest
     }
 
     private var analyticsPanels: some View {
@@ -2065,6 +2056,36 @@ struct NewsWorkspaceView: View {
                 Text("Stories")
                     .font(.headline)
                 storyResults(compact: compact)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func selectedRankedStoryPanel(compact: Bool) -> some View {
+        if let item = model.selectedNewsItem,
+           model.selectedNewsItemID == item.id {
+            BrandCard(title: "Selected ranked report", icon: "scope") {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Opened from the overview. The latest feed below remains chronological.")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        Spacer(minLength: 4)
+                        Button("Dismiss") {
+                            model.selectNewsItem(nil)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
+                    }
+                    NewsListView(
+                        items: [item],
+                        compact: compact,
+                        selectedItemID: item.id,
+                        onSelectCountry: { iso in
+                            model.selectedCountry = iso.uppercased()
+                        }
+                    )
+                }
             }
         }
     }
@@ -2860,7 +2881,7 @@ private struct LegacyMarketsWorkspaceView: View {
     private var relatedNews: [NewsItem] {
         guard let relatedCountry else { return [] }
         return model.news
-            .filter { ($0.country_iso2 ?? "").uppercased() == relatedCountry }
+            .filter { $0.hasSubjectCountry(relatedCountry) }
             .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
             .prefix(4)
             .map { $0 }
@@ -4814,11 +4835,17 @@ private enum SignalMapDataBuilder {
             )
         case .news:
             raw = countryStats.map { stat in
-                point(
+                let publisherDetail = stat.provider_count.map {
+                    " · \($0) \($0 == 1 ? "publisher" : "publishers")"
+                } ?? ""
+                let verifiedDetail = stat.verified_count.map {
+                    " · \($0) publisher-timed"
+                } ?? ""
+                return point(
                     id: "news-\(stat.country)",
                     iso: stat.country,
                     valueLabel: "\(stat.count)",
-                    detail: "\(stat.count) mapped \(stat.count == 1 ? "story" : "stories")",
+                    detail: "\(stat.count) assessed mapped \(stat.count == 1 ? "story" : "stories")\(verifiedDetail)\(publisherDetail)",
                     magnitude: Double(max(stat.count, 1))
                 )
             }

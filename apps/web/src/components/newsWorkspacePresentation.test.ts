@@ -3,6 +3,7 @@ import {
   describeNewsEmptyState,
   describeNewsFreshness,
   mergeNewsTranslationIntoItems,
+  newestNewsFirst,
   resolveNewsCoverageSelection,
   sliceNewsTrendForExport,
 } from "./newsWorkspacePresentation";
@@ -33,6 +34,19 @@ describe("news workspace presentation", () => {
       tone: "aging",
     });
     expect(describeNewsFreshness("2026-08-10T10:00:00Z", now).tone).toBe("stale");
+  });
+
+  it("presents browse feeds newest-first without mutating the response", () => {
+    const responseItems = [
+      { id: 1, event_time: "2026-08-18T20:00:00Z" },
+      { id: 2, event_time: null },
+      { id: 3, event_time: "2026-08-21T09:15:00Z" },
+      { id: 4, event_time: "not-a-date" },
+      { id: 5, event_time: "2026-08-20T17:30:00Z" },
+    ];
+
+    expect(newestNewsFirst(responseItems).map((item) => item.id)).toEqual([3, 5, 1, 2, 4]);
+    expect(responseItems.map((item) => item.id)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it("explains an empty country result rather than silently rendering a blank panel", () => {

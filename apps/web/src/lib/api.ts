@@ -76,10 +76,17 @@ export type NewsItem = {
   summary: string | null;
   url: string | null;
   country_iso2: string | null;
+  countries?: string[];
   language_code?: string | null;
   source_country_iso2?: string | null;
   tone?: number | null;
   event_time: string | null;
+  time?: {
+    basis: string;
+    is_publisher_verified: boolean;
+    published_at: string | null;
+    discovered_at: string | null;
+  } | null;
   source_name?: string | null;
   publisher?: string | null;
   payload?: unknown;
@@ -216,6 +223,7 @@ export type PodcastEpisode = {
 export type CountryStat = {
   country: string;
   count: number;
+  verified_count?: number;
   latest_at?: string | null;
   provider_count?: number;
 };
@@ -765,7 +773,9 @@ export type TransportOverview = {
       transport: "WebSocket";
       configured: boolean;
       primary_source: "AISstream";
-      primary_coverage: "best_effort_global";
+      primary_coverage: string;
+      primary_global?: boolean;
+      primary_subscription_mode?: "monitored_ports" | "configured" | "global" | string;
       primary_service_level: "beta_no_sla";
       primary_configured: boolean;
       primary_status: "disabled" | "connecting" | "reconnecting" | "upstream_stalled" | "live";
@@ -1749,7 +1759,7 @@ export async function fetchNews(params?: {
   includeMetadata?: boolean;
 }): Promise<NewsFeedResponse> {
   const sp = new URLSearchParams();
-  const requestedSort = params?.sort ?? "importance";
+  const requestedSort = params?.sort ?? "newest";
   sp.set("display_language", params?.displayLanguage ?? CURRENT_INTERFACE_LANGUAGE);
   sp.set("sort", requestedSort);
   if (params?.limit) sp.set("limit", String(params.limit));

@@ -150,7 +150,7 @@ private struct NewsRow: View {
                     if let source = sourceLabel {
                         Text(source).lineLimit(1)
                     }
-                    if let iso = item.country_iso2?.uppercased(), !iso.isEmpty {
+                    ForEach(Array(item.subjectCountries.prefix(3)), id: \.self) { iso in
                         Text("·")
                         Button(iso) { onSelectCountry(iso) }
                             .buttonStyle(.plain)
@@ -255,7 +255,7 @@ private struct NewsRow: View {
                             .padding(.vertical, 4)
                             .background(ClaritasPalette.darkBlue.opacity(0.12), in: Capsule())
                     }
-                    if let iso = item.country_iso2?.uppercased(), !iso.isEmpty {
+                    ForEach(Array(item.subjectCountries.prefix(3)), id: \.self) { iso in
                         Button(action: { onSelectCountry(iso) }) {
                             Text(iso)
                                 .font(.caption)
@@ -422,7 +422,7 @@ private struct NewsRow: View {
     }
 
     private var timeBasisLabel: String {
-        guard let basis = item.payload?.object?["time_basis"]?.string else {
+        guard let basis = item.timeBasis else {
             return "Reported"
         }
         switch basis {

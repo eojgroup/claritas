@@ -12,6 +12,7 @@ export type MpaMaritimeObservation = {
   displayName: string | null;
   callsign: string | null;
   shipType: string | number | null;
+  registrationCountryIso2: string | null;
   destination: null;
 };
 
@@ -130,6 +131,10 @@ export function parseMpaMaritimeObservations(
       displayName: text(vessel?.vesselName),
       callsign: text(vessel?.callSign),
       shipType,
+      registrationCountryIso2: (() => {
+        const flag = text(vessel?.flag)?.toUpperCase();
+        return flag && /^[A-Z]{2}$/.test(flag) ? flag : null;
+      })(),
       destination: null,
     };
     const existing = byMmsi.get(mmsi);

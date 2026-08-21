@@ -47,6 +47,7 @@ describe("fetchNews", () => {
 
     const result = await fetchNews({
       limit: 3,
+      country: "SG",
       category: "transport",
       sort: "newest",
       archive: true,
@@ -54,6 +55,7 @@ describe("fetchNews", () => {
 
     const requested = new URL(String(fetchMock.mock.calls[0][0]), "https://claritas.test");
     expect(requested.pathname).toBe("/api/news");
+    expect(requested.searchParams.get("country")).toBe("SG");
     expect(requested.searchParams.get("category")).toBe("transport");
     expect(requested.searchParams.get("sort")).toBe("newest");
     expect(requested.searchParams.get("limit")).toBe("3");
@@ -78,7 +80,7 @@ describe("fetchNews", () => {
     expect(result.page).toEqual({ limit: 3, offset: 0, total: 47, metadata_included: true });
   });
 
-  it("defaults to importance and omits an all-category filter", async () => {
+  it("defaults to newest and omits an all-category filter", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ items: [] }),
       { status: 200, headers: { "content-type": "application/json" } },
@@ -88,7 +90,7 @@ describe("fetchNews", () => {
     const result = await fetchNews({ limit: 3 });
 
     const requested = new URL(String(fetchMock.mock.calls[0][0]), "https://claritas.test");
-    expect(requested.searchParams.get("sort")).toBe("importance");
+    expect(requested.searchParams.get("sort")).toBe("newest");
     expect(requested.searchParams.has("category")).toBe(false);
     expect(requested.searchParams.has("archive")).toBe(false);
     expect(requested.searchParams.has("include_metadata")).toBe(false);
@@ -96,7 +98,7 @@ describe("fetchNews", () => {
       items: [],
       facets: { categories: [] },
       ranking: {
-        sort: "importance",
+        sort: "newest",
         archive: false,
         unassessed_count: null,
         selected_unassessed_count: null,

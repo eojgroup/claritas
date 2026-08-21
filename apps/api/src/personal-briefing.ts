@@ -18,6 +18,7 @@ import {
   projectBriefingPriorityEvents,
   type BriefingIntelligenceEvent,
 } from "./briefing-event-context";
+import { trustedNewsDirectCountrySql } from "./news-country-attribution";
 
 export type PersonalBriefingPreferences = {
   industries: string[];
@@ -57,6 +58,7 @@ type CandidateItemRow = {
   summary: string | null;
   url: string | null;
   country_iso2: string | null;
+  country_iso2s: string[];
   language_code: string | null;
   translation_provider: string | null;
   translation_model: string | null;
@@ -758,9 +760,13 @@ async function selectSignals(
            ELSE i.summary
          END AS summary,
          i.url,
-         upper(i.country_iso2::text) AS country_iso2,
+         subject_country.countries[1] AS country_iso2,
+         COALESCE(subject_country.countries,ARRAY[]::text[]) AS country_iso2s,
          i.language_code,
-         COALESCE(i.event_time, i.created_at) AS event_time,
+         CASE
+           WHEN i.kind='news_article' THEN i.event_time
+           ELSE COALESCE(i.event_time,i.created_at)
+         END AS event_time,
          i.payload,
          translation.provider AS translation_provider,
          translation.model AS translation_model,
@@ -772,8 +778,57 @@ async function selectSignals(
         AND translation.target_language_code = $3
         AND translation.source_title_hash = md5(COALESCE(i.title, ''))
         AND translation.source_summary_hash IS NOT DISTINCT FROM md5(i.summary)
-       WHERE COALESCE(i.event_time, i.created_at) >= $1::timestamptz
-         AND COALESCE(i.event_time, i.created_at) < $2::timestamptz
+       LEFT JOIN LATERAL (
+         SELECT array_agg(country ORDER BY priority,country) AS countries
+         FROM (
+           SELECT country,min(priority) AS priority
+           FROM (
+             SELECT upper(BTRIM(i.country_iso2::text)) AS country,0 AS priority
+             WHERE i.country_iso2 IS NOT NULL
+               AND (i.kind IS DISTINCT FROM 'news_article' OR ${trustedNewsDirectCountrySql("i")})
+             UNION ALL
+             SELECT upper(structured_country),1
+             FROM jsonb_array_elements_text(
+               CASE
+                 WHEN i.kind='news_article' AND jsonb_typeof(i.payload->'subject_country_iso2s')='array'
+                   THEN i.payload->'subject_country_iso2s'
+                 ELSE '[]'::jsonb
+               END
+             ) structured_country
+             WHERE structured_country ~ '^[A-Za-z]{2}$'
+             UNION ALL
+             SELECT upper(location->>'country_iso2'),2
+             FROM jsonb_array_elements(
+               CASE
+                 WHEN i.kind='news_article' AND jsonb_typeof(i.payload#>'{gkg,locations}')='array'
+                   THEN i.payload#>'{gkg,locations}'
+                 ELSE '[]'::jsonb
+               END
+             ) location
+             WHERE location->>'country_iso2' ~ '^[A-Za-z]{2}$'
+             UNION ALL
+             SELECT upper(BTRIM(country_event.primary_country_iso2::text)),3
+             FROM intelligence_event_evidence country_evidence
+             JOIN intelligence_event country_event ON country_event.id=country_evidence.event_id
+             WHERE i.kind='news_article'
+               AND country_evidence.domain='news'
+               AND country_evidence.source_record_type='item'
+               AND country_evidence.source_record_id=i.id::text
+               AND country_evidence.correlation_factors->>'decision'='attached'
+               AND country_event.status<>'dismissed'
+               AND country_event.primary_country_iso2 IS NOT NULL
+           ) subject_country_candidates
+           GROUP BY country
+         ) distinct_subject_countries
+       ) subject_country ON true
+       WHERE (
+           (i.kind='news_article' AND i.event_time >= $1::timestamptz AND i.event_time < $2::timestamptz)
+           OR (
+             i.kind IS DISTINCT FROM 'news_article'
+             AND COALESCE(i.event_time,i.created_at) >= $1::timestamptz
+             AND COALESCE(i.event_time,i.created_at) < $2::timestamptz
+           )
+         )
          AND (
            i.kind <> 'news_article'
            OR lower(s.name) <> 'gdelt'
@@ -823,10 +878,20 @@ async function selectSignals(
       const industryMatches = preferences.industries.filter((industry) =>
         containsTerm(searchable, industry)
       );
-      const itemCountry = row.country_iso2 ? countryMap.get(row.country_iso2) : null;
-      const countryMatch = !!row.country_iso2 && selectedCountries.has(row.country_iso2);
-      const regionMatch =
-        !!itemCountry?.region && selectedRegions.has(itemCountry.region.toLowerCase());
+      const itemCountries = Array.from(new Set(
+        (Array.isArray(row.country_iso2s) ? row.country_iso2s : [])
+          .map((country) => country.trim().toUpperCase())
+          .filter((country) => /^[A-Z]{2}$/.test(country)),
+      ));
+      const matchedCountryIso2 = itemCountries.find((country) => selectedCountries.has(country)) ?? null;
+      const matchedRegionIso2 = itemCountries.find((country) => {
+        const region = countryMap.get(country)?.region;
+        return !!region && selectedRegions.has(region.toLowerCase());
+      }) ?? null;
+      const selectedItemCountryIso2 = matchedCountryIso2 ?? matchedRegionIso2 ?? itemCountries[0] ?? null;
+      const itemCountry = selectedItemCountryIso2 ? countryMap.get(selectedItemCountryIso2) : null;
+      const countryMatch = matchedCountryIso2 != null;
+      const regionMatch = matchedRegionIso2 != null;
       const geographyMatch = countryMatch || regionMatch;
 
       const companyBranch = hasCompanyFilter && companyMatches.length > 0;
@@ -866,7 +931,7 @@ async function selectSignals(
         original_title: boundedText(row.original_title, 300) || null,
         summary,
         url: boundedText(row.url, 2_000) || null,
-        country_iso2: row.country_iso2,
+        country_iso2: selectedItemCountryIso2,
         original_language: row.language_code,
         translation: row.translation_provider
           ? {

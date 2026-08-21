@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { inferNewsCountry } from "./country-inference";
 
 process.env.DB_HOST ||= "127.0.0.1";
 process.env.DB_NAME ||= "claritas_test";
@@ -51,4 +52,27 @@ test("institutional publication time rejects invalid and future feed dates", asy
   );
   assert.equal(parseInstitutionalPublicationTime("not-a-date", now), null);
   assert.equal(parseInstitutionalPublicationTime("2026-08-21T12:05:01.000Z", now), null);
+});
+
+test("reviewed institutional jurisdiction is subject context, while explicit content remains primary", async () => {
+  const { institutionalSubjectGeography } = await connector;
+  const feedOnly = inferNewsCountry({
+    title: "Quarterly enforcement update",
+    feedCountryHint: "US",
+  });
+  assert.deepEqual(institutionalSubjectGeography(feedOnly, "US"), {
+    primary: "US",
+    countries: ["US"],
+    attribution: "institutional_jurisdiction",
+  });
+
+  const international = inferNewsCountry({
+    title: "SEC charges Singapore issuer after market disclosure failures",
+    feedCountryHint: "US",
+  });
+  assert.deepEqual(institutionalSubjectGeography(international, "US"), {
+    primary: "SG",
+    countries: ["SG", "US"],
+    attribution: "content_alias",
+  });
 });

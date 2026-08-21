@@ -163,7 +163,7 @@ final class APIClient {
         q: String? = nil,
         country: String? = nil,
         category: String? = nil,
-        sort: String = "importance",
+        sort: String = "newest",
         archive: Bool = false,
         includeMetadata: Bool = true
     ) async throws -> NewsPage {

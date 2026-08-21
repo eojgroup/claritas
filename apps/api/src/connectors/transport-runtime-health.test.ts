@@ -29,6 +29,8 @@ function regionalSource(
     id: "digitraffic",
     provider: "Fintraffic Digitraffic",
     configured: true,
+    configurationStatus: "configured",
+    countryCodes: ["FI"],
     readinessEligible: true,
     transport: "REST",
     lastRefreshAt: now - 20_000,
@@ -37,6 +39,9 @@ function regionalSource(
     error: false,
     coverage: "finland_and_nearby_baltic_reception",
     license: "CC BY 4.0",
+    lastFetchedCount: 800,
+    lastParsedCount: 798,
+    lastQueuedCount: 760,
     ...overrides,
   };
 }
@@ -67,6 +72,21 @@ test("reports a current AISstream source as live primary", () => {
   assert.equal(result.degraded, false);
   assert.equal(result.state, "live_primary");
   assert.equal(result.primary.traffic_current, true);
+  assert.equal(result.coverage_state, "global_primary");
+  assert.equal(result.global_ready, true);
+});
+
+test("reports targeted AISstream coverage without claiming global readiness", () => {
+  const result = health({
+    primaryCoverage: "targeted_monitored_port_reception",
+    primaryGlobal: false,
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.state, "live_primary");
+  assert.equal(result.coverage_state, "targeted_primary");
+  assert.equal(result.global_ready, false);
+  assert.equal(result.primary.global, false);
+  assert.equal(result.primary.coverage, "targeted_monitored_port_reception");
 });
 
 test("does not treat current websocket frames without accepted stored traffic as live primary", () => {
@@ -85,6 +105,18 @@ test("does not treat current websocket frames without accepted stored traffic as
   assert.equal(result.ready, false);
   assert.equal(result.state, "unavailable");
   assert.equal(result.primary.last_state_at, new Date(now - 10_000).toISOString());
+  assert.equal(result.primary.traffic_current, false);
+});
+
+test("accepted primary traffic is not current until its position is persisted", () => {
+  const result = health({
+    primaryLastSnapshotAt: now - 10_000,
+    primaryLastStoredAt: null,
+    regionalSources: [],
+  });
+  assert.equal(result.ready, false);
+  assert.equal(result.state, "unavailable");
+  assert.equal(result.primary.current, false);
   assert.equal(result.primary.traffic_current, false);
 });
 
@@ -112,6 +144,13 @@ test("accepts a current regional fallback but labels global coverage degraded", 
     "finland_and_nearby_baltic_reception",
   );
   assert.equal(result.fallback.global, false);
+  assert.equal(result.coverage_state, "regional_only");
+  assert.equal(result.global_ready, false);
+  assert.deepEqual(result.regional_sources[0].country_codes, ["FI"]);
+  assert.equal(result.regional_sources[0].configuration_status, "configured");
+  assert.equal(result.regional_sources[0].last_fetched_count, 800);
+  assert.equal(result.regional_sources[0].last_parsed_count, 798);
+  assert.equal(result.regional_sources[0].last_queued_count, 760);
 });
 
 test("a successful fallback poll proves provider state without inventing traffic", () => {
@@ -132,6 +171,39 @@ test("a successful fallback poll proves provider state without inventing traffic
   assert.equal(result.state, "regional_fallback");
   assert.equal(result.fallback.current, true);
   assert.equal(result.fallback.traffic_current, false);
+});
+
+test("accepted regional traffic is not reported as current before persistence", () => {
+  const result = health({
+    primaryConfigured: false,
+    primaryConnected: false,
+    primaryLastMessageAt: null,
+    primaryLastSnapshotAt: null,
+    primaryLastStoredAt: null,
+    regionalSources: [regionalSource({ lastStoredAt: null })],
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.state, "regional_fallback");
+  assert.equal(result.regional_sources[0].traffic_current, false);
+  assert.equal(result.fallback.traffic_current, false);
+});
+
+test("Fintraffic readiness cannot mask a configured but silent AISstream primary", () => {
+  const result = health({
+    primaryConnected: true,
+    primaryLastMessageAt: now - 10_000,
+    primaryLastSnapshotAt: null,
+    primaryLastStoredAt: null,
+    regionalSources: [regionalSource()],
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.state, "regional_fallback");
+  assert.equal(result.coverage_state, "regional_only");
+  assert.equal(result.global_ready, false);
+  assert.equal(result.primary.configured, true);
+  assert.equal(result.primary.connected, true);
+  assert.equal(result.primary.current, false);
+  assert.equal(result.regional_sources[0].current, true);
 });
 
 test("a plaintext streaming source remains visible but cannot prove readiness", () => {
@@ -274,7 +346,7 @@ test("diagnostic traffic cannot make a stale eligible fallback look current", ()
     result.regional_sources[1].last_state_at,
     new Date(currentDiagnosticState).toISOString(),
   );
-  assert.equal(result.regional_sources[1].traffic_current, true);
+  assert.equal(result.regional_sources[1].traffic_current, false);
 });
 
 test("standby replicas do not claim ingestion health", () => {

@@ -31,6 +31,12 @@ import {
 } from "./connectors/transport";
 import { isLoopbackAddress } from "./connectors/transport-runtime-health";
 import {
+  SINGAPORE_TRANSPORT_COUNTRY,
+  buildSingaporeTransportHealthQuery,
+  evaluateSingaporeTransportHealth,
+  type SingaporeTransportHealthRow,
+} from "./connectors/singapore-transport-health";
+import {
   getDatabasePoolStats,
   isDatabaseUnavailableError,
   pool,
@@ -47,6 +53,7 @@ import {
   buildLeadershipRunPlan,
   buildPodcastRunPlan,
   buildWeatherRunPlan,
+  cancelReleaseNewsRun,
   getMetrics,
   getRunDetail,
   getRunLogs,
@@ -77,6 +84,12 @@ import {
 } from "./news-intelligence";
 import { startNewsAssessmentWorker } from "./news-assessment-worker";
 import { buildNewsReaderQuery } from "./news-reader-query";
+import { buildNewsCountryStatsQuery } from "./news-country-attribution";
+import {
+  buildNewsRuntimeHealthQuery,
+  evaluateNewsRuntimeHealth,
+  type NewsRuntimeHealthRow,
+} from "./news-runtime-health";
 import {
   BriefingGenerationError,
   generateDailySignalBriefing,
@@ -171,6 +184,120 @@ app.get("/internal/transport/runtime-health", (req, res) => {
   const health = getTransportRuntimeHealth();
   res.setHeader("Cache-Control", "no-store");
   return res.status(health.ready ? 200 : 503).json(health);
+});
+app.get("/internal/transport/singapore-health", async (req, res) => {
+  // Query the persisted snapshot directly on every request. This deliberately
+  // bypasses the transport overview cache so release verification proves that
+  // a vessel is currently positioned in Singapore, rather than merely linked
+  // by flag, origin, destination or route metadata.
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    return res.status(404).send("not found");
+  }
+  res.setHeader("Cache-Control", "no-store");
+  const freshnessSeconds = parseBoundedIntEnv(
+    process.env.TRANSPORT_RUNTIME_FRESHNESS_SECONDS,
+    60,
+    1_800,
+    900,
+  );
+  try {
+    const result = await query<SingaporeTransportHealthRow>(
+      buildSingaporeTransportHealthQuery(),
+      [SINGAPORE_TRANSPORT_COUNTRY, freshnessSeconds],
+    );
+    const health = evaluateSingaporeTransportHealth(result.rows[0], {
+      now: Date.now(),
+      freshnessMilliseconds: freshnessSeconds * 1_000,
+    });
+    return res.status(health.ready ? 200 : 503).json(health);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "singapore_transport_health_failed",
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    return res.status(503).json({
+      ready: false,
+      state: "query_failed",
+      country: SINGAPORE_TRANSPORT_COUNTRY,
+      mode: "maritime",
+      position_basis: "current_country_iso2",
+      cache_bypassed: true,
+    });
+  }
+});
+app.get("/internal/news/runtime-health", async (req, res) => {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    return res.status(404).send("not found");
+  }
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const rawRunId = typeof req.query.runId === "string" ? req.query.runId.trim() : "";
+    const runId = /^[1-9][0-9]*$/.test(rawRunId) ? Number(rawRunId) : Number.NaN;
+    if (!Number.isSafeInteger(runId) || runId <= 0) {
+      return res.status(400).json({ ready: false, state: "invalid_release_run" });
+    }
+    const result = await query<NewsRuntimeHealthRow>(
+      buildNewsRuntimeHealthQuery(),
+      [NEWS_ASSESSMENT_METHODOLOGY, runId],
+    );
+    const health = evaluateNewsRuntimeHealth(result.rows[0]);
+    return res.status(health.ready ? 200 : 503).json(health);
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "news_runtime_health_failed",
+      message: error instanceof Error ? error.message : String(error),
+    }));
+    return res.status(503).json({ ready: false, state: "query_failed" });
+  }
+});
+app.post("/internal/news/refresh", async (req, res) => {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    return res.status(404).send("not found");
+  }
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const releaseId = typeof req.query.releaseId === "string" ? req.query.releaseId.trim() : "";
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(releaseId)) {
+      return res.status(400).json({ error: "A valid releaseId is required." });
+    }
+    const run = await triggerNewsRun({
+      actor: { userId: null, email: "release-gate@claritas.internal", triggerMode: "release_gate" },
+      // Release verification only needs durable provider acquisition. Optional
+      // AI translation continues on ordinary scheduled runs and cannot delay
+      // or orphan the deployment gate.
+      plan: buildNewsRunPlan({ runTranslations: false, releaseId }),
+    }, { releaseId });
+    return res.status(run.blockedByOtherRun ? 409 : 202).json({
+      runId: run.runId,
+      reused: run.reused,
+      blocked_by_other_run: run.blockedByOtherRun,
+      releaseId,
+    });
+  } catch (error) {
+    return res.status(503).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+app.post("/internal/news/refresh/:runId/cancel", async (req, res) => {
+  if (!isLoopbackAddress(req.socket.remoteAddress)) {
+    return res.status(404).send("not found");
+  }
+  res.setHeader("Cache-Control", "no-store");
+  const runId = /^[1-9][0-9]*$/.test(req.params.runId) ? Number(req.params.runId) : Number.NaN;
+  const releaseId = typeof req.query.releaseId === "string" ? req.query.releaseId.trim() : "";
+  if (!Number.isSafeInteger(runId) || runId <= 0 || !/^[A-Za-z0-9._-]{1,128}$/.test(releaseId)) {
+    return res.status(400).json({ cancelled: false, error: "A valid runId and releaseId are required." });
+  }
+  try {
+    const cancelled = await cancelReleaseNewsRun({ runId, releaseId });
+    return res.status(cancelled ? 200 : 409).json({ runId, releaseId, cancelled });
+  } catch (error) {
+    return res.status(503).json({
+      runId,
+      releaseId,
+      cancelled: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 });
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -2168,7 +2295,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     const sourceCountry = typeof req.query.source_country === "string" ? req.query.source_country.trim().toUpperCase() : "";
     const provider = typeof req.query.provider === "string" ? req.query.provider.trim().toLowerCase() : "";
     const category = typeof req.query.category === "string" ? req.query.category.trim().toLowerCase() : "";
-    const sort = typeof req.query.sort === "string" ? req.query.sort.trim().toLowerCase() : "importance";
+    const sort = typeof req.query.sort === "string" ? req.query.sort.trim().toLowerCase() : "newest";
     const archive = ["1", "true"].includes(String(req.query.archive ?? "").trim().toLowerCase());
     const includeMetadata = !["0", "false"].includes(String(req.query.include_metadata ?? "").trim().toLowerCase());
     if (category && !NEWS_CATEGORIES.some((candidate) => candidate === category)) {
@@ -2487,38 +2614,26 @@ app.post("/api/admin/ingestion/leadership/run", requireAdminRole, async (req, re
 app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
   try {
     trackDemandSignal("news");
-    const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 365);
-    const params: any[] = [days];
-    const [statsResult, coverageResult] = await Promise.all([
-      pool.query(
-        `SELECT upper(i.country_iso2) AS country,
-                COUNT(*)::int AS count,
-                MAX(COALESCE(i.event_time, i.created_at)) AS latest_at,
-                COUNT(DISTINCT s.id)::int AS provider_count
-         FROM item i JOIN source s ON s.id=i.source_id
-         WHERE i.country_iso2 IS NOT NULL
-           AND i.kind = 'news_article'
-           AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
-           AND COALESCE(i.event_time, i.created_at) >= now() - ($1 || ' days')::interval
-         GROUP BY upper(i.country_iso2)
-         ORDER BY count DESC`,
-        params
-      ),
-      pool.query<{ total: number; mapped: number }>(
-        `SELECT
-           COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE country_iso2 IS NOT NULL)::int AS mapped
-         FROM item i JOIN source s ON s.id=i.source_id
-         WHERE i.kind = 'news_article'
-           AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
-           AND COALESCE(i.event_time, i.created_at) >= now() - ($1 || ' days')::interval`,
-        params
-      ),
-    ]);
-    const total = Number(coverageResult.rows[0]?.total ?? 0);
-    const mapped = Number(coverageResult.rows[0]?.mapped ?? 0);
+    // The interactive clients expose at most a 45-day heatmap. Keeping the API
+    // to that same bound prevents an authenticated request from repeatedly
+    // expanding and de-duplicating a full year of JSON geography evidence.
+    const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 45);
+    const result = await pool.query<{
+      stats: Array<{
+        country: string;
+        count: number;
+        verified_count: number;
+        latest_at: string | null;
+        provider_count: number;
+      }>;
+      total: number;
+      mapped: number;
+    }>(buildNewsCountryStatsQuery(), [days, NEWS_ASSESSMENT_METHODOLOGY]);
+    const stats = Array.isArray(result.rows[0]?.stats) ? result.rows[0].stats : [];
+    const total = Number(result.rows[0]?.total ?? 0);
+    const mapped = Number(result.rows[0]?.mapped ?? 0);
     res.json({
-      stats: statsResult.rows,
+      stats,
       coverage: {
         window_days: days,
         total,

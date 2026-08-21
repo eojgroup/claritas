@@ -135,14 +135,19 @@ data:
   DB_STATEMENT_TIMEOUT_MS: "15000"
   DB_SLOW_QUERY_MS: "750"
   CLARITAS_DB_APPLICATION_NAME: "claritas-api"
-  # Global transport ingestion is sampled before persistence. adsb.lol is
-  # keyless; AISstream remains disabled until AISSTREAM_API_KEY is supplied.
+  # Transport ingestion is sampled before persistence. adsb.lol is keyless;
+  # AISstream remains disabled until AISSTREAM_API_KEY is supplied.
   AISSTREAM_ENABLED: "true"
+  # Whole-world AISstream emits roughly 300 messages/second according to the
+  # provider. Target monitored ports by default so the bounded queue can keep
+  # current positions for places Claritas actually links and explains.
+  AISSTREAM_COVERAGE_MODE: "monitored_ports"
+  AISSTREAM_MONITORED_PORT_RADIUS_KM: "110"
   AISSTREAM_SAMPLE_SECONDS: "600"
   AISSTREAM_FRESHNESS_MINUTES: "15"
   AISSTREAM_IDLE_TIMEOUT_SECONDS: "120"
-  # Persist the documented global subscription in bounded batches so a
-  # full-world vessel burst cannot monopolize the API database pool.
+  # Persist AISstream traffic in bounded batches so a vessel burst cannot
+  # monopolize the API database pool (including during explicit global mode).
   AISSTREAM_FLUSH_INTERVAL_SECONDS: "5"
   AISSTREAM_FLUSH_BATCH_SIZE: "250"
   AISSTREAM_FLUSH_BATCHES_PER_CYCLE: "2"
@@ -168,9 +173,9 @@ data:
   MPA_OCEANS_X_ENABLED: "true"
   MPA_OCEANS_X_POLL_SECONDS: "180"
   MPA_OCEANS_X_FRESHNESS_MINUTES: "15"
-  # Deployment health accepts a recent AISstream position or a successful
-  # official regional refresh. This exceeds the 10-minute AIS persistence
-  # sample interval so a healthy stream does not oscillate out of readiness.
+  # Deployment health accepts a recent persisted AISstream position or a
+  # successful official regional refresh. This exceeds the 10-minute AIS
+  # persistence sample interval so a healthy stream does not oscillate out.
   TRANSPORT_RUNTIME_FRESHNESS_SECONDS: "900"
   TRANSPORT_WORKER_LOCK_RETRY_SECONDS: "10"
   ADSB_LOL_POLL_ENABLED: "true"

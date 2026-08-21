@@ -70,6 +70,11 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-db, key: DB_PASSWORD } }
             - name: FLYWAY_ENCODING
               value: "UTF-8"
+            # Session-level advisory locking still serializes migration jobs
+            # while permitting CREATE INDEX CONCURRENTLY in script-configured
+            # non-transactional migrations.
+            - name: FLYWAY_POSTGRESQL_TRANSACTIONAL_LOCK
+              value: "false"
             - name: FLYWAY_LOCATIONS
               value: "filesystem:/flyway/sql"
             - name: JAVA_TOOL_OPTIONS

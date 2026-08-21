@@ -5,14 +5,42 @@ import https from "node:https";
 import { isIP } from "node:net";
 import { unzipSync } from "fflate";
 import worldCountries from "world-countries";
-import { query } from "../db";
+import { query, withTransaction } from "../db";
 import { hasEarthquakeHeadlineSignal } from "../earthquake-language";
-import { inferNewsCountry } from "./country-inference";
+import { trustedNewsDirectCountrySql } from "../news-country-attribution";
+import { inferNewsCountry, trustedSubjectCountryIso2 } from "./country-inference";
 
 const DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc";
 const DEFAULT_DATA_BASE_URL = "https://storage.googleapis.com/data.gdeltproject.org/gdeltv2";
 const GAL_RSS_URL = "https://storage.googleapis.com/data.gdeltproject.org/gdeltv3/gal/feed.rss";
-export const DEFAULT_GDELT_DOC_QUERY = "(geopolitics OR security OR technology OR markets OR climate OR energy OR disaster OR emergency OR earthquake OR aftershock OR tsunami OR volcano OR eruption OR landslide OR wildfire OR flood OR hurricane OR typhoon OR cyclone OR shipping OR transport OR logistics OR agriculture OR food OR \"public health\")";
+export const GDELT_DISCOVERY_LANES = [
+  {
+    id: "markets_macro",
+    weight: 7,
+    query: "(\"stock market\" OR stocks OR shares OR equities OR bonds OR treasury OR yields OR forex OR currency OR futures OR commodities OR inflation OR \"central bank\" OR \"Wall Street\" OR \"S&P 500\" OR Nasdaq OR FTSE OR DAX OR Nikkei OR \"Hang Seng\" OR rally OR selloff)",
+  },
+  {
+    id: "companies_technology",
+    weight: 4,
+    query: "(earnings OR merger OR acquisition OR bankruptcy OR IPO OR semiconductor OR cybersecurity OR \"artificial intelligence\")",
+  },
+  {
+    id: "geopolitics_policy",
+    weight: 4,
+    query: "(geopolitics OR sanctions OR conflict OR military OR election OR tariff OR regulation OR antitrust)",
+  },
+  {
+    id: "energy_transport",
+    weight: 3,
+    query: "(energy OR oil OR gas OR OPEC OR shipping OR port OR aviation OR transport OR logistics OR \"supply chain\" OR agriculture OR food)",
+  },
+  {
+    id: "major_hazards_health",
+    weight: 2,
+    query: "(disaster OR earthquake OR aftershock OR tsunami OR volcano OR landslide OR wildfire OR flood OR hurricane OR typhoon OR cyclone OR outbreak OR epidemic OR \"public health\")",
+  },
+] as const;
+export const DEFAULT_GDELT_DOC_QUERY = `(${GDELT_DISCOVERY_LANES.map((lane) => lane.query.slice(1, -1)).join(" OR ")})`;
 const ATTRIBUTION = "GDELT Project";
 const GDELT_DOC_DEFAULT_MAX_PUBLISH_AGE_HOURS = 72;
 const GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS = 3;
@@ -20,11 +48,15 @@ const GDELT_MAX_FUTURE_SKEW_MS = 5 * 60_000;
 const GDELT_ARTICLE_HTML_MAX_BYTES = 350_000;
 const GDELT_ARTICLE_VERIFICATION_CONCURRENCY = 4;
 const GDELT_DOC_MIN_REQUEST_SPACING_MS = 5_500;
+export const GDELT_CANONICAL_URL_ALGORITHM = "whatwg-url-v1";
+const GDELT_CANONICAL_RECONCILIATION_BATCH_SIZE = 500;
 let gdeltDocRequestTail: Promise<void> = Promise.resolve();
 let gdeltDocNextRequestAt = 0;
 
 export type GdeltDocArticle = {
   url?: string;
+  /** Original provider URL retained only to reconcile pre-normalisation rows. */
+  raw_url?: string;
   url_mobile?: string;
   title?: string;
   seendate?: string;
@@ -47,10 +79,23 @@ export type GdeltPublicationTime = {
   precision: "second" | "day";
 };
 
+export type GdeltPublisherContext = {
+  description: string | null;
+  keywords: string[];
+  /** Country codes from Place/addressCountry inside the article-owned JSON-LD subtree only. */
+  structuredCountryIso2s: string[];
+};
+
+type GdeltPublisherEvidence = {
+  publication: GdeltPublicationTime | null;
+  context: GdeltPublisherContext;
+};
+
 export type GdeltDocQualityResult = {
   accepted: boolean;
   reason:
     | "accepted"
+    | "accepted_provider_first_seen"
     | "missing_title"
     | "missing_or_unsafe_url"
     | "non_article_url"
@@ -61,8 +106,11 @@ export type GdeltDocQualityResult = {
     | "publisher_published_at_invalid"
     | "publisher_published_at_in_future"
     | "publisher_published_at_stale"
-    | "publisher_date_after_provider_seen";
+    | "publisher_date_after_provider_seen"
+    | "canonical_duplicate_merged";
   publication: GdeltPublicationTime | null;
+  effectiveTime: string | null;
+  timeBasis: "publisher_published_verified" | "provider_first_seen" | null;
 };
 
 export type GdeltGalArticle = {
@@ -72,7 +120,59 @@ export type GdeltGalArticle = {
   domain: string;
   relevanceScore: number;
   materialityScore: number;
+  discoveryLane: GdeltDiscoveryLaneId;
 };
+
+export type ExistingGdeltItem = {
+  external_id: string;
+  url: string | null;
+  dedupe_hash: string | null;
+  first_provider_seen_at: string | null;
+  quality_status: string | null;
+  time_basis: string | null;
+  publication_time_verified: boolean | null;
+  publisher_published_at: string | null;
+  publication_time_source: string | null;
+  time_precision: string | null;
+  event_time: string | null;
+  country_iso2: string | null;
+  country_attribution: string | null;
+  country_inference_source: string | null;
+  country_inference_confidence: string | null;
+  country_inference: unknown;
+  subject_country_iso2s: unknown;
+  gkg: unknown;
+};
+
+export type GdeltAliasPersistencePlan = {
+  persistenceExternalId: string;
+  firstProviderSeenAt: string | null;
+  providerFirstSeenEventTime: string | null;
+  verifiedPublication: {
+    publishedAt: string;
+    source: string | null;
+    precision: string | null;
+  } | null;
+  countryIso2: string | null;
+  countryAttribution: string | null;
+  countryInference: unknown;
+  subjectCountryIso2s: string[];
+  gkg: unknown;
+};
+
+type GdeltCanonicalItemRow = {
+  id: string;
+  url: string | null;
+  external_id: string;
+};
+
+type GdeltCanonicalSignalRow = {
+  id: string;
+  url: string | null;
+  raw_url: string | null;
+};
+
+export type GdeltDiscoveryLaneId = (typeof GDELT_DISCOVERY_LANES)[number]["id"];
 
 export type GdeltIngestParams = {
   query?: string;
@@ -111,6 +211,12 @@ export type GdeltHeadlineBudgets = {
   total: number;
   doc: number;
   galReserve: number;
+};
+
+export type GdeltDiscoveryLaneBudget = {
+  id: string;
+  query: string;
+  budget: number;
 };
 
 export type GdeltGlobalEvent = {
@@ -207,6 +313,41 @@ export function planGdeltHeadlineBudgets(value: unknown): GdeltHeadlineBudgets {
   return { total, doc: total - galReserve, galReserve };
 }
 
+export function planGdeltDiscoveryLaneBudgets(value: unknown): GdeltDiscoveryLaneBudget[] {
+  const total = clampInt(value, 1, 250, 20);
+  if (total < GDELT_DISCOVERY_LANES.length) {
+    return GDELT_DISCOVERY_LANES.slice(0, total).map((lane) => ({
+      id: lane.id,
+      query: lane.query,
+      budget: 1,
+    }));
+  }
+  const totalWeight = GDELT_DISCOVERY_LANES.reduce((sum, lane) => sum + lane.weight, 0);
+  const allocations = GDELT_DISCOVERY_LANES.map((lane) => ({
+    id: lane.id,
+    query: lane.query,
+    budget: 1,
+    remainder: 0,
+  }));
+  let remaining = total - allocations.length;
+  for (const allocation of allocations) {
+    const lane = GDELT_DISCOVERY_LANES.find((candidate) => candidate.id === allocation.id)!;
+    const exact = remaining * lane.weight / totalWeight;
+    const extra = Math.floor(exact);
+    allocation.budget += extra;
+    allocation.remainder = exact - extra;
+  }
+  let assigned = allocations.reduce((sum, allocation) => sum + allocation.budget, 0);
+  for (const allocation of [...allocations].sort((left, right) => (
+    right.remainder - left.remainder || left.id.localeCompare(right.id)
+  ))) {
+    if (assigned >= total) break;
+    allocation.budget += 1;
+    assigned += 1;
+  }
+  return allocations.map(({ remainder: _remainder, ...allocation }) => allocation);
+}
+
 function asNumber(value: string | undefined): number | null {
   if (!value) return null;
   const parsed = Number(value);
@@ -268,6 +409,15 @@ function usableGdeltArticleUrl(value: string | null | undefined): URL | null {
     ) {
       return null;
     }
+    url.hash = "";
+    for (const key of Array.from(url.searchParams.keys())) {
+      if (/^utm_/i.test(key) || [
+        "fbclid", "gclid", "dclid", "msclkid", "mc_cid", "mc_eid", "igshid", "vero_conv", "vero_id",
+      ].includes(key.toLowerCase())) {
+        url.searchParams.delete(key);
+      }
+    }
+    url.searchParams.sort();
     return url;
   } catch {
     return null;
@@ -368,20 +518,44 @@ function publicationCandidate(
   return normalized ? { publishedAt: normalized.iso, source, precision: normalized.precision } : null;
 }
 
-function jsonLdPublicationCandidates(value: unknown, candidates: GdeltPublicationTime[], depth = 0): void {
+function jsonLdPublicationCandidates(
+  value: unknown,
+  candidates: GdeltPublicationTime[],
+  depth = 0,
+  articleScope = false,
+): void {
   if (depth > 12 || value === null || value === undefined) return;
   if (Array.isArray(value)) {
-    for (const child of value) jsonLdPublicationCandidates(child, candidates, depth + 1);
+    for (const child of value) jsonLdPublicationCandidates(child, candidates, depth + 1, articleScope);
     return;
   }
   if (typeof value !== "object") return;
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+  const record = value as Record<string, unknown>;
+  const rawTypes = Array.isArray(record["@type"]) ? record["@type"] : [record["@type"]];
+  const types = rawTypes.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.toLowerCase());
+  const isArticle = types.some((type) => [
+    "article", "newsarticle", "reportagenewsarticle", "analysisnewsarticle", "report",
+  ].includes(type));
+  const articleContainerKeys = new Set([
+    "@graph", "mainentity", "subjectof", "haspart", "itemlistelement",
+  ]);
+  for (const [key, child] of Object.entries(record)) {
     const normalizedKey = key.toLowerCase();
-    if (normalizedKey === "datepublished" || normalizedKey === "datecreated") {
+    if ((isArticle || articleScope) && (normalizedKey === "datepublished" || normalizedKey === "datecreated")) {
       const candidate = publicationCandidate(child, "json_ld");
       if (candidate) candidates.push(candidate);
     }
-    jsonLdPublicationCandidates(child, candidates, depth + 1);
+    if (["publisher", "author", "creator", "copyrightholder", "provider", "sourceorganization", "editor"].includes(normalizedKey)) {
+      continue;
+    }
+    if (!isArticle && !articleScope && articleContainerKeys.has(normalizedKey)) {
+      jsonLdPublicationCandidates(child, candidates, depth + 1, false);
+    } else if (types.length === 0 && !articleScope) {
+      // Untyped wrappers may contain the typed article node. Once inside an
+      // article, dates on nested ImageObject/WebPage nodes are not publication
+      // evidence and are intentionally not traversed.
+      jsonLdPublicationCandidates(child, candidates, depth + 1, false);
+    }
   }
 }
 
@@ -453,6 +627,160 @@ export function extractGdeltPublisherPublicationTime(html: string, url: string):
     }
   }
   return selectConservativePublicationTime(candidates);
+}
+
+function boundedPublisherContextText(value: unknown, maximum = 600): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = decodeXml(value).normalize("NFKC").replace(/\s+/g, " ").trim();
+  return normalized ? normalized.slice(0, maximum) : null;
+}
+
+function collectJsonLdPublisherContext(
+  value: unknown,
+  output: string[],
+  structuredCountries: Set<string>,
+  depth = 0,
+  articleOwnedContext = false,
+  trustedLocationContext = false,
+): void {
+  if (depth > 10 || output.length >= 40 || value == null) return;
+  if (Array.isArray(value)) {
+    value.slice(0, 30).forEach((entry) => collectJsonLdPublisherContext(
+      entry,
+      output,
+      structuredCountries,
+      depth + 1,
+      articleOwnedContext,
+      trustedLocationContext,
+    ));
+    return;
+  }
+  if (typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  const rawTypes = Array.isArray(record["@type"]) ? record["@type"] : [record["@type"]];
+  const types = rawTypes.filter((entry): entry is string => typeof entry === "string").map((entry) => entry.toLowerCase());
+  const isArticleNode = types.some((type) => [
+    "article", "newsarticle", "reportagenewsarticle", "analysisnewsarticle", "report",
+  ].includes(type));
+  const isTypedLocationNode = types.some((type) => [
+    "place", "administrativearea", "country", "city", "state",
+  ].includes(type));
+  const trustedLocation = trustedLocationContext || (articleOwnedContext && isTypedLocationNode);
+  // @graph commonly includes a sibling Organization/Person node. Only an
+  // article node and the article's own location/about subtree may contribute
+  // subject context; sibling publisher metadata is ignored completely.
+  const articleContainerKeys = new Set([
+    "@graph", "mainentity", "subjectof", "haspart", "itemlistelement",
+  ]);
+
+  for (const [key, child] of Object.entries(record)) {
+    const normalizedKey = key.toLowerCase();
+    // Publisher/author geography identifies who produced the page, not what
+    // the article is about. Never let those subtrees leak into subject-country
+    // inference (the production GB heatmap skew was one consequence).
+    if ([
+      "publisher", "author", "creator", "copyrightholder", "provider",
+      "sourceorganization", "editor",
+    ].includes(normalizedKey)) continue;
+    const descriptiveField = ["description", "keywords", "articlesection"].includes(normalizedKey);
+    const locationField = ["about", "contentlocation", "locationcreated"].includes(normalizedKey);
+    const explicitLocationField = ["contentlocation", "locationcreated"].includes(normalizedKey);
+    const locationLabelField = ["name", "alternatename"].includes(normalizedKey);
+    const locationChildField = ["address", "geo", "containedinplace", "containsplace"].includes(normalizedKey);
+    const countryField = normalizedKey === "addresscountry";
+    if (
+      (descriptiveField && (isArticleNode || articleOwnedContext))
+      || (locationField && (isArticleNode || articleOwnedContext))
+      || (locationLabelField && articleOwnedContext)
+      || (locationChildField && trustedLocation)
+      || (countryField && trustedLocation)
+    ) {
+      if (typeof child === "string") {
+        const normalized = boundedPublisherContextText(child, 300);
+        if (normalized) output.push(normalized);
+        if ((trustedLocation || (isArticleNode && explicitLocationField))
+            && (countryField || locationLabelField || explicitLocationField)) {
+          const structuredCountry = countryNameToIso2(child);
+          if (structuredCountry) structuredCountries.add(structuredCountry);
+        }
+        if (normalizedKey === "addresscountry" && /^[A-Za-z]{2}$/.test(child.trim())) {
+          const countryName = worldCountries.find((country) => country.cca2 === child.trim().toUpperCase())?.name.common;
+          if (countryName) output.push(countryName);
+        }
+      } else {
+        collectJsonLdPublisherContext(
+          child,
+          output,
+          structuredCountries,
+          depth + 1,
+          articleOwnedContext || locationField,
+          trustedLocation || explicitLocationField,
+        );
+      }
+    } else if (
+      !isArticleNode &&
+      !articleOwnedContext &&
+      articleContainerKeys.has(normalizedKey) &&
+      child &&
+      typeof child === "object"
+    ) {
+      collectJsonLdPublisherContext(child, output, structuredCountries, depth + 1, false, false);
+    } else if (types.length === 0 && child && typeof child === "object") {
+      // JSON-LD wrappers without @type may contain the actual article node.
+      collectJsonLdPublisherContext(
+        child,
+        output,
+        structuredCountries,
+        depth + 1,
+        articleOwnedContext,
+        trustedLocation,
+      );
+    }
+  }
+}
+
+/**
+ * Extracts bounded publisher metadata for transient subject-country inference.
+ * The article body is neither parsed nor stored.
+ */
+export function extractGdeltPublisherContext(html: string): GdeltPublisherContext {
+  let description: string | null = null;
+  const keywords: string[] = [];
+  const structuredCountries = new Set<string>();
+  for (const match of html.matchAll(/<meta\b[^>]*>/giu)) {
+    const attributes = htmlAttributes(match[0]);
+    const keys = [attributes.property, attributes.name, attributes.itemprop]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.trim().toLowerCase());
+    if (!description && keys.some((key) => ["description", "og:description", "twitter:description"].includes(key))) {
+      description = boundedPublisherContextText(attributes.content);
+    }
+    if (keys.includes("keywords")) {
+      for (const candidate of String(attributes.content ?? "").split(/[,;|]/)) {
+        const normalized = boundedPublisherContextText(candidate, 100);
+        if (normalized) keywords.push(normalized);
+      }
+    }
+  }
+  for (const match of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/giu)) {
+    const openingTag = match[0].slice(0, match[0].indexOf(">") + 1);
+    if (!/application\/ld\+json/i.test(htmlAttributes(openingTag).type ?? "")) continue;
+    try {
+      const values: string[] = [];
+      collectJsonLdPublisherContext(JSON.parse(match[1]), values, structuredCountries);
+      for (const value of values) {
+        if (!description && value.length >= 40) description = value.slice(0, 600);
+        else keywords.push(value.slice(0, 100));
+      }
+    } catch {
+      // Ignore malformed publisher JSON-LD and retain any valid meta fields.
+    }
+  }
+  return {
+    description,
+    keywords: Array.from(new Set(keywords.map((value) => value.toLocaleLowerCase()))).slice(0, 20),
+    structuredCountryIso2s: Array.from(structuredCountries).sort(),
+  };
 }
 
 function isPublicIpv4(address: string): boolean {
@@ -582,24 +910,39 @@ async function requestVerifiedPublisherPage(urlValue: string, redirects = 0): Pr
   });
 }
 
-async function resolveGdeltPublisherPublicationTime(url: string): Promise<GdeltPublicationTime | null> {
+async function resolveGdeltPublisherEvidence(url: string): Promise<GdeltPublisherEvidence> {
   const urlCandidate = publicationTimeFromUrl(url);
   try {
     const page = await requestVerifiedPublisherPage(url);
-    if (!page) return urlCandidate;
+    if (!page) return {
+      publication: urlCandidate,
+      context: { description: null, keywords: [], structuredCountryIso2s: [] },
+    };
     // The final URL receives the same conservative date check. A redirect
     // cannot remove an older date embedded in the original canonical URL.
     const original = extractGdeltPublisherPublicationTime(page.html, url);
     const redirected = page.finalUrl === url
       ? null
       : extractGdeltPublisherPublicationTime(page.html, page.finalUrl);
-    return selectConservativePublicationTime([original, redirected].filter((value): value is GdeltPublicationTime => Boolean(value)));
+    return {
+      publication: selectConservativePublicationTime(
+        [original, redirected].filter((value): value is GdeltPublicationTime => Boolean(value)),
+      ),
+      context: extractGdeltPublisherContext(page.html),
+    };
   } catch {
     // An unambiguous publication date embedded in a canonical article URL is
     // still more defensible than GDELT discovery time when a publisher blocks
     // metadata requests. With neither, the article is rejected below.
-    return urlCandidate;
+    return {
+      publication: urlCandidate,
+      context: { description: null, keywords: [], structuredCountryIso2s: [] },
+    };
   }
+}
+
+async function resolveGdeltPublisherPublicationTime(url: string): Promise<GdeltPublicationTime | null> {
+  return (await resolveGdeltPublisherEvidence(url)).publication;
 }
 
 export function assessGdeltDocArticleQuality(input: {
@@ -610,42 +953,70 @@ export function assessGdeltDocArticleQuality(input: {
   now?: Date;
   maxPublisherAgeHours?: number;
   maxProviderSeenAgeHours?: number;
+  allowProviderFirstSeen?: boolean;
 }): GdeltDocQualityResult {
+  const reject = (
+    reason: Exclude<GdeltDocQualityResult["reason"], "accepted" | "accepted_provider_first_seen">,
+    publication: GdeltPublicationTime | null = null,
+  ): GdeltDocQualityResult => ({
+    accepted: false,
+    reason,
+    publication,
+    effectiveTime: null,
+    timeBasis: null,
+  });
   const title = input.title?.trim() ?? "";
   if (!title || title.length < 12 || title.length > 500 || GDELT_LOW_VALUE_TITLE.test(title)) {
-    return { accepted: false, reason: "missing_title", publication: null };
+    return reject("missing_title");
   }
   const url = usableGdeltArticleUrl(input.url);
-  if (!url) return { accepted: false, reason: "missing_or_unsafe_url", publication: null };
-  if (!isLikelyArticleUrl(url)) return { accepted: false, reason: "non_article_url", publication: null };
+  if (!url) return reject("missing_or_unsafe_url");
+  if (!isLikelyArticleUrl(url)) return reject("non_article_url");
 
   const seenAt = input.providerSeenAt ? Date.parse(input.providerSeenAt) : Number.NaN;
-  if (!Number.isFinite(seenAt)) return { accepted: false, reason: "invalid_provider_seen_at", publication: null };
+  if (!Number.isFinite(seenAt)) return reject("invalid_provider_seen_at");
   const now = input.now ?? new Date();
   const nowMs = now.getTime();
   if (seenAt > nowMs + GDELT_MAX_FUTURE_SKEW_MS) {
-    return { accepted: false, reason: "provider_seen_at_in_future", publication: null };
+    return reject("provider_seen_at_in_future");
   }
   const maxProviderSeenAgeMs = clampHours(input.maxProviderSeenAgeHours, GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS) * 3_600_000;
   if (nowMs - seenAt > maxProviderSeenAgeMs) {
-    return { accepted: false, reason: "provider_seen_at_outside_window", publication: null };
+    return reject("provider_seen_at_outside_window");
   }
 
   const publication = input.publication ?? null;
-  if (!publication) return { accepted: false, reason: "publisher_publication_unverified", publication: null };
+  if (!publication) {
+    if (input.allowProviderFirstSeen) {
+      return {
+        accepted: true,
+        reason: "accepted_provider_first_seen",
+        publication: null,
+        effectiveTime: new Date(seenAt).toISOString(),
+        timeBasis: "provider_first_seen",
+      };
+    }
+    return reject("publisher_publication_unverified");
+  }
   const publishedAt = Date.parse(publication.publishedAt);
-  if (!Number.isFinite(publishedAt)) return { accepted: false, reason: "publisher_published_at_invalid", publication: null };
+  if (!Number.isFinite(publishedAt)) return reject("publisher_published_at_invalid");
   if (publishedAt > nowMs + GDELT_MAX_FUTURE_SKEW_MS) {
-    return { accepted: false, reason: "publisher_published_at_in_future", publication: null };
+    return reject("publisher_published_at_in_future");
   }
   const maxPublisherAgeMs = clampHours(input.maxPublisherAgeHours, GDELT_DOC_DEFAULT_MAX_PUBLISH_AGE_HOURS) * 3_600_000;
   if (nowMs - publishedAt > maxPublisherAgeMs) {
-    return { accepted: false, reason: "publisher_published_at_stale", publication };
+    return reject("publisher_published_at_stale", publication);
   }
   if (publishedAt > seenAt + GDELT_MAX_FUTURE_SKEW_MS) {
-    return { accepted: false, reason: "publisher_date_after_provider_seen", publication };
+    return reject("publisher_date_after_provider_seen", publication);
   }
-  return { accepted: true, reason: "accepted", publication };
+  return {
+    accepted: true,
+    reason: "accepted",
+    publication,
+    effectiveTime: publication.publishedAt,
+    timeBasis: "publisher_published_verified",
+  };
 }
 
 async function mapWithConcurrency<T, R>(
@@ -675,33 +1046,708 @@ async function mapWithConcurrency<T, R>(
 async function quarantineGdeltArticle(
   sourceId: number,
   url: string | null,
+  title: string | null | undefined,
   reason: GdeltDocQualityResult["reason"],
   checkedAt: string,
   providerSeenAt: string | null,
 ): Promise<boolean> {
   if (!url) return false;
+  const canonicalUrl = canonicalGdeltUrl(url);
   const { rows } = await query<{ id: number }>(
-    `UPDATE item
-     SET payload = item.payload || jsonb_build_object(
+    `INSERT INTO item (
+       source_id,external_id,kind,title,url,event_time,payload
+     ) VALUES (
+       $1,$2,'news_article',$3,$2,$6::timestamptz,jsonb_build_object(
+         'provider','gdelt',
+         'quality_status','rejected',
+         'quality_rejection_reason',$4,
+         'quality_checked_at',$5,
+         'first_provider_seen_at',$6,
+         'last_provider_seen_at',$6,
+         'provider_seen_at',$6,
+         'canonical_url',$7,
+         'canonical_url_algorithm',$8
+       )
+     )
+     ON CONFLICT (source_id,external_id) DO UPDATE SET
+       payload = item.payload || jsonb_build_object(
            'quality_status', 'rejected',
-           'quality_rejection_reason', $3,
-           'quality_checked_at', $4
+           'quality_rejection_reason', $4,
+           'quality_checked_at', $5,
+           'first_provider_seen_at', COALESCE(
+             item.payload->>'first_provider_seen_at',
+             item.payload->>'provider_seen_at',
+             $6::text
+           ),
+           'canonical_url',$7::text,
+           'canonical_url_algorithm',$8::text
          ) || CASE
-           WHEN $5::text IS NULL THEN '{}'::jsonb
-           ELSE jsonb_build_object('last_provider_seen_at', $5::text)
+           WHEN $6::text IS NULL THEN '{}'::jsonb
+           ELSE jsonb_build_object('last_provider_seen_at', $6::text)
          END,
-         updated_at = now()
-     WHERE source_id = $1
-       AND external_id = $2
-       AND kind = 'news_article'
+       updated_at = now()
+     WHERE item.kind='news_article'
        AND (
          item.payload->>'quality_status' IS DISTINCT FROM 'rejected'
-         OR item.payload->>'quality_rejection_reason' IS DISTINCT FROM $3
+         OR item.payload->>'quality_rejection_reason' IS DISTINCT FROM $4
+         OR item.payload->>'canonical_url' IS DISTINCT FROM $7::text
+         OR item.payload->>'canonical_url_algorithm' IS DISTINCT FROM $8::text
        )
      RETURNING id`,
-    [sourceId, url, reason, checkedAt, providerSeenAt],
+    [
+      sourceId,
+      url,
+      title ?? null,
+      reason,
+      checkedAt,
+      providerSeenAt,
+      canonicalUrl,
+      GDELT_CANONICAL_URL_ALGORITHM,
+    ],
   );
   return rows.length > 0;
+}
+
+const EXISTING_GDELT_TIME_VERIFIED_SQL = `(
+  COALESCE(item.payload->>'publication_time_verified'='true',false)
+  OR COALESCE(item.payload->>'time_basis' LIKE 'publisher_published%',false)
+)`;
+const INCOMING_GDELT_TIME_VERIFIED_SQL = `(
+  COALESCE(EXCLUDED.payload->>'publication_time_verified'='true',false)
+  OR COALESCE(EXCLUDED.payload->>'time_basis' LIKE 'publisher_published%',false)
+)`;
+const MERGED_GDELT_EVENT_TIME_SQL = `CASE
+  WHEN ${EXISTING_GDELT_TIME_VERIFIED_SQL} AND NOT ${INCOMING_GDELT_TIME_VERIFIED_SQL}
+    THEN item.event_time
+  WHEN ${INCOMING_GDELT_TIME_VERIFIED_SQL} AND NOT ${EXISTING_GDELT_TIME_VERIFIED_SQL}
+    THEN EXCLUDED.event_time
+  ELSE COALESCE(LEAST(item.event_time,EXCLUDED.event_time),item.event_time,EXCLUDED.event_time)
+END`;
+const MERGED_GDELT_COUNTRY_SQL = `COALESCE(EXCLUDED.country_iso2,CASE
+  WHEN ${trustedNewsDirectCountrySql("item")} THEN item.country_iso2
+  ELSE NULL
+END)`;
+const MERGED_GDELT_PAYLOAD_SQL = `item.payload || EXCLUDED.payload || jsonb_build_object(
+  'first_provider_seen_at',COALESCE(
+    LEAST(
+      NULLIF(COALESCE(item.payload->>'first_provider_seen_at',item.payload->>'provider_seen_at'),''),
+      NULLIF(EXCLUDED.payload->>'first_provider_seen_at','')
+    ),
+    NULLIF(COALESCE(item.payload->>'first_provider_seen_at',item.payload->>'provider_seen_at'),''),
+    NULLIF(EXCLUDED.payload->>'first_provider_seen_at','')
+  ),
+  'last_provider_seen_at',EXCLUDED.payload->>'last_provider_seen_at',
+  'provider_seen_at',EXCLUDED.payload->>'provider_seen_at',
+  'time_basis',CASE
+    WHEN ${EXISTING_GDELT_TIME_VERIFIED_SQL} OR ${INCOMING_GDELT_TIME_VERIFIED_SQL}
+      THEN 'publisher_published_verified'
+    ELSE 'provider_first_seen'
+  END,
+  'publication_time_verified',${EXISTING_GDELT_TIME_VERIFIED_SQL} OR ${INCOMING_GDELT_TIME_VERIFIED_SQL},
+  'provider_discovery_fallback',NOT (${EXISTING_GDELT_TIME_VERIFIED_SQL} OR ${INCOMING_GDELT_TIME_VERIFIED_SQL}),
+  'publisher_published_at',COALESCE(
+    LEAST(
+      NULLIF(item.payload->>'publisher_published_at',''),
+      NULLIF(EXCLUDED.payload->>'publisher_published_at','')
+    ),
+    NULLIF(item.payload->>'publisher_published_at',''),
+    NULLIF(EXCLUDED.payload->>'publisher_published_at','')
+  ),
+  'publication_time_source',CASE
+    WHEN NULLIF(item.payload->>'publisher_published_at','') IS NOT NULL
+     AND (
+       NULLIF(EXCLUDED.payload->>'publisher_published_at','') IS NULL
+       OR item.payload->>'publisher_published_at'<=EXCLUDED.payload->>'publisher_published_at'
+     ) THEN item.payload->>'publication_time_source'
+    ELSE EXCLUDED.payload->>'publication_time_source'
+  END,
+  'time_precision',CASE
+    WHEN NULLIF(item.payload->>'publisher_published_at','') IS NOT NULL
+     AND (
+       NULLIF(EXCLUDED.payload->>'publisher_published_at','') IS NULL
+       OR item.payload->>'publisher_published_at'<=EXCLUDED.payload->>'publisher_published_at'
+    ) THEN item.payload->>'time_precision'
+    ELSE EXCLUDED.payload->>'time_precision'
+  END,
+  -- Country evidence must move as one unit. A transient GKG miss may update
+  -- discovery provenance, but it cannot erase a previously trusted subject
+  -- location while MERGED_GDELT_COUNTRY_SQL retains that location.
+  'country_attribution',CASE
+    WHEN EXCLUDED.country_iso2 IS NOT NULL THEN EXCLUDED.payload->>'country_attribution'
+    ELSE COALESCE(item.payload->>'country_attribution',EXCLUDED.payload->>'country_attribution')
+  END,
+  'country_inference',CASE
+    WHEN EXCLUDED.country_iso2 IS NOT NULL THEN EXCLUDED.payload->'country_inference'
+    ELSE COALESCE(item.payload->'country_inference',EXCLUDED.payload->'country_inference')
+  END,
+  'subject_country_iso2s',CASE
+    WHEN jsonb_typeof(EXCLUDED.payload->'subject_country_iso2s')='array'
+     AND jsonb_array_length(EXCLUDED.payload->'subject_country_iso2s')>0
+      THEN EXCLUDED.payload->'subject_country_iso2s'
+    ELSE COALESCE(item.payload->'subject_country_iso2s','[]'::jsonb)
+  END,
+  'gkg',COALESCE(
+    NULLIF(EXCLUDED.payload->'gkg','null'::jsonb),
+    NULLIF(item.payload->'gkg','null'::jsonb),
+    'null'::jsonb
+  )
+)`;
+
+// GAL is a degraded/supplemental discovery path. When it collides with a DOC
+// row, retain the richer DOC payload while still merging canonical-alias time
+// and geography history. This keeps event_time and its provenance internally
+// consistent without letting the fallback replace DOC-specific metadata.
+const MERGED_GDELT_DOC_ALIAS_HISTORY_PAYLOAD_SQL = `item.payload || jsonb_build_object(
+  'canonical_url',EXCLUDED.payload->>'canonical_url',
+  'canonical_url_algorithm',EXCLUDED.payload->>'canonical_url_algorithm',
+  'gal_fallback_seen_at',EXCLUDED.payload->>'provider_seen_at',
+  'gal_fallback_relevance_score',EXCLUDED.payload->'relevance_filter_score',
+  'first_provider_seen_at',COALESCE(
+    LEAST(
+      NULLIF(COALESCE(item.payload->>'first_provider_seen_at',item.payload->>'provider_seen_at'),''),
+      NULLIF(EXCLUDED.payload->>'first_provider_seen_at','')
+    ),
+    NULLIF(COALESCE(item.payload->>'first_provider_seen_at',item.payload->>'provider_seen_at'),''),
+    NULLIF(EXCLUDED.payload->>'first_provider_seen_at','')
+  ),
+  'time_basis',CASE
+    WHEN ${EXISTING_GDELT_TIME_VERIFIED_SQL} OR ${INCOMING_GDELT_TIME_VERIFIED_SQL}
+      THEN 'publisher_published_verified'
+    ELSE 'provider_first_seen'
+  END,
+  'publication_time_verified',${EXISTING_GDELT_TIME_VERIFIED_SQL} OR ${INCOMING_GDELT_TIME_VERIFIED_SQL},
+  'provider_discovery_fallback',NOT (${EXISTING_GDELT_TIME_VERIFIED_SQL} OR ${INCOMING_GDELT_TIME_VERIFIED_SQL}),
+  'publisher_published_at',COALESCE(
+    LEAST(
+      NULLIF(item.payload->>'publisher_published_at',''),
+      NULLIF(EXCLUDED.payload->>'publisher_published_at','')
+    ),
+    NULLIF(item.payload->>'publisher_published_at',''),
+    NULLIF(EXCLUDED.payload->>'publisher_published_at','')
+  ),
+  'publication_time_source',CASE
+    WHEN NULLIF(item.payload->>'publisher_published_at','') IS NOT NULL
+     AND (
+       NULLIF(EXCLUDED.payload->>'publisher_published_at','') IS NULL
+       OR item.payload->>'publisher_published_at'<=EXCLUDED.payload->>'publisher_published_at'
+     ) THEN item.payload->>'publication_time_source'
+    ELSE EXCLUDED.payload->>'publication_time_source'
+  END,
+  'time_precision',CASE
+    WHEN NULLIF(item.payload->>'publisher_published_at','') IS NOT NULL
+     AND (
+       NULLIF(EXCLUDED.payload->>'publisher_published_at','') IS NULL
+       OR item.payload->>'publisher_published_at'<=EXCLUDED.payload->>'publisher_published_at'
+     ) THEN item.payload->>'time_precision'
+    ELSE EXCLUDED.payload->>'time_precision'
+  END,
+  'country_attribution',CASE
+    WHEN item.country_iso2 IS NOT NULL THEN item.payload->>'country_attribution'
+    ELSE EXCLUDED.payload->>'country_attribution'
+  END,
+  'country_inference',CASE
+    WHEN item.country_iso2 IS NOT NULL THEN item.payload->'country_inference'
+    ELSE EXCLUDED.payload->'country_inference'
+  END,
+  'subject_country_iso2s',CASE
+    WHEN jsonb_typeof(EXCLUDED.payload->'subject_country_iso2s')='array'
+     AND jsonb_array_length(EXCLUDED.payload->'subject_country_iso2s')>0
+      THEN EXCLUDED.payload->'subject_country_iso2s'
+    ELSE COALESCE(item.payload->'subject_country_iso2s','[]'::jsonb)
+  END,
+  'gkg',COALESCE(
+    NULLIF(item.payload->'gkg','null'::jsonb),
+    NULLIF(EXCLUDED.payload->'gkg','null'::jsonb),
+    'null'::jsonb
+  )
+)`;
+
+export function canonicalGdeltUrl(value: string | null | undefined): string | null {
+  return usableGdeltArticleUrl(value)?.toString() ?? null;
+}
+
+function gdeltArticleDedupeHash(url: string): string {
+  return crypto.createHash("sha256").update(`${url}|gdelt-article`).digest("hex");
+}
+
+type GdeltCanonicalReconciliationResult = {
+  itemRows: number;
+  signalRows: number;
+  batches: number;
+  itemComplete: boolean;
+  signalComplete: boolean;
+};
+
+const gdeltCanonicalReconciliations = new Map<number, Promise<GdeltCanonicalReconciliationResult>>();
+
+type GdeltCanonicalCursor = {
+  item_after_id?: unknown;
+  signal_after_id?: unknown;
+};
+
+type GdeltCanonicalReconciliationStep = GdeltCanonicalReconciliationResult;
+
+function canonicalCursorId(value: unknown): string {
+  if (typeof value === "string" && /^\d+$/.test(value)) return value;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return "0";
+}
+
+async function reconcileGdeltCanonicalBatch(
+  sourceId: number,
+  repairSignals: boolean,
+): Promise<GdeltCanonicalReconciliationStep> {
+  return withTransaction(async (client) => {
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+      [`gdelt-canonical-history:${sourceId}:${GDELT_CANONICAL_URL_ALGORITHM}`],
+    );
+
+    const feedKey = `canonical-url-reconciliation:${GDELT_CANONICAL_URL_ALGORITHM}`;
+    await client.query(
+      `INSERT INTO source_feed(source_id,feed_key,params,cursor)
+       VALUES ($1,$2,$3::jsonb,$4::jsonb)
+       ON CONFLICT (source_id,feed_key) DO NOTHING`,
+      [
+        sourceId,
+        feedKey,
+        JSON.stringify({ purpose: "gdelt_canonical_url_reconciliation", algorithm: GDELT_CANONICAL_URL_ALGORITHM }),
+        JSON.stringify({
+          algorithm: GDELT_CANONICAL_URL_ALGORITHM,
+          item_after_id: "0",
+          signal_after_id: "0",
+          item_complete: false,
+          signal_complete: false,
+        }),
+      ],
+    );
+    const state = await client.query<{ cursor: GdeltCanonicalCursor | null }>(
+      `SELECT cursor FROM source_feed WHERE source_id=$1 AND feed_key=$2 FOR UPDATE`,
+      [sourceId, feedKey],
+    );
+    const cursor = state.rows[0]?.cursor ?? {};
+    let itemAfterId = canonicalCursorId(cursor.item_after_id);
+    let signalAfterId = canonicalCursorId(cursor.signal_after_id);
+
+    const selectItems = (afterId: string) => client.query<GdeltCanonicalItemRow>(
+      `SELECT id::text,url,external_id
+       FROM item
+       WHERE source_id=$1
+         AND kind='news_article'
+         AND payload->>'canonical_url_algorithm' IS DISTINCT FROM $2
+         AND id>$3::bigint
+       ORDER BY id
+       LIMIT $4`,
+      [sourceId, GDELT_CANONICAL_URL_ALGORITHM, afterId, GDELT_CANONICAL_RECONCILIATION_BATCH_SIZE],
+    );
+    let legacyItems = await selectItems(itemAfterId);
+    if (legacyItems.rows.length === 0 && itemAfterId !== "0") {
+      itemAfterId = "0";
+      legacyItems = await selectItems(itemAfterId);
+    }
+
+    const selectSignals = (afterId: string) => client.query<GdeltCanonicalSignalRow>(
+      `SELECT id::text,url,NULLIF(payload->>'raw_url','') AS raw_url
+       FROM news_signal
+       WHERE source_id=$1
+         AND payload->>'canonical_url_algorithm' IS DISTINCT FROM $2
+         AND id>$3::bigint
+       ORDER BY id
+       LIMIT $4`,
+      [sourceId, GDELT_CANONICAL_URL_ALGORITHM, afterId, GDELT_CANONICAL_RECONCILIATION_BATCH_SIZE],
+    );
+    let legacySignals: { rows: GdeltCanonicalSignalRow[] } = { rows: [] };
+    if (repairSignals) legacySignals = await selectSignals(signalAfterId);
+    if (repairSignals && legacySignals.rows.length === 0 && signalAfterId !== "0") {
+      signalAfterId = "0";
+      legacySignals = await selectSignals(signalAfterId);
+    }
+
+    // V52 makes these settings trigger-aware. Derived key repair must not
+    // pretend historical reporting is fresh or enqueue a news update event.
+    await client.query(
+      `SELECT set_config('claritas.preserve_updated_at','on',true),
+              set_config('claritas.suppress_item_outbox','on',true)`,
+    );
+    if (legacyItems.rows.length > 0) {
+      const repairs = legacyItems.rows.map((row) => ({
+        id: row.id,
+        canonical_url: canonicalGdeltUrl(row.url) ?? canonicalGdeltUrl(row.external_id),
+      }));
+      await client.query(
+        `UPDATE item AS news
+         SET payload = jsonb_set(
+           CASE
+             WHEN repair.canonical_url IS NULL THEN news.payload - 'canonical_url'
+             ELSE jsonb_set(news.payload,'{canonical_url}',to_jsonb(repair.canonical_url),true)
+           END,
+           '{canonical_url_algorithm}',to_jsonb($2::text),true
+         )
+         FROM jsonb_to_recordset($1::jsonb)
+           AS repair(id bigint,canonical_url text)
+         WHERE news.id=repair.id
+           AND news.source_id=$3
+           AND news.kind='news_article'
+           AND news.payload->>'canonical_url_algorithm' IS DISTINCT FROM $2`,
+        [JSON.stringify(repairs), GDELT_CANONICAL_URL_ALGORITHM, sourceId],
+      );
+      itemAfterId = legacyItems.rows.at(-1)?.id ?? itemAfterId;
+    }
+    if (legacySignals.rows.length > 0) {
+      const repairs = legacySignals.rows.map((row) => {
+        const rawUrl = row.raw_url ?? row.url;
+        return { id: row.id, raw_url: rawUrl, canonical_url: canonicalGdeltUrl(rawUrl) };
+      });
+      await client.query(
+        `UPDATE news_signal AS signal
+         SET url=repair.canonical_url,
+             payload=jsonb_set(
+               jsonb_set(
+                 signal.payload,
+                 '{raw_url}',COALESCE(to_jsonb(repair.raw_url),'null'::jsonb),true
+               ),
+               '{canonical_url}',COALESCE(to_jsonb(repair.canonical_url),'null'::jsonb),true
+             ) || jsonb_build_object('canonical_url_algorithm',$2::text)
+         FROM jsonb_to_recordset($1::jsonb)
+           AS repair(id bigint,raw_url text,canonical_url text)
+         WHERE signal.id=repair.id
+           AND signal.source_id=$3
+           AND signal.payload->>'canonical_url_algorithm' IS DISTINCT FROM $2`,
+        [JSON.stringify(repairs), GDELT_CANONICAL_URL_ALGORITHM, sourceId],
+      );
+      signalAfterId = legacySignals.rows.at(-1)?.id ?? signalAfterId;
+    }
+
+    const remaining = await client.query<{ items: boolean; signals: boolean }>(
+      `SELECT
+         EXISTS (
+           SELECT 1 FROM item
+           WHERE source_id=$1 AND kind='news_article'
+             AND payload->>'canonical_url_algorithm' IS DISTINCT FROM $2
+         ) AS items,
+         EXISTS (
+           SELECT 1 FROM news_signal
+           WHERE source_id=$1
+             AND payload->>'canonical_url_algorithm' IS DISTINCT FROM $2
+         ) AS signals`,
+      [sourceId, GDELT_CANONICAL_URL_ALGORITHM],
+    );
+    const itemComplete = !remaining.rows[0]?.items;
+    const signalComplete = !remaining.rows[0]?.signals;
+    await client.query(
+      `UPDATE source_feed
+       SET cursor=$3::jsonb,updated_at=now()
+       WHERE source_id=$1 AND feed_key=$2`,
+      [
+        sourceId,
+        feedKey,
+        JSON.stringify({
+          algorithm: GDELT_CANONICAL_URL_ALGORITHM,
+          item_after_id: itemComplete ? "0" : itemAfterId,
+          signal_after_id: signalComplete ? "0" : signalAfterId,
+          item_complete: itemComplete,
+          signal_complete: signalComplete,
+          checked_at: new Date().toISOString(),
+        }),
+      ],
+    );
+    return {
+      itemRows: legacyItems.rows.length,
+      signalRows: legacySignals.rows.length,
+      batches: legacyItems.rows.length > 0 || legacySignals.rows.length > 0 ? 1 : 0,
+      itemComplete,
+      signalComplete,
+    };
+  });
+}
+
+/**
+ * Repair every legacy URL with the exact same WHATWG implementation used for
+ * current DOC/GAL/GKG records. A durable source-feed cursor and advisory lock
+ * make the repair resumable across pods and restarts. Article identity rows
+ * are completed before a new story may be admitted. The much larger legacy
+ * GKG signal set advances through a small per-call budget and never blocks
+ * current GKG rows, which are canonicalized before they are persisted.
+ */
+export async function reconcileGdeltCanonicalHistory(
+  sourceId: number,
+): Promise<GdeltCanonicalReconciliationResult> {
+  const active = gdeltCanonicalReconciliations.get(sourceId);
+  if (active) return active;
+  const pending = (async () => {
+    let itemRows = 0;
+    let signalRows = 0;
+    let batches = 0;
+    let signalBatchesRemaining = clampInt(
+      process.env.GDELT_SIGNAL_CANONICAL_RECONCILIATION_BATCHES,
+      1,
+      4,
+      1,
+    );
+    // Transactions remain small, but the one-time item pass deliberately
+    // reaches completion. A partial item pass cannot safely prove that a
+    // newly discovered canonical URL has no tracked historical alias.
+    while (true) {
+      const repairSignals = signalBatchesRemaining > 0;
+      let step: GdeltCanonicalReconciliationStep;
+      try {
+        step = await reconcileGdeltCanonicalBatch(sourceId, repairSignals);
+      } catch (error) {
+        if (!repairSignals) throw error;
+        signalBatchesRemaining = 0;
+        console.warn(JSON.stringify({
+          event: "gdelt_signal_canonical_reconciliation_degraded",
+          message: error instanceof Error ? error.message : String(error),
+        }));
+        // Signal history is optional enrichment. Retry this item batch without
+        // it so a corrupt/oversized legacy signal cannot block current news.
+        step = await reconcileGdeltCanonicalBatch(sourceId, false);
+      }
+      itemRows += step.itemRows;
+      signalRows += step.signalRows;
+      batches += step.batches;
+      if (repairSignals) signalBatchesRemaining = Math.max(0, signalBatchesRemaining - 1);
+      if (step.itemComplete && (step.signalComplete || signalBatchesRemaining === 0)) {
+        return {
+          itemRows,
+          signalRows,
+          batches,
+          itemComplete: true,
+          signalComplete: step.signalComplete,
+        };
+      }
+    }
+  })();
+  gdeltCanonicalReconciliations.set(sourceId, pending);
+  try {
+    return await pending;
+  } finally {
+    if (gdeltCanonicalReconciliations.get(sourceId) === pending) {
+      gdeltCanonicalReconciliations.delete(sourceId);
+    }
+  }
+}
+
+async function requireGdeltCanonicalItemHistory(sourceId: number): Promise<void> {
+  const reconciliation = await reconcileGdeltCanonicalHistory(sourceId);
+  if (!reconciliation.itemComplete) {
+    throw new Error(
+      `GDELT article canonical URL reconciliation is incomplete (`
+        + `${reconciliation.itemRows} items and ${reconciliation.signalRows} signals repaired).`,
+    );
+  }
+}
+
+function existingGdeltPreference(left: ExistingGdeltItem, right: ExistingGdeltItem): number {
+  const trust = (item: ExistingGdeltItem) =>
+    (item.publication_time_verified ? 4 : 0)
+    + (item.quality_status === "accepted" ? 2 : 0)
+    + (item.time_basis === "provider_first_seen" ? 1 : 0);
+  const timestamp = (item: ExistingGdeltItem) => {
+    const parsed = Date.parse(item.event_time ?? "");
+    return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+  };
+  return trust(right) - trust(left)
+    // Equally trusted aliases must retain the earliest known effective time.
+    // Choosing the newest alias here can promote an old syndicated story when
+    // its tracking parameters change.
+    || timestamp(left) - timestamp(right)
+    || left.external_id.localeCompare(right.external_id);
+}
+
+function earliestGdeltTimestamp(values: Array<string | null | undefined>): string | null {
+  let earliest: number | null = null;
+  for (const value of values) {
+    const parsed = Date.parse(value ?? "");
+    if (!Number.isFinite(parsed)) continue;
+    if (earliest === null || parsed < earliest) earliest = parsed;
+  }
+  return earliest === null ? null : new Date(earliest).toISOString();
+}
+
+function existingGdeltCountryIsTrusted(item: ExistingGdeltItem): boolean {
+  if (!/^[A-Za-z]{2}$/.test(item.country_iso2?.trim() ?? "")) return false;
+  const source = (item.country_attribution ?? item.country_inference_source ?? "").trim().toLowerCase();
+  const confidence = (item.country_inference_confidence ?? "").trim().toLowerCase();
+  return [
+    "gkg_location",
+    "article_structured_location",
+    "targeted_event_query_fallback",
+    "institutional_jurisdiction",
+  ].includes(source) || (source === "content_alias" && ["medium", "high"].includes(confidence));
+}
+
+function existingGdeltSubjectCountries(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((country): country is string => typeof country === "string" && /^[A-Za-z]{2}$/.test(country.trim()))
+    .map((country) => country.trim().toUpperCase());
+}
+
+/**
+ * Pick the row that can be updated without violating the global dedupe index,
+ * while independently carrying the strongest/earliest history from every URL
+ * alias into that row. The canonical URL remains the public identity even when
+ * a legacy external_id must be retained as the conflict key.
+ */
+export function planGdeltAliasPersistence(
+  canonicalUrl: string,
+  aliases: ExistingGdeltItem[],
+): GdeltAliasPersistencePlan {
+  const ranked = [...aliases].sort(existingGdeltPreference);
+  const canonicalHash = gdeltArticleDedupeHash(canonicalUrl);
+  const persistence = ranked.find((item) => item.dedupe_hash === canonicalHash)
+    ?? ranked.find((item) => item.external_id === canonicalUrl)
+    ?? ranked[0];
+  const verified = ranked.filter((item) => item.publication_time_verified === true
+    || item.time_basis?.startsWith("publisher_published") === true);
+  const verifiedPublishedAt = earliestGdeltTimestamp(verified.flatMap((item) => [
+    item.publisher_published_at,
+    item.event_time,
+  ]));
+  const verifiedSource = verified
+    .filter((item) => earliestGdeltTimestamp([item.publisher_published_at, item.event_time]) === verifiedPublishedAt)
+    .sort(existingGdeltPreference)[0];
+  const trustedCountry = ranked
+    .filter(existingGdeltCountryIsTrusted)
+    .sort((left, right) => Number(right.quality_status === "accepted") - Number(left.quality_status === "accepted")
+      || existingGdeltPreference(left, right))[0];
+  const subjectCountryIso2s = Array.from(new Set([
+    ...ranked.flatMap((item) => existingGdeltSubjectCountries(item.subject_country_iso2s)),
+    ...(trustedCountry?.country_iso2 ? [trustedCountry.country_iso2.trim().toUpperCase()] : []),
+  ])).sort();
+  const historicalGkg = ranked.find((item) => item.gkg && typeof item.gkg === "object")?.gkg ?? null;
+
+  return {
+    persistenceExternalId: persistence?.external_id ?? canonicalUrl,
+    firstProviderSeenAt: earliestGdeltTimestamp(ranked.flatMap((item) => [
+      item.first_provider_seen_at,
+      item.time_basis === "provider_first_seen" ? item.event_time : null,
+    ])),
+    providerFirstSeenEventTime: earliestGdeltTimestamp(
+      ranked
+        .filter((item) => item.time_basis === "provider_first_seen")
+        .map((item) => item.event_time),
+    ),
+    verifiedPublication: verifiedPublishedAt ? {
+      publishedAt: verifiedPublishedAt,
+      source: verifiedSource?.publication_time_source ?? "historical_alias",
+      precision: verifiedSource?.time_precision ?? null,
+    } : null,
+    countryIso2: trustedCountry?.country_iso2?.trim().toUpperCase() ?? null,
+    countryAttribution: trustedCountry?.country_attribution
+      ?? trustedCountry?.country_inference_source
+      ?? null,
+    countryInference: trustedCountry?.country_inference ?? null,
+    subjectCountryIso2s,
+    gkg: historicalGkg,
+  };
+}
+
+export function mergeGdeltAliasTemporalEvidence(
+  aliasHistory: GdeltAliasPersistencePlan,
+  incoming: {
+    eventTime: string;
+    timeBasis: "publisher_published_verified" | "provider_first_seen";
+    publication: GdeltPublicationTime | null;
+    providerSeenAt: string;
+  },
+): {
+  eventTime: string;
+  timeBasis: "publisher_published_verified" | "provider_first_seen";
+  publicationTimeVerified: boolean;
+  publisherPublishedAt: string | null;
+  publicationTimeSource: string | null;
+  timePrecision: string;
+  firstProviderSeenAt: string;
+} {
+  const historicalPublication = aliasHistory.verifiedPublication;
+  const currentVerifiedTime = incoming.timeBasis === "publisher_published_verified"
+    ? incoming.eventTime
+    : null;
+  const publisherPublishedAt = earliestGdeltTimestamp([
+    incoming.publication?.publishedAt,
+    historicalPublication?.publishedAt,
+  ]);
+  const publicationTimeVerified = publisherPublishedAt !== null;
+  const eventTime = publicationTimeVerified
+    ? earliestGdeltTimestamp([currentVerifiedTime, historicalPublication?.publishedAt]) ?? incoming.eventTime
+    : earliestGdeltTimestamp([incoming.eventTime, aliasHistory.providerFirstSeenEventTime]) ?? incoming.eventTime;
+  const useHistoricalPublication = Boolean(historicalPublication) && (
+    !incoming.publication
+    || Date.parse(historicalPublication?.publishedAt ?? "") <= Date.parse(incoming.publication.publishedAt)
+  );
+
+  return {
+    eventTime,
+    timeBasis: publicationTimeVerified ? "publisher_published_verified" : "provider_first_seen",
+    publicationTimeVerified,
+    publisherPublishedAt,
+    publicationTimeSource: useHistoricalPublication
+      ? historicalPublication?.source ?? "historical_alias"
+      : incoming.publication?.source ?? null,
+    timePrecision: (useHistoricalPublication
+      ? historicalPublication?.precision
+      : incoming.publication?.precision) ?? "15_minute",
+    firstProviderSeenAt: earliestGdeltTimestamp([
+      aliasHistory.firstProviderSeenAt,
+      incoming.providerSeenAt,
+    ]) ?? incoming.providerSeenAt,
+  };
+}
+
+/**
+ * Reconcile current canonical URLs with rows written before tracking
+ * parameters were normalised. The application backfill above uses this exact
+ * WHATWG canonicalizer for the full historical GDELT corpus, so an old UTM
+ * variant cannot evade quarantine or re-enter as a newly discovered story.
+ */
+async function loadExistingGdeltItems(
+  sourceId: number,
+  canonicalUrls: string[],
+  rawAliases: string[] = [],
+): Promise<Map<string, ExistingGdeltItem[]>> {
+  if (canonicalUrls.length === 0) return new Map();
+  await requireGdeltCanonicalItemHistory(sourceId);
+  const aliases = Array.from(new Set([...canonicalUrls, ...rawAliases].filter(Boolean)));
+  const existing = await query<ExistingGdeltItem>(
+    `SELECT external_id,url,dedupe_hash,
+            COALESCE(payload->>'first_provider_seen_at',payload->>'provider_seen_at') AS first_provider_seen_at,
+            payload->>'quality_status' AS quality_status,
+            payload->>'time_basis' AS time_basis,
+            COALESCE(
+              payload->>'publication_time_verified' = 'true',
+              payload->>'time_basis' LIKE 'publisher_published%'
+            ) AS publication_time_verified,
+            payload->>'publisher_published_at' AS publisher_published_at,
+            payload->>'publication_time_source' AS publication_time_source,
+            payload->>'time_precision' AS time_precision,
+            event_time::text,country_iso2::text,
+            payload->>'country_attribution' AS country_attribution,
+            payload#>>'{country_inference,source}' AS country_inference_source,
+            payload#>>'{country_inference,confidence}' AS country_inference_confidence,
+            payload->'country_inference' AS country_inference,
+            payload->'subject_country_iso2s' AS subject_country_iso2s,
+            payload->'gkg' AS gkg
+     FROM item
+     WHERE source_id=$1 AND kind='news_article'
+       AND (
+         external_id=ANY($2::text[])
+         OR url=ANY($2::text[])
+         OR payload->>'canonical_url'=ANY($3::text[])
+       )`,
+    [sourceId, aliases, canonicalUrls],
+  );
+  const grouped = new Map<string, ExistingGdeltItem[]>();
+  for (const item of existing.rows) {
+    const key = canonicalGdeltUrl(item.url) ?? canonicalGdeltUrl(item.external_id);
+    if (!key || !canonicalUrls.includes(key)) continue;
+    const rows = grouped.get(key) ?? [];
+    rows.push(item);
+    grouped.set(key, rows);
+  }
+  for (const rows of grouped.values()) rows.sort(existingGdeltPreference);
+  return grouped;
 }
 
 export function parseGdeltTimestamp(value: string | undefined): string | null {
@@ -734,6 +1780,59 @@ function countryNameToIso2(value?: string | null): string | null {
       country.altSpellings?.some((spelling) => spelling.toLowerCase() === name)
   );
   return match?.cca2 ?? null;
+}
+
+export function resolveGdeltArticleSubject(input: {
+  title?: string | null;
+  url?: string | null;
+  context: GdeltPublisherContext;
+  gkgCountry?: string | null;
+  sourceCountry?: string | null;
+  eligibleTargetCountry?: string | null;
+}): {
+  inference: ReturnType<typeof inferNewsCountry>;
+  countryIso2: string | null;
+  countryAttribution: string;
+  subjectCountryIso2s: string[];
+} {
+  const structuredCountries = Array.from(new Set(
+    input.context.structuredCountryIso2s
+      .map((value) => value.trim().toUpperCase())
+      .filter((value) => worldCountries.some((country) => country.cca2 === value)),
+  )).sort();
+  const gkgCountry = countryNameToIso2(input.gkgCountry);
+  const sourceCountry = countryNameToIso2(input.sourceCountry);
+  const eligibleTargetCountry = countryNameToIso2(input.eligibleTargetCountry);
+  const inference = inferNewsCountry({
+    title: input.title,
+    summary: input.context.description,
+    keywords: input.context.keywords,
+    url: input.url,
+    feedCountryHint: gkgCountry ?? sourceCountry,
+  });
+  const contentCountry = trustedSubjectCountryIso2(inference);
+  const soleStructuredCountry = structuredCountries.length === 1 ? structuredCountries[0] : null;
+  const countryIso2 = soleStructuredCountry ?? contentCountry ?? gkgCountry ?? eligibleTargetCountry ?? null;
+  const countryAttribution = soleStructuredCountry
+    ? "article_structured_location"
+    : contentCountry
+      ? inference.source
+      : gkgCountry
+        ? "gkg_location"
+        : eligibleTargetCountry
+          ? "targeted_event_query_fallback"
+          : inference.source === "feed_hint" && sourceCountry
+            ? "publisher_country_fallback"
+            : inference.source;
+  return {
+    inference,
+    countryIso2,
+    countryAttribution,
+    subjectCountryIso2s: Array.from(new Set([
+      ...structuredCountries,
+      ...(countryIso2 ? [countryIso2] : []),
+    ])).sort(),
+  };
 }
 
 function gdeltCountryToIso2(value?: string | null): string | null {
@@ -795,6 +1894,13 @@ const GAL_RELEVANCE_PATTERNS: RegExp[] = [
 // causal or impact claim in the reader experience.
 const GAL_MATERIAL_HAZARD_PATTERN = /\b(?:earthquakes?|aftershocks?|tsunamis?|volcan(?:o|oes|ic)|eruptions?|landslides?|wildfires?|hurricanes?|typhoons?|cyclones?|tornado(?:es)?|floods?|droughts?|heatwaves?)\b/gi;
 const GAL_MATERIAL_IMPACT_PATTERN = /\b(?:magnitude\s*[6-9](?:\.\d+)?|m[6-9](?:\.\d+)?|major|severe|dead|deaths?|killed|injured|missing|rescues?|evacuat(?:e|ed|es|ing|ion|ions)|collapsed?|destroyed?|damaged?|blocked?|closed?|outages?|disrupt(?:ed|ion|ions)|emergency|warning|warnings)\b/gi;
+const GDELT_LANE_HEADLINE_PATTERNS: Record<GdeltDiscoveryLaneId, RegExp> = {
+  markets_macro: /\b(?:markets?|stocks?|shares?|equities|bonds?|treasur(?:y|ies)|yields?|forex|currenc(?:y|ies)|futures?|commodit(?:y|ies)|inflation|central banks?|interest rates?|wall street|s&p\s*500|dow(?: jones)?|nasdaq|ftse|dax|nikkei|hang seng|rally|rallied|selloff|traders?|investors?)\b/i,
+  companies_technology: /\b(?:earnings|revenue|profits?|losses|mergers?|acquisitions?|takeovers?|bankrupt(?:cy)?|\bipo\b|companies|corporate|semiconductors?|cybersecurity|artificial intelligence|technology|software|cloud computing)\b/i,
+  geopolitics_policy: /\b(?:geopolitic|sanctions?|conflicts?|war|military|elections?|tariffs?|regulat(?:ion|or|ory)|antitrust|government|minister|president|parliament|policy|court)\w*\b/i,
+  energy_transport: /\b(?:energy|oil|gas|opec|shipping|vessels?|ports?|aviation|airlines?|airports?|transport|logistics|supply chains?|agriculture|food|freight|canals?|straits?)\b/i,
+  major_hazards_health: /\b(?:disasters?|earthquakes?|aftershocks?|tsunamis?|volcan(?:o|oes|ic)|landslides?|wildfires?|floods?|hurricanes?|typhoons?|cyclones?|outbreaks?|epidemics?|pandemics?|public health|diseases?|vaccines?)\b/i,
+};
 
 const GAL_NON_ARTICLE_PATH = /\/(?:author|authors|tag|tags|category|categories|search|profile|profiles|topic|topics|archive|archives)(?:\/|$)/i;
 const GAL_LOW_VALUE_TITLE = /^(?:home|homepage|latest news|news|world|sports|weather|login|sign in|subscribe|contact us|about us|privacy policy)$/i;
@@ -824,6 +1930,21 @@ function galMaterialityScore(title: string): number {
   return hazards * 3 + impacts * 2;
 }
 
+export function gdeltDiscoveryLaneForTitle(title: string): GdeltDiscoveryLaneId {
+  for (const lane of GDELT_DISCOVERY_LANES) {
+    if (GDELT_LANE_HEADLINE_PATTERNS[lane.id].test(title)) return lane.id;
+  }
+  // Every admitted GAL item matched at least one governed relevance pattern.
+  // The policy/geopolitics lane is the least misleading fallback for broad
+  // institutional/security headlines that do not match a narrower topic.
+  return "geopolitics_policy";
+}
+
+function gdeltHeadlineMatchesLane(title: string, laneId: string): boolean {
+  if (!(laneId in GDELT_LANE_HEADLINE_PATTERNS)) return true;
+  return GDELT_LANE_HEADLINE_PATTERNS[laneId as GdeltDiscoveryLaneId].test(title);
+}
+
 function galFreshnessBand(eventTime: string, nowMs: number): number {
   const ageMs = Math.max(0, nowMs - Date.parse(eventTime));
   if (ageMs <= 6 * 3_600_000) return 0;
@@ -847,21 +1968,75 @@ function selectDomainDiverseGalArticles(
   const domainLimit = Math.max(1, Math.ceil(limit / 8));
   const domainCounts = new Map<string, number>();
   const selected: GdeltGalArticle[] = [];
-  const overflow: GdeltGalArticle[] = [];
-  for (const article of ranked) {
+  const selectedUrls = new Set<string>();
+  const take = (article: GdeltGalArticle, enforceDomainLimit: boolean): boolean => {
+    if (selectedUrls.has(article.url) || selected.length >= limit) return false;
     const domainCount = domainCounts.get(article.domain) ?? 0;
-    if (domainCount >= domainLimit) {
-      overflow.push(article);
-      continue;
-    }
+    if (enforceDomainLimit && domainCount >= domainLimit) return false;
     selected.push(article);
+    selectedUrls.add(article.url);
     domainCounts.set(article.domain, domainCount + 1);
-    if (selected.length >= limit) return selected;
+    return true;
+  };
+  const takeFrom = (candidates: GdeltGalArticle[], maximum: number, enforceDomainLimit: boolean) => {
+    if (maximum <= 0 || selected.length >= limit) return;
+    let taken = 0;
+    for (const article of candidates) {
+      if (take(article, enforceDomainLimit)) taken += 1;
+      if (taken >= maximum || selected.length >= limit) break;
+    }
+  };
+
+  const byLane = new Map<GdeltDiscoveryLaneId, GdeltGalArticle[]>();
+  for (const lane of GDELT_DISCOVERY_LANES) byLane.set(lane.id, []);
+  for (const article of ranked) byLane.get(article.discoveryLane)?.push(article);
+
+  // Chronology is a hard product invariant. Preserve the globally newest
+  // current headline before applying topic quotas within the remaining slots.
+  const newest = [...ranked].sort((left, right) =>
+    right.eventTime.localeCompare(left.eventTime) || left.url.localeCompare(right.url)
+  )[0];
+  if (newest) take(newest, true);
+
+  // A material disaster remains visible, but cannot monopolise a global feed.
+  // Market/macro receives the largest guaranteed share; the remaining lanes
+  // are sampled round-robin before any same-topic overflow is admitted.
+  const hazardBudget = Math.max(1, Math.ceil(limit / 5));
+  const selectedInLane = (laneId: GdeltDiscoveryLaneId) => selected.filter((article) => article.discoveryLane === laneId).length;
+  takeFrom(
+    byLane.get("major_hazards_health") ?? [],
+    Math.max(0, hazardBudget - selectedInLane("major_hazards_health")),
+    true,
+  );
+  const marketsBudget = Math.max(1, Math.ceil(limit * 0.4));
+  takeFrom(
+    byLane.get("markets_macro") ?? [],
+    Math.max(0, marketsBudget - selectedInLane("markets_macro")),
+    true,
+  );
+  const diversityLanes: GdeltDiscoveryLaneId[] = [
+    "companies_technology", "geopolitics_policy", "energy_transport",
+  ];
+  const laneOffsets = new Map<GdeltDiscoveryLaneId, number>();
+  let madeProgress = true;
+  while (selected.length < limit && madeProgress) {
+    madeProgress = false;
+    for (const laneId of diversityLanes) {
+      const candidates = byLane.get(laneId) ?? [];
+      let laneOffset = laneOffsets.get(laneId) ?? 0;
+      while (laneOffset < candidates.length && selectedUrls.has(candidates[laneOffset].url)) laneOffset += 1;
+      const candidate = candidates[laneOffset];
+      laneOffsets.set(laneId, laneOffset + 1);
+      if (candidate && take(candidate, true)) madeProgress = true;
+    }
   }
-  for (const article of overflow) {
-    selected.push(article);
-    if (selected.length >= limit) break;
-  }
+
+  takeFrom(ranked.filter((article) => article.discoveryLane !== "major_hazards_health"), limit, true);
+  takeFrom(ranked, limit, true);
+  // Sparse feeds may relax publisher diversity, never topic balance, before
+  // finally admitting hazard overflow as the only alternative to an empty slot.
+  takeFrom(ranked.filter((article) => article.discoveryLane !== "major_hazards_health"), limit, false);
+  takeFrom(ranked, limit, false);
   return selected;
 }
 
@@ -880,7 +2055,7 @@ export function selectGdeltDocCandidates(
     const key = url.toString();
     const existing = deduplicated.get(key);
     if (!existing || providerSeenAt > (parseGdeltTimestamp(existing.seendate) ?? "")) {
-      deduplicated.set(key, article);
+      deduplicated.set(key, { ...article, raw_url: article.raw_url ?? article.url, url: key });
     }
   }
 
@@ -1106,14 +2281,10 @@ export function selectTargetedGdeltDocCandidates(
 }
 
 function usableGalUrl(value: string): { url: string; domain: string } | null {
-  try {
-    const url = new URL(value);
-    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || GAL_NON_ARTICLE_PATH.test(url.pathname)) return null;
-    if (url.pathname === "/" || url.pathname.length < 5) return null;
-    return { url: url.toString(), domain: url.hostname.replace(/^www\./, "") };
-  } catch {
-    return null;
-  }
+  const url = usableGdeltArticleUrl(value);
+  if (!url || GAL_NON_ARTICLE_PATH.test(url.pathname)) return null;
+  if (url.pathname === "/" || url.pathname.length < 5) return null;
+  return { url: url.toString(), domain: url.hostname.replace(/^www\./, "") };
 }
 
 export function parseGdeltGalRss(xml: string, options: {
@@ -1150,6 +2321,7 @@ export function parseGdeltGalRss(xml: string, options: {
       domain: usableUrl.domain,
       relevanceScore,
       materialityScore,
+      discoveryLane: gdeltDiscoveryLaneForTitle(title),
     };
     const existing = candidates.get(article.url);
     if (
@@ -1304,6 +2476,27 @@ async function getLatestArchiveUrls(): Promise<{ event: string; gkg: string }> {
   throw new Error("GDELT did not expose a synchronized Event/GKG archive pair within the last three hours.");
 }
 
+export function gdeltGkgWindowUrls(latestUrl: string, timespan: string | undefined): string[] {
+  const match = /(\d{14})(?=\.gkg\.csv\.zip$)/.exec(latestUrl);
+  if (!match) return [latestUrl];
+  const stamp = match[1];
+  const latest = new Date(Date.UTC(
+    Number(stamp.slice(0, 4)),
+    Number(stamp.slice(4, 6)) - 1,
+    Number(stamp.slice(6, 8)),
+    Number(stamp.slice(8, 10)),
+    Number(stamp.slice(10, 12)),
+    Number(stamp.slice(12, 14)),
+  ));
+  if (Number.isNaN(latest.getTime())) return [latestUrl];
+  const archiveCount = Math.min(8, Math.max(1, Math.ceil(parseGdeltTimespanHours(timespan) * 4)));
+  return Array.from({ length: archiveCount }, (_, offset) => {
+    const candidate = new Date(latest.getTime() - offset * 15 * 60_000)
+      .toISOString().replace(/[-:T]/g, "").slice(0, 14);
+    return latestUrl.replace(stamp, candidate);
+  });
+}
+
 function parseEnhancedList(value: string | undefined): string[] {
   if (!value) return [];
   return Array.from(new Set(value.split(";").map((part) => part.split(",")[0]?.trim()).filter(Boolean))).slice(0, 100);
@@ -1372,19 +2565,117 @@ async function ingestEventArchive(sourceId: number, archiveUrl: string, maxRows:
   return count;
 }
 
-async function ingestGkgArchive(sourceId: number, archiveUrl: string, maxRows: number): Promise<number> {
-  const response = await fetchRetry(archiveUrl);
-  const text = firstZipText(new Uint8Array(await response.arrayBuffer()));
-  let count = 0;
-  for (const line of text.split(/\r?\n/)) {
-    if (!line || count >= maxRows) break;
-    const fields = line.split("\t");
-    if (fields.length < 27) continue;
+type ParsedGkgLine = {
+  fields: string[];
+  url: string | null;
+  rawUrl: string | null;
+};
+
+type GdeltGkgArchiveWindow = {
+  urls: string[];
+  resolutionError?: string;
+};
+
+type GdeltGkgArchiveIngest = {
+  sampled: number;
+  matched: number;
+  countryRows: number;
+  matchedCountryRows: number;
+  matchedCountryUrls: string[];
+  canonicalCountryUrls: string[];
+  archivesScanned: number;
+  archiveErrors: string[];
+};
+
+function* linesInText(text: string): Generator<string> {
+  let start = 0;
+  while (start < text.length) {
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
+    const line = text.slice(start, end).replace(/\r$/, "");
+    if (line) yield line;
+    if (newline === -1) return;
+    start = newline + 1;
+  }
+}
+
+function parseGkgLine(line: string): ParsedGkgLine | null {
+  if (!line) return null;
+  const fields = line.split("\t");
+  if (fields.length < 27) return null;
+  const rawUrl = fields[4] || null;
+  return { fields, url: canonicalGdeltUrl(rawUrl), rawUrl };
+}
+
+export function selectGdeltGkgRowsForUrls(text: string, urls: string[]): string[] {
+  const targets = new Set(urls.map(canonicalGdeltUrl).filter((value): value is string => Boolean(value)));
+  if (targets.size === 0) return [];
+  const matched = new Map<string, string>();
+  for (const line of linesInText(text)) {
+    const parsed = parseGkgLine(line);
+    if (!parsed?.url || !targets.has(parsed.url) || matched.has(parsed.url)) continue;
+    matched.set(parsed.url, line);
+    if (matched.size === targets.size) break;
+  }
+  return Array.from(matched.values());
+}
+
+export function countAcceptedGdeltGkgCountryMatches(
+  acceptedArticleUrls: string[],
+  matchedCountryUrls: string[],
+): number {
+  const accepted = new Set(
+    acceptedArticleUrls.map(canonicalGdeltUrl).filter((value): value is string => Boolean(value)),
+  );
+  const matched = new Set(
+    matchedCountryUrls.map(canonicalGdeltUrl).filter((value): value is string => Boolean(value)),
+  );
+  return Array.from(matched).filter((url) => accepted.has(url)).length;
+}
+
+function gkgLocationsHaveRecognizedCountry(locations: Array<Record<string, unknown>>): boolean {
+  return locations.some((location) => (
+    typeof location.country_iso2 === "string"
+    && worldCountries.some((country) => country.cca2 === location.country_iso2)
+  ));
+}
+
+export function selectGdeltGkgCountryProbeLine(text: string): string | null {
+  for (const line of linesInText(text)) {
+    const parsed = parseGkgLine(line);
+    if (!parsed?.url) continue;
+    if (gkgLocationsHaveRecognizedCountry(parseLocations(parsed.fields[10] || parsed.fields[9]))) {
+      return line;
+    }
+  }
+  return null;
+}
+
+function* gkgLinesWithCountryProbeFirst(text: string): Generator<string> {
+  const probe = selectGdeltGkgCountryProbeLine(text);
+  if (probe) yield probe;
+  for (const line of linesInText(text)) {
+    if (line !== probe) yield line;
+  }
+}
+
+async function ingestGkgLines(
+  sourceId: number,
+  lines: Iterable<string>,
+  maxRows: number,
+): Promise<{ persisted: number; withCountries: number; withCountryUrls: string[] }> {
+  let persisted = 0;
+  let withCountries = 0;
+  const withCountryUrls = new Set<string>();
+  for (const line of lines) {
+    if (!line || persisted >= maxRows) break;
+    const parsed = parseGkgLine(line);
+    if (!parsed) continue;
+    const { fields, url, rawUrl } = parsed;
     const locations = parseLocations(fields[10] || fields[9]);
     const primaryCountry = locations.map((location) => location.country_iso2).find((value) => typeof value === "string") as string | undefined;
     await ensureCountry(primaryCountry ?? null);
     const toneParts = (fields[15] || "").split(",").map((value) => asNumber(value));
-    const url = fields[4] || null;
     const domain = fields[3] || hostnameFromUrl(url);
     const themes = parseEnhancedList(fields[8] || fields[7]);
     const persons = parseEnhancedList(fields[12] || fields[11]);
@@ -1393,6 +2684,9 @@ async function ingestGkgArchive(sourceId: number, archiveUrl: string, maxRows: n
     if (!eventTime) continue;
     const payload = {
       provider: "gdelt", product: "gkg-2.1", attribution: ATTRIBUTION,
+      raw_url: rawUrl,
+      canonical_url: url,
+      canonical_url_algorithm: GDELT_CANONICAL_URL_ALGORITHM,
       source_collection: fields[2] || null,
       counts: fields[6] || fields[5] || null,
       image_url: fields[18] || null,
@@ -1418,12 +2712,97 @@ async function ingestGkgArchive(sourceId: number, archiveUrl: string, maxRows: n
        toneParts[2], toneParts[3], JSON.stringify(themes), JSON.stringify(persons),
        JSON.stringify(organizations), JSON.stringify(locations), eventTime, JSON.stringify(payload)]
     );
-    count += 1;
+    persisted += 1;
+    if (gkgLocationsHaveRecognizedCountry(locations)) {
+      withCountries += 1;
+      if (url) withCountryUrls.add(url);
+    }
   }
-  return count;
+  return { persisted, withCountries, withCountryUrls: Array.from(withCountryUrls) };
 }
 
-async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): Promise<{
+async function downloadGkgArchiveText(archiveUrl: string): Promise<string> {
+  const response = await fetchRetry(archiveUrl);
+  return firstZipText(new Uint8Array(await response.arrayBuffer()));
+}
+
+async function ingestGkgArchiveWindow(
+  sourceId: number,
+  window: GdeltGkgArchiveWindow,
+  matchUrls: string[],
+  maxRawRows: number,
+): Promise<GdeltGkgArchiveIngest> {
+  let sampled = 0;
+  let matched = 0;
+  let countryRows = 0;
+  let matchedCountryRows = 0;
+  const matchedCountryUrls = new Set<string>();
+  const canonicalCountryUrls = new Set<string>();
+  let archivesScanned = 0;
+  const archiveErrors = window.resolutionError ? [window.resolutionError] : [];
+  const unresolved = new Set(
+    matchUrls.map(canonicalGdeltUrl).filter((value): value is string => Boolean(value)),
+  );
+
+  // Each GKG archive expands to many times its compressed size. Download,
+  // match and release one interval at a time so a one-hour enrichment window
+  // never retains four fully decoded archives in the API process.
+  for (const [index, archiveUrl] of window.urls.entries()) {
+    if (index > 0 && unresolved.size === 0) break;
+    try {
+      const text = await downloadGkgArchiveText(archiveUrl);
+      archivesScanned += 1;
+      if (index === 0 && maxRawRows > 0) {
+        // Put one country-bearing, canonicalizable row first when the archive
+        // has one. The bounded sample then supplies a deterministic parser +
+        // persistence probe without depending on random DOC URL coincidence.
+        const sample = await ingestGkgLines(sourceId, gkgLinesWithCountryProbeFirst(text), maxRawRows);
+        sampled += sample.persisted;
+        countryRows += sample.withCountries;
+        for (const url of sample.withCountryUrls) canonicalCountryUrls.add(url);
+      }
+      if (unresolved.size > 0) {
+        const matchedLines = selectGdeltGkgRowsForUrls(text, Array.from(unresolved));
+        const matchedResult = await ingestGkgLines(
+          sourceId,
+          matchedLines,
+          Math.max(matchedLines.length, 1),
+        );
+        matched += matchedResult.persisted;
+        matchedCountryRows += matchedResult.withCountries;
+        for (const url of matchedResult.withCountryUrls) {
+          matchedCountryUrls.add(url);
+          canonicalCountryUrls.add(url);
+        }
+        countryRows += matchedResult.withCountries;
+        for (const line of matchedLines) {
+          const canonical = parseGkgLine(line)?.url;
+          if (canonical) unresolved.delete(canonical);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      archiveErrors.push(`${archiveUrl}: ${message}`);
+    }
+  }
+
+  return {
+    sampled,
+    matched,
+    countryRows,
+    matchedCountryRows,
+    matchedCountryUrls: Array.from(matchedCountryUrls),
+    canonicalCountryUrls: Array.from(canonicalCountryUrls),
+    archivesScanned,
+    archiveErrors,
+  };
+}
+
+async function ingestDocArticles(
+  sourceId: number,
+  params: GdeltIngestParams,
+  gkgArchiveWindow?: Promise<GdeltGkgArchiveWindow>,
+): Promise<{
   fetched: number;
   selected_candidates: number;
   accepted: number;
@@ -1433,28 +2812,131 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   unchanged: number;
   skipped: number;
   quality_quarantined: number;
+  provider_first_seen_accepted: number;
+  gkg_sampled: number;
+  gkg_matched: number;
+  gkg_country_rows: number;
+  gkg_matched_country_rows: number;
+  gkg_canonical_country_url_probes: number;
+  gkg_archives_scanned: number;
+  gkg_archive_errors: string[];
   quality_rejections: Record<string, number>;
   latest_event_time: string | null;
+  discovery_lanes: Array<{
+    id: string;
+    budget: number;
+    status: "healthy" | "empty" | "failed";
+    fetched: number;
+    candidates: number;
+    accepted: number;
+    error?: string;
+  }>;
 }> {
-  const apiUrl = new URL(process.env.GDELT_DOC_API_URL || DOC_API_URL);
-  apiUrl.searchParams.set("query", params.query?.trim() || process.env.GDELT_DOC_QUERY || DEFAULT_GDELT_DOC_QUERY);
-  apiUrl.searchParams.set("mode", "artlist");
+  // Do not fetch or admit a new headline until every pre-versioned article
+  // identity has passed through this runtime's exact canonicalizer. Legacy
+  // GKG enrichment advances separately and cannot block current reporting.
+  await requireGdeltCanonicalItemHistory(sourceId);
   const selectionLimit = clampInt(params.maxRecords, 1, 250, 25);
-  // Fetch a bounded candidate superset, then admit a diverse/material sample.
-  // Asking GDELT for exactly the storage budget repeatedly returned the same
-  // top 25 URLs during overlapping polls and hid lower-volume countries.
-  const candidateLimit = Math.min(Math.max(selectionLimit * 4, selectionLimit), 250);
-  apiUrl.searchParams.set("maxrecords", String(candidateLimit));
-  apiUrl.searchParams.set("format", "json");
-  apiUrl.searchParams.set("timespan", params.timespan?.trim() || "1h");
-  apiUrl.searchParams.set("sort", "datedesc");
-  const response = await fetchRetry(apiUrl.toString());
-  const data = (await response.json()) as GdeltDocResponse;
-  const rawArticles = Array.isArray(data.articles) ? data.articles : [];
-  const articles = params.targetedDiscovery
-    ? selectTargetedGdeltDocCandidates(rawArticles, params.targetedDiscovery, { limit: selectionLimit })
-    : selectGdeltDocCandidates(rawArticles, { limit: selectionLimit });
-  const urls = articles.map((article) => article.url).filter((value): value is string => Boolean(value));
+  const configuredQuery = params.query?.trim() || process.env.GDELT_DOC_QUERY?.trim();
+  const laneBudgets: GdeltDiscoveryLaneBudget[] = configuredQuery || params.targetedDiscovery
+    ? [{ id: params.targetedDiscovery ? "targeted_event" : "configured", query: configuredQuery || DEFAULT_GDELT_DOC_QUERY, budget: selectionLimit }]
+    : planGdeltDiscoveryLaneBudgets(selectionLimit);
+  const articles: Array<{ article: GdeltDocArticle; laneId: string; laneBudget: number }> = [];
+  const selectedUrls = new Set<string>();
+  const discoveryLanes: Array<{
+    id: string;
+    budget: number;
+    status: "healthy" | "empty" | "failed";
+    fetched: number;
+    candidates: number;
+    accepted: number;
+    error?: string;
+  }> = [];
+  let rawArticleCount = 0;
+  for (const lane of laneBudgets) {
+    try {
+      const apiUrl = new URL(process.env.GDELT_DOC_API_URL || DOC_API_URL);
+      apiUrl.searchParams.set("query", lane.query);
+      apiUrl.searchParams.set("mode", "artlist");
+      // Preserve each topic's storage lane. Publisher-page verification is
+      // supplemented by the explicitly labelled first-discovery path, so a
+      // climate burst cannot consume the markets/macroeconomy allocation.
+      const verificationLimit = lane.budget;
+      const candidateLimit = Math.min(Math.max(verificationLimit * 3, verificationLimit), 250);
+      apiUrl.searchParams.set("maxrecords", String(candidateLimit));
+      apiUrl.searchParams.set("format", "json");
+      apiUrl.searchParams.set("timespan", params.timespan?.trim() || "1h");
+      apiUrl.searchParams.set("sort", "datedesc");
+      // fetchRetry serializes every DOC request (including retries) through
+      // the process-wide 5.5-second limiter. The per-lane catch lets a 429 in
+      // one topic degrade coverage without discarding successful lanes.
+      const response = await fetchRetry(apiUrl.toString());
+      const data = (await response.json()) as GdeltDocResponse;
+      const rawArticles = Array.isArray(data.articles) ? data.articles : [];
+      rawArticleCount += rawArticles.length;
+      const laneInput = !params.targetedDiscovery && lane.id !== "configured"
+        ? rawArticles.filter((article) => gdeltHeadlineMatchesLane(article.title ?? "", lane.id))
+        : rawArticles;
+      const laneCandidates = params.targetedDiscovery
+        ? selectTargetedGdeltDocCandidates(laneInput, params.targetedDiscovery, { limit: candidateLimit })
+        : selectGdeltDocCandidates(laneInput, { limit: candidateLimit });
+      let admitted = 0;
+      for (const article of laneCandidates) {
+        const url = nonEmpty(article.url);
+        if (!url || selectedUrls.has(url)) continue;
+        selectedUrls.add(url);
+        articles.push({ article, laneId: lane.id, laneBudget: lane.budget });
+        admitted += 1;
+      }
+      discoveryLanes.push({
+        id: lane.id,
+        budget: lane.budget,
+        status: "healthy",
+        fetched: rawArticles.length,
+        candidates: admitted,
+        accepted: 0,
+      });
+    } catch (error) {
+      discoveryLanes.push({
+        id: lane.id,
+        budget: lane.budget,
+        status: "failed",
+        fetched: 0,
+        candidates: 0,
+        accepted: 0,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (!discoveryLanes.some((lane) => lane.status === "healthy")) {
+    throw new Error(`All GDELT DOC discovery lanes failed: ${discoveryLanes.map((lane) => `${lane.id}: ${lane.error ?? "unknown error"}`).join("; ")}`);
+  }
+  const urls = articles.map(({ article }) => article.url).filter((value): value is string => Boolean(value));
+  // GKG archives are much larger than our bounded general-purpose sample.
+  // Scan every 15-minute interval covered by the DOC query for selected URLs,
+  // while treating archive lookup/download as optional enrichment. Headlines
+  // remain ingestible when the raw archive service is delayed or unavailable.
+  const gkg = gkgArchiveWindow
+    ? await ingestGkgArchiveWindow(
+        sourceId,
+        await gkgArchiveWindow,
+        urls,
+        clampInt(params.maxRawRows ?? process.env.GDELT_MAX_RAW_ROWS, 25, 5000, 750),
+      )
+    : {
+        sampled: 0,
+        matched: 0,
+        countryRows: 0,
+        matchedCountryRows: 0,
+        matchedCountryUrls: [],
+        canonicalCountryUrls: [],
+        archivesScanned: 0,
+        archiveErrors: [],
+      };
+  // Current-window GKG rows were canonicalized before persistence. Advance a
+  // further legacy signal batch opportunistically, but gate only on article
+  // identity safety before the exact DOC-to-GKG join below.
+  await requireGdeltCanonicalItemHistory(sourceId);
   const signals = urls.length > 0
     ? await query<{ url: string; tone: number | null; themes: unknown; persons: unknown; organizations: unknown; locations: unknown; payload: unknown }>(
         `SELECT DISTINCT ON (url) url, tone, themes, persons, organizations, locations, payload
@@ -1465,12 +2947,19 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   const verificationNow = new Date();
   const maxPublisherAgeHours = gdeltPublisherMaxAgeHours();
   const maxProviderSeenAgeHours = gdeltProviderSeenMaxAgeHours(params);
+  const rawAliases = articles
+    .map(({ article }) => nonEmpty(article.raw_url))
+    .filter((value): value is string => Boolean(value));
+  const existingByUrl = await loadExistingGdeltItems(sourceId, urls, rawAliases);
   const verifiedArticles = await mapWithConcurrency(
     articles,
     GDELT_ARTICLE_VERIFICATION_CONCURRENCY,
-    async (article) => {
+    async (discovered) => {
+      const { article } = discovered;
       const url = nonEmpty(article.url);
       const providerSeenAt = parseGdeltTimestamp(article.seendate);
+      const existingAliases = url ? (existingByUrl.get(url) ?? []) : [];
+      const existing = existingAliases[0];
       const preflight = assessGdeltDocArticleQuality({
         title: article.title,
         url,
@@ -1481,21 +2970,50 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
         maxProviderSeenAgeHours,
       });
       if (preflight.reason !== "publisher_publication_unverified" || !url) {
-        return { article, url, providerSeenAt, quality: preflight };
+        return {
+          ...discovered,
+          url,
+          providerSeenAt,
+          existing,
+          existingAliases,
+          context: { description: null, keywords: [], structuredCountryIso2s: [] } as GdeltPublisherContext,
+          quality: preflight,
+        };
       }
-      const publication = await resolveGdeltPublisherPublicationTime(url);
+      const evidence = await resolveGdeltPublisherEvidence(url);
+      const existingSeenAt = existing?.first_provider_seen_at;
+      const existingSeenMs = existingSeenAt ? Date.parse(existingSeenAt) : Number.NaN;
+      const providerSeenMs = providerSeenAt ? Date.parse(providerSeenAt) : Number.NaN;
+      // A provider discovery timestamp is admitted only for a URL that is new
+      // to Claritas, or whose stored first discovery is the same current
+      // window. Rediscovery can never promote an older URL.
+      // Event-specific discovery is allowed to auto-link to a canonical
+      // earthquake. That higher-trust path must retain independently verified
+      // publisher time; provider discovery is suitable only for the general
+      // browse stream.
+      const continuingFirstSeenItem = existing?.quality_status === "accepted"
+        && existing.time_basis === "provider_first_seen";
+      const allowProviderFirstSeen = !params.targetedDiscovery && (
+        !existing
+        || (continuingFirstSeenItem && Number.isFinite(existingSeenMs) && Number.isFinite(providerSeenMs)
+          && Math.abs(existingSeenMs - providerSeenMs) <= GDELT_MAX_FUTURE_SKEW_MS)
+      );
       return {
-        article,
+        ...discovered,
         url,
         providerSeenAt,
+        existing,
+        existingAliases,
+        context: evidence.context,
         quality: assessGdeltDocArticleQuality({
           title: article.title,
           url,
           providerSeenAt,
-          publication,
+          publication: evidence.publication,
           now: verificationNow,
           maxPublisherAgeHours,
           maxProviderSeenAgeHours,
+          allowProviderFirstSeen,
         }),
       };
     },
@@ -1503,95 +3021,146 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
   let inserted = 0;
   let updated = 0;
   let unchanged = 0;
-  let skipped = Math.max(0, rawArticles.length - articles.length);
+  let skipped = Math.max(0, rawArticleCount - articles.length);
   let quarantined = 0;
+  let providerFirstSeenAccepted = 0;
   const qualityRejections: Record<string, number> = {};
   let latestEventTime: string | null = null;
   let linkEligible = 0;
+  const acceptedPersistedUrls = new Set<string>();
+  const acceptedByLane = new Map<string, number>();
   for (const candidate of verifiedArticles) {
-    const { article, url, providerSeenAt, quality } = candidate;
-    if (!quality.accepted || !url || !providerSeenAt || !quality.publication) {
+    const { article, laneId, laneBudget, url, providerSeenAt, quality } = candidate;
+    if (!quality.accepted || !url || !providerSeenAt || !quality.effectiveTime || !quality.timeBasis) {
       skipped += 1;
       qualityRejections[quality.reason] = (qualityRejections[quality.reason] ?? 0) + 1;
-      if (await quarantineGdeltArticle(sourceId, url, quality.reason, verificationNow.toISOString(), providerSeenAt)) {
-        quarantined += 1;
+      const preserveVerified = candidate.existing?.quality_status === "accepted"
+        && candidate.existing.publication_time_verified === true
+        && quality.reason === "publisher_publication_unverified";
+      if (preserveVerified) continue;
+      const rejectionAliases = Array.from(new Set([
+        url,
+        ...(candidate.existingAliases ?? []).map((item) => item.external_id),
+      ].filter((value): value is string => Boolean(value))));
+      for (const alias of rejectionAliases) {
+        if (await quarantineGdeltArticle(sourceId, alias, article.title, quality.reason, verificationNow.toISOString(), providerSeenAt)) {
+          quarantined += 1;
+        }
       }
       continue;
     }
+    if ((acceptedByLane.get(laneId) ?? 0) >= laneBudget) {
+      skipped += 1;
+      continue;
+    }
+    if (inserted + updated + unchanged >= selectionLimit) {
+      skipped += 1;
+      continue;
+    }
+    const aliasHistory = planGdeltAliasPersistence(url, candidate.existingAliases ?? []);
+    const temporal = mergeGdeltAliasTemporalEvidence(aliasHistory, {
+      eventTime: quality.effectiveTime,
+      timeBasis: quality.timeBasis,
+      publication: quality.publication,
+      providerSeenAt,
+    });
     if (params.targetedDiscovery
-        && !targetedGdeltPublicationIsTimely(quality.publication.publishedAt, params.targetedDiscovery)) {
+        && !targetedGdeltPublicationIsTimely(temporal.eventTime, params.targetedDiscovery)) {
       skipped += 1;
       qualityRejections.target_event_time_mismatch = (qualityRejections.target_event_time_mismatch ?? 0) + 1;
       continue;
     }
-    // GDELT's seendate is evidence of discovery only. Event ordering uses the
-    // verified publisher date, so a re-indexed old URL cannot become new again.
-    const eventTime = quality.publication.publishedAt;
-    if (!latestEventTime || eventTime > latestEventTime) latestEventTime = eventTime;
+    // GDELT's seendate is evidence of discovery only. The payload preserves
+    // that distinction, and conflicts retain the earliest effective time so a
+    // rediscovery can never move an existing URL forward.
+    const eventTime = temporal.eventTime;
+    if (temporal.timeBasis === "provider_first_seen") providerFirstSeenAccepted += 1;
     const publisherDomain = nonEmpty(article.domain) ?? hostnameFromUrl(url);
     const languageCode = normalizeLanguage(article.language);
     const sourceCountry = countryNameToIso2(article.sourcecountry);
     const signal = signalsByUrl.get(url);
     const locations = Array.isArray(signal?.locations) ? signal.locations as Array<Record<string, unknown>> : [];
     const gkgCountry = locations.map((location) => location.country_iso2).find((value) => typeof value === "string") as string | undefined;
-    // DOC exposes the publisher's country, while GKG exposes locations found in
-    // the article. Prefer a matched GKG location, then use the publisher country
-    // only as a low-confidence fallback when the headline and URL do not resolve
-    // a subject geography. The inference metadata keeps that distinction visible.
-    const inference = inferNewsCountry({
-      title: article.title,
-      url,
-      feedCountryHint: gkgCountry ?? sourceCountry,
-    });
     const targetedMatch = params.targetedDiscovery
       ? describeTargetedGdeltMatch(article, params.targetedDiscovery)
       : null;
     const targetCountry = params.targetedDiscovery?.countryIso2?.trim().toUpperCase() ?? null;
     const eligibleTargetCountry = eligibleTargetedGdeltCountryFallback(targetedMatch, targetCountry);
     if (targetedMatch?.link_eligible) linkEligible += 1;
-    const contentCountry = inference.source === "content_alias" ? inference.iso2 : null;
-    // Publisher country and URL TLD are low-confidence hints. For a targeted
-    // event query they must not relabel a China story as U.S. merely because a
-    // U.S. publisher reported it. Explicit article text/GKG geography still
-    // wins, followed by the event-query country with its visible attribution.
-    const countryIso2 = contentCountry ?? gkgCountry ?? eligibleTargetCountry ?? inference.iso2 ?? null;
+    // Typed Place/addressCountry metadata inside the NewsArticle subtree is
+    // direct publisher-authored subject evidence. Publisher jurisdiction and
+    // URL TLD remain provenance-only hints, while GKG and targeted-event
+    // geography keep explicit attribution.
+    const subject = resolveGdeltArticleSubject({
+      title: article.title,
+      url,
+      context: candidate.context,
+      gkgCountry: gkgCountry ?? null,
+      sourceCountry,
+      eligibleTargetCountry,
+    });
+    const hasCurrentSubjectCountry = Boolean(subject.countryIso2 || subject.subjectCountryIso2s.length > 0);
+    const countryIso2 = subject.countryIso2 ?? aliasHistory.countryIso2;
+    const subjectCountryIso2s = Array.from(new Set([
+      ...subject.subjectCountryIso2s,
+      ...aliasHistory.subjectCountryIso2s,
+      ...(countryIso2 ? [countryIso2] : []),
+    ])).sort();
+    const countryAttribution = hasCurrentSubjectCountry
+      ? subject.countryAttribution
+      : aliasHistory.countryAttribution;
+    const countryInference = hasCurrentSubjectCountry
+      ? subject.inference
+      : aliasHistory.countryInference ?? subject.inference;
+    const gkgPayload = signal ? {
+      tone: signal.tone, themes: signal.themes, persons: signal.persons,
+      organizations: signal.organizations, locations: signal.locations,
+    } : aliasHistory.gkg;
     await ensureCountry(countryIso2);
     await ensureCountry(sourceCountry);
-    const externalId = url;
+    for (const subjectCountry of subjectCountryIso2s) await ensureCountry(subjectCountry);
+    const externalId = aliasHistory.persistenceExternalId;
     const payload = {
       provider: "gdelt", product: "doc-2.0", attribution: ATTRIBUTION,
+      canonical_url: url,
+      canonical_url_algorithm: GDELT_CANONICAL_URL_ALGORITHM,
       source: publisherDomain, publisher: publisherDomain,
       domain: publisherDomain, source_country: article.sourcecountry || null,
       source_country_iso2: sourceCountry, language: article.language || null,
       language_code: languageCode, image_url: article.socialimage || null,
-      mobile_url: article.url_mobile || null, country_inference: inference,
+      mobile_url: article.url_mobile || null,
+      country_inference: countryInference,
+      subject_country_iso2s: subjectCountryIso2s,
       // `seendate` is GDELT's first-seen value, not an article publication
       // timestamp. We retain it for provenance but only expose a source date
       // that passed the publisher-date and freshness checks above.
-      time_basis: "publisher_published_verified",
-      time_precision: quality.publication.precision,
-      publication_time_source: quality.publication.source,
+      time_basis: temporal.timeBasis,
+      time_precision: temporal.timePrecision,
+      publication_time_source: temporal.publicationTimeSource,
       provider_seen_at: providerSeenAt,
-      first_provider_seen_at: providerSeenAt,
+      first_provider_seen_at: temporal.firstProviderSeenAt,
       last_provider_seen_at: providerSeenAt,
-      publisher_published_at: eventTime,
+      publisher_published_at: temporal.publisherPublishedAt,
+      publication_time_verified: temporal.publicationTimeVerified,
+      provider_discovery_fallback: temporal.timeBasis === "provider_first_seen",
       quality_status: "accepted",
       quality_checked_at: verificationNow.toISOString(),
       quality_checks: {
         provider_seen_at_valid: true,
-        publisher_date_verified: true,
-        publisher_date_fresh: true,
-        publisher_date_not_after_provider_seen: true,
+        publisher_date_verified: temporal.publicationTimeVerified,
+        publisher_date_fresh: quality.publication ? true : null,
+        publisher_date_not_after_provider_seen: quality.publication ? true : null,
         article_url_valid: true,
       },
-      country_attribution:
-        eligibleTargetCountry && !contentCountry && !gkgCountry
-          ? "targeted_event_query_fallback"
-          : inference.source === "feed_hint" && !gkgCountry && sourceCountry
-          ? "publisher_country_fallback"
-          : gkgCountry && countryIso2 === gkgCountry
-            ? "gkg_location"
-            : inference.source,
+      discovery_lane: laneId,
+      country_attribution: countryAttribution,
+      ...(candidate.existingAliases?.length ? {
+        canonical_alias_history: {
+          aliases_seen: candidate.existingAliases.length,
+          persistence_external_id: externalId,
+          earliest_effective_at: eventTime,
+        },
+      } : {}),
       ...(params.targetedDiscovery ? {
         targeted_discovery: {
           method: "deterministic_gdelt_doc_event_query_v1",
@@ -1608,58 +3177,39 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
           match: targetedMatch,
         },
       } : {}),
-      gkg: signal ? {
-        tone: signal.tone, themes: signal.themes, persons: signal.persons,
-        organizations: signal.organizations, locations: signal.locations,
-      } : null,
+      gkg: gkgPayload,
       license: { data: "GDELT unrestricted use with attribution", article: "Third-party publisher content" },
       raw: article,
     };
-    const dedupeHash = crypto.createHash("sha256").update(`${url}|gdelt-article`).digest("hex");
-    const result = await query<{ inserted: boolean }>(
+    const dedupeHash = gdeltArticleDedupeHash(url);
+    const result = await query<{ inserted: boolean; event_time: string }>(
       `INSERT INTO item (
          source_id, external_id, kind, title, summary, url, country_iso2, event_time,
          payload, dedupe_hash, language_code, source_country_iso2, tone
        ) VALUES ($1,$2,'news_article',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        ON CONFLICT (source_id, external_id) DO UPDATE SET
          title = COALESCE(EXCLUDED.title, item.title), summary = COALESCE(EXCLUDED.summary, item.summary),
-         country_iso2 = COALESCE(EXCLUDED.country_iso2, item.country_iso2),
-         -- Preserve the earliest verified publisher date. A subsequent GDELT
-         -- rediscovery must update provenance, never promote an old URL.
-         event_time = COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time),
-         payload = item.payload || EXCLUDED.payload || jsonb_build_object(
-           'first_provider_seen_at', COALESCE(
-             item.payload->>'first_provider_seen_at',
-             item.payload->>'provider_seen_at',
-             EXCLUDED.payload->>'first_provider_seen_at'
-           ),
-           'last_provider_seen_at', EXCLUDED.payload->>'last_provider_seen_at',
-           'provider_seen_at', EXCLUDED.payload->>'provider_seen_at',
-           'publisher_published_at', to_jsonb(COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time))
-         ),
+         url = EXCLUDED.url,
+         country_iso2 = ${MERGED_GDELT_COUNTRY_SQL},
+         -- Preserve the earliest effective publisher/discovery date. A
+         -- subsequent GDELT rediscovery may update provenance, never recency.
+         event_time = ${MERGED_GDELT_EVENT_TIME_SQL},
+         payload = ${MERGED_GDELT_PAYLOAD_SQL},
          dedupe_hash = EXCLUDED.dedupe_hash,
          language_code = COALESCE(EXCLUDED.language_code, item.language_code),
          source_country_iso2 = COALESCE(EXCLUDED.source_country_iso2, item.source_country_iso2),
          tone = COALESCE(EXCLUDED.tone, item.tone), updated_at = now()
        WHERE item.title IS DISTINCT FROM COALESCE(EXCLUDED.title, item.title)
           OR item.summary IS DISTINCT FROM COALESCE(EXCLUDED.summary, item.summary)
-          OR item.country_iso2 IS DISTINCT FROM COALESCE(EXCLUDED.country_iso2, item.country_iso2)
-          OR item.event_time IS DISTINCT FROM COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time)
-          OR item.payload IS DISTINCT FROM item.payload || EXCLUDED.payload || jsonb_build_object(
-            'first_provider_seen_at', COALESCE(
-              item.payload->>'first_provider_seen_at',
-              item.payload->>'provider_seen_at',
-              EXCLUDED.payload->>'first_provider_seen_at'
-            ),
-            'last_provider_seen_at', EXCLUDED.payload->>'last_provider_seen_at',
-            'provider_seen_at', EXCLUDED.payload->>'provider_seen_at',
-            'publisher_published_at', to_jsonb(COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time))
-          )
+          OR item.url IS DISTINCT FROM EXCLUDED.url
+          OR item.country_iso2 IS DISTINCT FROM ${MERGED_GDELT_COUNTRY_SQL}
+          OR item.event_time IS DISTINCT FROM ${MERGED_GDELT_EVENT_TIME_SQL}
+          OR item.payload IS DISTINCT FROM ${MERGED_GDELT_PAYLOAD_SQL}
           OR item.dedupe_hash IS DISTINCT FROM EXCLUDED.dedupe_hash
           OR item.language_code IS DISTINCT FROM COALESCE(EXCLUDED.language_code, item.language_code)
           OR item.source_country_iso2 IS DISTINCT FROM COALESCE(EXCLUDED.source_country_iso2, item.source_country_iso2)
           OR item.tone IS DISTINCT FROM COALESCE(EXCLUDED.tone, item.tone)
-       RETURNING (xmax = 0) AS inserted`,
+       RETURNING (xmax = 0) AS inserted,event_time::text`,
       [sourceId, externalId, article.title || null,
        signal ? `GDELT themes: ${(signal.themes as string[]).slice(0, 4).join(", ")}` : null,
        url, countryIso2, eventTime, JSON.stringify(payload), dedupeHash,
@@ -1668,9 +3218,28 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
     if (!result.rows[0]) unchanged += 1;
     else if (result.rows[0].inserted) inserted += 1;
     else updated += 1;
+    acceptedPersistedUrls.add(url);
+    const persistedEventTime = result.rows[0]?.event_time ?? candidate.existing?.event_time ?? eventTime;
+    if (!latestEventTime || persistedEventTime > latestEventTime) latestEventTime = persistedEventTime;
+    for (const alias of candidate.existingAliases ?? []) {
+      if (alias.external_id === externalId) continue;
+      if (await quarantineGdeltArticle(
+        sourceId,
+        alias.external_id,
+        article.title,
+        "canonical_duplicate_merged",
+        verificationNow.toISOString(),
+        providerSeenAt,
+      )) quarantined += 1;
+    }
+    acceptedByLane.set(laneId, (acceptedByLane.get(laneId) ?? 0) + 1);
+  }
+  for (const lane of discoveryLanes) {
+    lane.accepted = acceptedByLane.get(lane.id) ?? 0;
+    if (lane.status === "healthy" && lane.accepted === 0) lane.status = "empty";
   }
   return {
-    fetched: rawArticles.length,
+    fetched: rawArticleCount,
     selected_candidates: articles.length,
     accepted: inserted + updated + unchanged,
     link_eligible: linkEligible,
@@ -1679,26 +3248,59 @@ async function ingestDocArticles(sourceId: number, params: GdeltIngestParams): P
     unchanged,
     skipped,
     quality_quarantined: quarantined,
+    provider_first_seen_accepted: providerFirstSeenAccepted,
+    gkg_sampled: gkg.sampled,
+    gkg_matched: gkg.matched,
+    gkg_country_rows: gkg.countryRows,
+    // Release health must be grounded in GKG geography attached to an article
+    // that survived publisher-time/quality verification and persistence.
+    gkg_matched_country_rows: countAcceptedGdeltGkgCountryMatches(
+      Array.from(acceptedPersistedUrls),
+      gkg.matchedCountryUrls,
+    ),
+    // Deterministic release proof: these country-bearing latest-archive rows
+    // traversed WHATWG canonicalization and a successful news_signal upsert.
+    // Unlike random DOC/GKG coincidence, a healthy current archive should
+    // reliably produce this without overstating article-level enrichment.
+    gkg_canonical_country_url_probes: gkg.canonicalCountryUrls.length,
+    gkg_archives_scanned: gkg.archivesScanned,
+    gkg_archive_errors: gkg.archiveErrors,
     quality_rejections: qualityRejections,
     latest_event_time: latestEventTime,
+    discovery_lanes: discoveryLanes,
   };
 }
 
 export function hasUsableGdeltDocCoverage(result: {
   latest_event_time: string | null;
-}): boolean {
-  return typeof result.latest_event_time === "string" && !Number.isNaN(Date.parse(result.latest_event_time));
+  accepted?: number;
+}, options: { now?: Date; maxAgeHours?: number } = {}): boolean {
+  const eventTime = typeof result.latest_event_time === "string"
+    ? Date.parse(result.latest_event_time)
+    : Number.NaN;
+  const now = (options.now ?? new Date()).getTime();
+  const maxAgeHours = clampHours(options.maxAgeHours, 4);
+  return Number(result.accepted ?? 1) > 0
+    && Number.isFinite(eventTime)
+    && eventTime <= now + GDELT_MAX_FUTURE_SKEW_MS
+    && now - eventTime <= maxAgeHours * 3_600_000;
 }
 
 export function hasUsableGdeltFallbackCoverage(result: {
   selected?: unknown;
   latest_event_time?: unknown;
-}): boolean {
+}, options: { now?: Date; maxAgeHours?: number } = {}): boolean {
   const selected = Number(result.selected);
+  const eventTime = typeof result.latest_event_time === "string"
+    ? Date.parse(result.latest_event_time)
+    : Number.NaN;
+  const now = (options.now ?? new Date()).getTime();
+  const maxAgeHours = clampHours(options.maxAgeHours, 4);
   return Number.isFinite(selected)
     && selected > 0
-    && typeof result.latest_event_time === "string"
-    && !Number.isNaN(Date.parse(result.latest_event_time));
+    && Number.isFinite(eventTime)
+    && eventTime <= now + GDELT_MAX_FUTURE_SKEW_MS
+    && now - eventTime <= maxAgeHours * 3_600_000;
 }
 
 async function ingestGalFallback(
@@ -1709,7 +3311,7 @@ async function ingestGalFallback(
   const response = await fetchRetry(process.env.GDELT_GAL_RSS_URL?.trim() || GAL_RSS_URL);
   const xml = await response.text();
   const selectedLimit = clampInt(params.maxRecords ?? process.env.GDELT_GAL_MAX_ARTICLES, 1, 250, 25);
-  const maxProviderSeenAgeHours = clampHours(process.env.GDELT_GAL_MAX_AGE_HOURS, 48);
+  const maxProviderSeenAgeHours = clampHours(process.env.GDELT_GAL_MAX_AGE_HOURS, 3);
   const parsed = parseGdeltGalRss(xml, {
     // Inspect a small bounded superset before source-date verification so a
     // few unverifiable results cannot starve the degraded fallback entirely.
@@ -1718,10 +3320,14 @@ async function ingestGalFallback(
   });
   const verificationNow = new Date();
   const maxPublisherAgeHours = gdeltPublisherMaxAgeHours();
+  const galUrls = parsed.articles.map((article) => article.url);
+  const existingByUrl = await loadExistingGdeltItems(sourceId, galUrls);
   const verifiedArticles = await mapWithConcurrency(
     parsed.articles,
     GDELT_ARTICLE_VERIFICATION_CONCURRENCY,
     async (article) => {
+      const existingAliases = existingByUrl.get(article.url) ?? [];
+      const existing = existingAliases[0];
       const preflight = assessGdeltDocArticleQuality({
         title: article.title,
         url: article.url,
@@ -1731,18 +3337,38 @@ async function ingestGalFallback(
         maxPublisherAgeHours,
         maxProviderSeenAgeHours,
       });
-      if (preflight.reason !== "publisher_publication_unverified") return { article, quality: preflight };
-      const publication = await resolveGdeltPublisherPublicationTime(article.url);
+      if (preflight.reason !== "publisher_publication_unverified") {
+        return {
+          article,
+          existing,
+          existingAliases,
+          context: { description: null, keywords: [], structuredCountryIso2s: [] } as GdeltPublisherContext,
+          quality: preflight,
+        };
+      }
+      const evidence = await resolveGdeltPublisherEvidence(article.url);
+      const existingSeenAt = existing?.first_provider_seen_at;
+      const existingSeenMs = existingSeenAt ? Date.parse(existingSeenAt) : Number.NaN;
+      const providerSeenMs = Date.parse(article.eventTime);
+      const continuingFirstSeenItem = existing?.quality_status === "accepted"
+        && existing.time_basis === "provider_first_seen";
+      const allowProviderFirstSeen = !existing
+        || (continuingFirstSeenItem && Number.isFinite(existingSeenMs) && Number.isFinite(providerSeenMs)
+          && Math.abs(existingSeenMs - providerSeenMs) <= GDELT_MAX_FUTURE_SKEW_MS);
       return {
         article,
+        existing,
+        existingAliases,
+        context: evidence.context,
         quality: assessGdeltDocArticleQuality({
           title: article.title,
           url: article.url,
           providerSeenAt: article.eventTime,
-          publication,
+          publication: evidence.publication,
           now: verificationNow,
           maxPublisherAgeHours,
           maxProviderSeenAgeHours,
+          allowProviderFirstSeen,
         }),
       };
     },
@@ -1752,17 +3378,28 @@ async function ingestGalFallback(
   let unchanged = 0;
   let skipped = parsed.skipped;
   let quarantined = 0;
+  let providerFirstSeenAccepted = 0;
   const qualityRejections: Record<string, number> = {};
   let latestEventTime: string | null = null;
   let selected = 0;
 
   for (const candidate of verifiedArticles) {
     const { article, quality } = candidate;
-    if (!quality.accepted || !quality.publication) {
+    if (!quality.accepted || !quality.effectiveTime || !quality.timeBasis) {
       skipped += 1;
       qualityRejections[quality.reason] = (qualityRejections[quality.reason] ?? 0) + 1;
-      if (await quarantineGdeltArticle(sourceId, article.url, quality.reason, verificationNow.toISOString(), article.eventTime)) {
-        quarantined += 1;
+      const preserveVerified = candidate.existing?.quality_status === "accepted"
+        && candidate.existing.publication_time_verified === true
+        && quality.reason === "publisher_publication_unverified";
+      if (preserveVerified) continue;
+      const rejectionAliases = Array.from(new Set([
+        article.url,
+        ...(candidate.existingAliases ?? []).map((item) => item.external_id),
+      ]));
+      for (const alias of rejectionAliases) {
+        if (await quarantineGdeltArticle(sourceId, alias, article.title, quality.reason, verificationNow.toISOString(), article.eventTime)) {
+          quarantined += 1;
+        }
       }
       continue;
     }
@@ -1773,104 +3410,141 @@ async function ingestGalFallback(
       continue;
     }
     selected += 1;
-    const eventTime = quality.publication.publishedAt;
-    if (!latestEventTime || eventTime > latestEventTime) latestEventTime = eventTime;
-    const inference = inferNewsCountry({ title: article.title, url: article.url });
-    await ensureCountry(inference.iso2);
+    const aliasHistory = planGdeltAliasPersistence(article.url, candidate.existingAliases ?? []);
+    const temporal = mergeGdeltAliasTemporalEvidence(aliasHistory, {
+      eventTime: quality.effectiveTime,
+      timeBasis: quality.timeBasis,
+      publication: quality.publication,
+      providerSeenAt: article.eventTime,
+    });
+    const eventTime = temporal.eventTime;
+    if (temporal.timeBasis === "provider_first_seen") providerFirstSeenAccepted += 1;
+    const subject = resolveGdeltArticleSubject({
+      title: article.title,
+      url: article.url,
+      context: candidate.context,
+    });
+    const hasCurrentSubjectCountry = Boolean(subject.countryIso2 || subject.subjectCountryIso2s.length > 0);
+    const subjectCountry = subject.countryIso2 ?? aliasHistory.countryIso2;
+    const subjectCountryIso2s = Array.from(new Set([
+      ...subject.subjectCountryIso2s,
+      ...aliasHistory.subjectCountryIso2s,
+      ...(subjectCountry ? [subjectCountry] : []),
+    ])).sort();
+    const countryAttribution = hasCurrentSubjectCountry
+      ? subject.countryAttribution
+      : aliasHistory.countryAttribution;
+    const countryInference = hasCurrentSubjectCountry
+      ? subject.inference
+      : aliasHistory.countryInference ?? subject.inference;
+    await ensureCountry(subjectCountry);
+    for (const country of subjectCountryIso2s) await ensureCountry(country);
     const payload = {
       provider: "gdelt",
       product: "gal-rss",
+      canonical_url: article.url,
+      canonical_url_algorithm: GDELT_CANONICAL_URL_ALGORITHM,
       attribution: ATTRIBUTION,
       source: article.domain,
       publisher: article.domain,
       domain: article.domain,
       source_country_iso2: null,
       language_code: "en",
-      country_inference: inference,
-      country_attribution: inference.source,
+      country_inference: countryInference,
+      country_attribution: countryAttribution,
+      subject_country_iso2s: subjectCountryIso2s,
       relevance_filter_score: article.relevanceScore,
       materiality_filter_score: article.materialityScore,
-      time_basis: "publisher_published_verified",
-      time_precision: quality.publication.precision,
-      publication_time_source: quality.publication.source,
+      discovery_lane: article.discoveryLane,
+      time_basis: temporal.timeBasis,
+      time_precision: temporal.timePrecision,
+      publication_time_source: temporal.publicationTimeSource,
       provider_time_at: article.eventTime,
       provider_seen_at: article.eventTime,
-      first_provider_seen_at: article.eventTime,
+      first_provider_seen_at: temporal.firstProviderSeenAt,
       last_provider_seen_at: article.eventTime,
-      publisher_published_at: eventTime,
+      publisher_published_at: temporal.publisherPublishedAt,
+      publication_time_verified: temporal.publicationTimeVerified,
+      provider_discovery_fallback: temporal.timeBasis === "provider_first_seen",
       quality_status: "accepted",
       quality_checked_at: verificationNow.toISOString(),
       quality_checks: {
         provider_seen_at_valid: true,
-        publisher_date_verified: true,
-        publisher_date_fresh: true,
-        publisher_date_not_after_provider_seen: true,
+        publisher_date_verified: temporal.publicationTimeVerified,
+        publisher_date_fresh: quality.publication ? true : null,
+        publisher_date_not_after_provider_seen: quality.publication ? true : null,
         article_url_valid: true,
       },
       fallback_reason: reason,
+      ...(candidate.existingAliases?.length ? {
+        canonical_alias_history: {
+          aliases_seen: candidate.existingAliases.length,
+          persistence_external_id: aliasHistory.persistenceExternalId,
+          earliest_effective_at: eventTime,
+        },
+      } : {}),
+      gkg: aliasHistory.gkg,
       license: { data: "GDELT unrestricted use with attribution", article: "Third-party publisher content" },
     };
-    const dedupeHash = crypto.createHash("sha256").update(`${article.url}|gdelt-article`).digest("hex");
-    const result = await query<{ inserted: boolean }>(
+    const dedupeHash = gdeltArticleDedupeHash(article.url);
+    const result = await query<{ inserted: boolean; event_time: string }>(
       `INSERT INTO item (
          source_id, external_id, kind, title, summary, url, country_iso2, event_time,
          payload, dedupe_hash, language_code, source_country_iso2, tone
        ) VALUES ($1,$2,'news_article',$3,NULL,$4,$5,$6,$7,$8,'en',NULL,NULL)
        ON CONFLICT (source_id, external_id) DO UPDATE SET
          title = COALESCE(item.title, EXCLUDED.title),
-         country_iso2 = COALESCE(item.country_iso2, EXCLUDED.country_iso2),
-         event_time = CASE
-           WHEN item.payload->>'product' = 'doc-2.0' THEN item.event_time
-           ELSE COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time)
+         url = EXCLUDED.url,
+         country_iso2 = CASE
+           WHEN item.payload->>'product'='doc-2.0' AND item.country_iso2 IS NOT NULL THEN item.country_iso2
+           ELSE ${MERGED_GDELT_COUNTRY_SQL}
          END,
+         event_time = ${MERGED_GDELT_EVENT_TIME_SQL},
          payload = CASE
            WHEN item.payload->>'product' = 'doc-2.0'
-             THEN item.payload || jsonb_build_object(
-               'gal_fallback_seen_at', EXCLUDED.payload->>'provider_seen_at',
-               'gal_fallback_relevance_score', EXCLUDED.payload->'relevance_filter_score'
-             )
-           ELSE item.payload || EXCLUDED.payload || jsonb_build_object(
-             'first_provider_seen_at', COALESCE(
-               item.payload->>'first_provider_seen_at',
-               item.payload->>'provider_seen_at',
-               EXCLUDED.payload->>'first_provider_seen_at'
-             ),
-             'last_provider_seen_at', EXCLUDED.payload->>'last_provider_seen_at',
-             'provider_seen_at', EXCLUDED.payload->>'provider_seen_at',
-             'publisher_published_at', to_jsonb(COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time))
-           )
+             THEN ${MERGED_GDELT_DOC_ALIAS_HISTORY_PAYLOAD_SQL}
+           ELSE ${MERGED_GDELT_PAYLOAD_SQL}
          END,
          dedupe_hash = EXCLUDED.dedupe_hash,
          updated_at = now()
-       WHERE item.dedupe_hash IS DISTINCT FROM EXCLUDED.dedupe_hash
+       WHERE item.url IS DISTINCT FROM EXCLUDED.url
+          OR item.dedupe_hash IS DISTINCT FROM EXCLUDED.dedupe_hash
           OR (item.title IS NULL AND EXCLUDED.title IS NOT NULL)
-          OR (item.country_iso2 IS NULL AND EXCLUDED.country_iso2 IS NOT NULL)
+          OR item.country_iso2 IS DISTINCT FROM CASE
+            WHEN item.payload->>'product'='doc-2.0' AND item.country_iso2 IS NOT NULL THEN item.country_iso2
+            ELSE ${MERGED_GDELT_COUNTRY_SQL}
+          END
+          OR item.event_time IS DISTINCT FROM ${MERGED_GDELT_EVENT_TIME_SQL}
           OR (
             item.payload->>'product' = 'doc-2.0'
-            AND item.payload->>'gal_fallback_seen_at' IS DISTINCT FROM EXCLUDED.payload->>'provider_seen_at'
+            AND item.payload IS DISTINCT FROM ${MERGED_GDELT_DOC_ALIAS_HISTORY_PAYLOAD_SQL}
           )
           OR (
             item.payload->>'product' IS DISTINCT FROM 'doc-2.0'
             AND (
-              item.event_time IS DISTINCT FROM COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time)
-              OR item.payload IS DISTINCT FROM item.payload || EXCLUDED.payload || jsonb_build_object(
-                'first_provider_seen_at', COALESCE(
-                  item.payload->>'first_provider_seen_at',
-                  item.payload->>'provider_seen_at',
-                  EXCLUDED.payload->>'first_provider_seen_at'
-                ),
-                'last_provider_seen_at', EXCLUDED.payload->>'last_provider_seen_at',
-                'provider_seen_at', EXCLUDED.payload->>'provider_seen_at',
-                'publisher_published_at', to_jsonb(COALESCE(LEAST(item.event_time, EXCLUDED.event_time), item.event_time, EXCLUDED.event_time))
-              )
+              item.event_time IS DISTINCT FROM ${MERGED_GDELT_EVENT_TIME_SQL}
+              OR item.payload IS DISTINCT FROM ${MERGED_GDELT_PAYLOAD_SQL}
             )
           )
-       RETURNING (xmax = 0) AS inserted`,
-      [sourceId, article.url, article.title, article.url, inference.iso2, eventTime, JSON.stringify(payload), dedupeHash],
+       RETURNING (xmax = 0) AS inserted,event_time::text`,
+      [sourceId, aliasHistory.persistenceExternalId, article.title, article.url, subjectCountry, eventTime, JSON.stringify(payload), dedupeHash],
     );
     if (!result.rows[0]) unchanged += 1;
     else if (result.rows[0].inserted) inserted += 1;
     else updated += 1;
+    const persistedEventTime = result.rows[0]?.event_time ?? candidate.existing?.event_time ?? eventTime;
+    if (!latestEventTime || persistedEventTime > latestEventTime) latestEventTime = persistedEventTime;
+    for (const alias of candidate.existingAliases ?? []) {
+      if (alias.external_id === aliasHistory.persistenceExternalId) continue;
+      if (await quarantineGdeltArticle(
+        sourceId,
+        alias.external_id,
+        article.title,
+        "canonical_duplicate_merged",
+        verificationNow.toISOString(),
+        article.eventTime,
+      )) quarantined += 1;
+    }
   }
 
   return {
@@ -1884,6 +3558,7 @@ async function ingestGalFallback(
     unchanged,
     skipped,
     quality_quarantined: quarantined,
+    provider_first_seen_accepted: providerFirstSeenAccepted,
     quality_rejections: qualityRejections,
     latest_event_time: latestEventTime,
     coverage: "bounded materiality- and publisher-diverse sample from GDELT's rolling 15-minute global feed",
@@ -1956,29 +3631,80 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
     http_failures: 0,
     doc_status: includeDoc ? "pending" : "not_requested",
   };
-  let archiveUrls: { event: string; gkg: string } | null = null;
-  if (includeEvents || includeGkg) archiveUrls = await getLatestArchiveUrls();
-  if (includeEvents && archiveUrls) {
-    const events = await ingestEventArchive(sourceId, archiveUrls.event, maxRawRows);
-    result.events = events;
-    result.inserted = Number(result.inserted) + events;
-  }
-  if (includeGkg && archiveUrls) {
-    const signals = await ingestGkgArchive(sourceId, archiveUrls.gkg, maxRawRows);
-    result.signals = signals;
-    result.inserted = Number(result.inserted) + signals;
-  }
+  // Raw Event/GKG archives are enrichment, not a prerequisite for headlines.
+  // Resolve them in parallel with DOC discovery and convert lookup failures to
+  // values immediately so a rejected promise cannot suppress DOC/GAL or become
+  // an unhandled rejection while the rate-limited discovery lanes are running.
+  const archiveResolution = includeEvents || includeGkg
+    ? getLatestArchiveUrls().then(
+        (urls) => ({ urls, error: null as string | null }),
+        (error) => ({
+          urls: null,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      )
+    : Promise.resolve({ urls: null, error: null as string | null });
+  const gkgArchiveWindow = includeGkg
+    ? archiveResolution.then<GdeltGkgArchiveWindow>((resolution) => (
+        resolution.urls
+          ? { urls: gdeltGkgWindowUrls(resolution.urls.gkg, params.timespan?.trim() || "1h") }
+          : { urls: [], resolutionError: resolution.error ?? "GDELT archive lookup failed." }
+      ))
+    : undefined;
+  const eventArchive = includeEvents
+    ? archiveResolution.then(async (resolution): Promise<{ count: number; error: string | null }> => {
+        if (!resolution.urls) return { count: 0, error: resolution.error ?? "GDELT archive lookup failed." };
+        try {
+          return {
+            count: await ingestEventArchive(sourceId, resolution.urls.event, maxRawRows),
+            error: null,
+          };
+        } catch (error) {
+          return { count: 0, error: error instanceof Error ? error.message : String(error) };
+        }
+      })
+    : Promise.resolve({ count: 0, error: null as string | null });
+  let gkgHandledByDoc = false;
   if (includeDoc) {
     const headlineBudgets = planGdeltHeadlineBudgets(params.maxRecords ?? process.env.GDELT_DOC_MAX_ARTICLES);
     result.headline_budget = headlineBudgets;
     try {
-      const doc = await ingestDocArticles(sourceId, { ...params, maxRecords: headlineBudgets.doc });
+      const doc = await ingestDocArticles(
+        sourceId,
+        { ...params, maxRecords: headlineBudgets.doc },
+        gkgArchiveWindow,
+      );
+      gkgHandledByDoc = includeGkg;
+      // GKG is fetched alongside the DOC lanes. Preserve its exact-run
+      // completion metrics even when DOC itself has no usable headline and
+      // GAL must provide the headline fallback; otherwise the release gate
+      // can incorrectly report that no location archive was decoded.
+      result.signals = doc.gkg_sampled + doc.gkg_matched;
+      result.gkg_sampled = doc.gkg_sampled;
+      result.gkg_matched = doc.gkg_matched;
+      result.gkg_country_rows = doc.gkg_country_rows;
+      result.gkg_matched_country_rows = doc.gkg_matched_country_rows;
+      result.gkg_canonical_country_url_probes = doc.gkg_canonical_country_url_probes;
+      result.gkg_archives_scanned = doc.gkg_archives_scanned;
+      result.gkg_archive_errors = doc.gkg_archive_errors;
+      result.inserted = Number(result.inserted) + doc.gkg_sampled + doc.gkg_matched;
       if (!hasUsableGdeltDocCoverage(doc)) {
-        throw new Error("GDELT DOC returned no usable article with a valid provider first-seen time.");
+        throw new Error("GDELT DOC returned no current persisted article inside the four-hour coverage window.");
       }
+      const failedLanes = doc.discovery_lanes.filter((lane) => lane.status === "failed");
+      const emptyLanes = doc.discovery_lanes.filter((lane) => lane.status === "empty");
+      const requiredEmptyLanes = emptyLanes.filter((lane) => lane.id === "markets_macro");
+      const degradedLanes = [...failedLanes, ...requiredEmptyLanes];
       result.articles = doc;
-      result.doc_status = "healthy";
-      result.health = "healthy";
+      result.doc_status = degradedLanes.length > 0 ? "healthy_partial" : "healthy";
+      result.health = degradedLanes.length > 0 ? "degraded" : "healthy";
+      if (degradedLanes.length > 0) {
+        result.partial = true;
+        result.failed_discovery_lanes = failedLanes.map((lane) => lane.id);
+        result.empty_required_discovery_lanes = requiredEmptyLanes.map((lane) => lane.id);
+        result.http_failures = Number(result.http_failures)
+          + failedLanes.filter((lane) => /\bHTTP\b/i.test(lane.error ?? "")).length;
+      }
       result.latest_event_time = doc.latest_event_time;
       result.inserted = Number(result.inserted) + doc.inserted;
       result.updated = Number(result.updated) + doc.updated;
@@ -2042,6 +3768,42 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
         result.http_failures = Number(result.http_failures) + (/\bHTTP\b/i.test(galError) ? 1 : 0);
       }
     }
+  }
+
+  // A DOC-wide failure can occur before optional GKG enrichment starts. Keep
+  // the raw signal sample available in that case, still without allowing it to
+  // alter the headline fallback decision.
+  if (includeGkg && !gkgHandledByDoc && gkgArchiveWindow) {
+    const gkg = await ingestGkgArchiveWindow(sourceId, await gkgArchiveWindow, [], maxRawRows);
+    result.signals = gkg.sampled;
+    result.gkg_sampled = gkg.sampled;
+    result.gkg_matched = gkg.matched;
+    result.gkg_country_rows = gkg.countryRows;
+    result.gkg_matched_country_rows = gkg.matchedCountryRows;
+    result.gkg_canonical_country_url_probes = gkg.canonicalCountryUrls.length;
+    result.gkg_archives_scanned = gkg.archivesScanned;
+    result.gkg_archive_errors = gkg.archiveErrors;
+    result.inserted = Number(result.inserted) + gkg.sampled;
+  }
+
+  const event = await eventArchive;
+  if (includeEvents) {
+    result.events = event.count;
+    result.inserted = Number(result.inserted) + event.count;
+    if (event.error) result.event_archive_error = event.error;
+  }
+  const archiveErrors = Array.from(new Set([
+    ...(Array.isArray(result.gkg_archive_errors) ? result.gkg_archive_errors as string[] : []),
+    ...(event.error ? [event.error] : []),
+  ]));
+  if (archiveErrors.length > 0) {
+    result.partial = true;
+    result.raw_archive_status = "degraded";
+    result.http_failures = Number(result.http_failures)
+      + archiveErrors.filter((message) => /\bHTTP\b/i.test(message)).length;
+    if (result.health === "healthy") result.health = "degraded";
+  } else if (includeEvents || includeGkg) {
+    result.raw_archive_status = "healthy";
   }
   return result;
 }

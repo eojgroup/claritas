@@ -173,10 +173,10 @@ function maritimeRuntimeLabel(
     regionalSources.every((source) => source.error) &&
     coverage.messages_received === 0
   ) {
-    return "global AIS is silent and the configured official regional sources are retrying";
+    return "AISstream is silent in its configured reception areas and the official regional sources are retrying";
   }
   if (coverage.connected && coverage.messages_received === 0) {
-    return `connected with ${coverage.subscription_boxes ?? 1} coverage area; global provider has not delivered AIS frames yet`;
+    return `connected with ${coverage.subscription_boxes ?? 1} coverage area; the configured AISstream subscription has not delivered frames yet`;
   }
   if (coverage.messages_received > 0 && coverage.snapshots_accepted === 0) {
     return `${coverage.messages_received.toLocaleString()} AIS frames received; awaiting a usable vessel position`;

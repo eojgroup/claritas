@@ -272,6 +272,75 @@ test("ingestion time never substitutes for a missing publisher timestamp", () =>
   assert.equal(assessment.tier, "routine");
 });
 
+test("an event timestamp without a governed time basis cannot claim recent publication", () => {
+  const assessment = assessNewsItem({
+    itemId: 17,
+    title: "Market update with ambiguous source time",
+    eventTime: "2026-08-21T11:59:00Z",
+    payload: { topics: ["markets"] },
+  }, NOW);
+  assert.equal(assessment.components.effective_time_valid, false);
+  assert.equal(assessment.components.freshness, 0);
+  assert.ok(assessment.reasons.some((reason) => reason.code === "unverified_publication_time"));
+  assert.ok(!assessment.reasons.some((reason) => reason.code === "recent_publication"));
+});
+
+test("GDELT discovery chronology is explicit and lower-trust than publisher time", () => {
+  const discovery = assessNewsItem({
+    itemId: 18,
+    title: "Wall Street stocks fall as bond yields rise",
+    eventTime: "2026-08-21T11:30:00Z",
+    sourceName: "gdelt",
+    payload: {
+      provider: "gdelt",
+      quality_status: "accepted",
+      time_basis: "provider_first_seen",
+      publication_time_verified: false,
+    },
+  }, NOW);
+  const published = assessNewsItem({
+    itemId: 19,
+    title: "Wall Street stocks fall as bond yields rise",
+    eventTime: "2026-08-21T11:30:00Z",
+    sourceName: "gdelt",
+    payload: {
+      provider: "gdelt",
+      quality_status: "accepted",
+      time_basis: "publisher_published_verified",
+      publication_time_verified: true,
+    },
+  }, NOW);
+
+  assert.equal(discovery.primaryCategory, "markets");
+  assert.equal(discovery.components.time_basis, "provider_first_seen");
+  assert.equal(discovery.components.publisher_publication_time_verified, false);
+  assert.equal(discovery.components.publication_time_valid, false);
+  assert.equal(discovery.components.effective_time_valid, true);
+  assert.ok(discovery.reasons.some((reason) => reason.code === "recent_provider_discovery"));
+  assert.ok(!discovery.reasons.some((reason) => reason.code === "recent_publication"));
+  assert.ok(published.reasons.some((reason) => reason.code === "recent_publication"));
+  assert.ok(published.score > discovery.score);
+});
+
+test("repeated broad GKG themes cannot overwhelm a market-specific headline", () => {
+  const classification = classifyNewsItem({
+    itemId: 20,
+    title: "S&P 500 and Nasdaq shares rally after bond yields fall",
+    payload: {
+      gkg: {
+        themes: [
+          "ENV_CLIMATECHANGE",
+          "ENV_CLIMATECHANGE_IMPACTS",
+          "ENV_CLIMATECHANGE_POLICY",
+          "ENV_CLIMATECHANGE_ADAPTATION",
+        ],
+      },
+    },
+  });
+  assert.equal(classification.primaryCategory, "markets");
+  assert.deepEqual(classification.categories, ["markets", "climate_disasters"]);
+});
+
 test("structured context takes precedence over conflicting lexical copy", () => {
   const classification = classifyNewsItem({
     itemId: 10,

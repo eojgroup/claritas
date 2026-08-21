@@ -24,15 +24,27 @@ final class AppModel: ObservableObject {
     @Published var selectedCountry: String? = nil {
         didSet {
             guard normalizedCountry(selectedCountry) != normalizedCountry(oldValue) else { return }
+            selectedNewsItemID = nil
             scheduleTransportRefresh()
+            synchronizeWatchContext()
         }
     }
     @Published var selectedSymbol: String? = nil
-    @Published var selectedNewsItemID: Int? = nil
+    @Published var selectedNewsItemID: Int? = nil {
+        didSet {
+            if selectedNewsItem?.id != selectedNewsItemID {
+                selectedNewsItem = nil
+            }
+        }
+    }
+    @Published private(set) var selectedNewsItem: NewsItem? = nil
     @Published var selectedIntelligenceEventID: String? = nil
     @Published var dailyBriefing: DailySignalBriefing? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
     @Published var news: [NewsItem] = []
+    /// A small importance-ranked feed for overview cards. It is intentionally
+    /// separate from `news`, whose ordering belongs to the News workspace.
+    @Published private(set) var rankedNews: [NewsItem] = []
     @Published var podcasts: [PodcastEpisode] = []
     @Published var countryStats: [CountryStat] = []
     @Published var weather: [CountryWeather] = []
@@ -42,6 +54,7 @@ final class AppModel: ObservableObject {
     @Published var transportOverview: TransportOverview? = nil
     @Published private(set) var transportOverviewCountry: String? = nil
     @Published var isRefreshingNews: Bool = false
+    @Published private(set) var isRefreshingRankedNews: Bool = false
     @Published var isRefreshingPodcasts: Bool = false
     @Published var isRefreshingWeather: Bool = false
     @Published var isRefreshingMarketQuotes: Bool = false
@@ -50,12 +63,18 @@ final class AppModel: ObservableObject {
     @Published private(set) var newsScopeCountry: String? = nil
     @Published var selectedNewsCategory: String = NewsCategoryCatalog.allCode
     @Published private(set) var newsScopeCategory: String = NewsCategoryCatalog.allCode
-    @Published private(set) var newsScopeSort: NewsSortMode = .importance
+    @Published private(set) var newsScopeSort: NewsSortMode = .newest
     @Published private(set) var newsCategoryFacets: [NewsCategoryFacet] = []
     @Published private(set) var newsPageTotal: Int? = nil
     @Published private(set) var newsUnassessedCount: Int? = nil
     @Published private(set) var newsMetadataIncluded: Bool = false
+    @Published private(set) var rankedNewsScopeCountry: String? = nil
+    @Published private(set) var rankedNewsScopeCategory: String = NewsCategoryCatalog.allCode
+    @Published private(set) var rankedNewsCategoryFacets: [NewsCategoryFacet] = []
+    @Published private(set) var rankedNewsPageTotal: Int? = nil
+    @Published private(set) var rankedNewsMetadataIncluded: Bool = false
     @Published var newsLoadError: String? = nil
+    @Published private(set) var rankedNewsLoadError: String? = nil
     @Published var podcastLoadError: String? = nil
     @Published var transportLoadError: String? = nil
     @Published var authStatus: AuthStatus = .checking
@@ -83,6 +102,7 @@ final class AppModel: ObservableObject {
     private let archiveNewsPageSize = 100
     private let archiveNewsMaxPages = 4
     private var newsRequestID = UUID()
+    private var rankedNewsRequestID = UUID()
     private var transportRefreshTask: Task<Void, Never>?
     private var transportRequestID = UUID()
 
@@ -114,7 +134,12 @@ final class AppModel: ObservableObject {
         self.authCallbackURL = callbackURL
         self.authCallbackScheme = callbackURL.scheme ?? "claritas"
         self.api.setAuthToken(authToken)
-        self.watchSync.update(baseURL: api.baseURLDescription, authToken: authToken)
+        self.watchSync.update(
+            baseURL: api.baseURLDescription,
+            authToken: authToken,
+            selectedCountry: nil,
+            newsCategory: selectedNewsCategory
+        )
     }
 
     func bootstrap() async {
@@ -314,7 +339,16 @@ final class AppModel: ObservableObject {
         } else {
             UserDefaults.standard.removeObject(forKey: authTokenKey)
         }
-        watchSync.update(baseURL: api.baseURLDescription, authToken: token)
+        synchronizeWatchContext()
+    }
+
+    private func synchronizeWatchContext() {
+        watchSync.update(
+            baseURL: api.baseURLDescription,
+            authToken: authToken,
+            selectedCountry: normalizedCountry(selectedCountry),
+            newsCategory: selectedNewsCategory
+        )
     }
 
     func loadInitial() async {
@@ -354,7 +388,7 @@ final class AppModel: ObservableObject {
                     mode: .recent,
                     country: initialNewsCountry,
                     category: initialNewsCategory,
-                    sort: .importance
+                    sort: .newest
                 ))
             }
             catch { return .failure(error) }
@@ -448,7 +482,7 @@ final class AppModel: ObservableObject {
             newsLoadMode = .recent
             newsScopeCountry = initialNewsCountry
             newsScopeCategory = initialNewsCategory
-            newsScopeSort = .importance
+            newsScopeSort = .newest
             newsLoadError = nil
         }
         if case .failure(let error) = resolvedNews, newsRequestID == initialNewsRequestID {
@@ -488,24 +522,34 @@ final class AppModel: ObservableObject {
         weather = []
         leadership = []
         news = []
+        rankedNews = []
         newsScopeCountry = nil
         selectedNewsCategory = NewsCategoryCatalog.allCode
         newsScopeCategory = NewsCategoryCatalog.allCode
-        newsScopeSort = .importance
+        newsScopeSort = .newest
         newsCategoryFacets = []
         newsPageTotal = nil
         newsUnassessedCount = nil
         newsMetadataIncluded = false
+        rankedNewsScopeCountry = nil
+        rankedNewsScopeCategory = NewsCategoryCatalog.allCode
+        rankedNewsCategoryFacets = []
+        rankedNewsPageTotal = nil
+        rankedNewsMetadataIncluded = false
         newsRequestID = UUID()
+        rankedNewsRequestID = UUID()
         isRefreshingNews = false
+        isRefreshingRankedNews = false
         podcasts = []
         marketQuotes = []
         countryMarkets = []
         transportOverview = nil
         transportOverviewCountry = nil
         newsLoadError = nil
+        rankedNewsLoadError = nil
         podcastLoadError = nil
         transportLoadError = nil
+        synchronizeWatchContext()
     }
 
     func clearSelection() {
@@ -513,6 +557,11 @@ final class AppModel: ObservableObject {
         selectedSymbol = nil
         selectedNewsItemID = nil
         selectedIntelligenceEventID = nil
+    }
+
+    func selectNewsItem(_ item: NewsItem?) {
+        selectedNewsItem = item
+        selectedNewsItemID = item?.id
     }
 
     func configurePushNotifications() async {
@@ -624,6 +673,7 @@ final class AppModel: ObservableObject {
         selectedNewsItemID = nil
         newsLoadError = nil
         selectedNewsCategory = normalized
+        synchronizeWatchContext()
     }
 
     func newsCategoryOptions(mode: NewsLoadMode, country: String?) -> [NewsCategoryOption] {
@@ -639,11 +689,87 @@ final class AppModel: ObservableObject {
         )
     }
 
+    func rankedNewsCategoryOptions(country: String?) -> [NewsCategoryOption] {
+        guard rankedNewsMetadataIncluded,
+              rankedNewsScopeCountry == normalizedCountry(country) else {
+            return NewsCategoryCatalog.options
+        }
+        return NewsCategoryCatalog.options(
+            facets: rankedNewsCategoryFacets,
+            allCount: rankedNewsScopeCategory == NewsCategoryCatalog.allCode
+                ? rankedNewsPageTotal
+                : nil,
+            metadataIncluded: true
+        )
+    }
+
+    func refreshRankedNews(
+        country: String? = nil,
+        category: String? = nil
+    ) async {
+        guard hasPaidAccess else {
+            clearAppData()
+            return
+        }
+
+        let requestedCountry = normalizedCountry(country)
+        let requestedCategory = NewsCategoryCatalog.normalized(category ?? selectedNewsCategory)
+        let requestID = UUID()
+        rankedNewsRequestID = requestID
+        if rankedNewsScopeCountry != requestedCountry || rankedNewsScopeCategory != requestedCategory {
+            rankedNews = []
+            rankedNewsCategoryFacets = []
+            rankedNewsPageTotal = nil
+            rankedNewsMetadataIncluded = false
+        }
+        rankedNewsScopeCountry = requestedCountry
+        rankedNewsScopeCategory = requestedCategory
+        isRefreshingRankedNews = true
+        rankedNewsLoadError = nil
+        defer {
+            if rankedNewsRequestID == requestID {
+                isRefreshingRankedNews = false
+            }
+        }
+
+        do {
+            let loadedPage = try await api.fetchNews(
+                limit: 3,
+                offset: 0,
+                q: nil,
+                country: requestedCountry,
+                category: requestedCategory,
+                sort: NewsSortMode.importance.rawValue,
+                archive: false,
+                includeMetadata: true
+            )
+            guard rankedNewsRequestID == requestID else { return }
+            rankedNews = Array(loadedPage.items.prefix(3))
+            let includesMetadata = loadedPage.page.metadata_included
+                ?? !loadedPage.facets.categories.isEmpty
+            rankedNewsCategoryFacets = includesMetadata ? loadedPage.facets.categories : []
+            rankedNewsPageTotal = includesMetadata ? loadedPage.page.total : nil
+            rankedNewsMetadataIncluded = includesMetadata
+            if let selectedID = selectedNewsItemID,
+               let refreshedSelection = rankedNews.first(where: { $0.id == selectedID }) {
+                selectedNewsItem = refreshedSelection
+            }
+        } catch {
+            guard rankedNewsRequestID == requestID else { return }
+            if isPaymentRequired(error) {
+                clearAppData()
+                await refreshAccess()
+                return
+            }
+            rankedNewsLoadError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
     func refreshNews(
         mode: NewsLoadMode = .recent,
         country: String? = nil,
         category: String? = nil,
-        sort: NewsSortMode = .importance
+        sort: NewsSortMode = .newest
     ) async {
         guard hasPaidAccess else {
             clearAppData()
@@ -984,6 +1110,10 @@ final class AppModel: ObservableObject {
         let includesMetadata = loadedPage.page.metadata_included
             ?? !loadedPage.facets.categories.isEmpty
         news = loadedPage.items
+        if let selectedID = selectedNewsItemID,
+           let refreshedSelection = loadedPage.items.first(where: { $0.id == selectedID }) {
+            selectedNewsItem = refreshedSelection
+        }
         newsCategoryFacets = includesMetadata ? loadedPage.facets.categories : []
         newsPageTotal = includesMetadata ? loadedPage.page.total : nil
         newsUnassessedCount = includesMetadata ? loadedPage.ranking.unassessed_count : nil

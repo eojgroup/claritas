@@ -6,6 +6,7 @@ import { getCountryMarketOverview } from "./connectors/market-overview";
 import { getMarketInstrumentSnapshots } from "./connectors/market-instruments";
 import { getCountryWeatherLatest } from "./connectors/weather";
 import { NEWS_ASSESSMENT_METHODOLOGY } from "./news-intelligence";
+import { currentNewsAssessmentSql, newsStoryKeySql } from "./news-country-attribution";
 import {
   getBriefingIntelligenceEvents,
   projectBriefingPriorityEvents,
@@ -260,7 +261,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     intelligenceEventResult,
   ] = await Promise.all([
     query<NewsContextRow>(
-      `WITH candidates AS MATERIALIZED (
+      `WITH base_candidates AS MATERIALIZED (
          SELECT
            i.id,
            s.name AS source_name,
@@ -280,15 +281,20 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
            translation.model AS translation_model,
            CASE WHEN translation.generated_summary IS NOT NULL THEN 'ai_generated' ELSE NULL END AS summary_kind,
            assessment.score AS importance_score,
-           ROW_NUMBER() OVER (
-             PARTITION BY canonical_news_publisher_key(i.url,i.payload,s.name)
-             ORDER BY assessment.score DESC NULLS LAST,i.event_time DESC,i.id DESC
-           ) AS publisher_rank
+           GREATEST(
+             0::double precision,
+             COALESCE(assessment.score,0)::double precision
+               - CASE WHEN i.payload->>'time_basis'='provider_first_seen' THEN 8 ELSE 0 END
+           ) AS base_quality_score,
+           canonical_news_publisher_key(i.url,i.payload,s.name) AS publisher_key,
+           ${newsStoryKeySql("i")} AS story_key,
+           COALESCE(i.payload->>'time_basis'='provider_first_seen',false) AS time_is_provider_discovery
          FROM item i
          JOIN source s ON s.id = i.source_id
          LEFT JOIN news_item_assessment assessment
            ON assessment.item_id=i.id
           AND assessment.methodology_version='${NEWS_ASSESSMENT_METHODOLOGY}'
+          AND ${currentNewsAssessmentSql("i", "assessment")}
          LEFT JOIN item_translation translation
            ON translation.item_id = i.id
           AND translation.target_language_code = $4
@@ -303,6 +309,29 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
              OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) IN ('en', 'eng', 'english')
              OR lower(replace(COALESCE(i.language_code, ''), '_', '-')) LIKE 'en-%'
            )
+       ), story_ranked AS MATERIALIZED (
+         SELECT candidate.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY candidate.story_key
+                  ORDER BY (candidate.importance_score IS NULL) ASC,
+                           candidate.time_is_provider_discovery ASC,
+                           candidate.base_quality_score DESC,
+                           candidate.event_time DESC,
+                           candidate.id DESC
+                ) AS story_rank
+         FROM base_candidates candidate
+       ), distinct_news AS MATERIALIZED (
+         SELECT * FROM story_ranked WHERE story_rank=1
+       ), candidates AS MATERIALIZED (
+         SELECT candidate.*,
+                ROW_NUMBER() OVER (
+                  PARTITION BY candidate.publisher_key
+                  ORDER BY candidate.base_quality_score DESC,
+                           candidate.importance_score DESC NULLS LAST,
+                           candidate.event_time DESC,
+                           candidate.id DESC
+                ) AS publisher_rank
+         FROM distinct_news candidate
        )
        SELECT id,source_name,publisher,title,original_title,summary,url,
               country_iso2,language_code,event_time,translation_provider,
@@ -312,7 +341,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        -- stay eligible but sort below assessed material reporting.
        ORDER BY GREATEST(
                   0::double precision,
-                  COALESCE(importance_score,0)
+                  base_quality_score
                     - LEAST(24::double precision,(publisher_rank-1)::double precision*8)
                 ) DESC,
                 importance_score DESC NULLS LAST,

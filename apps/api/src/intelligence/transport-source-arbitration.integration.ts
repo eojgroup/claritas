@@ -69,22 +69,26 @@ test("transport persistence keeps position and provenance from the winning sourc
     );
 
   try {
-    await storeTransportSnapshots([
+    const initialStored = await storeTransportSnapshots([
       snapshot("aisstream", observedAt, 1, "primary-newer"),
     ]);
+    assert.equal(initialStored.length, 1);
     const primaryRow = (await persistedRow()).rows[0];
-    await storeTransportSnapshots([
+    const rejectedOlder = await storeTransportSnapshots([
       snapshot("barentswatch", olderObservedAt, 2, "fallback-older"),
     ]);
+    assert.equal(rejectedOlder.length, 0);
     assert.deepEqual((await persistedRow()).rows[0], primaryRow);
 
-    await storeTransportSnapshots([
+    const officialTieStored = await storeTransportSnapshots([
       snapshot("barentswatch", observedAt, 3, "official-tie"),
     ]);
+    assert.equal(officialTieStored.length, 1);
     const officialRow = (await persistedRow()).rows[0];
-    await storeTransportSnapshots([
+    const rejectedLowerPriorityTie = await storeTransportSnapshots([
       snapshot("aisstream", observedAt, 4, "primary-lower-priority-tie"),
     ]);
+    assert.equal(rejectedLowerPriorityTie.length, 0);
     assert.deepEqual((await persistedRow()).rows[0], officialRow);
 
     // A newer source always wins, but sparse metadata from that source must

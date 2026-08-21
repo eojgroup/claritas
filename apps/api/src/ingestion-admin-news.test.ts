@@ -15,25 +15,65 @@ test("scheduled news defaults enable governed providers within the hourly headli
   const plan = buildNewsRunPlan({});
 
   assert.deepEqual(plan.providers, { gdelt: true, institutionalRss: true, govUk: true });
-  assert.deepEqual(plan.gdelt, { timespan: "30min", maxRecords: 25, maxRawRows: 190 });
+  assert.deepEqual(plan.gdelt, { timespan: "1h", maxRecords: 25, maxRawRows: 190 });
+  assert.equal(plan.runTranslations, true);
+});
+
+test("release news plans are acquisition-only and carry durable ownership", async () => {
+  const { buildNewsRunPlan } = await ingestion;
+  const plan = buildNewsRunPlan({
+    runTranslations: false,
+    releaseId: "release-123-attempt-2",
+  });
+
+  assert.equal(plan.runTranslations, false);
+  assert.equal(plan.releaseId, "release-123-attempt-2");
+  assert.equal(plan.requestPayload.run_translations, false);
+  assert.equal(plan.requestPayload.release_id, "release-123-attempt-2");
+});
+
+test("news run queueing is atomic and release cancellation is exact-owner scoped", () => {
+  const implementation = readFileSync(resolve(__dirname, "ingestion-admin.ts"), "utf8");
+  const api = readFileSync(resolve(__dirname, "index.ts"), "utf8");
+  assert.match(implementation, /pg_advisory_xact_lock\(hashtextextended\(\$1,0\)\)/);
+  assert.match(implementation, /pipeline='news' AND status IN \('queued','running'\)/);
+  assert.match(implementation, /request_payload->>'release_id'=\$2/);
+  assert.match(implementation, /release_cancelled/);
+  assert.match(implementation, /started_at < now\(\)-make_interval/);
+  assert.match(api, /buildNewsRunPlan\(\{ runTranslations: false, releaseId \}\)/);
+  assert.match(api, /buildNewsRuntimeHealthQuery\(\),\s*\[NEWS_ASSESSMENT_METHODOLOGY, runId\]/);
+  assert.match(api, /cancelReleaseNewsRun\(\{ runId, releaseId \}\)/);
 });
 
 test("news run plan caps GDELT volume and validates duration syntax", async () => {
   const { buildNewsRunPlan, IngestionValidationError } = await ingestion;
   const plan = buildNewsRunPlan({
     providers: { gdelt: true, institutionalRss: false, govUk: false },
-    gdelt: { timespan: "30min", maxRecords: 500, maxRawRows: 5_000 },
+    gdelt: { timespan: "1h", maxRecords: 500, maxRawRows: 5_000 },
   });
-  assert.deepEqual(plan.gdelt, { timespan: "30min", maxRecords: 25, maxRawRows: 190 });
+  assert.deepEqual(plan.gdelt, { timespan: "1h", maxRecords: 25, maxRawRows: 190 });
   assert.throws(
     () => buildNewsRunPlan({ gdelt: { timespan: "yesterday" } }),
     IngestionValidationError,
+  );
+  assert.throws(
+    () => buildNewsRunPlan({ gdelt: { timespan: "30min" } }),
+    /DOC API rejects shorter windows/,
   );
 });
 
 test("GDELT publisher coverage cannot hide behind fresh machine archives", async () => {
   const { classifyGdeltNewsCoverage } = await ingestion;
   assert.equal(classifyGdeltNewsCoverage({ doc_status: "healthy" }), "success");
+  assert.equal(classifyGdeltNewsCoverage({
+    doc_status: "healthy",
+    health: "degraded",
+    raw_archive_status: "degraded",
+  }), "degraded");
+  assert.equal(classifyGdeltNewsCoverage({
+    doc_status: "healthy",
+    health: "failed",
+  }), "failed");
   assert.equal(classifyGdeltNewsCoverage({
     doc_status: "degraded_fallback",
     gal_fallback: { selected: 4, latest_event_time: "2026-08-14T09:15:00Z" },
@@ -102,11 +142,13 @@ test("news importance and category filters are applied before pagination", () =>
   assert.match(route, /buildNewsReaderQuery\(/);
   assert.match(reader, /const candidateOrder = sort === "importance"/);
   assert.match(reader, /WITH base_news AS NOT MATERIALIZED/);
-  assert.match(reader, /i\.event_time >= now\(\) - interval '8 days'/);
+  assert.match(reader, /i\.event_time >= now\(\) - interval '48 hours'/);
   assert.match(reader, /i\.event_time <= now\(\) \+ interval '5 minutes'/);
   assert.match(reader, /createNewsQueryParameterPlan\(displayLanguage, includeMetadata\)/);
   assert.match(reader, /jsonb_array_elements_text\(facet_item\.categories\)/);
   assert.match(reader, /category_facets AS MATERIALIZED/);
+  assert.match(reader, /category_eligible_news AS NOT MATERIALIZED/);
+  assert.match(reader, /story_ranked AS MATERIALIZED/);
   assert.match(reader, /eligible_news AS NOT MATERIALIZED/);
   assert.match(reader, /WHERE candidate\.categories \? \$\$\{categoryIndex\}/);
   assert.ok(implementation.indexOf("FROM eligible_news candidate") < implementation.indexOf("LIMIT $${limitIndex} OFFSET $${offsetIndex}"));
@@ -118,6 +160,54 @@ test("news importance and category filters are applied before pagination", () =>
   assert.match(reader, /assessment\.methodology_version=\$\$\{methodologyIndex\}/);
 });
 
+test("balanced discovery migration restores timely news without inventing publisher countries", () => {
+  const migration = readFileSync(resolve(
+    __dirname,
+    "../../../infra/gcp/sql/V52__balanced_news_discovery.sql",
+  ), "utf8");
+  const indexMigration = readFileSync(resolve(
+    __dirname,
+    "../../../infra/gcp/sql/V53__balanced_news_indexes.sql",
+  ), "utf8");
+  const indexMigrationConfig = readFileSync(resolve(
+    __dirname,
+    "../../../infra/gcp/sql/V53__balanced_news_indexes.sql.conf",
+  ), "utf8");
+  const flywayJob = readFileSync(resolve(
+    __dirname,
+    "../../../infra/k8s/migrations/flyway-job.yaml",
+  ), "utf8");
+  assert.match(migration, /WHEN schedule_interval_minutes = 60 THEN 15/);
+  assert.match(migration, /ELSE schedule_interval_minutes/);
+  assert.match(migration, /WHERE pipeline = 'news'/);
+  assert.match(migration, /"timespan":"1h","maxRecords":25,"maxRawRows":190/);
+  assert.match(migration, /IN \('15min','30min','45min'\)/);
+  assert.match(migration, /publication_time_verified/);
+  assert.match(migration, /subject_country_iso2s/);
+  assert.match(migration, /location_aliases/);
+  assert.match(migration, /INSERT INTO country \(iso2, iso3, name, region\)/);
+  assert.match(migration, /\('ZW','ZWE','Zimbabwe','Africa'\)/);
+  assert.match(migration, /occupied palestinian territories/);
+  assert.match(migration, /democratic republic of the congo/);
+  assert.match(migration, /institutional_jurisdiction/);
+  assert.match(migration, /'','none','publisher_country_fallback','feed_hint','locale_hint','url_tld/);
+  assert.match(migration, /country_inference,source/);
+  assert.match(migration, /country_iso2 = NULL/);
+  assert.doesNotMatch(migration, /canonical_gdelt_article_url/);
+  assert.match(migration, /claritas\.suppress_item_outbox/);
+  assert.match(migration, /claritas\.preserve_updated_at/);
+  assert.doesNotMatch(migration, /CREATE INDEX CONCURRENTLY/);
+  assert.match(indexMigration, /DROP INDEX CONCURRENTLY IF EXISTS item_news_source_url_idx/);
+  assert.match(indexMigration, /DROP INDEX CONCURRENTLY IF EXISTS item_news_source_canonical_url_idx/);
+  assert.match(indexMigration, /CREATE INDEX CONCURRENTLY item_news_source_url_idx/);
+  assert.match(indexMigration, /CREATE INDEX CONCURRENTLY item_news_source_canonical_url_idx/);
+  assert.doesNotMatch(migration, /item_gdelt_recent_event_idx/);
+  assert.match(indexMigrationConfig, /executeInTransaction=false/);
+  assert.match(flywayJob, /FLYWAY_POSTGRESQL_TRANSACTIONAL_LOCK[\s\S]*value: "false"/);
+  assert.match(migration, /lower\(provider\.name\) IN \('gdelt','govuk_search','institutional_rss'\)/);
+  assert.doesNotMatch(migration, /UPDATE source/i);
+});
+
 test("newest news is strictly chronological in current and explicit archive modes", () => {
   const api = readFileSync(resolve(__dirname, "index.ts"), "utf8");
   const route = api.slice(
@@ -127,6 +217,7 @@ test("newest news is strictly chronological in current and explicit archive mode
   const reader = readFileSync(resolve(__dirname, "news-reader-query.ts"), "utf8");
 
   assert.match(reader, /: "candidate\.event_time DESC NULLS LAST, candidate\.id DESC"/);
+  assert.match(route, /req\.query\.sort[\s\S]*: "newest"/);
   assert.doesNotMatch(reader, /country_rank/);
   assert.match(route, /archive,/);
   assert.match(route, /metadata_included: includeMetadata/);
@@ -186,8 +277,13 @@ test("daily briefing uses current assessments and the same publisher-burst penal
 
   assert.match(context, /LEFT JOIN news_item_assessment assessment\s+ON assessment\.item_id=i\.id/);
   assert.match(context, /assessment\.methodology_version='\$\{NEWS_ASSESSMENT_METHODOLOGY\}'/);
-  assert.match(context, /PARTITION BY canonical_news_publisher_key\(i\.url,i\.payload,s\.name\)/);
-  assert.match(context, /COALESCE\(importance_score,0\)\s+- LEAST\(24::double precision/);
+  assert.match(context, /currentNewsAssessmentSql\("i", "assessment"\)/);
+  assert.match(context, /\$\{newsStoryKeySql\("i"\)\} AS story_key/);
+  assert.match(context, /PARTITION BY candidate\.story_key/);
+  assert.match(context, /COALESCE\(i\.payload->>'time_basis'='provider_first_seen',false\) AS time_is_provider_discovery/);
+  assert.match(context, /FROM distinct_news candidate/);
+  assert.match(context, /PARTITION BY candidate\.publisher_key\s+ORDER BY candidate\.base_quality_score DESC/);
+  assert.match(context, /base_quality_score\s+- LEAST\(24::double precision,\(publisher_rank-1\)::double precision\*8\)/);
   assert.match(context, /importance_score DESC NULLS LAST,\s+event_time DESC/);
   assert.doesNotMatch(context, /COALESCE\(i\.event_time, i\.created_at\)/);
 });
@@ -198,7 +294,17 @@ test("news country coverage exposes freshness and provider depth", () => {
     api.indexOf('app.get("/api/news/country-stats"'),
     api.indexOf("// Admin user/role management"),
   );
+  const attribution = readFileSync(resolve(__dirname, "news-country-attribution.ts"), "utf8");
 
-  assert.match(route, /MAX\(COALESCE\(i\.event_time, i\.created_at\)\) AS latest_at/);
-  assert.match(route, /COUNT\(DISTINCT s\.id\)::int AS provider_count/);
+  assert.match(route, /buildNewsCountryStatsQuery\(\)/);
+  assert.match(route, /\[days, NEWS_ASSESSMENT_METHODOLOGY\]/);
+  assert.match(route, /Math\.min\([\s\S]*, 45\)/);
+  assert.match(attribution, /max\(publisher_event_time\) AS latest_at/);
+  assert.match(attribution, /publication_time_verified'='true'/);
+  assert.match(attribution, /count\(DISTINCT publisher_key\) FILTER \([\s\S]*AS provider_count/);
+  assert.match(attribution, /verified_count/);
+  assert.match(attribution, /JOIN news_item_assessment assessment/);
+  assert.match(attribution, /metadata->>'retired'/);
+  assert.match(attribution, /count\(DISTINCT story_key\)::int AS count/);
+  assert.doesNotMatch(attribution, /COALESCE\(i\.event_time,i\.created_at\)/);
 });

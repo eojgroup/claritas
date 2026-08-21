@@ -38,7 +38,8 @@ conclusion. Categories and topic tags are automated navigation metadata.
 ## Priority
 
 The priority assessment is versioned and stored separately from the immutable
-publisher record. It considers verified publication freshness, structured
+publisher record. It considers verified publication or explicitly labelled
+first-discovery freshness, structured
 market-relevant topics and the strongest eligible linked event, including its
 severity, confidence and relevance. A linked event contributes once; its
 component scores are not counted again under new labels.
@@ -48,15 +49,28 @@ plain-language reason alongside the tier. They do not call GDELT tone “impact,
 infer authority from a publisher name, or describe multiple evidence domains as
 multiple publishers.
 
+GDELT discovery uses independent bounded lanes for markets/macroeconomy,
+companies/technology, geopolitics/policy, energy/transport and major
+hazards/health. A failed or rate-limited lane degrades that run without
+discarding successful lanes. Exact syndicated headlines are collapsed in the
+reader and category facets so redistribution does not masquerade as additional
+coverage.
+
+Publisher timestamps remain preferred. When a current GDELT URL has no
+publisher-owned timestamp, its first-ever Claritas discovery may enter the
+chronology as `provider_first_seen`. It is visibly identified as discovery
+time, receives lower source quality and an additional importance-order penalty,
+and its earliest time is immutable: rediscovery cannot refresh it.
+
 When an assessment is temporarily unavailable, the API returns an explicit
 wire fallback (`Other`, `Routine`, `is_fallback: true`) and clients label it
 `Unranked — assessment pending`; they do not present missing assessment as a
 low-importance conclusion. “Latest” remains
 available as a separate, strictly chronological sort for readers who want an
-unranked chronology. The normal attention queue covers verified publication
-times from the last eight days; older reporting is available only through the
-explicit archive mode. Missing or materially future-dated publication times do
-not enter the reader queue.
+unranked chronology. The normal attention queue covers verified publication or
+explicitly labelled first-discovery times from the last 48 hours; older
+reporting is available only through the explicit archive mode. Missing or
+materially future-dated effective times do not enter the reader queue.
 
 ## Corroboration and clustering
 

@@ -1,7 +1,7 @@
 export const MARITIME_SOURCE_DEFINITIONS = {
   aisstream: {
     provider: "AISstream",
-    coverage: "Best-effort global terrestrial reception",
+    coverage: "Configured AISstream reception areas",
     license: "Provider terms",
     sourceUrl: "https://aisstream.io/",
     priority: 100,

@@ -1,5 +1,33 @@
 import type { NewsItem, NewsTranslation } from "../lib/api";
 
+/**
+ * Keeps browse-feed chronology deterministic without mutating the response.
+ * Dated stories are newest first; undated/invalid stories retain
+ * their input order at the end of the list.
+ */
+export function newestNewsFirst<T extends Pick<NewsItem, "event_time">>(
+  items: readonly T[],
+): T[] {
+  return items
+    .map((item, index) => {
+      const parsed = item.event_time ? Date.parse(item.event_time) : Number.NaN;
+      return {
+        item,
+        index,
+        timestamp: Number.isFinite(parsed) ? parsed : null,
+      };
+    })
+    .sort((left, right) => {
+      if (left.timestamp != null && right.timestamp != null) {
+        return right.timestamp - left.timestamp || left.index - right.index;
+      }
+      if (left.timestamp != null) return -1;
+      if (right.timestamp != null) return 1;
+      return left.index - right.index;
+    })
+    .map(({ item }) => item);
+}
+
 export function mergeNewsTranslationIntoItems(
   items: NewsItem[],
   itemId: number,

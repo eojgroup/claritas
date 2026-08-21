@@ -568,9 +568,7 @@ private enum WatchMapData {
         leadership: [CountryLeadership]
     ) -> [WatchMapPoint] {
         var values: [(iso: String, label: String, detail: String, magnitude: Double)] = []
-        let newsCounts = Dictionary(grouping: news.compactMap { item in
-            item.country_iso2?.uppercased()
-        }, by: { $0 }).mapValues(\.count)
+        let newsCounts = Dictionary(grouping: news.flatMap(\.subjectCountries), by: { $0 }).mapValues(\.count)
 
         switch layer {
         case .news:
@@ -1302,7 +1300,7 @@ private struct WatchNewsView: View {
                             Button {
                                 model.openOnPhone(
                                     "news",
-                                    country: item.country_iso2,
+                                    country: model.selectedCountry ?? item.country_iso2,
                                     newsID: item.id,
                                     category: model.selectedNewsCategory
                                 )
@@ -1318,7 +1316,10 @@ private struct WatchNewsView: View {
                     }
                 } header: {
                     HStack {
-                        WatchSectionLabel(title: "Top reporting", icon: "newspaper")
+                        WatchSectionLabel(
+                            title: model.selectedCountry.map { "\($0) reporting" } ?? "Top reporting",
+                            icon: "newspaper"
+                        )
                         Spacer()
                         WatchRefreshStatus()
                     }
@@ -1355,7 +1356,11 @@ private struct WatchNewsView: View {
                     .font(.caption2)
                 }
             } else {
-                Text("No ranked stories in this category.")
+                Text(
+                    model.selectedCountry.map {
+                        "No ranked stories for \($0) in this category."
+                    } ?? "No ranked stories in this category."
+                )
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
