@@ -525,7 +525,7 @@ struct NewsItem: Codable, Identifiable {
 
     var primaryCategoryLabel: String {
         if importance?.is_fallback == true { return "Category pending" }
-        NewsCategoryCatalog.label(for: primary_category ?? categories.first)
+        return NewsCategoryCatalog.label(for: primary_category ?? categories.first)
     }
 
     var importanceTierLabel: String? {
@@ -540,7 +540,7 @@ struct NewsItem: Codable, Identifiable {
         if importance?.is_fallback == true {
             return importance?.reasons.first?.label ?? "Automated assessment pending"
         }
-        importance?.reasons.first?.label
+        return importance?.reasons.first?.label
     }
 
     /// Keeps the most decision-useful tags visible when category tags arrive first.
