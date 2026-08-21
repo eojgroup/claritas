@@ -290,6 +290,18 @@ const PIPELINE_SOURCE_DEFAULT: Record<IngestionPipeline, SourceConfigKey> = {
 
 const activeRunPromises = new Map<number, Promise<void>>();
 const NEWS_RUN_LOCK_KEY = "claritas:ingestion-run:news";
+const INGESTION_RUN_HEARTBEAT_SECONDS = clampInt(
+  process.env.INGESTION_RUN_HEARTBEAT_SECONDS,
+  5,
+  60,
+  15,
+);
+const NEWS_RELEASE_HANDOFF_STALE_SECONDS = clampInt(
+  process.env.NEWS_RELEASE_HANDOFF_STALE_SECONDS,
+  30,
+  600,
+  90,
+);
 const NEWS_ACTIVE_RUN_STALE_MINUTES = clampInt(
   process.env.NEWS_ACTIVE_RUN_STALE_MINUTES,
   15,
@@ -602,7 +614,7 @@ async function createOrReuseNewsRun(
              )
          WHERE pipeline='news'
            AND status IN ('queued','running')
-           AND started_at < now()-make_interval(mins => $2::int)
+           AND updated_at < now()-make_interval(mins => $2::int)
          RETURNING id
        )
        INSERT INTO ingestion_run_log (run_id,logged_at,level,message,context)
@@ -613,6 +625,44 @@ async function createOrReuseNewsRun(
         NEWS_ACTIVE_RUN_STALE_MINUTES,
       ],
     );
+
+    if (options.releaseId) {
+      // A news task executes inside the API process. Once a rollout replaces
+      // that process, its durable row can otherwise block the release for the
+      // generic 90-minute stale window. Current processes heartbeat active
+      // rows, so a release may safely reclaim only a row whose executor has
+      // stopped reporting for the bounded handoff interval.
+      await client.query(
+        `WITH reclaimed AS (
+           UPDATE ingestion_run
+           SET status='failed',
+               finished_at=now(),
+               updated_at=now(),
+               error=COALESCE(error,$1),
+               stats=COALESCE(stats,'{}'::jsonb) || jsonb_build_object(
+                 'release_handoff_reclaimed',true,
+                 'release_handoff_reclaimed_at',now(),
+                 'stale_heartbeat_seconds',$2::int,
+                 'replacement_release_id',$3::text
+               )
+           WHERE pipeline='news'
+             AND status IN ('queued','running')
+             AND updated_at < now()-make_interval(secs => $2::int)
+           RETURNING id
+         )
+         INSERT INTO ingestion_run_log (run_id,logged_at,level,message,context)
+         SELECT id,now(),'error',$1,jsonb_build_object(
+           'stale_heartbeat_seconds',$2::int,
+           'replacement_release_id',$3::text
+         )
+         FROM reclaimed`,
+        [
+          "Reclaimed an orphaned news ingestion run during release handoff.",
+          NEWS_RELEASE_HANDOFF_STALE_SECONDS,
+          options.releaseId,
+        ],
+      );
+    }
 
     const active = await client.query<{ id: number; release_id: string | null }>(
       `SELECT id,request_payload->>'release_id' AS release_id
@@ -709,6 +759,24 @@ async function safeAppendRunLog(
 }
 
 function startRunTask(runId: number, task: () => Promise<void>) {
+  let heartbeatInFlight = false;
+  const heartbeat = setInterval(() => {
+    if (heartbeatInFlight) return;
+    heartbeatInFlight = true;
+    void query(
+      `UPDATE ingestion_run
+       SET updated_at=now()
+       WHERE id=$1 AND status IN ('queued','running')`,
+      [runId],
+    ).catch((error) => {
+      // A missed beat remains recoverable; the release handoff requires
+      // several consecutive misses before it can reclaim the row.
+      console.warn(`Failed to heartbeat ingestion run ${runId}:`, error);
+    }).finally(() => {
+      heartbeatInFlight = false;
+    });
+  }, INGESTION_RUN_HEARTBEAT_SECONDS * 1_000);
+  heartbeat.unref();
   const promise = (async () => {
     try {
       await task();
@@ -716,6 +784,7 @@ function startRunTask(runId: number, task: () => Promise<void>) {
       // eslint-disable-next-line no-console
       console.error(`Unhandled error in ingestion run ${runId}:`, err);
     } finally {
+      clearInterval(heartbeat);
       activeRunPromises.delete(runId);
     }
   })();
