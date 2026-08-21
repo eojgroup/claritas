@@ -39,7 +39,7 @@ test("news run queueing is atomic and release cancellation is exact-owner scoped
   assert.match(implementation, /pipeline='news' AND status IN \('queued','running'\)/);
   assert.match(implementation, /request_payload->>'release_id'=\$2/);
   assert.match(implementation, /release_cancelled/);
-  assert.match(implementation, /updated_at < now\(\)-make_interval\(mins => \$2::int\)/);
+  assert.match(implementation, /started_at < now\(\)-make_interval\(mins => \$2::int\)/);
   assert.match(implementation, /INGESTION_RUN_HEARTBEAT_SECONDS/);
   assert.match(implementation, /updated_at < now\(\)-make_interval\(secs => \$2::int\)/);
   assert.match(implementation, /release_handoff_reclaimed/);

@@ -614,7 +614,7 @@ async function createOrReuseNewsRun(
              )
          WHERE pipeline='news'
            AND status IN ('queued','running')
-           AND updated_at < now()-make_interval(mins => $2::int)
+           AND started_at < now()-make_interval(mins => $2::int)
          RETURNING id
        )
        INSERT INTO ingestion_run_log (run_id,logged_at,level,message,context)
