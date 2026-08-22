@@ -1281,65 +1281,45 @@ jobs:
             echo "::notice title=Transport runtime verified::AISstream primary is current for its configured subscription areas."
           fi
 
-          # The general transport gate proves provider liveness. Prove the
-          # reported Singapore regression separately against uncached persisted
-          # data: at least one fresh maritime position must currently resolve to
-          # SG. Flag, origin, destination and route links do not qualify.
-          singapore_transport_ready=0
-          singapore_transport_body=""
-          for attempt in $(seq 1 24); do
-            echo "Singapore maritime coverage verification attempt ${attempt}/24"
-            singapore_transport_body="$(
-              timeout --signal=TERM --kill-after=5s 15s \
-                kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
-                  fetch("http://127.0.0.1:8080/internal/transport/singapore-health", { signal: AbortSignal.timeout(5_000) })
-                    .then((response) => response.text())
-                    .then((value) => process.stdout.write(value))
-                    .catch(() => process.exit(1));
-                ' 2>/dev/null || true
-            )"
-            singapore_transport_ready_value="$(
-              printf '%s' "$singapore_transport_body" | node -e '
-                let input = "";
-                process.stdin.on("data", (chunk) => { input += chunk; });
-                process.stdin.on("end", () => {
-                  try {
-                    const health = JSON.parse(input);
-                    process.stdout.write(String(
-                      health.ready === true &&
-                      health.state === "current_singapore_vessel" &&
-                      health.country === "SG" &&
-                      health.mode === "maritime" &&
-                      health.position_basis === "current_country_iso2" &&
-                      health.cache_bypassed === true &&
-                      Number(health.current_vessels) > 0
-                    ));
-                  } catch {
-                    process.stdout.write("false");
-                  }
-                });
-              '
-            )"
-            if [ "$singapore_transport_ready_value" = "true" ]; then
-              singapore_transport_ready=1
-              break
-            fi
-            printf '%s\n' "$singapore_transport_body"
-            if [ "$attempt" -lt 24 ]; then sleep 10; fi
-          done
-          if [ "$singapore_transport_ready" -ne 1 ]; then
-            echo "::error::No fresh position-derived maritime entity is currently in Singapore; flag, origin, destination and route links are intentionally excluded." >&2
-            printf '%s\n' "$singapore_transport_body"
-            kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
-              grep -E "(AISstream|aisstream_|mpa_oceans_x_maritime_refresh|MPA OCEANS-X|singapore_transport_health_failed)" || true
-            exit 1
-          fi
+          # Report the Singapore regression against uncached persisted data,
+          # but do not make instantaneous vessel occupancy a release invariant.
+          # The strict gate above already proves that at least one configured
+          # transport provider is current. Singapore can legitimately be empty
+          # when AISstream is silent and the optional MPA feed is not configured;
+          # rolling back healthy application code cannot restore that external
+          # coverage. Keep this visible as a release warning for operator action.
+          singapore_transport_body="$(
+            timeout --signal=TERM --kill-after=5s 15s \
+              kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
+                fetch("http://127.0.0.1:8080/internal/transport/singapore-health", { signal: AbortSignal.timeout(5_000) })
+                  .then((response) => response.text())
+                  .then((value) => process.stdout.write(value))
+                  .catch(() => process.exit(1));
+              ' 2>/dev/null || true
+          )"
           printf '%s' "$singapore_transport_body" | node -e '
             let input = "";
             process.stdin.on("data", (chunk) => { input += chunk; });
             process.stdin.on("end", () => {
-              const health = JSON.parse(input);
-              console.log("Singapore maritime coverage verified: " + health.current_vessels + " fresh position-derived vessels; latest=" + health.latest_observed_at + "; sources=" + (health.source_names || []).join(","));
+              try {
+                const health = JSON.parse(input);
+                const current =
+                  health.ready === true &&
+                  health.state === "current_singapore_vessel" &&
+                  health.country === "SG" &&
+                  health.mode === "maritime" &&
+                  health.position_basis === "current_country_iso2" &&
+                  health.cache_bypassed === true &&
+                  Number(health.current_vessels) > 0;
+                if (current) {
+                  console.log("::notice title=Singapore maritime coverage verified::" + health.current_vessels + " fresh position-derived vessels; latest=" + health.latest_observed_at + "; sources=" + (health.source_names || []).join(","));
+                } else {
+                  console.log("::warning title=Singapore maritime positions unavailable::No fresh position-derived vessel currently resolves to Singapore. This is an external coverage diagnostic, not an application rollout failure; configure MPA OCEANS-X or restore AISstream traffic.");
+                  console.log(input || "Singapore health response was empty.");
+                }
+              } catch {
+                console.log("::warning title=Singapore maritime diagnostic unavailable::The post-rollout Singapore position check returned no readable health payload; the strict provider-liveness gate passed.");
+              }
             });
           '
           kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
