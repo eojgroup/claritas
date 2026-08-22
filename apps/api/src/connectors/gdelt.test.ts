@@ -610,6 +610,19 @@ test("GDELT URL reconciliation repairs complete item and signal history in bound
   );
 });
 
+test("GDELT first-seen repair makes canonical discovery chronology immutable", () => {
+  const migration = readFileSync(resolve(
+    __dirname,
+    "../../../../infra/gcp/sql/V54__repair_gdelt_first_seen_chronology.sql",
+  ), "utf8");
+  assert.match(migration, /payload->>'time_basis'='provider_first_seen'/);
+  assert.match(migration, /LEAST\([\s\S]*i\.event_time,[\s\S]*i\.created_at/);
+  assert.match(migration, /MIN\(earliest_row_seen_at\) AS first_seen_at/);
+  assert.match(migration, /GROUP BY source_id,story_key/);
+  assert.match(migration, /SET event_time=r\.first_seen_at/);
+  assert.match(migration, /\{first_provider_seen_at\}/);
+});
+
 test("GDELT conflict updates retain trusted country evidence through a transient GKG miss", () => {
   const source = readFileSync(resolve(__dirname, "gdelt.ts"), "utf8");
   const merge = source.slice(

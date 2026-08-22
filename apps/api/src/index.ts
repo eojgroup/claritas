@@ -3407,7 +3407,7 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
     }
     const country =
       typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
-    if (!/^[A-Z]{2}$/.test(country)) {
+    if (country && !/^[A-Z]{2}$/.test(country)) {
       return res.status(400).json({ error: "country must be an ISO alpha-2 code." });
     }
     const corridorCountry =
@@ -3416,6 +3416,9 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
         : "";
     if (corridorCountry && !/^[A-Z]{2}$/.test(corridorCountry)) {
       return res.status(400).json({ error: "corridor must be an ISO alpha-2 code." });
+    }
+    if (corridorCountry && !country) {
+      return res.status(400).json({ error: "corridor requires a country scope." });
     }
     if (corridorCountry && corridorCountry === country) {
       return res.status(400).json({ error: "corridor must identify a different country." });
@@ -3430,7 +3433,7 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
     const overview = await getTransportOverview({
       detail,
       mode,
-      country,
+      country: country || undefined,
       corridorCountry: corridorCountry || undefined,
       entityLimit: Number.isFinite(entityLimitRaw as number) ? entityLimitRaw : undefined,
       bypassCache: refresh,

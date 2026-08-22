@@ -309,7 +309,9 @@ private struct WatchSignalGlanceView: View {
             podcasts: model.podcasts,
             weather: model.weather,
             markets: model.markets,
-            leadership: model.leadership
+            leadership: model.leadership,
+            events: model.intelligenceEvents,
+            transport: model.transport
         )
     }
 
@@ -391,7 +393,7 @@ private struct WatchSignalGlanceView: View {
                             }
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            Text("News 40% · podcast 25% · weather 15% · markets 15%")
+                            Text("News 30 · events 25 · transport 15 · weather 10 · markets 10 · podcasts 10")
                                 .font(.system(size: 8))
                                 .foregroundStyle(.secondary)
                         }
@@ -565,7 +567,9 @@ private enum WatchMapData {
         podcasts: [PodcastEpisode],
         weather: [CountryWeather],
         markets: [MarketQuote],
-        leadership: [CountryLeadership]
+        leadership: [CountryLeadership],
+        events: [IntelligenceEvent],
+        transport: TransportOverview?
     ) -> [WatchMapPoint] {
         var values: [(iso: String, label: String, detail: String, magnitude: Double)] = []
         let newsCounts = Dictionary(grouping: news.flatMap(\.subjectCountries), by: { $0 }).mapValues(\.count)
@@ -599,7 +603,9 @@ private enum WatchMapData {
                 news: news,
                 podcasts: podcasts,
                 weather: weather,
-                marketQuotes: markets
+                marketQuotes: markets,
+                events: events,
+                transport: transport
             ).map { score in
                 return (
                     score.country,

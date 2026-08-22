@@ -52,6 +52,7 @@ final class AppModel: ObservableObject {
     @Published var marketQuotes: [MarketQuote] = []
     @Published var countryMarkets: [CountryMarketOverview] = []
     @Published var transportOverview: TransportOverview? = nil
+    @Published private(set) var signalTransportOverview: TransportOverview? = nil
     @Published private(set) var transportOverviewCountry: String? = nil
     @Published var isRefreshingNews: Bool = false
     @Published private(set) var isRefreshingRankedNews: Bool = false
@@ -544,6 +545,7 @@ final class AppModel: ObservableObject {
         marketQuotes = []
         countryMarkets = []
         transportOverview = nil
+        signalTransportOverview = nil
         transportOverviewCountry = nil
         newsLoadError = nil
         rankedNewsLoadError = nil
@@ -897,12 +899,7 @@ final class AppModel: ObservableObject {
             }
         }
 
-        guard let country = transportFocusCountry else {
-            transportOverview = nil
-            transportOverviewCountry = nil
-            transportLoadError = "Transport intelligence is waiting for a highlighted country."
-            return
-        }
+        let country = transportFocusCountry
         if transportOverviewCountry != country {
             // Never relabel a previous country's live positions as the newly
             // selected scope while the replacement request is in flight.
@@ -911,15 +908,29 @@ final class AppModel: ObservableObject {
         }
 
         do {
-            let overview = try await api.fetchTransportOverview(
-                detail: "full",
-                country: country,
-                entityLimit: 320,
+            async let globalRequest = api.fetchTransportOverview(
+                detail: "aggregate",
                 refresh: forceRefresh
             )
-            guard transportRequestID == requestID, transportFocusCountry == country else { return }
-            transportOverview = overview
-            transportOverviewCountry = country
+            if let country {
+                async let scopedRequest = api.fetchTransportOverview(
+                    detail: "full",
+                    country: country,
+                    entityLimit: 320,
+                    refresh: forceRefresh
+                )
+                let (global, scoped) = try await (globalRequest, scopedRequest)
+                guard transportRequestID == requestID, transportFocusCountry == country else { return }
+                signalTransportOverview = global
+                transportOverview = scoped
+                transportOverviewCountry = country
+            } else {
+                let global = try await globalRequest
+                guard transportRequestID == requestID else { return }
+                signalTransportOverview = global
+                transportOverview = nil
+                transportOverviewCountry = nil
+            }
         } catch {
             if Task.isCancelled || transportRequestID != requestID { return }
             if isPaymentRequired(error) {

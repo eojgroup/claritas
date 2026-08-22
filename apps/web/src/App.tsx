@@ -962,6 +962,7 @@ export default function ClaritasDashboard() {
   const [fxRates, setFxRates] = useState<FxRate[]>([]);
   const [policyRates, setPolicyRates] = useState<PolicyRate[]>([]);
   const [transportOverview, setTransportOverview] = useState<TransportOverview | null>(null);
+  const [globalTransportOverview, setGlobalTransportOverview] = useState<TransportOverview | null>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [topNews, setTopNews] = useState<NewsItem[]>([]);
@@ -2448,6 +2449,24 @@ export default function ClaritasDashboard() {
     return links;
   }, [countryMeta, podcasts]);
 
+  useEffect(() => {
+    if (authStatus !== "authed" || !hasPaidAccess) {
+      setGlobalTransportOverview(null);
+      return;
+    }
+    let cancelled = false;
+    fetchTransportOverview({ detail: "aggregate" })
+      .then((overview) => {
+        if (!cancelled) setGlobalTransportOverview(overview);
+      })
+      .catch(() => {
+        if (!cancelled) setGlobalTransportOverview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, hasPaidAccess]);
+
   const crossSourceMapData = useMemo(() => {
     const newsByCountry = new Map(
       mapBubbleData.map((row) => [row.country.toUpperCase(), row] as const),
@@ -2456,10 +2475,24 @@ export default function ClaritasDashboard() {
       weatherStats.map((row) => [row.country.toUpperCase(), row] as const),
     );
     const marketByIso = new Map(countryMarkets.map((row) => [row.country.toUpperCase(), row] as const));
+    const eventsByIso = new Map<string, { count: number; maxRelevance: number }>();
+    for (const event of overviewEvents) {
+      const iso = normalizeIso2(event.primary_country_iso2);
+      if (!iso || event.status === "dismissed") continue;
+      const current = eventsByIso.get(iso) ?? { count: 0, maxRelevance: 0 };
+      current.count += 1;
+      current.maxRelevance = Math.max(current.maxRelevance, Number(event.relevance_score) || 0);
+      eventsByIso.set(iso, current);
+    }
+    const transportByIso = new Map(
+      (globalTransportOverview?.countries ?? []).map((row) => [row.country.toUpperCase(), row] as const),
+    );
     const countries = new Set<string>([
       ...newsByCountry.keys(),
       ...weatherByIso.keys(),
       ...marketByIso.keys(),
+      ...eventsByIso.keys(),
+      ...transportByIso.keys(),
       ...podcastCountryLinks.keys(),
     ]);
     const maxNews = Math.max(
@@ -2472,6 +2505,10 @@ export default function ClaritasDashboard() {
         Math.abs(row.composite_change_percent ?? row.index_change_percent ?? row.fx_change_percent ?? 0),
       ),
     );
+    const maxTransport = Math.max(
+      1,
+      ...Array.from(transportByIso.values()).map((row) => row.active_count),
+    );
 
     return Array.from(countries)
       .flatMap((iso) => {
@@ -2479,6 +2516,8 @@ export default function ClaritasDashboard() {
         const newsRow = newsByCountry.get(iso);
         const weather = weatherByIso.get(iso);
         const market = marketByIso.get(iso);
+        const events = eventsByIso.get(iso);
+        const transport = transportByIso.get(iso);
         const podcast = podcastCountryLinks.get(iso);
         const newsRelevance = newsRow
           ? Math.log1p(newsRow.count) / Math.log1p(maxNews)
@@ -2504,6 +2543,12 @@ export default function ClaritasDashboard() {
           market?.composite_change_percent ?? market?.index_change_percent ?? market?.fx_change_percent ?? 0,
         );
         const marketRelevance = market ? marketMove / maxMarketMove : 0;
+        const eventRelevance = events
+          ? Math.min(1, (events.maxRelevance + Math.min(20, Math.log1p(events.count) * 6)) / 100)
+          : 0;
+        const transportRelevance = transport
+          ? Math.log1p(transport.active_count) / Math.log1p(maxTransport)
+          : 0;
         const podcastRelevance = podcast
           ? Math.min(1, (podcast.maxScore + Math.min(18, podcast.signalCount * 3)) / 100)
           : 0;
@@ -2511,16 +2556,20 @@ export default function ClaritasDashboard() {
           newsRelevance > 0 ? "news" : null,
           weatherRelevance > 0 ? "weather" : null,
           marketRelevance > 0 ? "markets" : null,
+          eventRelevance > 0 ? "events" : null,
+          transportRelevance > 0 ? "transport" : null,
           podcastRelevance > 0 ? "podcast" : null,
         ].filter((domain): domain is string => Boolean(domain));
         const breadthBonus = Math.max(0, domains.length - 1) * 2;
         const relevance = Math.min(
           100,
           Math.round(
-            newsRelevance * 40 +
-              weatherRelevance * 15 +
-              marketRelevance * 15 +
-              podcastRelevance * 25 +
+            newsRelevance * 30 +
+              eventRelevance * 25 +
+              transportRelevance * 15 +
+              weatherRelevance * 10 +
+              marketRelevance * 10 +
+              podcastRelevance * 10 +
               breadthBonus,
           ),
         );
@@ -2528,6 +2577,10 @@ export default function ClaritasDashboard() {
 
         const lines = [
           newsRow ? `News: ${newsRow.count} mapped stories` : null,
+          events ? `Events: ${events.count} current · peak relevance ${Math.round(events.maxRelevance)}/100` : null,
+          transport
+            ? `Transport: ${transport.active_count} live country links · ${transport.trend.ship_departures.current + transport.trend.tracked_flights.current} observed movements`
+            : null,
           podcast
             ? `Podcast: ${podcast.signalCount} attributed signals · ${podcast.sources.values().next().value ?? "source"}`
             : null,
@@ -2561,6 +2614,8 @@ export default function ClaritasDashboard() {
   }, [
     mapBubbleData,
     countryMarkets,
+    globalTransportOverview,
+    overviewEvents,
     podcastCountryLinks,
     regionCountries,
     weatherStats,
@@ -5594,20 +5649,20 @@ export default function ClaritasDashboard() {
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Global event picture
+                            Global signal picture
                           </div>
                           <div className="text-sm font-semibold">
                             Map:{" "}
                             {mapMode === "signals"
-                              ? `${overviewEventPoints.length} located events · ${overviewEventPoints.filter((point) => point.hasImagery).length} with imagery`
+                              ? `${crossSourceMapData.length} countries ranked · ${overviewEventPoints.length} located events`
                               : mapMode === "news"
                                 ? "#News per country"
                                 : "Weather (temperature) per country"}
                           </div>
                           <div className="mt-1 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">
-                            <span>Dots = canonical events</span>
-                            <span>Dashed rings = imagery available</span>
-                            <span>Country fill = context layer</span>
+                            <span>Country fill = combined signal prevalence</span>
+                            <span>News · events · markets · weather · transport · podcasts</span>
+                            <span>Dots = canonical events · rings = imagery</span>
                           </div>
                         </div>
                         <div className="map-mode-tabs flex flex-wrap items-center gap-2 text-xs">
@@ -5619,7 +5674,7 @@ export default function ClaritasDashboard() {
                             }`}
                             onClick={() => setMapMode("signals")}
                           >
-                            Event context
+                            Signals
                           </button>
                           <button
                             className={`rounded-full border px-3 py-1 transition ${
@@ -5880,11 +5935,11 @@ export default function ClaritasDashboard() {
                         {mapMode === "signals" ? (
                           <div className="flex flex-wrap items-center gap-2 text-[color:var(--shell-muted)]">
                             <span className="font-semibold text-[color:var(--shell-ink)]">
-                              Event evidence model
+                              Signal prevalence model
                             </span>
                             <span>
-                              Select a located event to open its news, official feeds,
-                              transport, weather, market and satellite evidence as one thread.
+                              Country colour combines reporting prevalence, current events,
+                              market movement, weather severity, live transport and podcast evidence.
                             </span>
                             {highestSignalCountry && (
                               <button

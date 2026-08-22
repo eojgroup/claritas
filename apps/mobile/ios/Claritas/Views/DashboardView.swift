@@ -1490,6 +1490,7 @@ struct NewsWorkspaceView: View {
             podcasts: model.podcasts,
             weather: model.weather,
             countryMarkets: model.countryMarkets,
+            events: [],
             leadership: model.leadership,
             transport: nil
         )
@@ -4265,8 +4266,9 @@ struct SignalMapPanel: View {
             podcasts: model.podcasts,
             weather: model.weather,
             countryMarkets: model.countryMarkets,
+            events: events,
             leadership: model.leadership,
-            transport: model.transportOverview
+            transport: model.signalTransportOverview
         )
     }
 
@@ -4387,7 +4389,7 @@ struct SignalMapPanel: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Relevance model")
                             .font(.caption.weight(.semibold))
-                        Text("News 40% · podcast evidence 25% · weather 15% · markets 15% · confirmation bonus")
+                        Text("News 30% · events 25% · transport 15% · weather 10% · markets 10% · podcasts 10% · breadth bonus")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
@@ -4436,7 +4438,7 @@ struct SignalMapPanel: View {
             mode = resolved
             storedMode = resolved.rawValue
         }
-        .task(id: model.selectedCountry ?? "global") {
+        .task {
             await loadEvents()
         }
         .sheet(isPresented: $showsCountryProfileSheet) {
@@ -4606,7 +4608,7 @@ struct SignalMapPanel: View {
         if compactLayout {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("GLOBAL EVENT MAP")
+                    Text("GLOBAL SIGNAL MAP")
                         .font(.caption2.weight(.bold))
                         .tracking(1.2)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -4633,13 +4635,13 @@ struct SignalMapPanel: View {
             }
         } else {
             BrandSectionHeader(
-                kicker: "Global event picture",
+                kicker: "Global signal picture",
                 title: mode == .transport
                     ? "\(model.transportOverview?.entities.count ?? 0) movements · \(mode.title)"
                     : "\(mappedEvents.count) located events · \(mode.title)",
                 detail: mode == .transport
                     ? "Aircraft and vessel positions are limited to the selected country relationship scope and current provider coverage."
-                    : "Event dots open the canonical evidence thread; rings identify satellite-backed events."
+                    : "Country colour combines news, events, markets, weather, transport and podcast prevalence; dots open canonical event evidence."
             )
         }
     }
@@ -4805,7 +4807,7 @@ struct SignalMapPanel: View {
     @MainActor
     private func loadEvents() async {
         do {
-            events = try await model.api.fetchIntelligenceEvents(limit: 100, country: model.selectedCountry)
+            events = try await model.api.fetchIntelligenceEvents(limit: 100, country: nil)
             eventLoadError = nil
         } catch {
             eventLoadError = error.localizedDescription
@@ -4821,6 +4823,7 @@ private enum SignalMapDataBuilder {
         podcasts: [PodcastEpisode],
         weather: [CountryWeather],
         countryMarkets: [CountryMarketOverview],
+        events: [IntelligenceEvent],
         leadership: [CountryLeadership],
         transport: TransportOverview?
     ) -> [CountryBubblePoint] {
@@ -4831,7 +4834,9 @@ private enum SignalMapDataBuilder {
                 countryStats: countryStats,
                 podcasts: podcasts,
                 weather: weather,
-                countryMarkets: countryMarkets
+                countryMarkets: countryMarkets,
+                events: events,
+                transport: transport
             )
         case .news:
             raw = countryStats.map { stat in
@@ -4913,7 +4918,9 @@ private enum SignalMapDataBuilder {
         countryStats: [CountryStat],
         podcasts: [PodcastEpisode],
         weather: [CountryWeather],
-        countryMarkets: [CountryMarketOverview]
+        countryMarkets: [CountryMarketOverview],
+        events: [IntelligenceEvent],
+        transport: TransportOverview?
     ) -> [CountryBubblePoint] {
         let newsByCountry = Dictionary(
             uniqueKeysWithValues: countryStats.map { ($0.country.uppercased(), $0.count) }
@@ -4928,6 +4935,15 @@ private enum SignalMapDataBuilder {
             weatherByCountry[iso] = row
         }
         let marketByCountry = Dictionary(uniqueKeysWithValues: countryMarkets.map { ($0.country.uppercased(), $0) })
+        var eventsByCountry: [String: (count: Int, relevance: Double)] = [:]
+        for event in events where event.status.lowercased() != "dismissed" {
+            guard let iso = event.primary_country_iso2?.uppercased(), iso.count == 2 else { continue }
+            let current = eventsByCountry[iso] ?? (0, 0)
+            eventsByCountry[iso] = (current.count + 1, max(current.relevance, event.relevance_score))
+        }
+        let transportByCountry = Dictionary(
+            uniqueKeysWithValues: (transport?.countries ?? []).map { ($0.country.uppercased(), $0) }
+        )
 
         var podcastByCountry: [String: (count: Int, score: Double)] = [:]
         for episode in podcasts {
@@ -4953,12 +4969,15 @@ private enum SignalMapDataBuilder {
         let countries = Set(newsByCountry.keys)
             .union(weatherByCountry.keys)
             .union(marketByCountry.keys)
+            .union(eventsByCountry.keys)
+            .union(transportByCountry.keys)
             .union(podcastByCountry.keys)
         let maxNews = Double(max(newsByCountry.values.max() ?? 1, 1))
         let maxMarket = max(
             marketByCountry.values.map { abs($0.composite_change_percent ?? $0.index_change_percent ?? $0.fx_change_percent ?? 0) }.max() ?? 1,
             1
         )
+        let maxTransport = Double(max(transportByCountry.values.map(\.active_count).max() ?? 1, 1))
 
         return countries.compactMap { iso in
             var domains: [String] = []
@@ -4984,6 +5003,18 @@ private enum SignalMapDataBuilder {
             let marketRelevance = market == nil ? 0 : marketMove / maxMarket
             if market != nil { domains.append("markets") }
 
+            let countryEvents = eventsByCountry[iso]
+            let eventRelevance = countryEvents.map {
+                min(1, ($0.relevance + min(20, log1p(Double($0.count)) * 6)) / 100)
+            } ?? 0
+            if countryEvents != nil { domains.append("events") }
+
+            let countryTransport = transportByCountry[iso]
+            let transportRelevance = countryTransport.map {
+                log1p(Double($0.active_count)) / log1p(maxTransport)
+            } ?? 0
+            if countryTransport != nil { domains.append("transport") }
+
             let podcast = podcastByCountry[iso]
             let podcastRelevance = podcast.map {
                 min(1, ($0.score + min(18, Double($0.count * 3))) / 100)
@@ -4994,10 +5025,12 @@ private enum SignalMapDataBuilder {
             let relevance = min(
                 100,
                 round(
-                    newsRelevance * 40 +
-                    podcastRelevance * 25 +
-                    weatherRelevance * 15 +
-                    marketRelevance * 15 +
+                    newsRelevance * 30 +
+                    eventRelevance * 25 +
+                    transportRelevance * 15 +
+                    weatherRelevance * 10 +
+                    marketRelevance * 10 +
+                    podcastRelevance * 10 +
                     breadthBonus
                 )
             )
@@ -5005,6 +5038,8 @@ private enum SignalMapDataBuilder {
 
             var drivers: [String] = []
             if newsCount > 0 { drivers.append("\(newsCount) stories") }
+            if let countryEvents { drivers.append("\(countryEvents.count) events") }
+            if let countryTransport { drivers.append("\(countryTransport.active_count) transport links") }
             if let podcast { drivers.append("\(podcast.count) podcast signals") }
             if let currentWeather, weatherRelevance > 0 {
                 drivers.append(currentWeather.temp_c.map { String(format: "%.0f°C", $0) } ?? "weather")

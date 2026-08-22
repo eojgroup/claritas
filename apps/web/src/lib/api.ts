@@ -1971,21 +1971,21 @@ export async function fetchCountryMarketDetail(country: string): Promise<Country
 }
 
 export async function fetchTransportOverview(params: {
-  country: string;
+  country?: string;
   corridorCountry?: string;
   detail?: "aggregate" | "full";
   mode?: TransportMode;
   entityLimit?: number;
   refresh?: boolean;
 }): Promise<TransportOverview> {
-  const country = params.country.trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(country)) {
+  const country = params.country?.trim().toUpperCase() ?? "";
+  if (country && !/^[A-Z]{2}$/.test(country)) {
     throw new Error("Transport intelligence requires an ISO alpha-2 country.");
   }
   const sp = new URLSearchParams();
-  sp.set("country", country);
+  if (country) sp.set("country", country);
   const corridorCountry = params.corridorCountry?.trim().toUpperCase();
-  if (corridorCountry && /^[A-Z]{2}$/.test(corridorCountry)) {
+  if (country && corridorCountry && /^[A-Z]{2}$/.test(corridorCountry)) {
     sp.set("corridor", corridorCountry);
   }
   if (params.detail) sp.set("detail", params.detail);

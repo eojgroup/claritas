@@ -1455,7 +1455,9 @@ enum CountryRelevanceResolver {
         countryStats: [CountryStat],
         podcasts: [PodcastEpisode],
         weather: [CountryWeather],
-        countryMarkets: [CountryMarketOverview]
+        countryMarkets: [CountryMarketOverview],
+        events: [IntelligenceEvent] = [],
+        transport: TransportOverview? = nil
     ) -> [CountryRelevanceScore] {
         var newsCounts: [String: Int] = [:]
         countryStats.forEach { row in
@@ -1473,7 +1475,9 @@ enum CountryRelevanceResolver {
             newsCounts: newsCounts,
             podcastSignals: podcastSignals(podcasts),
             weather: weather,
-            marketMoves: marketMoves
+            marketMoves: marketMoves,
+            events: events,
+            transport: transport
         )
     }
 
@@ -1481,7 +1485,9 @@ enum CountryRelevanceResolver {
         news: [NewsItem],
         podcasts: [PodcastEpisode],
         weather: [CountryWeather],
-        marketQuotes: [MarketQuote]
+        marketQuotes: [MarketQuote],
+        events: [IntelligenceEvent] = [],
+        transport: TransportOverview? = nil
     ) -> [CountryRelevanceScore] {
         var newsCounts: [String: Int] = [:]
         news.forEach { row in
@@ -1501,7 +1507,9 @@ enum CountryRelevanceResolver {
             newsCounts: newsCounts,
             podcastSignals: podcastSignals(podcasts),
             weather: weather,
-            marketMoves: marketMoves
+            marketMoves: marketMoves,
+            events: events,
+            transport: transport
         )
     }
 
@@ -1509,7 +1517,9 @@ enum CountryRelevanceResolver {
         newsCounts: [String: Int],
         podcastSignals: [String: (count: Int, score: Double)],
         weather: [CountryWeather],
-        marketMoves: [String: Double]
+        marketMoves: [String: Double],
+        events: [IntelligenceEvent],
+        transport: TransportOverview?
     ) -> [CountryRelevanceScore] {
         var latestWeather: [String: CountryWeather] = [:]
         weather.forEach { row in
@@ -1520,13 +1530,28 @@ enum CountryRelevanceResolver {
             }
             latestWeather[country] = row
         }
+        var eventSignals: [String: (count: Int, relevance: Double)] = [:]
+        events.forEach { event in
+            guard event.status.lowercased() != "dismissed",
+                  let country = iso2(event.primary_country_iso2) else { return }
+            let current = eventSignals[country] ?? (0, 0)
+            eventSignals[country] = (current.count + 1, max(current.relevance, event.relevance_score))
+        }
+        var transportCounts: [String: Int] = [:]
+        (transport?.countries ?? []).forEach { row in
+            guard let country = iso2(row.country) else { return }
+            transportCounts[country, default: 0] += row.active_count
+        }
 
         let countries = Set(newsCounts.keys)
             .union(latestWeather.keys)
             .union(marketMoves.keys)
+            .union(eventSignals.keys)
+            .union(transportCounts.keys)
             .union(podcastSignals.keys)
         let maxNews = Double(max(newsCounts.values.max() ?? 1, 1))
         let maxMarket = max(marketMoves.values.max() ?? 1, 1)
+        let maxTransport = Double(max(transportCounts.values.max() ?? 1, 1))
 
         return countries.compactMap { country -> CountryRelevanceScore? in
             let newsCount = newsCounts[country] ?? 0
@@ -1543,6 +1568,13 @@ enum CountryRelevanceResolver {
             let windSeverity = weatherRow?.wind_speed.map { min(1, $0 / 25) } ?? 0
             let weatherRelevance = max(temperatureSeverity, max(humiditySeverity, windSeverity))
             let marketRelevance = marketMoves[country].map { $0 / maxMarket } ?? 0
+            let countryEvents = eventSignals[country]
+            let eventRelevance = countryEvents.map {
+                min(1, ($0.relevance + min(20, log1p(Double($0.count)) * 6)) / 100)
+            } ?? 0
+            let transportRelevance = transportCounts[country].map {
+                log1p(Double($0)) / log1p(maxTransport)
+            } ?? 0
             let podcast = podcastSignals[country]
             let podcastRelevance = podcast.map {
                 min(1, ($0.score + min(18, Double($0.count * 3))) / 100)
@@ -1551,16 +1583,20 @@ enum CountryRelevanceResolver {
                 newsCount > 0,
                 weatherRelevance > 0,
                 marketMoves[country] != nil,
+                countryEvents != nil,
+                transportCounts[country] != nil,
                 podcast != nil,
             ].filter { $0 }.count
             let breadthBonus = Double(max(0, domainCount - 1) * 2)
             let relevance = min(
                 100,
                 round(
-                    newsRelevance * 40 +
-                    podcastRelevance * 25 +
-                    weatherRelevance * 15 +
-                    marketRelevance * 15 +
+                    newsRelevance * 30 +
+                    eventRelevance * 25 +
+                    transportRelevance * 15 +
+                    weatherRelevance * 10 +
+                    marketRelevance * 10 +
+                    podcastRelevance * 10 +
                     breadthBonus
                 )
             )

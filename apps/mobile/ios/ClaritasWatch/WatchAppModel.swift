@@ -221,29 +221,19 @@ final class WatchAppModel: ObservableObject {
         case .failure(let error): errors.append(error)
         }
 
-        let transportCountry = requestedCountry ?? CountryRelevanceResolver.ranked(
-            news: news,
-            podcasts: podcasts,
-            weather: weather,
-            marketQuotes: markets
-        ).first?.country
-        if let country = transportCountry {
-            do {
-                let loadedTransport = try await requestAPI.fetchTransportOverview(
-                    detail: "aggregate",
-                    country: country,
-                    refresh: false
-                )
-                guard refreshRequestID == requestID else { return }
-                transport = loadedTransport
-            } catch {
-                guard refreshRequestID == requestID else { return }
-                if isUnauthorized(error) {
-                    errors.append(error)
-                }
+        do {
+            let loadedTransport = try await requestAPI.fetchTransportOverview(
+                detail: "aggregate",
+                country: requestedCountry,
+                refresh: false
+            )
+            guard refreshRequestID == requestID else { return }
+            transport = loadedTransport
+        } catch {
+            guard refreshRequestID == requestID else { return }
+            if isUnauthorized(error) {
+                errors.append(error)
             }
-        } else {
-            transport = nil
         }
 
         guard refreshRequestID == requestID else { return }
