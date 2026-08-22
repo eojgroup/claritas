@@ -86,6 +86,24 @@ test("GDELT publisher coverage cannot hide behind fresh machine archives", async
     gal_fallback: { selected: 0, latest_event_time: null },
   }), "failed");
   assert.equal(classifyGdeltNewsCoverage({ doc_status: "degraded", events: 500, signals: 500 }), "failed");
+  assert.equal(classifyGdeltNewsCoverage({
+    health: "failed",
+    doc_status: "degraded",
+    doc_error: "All GDELT DOC discovery lanes failed: markets_macro: GDELT HTTP 429 after 2 attempts",
+    raw_archive_status: "healthy",
+    gkg_archives_scanned: 1,
+    gkg_sampled: 190,
+    gkg_canonical_country_url_probes: 147,
+  }), "degraded");
+  assert.equal(classifyGdeltNewsCoverage({
+    health: "failed",
+    doc_status: "degraded",
+    doc_error: "All GDELT DOC discovery lanes failed: GDELT HTTP 429",
+    raw_archive_status: "healthy",
+    gkg_archives_scanned: 1,
+    gkg_sampled: 190,
+    gkg_canonical_country_url_probes: 0,
+  }), "failed", "a throttle cannot hide an unproved raw archive path");
 });
 
 test("news scheduling migration preserves an explicit GOV.UK opt-out", () => {

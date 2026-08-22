@@ -151,6 +151,31 @@ test("news runtime health fails closed unless the exact release-owned GDELT run 
   assert.equal(translationOnlyOrIncomplete.ready, false);
   assert.equal(translationOnlyOrIncomplete.checks.release_gdelt_acquisition, false);
 
+  const throttledDocWithProvedRawArchive = evaluateNewsRuntimeHealth({
+    ...healthy,
+    release_gdelt_step_status: "degraded",
+    release_gdelt_doc_status: "degraded",
+    release_gdelt_doc_error:
+      "All GDELT DOC discovery lanes failed: markets_macro: GDELT HTTP 429 after 2 attempts",
+    release_gdelt_raw_archive_status: "healthy",
+    release_gdelt_gkg_archives_scanned: 1,
+    release_gdelt_gkg_sampled: 190,
+    release_gdelt_gkg_matched: 0,
+    release_gdelt_gkg_matched_country_rows: 0,
+    release_gdelt_gkg_canonical_country_url_probes: 147,
+  }, now);
+  assert.equal(throttledDocWithProvedRawArchive.ready, true);
+  assert.equal(throttledDocWithProvedRawArchive.checks.release_gdelt_acquisition, true);
+
+  const arbitraryDocFailure = evaluateNewsRuntimeHealth({
+    ...healthy,
+    release_gdelt_step_status: "degraded",
+    release_gdelt_doc_status: "degraded",
+    release_gdelt_doc_error: "GDELT DOC returned malformed JSON",
+  }, now);
+  assert.equal(arbitraryDocFailure.ready, false);
+  assert.equal(arbitraryDocFailure.checks.release_gdelt_acquisition, false);
+
   const rawArchiveOutage = evaluateNewsRuntimeHealth({
     ...healthy,
     release_gdelt_step_status: "degraded",

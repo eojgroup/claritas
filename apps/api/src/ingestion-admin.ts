@@ -847,6 +847,18 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
 export function classifyGdeltNewsCoverage(
   result: Record<string, unknown>,
 ): "success" | "degraded" | "failed" {
+  const docRateLimitedWithRawCoverage = result.doc_status === "degraded"
+    && result.raw_archive_status === "healthy"
+    && /\bGDELT HTTP 429\b/i.test(asString(result.doc_error) ?? "")
+    && Number(result.gkg_archives_scanned) >= 1
+    && Number(result.gkg_sampled) >= 1
+    && Number(result.gkg_canonical_country_url_probes) >= 1;
+  // DOC is only one GDELT product. A provider throttle is degraded coverage,
+  // rather than a total GDELT failure, when the same exact run still proves
+  // that the raw archive path decoded and persisted country-bearing data.
+  // Release health separately requires a fresh, assessed, diverse publisher
+  // stream, so machine archives cannot stand in for user-visible reporting.
+  if (docRateLimitedWithRawCoverage) return "degraded";
   if (result.health === "failed") return "failed";
   const rawArchiveDegraded = result.raw_archive_status === "degraded"
     || result.health === "degraded";

@@ -446,6 +446,15 @@ export function evaluateNewsRuntimeHealth(
   const latestEventMs = Date.parse(row?.latest_current_event_time ?? "");
   const nowMs = now.getTime();
   const assessmentRatio = currentCount > 0 ? assessedCount / currentCount : 0;
+  const releaseGdeltRawEnrichment = ["healthy", "degraded"].includes(
+    releaseGdeltRawArchiveStatus ?? "",
+  ) && releaseGdeltGkgArchivesScanned >= 1
+    && releaseGdeltGkgSampled >= 1
+    && releaseGdeltGkgCanonicalCountryUrlProbes >= 1;
+  const releaseGdeltDocRateLimited = releaseGdeltStepStatus === "degraded"
+    && releaseGdeltDocStatus === "degraded"
+    && /\bGDELT HTTP 429\b/i.test(row?.release_gdelt_doc_error ?? "")
+    && releaseGdeltRawArchiveStatus === "healthy";
   const checks = {
     current_volume: currentCount >= 3,
     current_timestamp: Number.isFinite(latestEventMs)
@@ -467,16 +476,19 @@ export function evaluateNewsRuntimeHealth(
       && releaseRunStatus === "success"
       && releaseRunTriggerMode === "release_gate",
     release_gdelt_acquisition: ["success", "degraded"].includes(releaseGdeltStepStatus ?? "")
-      && ["healthy", "healthy_partial", "degraded_fallback"].includes(releaseGdeltDocStatus ?? ""),
+      && (
+        ["healthy", "healthy_partial", "degraded_fallback"].includes(releaseGdeltDocStatus ?? "")
+        // GDELT explicitly asks throttled clients to wait. Accept that bounded
+        // upstream condition only when the exact release also proves the raw
+        // archive path; all user-visible freshness and quality checks above
+        // must still pass independently.
+        || (releaseGdeltDocRateLimited && releaseGdeltRawEnrichment)
+      ),
     // DOC discovery and the latest available GKG interval need not contain the
     // same publisher URL. Require a deterministic country-bearing GKG row to
     // traverse parsing, WHATWG canonicalization and persistence; keep random
     // DOC/GKG intersections as observability rather than a release condition.
-    release_gdelt_raw_enrichment: ["healthy", "degraded"].includes(
-      releaseGdeltRawArchiveStatus ?? "",
-    ) && releaseGdeltGkgArchivesScanned >= 1
-      && releaseGdeltGkgSampled >= 1
-      && releaseGdeltGkgCanonicalCountryUrlProbes >= 1,
+    release_gdelt_raw_enrichment: releaseGdeltRawEnrichment,
   };
   const ready = Object.values(checks).every(Boolean);
   return {

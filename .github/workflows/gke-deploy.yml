@@ -1185,6 +1185,9 @@ jobs:
             process.stdin.on("end", () => {
               const health = JSON.parse(input);
               console.log("News runtime verified: " + health.current.count + " current; " + health.current.markets + " markets (" + health.current.publisher_verified_markets + " publisher-timed); " + health.current.publishers + " publishers; " + health.quality_anchor_24h.publisher_verified + " publisher-time anchors in 24h; " + health.geography_24h.countries + " mapped countries; " + health.geography_24h.non_gb_stories + " non-GB stories; " + health.release_run.gdelt_gkg_sampled + " exact-run GKG rows decoded; " + health.release_run.gdelt_gkg_canonical_country_url_probes + " deterministic country/canonical persistence probes; " + health.release_run.gdelt_gkg_matched + " incidental DOC matches (" + health.release_run.gdelt_gkg_matched_country_rows + " accepted with valid country geography).");
+              if (health.release_run.gdelt_doc_status === "degraded") {
+                console.log("::warning title=GDELT DOC discovery degraded::" + (health.release_run.gdelt_diagnostics?.doc?.error || "GDELT DOC discovery did not complete.") + " The exact release proved the raw GDELT archive path and the independent reporting quality gates.");
+              }
             });
           '
 
