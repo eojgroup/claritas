@@ -490,6 +490,10 @@ private struct ClaritasLegacyWidgetProvider: TimelineProvider {
 
 @available(iOS 17.0, *)
 private struct ClaritasIntentWidgetProvider: AppIntentTimelineProvider {
+    func recommendations() -> [AppIntentRecommendation<ClaritasWidgetIntent>] {
+        []
+    }
+
     func placeholder(in context: Context) -> ClaritasWidgetEntry {
         ClaritasWidgetEntry(
             date: .now,

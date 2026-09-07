@@ -215,6 +215,10 @@ private struct ClaritasWatchEntry: TimelineEntry {
 }
 
 private struct ClaritasWatchProvider: AppIntentTimelineProvider {
+    func recommendations() -> [AppIntentRecommendation<ClaritasWatchWidgetIntent>] {
+        []
+    }
+
     func placeholder(in context: Context) -> ClaritasWatchEntry {
         makeEntry(
             configuration: ClaritasWatchWidgetIntent(),
