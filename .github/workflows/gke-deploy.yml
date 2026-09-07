@@ -14,6 +14,7 @@ on:
       - 'infra/gcp/sql/**'
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
+      - 'infra/scripts/reconcile-cloud-sql-password.sh'
       - '.github/workflows/gke-deploy.yml'
   pull_request:
     paths:
@@ -27,6 +28,7 @@ on:
       - 'infra/keycloak/**'
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
+      - 'infra/scripts/reconcile-cloud-sql-password.sh'
   workflow_dispatch:
 
 # Terraform deployment also updates production Kubernetes configuration.
@@ -119,7 +121,9 @@ jobs:
         run: python3 infra/scripts/check-flyway-migrations.py
 
       - name: Check deployment shell scripts
-        run: bash -n infra/scripts/wait-for-k8s-job.sh
+        run: |
+          bash -n infra/scripts/wait-for-k8s-job.sh
+          bash -n infra/scripts/reconcile-cloud-sql-password.sh
 
   build:
     name: Build Docker Image and Push to Artifact Registry
@@ -556,8 +560,8 @@ jobs:
             echo "::error::Could not extract keycloak_db_pass from Terraform output." >&2
             exit 1
           fi
-          gcloud sql users set-password claritas_app --instance="$DB_INSTANCE" --project "${PROJECT_ID}" --password="$DB_PASS"
-          gcloud sql users set-password keycloak_app --instance="$DB_INSTANCE" --project "${PROJECT_ID}" --password="$KC_DB_PASS"
+          CLARITAS_SQL_PASSWORD="$DB_PASS" ./infra/scripts/reconcile-cloud-sql-password.sh "$PROJECT_ID" "$DB_INSTANCE" claritas_app
+          CLARITAS_SQL_PASSWORD="$KC_DB_PASS" ./infra/scripts/reconcile-cloud-sql-password.sh "$PROJECT_ID" "$DB_INSTANCE" keycloak_app
 
       - name: 🔐 Ensure DB secret matches Terraform state
         env:

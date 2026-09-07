@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { delimiter, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const workflow = readFileSync(resolve(
@@ -15,6 +17,50 @@ const terraformAuthSecret = readFileSync(resolve(
   __dirname,
   "../../../infra/gcp/terraform/k8s-secrets.tf",
 ), "utf8");
+
+test("Cloud SQL reconciliation retries busy operations without hiding permanent failures", () => {
+  const directory = mkdtempSync(join(tmpdir(), "claritas-cloud-sql-"));
+  try {
+    writeFileSync(join(directory, "gcloud"), `#!/usr/bin/env node
+const fs = require("node:fs");
+const file = process.env.COUNTER_FILE;
+const count = fs.existsSync(file) ? Number(fs.readFileSync(file, "utf8")) + 1 : 1;
+fs.writeFileSync(file, String(count));
+if (process.env.SCENARIO === "recovers" && count === 2) process.exit(0);
+const failure = process.env.SCENARIO === "permanent"
+  ? "HTTPError 403: Permission denied"
+  : "HTTPError 409: Operation failed because another operation was already in progress. Try your request after the current operation is complete.";
+console.error(failure + " password=" + process.env.CLARITAS_SQL_PASSWORD);
+process.exit(1);
+`, { mode: 0o755 });
+    for (const [scenario, expectedStatus, expectedAttempts] of [
+      ["recovers", 0, 2], ["permanent", 1, 1], ["exhausted", 1, 3],
+    ] as const) {
+      const counter = join(directory, scenario);
+      const result = spawnSync("bash", [
+        resolve(__dirname, "../../../infra/scripts/reconcile-cloud-sql-password.sh"),
+        "test-project", "test-instance", "test-user",
+      ], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          PATH: `${directory}${delimiter}${process.env.PATH}`,
+          COUNTER_FILE: counter,
+          SCENARIO: scenario,
+          CLARITAS_SQL_PASSWORD: "synthetic-secret-do-not-log",
+          CLOUD_SQL_PASSWORD_ATTEMPTS: "3",
+          CLOUD_SQL_PASSWORD_RETRY_SECONDS: "0",
+        },
+      });
+      assert.equal(result.status, expectedStatus, result.stderr || result.stdout);
+      assert.equal(Number(readFileSync(counter, "utf8")), expectedAttempts);
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic-secret-do-not-log/);
+      if (expectedStatus !== 0) assert.match(result.stderr, /\[REDACTED\]/);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("GKE release gates provider liveness without gating instantaneous Singapore occupancy", () => {
   const transportGate = workflow.slice(
