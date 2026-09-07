@@ -100,7 +100,8 @@ with the publisher URL, attribution, time basis and translation disclosure.
 `GET /api/news?q=...` searches case-insensitive literal substrings in original
 headlines and excerpts, current translations for `display_language`, and
 publisher, original article domain and ingestion-provider identities. Separate
-terms require every term to match; double quotes keep a phrase together and
+terms require every term to match; paired straight (`"…"`) or smart (`“…”`)
+double quotes keep a phrase together and
 `-term` or `-"quoted phrase"` excludes matches. For example,
 `"interest rates" Fed -inflation` finds Federal Reserve coverage mentioning that
 phrase without inflation. `%`, `_` and backslashes are literal characters.

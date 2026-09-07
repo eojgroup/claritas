@@ -39,6 +39,29 @@ test("news search rejects excess input instead of silently changing its meaning"
   }
 });
 
+test("mobile smart quotes delimit exact phrases and exclusions while preserving their contents", () => {
+  assert.deepEqual(parseNewsSearchQuery('“interest rates” Fed -“press release”'), [
+    { text: "interest rates", excluded: false },
+    { text: "Fed", excluded: false },
+    { text: "press release", excluded: true },
+  ]);
+  assert.deepEqual(parseNewsSearchQuery(String.raw`“ 10%  growth_\today ” " spaced phrase "`), [
+    { text: String.raw` 10%  growth_\today `, excluded: false },
+    { text: " spaced phrase ", excluded: false },
+  ]);
+  assert.deepEqual(buildNewsSearchPredicate('“interest rates” -“press release”').params, ["%interest rates%", "%press release%"]);
+  for (const [query, message] of [
+    ["“interest rates", /unclosed quoted phrase/],
+    ['“interest rates"', /mismatched quote delimiters/],
+    ['"interest rates”', /mismatched quote delimiters/],
+    ["“interest rates“", /mismatched quote delimiters/],
+    ["”interest rates”", /mismatched quote delimiters/],
+    ["-“ ”", /cannot be empty/],
+  ] as const) {
+    assert.throws(() => parseNewsSearchQuery(query), (error: unknown) => error instanceof NewsSearchValidationError && message.test(error.message));
+  }
+});
+
 test("search patterns bind SQL wildcards, escapes and injection text literally", () => {
   const built = buildNewsSearchPredicate(String.raw`"10% growth" foo_bar C:\markets wow! "x');DROP TABLE item;--"`, 4);
   assert.deepEqual(built.params, ["%10!% growth%", "%foo!_bar%", String.raw`%C:\markets%`, "%wow!!%", "%x');DROP TABLE item;--%"]);

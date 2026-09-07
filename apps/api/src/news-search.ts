@@ -21,12 +21,14 @@ export function parseNewsSearchQuery(query: string): NewsSearchTerm[] {
     const excluded = query[cursor] === "-";
     if (excluded) cursor += 1;
     let text: string;
-    if (query[cursor] === '"') {
+    if (query[cursor] === '"' || query[cursor] === '“') {
+      const closingQuote = query[cursor] === '“' ? '”' : '"';
       const start = ++cursor;
-      const end = query.indexOf('"', start);
-      if (end === -1) throw new NewsSearchValidationError("News search has an unclosed quoted phrase.");
-      text = query.slice(start, end).trim();
-      cursor = end + 1;
+      while (cursor < query.length && !/["“”]/.test(query[cursor])) cursor += 1;
+      if (cursor === query.length) throw new NewsSearchValidationError("News search has an unclosed quoted phrase.");
+      if (query[cursor] !== closingQuote) throw new NewsSearchValidationError("News search has mismatched quote delimiters.");
+      text = query.slice(start, cursor);
+      cursor += 1;
       if (cursor < query.length && !/\s/.test(query[cursor])) {
         throw new NewsSearchValidationError("Separate news search terms and quoted phrases with spaces.");
       }
@@ -34,9 +36,10 @@ export function parseNewsSearchQuery(query: string): NewsSearchTerm[] {
       const start = cursor;
       while (cursor < query.length && !/\s/.test(query[cursor])) cursor += 1;
       text = query.slice(start, cursor);
+      if (/[“”]/.test(text)) throw new NewsSearchValidationError("News search has mismatched quote delimiters.");
       if (text.includes('"')) throw new NewsSearchValidationError("Place double quotes around a complete news search phrase.");
     }
-    if (!text) throw new NewsSearchValidationError("News search phrases and exclusions cannot be empty.");
+    if (!text.trim()) throw new NewsSearchValidationError("News search phrases and exclusions cannot be empty.");
     terms.push({ text, excluded });
     if (terms.length > NEWS_SEARCH_MAX_TERMS) {
       throw new NewsSearchValidationError(`News search supports at most ${NEWS_SEARCH_MAX_TERMS} terms or quoted phrases.`);
