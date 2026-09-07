@@ -97,6 +97,18 @@ with the publisher URL, attribution, time basis and translation disclosure.
 
 ## Coverage and rights
 
+`GET /api/news?q=...` searches case-insensitive literal substrings in original
+headlines and excerpts, current translations for `display_language`, and
+publisher, original article domain and ingestion-provider identities. Separate
+terms require every term to match; double quotes keep a phrase together and
+`-term` or `-"quoted phrase"` excludes matches. For example,
+`"interest rates" Fed -inflation` finds Federal Reserve coverage mentioning that
+phrase without inflation. `%`, `_` and backslashes are literal characters.
+Search accepts at most 400 characters and 12 terms or phrases; excess input,
+unclosed quotes and empty exclusions return HTTP 400 with an explanatory error.
+Existing country, category, language, source, freshness and archive filters still
+apply, with search evaluated before story deduplication, facets and pagination.
+
 Priority is calculated only over reporting Claritas has lawfully discovered and
 quality-checked. It does not imply complete global coverage. Claritas stores and
 shows publisher headlines, available excerpts, provenance and links under the

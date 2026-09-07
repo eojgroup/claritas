@@ -54,6 +54,67 @@ test("institutional publication time rejects invalid and future feed dates", asy
   assert.equal(parseInstitutionalPublicationTime("2026-08-21T12:05:01.000Z", now), null);
 });
 
+test("institutional text tolerates malformed numeric entities and strips encoded markup", async () => {
+  const { parseInstitutionalFeedItem } = await connector;
+  const item = parseInstitutionalFeedItem(`<title>Rates &#x2014; &#9999999999; &#0; &#55296;</title>
+    <link>https://www.ecb.europa.eu/news?a=1&amp;b=2</link>
+    <description>&lt;p&gt;Inflation &amp; prices&lt;/p&gt;</description>`, "https://www.ecb.europa.eu/rss/press.html");
+  assert.equal(item?.title, "Rates — � � �");
+  assert.equal(item?.summary, "Inflation & prices");
+  assert.equal(item?.url, "https://www.ecb.europa.eu/news?a=1&b=2");
+});
+
+test("institutional Atom links choose the article over self feeds and enclosures", async () => {
+  const { parseInstitutionalFeedItem } = await connector;
+  const item = parseInstitutionalFeedItem(`<title>Policy decision</title>
+    <link rel="self" type="application/atom+xml" href="/api/item/123" />
+    <link rel="enclosure" href="/recording.mp3" />
+    <link href="/news/123" rel="alternate" type="text/html" />
+    <published>2026-09-01T09:00:00Z</published>`, "https://www.ecb.europa.eu/rss/press.html");
+  assert.equal(item?.url, "https://www.ecb.europa.eu/news/123");
+  assert.equal(item?.publishedRaw, "2026-09-01T09:00:00Z");
+});
+
+test("institutional article links reject executable schemes and credentials", async () => {
+  const { parseInstitutionalFeedItem } = await connector;
+  for (const link of ["javascript:alert(1)", "data:text/html,hello", "file:///tmp/story", "https://user:secret@example.com/news"]) {
+    assert.equal(parseInstitutionalFeedItem(`<title>News</title><link>${link}</link>`, "https://www.ecb.europa.eu/rss/press.html"), null);
+  }
+});
+
+test("updated-only entries cannot masquerade as newly published news", async () => {
+  const { parseInstitutionalFeedItem } = await connector;
+  const item = parseInstitutionalFeedItem(`<title>Old policy page</title>
+    <link>https://www.ecb.europa.eu/policy</link>
+    <updated>2026-09-07T15:00:00Z</updated>`, "https://www.ecb.europa.eu/rss/press.html");
+  assert.equal(item?.publishedRaw, null);
+});
+
+test("institutional feed parsing bounds records and source text", async () => {
+  const { feedItems, parseInstitutionalFeedItem } = await connector;
+  assert.equal(feedItems(`<rss>${"<item><title>News</title></item>".repeat(300)}</rss>`).length, 200);
+  const item = parseInstitutionalFeedItem(`<title>${"x".repeat(3_000)}</title>
+    <link>https://www.ecb.europa.eu/news</link><description>${"y".repeat(20_000)}</description>`, "https://www.ecb.europa.eu/rss/press.html");
+  assert.equal(item?.title.length, 2_000);
+  assert.equal(item?.summary?.length, 10_000);
+  const longIdItem = (suffix: string) => parseInstitutionalFeedItem(`<title>News</title>
+    <link>https://www.ecb.europa.eu/news</link><guid>${"x".repeat(3_000)}${suffix}</guid>`, "https://www.ecb.europa.eu/rss/press.html");
+  assert.match(longIdItem("a")!.externalId, /^sha256:[a-f0-9]{64}$/);
+  assert.notEqual(longIdItem("a")!.externalId, longIdItem("b")!.externalId);
+});
+
+test("institutional feed downloads cancel oversized chunked bodies", async () => {
+  const { readInstitutionalFeed } = await connector;
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) { controller.enqueue(new Uint8Array(1_000_000)); },
+    cancel() { cancelled = true; },
+  });
+  await assert.rejects(readInstitutionalFeed(new Response(stream)), /size limit/);
+  assert.equal(cancelled, true);
+  assert.equal(await readInstitutionalFeed(new Response("<rss />")), "<rss />");
+});
+
 test("reviewed institutional jurisdiction is subject context, while explicit content remains primary", async () => {
   const { institutionalSubjectGeography } = await connector;
   const feedOnly = inferNewsCountry({

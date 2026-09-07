@@ -1,7 +1,6 @@
 import express from "express";
 import { createHash, randomBytes, randomUUID } from "crypto";
-import { lookup } from "dns/promises";
-import { isIP } from "net";
+import { fetchPublicImage, ImageProxyError } from "./image-proxy";
 import {
   discoverPodcastFeeds,
   ingestPodcastIndex,
@@ -92,6 +91,7 @@ import {
 } from "./news-intelligence";
 import { startNewsAssessmentWorker } from "./news-assessment-worker";
 import { buildNewsReaderQuery } from "./news-reader-query";
+import { NewsSearchValidationError } from "./news-search";
 import { buildNewsCountryStatsQuery } from "./news-country-attribution";
 import {
   buildNewsRuntimeHealthQuery,
@@ -2298,7 +2298,10 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
     trackDemandSignal("news");
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "20"), 10) || 20, 1), 200);
     const offset = Math.max(parseInt(String(req.query.offset || "0"), 10) || 0, 0);
-    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    if (req.query.q !== undefined && typeof req.query.q !== "string") {
+      throw new NewsSearchValidationError("News search q must be a single string.");
+    }
+    const q = typeof req.query.q === "string" ? req.query.q : "";
     const country = typeof req.query.country === "string" ? req.query.country.trim().toUpperCase() : "";
     const language = typeof req.query.language === "string" ? req.query.language.trim().toLowerCase() : "";
     const sourceCountry = typeof req.query.source_country === "string" ? req.query.source_country.trim().toUpperCase() : "";
@@ -2359,7 +2362,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       },
     });
   } catch (e: any) {
-    res.status(500).json({ error: e.message || String(e) });
+    res.status(e instanceof NewsSearchValidationError ? 400 : 500).json({ error: e.message || String(e) });
   }
 });
 
@@ -3679,58 +3682,6 @@ app.get("/api/market/rates", requireAuthenticated, async (_req, res) => {
   }
 });
 
-function isPrivateNetworkAddress(address: string) {
-  const normalized = address.toLowerCase().split("%")[0];
-  if (normalized.startsWith("::ffff:")) return isPrivateNetworkAddress(normalized.slice(7));
-  if (isIP(normalized) === 4) {
-    const parts = normalized.split(".").map(Number);
-    const [a, b] = parts;
-    return a === 0 || a === 10 || a === 127 || a >= 224
-      || (a === 100 && b >= 64 && b <= 127)
-      || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && (b === 0 || b === 168))
-      || (a === 198 && (b === 18 || b === 19 || b === 51))
-      || (a === 203 && b === 0);
-  }
-  if (isIP(normalized) === 6) {
-    return normalized === "::" || normalized === "::1"
-      || normalized.startsWith("fc") || normalized.startsWith("fd")
-      || /^fe[89ab]/.test(normalized);
-  }
-  return true;
-}
-
-async function assertPublicImageUrl(value: string) {
-  const target = new URL(value);
-  if (target.protocol !== "https:" || target.username || target.password || target.port) {
-    throw new Error("Only credential-free HTTPS image URLs on the default port are permitted.");
-  }
-  if (target.hostname === "localhost" || target.hostname.endsWith(".localhost")) {
-    throw new Error("Local image hosts are not permitted.");
-  }
-  const addresses = await lookup(target.hostname, { all: true, verbatim: true });
-  if (!addresses.length || addresses.some((entry) => isPrivateNetworkAddress(entry.address))) {
-    throw new Error("Image host resolves to a private or reserved network.");
-  }
-  return target;
-}
-
-async function fetchPublicImage(value: string) {
-  let target = await assertPublicImageUrl(value);
-  for (let redirects = 0; redirects <= 3; redirects += 1) {
-    const response = await fetch(target, { redirect: "manual", signal: AbortSignal.timeout(10_000) });
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location || redirects === 3) throw new Error("Image redirect limit exceeded.");
-      target = await assertPublicImageUrl(new URL(location, target).toString());
-      continue;
-    }
-    return response;
-  }
-  throw new Error("Image redirect limit exceeded.");
-}
-
 // Bounded thumbnail proxy with DNS and redirect validation to prevent SSRF.
 app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
   try {
@@ -3738,27 +3689,15 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
     if (!url || !/^https:\/\//i.test(url)) {
       return res.status(400).send("invalid url");
     }
-    const r = await fetchPublicImage(url);
-    if (!r.ok) {
-      return res.status(r.status).send("upstream error");
-    }
-    const ct = r.headers.get("content-type") || "";
-    if (!ct.toLowerCase().startsWith("image/")) return res.status(415).send("upstream is not an image");
-    const contentLength = Number(r.headers.get("content-length") || 0);
-    if (contentLength > 5_000_000) {
-      return res.status(413).send("image too large");
-    }
-    res.setHeader("content-type", ct);
-    res.setHeader("cache-control", "public, max-age=86400, s-maxage=86400, immutable");
-    res.setHeader("access-control-allow-origin", "*");
-    const buf = Buffer.from(await r.arrayBuffer());
-    if (buf.length > 5_000_000) {
-      return res.status(413).send("image too large");
-    }
-    res.status(200).send(buf);
+    const image = await fetchPublicImage(url);
+    res.setHeader("Content-Type", image.contentType);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.status(200).send(image.body);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    res.status(400).send(message.includes("private") || message.includes("permitted") ? "image host is not permitted" : "proxy error");
+    res.status(error instanceof ImageProxyError ? error.status : 502)
+      .send(error instanceof ImageProxyError ? error.message : "proxy error");
   }
 });
 

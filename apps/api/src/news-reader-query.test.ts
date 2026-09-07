@@ -18,7 +18,7 @@ test("news reader variants use every PostgreSQL bind index contiguously", async 
             displayLanguage: "en",
             limit: 20,
             offset: filtered ? 20 : 0,
-            q: filtered ? "rates" : "",
+            q: filtered ? 'Fed "interest rates" -inflation 10% foo_bar' : "",
             country: filtered ? "US" : "",
             language: filtered ? "en" : "",
             sourceCountry: filtered ? "US" : "",
@@ -42,6 +42,25 @@ test("news reader variants use every PostgreSQL bind index contiguously", async 
       }
     }
   }
+});
+
+test("reader search applies before facets and pagination and uses only current translations", async () => {
+  const { buildNewsReaderQuery } = await reader;
+  const built = buildNewsReaderQuery({
+    displayLanguage: "en", limit: 20, offset: 40, q: 'Fed "interest rates" -inflation',
+    country: "US", language: "", sourceCountry: "", provider: "", category: "economy",
+    sort: "newest", archive: false, includeMetadata: true,
+  });
+  const searchIndex = built.params.indexOf("%Fed%") + 1;
+  assert.ok(searchIndex > 0);
+  assert.deepEqual(built.params.slice(searchIndex - 1, searchIndex + 2), ["%Fed%", "%interest rates%", "%inflation%"]);
+  assert.ok(built.sql.indexOf(`ILIKE $${searchIndex}`) < built.sql.indexOf("category_eligible_news AS"));
+  assert.ok(built.sql.indexOf(`ILIKE $${searchIndex}`) < built.sql.indexOf("LIMIT $"));
+  assert.match(built.sql, /translation\.target_language_code = \$1/);
+  assert.match(built.sql, /translation\.source_title_hash = md5\(COALESCE\(i\.title, ''\)\)/);
+  assert.match(built.sql, /translation\.source_summary_hash IS NOT DISTINCT FROM md5\(i\.summary\)/);
+  assert.match(built.sql, /i\.event_time >= now\(\) - interval '48 hours'/);
+  assert.match(built.sql, /quality_status' = 'accepted'/);
 });
 
 test("country and category scope compose before syndicated-story pagination", async () => {

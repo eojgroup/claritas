@@ -113,10 +113,19 @@ export function parseInstitutionalPublicationTime(
 function decodeXml(value: string): string {
   return value
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (entity, code: string) => {
+      if (code.startsWith("#")) {
+        const point = code[1].toLowerCase() === "x" ? Number.parseInt(code.slice(2), 16) : Number(code.slice(1));
+        // Malformed provider copy must not throw and discard the rest of a
+        // healthy feed, nor introduce NUL/surrogates into PostgreSQL text.
+        return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff)
+          ? String.fromCodePoint(point) : "\ufffd";
+      }
+      return ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" } as Record<string, string>)[code.toLowerCase()] ?? entity;
+    })
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/\u0000/g, "\ufffd")
     .replace(/\s+/g, " ").trim();
 }
 
@@ -125,16 +134,80 @@ function tag(block: string, name: string): string | null {
   return match ? decodeXml(match[1]) : null;
 }
 
-function link(block: string): string | null {
+function articleUrl(value: string | null, baseUrl: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value, baseUrl);
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port) return null;
+    return url.toString();
+  } catch { return null; }
+}
+
+function link(block: string, baseUrl: string): string | null {
   const value = tag(block, "link");
-  if (value) return value;
-  const atom = /<link\b[^>]*href=["']([^"']+)["'][^>]*\/?\s*>/i.exec(block);
-  return atom?.[1] ? decodeXml(atom[1]) : null;
+  if (value) return articleUrl(value, baseUrl);
+  // Atom often lists a self link or audio enclosure before the article.
+  // Only the alternate HTML representation is a reader destination.
+  for (const atom of block.matchAll(/<link\b[^>]*>/gi)) {
+    const attributes = Object.fromEntries(Array.from(atom[0].matchAll(/([\w:-]+)\s*=\s*["']([^"']*)["']/g))
+      .map((match) => [match[1].toLowerCase(), match[2]]));
+    if (attributes.rel && attributes.rel.toLowerCase() !== "alternate") continue;
+    if (attributes.type && !["text/html", "application/xhtml+xml"].includes(attributes.type.toLowerCase())) continue;
+    const url = articleUrl(attributes.href ? decodeXml(attributes.href) : null, baseUrl);
+    if (url) return url;
+  }
+  return null;
 }
 
 export function feedItems(xml: string): string[] {
-  const rss = [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map((match) => match[1]);
-  return rss.length ? rss : [...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)].map((match) => match[1]);
+  const pattern = /<item\b/i.test(xml) ? /<item\b[^>]*>([\s\S]*?)<\/item>/gi : /<entry\b[^>]*>([\s\S]*?)<\/entry>/gi;
+  const items: string[] = [];
+  for (const match of xml.matchAll(pattern)) {
+    items.push(match[1]);
+    if (items.length >= 200) break;
+  }
+  return items;
+}
+
+export function parseInstitutionalFeedItem(block: string, baseUrl: string): {
+  title: string; url: string; summary: string | null; publishedRaw: string | null; externalId: string;
+} | null {
+  const title = tag(block, "title")?.slice(0, 2_000);
+  const url = link(block, baseUrl);
+  if (!title || !url) return null;
+  const externalId = tag(block, "guid") || tag(block, "id") || url;
+  return {
+    title, url,
+    summary: (tag(block, "description") ?? tag(block, "summary") ?? tag(block, "content"))?.slice(0, 10_000) ?? null,
+    publishedRaw: tag(block, "pubDate") ?? tag(block, "published"),
+    externalId: Buffer.byteLength(externalId) <= 2_000
+      ? externalId : `sha256:${crypto.createHash("sha256").update(externalId).digest("hex")}`,
+  };
+}
+
+export async function readInstitutionalFeed(response: Response): Promise<string> {
+  const maxBytes = 5_000_000;
+  if (Number(response.headers.get("content-length")) > maxBytes) {
+    await response.body?.cancel();
+    throw new Error("Institutional feed exceeds size limit.");
+  }
+  if (!response.body) throw new Error("Institutional feed response has no body.");
+  const reader = response.body.getReader();
+  const chunks: Buffer[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new Error("Institutional feed exceeds size limit.");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally { reader.releaseLock(); }
+  return Buffer.concat(chunks, size).toString("utf8");
 }
 
 export function institutionalSubjectGeography(
@@ -207,12 +280,10 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
         signal: AbortSignal.timeout(20_000),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      for (const block of feedItems(await response.text())) {
-        const title = tag(block, "title");
-        const url = link(block);
-        if (!title || !url) { skipped += 1; continue; }
-        const summary = tag(block, "description") ?? tag(block, "summary") ?? tag(block, "content");
-        const publishedRaw = tag(block, "pubDate") ?? tag(block, "published") ?? tag(block, "updated");
+      for (const block of feedItems(await readInstitutionalFeed(response))) {
+        const item = parseInstitutionalFeedItem(block, feed.url);
+        if (!item) { skipped += 1; continue; }
+        const { title, url, summary, publishedRaw, externalId } = item;
         const eventTime = parseInstitutionalPublicationTime(publishedRaw);
         if (eventTime && (!latestEventTime || eventTime > latestEventTime)) latestEventTime = eventTime;
         const inference = inferNewsCountry({ title, summary, url, feedCountryHint: feed.sourceCountryIso2 });
@@ -220,7 +291,6 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
         for (const subjectCountry of subjectGeography.countries) {
           await query(`INSERT INTO country (iso2, name) VALUES ($1::char(2), $1) ON CONFLICT (iso2) DO NOTHING`, [subjectCountry]);
         }
-        const externalId = tag(block, "guid") ?? tag(block, "id") ?? url;
         const result = await query<{ inserted: boolean }>(
           `INSERT INTO item (
              source_id, external_id, kind, title, summary, url, country_iso2, event_time,

@@ -5,6 +5,7 @@ import { pool, query, withTransaction } from "../db";
 import { consumeDomainEvent } from "./consumer";
 import { buildEventDedupeKey } from "./correlation";
 import { buildNewsReaderQuery } from "../news-reader-query";
+import { buildNewsSearchPredicate } from "../news-search";
 import {
   correlateAndUpsertIntelligenceSignal,
   recomputeIntelligenceEventAggregateTx,
@@ -88,6 +89,38 @@ test("news reader query executes with and without metadata across bind layouts",
     const result = await pool.query(readerQuery.sql, readerQuery.params);
     assert.equal(result.rows.length, 1);
     assert.ok(Array.isArray(result.rows[0].items));
+  }
+});
+
+test("news research search matches phrases and publishers with literal wildcards and null-safe exclusions", async () => {
+  const fixtures = [
+    { id: 1, title: "The central bank cuts interest rates", summary: null, payload: { publisher: "Federal Reserve Board" }, url: "https://www.federalreserve.gov/policy", provider: "institutional_rss" },
+    { id: 2, title: "Zinsentscheid", translated_title: "A decision on interest rates", summary: null, payload: { publisher: "Federal Reserve Board" }, url: "https://www.federalreserve.gov/decision", provider: "gdelt" },
+    { id: 3, title: "The Fed holds interest rates", summary: "Inflation stays elevated", payload: {}, url: "https://www.federalreserve.gov/inflation", provider: "institutional_rss" },
+    { id: 4, title: String.raw`10% growth for foo_bar at C:\markets`, payload: {}, provider: "fixture", url: "https://example.org/literal" },
+    { id: 5, title: "100 growth for fooXbar at CXmarkets", payload: {}, provider: "fixture", url: "https://example.org/wildcard" },
+    { id: 6, title: "Rates draw interest from the Fed", payload: {}, provider: "fixture", url: "https://example.org/order" },
+  ];
+  const cases: Array<[string, number[]]> = [
+    ['Fed "interest rates" -inflation', [1, 2]],
+    ['"interest rates"', [1, 2, 3]],
+    ["-inflation", [1, 2, 4, 5, 6]],
+    [String.raw`"10% growth" foo_bar C:\markets`, [4]],
+    ["federalreserve.gov", [1, 2, 3]],
+    ["institutional_rss", [1, 3]],
+  ];
+  for (const [search, expected] of cases) {
+    const predicate = buildNewsSearchPredicate(search, 2);
+    const { rows } = await query<{ id: number }>(`SELECT i.id
+      FROM jsonb_to_recordset($1::jsonb) AS i(
+        id int,title text,summary text,payload jsonb,url text,provider text,
+        translated_title text,generated_summary text
+      )
+      CROSS JOIN LATERAL (SELECT i.translated_title,i.generated_summary) translation
+      CROSS JOIN LATERAL (SELECT i.provider AS name) s
+      WHERE ${predicate.sql}
+      ORDER BY i.id`, [JSON.stringify(fixtures), ...predicate.params]);
+    assert.deepEqual(rows.map((row) => row.id), expected, search);
   }
 });
 

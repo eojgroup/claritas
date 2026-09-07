@@ -1,5 +1,6 @@
 import { intelligenceEventEarthObservationStateSql } from "./intelligence/service";
 import { createNewsQueryParameterPlan } from "./news-intelligence";
+import { buildNewsSearchPredicate } from "./news-search";
 import {
   currentNewsAssessmentSql,
   newsStoryKeySql,
@@ -57,18 +58,9 @@ export function buildNewsReaderQuery(input: NewsReaderQueryInput): {
   // archive. Two days covers overnight/closed-market context without allowing
   // a thin category to look healthy because it still contains week-old rows.
   if (!archive) where.push("i.event_time >= now() - interval '48 hours'");
-  if (q) {
-    const titleIndex = params.push(`%${q}%`);
-    const summaryIndex = params.push(`%${q}%`);
-    const translatedTitleIndex = params.push(`%${q}%`);
-    const translatedSummaryIndex = params.push(`%${q}%`);
-    where.push(`(
-      i.title ILIKE $${titleIndex}
-      OR i.summary ILIKE $${summaryIndex}
-      OR translation.translated_title ILIKE $${translatedTitleIndex}
-      OR translation.generated_summary ILIKE $${translatedSummaryIndex}
-    )`);
-  }
+  const search = buildNewsSearchPredicate(q, params.length + 1);
+  params.push(...search.params);
+  if (search.sql) where.push(search.sql);
   let countryIndex: number | null = null;
   if (country) {
     countryIndex = params.push(country);

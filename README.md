@@ -194,13 +194,10 @@ Architecture and product design references:
 
 ## 🚀 Getting Started
 
-### 1. Codespaces
-Spin up an environment in-browser with GitHub Codespaces (preconfigured in `.devcontainer`).
-
-### 2. Manual Dev Setup
+### 1. Local Development
 Clone the workspace, then install and run each application from its own package:
 ```bash
-git clone https://github.com/your-org/claritas.git
+git clone https://github.com/eojgroup/claritas.git
 cd claritas
 (cd apps/api && npm ci && npm run dev)
 # In a second terminal:
@@ -211,7 +208,7 @@ The API requires the database environment variables documented in
 `apps/api/src/db.ts`. Native-app setup is documented in
 [`apps/mobile/ios/README.md`](apps/mobile/ios/README.md).
 
-### 3. Provider API Keys and Open Data
+### 2. Provider API Keys and Open Data
 
 - API runtime environment variable names:
   - `OPENWEATHER_API_KEY`
@@ -410,7 +407,7 @@ The API requires the database environment variables documented in
     `APNS_DELIVERY_ENABLED`
   - Used by deploy workflow: `.github/workflows/gke-deploy.yml` (`Ensure API provider secrets exist`)
 
-### 4. Daily Briefing AI Backend
+### 3. Daily Briefing AI Backend
 
 The daily briefing generator can use OpenCode as an internal LLM service:
 
