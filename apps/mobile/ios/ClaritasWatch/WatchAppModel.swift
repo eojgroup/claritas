@@ -16,6 +16,7 @@ final class WatchAppModel: ObservableObject {
     /// Reporting shown by the News tab for the user's selected category.
     @Published private(set) var selectedCategoryNews: [NewsItem] = []
     @Published private(set) var podcasts: [PodcastEpisode] = []
+    @Published private(set) var social: [SocialSignal] = []
     @Published private(set) var weather: [CountryWeather] = []
     @Published private(set) var leadership: [CountryLeadership] = []
     @Published private(set) var markets: [MarketQuote] = []
@@ -30,6 +31,7 @@ final class WatchAppModel: ObservableObject {
     @Published private(set) var selectedNewsCategory: String = NewsCategoryCatalog.allCode
     @Published private(set) var isRefreshingNews: Bool = false
     @Published private(set) var newsLoadError: String?
+    @Published private(set) var socialLoadError: String?
     @Published private(set) var newsCategoryFacets: [NewsCategoryFacet] = []
     @Published private(set) var newsPageTotal: Int?
     @Published private(set) var newsUnassessedCount: Int?
@@ -39,6 +41,7 @@ final class WatchAppModel: ObservableObject {
     private var api = APIClient()
     private let cacheKey = "CLARITAS_WATCH_SNAPSHOT"
     private var refreshRequestID = UUID()
+    private var widgetFreshness = WatchWidgetFreshness.empty
 
     var hasSession: Bool {
         WatchKeychain.authToken != nil
@@ -88,6 +91,7 @@ final class WatchAppModel: ObservableObject {
     func bootstrap() async {
         connectivity.requestContext()
         guard hasSession else {
+            clearProtectedData()
             connectionState = .waitingForPhone
             return
         }
@@ -96,8 +100,7 @@ final class WatchAppModel: ObservableObject {
 
     func refresh() async {
         guard let token = WatchKeychain.authToken else {
-            refreshRequestID = UUID()
-            isRefreshingNews = false
+            clearProtectedData()
             connectionState = .waitingForPhone
             connectivity.requestContext()
             return
@@ -109,6 +112,7 @@ final class WatchAppModel: ObservableObject {
         let requestedNewsCategory = selectedNewsCategory
         isRefreshingNews = true
         newsLoadError = nil
+        socialLoadError = nil
         defer {
             if refreshRequestID == requestID {
                 isRefreshingNews = false
@@ -125,7 +129,7 @@ final class WatchAppModel: ObservableObject {
                 limit: 12,
                 country: requestedCountry,
                 category: NewsCategoryCatalog.allCode,
-                sort: "importance",
+                sort: "newest",
                 archive: false,
                 includeMetadata: true
             )
@@ -136,7 +140,7 @@ final class WatchAppModel: ObservableObject {
                 limit: 12,
                 country: requestedCountry,
                 category: requestedNewsCategory,
-                sort: "importance",
+                sort: "newest",
                 archive: false,
                 includeMetadata: false
             )
@@ -146,7 +150,12 @@ final class WatchAppModel: ObservableObject {
         async let leadershipResult = result { try await requestAPI.fetchCountryLeadership() }
         async let marketResult = result { try await requestAPI.fetchMarketQuotes(refresh: false) }
         async let scheduleResult = result { try await requestAPI.fetchDailyBriefingSchedule() }
-        async let intelligenceResult = result { try await requestAPI.fetchIntelligenceEvents(limit: 8) }
+        async let intelligenceResult = result {
+            try await requestAPI.fetchIntelligenceEvents(limit: 8, country: requestedCountry)
+        }
+        async let socialResult = result {
+            try await requestAPI.fetchSocialSignals(limit: 8, country: requestedCountry)
+        }
 
         let results = await (
             briefingResult,
@@ -157,23 +166,28 @@ final class WatchAppModel: ObservableObject {
             leadershipResult,
             marketResult,
             scheduleResult,
-            intelligenceResult
+            intelligenceResult,
+            socialResult
         )
         guard refreshRequestID == requestID else { return }
         var errors: [Error] = []
+        let refreshedAt = Date()
 
         switch results.0 {
-        case .success(let value): briefing = value
+        case .success(let value):
+            briefing = value
+            widgetFreshness.overview = refreshedAt
         case .failure(let error): errors.append(error)
         }
         switch results.1 {
         case .success(let page):
-            news = Array(page.items.prefix(12))
+            news = Array(NewsChronology.sorted(page.items, order: .newestFirst).prefix(12))
             applyNewsMetadata(page)
             if requestedNewsCategory == NewsCategoryCatalog.allCode {
                 selectedCategoryNews = news
                 newsLoadError = nil
             }
+            widgetFreshness.news = refreshedAt
         case .failure(let error):
             if requestedNewsCategory == NewsCategoryCatalog.allCode {
                 newsLoadError = error.localizedDescription
@@ -183,7 +197,9 @@ final class WatchAppModel: ObservableObject {
         switch results.2 {
         case .success(let page):
             if requestedNewsCategory != NewsCategoryCatalog.allCode, let page {
-                selectedCategoryNews = Array(page.items.prefix(12))
+                selectedCategoryNews = Array(
+                    NewsChronology.sorted(page.items, order: .newestFirst).prefix(12)
+                )
                 newsLoadError = nil
             }
         case .failure(let error):
@@ -195,15 +211,28 @@ final class WatchAppModel: ObservableObject {
         case .failure(let error): errors.append(error)
         }
         switch results.4 {
-        case .success(let value): weather = Array(value.prefix(20))
+        case .success(let value):
+            let scoped = requestedCountry.map { country in
+                value.filter { normalizedCountry($0.country) == country }
+            } ?? value
+            weather = Array(scoped.prefix(20))
+            widgetFreshness.weather = refreshedAt
         case .failure(let error): errors.append(error)
         }
         switch results.5 {
-        case .success(let value): leadership = value
+        case .success(let value):
+            leadership = requestedCountry.map { country in
+                value.filter { normalizedCountry($0.country) == country }
+            } ?? value
         case .failure(let error): errors.append(error)
         }
         switch results.6 {
-        case .success(let value): markets = Array(value.prefix(20))
+        case .success(let value):
+            let scoped = requestedCountry.map { country in
+                value.filter { normalizedCountry($0.country) == country }
+            } ?? value
+            markets = Array(scoped.prefix(20))
+            widgetFreshness.markets = refreshedAt
         case .failure(let error): errors.append(error)
         }
         switch results.7 {
@@ -217,8 +246,23 @@ final class WatchAppModel: ObservableObject {
             }
         }
         switch results.8 {
-        case .success(let value): intelligenceEvents = Array(value.prefix(8))
-        case .failure(let error): errors.append(error)
+            case .success(let value):
+                let scoped = requestedCountry.map { country in
+                    value.filter { normalizedCountry($0.primary_country_iso2) == country }
+                } ?? value
+                intelligenceEvents = Array(scoped.prefix(8))
+            case .failure(let error): errors.append(error)
+        }
+        switch results.9 {
+        case .success(let value):
+            social = Array(SocialSignal.newestFirst(value).prefix(8))
+            socialLoadError = nil
+        case .failure(let error):
+            if isUnauthorized(error) {
+                errors.append(error)
+            } else {
+                socialLoadError = error.localizedDescription
+            }
         }
 
         do {
@@ -229,6 +273,7 @@ final class WatchAppModel: ObservableObject {
             )
             guard refreshRequestID == requestID else { return }
             transport = loadedTransport
+            widgetFreshness.transport = Date()
         } catch {
             guard refreshRequestID == requestID else { return }
             if isUnauthorized(error) {
@@ -238,19 +283,23 @@ final class WatchAppModel: ObservableObject {
 
         guard refreshRequestID == requestID else { return }
 
-        if errors.isEmpty {
-            lastUpdated = Date()
-            connectionState = .ready
-            saveCache()
-            WatchWidgetSnapshotStore.save(
-                newsCount: news.count,
-                marketDirection: marketDirection
-            )
-        } else if errors.contains(where: isUnauthorized) {
+        if errors.contains(where: isUnauthorized) {
             WatchKeychain.authToken = nil
+            clearProtectedData()
             connectionState = .waitingForPhone
         } else {
-            connectionState = .failed(errors[0].localizedDescription)
+            lastUpdated = widgetFreshness.latest ?? lastUpdated
+            saveCache()
+            WatchWidgetSnapshotStore.save(
+                news: news,
+                markets: markets,
+                weather: weather,
+                transport: transport,
+                intelligenceEvents: intelligenceEvents,
+                selectedCountry: selectedCountry,
+                freshness: widgetFreshness.withDerivedOverview
+            )
+            connectionState = errors.isEmpty ? .ready : .failed(errors[0].localizedDescription)
         }
     }
 
@@ -283,6 +332,40 @@ final class WatchAppModel: ObservableObject {
         await refresh()
     }
 
+    /// Applies a complication's country scope without relying on the paired
+    /// iPhone to resend its application context first. `GLOBAL` is the
+    /// explicit deep-link representation of an unscoped view.
+    func selectCountry(_ country: String?) async {
+        let normalized = country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let nextCountry: String?
+        if normalized == "GLOBAL" {
+            nextCountry = nil
+        } else {
+            nextCountry = normalizedCountry(normalized)
+        }
+        guard normalized == "GLOBAL" || nextCountry != nil else { return }
+        guard nextCountry != selectedCountry else { return }
+
+        selectedCountry = nextCountry
+        refreshRequestID = UUID()
+        isRefreshingNews = false
+        news = []
+        selectedCategoryNews = []
+        newsCategoryFacets = []
+        newsPageTotal = nil
+        newsUnassessedCount = nil
+        newsMetadataIncluded = false
+        social = []
+        socialLoadError = nil
+        weather = []
+        leadership = []
+        markets = []
+        transport = nil
+        intelligenceEvents = []
+        widgetFreshness = .empty
+        await refresh()
+    }
+
     func updateDailyBriefingSchedule(enabled: Bool, scheduledTime: String, timezone: String) async {
         guard !isSavingBriefingSchedule else { return }
         guard let token = WatchKeychain.authToken else {
@@ -298,17 +381,21 @@ final class WatchAppModel: ObservableObject {
         defer { isSavingBriefingSchedule = false }
 
         do {
-            briefingSchedule = try await api.updateDailyBriefingSchedule(
+            let updatedSchedule = try await api.updateDailyBriefingSchedule(
                 enabled: enabled,
                 scheduledTime: scheduledTime,
                 timezone: timezone
             )
+            guard WatchKeychain.authToken == token else { return }
+            briefingSchedule = updatedSchedule
             lastUpdated = Date()
             connectionState = .ready
             saveCache()
         } catch {
+            guard WatchKeychain.authToken == token else { return }
             if isUnauthorized(error) {
                 WatchKeychain.authToken = nil
+                clearProtectedData()
                 connectionState = .waitingForPhone
                 return
             }
@@ -319,14 +406,18 @@ final class WatchAppModel: ObservableObject {
     private func apply(context: [String: Any]) {
         let previousCountry = selectedCountry
         let previousCategory = selectedNewsCategory
+        let previousToken = WatchKeychain.authToken
+        var removedSession = false
         if let baseURL = context["apiBaseURL"] as? String, !baseURL.isEmpty {
             UserDefaults.standard.set(baseURL, forKey: "API_BASE_URL")
         }
         if let token = context["authToken"] as? String {
-            WatchKeychain.authToken = token.isEmpty ? nil : token
+            let nextToken = token.isEmpty ? nil : token
+            WatchKeychain.authToken = nextToken
             if token.isEmpty {
-                refreshRequestID = UUID()
-                isRefreshingNews = false
+                removedSession = true
+            } else if previousToken != nextToken {
+                clearProtectedData()
             }
         }
         if let rawCountry = context["selectedCountry"] as? String {
@@ -346,9 +437,21 @@ final class WatchAppModel: ObservableObject {
             newsMetadataIncluded = false
         }
         if previousCountry != selectedCountry {
+            social = []
+            socialLoadError = nil
+            weather = []
+            leadership = []
+            markets = []
             transport = nil
+            intelligenceEvents = []
+            widgetFreshness = .empty
         }
         api = APIClient()
+        if removedSession {
+            clearProtectedData()
+            connectionState = .waitingForPhone
+            return
+        }
         Task { await refresh() }
     }
 
@@ -383,6 +486,7 @@ final class WatchAppModel: ObservableObject {
             newsUnassessedCount: newsUnassessedCount,
             newsMetadataIncluded: newsMetadataIncluded,
             podcasts: podcasts,
+            social: social,
             weather: weather,
             leadership: leadership,
             markets: markets,
@@ -391,9 +495,14 @@ final class WatchAppModel: ObservableObject {
             briefingSchedule: briefingSchedule,
             selectedCountry: selectedCountry,
             selectedNewsCategory: selectedNewsCategory,
-            lastUpdated: lastUpdated
+            lastUpdated: lastUpdated,
+            widgetFreshness: widgetFreshness
         )
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        let encoder = JSONEncoder()
+        // `JSONDecoder.api` treats numeric dates as Unix seconds, so the cache
+        // encoder must use the same epoch rather than Foundation's reference date.
+        encoder.dateEncodingStrategy = .secondsSince1970
+        guard let data = try? encoder.encode(snapshot) else { return }
         UserDefaults.standard.set(data, forKey: cacheKey)
     }
 
@@ -407,16 +516,16 @@ final class WatchAppModel: ObservableObject {
         let cachedCategory = NewsCategoryCatalog.normalized(snapshot.selectedNewsCategory)
         selectedNewsCategory = cachedCategory
         if let cachedCategoryNews = snapshot.selectedCategoryNews {
-            news = snapshot.news
-            selectedCategoryNews = cachedCategoryNews
+            news = NewsChronology.sorted(snapshot.news, order: .newestFirst)
+            selectedCategoryNews = NewsChronology.sorted(cachedCategoryNews, order: .newestFirst)
             newsCategoryFacets = snapshot.newsCategoryFacets ?? []
             newsPageTotal = snapshot.newsPageTotal
             newsUnassessedCount = snapshot.newsUnassessedCount
             newsMetadataIncluded = snapshot.newsMetadataIncluded ?? false
         } else if cachedCategory == NewsCategoryCatalog.allCode {
             // Snapshots written before category selection stored the global feed in `news`.
-            news = snapshot.news
-            selectedCategoryNews = snapshot.news
+            news = NewsChronology.sorted(snapshot.news, order: .newestFirst)
+            selectedCategoryNews = news
             newsCategoryFacets = []
             newsPageTotal = nil
             newsUnassessedCount = nil
@@ -425,13 +534,14 @@ final class WatchAppModel: ObservableObject {
             // A short-lived pre-separation build cached a filtered feed as `news`.
             // Keep it visible, but never reuse it for global Watch metrics.
             news = []
-            selectedCategoryNews = snapshot.news
+            selectedCategoryNews = NewsChronology.sorted(snapshot.news, order: .newestFirst)
             newsCategoryFacets = []
             newsPageTotal = nil
             newsUnassessedCount = nil
             newsMetadataIncluded = false
         }
         podcasts = snapshot.podcasts
+        social = SocialSignal.newestFirst(snapshot.social ?? [])
         weather = snapshot.weather
         leadership = snapshot.leadership
         markets = snapshot.markets
@@ -439,6 +549,35 @@ final class WatchAppModel: ObservableObject {
         intelligenceEvents = snapshot.intelligenceEvents
         briefingSchedule = snapshot.briefingSchedule
         lastUpdated = snapshot.lastUpdated
+        widgetFreshness = snapshot.widgetFreshness ?? .empty
+    }
+
+    private func clearProtectedData() {
+        refreshRequestID = UUID()
+        isRefreshingNews = false
+        briefing = nil
+        news = []
+        selectedCategoryNews = []
+        podcasts = []
+        social = []
+        weather = []
+        leadership = []
+        markets = []
+        transport = nil
+        intelligenceEvents = []
+        briefingSchedule = nil
+        isSavingBriefingSchedule = false
+        briefingScheduleError = nil
+        socialLoadError = nil
+        newsLoadError = nil
+        newsCategoryFacets = []
+        newsPageTotal = nil
+        newsUnassessedCount = nil
+        newsMetadataIncluded = false
+        lastUpdated = nil
+        widgetFreshness = .empty
+        UserDefaults.standard.removeObject(forKey: cacheKey)
+        WatchWidgetSnapshotStore.clear()
     }
 
     private func applyNewsMetadata(_ page: NewsPage) {
@@ -459,6 +598,7 @@ private struct WatchSnapshot: Codable {
     let newsUnassessedCount: Int?
     let newsMetadataIncluded: Bool?
     let podcasts: [PodcastEpisode]
+    let social: [SocialSignal]?
     let weather: [CountryWeather]
     let leadership: [CountryLeadership]
     let markets: [MarketQuote]
@@ -468,4 +608,5 @@ private struct WatchSnapshot: Codable {
     let selectedCountry: String?
     let selectedNewsCategory: String?
     let lastUpdated: Date?
+    let widgetFreshness: WatchWidgetFreshness?
 }

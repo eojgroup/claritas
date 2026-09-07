@@ -28,6 +28,7 @@ import {
   Podcast,
   RefreshCw,
   Route,
+  Radio,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -53,9 +54,12 @@ import PriorityNewsList from "./components/PriorityNewsList";
 import NewsCategoryControl from "./components/NewsCategoryControl";
 import { newsCategoryLabel } from "./components/newsCategoryPresentation";
 import {
+  compareNewsNewest,
   describeNewsEmptyState,
   describeNewsFreshness,
+  latestNewsTimestamp,
   mergeNewsTranslationIntoItems,
+  newsChronology,
   newestNewsFirst,
   resolveNewsCoverageSelection,
   sliceNewsTrendForExport,
@@ -148,6 +152,7 @@ type MapMode = "signals" | "news" | "weather";
 type AppView =
   | "dashboard"
   | "news"
+  | "social"
   | "podcasts"
   | "weather"
   | "markets"
@@ -159,6 +164,7 @@ type AppView =
   | "legal";
 const OVERVIEW_DRILLDOWN_VIEWS = new Set<AppView>([
   "news",
+  "social",
   "podcasts",
   "weather",
   "markets",
@@ -794,6 +800,7 @@ import EarthObservationWorkspace from "./components/EarthObservationWorkspace";
 import IntelligenceEventStrip from "./components/IntelligenceEventStrip";
 import AdminWorkspace from "./components/AdminWorkspace";
 import SatelliteContextPanel from "./components/SatelliteContextPanel";
+import SocialSignalsWorkspace from "./components/SocialSignalsWorkspace";
 import { eventCoordinateContext } from "./components/eventPresentation";
 import {
   fetchAuthMe,
@@ -1897,7 +1904,7 @@ export default function ClaritasDashboard() {
         item.url ?? "",
         getNewsSignalCountries(item).join(" "),
         source,
-        item.event_time ?? "",
+        newsChronology(item).timestamp ?? "",
         item.kind ?? "",
       ]
         .join(" ")
@@ -2031,7 +2038,10 @@ export default function ClaritasDashboard() {
 
   const newsDateBounds = useMemo(() => {
     const keys = newsTrendPrimaryScope
-      .map((item) => (item.event_time ? getDateKey(item.event_time) : null))
+      .map((item) => {
+        const timestamp = newsChronology(item).timestamp;
+        return timestamp ? getDateKey(timestamp) : null;
+      })
       .filter((value): value is string => Boolean(value))
       .sort();
     if (keys.length === 0) return null;
@@ -2104,8 +2114,9 @@ export default function ClaritasDashboard() {
     const perDayCountries = new Map<string, Map<string, number>>();
 
     newsSearchScope.forEach((item) => {
-      if (!item.event_time) return;
-      const key = getDateKey(item.event_time);
+      const timestamp = newsChronology(item).timestamp;
+      if (!timestamp) return;
+      const key = getDateKey(timestamp);
       if (!key) return;
       const bucket = buckets.get(key);
       if (!bucket) return;
@@ -2190,7 +2201,8 @@ export default function ClaritasDashboard() {
     let items = newsSearchScope;
     if (effectiveRange) {
       items = items.filter((item) => {
-        const key = item.event_time ? getDateKey(item.event_time) : null;
+        const timestamp = newsChronology(item).timestamp;
+        const key = timestamp ? getDateKey(timestamp) : null;
         if (!key) return true;
         return key >= effectiveRange.start && key <= effectiveRange.end;
       });
@@ -2235,7 +2247,8 @@ export default function ClaritasDashboard() {
     let items = newsSearchScope;
     if (mapRange) {
       items = items.filter((item) => {
-        const key = item.event_time ? getDateKey(item.event_time) : null;
+        const timestamp = newsChronology(item).timestamp;
+        const key = timestamp ? getDateKey(timestamp) : null;
         if (!key) return false;
         return key >= mapRange.start && key <= mapRange.end;
       });
@@ -2256,9 +2269,10 @@ export default function ClaritasDashboard() {
           sources: new Map<string, number>(),
         };
         entry.count += 1;
-        if (item.event_time) {
-          if (!entry.lastEvent || item.event_time > entry.lastEvent) {
-            entry.lastEvent = item.event_time;
+        const timestamp = newsChronology(item).timestamp;
+        if (timestamp) {
+          if (!entry.lastEvent || Date.parse(timestamp) > Date.parse(entry.lastEvent)) {
+            entry.lastEvent = timestamp;
           }
         }
         const source = getSourceLabel(item);
@@ -2781,7 +2795,8 @@ export default function ClaritasDashboard() {
   const newsPageTimelineData = useMemo(() => {
     const byDate = new Map<string, number>();
     newsPageItems.forEach((item) => {
-      const key = item.event_time ? getDateKey(item.event_time) : null;
+      const timestamp = newsChronology(item).timestamp;
+      const key = timestamp ? getDateKey(timestamp) : null;
       if (!key) return;
       byDate.set(key, (byDate.get(key) ?? 0) + 1);
     });
@@ -3484,7 +3499,7 @@ export default function ClaritasDashboard() {
     if (!relationCountry) return [];
     return [...news]
       .filter((item) => getNewsSignalCountries(item).includes(relationCountry))
-      .sort((a, b) => (b.event_time || "").localeCompare(a.event_time || ""))
+      .sort(compareNewsNewest)
       .slice(0, 6);
   }, [news, relationCountry]);
 
@@ -3505,12 +3520,10 @@ export default function ClaritasDashboard() {
     };
   }, [newsPageCountryStats.size, newsPageItems, newsPageSourceData, newsPageTimelineData.length]);
 
-  const newsLatestTimestamp = useMemo(() => (
-    newsPageItems
-      .map((item) => item.event_time)
-      .filter((value): value is string => Boolean(value))
-      .sort((left, right) => right.localeCompare(left))[0] ?? null
-  ), [newsPageItems]);
+  const newsLatestTimestamp = useMemo(
+    () => latestNewsTimestamp(newsPageItems),
+    [newsPageItems],
+  );
   const newsFreshness = useMemo(
     () => describeNewsFreshness(newsLatestTimestamp),
     [newsLatestTimestamp],
@@ -3922,8 +3935,9 @@ export default function ClaritasDashboard() {
   const latestEventLabel = useMemo(() => {
     const times: number[] = [];
     filteredNews.forEach((item) => {
-      if (item.event_time) {
-        const time = Date.parse(item.event_time);
+      const timestamp = newsChronology(item).timestamp;
+      if (timestamp) {
+        const time = Date.parse(timestamp);
         if (!Number.isNaN(time)) times.push(time);
       }
     });
@@ -3958,6 +3972,7 @@ export default function ClaritasDashboard() {
   const aiSearchPreview = useMemo(() => {
     const news = newsSearchScope.slice(0, 8).map((item) => {
       const countries = getNewsSignalCountries(item);
+      const chronologyTimestamp = newsChronology(item).timestamp;
       const preferredCountry = selectedNewsCountry && countries.includes(selectedNewsCountry)
         ? selectedNewsCountry
         : countries[0] ?? null;
@@ -3969,7 +3984,7 @@ export default function ClaritasDashboard() {
         subtitle: [
           item.translated_title ? "AI translation" : null,
           countries.length > 0 ? countries.join(", ") : null,
-          item.event_time ? new Date(item.event_time).toLocaleString() : null,
+          chronologyTimestamp ? new Date(chronologyTimestamp).toLocaleString() : null,
         ]
           .filter(Boolean)
           .join(" · "),
@@ -4500,6 +4515,10 @@ export default function ClaritasDashboard() {
       icon: LayoutGrid,
       group: "core",
     },
+    { id: "news", label: "News", view: "news" as const, icon: Newspaper, group: "sources" },
+    { id: "social", label: "Social signals", view: "social" as const, icon: Radio, group: "sources" },
+    { id: "podcasts", label: "Podcasts", view: "podcasts" as const, icon: Podcast, group: "sources" },
+    { id: "transport", label: "Transport", view: "transport" as const, icon: Route, group: "sources" },
     ...(isAdmin
       ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings, group: "operations" }]
       : []),
@@ -4517,6 +4536,11 @@ export default function ClaritasDashboard() {
       kicker: "Source explorer",
       title: "Global news signals",
       summary: "Source, geography, significance, and recency in one stream",
+    },
+    social: {
+      kicker: "Source explorer · unverified",
+      title: "Social signal monitor",
+      summary: "Newest attributed posts, responsible accounts, and explicit trust boundaries",
     },
     podcasts: {
       kicker: "Source explorer",
@@ -4822,10 +4846,7 @@ export default function ClaritasDashboard() {
               <nav className="flex-1 px-3 py-2 space-y-1">
                 {navItems.map((item) => {
                   const Icon = item.icon;
-                  const active = activeView === item.view || (
-                    item.view === "dashboard" &&
-                    OVERVIEW_DRILLDOWN_VIEWS.has(activeView)
-                  );
+                  const active = activeView === item.view;
                   return (
                     <button
                       key={item.id}
@@ -4902,10 +4923,7 @@ export default function ClaritasDashboard() {
           <nav className="flex-1 px-3 py-2 space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const active = activeView === item.view || (
-                item.view === "dashboard" &&
-                OVERVIEW_DRILLDOWN_VIEWS.has(activeView)
-              );
+              const active = activeView === item.view;
               return (
                 <button
                   key={item.id}
@@ -5609,6 +5627,11 @@ export default function ClaritasDashboard() {
                               <Podcast className="h-3.5 w-3.5" />
                               <strong>Podcast</strong>
                               <small>{podcastSummary.signals} signals · {podcastSummary.evidence} excerpts</small>
+                            </button>
+                            <button type="button" onClick={() => setActiveView("social")}>
+                              <Radio className="h-3.5 w-3.5" />
+                              <strong>Social</strong>
+                              <small>Attributed posts · unverified claims</small>
                             </button>
                           </div>
                         </div>
@@ -6920,6 +6943,9 @@ export default function ClaritasDashboard() {
 
               </div>
             )}
+            {activeView === "social" && (
+              <SocialSignalsWorkspace initialCountry={selectedCountry} />
+            )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
                 <IntelligenceEventStrip country={selectedNewsCountry} onOpen={handleOpenIntelligence} />
@@ -7027,8 +7053,8 @@ export default function ClaritasDashboard() {
                         onChange={(event) => selectNewsSort(event.currentTarget.value as NewsSort)}
                         className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
                       >
-                        <option value="importance">Importance</option>
-                        <option value="newest">Latest</option>
+                        <option value="newest">Latest first</option>
+                        <option value="importance">Importance-ranked</option>
                       </select>
                     </label>
                     <div className="flex items-end">
@@ -7207,7 +7233,12 @@ export default function ClaritasDashboard() {
                           {newsMapCountryLabel ? `${newsMapCountryLabel} story stream` : "Global story stream"}
                         </div>
                       </div>
-                      <span className={`news-freshness-chip is-${newsFreshness.tone}`}>{newsFreshness.label}</span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="news-freshness-chip">
+                          {newsSortBy === "newest" ? "Latest first" : "Importance-ranked"}
+                        </span>
+                        <span className={`news-freshness-chip is-${newsFreshness.tone}`}>{newsFreshness.label}</span>
+                      </div>
                     </div>
                     <div
                       ref={feedRef}
@@ -10306,13 +10337,10 @@ export default function ClaritasDashboard() {
       </div>
       <nav className="mobile-ops-nav app-safe-bottom" aria-label="Primary mobile navigation">
         {navItems
-          .filter((item) => ["dashboard", "admin", "profile", "legal"].includes(item.id))
+          .filter((item) => ["dashboard", "news", "social", "profile", "admin"].includes(item.id))
           .map((item) => {
             const Icon = item.icon;
-            const active = activeView === item.view || (
-              item.view === "dashboard" &&
-              OVERVIEW_DRILLDOWN_VIEWS.has(activeView)
-            );
+            const active = activeView === item.view;
             return (
               <button
                 key={`mobile-ops-${item.id}`}

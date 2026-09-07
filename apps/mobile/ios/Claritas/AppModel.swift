@@ -1,7 +1,44 @@
 import Foundation
 import Combine
 import AuthenticationServices
+import Security
 import UIKit
+
+private enum AppKeychain {
+    private static let service = "com.eojgroup.claritas"
+    private static let account = "auth-token"
+
+    static var authToken: String? {
+        get {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+                kSecReturnData as String: true,
+                kSecMatchLimit as String: kSecMatchLimitOne
+            ]
+            var result: AnyObject?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+                  let data = result as? Data else {
+                return nil
+            }
+            return String(data: data, encoding: .utf8)
+        }
+        set {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account
+            ]
+            SecItemDelete(query as CFDictionary)
+            guard let newValue, let data = newValue.data(using: .utf8) else { return }
+            var item = query
+            item[kSecValueData as String] = data
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            SecItemAdd(item as CFDictionary, nil)
+        }
+    }
+}
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -27,6 +64,7 @@ final class AppModel: ObservableObject {
             selectedNewsItemID = nil
             scheduleTransportRefresh()
             synchronizeWatchContext()
+            updateWidgetSnapshot()
         }
     }
     @Published var selectedSymbol: String? = nil
@@ -46,6 +84,8 @@ final class AppModel: ObservableObject {
     /// separate from `news`, whose ordering belongs to the News workspace.
     @Published private(set) var rankedNews: [NewsItem] = []
     @Published var podcasts: [PodcastEpisode] = []
+    @Published private(set) var socialSignals: [SocialSignal] = []
+    @Published private(set) var socialCoverage: SocialCoverageResponse? = nil
     @Published var countryStats: [CountryStat] = []
     @Published var weather: [CountryWeather] = []
     @Published var leadership: [CountryLeadership] = []
@@ -57,6 +97,7 @@ final class AppModel: ObservableObject {
     @Published var isRefreshingNews: Bool = false
     @Published private(set) var isRefreshingRankedNews: Bool = false
     @Published var isRefreshingPodcasts: Bool = false
+    @Published private(set) var isRefreshingSocial: Bool = false
     @Published var isRefreshingWeather: Bool = false
     @Published var isRefreshingMarketQuotes: Bool = false
     @Published var isRefreshingTransport: Bool = false
@@ -77,6 +118,8 @@ final class AppModel: ObservableObject {
     @Published var newsLoadError: String? = nil
     @Published private(set) var rankedNewsLoadError: String? = nil
     @Published var podcastLoadError: String? = nil
+    @Published private(set) var socialLoadError: String? = nil
+    @Published private(set) var socialCoverageLoadError: String? = nil
     @Published var transportLoadError: String? = nil
     @Published var authStatus: AuthStatus = .checking
     @Published var authUser: AuthUser? = nil
@@ -92,10 +135,13 @@ final class AppModel: ObservableObject {
     let api: APIClient
     private var authToken: String? = nil
     private var authSession: ASWebAuthenticationSession?
+    private var authSessionAttemptID = UUID()
+    private var authCodeVerifier: String?
+    private var authHandoffRequestID = UUID()
     private let authPresenter = AuthSessionPresenter()
     private let watchSync = WatchSyncCoordinator.shared
 
-    private let authTokenKey = "AUTH_TOKEN"
+    private static let legacyAuthTokenKey = "AUTH_TOKEN"
     private let pushInstallationIDKey = "APNS_INSTALLATION_ID"
     private let authCallbackScheme: String
     private let authCallbackURL: URL
@@ -104,8 +150,12 @@ final class AppModel: ObservableObject {
     private let archiveNewsMaxPages = 4
     private var newsRequestID = UUID()
     private var rankedNewsRequestID = UUID()
+    private var socialRequestID = UUID()
+    private var socialScopeKey: String?
     private var transportRefreshTask: Task<Void, Never>?
     private var transportRequestID = UUID()
+    private var dataGeneration = UUID()
+    private var widgetFreshness = WidgetSnapshotFreshness.empty
 
     var isAdmin: Bool {
         (authUser?.roles ?? []).contains { $0.lowercased() == "admin" }
@@ -130,8 +180,17 @@ final class AppModel: ObservableObject {
 
     init() {
         let callbackURL = Self.resolveAuthCallbackURL()
+        let legacyAuthToken = UserDefaults.standard.string(forKey: Self.legacyAuthTokenKey)
+        let storedAuthToken = AppKeychain.authToken ?? legacyAuthToken
+        if AppKeychain.authToken == nil, let legacyAuthToken {
+            AppKeychain.authToken = legacyAuthToken
+        }
+        // Bearer sessions belong in the Keychain. Remove the legacy preference
+        // after this one-time migration even if secure storage is unavailable;
+        // a fresh sign-in is safer than retaining a reusable token in defaults.
+        UserDefaults.standard.removeObject(forKey: Self.legacyAuthTokenKey)
         self.api = APIClient()
-        self.authToken = UserDefaults.standard.string(forKey: authTokenKey)
+        self.authToken = storedAuthToken
         self.authCallbackURL = callbackURL
         self.authCallbackScheme = callbackURL.scheme ?? "claritas"
         self.api.setAuthToken(authToken)
@@ -211,9 +270,33 @@ final class AppModel: ObservableObject {
 
     func startSignIn(provider: AuthProviderId) {
         authError = nil
+        guard AuthProviderAvailability.isEnabled(provider, in: authProviders) else {
+            authError = "This identity provider is not currently available."
+            return
+        }
+        authSessionAttemptID = UUID()
+        let sessionAttemptID = authSessionAttemptID
+        authHandoffRequestID = UUID()
+        authSession?.cancel()
+        authSession = nil
+        authCodeVerifier = nil
+
+        let codeVerifier = NativeAuthPKCE.makeVerifier()
+        guard NativeAuthPKCE.isValidVerifier(codeVerifier) else {
+            authError = "Unable to prepare secure sign-in."
+            return
+        }
+        let codeChallenge = NativeAuthPKCE.challenge(for: codeVerifier)
+        authCodeVerifier = codeVerifier
 
         let startPath = authProviders.first(where: { $0.id == provider })?.start_path
-        guard let authURL = api.authStartURL(provider: provider, redirect: authCallbackURL, startPathOverride: startPath) else {
+        guard let authURL = api.authStartURL(
+            provider: provider,
+            redirect: authCallbackURL,
+            nativeCodeChallenge: codeChallenge,
+            startPathOverride: startPath
+        ) else {
+            authCodeVerifier = nil
             authError = "Unable to start sign-in."
             return
         }
@@ -221,12 +304,15 @@ final class AppModel: ObservableObject {
         let session = ASWebAuthenticationSession(url: authURL, callbackURLScheme: authCallbackScheme) { [weak self] callbackURL, error in
             guard let self else { return }
             Task { @MainActor in
+                guard self.authSessionAttemptID == sessionAttemptID else { return }
                 self.authSession = nil
                 if let callbackURL {
                     self.handleAuthCallback(callbackURL)
                 } else if let error {
+                    self.authCodeVerifier = nil
                     self.authError = self.describeAuthSessionError(error)
                 } else {
+                    self.authCodeVerifier = nil
                     self.authError = "Sign-in did not complete."
                 }
             }
@@ -235,39 +321,90 @@ final class AppModel: ObservableObject {
         session.prefersEphemeralWebBrowserSession = false
         authSession = session
         if !session.start() {
+            authSessionAttemptID = UUID()
             authSession = nil
+            authCodeVerifier = nil
             authError = "Unable to open secure sign-in."
         }
     }
 
     func handleAuthCallback(_ url: URL) {
-        let comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        let items = comps?.queryItems ?? []
-        if let error = items.first(where: { $0.name == "error" })?.value {
-            authError = error
-            authStatus = .unauthed
+        guard NativeAuthCallback.matchesExpectedEndpoint(url) else {
+            authCodeVerifier = nil
+            authHandoffRequestID = UUID()
+            authError = "Invalid sign-in callback."
+            if authUser == nil { authStatus = .unauthed }
             return
         }
-        guard let token = items.first(where: { $0.name == "token" })?.value, !token.isEmpty else {
-            authError = "Missing session token."
-            authStatus = .unauthed
+
+        guard let payload = NativeAuthCallback.parse(url) else {
+            authCodeVerifier = nil
+            authHandoffRequestID = UUID()
+            authError = "Missing or invalid one-time sign-in code."
+            if authUser == nil { authStatus = .unauthed }
             return
         }
-        setAuthToken(token)
+
+        if case .providerError(let message) = payload {
+            authCodeVerifier = nil
+            authHandoffRequestID = UUID()
+            authError = message
+            if authUser == nil { authStatus = .unauthed }
+            return
+        }
+
+        guard case .handoffCode(let code) = payload,
+              let codeVerifier = authCodeVerifier,
+              NativeAuthPKCE.isValidVerifier(codeVerifier) else {
+            authCodeVerifier = nil
+            authHandoffRequestID = UUID()
+            authError = "Secure sign-in session expired. Please try again."
+            if authUser == nil { authStatus = .unauthed }
+            return
+        }
+
+        authCodeVerifier = nil
+        let requestID = UUID()
+        authHandoffRequestID = requestID
+        authStatus = .checking
+        authError = nil
         Task {
-            await loadAuth()
-            if authStatus == .authed {
-                if hasPaidAccess {
-                    await loadInitial()
-                    await configurePushNotifications()
-                } else {
+            do {
+                let handoff = try await api.exchangeAuthHandoffCode(code, codeVerifier: codeVerifier)
+                guard authHandoffRequestID == requestID else { return }
+                setAuthToken(handoff.token)
+
+                await loadAuth()
+                guard authHandoffRequestID == requestID else { return }
+                if authStatus == .authed {
+                    if hasPaidAccess {
+                        await loadInitial()
+                        await configurePushNotifications()
+                    } else {
+                        clearAppData()
+                    }
+                } else if authError == nil {
+                    setAuthToken(nil)
+                    authError = "The new sign-in session could not be verified."
+                }
+            } catch {
+                guard authHandoffRequestID == requestID else { return }
+                if authUser == nil {
+                    setAuthToken(nil)
+                    authStatus = .unauthed
                     clearAppData()
                 }
+                authError = describeAuthLoadError(error, context: "sign-in handoff")
             }
         }
     }
 
     func logout() async {
+        authSessionAttemptID = UUID()
+        authHandoffRequestID = UUID()
+        authCodeVerifier = nil
+        authSession?.cancel()
+        authSession = nil
         var pushRevoked = false
         if let deviceID = UserDefaults.standard.string(forKey: "APNS_DEVICE_ID") {
             do {
@@ -335,11 +472,8 @@ final class AppModel: ObservableObject {
     private func setAuthToken(_ token: String?) {
         authToken = token
         api.setAuthToken(token)
-        if let token {
-            UserDefaults.standard.set(token, forKey: authTokenKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: authTokenKey)
-        }
+        AppKeychain.authToken = token
+        UserDefaults.standard.removeObject(forKey: Self.legacyAuthTokenKey)
         synchronizeWatchContext()
     }
 
@@ -360,6 +494,7 @@ final class AppModel: ObservableObject {
 
         let initialNewsCountry = normalizedCountry(selectedCountry)
         let initialNewsCategory = NewsCategoryCatalog.normalized(selectedNewsCategory)
+        let generation = dataGeneration
         let initialNewsRequestID = UUID()
         newsRequestID = initialNewsRequestID
 
@@ -427,6 +562,7 @@ final class AppModel: ObservableObject {
             marketResult,
             marketQuoteResult
         )
+        guard dataGeneration == generation, authStatus == .authed, hasPaidAccess else { return }
 
         var paymentRequiredDetected = false
         if case .failure(let error) = resolvedStats, isPaymentRequired(error) {
@@ -467,6 +603,7 @@ final class AppModel: ObservableObject {
         }
         if case .success(let briefing) = resolvedBriefing {
             dailyBriefing = briefing
+            widgetFreshness.overview = Date()
         }
         if case .success(let schedule) = resolvedSchedule {
             dailyBriefingSchedule = schedule
@@ -474,17 +611,19 @@ final class AppModel: ObservableObject {
         }
         if case .success(let weatherRows) = resolvedWeather {
             weather = weatherRows
+            widgetFreshness.weather = Date()
         }
         if case .success(let leadershipRows) = resolvedLeadership {
             leadership = leadershipRows
         }
         if case .success(let newsPage) = resolvedNews, newsRequestID == initialNewsRequestID {
-            applyNewsPage(newsPage)
+            applyNewsPage(newsPage, sort: .newest)
             newsLoadMode = .recent
             newsScopeCountry = initialNewsCountry
             newsScopeCategory = initialNewsCategory
             newsScopeSort = .newest
             newsLoadError = nil
+            widgetFreshness.news = Date()
         }
         if case .failure(let error) = resolvedNews, newsRequestID == initialNewsRequestID {
             newsLoadError = (error as? APIError)?.message ?? error.localizedDescription
@@ -498,19 +637,18 @@ final class AppModel: ObservableObject {
         }
         if case .success(let overview) = resolvedMarket {
             countryMarkets = overview.countries
+            widgetFreshness.markets = Date()
         }
         if case .success(let quotes) = resolvedMarketQuotes {
             marketQuotes = quotes
+            widgetFreshness.markets = Date()
         }
         await refreshTransport(forceRefresh: false)
-        WidgetSnapshotStore.save(
-            newsCount: news.count,
-            countryMarkets: countryMarkets,
-            weather: weather
-        )
+        updateWidgetSnapshot()
     }
 
     func clearAppData() {
+        dataGeneration = UUID()
         clearSelection()
         transportRefreshTask?.cancel()
         transportRefreshTask = nil
@@ -539,9 +677,18 @@ final class AppModel: ObservableObject {
         rankedNewsMetadataIncluded = false
         newsRequestID = UUID()
         rankedNewsRequestID = UUID()
+        socialRequestID = UUID()
         isRefreshingNews = false
         isRefreshingRankedNews = false
+        isRefreshingPodcasts = false
+        isRefreshingSocial = false
+        isRefreshingWeather = false
+        isRefreshingMarketQuotes = false
+        isRefreshingTransport = false
         podcasts = []
+        socialSignals = []
+        socialCoverage = nil
+        socialScopeKey = nil
         marketQuotes = []
         countryMarkets = []
         transportOverview = nil
@@ -550,7 +697,11 @@ final class AppModel: ObservableObject {
         newsLoadError = nil
         rankedNewsLoadError = nil
         podcastLoadError = nil
+        socialLoadError = nil
+        socialCoverageLoadError = nil
         transportLoadError = nil
+        widgetFreshness = .empty
+        WidgetSnapshotStore.clear()
         synchronizeWatchContext()
     }
 
@@ -798,11 +949,13 @@ final class AppModel: ObservableObject {
                 sort: sort
             )
             guard newsRequestID == requestID else { return }
-            applyNewsPage(loadedPage)
+            applyNewsPage(loadedPage, sort: sort)
             newsLoadMode = mode
             newsScopeCountry = requestedCountry
             newsScopeCategory = requestedCategory
             newsScopeSort = sort
+            widgetFreshness.news = Date()
+            updateWidgetSnapshot()
         } catch {
             guard newsRequestID == requestID else { return }
             if isPaymentRequired(error) {
@@ -821,17 +974,21 @@ final class AppModel: ObservableObject {
             return
         }
 
+        let generation = dataGeneration
         isRefreshingPodcasts = true
         podcastLoadError = nil
         defer { isRefreshingPodcasts = false }
 
         do {
-            podcasts = try await api.fetchPodcasts(
+            let loadedPodcasts = try await api.fetchPodcasts(
                 limit: 60,
                 q: query,
                 signalType: signalType
             )
+            guard dataGeneration == generation else { return }
+            podcasts = loadedPodcasts
         } catch {
+            guard dataGeneration == generation else { return }
             if isPaymentRequired(error) {
                 clearAppData()
                 await refreshAccess()
@@ -841,18 +998,101 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshSocialSignals(
+        platform: SocialPlatform? = nil,
+        country: String? = nil,
+        query: String? = nil
+    ) async {
+        guard hasPaidAccess else {
+            clearAppData()
+            return
+        }
+
+        let requestID = UUID()
+        socialRequestID = requestID
+        let scopeKey = [
+            platform?.rawValue ?? "all",
+            normalizedCountry(country) ?? "global",
+            query?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        ].joined(separator: "|")
+        if socialScopeKey != scopeKey {
+            socialSignals = []
+        }
+        isRefreshingSocial = true
+        socialLoadError = nil
+        socialCoverageLoadError = nil
+        defer {
+            if socialRequestID == requestID {
+                isRefreshingSocial = false
+            }
+        }
+
+        async let signalsRequest: Result<[SocialSignal], Error> = {
+            do {
+                return .success(try await api.fetchSocialSignals(
+                    limit: 80,
+                    platform: platform,
+                    country: country,
+                    query: query
+                ))
+            } catch {
+                return .failure(error)
+            }
+        }()
+        async let coverageRequest: Result<SocialCoverageResponse, Error> = {
+            do {
+                return .success(try await api.fetchSocialCoverage(days: 7))
+            } catch {
+                return .failure(error)
+            }
+        }()
+
+        let (signalsResult, coverageResult) = await (signalsRequest, coverageRequest)
+        guard socialRequestID == requestID else { return }
+
+        if case .failure(let error) = signalsResult, isPaymentRequired(error) {
+            clearAppData()
+            await refreshAccess()
+            return
+        }
+        if case .failure(let error) = coverageResult, isPaymentRequired(error) {
+            clearAppData()
+            await refreshAccess()
+            return
+        }
+
+        switch signalsResult {
+        case .success(let signals):
+            socialSignals = SocialSignal.newestFirst(signals)
+            socialScopeKey = scopeKey
+        case .failure(let error):
+            socialLoadError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+        if case .success(let coverage) = coverageResult {
+            socialCoverage = coverage
+        } else if case .failure(let error) = coverageResult {
+            socialCoverageLoadError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
     func refreshWeatherNow() async {
         guard !isRefreshingWeather else { return }
         guard hasPaidAccess else {
             clearAppData()
             return
         }
+        let generation = dataGeneration
         isRefreshingWeather = true
         defer { isRefreshingWeather = false }
         do {
             _ = try await api.ingestWeatherNow(country: selectedCountry)
-            weather = try await api.fetchCountryWeather()
+            let loadedWeather = try await api.fetchCountryWeather()
+            guard dataGeneration == generation else { return }
+            weather = loadedWeather
+            widgetFreshness.weather = Date()
+            updateWidgetSnapshot()
         } catch {
+            guard dataGeneration == generation else { return }
             if isPaymentRequired(error) {
                 clearAppData()
                 await refreshAccess()
@@ -867,15 +1107,20 @@ final class AppModel: ObservableObject {
             clearAppData()
             return
         }
+        let generation = dataGeneration
         isRefreshingMarketQuotes = true
         defer { isRefreshingMarketQuotes = false }
         do {
             async let overviewRequest = api.fetchCountryMarkets()
             async let quotesRequest = api.fetchMarketQuotes(refresh: false)
             let (overview, quotes) = try await (overviewRequest, quotesRequest)
+            guard dataGeneration == generation else { return }
             countryMarkets = overview.countries
             marketQuotes = quotes
+            widgetFreshness.markets = Date()
+            updateWidgetSnapshot()
         } catch {
+            guard dataGeneration == generation else { return }
             if isPaymentRequired(error) {
                 clearAppData()
                 await refreshAccess()
@@ -931,6 +1176,8 @@ final class AppModel: ObservableObject {
                 transportOverview = nil
                 transportOverviewCountry = nil
             }
+            widgetFreshness.transport = Date()
+            updateWidgetSnapshot()
         } catch {
             if Task.isCancelled || transportRequestID != requestID { return }
             if isPaymentRequired(error) {
@@ -940,6 +1187,28 @@ final class AppModel: ObservableObject {
             }
             transportLoadError = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+
+    private func updateWidgetSnapshot() {
+        WidgetSnapshotStore.save(
+            news: news,
+            newsTotal: newsPageTotal,
+            newsScopeCountry: newsScopeCountry,
+            countryStats: countryStats,
+            countryMarkets: countryMarkets,
+            weather: weather,
+            transport: signalTransportOverview,
+            transportDetail: transportOverview,
+            briefing: dailyBriefing,
+            selectedCountry: selectedCountry,
+            freshness: WidgetSnapshotFreshness(
+                overview: widgetFreshness.overview,
+                news: widgetFreshness.news,
+                markets: widgetFreshness.markets,
+                weather: widgetFreshness.weather,
+                transport: widgetFreshness.transport
+            )
+        )
     }
 
     private func scheduleTransportRefresh() {
@@ -1026,24 +1295,9 @@ final class AppModel: ObservableObject {
     }
 
     private static func resolveAuthCallbackURL() -> URL {
-        let defaultURL = URL(string: "claritas://auth/callback")!
-
-        if let runtimeOverride = UserDefaults.standard.string(forKey: "AUTH_CALLBACK_URL"),
-           let runtimeURL = URL(string: runtimeOverride),
-           runtimeURL.scheme != nil {
-            return runtimeURL
-        }
-
-        guard let configURL = Bundle.main.url(forResource: "Config", withExtension: "plist"),
-              let data = try? Data(contentsOf: configURL),
-              let dict = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
-              let callbackValue = dict["AUTH_CALLBACK_URL"] as? String,
-              let callbackURL = URL(string: callbackValue),
-              callbackURL.scheme != nil else {
-            return defaultURL
-        }
-
-        return callbackURL
+        // The API allowlist and callback parser intentionally share this one
+        // native endpoint. Runtime overrides must not broaden callback trust.
+        NativeAuthCallback.expectedURL
     }
 
     nonisolated private static func isoDate(_ date: Date) -> String {
@@ -1117,10 +1371,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func applyNewsPage(_ loadedPage: NewsPage) {
+    private func applyNewsPage(_ loadedPage: NewsPage, sort: NewsSortMode) {
         let includesMetadata = loadedPage.page.metadata_included
             ?? !loadedPage.facets.categories.isEmpty
-        news = loadedPage.items
+        news = sort == .importance
+            ? loadedPage.items
+            : NewsChronology.sorted(loadedPage.items, order: .newestFirst)
         if let selectedID = selectedNewsItemID,
            let refreshedSelection = loadedPage.items.first(where: { $0.id == selectedID }) {
             selectedNewsItem = refreshedSelection

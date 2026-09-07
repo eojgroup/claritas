@@ -45,6 +45,7 @@ Each domain has a distinct analytical responsibility:
 | Signal Desk | What is the canonical event, which evidence supports it, and what remains uncertain? | Prioritized event queue, chronological labelled evidence, original sources and event-specific EO |
 | Daily briefing | What is the cross-domain situation? | Newsletter synthesis plus a compact, read-only Watch glance |
 | News | Which publishers report a development, and which canonical event does each story support? | Dense story stream, source mix, country coverage and linked-event action |
+| Social signals | Which account made a public claim, when, and with what explicit responsibility? | Newest-first attributed posts, original links, account identity and a persistent unverified boundary |
 | Podcast intelligence | What claims, risks, and evidence support the signal? | Episode evidence, extracted signals, timestamps |
 | Weather | Which conditions exceed operating thresholds and where? | Threshold queue, observation feed, map, distribution charts |
 | Markets | Which instruments moved and what context may explain it? | Watchlist, symbol drilldown, session range, movers, benchmark regime |
@@ -133,7 +134,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 
 ### Web
 
-- A persistent left navigation puts Overview and Signal Desk first, then groups News, Podcast, Weather, Market and Transport explorers as source lenses. Operations and account destinations remain separate.
+- A persistent left navigation puts Overview first, then exposes News, Social, Podcast and Transport explorers directly. Weather, Market and governed imagery remain available from the overview drill-down; operations and account destinations stay separate.
 - A sticky top bar always shows page title, scope summary, live/freshness state, search, notifications, theme, and account state.
 - The active page owns filtering and comparison controls.
 - At mobile width, the same destinations remain available through the navigation drawer; the Signal Desk is not hidden behind the imagery catalogue.
@@ -143,7 +144,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 ### iPhone
 
 - `TabView` and `NavigationStack` preserve platform-native navigation.
-- Five stable destinations keep the bottom bar predictable: Dashboard, Signal desk, News, Daily briefing, and More. Podcasts, weather, markets, transport, the Imagery library, account, policy and eligible admin routes live in More.
+- Four stable destinations keep the bottom bar predictable: Overview, News, Investigate, and More. Daily briefing, Social, podcasts, weather, markets, transport, the Imagery library, account, policy and eligible admin routes live in More.
 - The Dashboard is map-first; the Signal Desk is the canonical event investigation and is reachable directly from a linked News card or push alert.
 - Region scope, ranked bubbles, highest-relevance guidance, country selection, zoom/pan, and reset are touch-sized. Compare and pin remain tablet/desktop tools.
 - The Dashboard contains the map, a compact posture strip, the active country profile, and only the most actionable current signals. Full source-lens workspaces remain available from their destinations.
@@ -153,6 +154,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 
 - `NavigationSplitView` groups Workspace, Source lenses, Operations and Account.
 - Workspace puts the Signal Desk and Daily briefing before the individual source lenses. The selected event preserves the same labelled evidence and imagery contract as web.
+- News, Social and Transport are explicit source lenses in the sidebar. The Social lens uses the same account/responsible-party contract as web and never promotes a platform badge into factual confidence.
 - The overview uses the map as its dominant surface, with region scope, country selection, compare, pin, and cross-domain drill-in.
 - The dedicated Transport workspace exposes live aircraft and vessel markers, route curves, sampled tracks, flight numbers/MMSIs, country linkage, corridor flows, and activity/country charts.
 - A compact KPI posture strip follows the map. The lower stage uses a wide intelligence stream and a narrower selection-driven context rail for focus, market movement, and weather thresholds.
@@ -165,6 +167,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 - The watch map preserves the same three layers, regional scope, ranking, highest-relevance explanation, country selection, and reset behavior in a glanceable form.
 - A single Pulse page replaces separate domain deep dives and limits itself to the most relevant headline, weather exception, and market mover.
 - A Transport pulse page adds aggregate flight, vessel, connected-country, and leading-corridor context without sending raw tracks to Watch.
+- A Social claims page shows only the newest attributed messages, keeps the unverified warning visible, and hands deeper review to iPhone.
 - Dense lists, evidence, compare, schedule editing, admin, profile editing, and policy reading remain unavailable.
 - “Open on iPhone” can send a destination, selected/highest country and exact event identity through `WatchConnectivity`; the iPhone opens the matching workspace selection.
 
@@ -393,6 +396,7 @@ Shared tokens and component contracts create one product identity. Shared geomet
 | EO context/library | `IntelligenceWorkspace.tsx`, `EarthObservationWorkspace.tsx` | `IntelligenceWorkspaceView.swift` | event phone handoff only |
 | Maps | `WorldMapBubbles.tsx` | `SignalMapPanel`, `InteractiveCountryBubbleMap` | `WatchSignalMap` |
 | Transport | `TransportWorkspace.tsx` | `TransportWorkspaceView.swift`, `CountryProfileView.swift` | `WatchTransportPulseView` |
+| Social signals | `SocialSignalsWorkspace.tsx` | `SocialSignalsView.swift` | `WatchSocialSignalsView.swift` |
 | Alerts/push | in-app watchlist/alert controls in `IntelligenceWorkspace.tsx` | `PushNotificationCoordinator.swift`, `ProfileView.swift` | no direct token registration; phone handoff |
 | Admin | `AdminIngestionPanel.tsx`, `AdminUserManagementPanel.tsx` | `AdminWorkspaceView` | Intentionally unavailable |
 | Settings/documents | `App.tsx` | `ProfileView.swift`, `PoliciesWorkspaceView` | Phone handoff only |
@@ -419,6 +423,7 @@ The current system:
 - treats tablet as a map-led two-column review workspace;
 - treats mobile as map-led triage and drill-in;
 - treats watch as a map-led companion with a briefing glance, a one-page urgent pulse, and phone handoff;
+- carries social claims across web, iPhone/iPad and Watch with identical attribution and non-fact semantics;
 - puts one canonical-event Signal Desk ahead of the source lenses and links News cards back to the event/evidence thread;
 - adds a shared event workspace on web/iPad, focused event triage on iPhone, authenticated persisted EO previews and before/after comparison, and a concise Watch event pulse that hands off to the exact iPhone event;
 - shows bounded NASA GIBS browse context directly on web while keeping it distinct from persisted observations and model interpretation; and

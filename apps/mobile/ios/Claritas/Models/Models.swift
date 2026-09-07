@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum AuthProviderId: String, Codable, CaseIterable, Identifiable {
     case google
@@ -14,6 +15,116 @@ struct AuthProvider: Codable, Identifiable {
     let display_name: String?
     let icon: String?
     let start_path: String?
+}
+
+enum AuthProviderAvailability {
+    static func enabledProviderIDs(_ providers: [AuthProvider]) -> [AuthProviderId] {
+        AuthProviderId.allCases.filter { id in
+            providers.contains { $0.id == id && $0.enabled }
+        }
+    }
+
+    static func isEnabled(_ id: AuthProviderId, in providers: [AuthProvider]) -> Bool {
+        providers.contains { $0.id == id && $0.enabled }
+    }
+}
+
+struct AuthHandoffResponse: Decodable {
+    let token: String
+    let expires_at: Date
+}
+
+struct AuthHandoffRequest: Encodable, Equatable {
+    let code: String
+    let code_verifier: String
+}
+
+enum NativeAuthCallbackPayload: Equatable {
+    case handoffCode(String)
+    case providerError(String)
+}
+
+enum NativeAuthCallback {
+    static let expectedURL = URL(string: "claritas://auth/callback")!
+
+    static func matchesExpectedEndpoint(_ url: URL) -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return false
+        }
+        return components.scheme?.lowercased() == "claritas"
+            && components.host?.lowercased() == "auth"
+            && components.path == "/callback"
+            && components.user == nil
+            && components.password == nil
+            && components.port == nil
+            && components.fragment == nil
+    }
+
+    static func parse(_ url: URL) -> NativeAuthCallbackPayload? {
+        guard matchesExpectedEndpoint(url),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+
+        let items = components.queryItems ?? []
+        // Session bearer tokens are never accepted from a callback URL. Apart
+        // from preventing disclosure through URL handling, this fails closed
+        // against mixed legacy/new callback payloads.
+        guard !items.contains(where: { $0.name == "token" }) else { return nil }
+
+        let codeItems = items.filter { $0.name == "code" }
+        let errorItems = items.filter { $0.name == "error" }
+        guard !(codeItems.isEmpty == false && errorItems.isEmpty == false) else { return nil }
+
+        if codeItems.count == 1,
+           let rawCode = codeItems[0].value {
+            let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !code.isEmpty, code.utf8.count <= 4_096 else { return nil }
+            return .handoffCode(code)
+        }
+
+        if codeItems.isEmpty,
+           errorItems.count == 1,
+           let rawError = errorItems[0].value {
+            let description = items
+                .first(where: { $0.name == "error_description" })?
+                .value?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallback = rawError.trimmingCharacters(in: .whitespacesAndNewlines)
+            let message = (description?.isEmpty == false ? description : nil) ?? fallback
+            guard !message.isEmpty else { return nil }
+            return .providerError(String(message.prefix(500)))
+        }
+
+        return nil
+    }
+}
+
+enum NativeAuthPKCE {
+    static func makeVerifier() -> String {
+        var generator = SystemRandomNumberGenerator()
+        let bytes = (0..<32).map { _ in
+            UInt8.random(in: UInt8.min...UInt8.max, using: &generator)
+        }
+        return base64URL(Data(bytes))
+    }
+
+    static func challenge(for verifier: String) -> String {
+        base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
+    }
+
+    static func isValidVerifier(_ verifier: String) -> Bool {
+        guard (43...128).contains(verifier.utf8.count) else { return false }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+        return verifier.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
 }
 
 struct BillingPlanRef: Codable {
@@ -520,9 +631,68 @@ struct NewsItem: Codable, Identifiable {
         return "AI translation · \(source)→\(target)"
     }
 
+    /// The canonical server event timestamp retained for compatibility with
+    /// older cached responses. Reader chronology should use `chronologyDate`
+    /// so a publisher timestamp and a provider discovery timestamp are never
+    /// silently presented as the same kind of evidence.
     var eventDate: Date? {
-        guard let s = event_time else { return nil }
-        return APIDateParser.parse(s)
+        event_time.flatMap(APIDateParser.parse)
+    }
+
+    var publisherPublishedDate: Date? {
+        time?.published_at.flatMap(APIDateParser.parse)
+    }
+
+    var providerDiscoveredDate: Date? {
+        time?.discovered_at.flatMap(APIDateParser.parse)
+    }
+
+    var timelineDate: Date? {
+        time?.timeline_at.flatMap(APIDateParser.parse)
+    }
+
+    /// Uses the exact timeline instant selected by the reader API. The
+    /// publisher/discovery fields remain fallbacks for snapshots written by
+    /// older app versions; their provenance label is never inferred away.
+    var chronologyDate: Date? {
+        if let timelineDate { return timelineDate }
+        switch chronologyBasis {
+        case .published:
+            return publisherPublishedDate ?? eventDate
+        case .firstSeen:
+            return providerDiscoveredDate ?? eventDate
+        case .sourceTime:
+            return eventDate ?? publisherPublishedDate ?? providerDiscoveredDate
+        case .reported:
+            return eventDate ?? publisherPublishedDate ?? providerDiscoveredDate
+        }
+    }
+
+    var chronologyBasis: NewsChronology.Basis {
+        let basis = timeBasis?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+
+        if basis == "provider_first_seen" {
+            return .firstSeen
+        }
+        if basis == "publisher_published_or_provider_discovered" {
+            return .sourceTime
+        }
+        if basis.hasPrefix("publisher_published") {
+            return .published
+        }
+        if time?.is_publisher_verified == true, publisherPublishedDate != nil {
+            return .published
+        }
+        if providerDiscoveredDate != nil, publisherPublishedDate == nil {
+            return .firstSeen
+        }
+        return .reported
+    }
+
+    var chronologyLabel: String {
+        chronologyBasis.label
     }
 
     var subjectCountries: [String] {
@@ -681,8 +851,59 @@ struct NewsItem: Codable, Identifiable {
 struct NewsTimeEvidence: Codable {
     let basis: String
     let is_publisher_verified: Bool
+    let timeline_at: String?
     let published_at: String?
     let discovered_at: String?
+}
+
+enum NewsChronology {
+    enum Basis {
+        case published
+        case firstSeen
+        case sourceTime
+        case reported
+
+        var label: String {
+            switch self {
+            case .published: return "Published"
+            case .firstSeen: return "First seen"
+            case .sourceTime: return "Source time"
+            case .reported: return "Reported"
+            }
+        }
+    }
+
+    enum Order {
+        case newestFirst
+        case oldestFirst
+    }
+
+    /// Sorts actual instants instead of their ISO-8601 spellings. Raw string
+    /// comparison is incorrect when feeds mix offsets or fractional seconds.
+    /// Missing timestamps remain at the end and IDs make ties deterministic.
+    static func sorted(_ items: [NewsItem], order: Order) -> [NewsItem] {
+        items.sorted { precedes($0, $1, order: order) }
+    }
+
+    static func precedes(_ left: NewsItem, _ right: NewsItem, order: Order) -> Bool {
+        let leftDate = left.chronologyDate
+        let rightDate = right.chronologyDate
+
+        switch (leftDate, rightDate) {
+        case (let leftDate?, let rightDate?) where leftDate != rightDate:
+            return order == .newestFirst
+                ? leftDate > rightDate
+                : leftDate < rightDate
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            return order == .newestFirst
+                ? left.id > right.id
+                : left.id < right.id
+        }
+    }
 }
 
 struct NewsPage: Codable {
@@ -1943,6 +2164,7 @@ enum IngestionPipeline: String, Codable, CaseIterable, Identifiable {
     case market
     case podcasts
     case leadership
+    case social
 
     var id: String { rawValue }
 }
@@ -2854,4 +3076,149 @@ struct AdminIntelligenceStatus: Codable {
     let rapid_sources: [EarthProviderStatus]
     let alert_candidates: [AlertCandidate]
     let generated_at: Date
+}
+
+// Social records deliberately live outside the News model. They prove that a
+// named platform account posted a claim, never that the claim itself is true.
+enum SocialPlatform: String, Codable, CaseIterable, Identifiable {
+    case x
+    case youtube
+    case reddit
+    case bluesky
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .x: return "X"
+        case .youtube: return "YouTube"
+        case .reddit: return "Reddit"
+        case .bluesky: return "Bluesky"
+        }
+    }
+}
+
+struct SocialEngagement: Codable {
+    let likes: Int?
+    let replies: Int?
+    let reposts: Int?
+    let quotes: Int?
+    let views: Int?
+    let score: Int?
+    let comments: Int?
+    let upvote_ratio: Double?
+}
+
+struct SocialAccount: Codable {
+    let account_id: String
+    let handle: String?
+    let display_name: String?
+    let profile_url: String?
+    let avatar_url: String?
+    let platform_verified: Bool
+}
+
+struct SocialResponsibleParty: Codable {
+    let name: String
+    let account_id: String
+    let type: String
+    let attribution_basis: String
+    let caveat: String?
+}
+
+struct SocialCredibility: Codable {
+    let tier: String
+    let score: Double?
+    let platform_verified_account: Bool
+    let rationale: String
+}
+
+struct SocialSignal: Codable, Identifiable {
+    let id: Int
+    let platform: SocialPlatform
+    let content_type: String
+    let signal_nature: String
+    let verification_status: String
+    let is_fact: Bool
+    let text: String
+    let title: String?
+    let url: String
+    let posted_at: Date
+    let acquired_at: Date
+    let language_code: String?
+    let country_iso2: String?
+    let engagement: SocialEngagement
+    let posted_by: SocialAccount
+    let responsible_party: SocialResponsibleParty
+    let credibility: SocialCredibility
+    let warning: String
+    let payload_metadata: JSONValue?
+
+    var authorLabel: String {
+        let displayName = posted_by.display_name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let handle = posted_by.handle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return displayName?.isEmpty == false
+            ? displayName!
+            : handle?.isEmpty == false
+                ? handle!
+                : responsible_party.name
+    }
+
+    var handleLabel: String? {
+        guard let handle = posted_by.handle?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !handle.isEmpty else { return nil }
+        switch platform {
+        case .reddit:
+            let normalized = handle.hasPrefix("@") ? String(handle.dropFirst()) : handle
+            return normalized.lowercased().hasPrefix("u/") ? normalized : "u/\(normalized)"
+        case .youtube:
+            return handle
+        case .x, .bluesky:
+            return handle.hasPrefix("@") ? handle : "@\(handle)"
+        }
+    }
+
+    var sourceURL: URL? { URL(string: url) }
+
+    static func newestFirst(_ values: [SocialSignal]) -> [SocialSignal] {
+        values.sorted {
+            if $0.posted_at != $1.posted_at { return $0.posted_at > $1.posted_at }
+            return $0.id > $1.id
+        }
+    }
+}
+
+struct SocialProviderStatus: Codable, Identifiable {
+    let id: SocialPlatform
+    let label: String
+    let enabled: Bool
+    let configured: Bool
+    let available: Bool
+    let authentication: String
+    let required_environment: [String]
+    let access_note: String
+}
+
+struct SocialCoverageRow: Codable, Identifiable {
+    var id: SocialPlatform { platform }
+    let platform: SocialPlatform
+    let signal_count: Int
+    let account_count: Int
+    let latest_posted_at: Date?
+    let latest_acquired_at: Date?
+}
+
+struct SocialClassification: Codable {
+    let content_type: String
+    let signal_nature: String
+    let default_verification_status: String
+    let is_fact: Bool
+    let warning: String
+}
+
+struct SocialCoverageResponse: Codable {
+    let window_days: Int
+    let coverage: [SocialCoverageRow]
+    let providers: [SocialProviderStatus]
+    let classification: SocialClassification
 }

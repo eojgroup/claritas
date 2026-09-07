@@ -1,6 +1,6 @@
 # Claritas 🌍
 
-Claritas is a unified data platform that brings clarity to global complexity by aggregating, enriching, and visualizing international datasets. This monorepo contains the web app, mobile app, API, and GCP infrastructure.
+Claritas is a map-led global intelligence workspace. It brings attributed news and social signals, weather, markets, transport, and satellite evidence into one clear operating picture for teams monitoring material change. This monorepo contains the web app, mobile app, API, and GCP infrastructure.
 
 ---
 
@@ -55,6 +55,8 @@ Architecture and product design references:
   - `auth_identity` (provider subject links)
   - `auth_session` (session lifecycle + audit attributes)
   - `auth_role`, `auth_user_role` (RBAC)
+- [Apple and Microsoft sign-in setup](docs/configuration/apple-and-microsoft-sign-in.md): provider-console registration, required secrets, deployment, and verification.
+- [Social-media source setup](docs/configuration/social-media-sources.md): provider access, credentials, trust boundaries, controlled ingestion, and verification.
 
 ### 2) Application and API Layer
 
@@ -165,6 +167,7 @@ Architecture and product design references:
 
 - Keycloak on GKE now runs as a hardened deployment (`infra/k8s/keycloak-deployment.yaml`):
   - 1 replica by default on the current small dev cluster (scale to 2+ for production)
+  - Keycloak 26.7.3 with a digest-pinned base image and checksum-pinned Apple broker extension
   - startup/readiness/liveness probes
   - anti-affinity + pod disruption budget
   - dedicated service account (`keycloak-sa`) with Workload Identity

@@ -1,5 +1,10 @@
 # Claritas Apple Apps (SwiftUI)
 
+Claritas is a map-led global intelligence workspace that brings attributed news
+and social signals, weather, markets, transport, and satellite evidence into
+one operating picture. The native apps provide the same Signal Desk and
+evidence-first workflow on iPhone, iPad, and Apple Watch.
+
 The iPhone and iPad signal map uses [Natural Earth country geometry](https://www.naturalearthdata.com/about/terms-of-use/)
 (public domain), distributed through the `world-atlas` dataset, for its native
 MapKit signal-concentration layer. Apple Maps remains the basemap and interaction
@@ -13,10 +18,13 @@ validator; the validator rejects any remaining cross-world ring segment.
 Project path: `apps/mobile/ios/Claritas/Claritas.xcodeproj`
 Generator source: `apps/mobile/ios/generate_xcodeproj.rb`
 
-The project contains one App Store product with two Xcode targets:
+The project contains one App Store product with two application targets and two
+embedded WidgetKit extension targets:
 
 - `Claritas`: universal iPhone/iPad app and Apple Watch companion authority.
 - `Claritas Watch App`: embedded watchOS SwiftUI companion app.
+- `Claritas Widgets`: iPhone/iPad overview and configurable signal widgets.
+- `Claritas Watch Widgets`: watchOS complications and rectangular overview widgets.
 
 ## Quick Start
 
@@ -31,21 +39,41 @@ The project contains one App Store product with two Xcode targets:
 3. Configure the API base URL:
    - Edit `apps/mobile/ios/Claritas/Config.plist` -> `API_BASE_URL` to point to your backend (e.g. `https://your-host.com`).
    - Keep `apps/mobile/ios/ClaritasWatch/Config.plist` aligned for first launch. The iPhone app sends its active URL to the watch after pairing.
-   - Ensure `AUTH_CALLBACK_URL` matches your registered iOS URL scheme (default: `claritas://auth/callback`).
+   - Register and allowlist the fixed native callback `claritas://auth/callback`.
+     The app intentionally does not accept runtime callback overrides.
    - Or at runtime set `UserDefaults.standard.set("https://your-host.com", forKey: "API_BASE_URL")` in AppDelegate for advanced configs.
 4. Run `Claritas` on a paired iPhone + Apple Watch simulator or devices and sign in on iPhone.
 5. Run/install `Claritas Watch App`. Its companion flow preserves the interactive signal map, adds a read-only published briefing glance, and condenses urgent cross-domain event context into one Pulse page. It caches the last successful update and can hand an exact event to iPhone.
 6. Run `Claritas` on an iPad simulator or device. The same universal app provides:
    - Persistent split-view navigation.
    - One event-centred Signal Desk with a prioritized event list, labelled evidence timeline, source links, and event-specific satellite observations.
-   - Workspace destinations for the Signal Desk and Daily briefing; News, Podcasts, Weather, Markets, and Transport remain source lenses rather than parallel event systems.
+   - Workspace destinations for the Signal Desk and Daily briefing; News, Social, Podcasts, Weather, Markets, and Transport remain source lenses rather than parallel event systems.
    - Admin, profile, and policies workspaces according to role.
    - Multi-window iPadOS support.
 7. The iPhone app will load:
-   - Five stable destinations: Dashboard, Signal desk, News, Daily briefing, and More.
+   - Four stable tabs: Overview, News, Investigate, and More.
    - A condensed map-first Dashboard for posture and country context, with the Signal Desk as the canonical investigation path.
    - News cards that open the linked canonical event when one exists; the event timeline links back to the original source URL.
-   - Podcast, weather, market, transport, imagery catalogue, account/reference tools, and eligible admin controls under More.
+   - Social, podcast, weather, market, transport, daily briefing, imagery catalogue, account/reference tools, and eligible admin controls under More.
+
+## Widget configuration and data contract
+
+- On iOS/iPadOS 17 or newer, add **Claritas scoped intelligence**, long-press it,
+  and choose a country plus one of Overview, News, Markets, Weather, or
+  Transport. **Claritas global overview** remains available on iOS/iPadOS 16
+  and newer as a zero-configuration overview.
+- On watchOS 10 or newer, edit the Claritas complication/widget to choose the
+  same country and domain. Inline, circular, and rectangular accessory families
+  use the same scope and freshness state.
+- Widgets read a bounded presentation snapshot from the configured App Group;
+  they never store an auth token or make an authenticated API request. Open the
+  containing app after first install/sign-in so it can populate the snapshot.
+- The snapshot refreshes after news, market, weather, and transport updates.
+  A visible stale state is shown after two hours instead of presenting old data
+  as current.
+- Widget taps use
+  `claritas://widget?domain={overview|news|markets|weather|transport}&country={GLOBAL|ISO2}`
+  so the app can restore the exact workspace and country scope.
 
 ## Unified Signal Desk contract
 
@@ -163,7 +191,9 @@ The App Store Connect key must be a team key with Admin access because CI uses t
 ## Notes
 
 - ATS is currently permissive (NSAllowsArbitraryLoads=true) to simplify dev. For production, replace with explicit domain exceptions or HTTPS endpoints.
-- Backend auth redirect validation now supports non-HTTP callback schemes via `AUTH_ALLOWED_REDIRECT_SCHEMES` (default includes `claritas`).
+- Native authentication accepts only the allowlisted callback
+  `claritas://auth/callback`; scheme-only callback trust and runtime callback
+  overrides are intentionally unsupported.
 - Country centroids support overview navigation only; they are not valid substitutes for event-specific EO coordinates.
 - The native iPhone/iPad map uses Apple Maps with a Natural Earth country
   choropleth, a bounded set of priority labels, event/satellite markers,

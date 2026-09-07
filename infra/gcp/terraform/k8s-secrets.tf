@@ -46,4 +46,12 @@ resource "kubernetes_secret" "claritas_auth" {
   data       = local.k8s_auth_data
   type       = "Opaque"
   depends_on = [google_container_cluster.primary]
+
+  # Terraform creates the Secret for a new environment, but must not reconcile
+  # its data map afterward: an omitted optional workflow input would otherwise
+  # delete a live API or identity-provider credential. Deployment workflows
+  # merge explicitly supplied values after apply and preserve every other key.
+  lifecycle {
+    ignore_changes = [data]
+  }
 }

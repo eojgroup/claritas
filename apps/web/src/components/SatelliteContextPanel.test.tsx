@@ -210,13 +210,14 @@ describe("SatelliteContextPanel", () => {
       epistemic_notice: "Correlation does not establish causation.",
     });
 
-    render(<SatelliteContextPanel onOpenEvent={vi.fn()} onOpenImagery={vi.fn()} />);
+    const { container } = render(<SatelliteContextPanel onOpenEvent={vi.fn()} onOpenImagery={vi.fn()} />);
     const image = await screen.findByAltText(/mission-x · natural color/i);
     expect(image.getAttribute("src")).toBe(highResolutionAsset.url);
     expect(screen.getByText(/High-resolution processed scene · 10 m native resolution · 14.8 m effective pixel size/i)).toBeTruthy();
     expect(screen.getByText("Terminal access interrupted")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Terminal access interrupted" }).getAttribute("href")).toBe("https://example.test/terminal-report");
-    expect(screen.getByText(/Canal Journal · Aug 11, 2026, 08:10:00 AM UTC/i)).toBeTruthy();
+    expect(screen.getByText(/Canal Journal/i)).toBeTruthy();
+    expect(container.querySelector('time[datetime="2026-08-11T08:10:00Z"]')).toBeTruthy();
     expect(screen.getByText(/post-start context, not proof of impact or cause/i)).toBeTruthy();
     expect(screen.getByText(/hypotheses for human review/i)).toBeTruthy();
     expect(screen.getByText(/does not by itself prove causation/i)).toBeTruthy();

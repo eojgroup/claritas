@@ -84,6 +84,7 @@ export type NewsItem = {
   time?: {
     basis: string;
     is_publisher_verified: boolean;
+    timeline_at?: string | null;
     published_at: string | null;
     discovered_at: string | null;
   } | null;
@@ -836,7 +837,7 @@ export type TransportTrackPoint = {
 };
 
 export type AuthProviderId = "google" | "microsoft" | "apple";
-export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership";
+export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership" | "social";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
 export type DailySignalBriefingStatus = "draft" | "published" | "archived";
 
@@ -2084,6 +2085,22 @@ export async function triggerAdminPodcastIngestion(payload: {
     body: JSON.stringify(payload),
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger podcast ingestion"));
+  return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
+}
+
+export async function triggerAdminSocialIngestion(payload: {
+  providers?: { x?: boolean; reddit?: boolean; youtube?: boolean; bluesky?: boolean };
+  queries?: string[];
+  maxResultsPerQuery?: number;
+  lookbackHours?: number;
+}): Promise<{ run: AdminIngestionRun; logs: AdminIngestionLog[] }> {
+  const resp = await fetch(`${API_BASE}/api/admin/ingestion/social/run`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Failed to trigger social ingestion"));
   return (await resp.json()) as { run: AdminIngestionRun; logs: AdminIngestionLog[] };
 }
 

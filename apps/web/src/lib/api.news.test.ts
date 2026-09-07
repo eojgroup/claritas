@@ -13,6 +13,13 @@ describe("fetchNews", () => {
       url: "https://example.test/story",
       country_iso2: "SG",
       event_time: "2026-08-21T10:00:00Z",
+      time: {
+        basis: "publisher_published_verified",
+        is_publisher_verified: true,
+        timeline_at: "2026-08-21T10:00:00Z",
+        published_at: "2026-08-21T10:00:00Z",
+        discovered_at: "2026-08-21T10:02:00Z",
+      },
       primary_category: "transport",
       categories: ["transport", "markets"],
       tags: [{ code: "port", label: "Port disruption", kind: "event" }],
@@ -62,6 +69,12 @@ describe("fetchNews", () => {
     expect(requested.searchParams.get("archive")).toBe("true");
     expect(requested.searchParams.has("include_metadata")).toBe(false);
     expect(result.items[0]).toMatchObject({
+      time: {
+        basis: "publisher_published_verified",
+        timeline_at: "2026-08-21T10:00:00Z",
+        published_at: "2026-08-21T10:00:00Z",
+        discovered_at: "2026-08-21T10:02:00Z",
+      },
       primary_category: "transport",
       tags: [{ code: "port", label: "Port disruption", kind: "event" }],
       importance: {

@@ -158,9 +158,9 @@ struct DashboardView: View {
                                 NewsPriorityMetadataView(item: item, compact: true)
                                 HStack(spacing: 6) {
                                     Text(newsSourceLabel(item) ?? "Reporting source")
-                                    if let date = item.eventDate {
+                                    if let date = item.chronologyDate {
                                         Text("·")
-                                        Text(date.formatted(date: .omitted, time: .shortened))
+                                        Text("\(item.chronologyLabel) \(date.formatted(date: .omitted, time: .shortened))")
                                             .monospacedDigit()
                                     }
                                     if let event = item.linked_events.first {
@@ -1036,17 +1036,15 @@ struct DashboardView: View {
     }
 
     private var latestSyncLabel: String {
-        let allTimestamps =
-            model.news.compactMap(\.event_time) +
-            model.weather.map(\.observed_at) +
-            model.marketQuotes.map(\.observed_at)
-        let parsed = allTimestamps.compactMap(APIDateParser.parse)
+        let parsed = model.news.compactMap(\.chronologyDate)
+            + model.weather.compactMap { APIDateParser.parse($0.observed_at) }
+            + model.marketQuotes.compactMap { APIDateParser.parse($0.observed_at) }
         guard let latest = parsed.max() else { return "Awaiting sync" }
         return latest.formatted(date: .abbreviated, time: .shortened)
     }
 
     private var newsCoverageLabel: String {
-        let dates = model.news.compactMap(\.eventDate).sorted()
+        let dates = model.news.compactMap(\.chronologyDate).sorted()
         guard let start = dates.first, let end = dates.last else { return "No dated news" }
         return "\(start.formatted(date: .abbreviated, time: .omitted)) - \(end.formatted(date: .abbreviated, time: .omitted))"
     }
@@ -1102,7 +1100,7 @@ struct DashboardView: View {
                 id: "news-\($0.id)",
                 kind: "News",
                 title: $0.presentationTitle,
-                detail: [($0.country_iso2 ?? "").uppercased(), shortDateTimeLabel($0.event_time)]
+                detail: [($0.country_iso2 ?? "").uppercased(), shortDateTimeLabel($0.chronologyDate)]
                     .filter { !$0.isEmpty }
                     .joined(separator: " • ")
             )
@@ -1211,7 +1209,7 @@ struct DashboardView: View {
         guard let relationCountry else { return [] }
         return model.news
             .filter { $0.hasSubjectCountry(relationCountry) }
-            .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
+            .sorted { NewsChronology.precedes($0, $1, order: .newestFirst) }
     }
 
     private func valueOrDash(_ value: Double?) -> String {
@@ -1380,7 +1378,7 @@ struct NewsWorkspaceView: View {
     }
 
     private var newestLoadedStoryDate: Date? {
-        model.news.compactMap(\.eventDate).max()
+        model.news.compactMap(\.chronologyDate).max()
     }
 
     private var recentFeedLooksStale: Bool {
@@ -1426,15 +1424,15 @@ struct NewsWorkspaceView: View {
         case .importance:
             ordered = filtered
         case .newest:
-            ordered = filtered.sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
+            ordered = NewsChronology.sorted(filtered, order: .newestFirst)
         case .oldest:
-            ordered = filtered.sorted { ($0.event_time ?? "") < ($1.event_time ?? "") }
+            ordered = NewsChronology.sorted(filtered, order: .oldestFirst)
         case .source:
             ordered = filtered.sorted {
                 let lhs = newsSourceLabel($0) ?? ""
                 let rhs = newsSourceLabel($1) ?? ""
                 if lhs != rhs { return lhs < rhs }
-                return ($0.event_time ?? "") > ($1.event_time ?? "")
+                return NewsChronology.precedes($0, $1, order: .newestFirst)
             }
         }
         return ordered
@@ -1443,7 +1441,7 @@ struct NewsWorkspaceView: View {
     private var timelineData: [ChartDateCount] {
         var counts: [String: Int] = [:]
         for item in rows {
-            guard let key = dateOnlyLabel(item.event_time) else { continue }
+            guard let key = item.chronologyDate.map(dateOnlyLabel) else { continue }
             counts[key, default: 0] += 1
         }
         return counts
@@ -1464,7 +1462,7 @@ struct NewsWorkspaceView: View {
     }
 
     private var coverageLabel: String {
-        let dates = rows.compactMap(\.eventDate).sorted()
+        let dates = rows.compactMap(\.chronologyDate).sorted()
         guard let start = dates.first, let end = dates.last else { return "No dated articles" }
         return "\(start.formatted(date: .abbreviated, time: .omitted)) - \(end.formatted(date: .abbreviated, time: .omitted))"
     }
@@ -2883,7 +2881,7 @@ private struct LegacyMarketsWorkspaceView: View {
         guard let relatedCountry else { return [] }
         return model.news
             .filter { $0.hasSubjectCountry(relatedCountry) }
-            .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
+            .sorted { NewsChronology.precedes($0, $1, order: .newestFirst) }
             .prefix(4)
             .map { $0 }
     }
@@ -3485,8 +3483,11 @@ private func shortDateTimeLabel(_ value: String?) -> String {
     return date.formatted(date: .abbreviated, time: .shortened)
 }
 
-private func dateOnlyLabel(_ value: String?) -> String? {
-    guard let value, let date = APIDateParser.parse(value) else { return nil }
+private func shortDateTimeLabel(_ value: Date?) -> String {
+    value?.formatted(date: .abbreviated, time: .shortened) ?? ""
+}
+
+private func dateOnlyLabel(_ date: Date) -> String {
     return date.formatted(.dateTime.year().month(.abbreviated).day())
 }
 

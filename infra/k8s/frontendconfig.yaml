@@ -1,0 +1,11 @@
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: claritas-frontendconfig
+  namespace: claritas
+spec:
+  # GKE keeps the HTTP forwarding rule solely to issue this redirect. Public
+  # application and identity traffic is served only after upgrading to HTTPS.
+  redirectToHttps:
+    enabled: true
+    responseCodeName: PERMANENT_REDIRECT

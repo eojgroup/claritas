@@ -3,6 +3,8 @@ import {
   describeNewsEmptyState,
   describeNewsFreshness,
   mergeNewsTranslationIntoItems,
+  latestNewsTimestamp,
+  newsChronology,
   newestNewsFirst,
   resolveNewsCoverageSelection,
   sliceNewsTrendForExport,
@@ -47,6 +49,65 @@ describe("news workspace presentation", () => {
 
     expect(newestNewsFirst(responseItems).map((item) => item.id)).toEqual([3, 5, 1, 2, 4]);
     expect(responseItems.map((item) => item.id)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("orders absolute instants rather than lexically comparing ISO spellings", () => {
+    const responseItems = [
+      { id: 1, event_time: "2026-09-07T10:30:00+02:00", payload: null, time: null },
+      { id: 2, event_time: "2026-09-07T09:00:00Z", payload: null, time: null },
+      { id: 3, event_time: "2026-09-07T08:45:00.500Z", payload: null, time: null },
+    ];
+
+    expect(newestNewsFirst(responseItems).map((item) => item.id)).toEqual([2, 3, 1]);
+  });
+
+  it("keeps publisher publication and provider discovery chronology semantically distinct", () => {
+    const published = newsChronology({
+      event_time: "2026-09-07T08:00:00Z",
+      payload: null,
+      time: {
+        basis: "publisher_published_verified",
+        is_publisher_verified: true,
+        timeline_at: "2026-09-07T08:00:00Z",
+        published_at: "2026-09-07T08:00:00Z",
+        discovered_at: "2026-09-07T09:00:00Z",
+      },
+    });
+    const discovered = newsChronology({
+      event_time: "2026-09-07T09:00:00Z",
+      payload: null,
+      time: {
+        basis: "provider_first_seen",
+        is_publisher_verified: false,
+        timeline_at: "2026-09-07T09:00:00Z",
+        published_at: null,
+        discovered_at: "2026-09-07T09:00:00Z",
+      },
+    });
+
+    expect(published).toMatchObject({ label: "Published", basis: "publication" });
+    expect(discovered).toMatchObject({ label: "First seen", basis: "discovery" });
+    expect(discovered.timestamp).toBe("2026-09-07T09:00:00Z");
+  });
+
+  it("uses provenance-specific timestamps for cached responses predating timeline_at", () => {
+    expect(newsChronology({
+      event_time: "2026-09-07T11:00:00Z",
+      payload: null,
+      time: {
+        basis: "publisher_published_verified",
+        is_publisher_verified: true,
+        published_at: "2026-09-07T08:00:00Z",
+        discovered_at: "2026-09-07T11:00:00Z",
+      },
+    }).timestamp).toBe("2026-09-07T08:00:00Z");
+  });
+
+  it("finds freshness by instant when timestamp offsets use different spellings", () => {
+    expect(latestNewsTimestamp([
+      { event_time: "2026-09-07T10:30:00+02:00" },
+      { event_time: "2026-09-07T09:00:00Z" },
+    ])).toBe("2026-09-07T09:00:00Z");
   });
 
   it("explains an empty country result rather than silently rendering a blank panel", () => {

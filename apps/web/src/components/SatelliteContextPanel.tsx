@@ -515,7 +515,14 @@ export default function SatelliteContextPanel({
                       ) : (
                         <span className="font-semibold">{item.title}</span>
                       )}
-                      <span className="text-[color:var(--shell-muted)]"> · {item.publisher || "Publisher unavailable"}{item.publishedAt ? ` · ${formatExactTimestamp(item.publishedAt)}` : " · publication time unavailable"}</span>
+                      <span className="text-[color:var(--shell-muted)]">
+                        {" · "}{item.publisher || "Publisher unavailable"}{" · "}
+                        {item.publishedAt ? (
+                          <time dateTime={item.publishedAt}>{formatExactTimestamp(item.publishedAt)}</time>
+                        ) : (
+                          "publication time unavailable"
+                        )}
+                      </span>
                     </div>
                   ))}
                 </div>

@@ -23,6 +23,7 @@ import {
   testAdminDailyBriefingGeneratorConnection,
   triggerAdminMarketIngestion,
   triggerAdminPodcastIngestion,
+  triggerAdminSocialIngestion,
   triggerAdminLeadershipIngestion,
   triggerAdminNewsIngestion,
   triggerAdminWeatherIngestion,
@@ -41,6 +42,7 @@ import {
   type DailySignalBriefing,
   type IngestionPipeline,
 } from "../lib/api";
+import { fetchSocialCoverage, type SocialCoverage, type SocialPlatform } from "../lib/socialApi";
 
 type AdminIngestionPanelProps = {
   dark: boolean;
@@ -112,6 +114,7 @@ function pipelineLabel(pipeline: IngestionPipeline): string {
   if (pipeline === "weather") return "Weather";
   if (pipeline === "market") return "Market";
   if (pipeline === "podcasts") return "Podcasts";
+  if (pipeline === "social") return "Social";
   return "Leadership";
 }
 
@@ -127,6 +130,11 @@ function sourceLabel(sourceName: string): string {
   if (normalized === "fred") return "FRED";
   if (normalized === "world_bank_wdi") return "World Bank WDI";
   if (normalized === "podcastindex") return "PodcastIndex";
+  if (normalized === "social_media") return "Social media";
+  if (normalized === "x_social") return "X";
+  if (normalized === "reddit_social") return "Reddit";
+  if (normalized === "youtube_social") return "YouTube";
+  if (normalized === "bluesky_social") return "Bluesky";
   if (normalized === "wikidata") return "Wikidata";
   return sourceName;
 }
@@ -183,6 +191,7 @@ const automationPipelines: IngestionPipeline[] = [
   "market",
   "podcasts",
   "leadership",
+  "social",
 ];
 
 function toAutomationPayloadText(payload: Record<string, unknown>): string {
@@ -268,6 +277,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     market: null,
     podcasts: null,
     leadership: null,
+    social: null,
   });
   const [pendingAutomationSave, setPendingAutomationSave] = useState<AutomationPendingMap>({
     news: false,
@@ -275,6 +285,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     market: false,
     podcasts: false,
     leadership: false,
+    social: false,
   });
   const [isLoadingOverview, setIsLoadingOverview] = useState(false);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -286,6 +297,7 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [isTriggeringMarket, setIsTriggeringMarket] = useState(false);
   const [isTriggeringPodcasts, setIsTriggeringPodcasts] = useState(false);
   const [isTriggeringLeadership, setIsTriggeringLeadership] = useState(false);
+  const [isTriggeringSocial, setIsTriggeringSocial] = useState(false);
   const [metricsDays, setMetricsDays] = useState<7 | 30 | 90>(30);
   const [pipelineFilter, setPipelineFilter] = useState<"all" | IngestionPipeline>("all");
 
@@ -310,6 +322,16 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   const [podcastMaxEpisodes, setPodcastMaxEpisodes] = useState(5);
   const [podcastFetchTranscripts, setPodcastFetchTranscripts] = useState(true);
   const [podcastExtractIntelligence, setPodcastExtractIntelligence] = useState(true);
+  const [socialCoverage, setSocialCoverage] = useState<SocialCoverage | null>(null);
+  const [socialProviders, setSocialProviders] = useState<Record<SocialPlatform, boolean>>({
+    x: false,
+    reddit: false,
+    youtube: false,
+    bluesky: true,
+  });
+  const [socialQueries, setSocialQueries] = useState("geopolitics\nsecurity\nmarkets\ntransport disruption\nextreme weather");
+  const [socialMaxResults, setSocialMaxResults] = useState(25);
+  const [socialLookbackHours, setSocialLookbackHours] = useState(24);
   const [briefingConfig, setBriefingConfig] = useState<AdminDailyBriefingGeneratorConfig | null>(null);
   const [briefingConfigError, setBriefingConfigError] = useState<string | null>(null);
   const [isLoadingBriefingConfig, setIsLoadingBriefingConfig] = useState(false);
@@ -350,6 +372,22 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
       setBriefingConnectionError(toErrorMessage(error));
     } finally {
       setIsTestingBriefingConnection(false);
+    }
+  }, []);
+
+  const refreshSocialCoverage = useCallback(async () => {
+    try {
+      const next = await fetchSocialCoverage();
+      setSocialCoverage(next);
+      setSocialProviders((current) => {
+        const updated = { ...current };
+        next.providers.forEach((provider) => {
+          updated[provider.platform] = provider.enabled && provider.configured;
+        });
+        return updated;
+      });
+    } catch {
+      setSocialCoverage(null);
     }
   }, []);
 
@@ -434,6 +472,10 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
   useEffect(() => {
     void refreshBriefingConfig();
   }, [refreshBriefingConfig]);
+
+  useEffect(() => {
+    void refreshSocialCoverage();
+  }, [refreshSocialCoverage]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -630,6 +672,43 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     refreshOverview,
   ]);
 
+  const handleTriggerSocial = useCallback(async () => {
+    const queries = socialQueries
+      .split(/\n|,/g)
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+    if (queries.length === 0) {
+      setActionError("Provide at least one social discovery query.");
+      return;
+    }
+    if (!Object.values(socialProviders).some(Boolean)) {
+      setActionError("Select at least one configured social provider.");
+      return;
+    }
+
+    setIsTriggeringSocial(true);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      const created = await triggerAdminSocialIngestion({
+        providers: socialProviders,
+        queries,
+        maxResultsPerQuery: socialMaxResults,
+        lookbackHours: socialLookbackHours,
+      });
+      setActionNotice(`Social ingestion run #${created.run.id} was queued. Posts remain unverified claims.`);
+      setSelectedRunId(created.run.id);
+      setSelectedRun(created.run);
+      setLogs(created.logs);
+      await Promise.all([refreshOverview(true), refreshSocialCoverage()]);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setIsTriggeringSocial(false);
+    }
+  }, [refreshOverview, refreshSocialCoverage, socialLookbackHours, socialMaxResults, socialProviders, socialQueries]);
+
   const handleTriggerLeadership = useCallback(async () => {
     setIsTriggeringLeadership(true);
     setActionError(null);
@@ -742,6 +821,21 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
     },
     [automationDrafts, refreshOverview],
   );
+
+  const prepareSocialAutomation = useCallback(async () => {
+    setPendingAutomationSave((previous) => ({ ...previous, social: true }));
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      await updateAdminIngestionAutomationRule("social", {});
+      setActionNotice("Disabled social automation controls were created. Review provider scope before enabling them.");
+      await refreshOverview(true);
+    } catch (error) {
+      setActionError(toErrorMessage(error));
+    } finally {
+      setPendingAutomationSave((previous) => ({ ...previous, social: false }));
+    }
+  }, [refreshOverview]);
 
   const chartData = useMemo(() => {
     const byDate = new Map<
@@ -1061,6 +1155,69 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             </button>
           </div>
 
+          <div className="min-w-0 rounded-xl border border-amber-500/40 bg-[color:var(--shell-bg)] p-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+              Social signal run
+            </div>
+            <div className="mt-2 rounded-lg bg-amber-500/10 p-2 text-xs leading-5 text-[color:var(--shell-muted)]">
+              Every result is stored as an attributed, unverified claim. Account badges and engagement never become factual confidence.
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              {(["x", "youtube", "reddit", "bluesky"] as const).map((provider) => {
+                const status = socialCoverage?.providers.find((entry) => entry.platform === provider);
+                const unavailable = Boolean(status && (!status.enabled || !status.configured));
+                return (
+                  <label key={provider} className="inline-flex min-h-9 items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={socialProviders[provider]}
+                      disabled={unavailable}
+                      onChange={(event) => setSocialProviders((current) => ({ ...current, [provider]: event.currentTarget.checked }))}
+                    />
+                    <span className="capitalize">{provider === "x" ? "X" : provider}</span>
+                    <small className="text-[color:var(--shell-muted)]">
+                      {status?.available
+                        ? "ready"
+                        : status?.configured
+                          ? "disabled"
+                          : provider === "bluesky" && !status
+                            ? "checking"
+                            : "access required"}
+                    </small>
+                  </label>
+                );
+              })}
+            </div>
+            <label className="mt-2 block text-xs text-[color:var(--shell-muted)]">
+              Discovery queries (one per line)
+              <textarea
+                rows={3}
+                value={socialQueries}
+                onChange={(event) => setSocialQueries(event.currentTarget.value)}
+                className="mt-1 w-full resize-y rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1.5 text-sm text-[color:var(--shell-ink)]"
+              />
+            </label>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <label className="text-xs text-[color:var(--shell-muted)]">
+                Results / query
+                <input type="number" min={1} max={100} value={socialMaxResults} onChange={(event) => setSocialMaxResults(Math.min(100, Math.max(1, Number(event.currentTarget.value) || 1)))} className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]" />
+              </label>
+              <label className="text-xs text-[color:var(--shell-muted)]">
+                Lookback hours
+                <input type="number" min={1} max={168} value={socialLookbackHours} onChange={(event) => setSocialLookbackHours(Math.min(168, Math.max(1, Number(event.currentTarget.value) || 1)))} className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-sm text-[color:var(--shell-ink)]" />
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleTriggerSocial()}
+              disabled={isTriggeringSocial}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-3 py-2 text-sm font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-on-strong)] disabled:opacity-50 sm:w-auto sm:text-xs"
+            >
+              <Play className="h-3.5 w-3.5" />
+              {isTriggeringSocial ? "Starting…" : "Run Social"}
+            </button>
+          </div>
+
           <div className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
               Leadership run
@@ -1331,6 +1488,29 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
             const status = automationStatusByPipeline.get(pipeline);
             const isSaving = pendingAutomationSave[pipeline];
             if (!rule || !draft) {
+              if (pipeline === "social" && automationRules.length > 0) {
+                return (
+                  <div
+                    key={pipeline}
+                    className="min-w-0 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3"
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
+                      Social
+                    </div>
+                    <p className="mt-2 text-xs leading-relaxed text-[color:var(--shell-muted)]">
+                      Social ingestion is available manually above. Create its disabled automation controls only after this release has completed successfully, then review provider scope and quotas before enabling them.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void prepareSocialAutomation()}
+                      disabled={isSaving}
+                      className="mt-3 inline-flex w-full items-center justify-center rounded-full border border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-on-strong)] disabled:opacity-50"
+                    >
+                      {isSaving ? "Preparing…" : "Prepare social automation"}
+                    </button>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={pipeline}
@@ -1605,6 +1785,17 @@ export default function AdminIngestionPanel({ dark }: AdminIngestionPanelProps) 
           </div>
           <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
             country snapshots · {summaryByPipeline.get("leadership")?.run_count ?? 0} runs
+          </div>
+        </div>
+        <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">
+          <div className="text-[11px] uppercase tracking-[0.28em] text-[color:var(--shell-muted)]">
+            Social totals ({metricsDays}d)
+          </div>
+          <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+            {(summaryByPipeline.get("social")?.inserted ?? 0) + (summaryByPipeline.get("social")?.updated ?? 0)}
+          </div>
+          <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
+            claims processed · {summaryByPipeline.get("social")?.run_count ?? 0} runs
           </div>
         </div>
         <div className="min-w-0 rounded-2xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-4 shadow-sm">

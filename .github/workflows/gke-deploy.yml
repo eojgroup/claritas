@@ -10,6 +10,7 @@ on:
     paths:
       - 'apps/**'
       - 'infra/k8s/**'
+      - 'infra/keycloak/**'
       - 'infra/gcp/sql/**'
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
@@ -21,10 +22,9 @@ on:
       - 'apps/mobile/**'
       - '.github/workflows/**'
       - 'infra/gcp/terraform/**'
-      - 'infra/k8s/api-deployment.yaml'
-      - 'infra/k8s/config/claritas-config.yaml'
+      - 'infra/k8s/**'
       - 'infra/gcp/sql/**'
-      - 'infra/k8s/migrations/**'
+      - 'infra/keycloak/**'
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
   workflow_dispatch:
@@ -126,6 +126,8 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      keycloak_image: ${{ steps.resolve_keycloak_image.outputs.image }}
     permissions:
       contents: read
       id-token: write
@@ -212,6 +214,62 @@ jobs:
             done
           done
 
+      - name: 🔐 Build Keycloak image with Apple broker
+        env:
+          IMAGE_URI_KEYCLOAK: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-keycloak
+          KEYCLOAK_IMAGE_TAG: 26.7.3-apple-1.17.0
+        run: |
+          test -f ./infra/keycloak/Dockerfile || { echo "ERROR: ./infra/keycloak/Dockerfile not found"; exit 1; }
+          docker build \
+            -t "${IMAGE_URI_KEYCLOAK}:${KEYCLOAK_IMAGE_TAG}" \
+            -t "${IMAGE_URI_KEYCLOAK}:${{ github.sha }}" \
+            -f ./infra/keycloak/Dockerfile .
+
+      - name: 🔐 Push Keycloak image
+        env:
+          IMAGE_URI_KEYCLOAK: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-keycloak
+          KEYCLOAK_IMAGE_TAG: 26.7.3-apple-1.17.0
+        run: |
+          for tag in "${KEYCLOAK_IMAGE_TAG}" "${{ github.sha }}"; do
+            for attempt in 1 2 3; do
+              if docker push "${IMAGE_URI_KEYCLOAK}:${tag}"; then
+                break
+              fi
+              if [ "${attempt}" -eq 3 ]; then
+                echo "Failed to push ${IMAGE_URI_KEYCLOAK}:${tag} after ${attempt} attempts" >&2
+                exit 1
+              fi
+              echo "Retrying ${IMAGE_URI_KEYCLOAK}:${tag} (attempt ${attempt}/3)..." >&2
+              sleep $((attempt * 10))
+            done
+          done
+
+      - name: 🔎 Resolve immutable Keycloak image
+        id: resolve_keycloak_image
+        env:
+          IMAGE_URI_KEYCLOAK: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-keycloak
+        run: |
+          set -euo pipefail
+          ref="${IMAGE_URI_KEYCLOAK}:${GITHUB_SHA}"
+          digest=""
+          for attempt in 1 2 3; do
+            digest="$(docker buildx imagetools inspect "$ref" 2>/dev/null | awk '$1 == "Digest:" { print $2; exit }')"
+            if [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+              break
+            fi
+            digest=""
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "Failed to resolve an immutable digest for ${ref}." >&2
+            exit 1
+          fi
+          image="${IMAGE_URI_KEYCLOAK}@${digest}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "Resolved Keycloak image ${image}."
+
       - name: 🏗️ Build Docker image (opencode)
         env:
           IMAGE_URI_OPENCODE: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/opencode
@@ -241,7 +299,7 @@ jobs:
     name: Deploy to GKE
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    # Keep enough headroom for bounded rollouts plus a four-workload rollback,
+    # Keep enough headroom for bounded rollouts plus a three-workload rollback,
     # while preventing a stalled production control-plane call from occupying
     # the serialized deploy lane indefinitely.
     timeout-minutes: 180
@@ -257,6 +315,8 @@ jobs:
       IMAGE_URI_WEB: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-web
       IMAGE_URI_API: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api
       IMAGE_URI_OPENCODE: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/opencode
+      IMAGE_URI_KEYCLOAK: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-keycloak
+      KEYCLOAK_IMAGE: ${{ needs.build.outputs.keycloak_image }}
       DOMAIN: app.claritas.info
       AUTH_DOMAIN: auth.claritas.info
       DNS_ZONE: ""  # set to your Cloud DNS managed zone name to auto-manage A record (optional)
@@ -340,6 +400,17 @@ jobs:
           PODCAST_MAX_EPISODES_PER_FEED: ${{ vars.PODCAST_MAX_EPISODES_PER_FEED }}
           PODCAST_INTELLIGENCE_EXTRACTION_ENABLED: ${{ vars.PODCAST_INTELLIGENCE_EXTRACTION_ENABLED }}
           PODCASTINDEX_USER_AGENT: ${{ vars.PODCASTINDEX_USER_AGENT }}
+          SOCIAL_DISCOVERY_QUERIES: ${{ vars.SOCIAL_DISCOVERY_QUERIES }}
+          SOCIAL_MAX_RESULTS_PER_QUERY: ${{ vars.SOCIAL_MAX_RESULTS_PER_QUERY }}
+          SOCIAL_LOOKBACK_HOURS: ${{ vars.SOCIAL_LOOKBACK_HOURS }}
+          SOCIAL_RETENTION_DAYS: ${{ vars.SOCIAL_RETENTION_DAYS }}
+          SOCIAL_USER_AGENT: ${{ vars.SOCIAL_USER_AGENT }}
+          REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
+          REDDIT_API_APPROVED: ${{ vars.REDDIT_API_APPROVED || 'false' }}
+          SOCIAL_X_ENABLED: ${{ vars.SOCIAL_X_ENABLED || 'true' }}
+          SOCIAL_REDDIT_ENABLED: ${{ vars.SOCIAL_REDDIT_ENABLED || 'false' }}
+          SOCIAL_YOUTUBE_ENABLED: ${{ vars.SOCIAL_YOUTUBE_ENABLED || 'true' }}
+          SOCIAL_BLUESKY_ENABLED: ${{ vars.SOCIAL_BLUESKY_ENABLED || 'true' }}
           SEC_EDGAR_USER_AGENT: ${{ vars.SEC_EDGAR_USER_AGENT || secrets.SEC_EDGAR_USER_AGENT }}
           NWS_USER_AGENT: ${{ vars.NWS_USER_AGENT || secrets.NWS_USER_AGENT }}
           EVENT_CORRELATION_ENABLED: ${{ vars.EVENT_CORRELATION_ENABLED || 'true' }}
@@ -378,9 +449,9 @@ jobs:
             base="https://${base}"
           fi
           if [ -n "${base}" ]; then
-            allowed_redirects="${base},claritas://,http://localhost:5173,http://localhost:8080"
+            allowed_redirects="${base},claritas://auth/callback,http://localhost:5173,http://localhost:8080"
             api_redirects="${base}/api/auth/google/callback,${base}/api/auth/microsoft/callback,${base}/api/auth/apple/callback,http://localhost:8080/api/auth/google/callback,http://localhost:8080/api/auth/microsoft/callback,http://localhost:8080/api/auth/apple/callback"
-            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${allowed_redirects}\",\"AUTH_ALLOWED_REDIRECT_SCHEMES\":\"claritas\",\"KEYCLOAK_API_REDIRECT_URIS\":\"${api_redirects}\"}}"
+            kubectl -n "${NAMESPACE}" patch configmap claritas-config --type merge -p "{\"data\":{\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${allowed_redirects}\",\"KEYCLOAK_API_REDIRECT_URIS\":\"${api_redirects}\"}}"
           fi
           node <<'NODE'
           const fs = require("fs");
@@ -397,6 +468,17 @@ jobs:
             "PODCAST_MAX_EPISODES_PER_FEED",
             "PODCAST_INTELLIGENCE_EXTRACTION_ENABLED",
             "PODCASTINDEX_USER_AGENT",
+            "SOCIAL_DISCOVERY_QUERIES",
+            "SOCIAL_MAX_RESULTS_PER_QUERY",
+            "SOCIAL_LOOKBACK_HOURS",
+            "SOCIAL_RETENTION_DAYS",
+            "SOCIAL_USER_AGENT",
+            "REDDIT_USER_AGENT",
+            "REDDIT_API_APPROVED",
+            "SOCIAL_X_ENABLED",
+            "SOCIAL_REDDIT_ENABLED",
+            "SOCIAL_YOUTUBE_ENABLED",
+            "SOCIAL_BLUESKY_ENABLED",
             "SEC_EDGAR_USER_AGENT",
             "NWS_USER_AGENT",
             "EVENT_CORRELATION_ENABLED",
@@ -441,6 +523,7 @@ jobs:
 
       - name: 🛠️ Apply Kubernetes resources (non-workload)
         run: |
+          kubectl apply -f ./infra/k8s/frontendconfig.yaml
           kubectl apply -f ./infra/k8s/api-backendconfig.yaml
           kubectl apply -f ./infra/k8s/web-service.yaml
           kubectl apply -f ./infra/k8s/api-service.yaml
@@ -505,6 +588,10 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           PODCASTINDEX_API_KEY: ${{ secrets.PODCASTINDEX_API_KEY }}
           PODCASTINDEX_API_SECRET: ${{ secrets.PODCASTINDEX_API_SECRET }}
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
           BARENTSWATCH_AIS_CLIENT_ID: ${{ secrets.BARENTSWATCH_AIS_CLIENT_ID }}
           BARENTSWATCH_AIS_CLIENT_SECRET: ${{ secrets.BARENTSWATCH_AIS_CLIENT_SECRET }}
@@ -546,6 +633,35 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           else
             echo "::warning::PodcastIndex credentials not provided; podcast automation remains disabled"
+          fi
+
+          # Social providers are optional and remain independently deployable.
+          # Their absence never falls back to scraping or an unofficial API.
+          if [ -n "${X_BEARER_TOKEN:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-x-social \
+              --from-literal=X_BEARER_TOKEN="$X_BEARER_TOKEN" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::notice::X_BEARER_TOKEN not provided; preserving any existing X secret. Disable SOCIAL_X_ENABLED and revoke/delete explicitly when retiring access."
+          fi
+
+          if [ -n "${REDDIT_CLIENT_ID:-}" ] && [ -n "${REDDIT_CLIENT_SECRET:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-reddit \
+              --from-literal=REDDIT_CLIENT_ID="$REDDIT_CLIENT_ID" \
+              --from-literal=REDDIT_CLIENT_SECRET="$REDDIT_CLIENT_SECRET" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          elif [ -n "${REDDIT_CLIENT_ID:-}" ] || [ -n "${REDDIT_CLIENT_SECRET:-}" ]; then
+            echo "::warning::Reddit OAuth credentials are incomplete; preserving any existing secret"
+          else
+            echo "::notice::Reddit credentials not provided; preserving any existing Reddit secret. Keep both Reddit gates false or revoke/delete explicitly when retiring access."
+          fi
+
+          if [ -n "${YOUTUBE_API_KEY:-}" ]; then
+            kubectl -n "$NS" create secret generic claritas-youtube \
+              --from-literal=YOUTUBE_API_KEY="$YOUTUBE_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::notice::YOUTUBE_API_KEY not provided; preserving any existing YouTube secret. Disable SOCIAL_YOUTUBE_ENABLED and revoke/delete explicitly when retiring access."
           fi
 
           # AISstream uses one server-side key for the long-lived maritime feed.
@@ -748,46 +864,52 @@ jobs:
             exit 1
           fi
 
-          args=(
-            --from-literal=KEYCLOAK_DB_PASSWORD="$KEYCLOAK_DB_PASSWORD"
-            --from-literal=KEYCLOAK_ADMIN="$KEYCLOAK_ADMIN"
-            --from-literal=KEYCLOAK_ADMIN_PASSWORD="$KEYCLOAK_ADMIN_PASSWORD"
-          )
-          if [ -n "${AUTH_KEYCLOAK_CLIENT_SECRET:-}" ]; then
-            args+=(--from-literal=AUTH_KEYCLOAK_CLIENT_SECRET="$AUTH_KEYCLOAK_CLIENT_SECRET")
+          # Merge only non-empty inputs. A missing GitHub secret must preserve
+          # the corresponding live key rather than silently revoking a working
+          # API client or identity provider. Explicit revocation is documented
+          # and remains an operator action.
+          auth_patch="$(node <<'NODE'
+          const names = [
+            "KEYCLOAK_DB_PASSWORD",
+            "KEYCLOAK_ADMIN",
+            "KEYCLOAK_ADMIN_PASSWORD",
+            "AUTH_KEYCLOAK_CLIENT_SECRET",
+            "INGEST_API_TOKEN",
+            "KC_IDP_GOOGLE_CLIENT_ID",
+            "KC_IDP_GOOGLE_CLIENT_SECRET",
+            "KC_IDP_MICROSOFT_CLIENT_ID",
+            "KC_IDP_MICROSOFT_CLIENT_SECRET",
+            "KC_IDP_MICROSOFT_TENANT",
+            "KC_IDP_APPLE_CLIENT_ID",
+            "KC_IDP_APPLE_TEAM_ID",
+            "KC_IDP_APPLE_KEY_ID",
+            "KC_IDP_APPLE_PRIVATE_KEY",
+          ];
+          const data = {};
+          for (const name of names) {
+            const value = process.env[name];
+            if (value?.trim()) data[name] = Buffer.from(value).toString("base64");
+          }
+          process.stdout.write(JSON.stringify({ data }));
+          NODE
+          )"
+          if kubectl -n "$NS" get secret claritas-auth >/dev/null 2>&1; then
+            kubectl -n "$NS" patch secret claritas-auth --type merge -p "$auth_patch" >/dev/null
+          else
+            auth_manifest="$(AUTH_SECRET_PATCH="$auth_patch" NS="$NS" node <<'NODE'
+          const patch = JSON.parse(process.env.AUTH_SECRET_PATCH);
+          process.stdout.write(JSON.stringify({
+            apiVersion: "v1",
+            kind: "Secret",
+            metadata: { name: "claritas-auth", namespace: process.env.NS },
+            type: "Opaque",
+            data: patch.data,
+          }));
+          NODE
+          )"
+            printf '%s' "$auth_manifest" | kubectl apply -f - >/dev/null
           fi
-          if [ -n "${INGEST_API_TOKEN:-}" ]; then
-            args+=(--from-literal=INGEST_API_TOKEN="$INGEST_API_TOKEN")
-          fi
-          if [ -n "${KC_IDP_GOOGLE_CLIENT_ID:-}" ]; then
-            args+=(--from-literal=KC_IDP_GOOGLE_CLIENT_ID="$KC_IDP_GOOGLE_CLIENT_ID")
-          fi
-          if [ -n "${KC_IDP_GOOGLE_CLIENT_SECRET:-}" ]; then
-            args+=(--from-literal=KC_IDP_GOOGLE_CLIENT_SECRET="$KC_IDP_GOOGLE_CLIENT_SECRET")
-          fi
-          if [ -n "${KC_IDP_MICROSOFT_CLIENT_ID:-}" ]; then
-            args+=(--from-literal=KC_IDP_MICROSOFT_CLIENT_ID="$KC_IDP_MICROSOFT_CLIENT_ID")
-          fi
-          if [ -n "${KC_IDP_MICROSOFT_CLIENT_SECRET:-}" ]; then
-            args+=(--from-literal=KC_IDP_MICROSOFT_CLIENT_SECRET="$KC_IDP_MICROSOFT_CLIENT_SECRET")
-          fi
-          if [ -n "${KC_IDP_MICROSOFT_TENANT:-}" ]; then
-            args+=(--from-literal=KC_IDP_MICROSOFT_TENANT="$KC_IDP_MICROSOFT_TENANT")
-          fi
-          if [ -n "${KC_IDP_APPLE_CLIENT_ID:-}" ]; then
-            args+=(--from-literal=KC_IDP_APPLE_CLIENT_ID="$KC_IDP_APPLE_CLIENT_ID")
-          fi
-          if [ -n "${KC_IDP_APPLE_TEAM_ID:-}" ]; then
-            args+=(--from-literal=KC_IDP_APPLE_TEAM_ID="$KC_IDP_APPLE_TEAM_ID")
-          fi
-          if [ -n "${KC_IDP_APPLE_KEY_ID:-}" ]; then
-            args+=(--from-literal=KC_IDP_APPLE_KEY_ID="$KC_IDP_APPLE_KEY_ID")
-          fi
-          if [ -n "${KC_IDP_APPLE_PRIVATE_KEY:-}" ]; then
-            args+=(--from-literal=KC_IDP_APPLE_PRIVATE_KEY="$KC_IDP_APPLE_PRIVATE_KEY")
-          fi
-
-          kubectl -n "$NS" create secret generic claritas-auth "${args[@]}" --dry-run=client -o yaml | kubectl apply -f -
+          echo "Merged supplied auth values while preserving omitted live Secret keys."
 
       - name: 🌐 Ensure static API egress infrastructure exists
         run: |
@@ -882,21 +1004,30 @@ jobs:
             ' "$snapshot"
           }
 
-          for deployment in keycloak claritas-web claritas-api opencode; do
+          # Keycloak 26.7.3 performs an irreversible database-schema upgrade.
+          # Never automatically restore the pre-upgrade server binary against
+          # that newer schema; application workloads remain safely reversible.
+          for deployment in claritas-web claritas-api opencode; do
             snapshot_deployment "$deployment"
           done
           {
             echo "APPLICATION_ROLLBACK_ARMED=true"
             echo "RELEASE_GATE_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
           } >> "$GITHUB_ENV"
-          echo "Captured four complete pre-release workload specs with every container image pinned by digest."
+          echo "Captured three complete application workload specs with every container image pinned by digest."
 
       - name: 🛠️ Apply identity deployment
         run: |
+          set -euo pipefail
           # Keycloak must be available for the realm bootstrap below. Keep the
           # application workloads on the previous image until this commit's
           # migrations have completed and their schema has been verified.
-          kubectl apply -f ./infra/k8s/keycloak-deployment.yaml
+          if [[ ! "$KEYCLOAK_IMAGE" =~ ^${IMAGE_URI_KEYCLOAK}@sha256:[a-f0-9]{64}$ ]]; then
+            echo "Invalid immutable Keycloak image: ${KEYCLOAK_IMAGE}" >&2
+            exit 1
+          fi
+          kubectl set image -f ./infra/k8s/keycloak-deployment.yaml \
+            keycloak="$KEYCLOAK_IMAGE" --local -o yaml | kubectl apply -f -
 
       - name: 🔑 Bootstrap Keycloak realm and IdPs
         env:
@@ -1497,12 +1628,12 @@ jobs:
             ' "$snapshot")"
             kubectl -n "${NAMESPACE}" patch "deployment/${deployment}" --type=json -p "$patch"
           }
-          for deployment in keycloak claritas-web claritas-api opencode; do
+          for deployment in claritas-web claritas-api opencode; do
             if ! restore_deployment_spec "$deployment"; then
               rollback_failed=1
             fi
           done
-          for deployment in keycloak claritas-web claritas-api opencode; do
+          for deployment in claritas-web claritas-api opencode; do
             if ! kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s; then
               echo "::error::Rollback rollout failed for ${deployment}." >&2
               kubectl -n "${NAMESPACE}" describe "deployment/${deployment}" | sed -n '1,160p' || true
@@ -1513,4 +1644,4 @@ jobs:
             echo "::error::Application rollback was incomplete; manual intervention is required." >&2
             exit 1
           fi
-          echo "::notice title=Application rollback complete::Restored all four complete pre-release workload specs with every container image digest-pinned."
+          echo "::notice title=Application rollback complete::Restored all three application workload specs with every container image digest-pinned; retained the forward-only Keycloak upgrade."

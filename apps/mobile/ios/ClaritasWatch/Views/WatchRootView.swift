@@ -1,21 +1,66 @@
 import Foundation
 import SwiftUI
 
+private enum WatchPulseFocus: Hashable {
+    case overview
+    case markets
+    case weather
+
+    var title: String {
+        switch self {
+        case .overview: return "Scoped pulse"
+        case .markets: return "Market pulse"
+        case .weather: return "Weather pulse"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .overview: return "waveform.path.ecg"
+        case .markets: return "chart.line.uptrend.xyaxis"
+        case .weather: return "cloud.sun"
+        }
+    }
+
+    var phoneDestination: String {
+        switch self {
+        case .overview: return "dashboard"
+        case .markets: return "markets"
+        case .weather: return "weather"
+        }
+    }
+}
+
 struct WatchRootView: View {
+    private enum Page: Hashable {
+        case briefing
+        case news
+        case social
+        case intelligence
+        case pulse
+        case map
+        case transport
+    }
+
     @EnvironmentObject private var model: WatchAppModel
+    @State private var page: Page = .briefing
+    @State private var pulseFocus: WatchPulseFocus = .overview
 
     var body: some View {
         Group {
             if !model.hasSession {
                 WatchPairingView()
             } else {
-                TabView {
-                    WatchBriefingView()
-                    WatchNewsView()
-                    WatchIntelligencePulseView()
-                    WatchPulseView()
-                    WatchSignalGlanceView()
-                    WatchTransportPulseView()
+                TabView(selection: $page) {
+                    WatchBriefingView().tag(Page.briefing)
+                    WatchNewsView().tag(Page.news)
+                    WatchSocialSignalsView().tag(Page.social)
+                    WatchIntelligencePulseView().tag(Page.intelligence)
+                    WatchPulseView(focus: pulseFocus)
+                        .id(pulseFocus)
+                        .tag(Page.pulse)
+                    WatchSignalGlanceView().tag(Page.map)
+                    WatchTransportPulseView().tag(Page.transport)
                 }
                 .tabViewStyle(.verticalPage)
             }
@@ -23,6 +68,48 @@ struct WatchRootView: View {
         .tint(WatchPalette.orange)
         .task {
             await model.bootstrap()
+        }
+        .onOpenURL { url in
+            openWidgetURL(url)
+        }
+    }
+
+    private func openWidgetURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "claritas",
+              url.host?.lowercased() == "widget",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let domain = components.queryItems?
+                .first(where: { $0.name == "domain" })?
+                .value?
+                .lowercased(),
+              ["overview", "news", "markets", "weather", "transport"].contains(domain)
+        else { return }
+
+        let rawCountry = components.queryItems?
+            .first(where: { $0.name == "country" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        guard rawCountry == "GLOBAL"
+                || rawCountry?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil
+        else { return }
+
+        switch domain {
+        case "news": page = .news
+        case "markets":
+            pulseFocus = .markets
+            page = .pulse
+        case "weather":
+            pulseFocus = .weather
+            page = .pulse
+        case "transport": page = .transport
+        default:
+            pulseFocus = .overview
+            page = .pulse
+        }
+
+        Task {
+            await model.selectCountry(rawCountry)
         }
     }
 }
@@ -997,6 +1084,7 @@ private struct WatchBriefingView: View {
 
 private struct WatchPulseView: View {
     @EnvironmentObject private var model: WatchAppModel
+    let focus: WatchPulseFocus
 
     private var topMover: MarketQuote? {
         model.markets.max {
@@ -1021,32 +1109,34 @@ private struct WatchPulseView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        WatchSectionLabel(title: "Urgent pulse", icon: "waveform.path.ecg")
+                        WatchSectionLabel(title: focus.title, icon: focus.icon)
                         Spacer()
                         WatchRefreshStatus()
                     }
 
-                    WatchCard {
-                        HStack {
-                            Text("\(model.criticalSignalCount)")
-                                .font(.title2.weight(.bold))
-                                .monospacedDigit()
-                                .foregroundStyle(
-                                    model.criticalSignalCount > 0
-                                        ? WatchPalette.negative
-                                        : WatchPalette.sage
-                                )
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("threshold signals")
-                                    .font(.caption.weight(.semibold))
-                                Text("Weather + markets")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                    if focus == .overview {
+                        WatchCard {
+                            HStack {
+                                Text("\(model.criticalSignalCount)")
+                                    .font(.title2.weight(.bold))
+                                    .monospacedDigit()
+                                    .foregroundStyle(
+                                        model.criticalSignalCount > 0
+                                            ? WatchPalette.negative
+                                            : WatchPalette.sage
+                                    )
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("threshold signals")
+                                        .font(.caption.weight(.semibold))
+                                    Text(model.selectedCountry ?? "Global scope")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
 
-                    if let headline = model.news.first {
+                    if focus == .overview, let headline = model.news.first {
                         pulseCard(
                             label: "Headline",
                             icon: "newspaper",
@@ -1062,7 +1152,7 @@ private struct WatchPulseView: View {
                         )
                     }
 
-                    if let weather = priorityWeather {
+                    if focus != .markets, let weather = priorityWeather {
                         pulseCard(
                             label: "Weather",
                             icon: "cloud.sun",
@@ -1072,7 +1162,7 @@ private struct WatchPulseView: View {
                         )
                     }
 
-                    if let mover = topMover {
+                    if focus != .weather, let mover = topMover {
                         pulseCard(
                             label: "Market",
                             icon: "chart.line.uptrend.xyaxis",
@@ -1084,8 +1174,22 @@ private struct WatchPulseView: View {
                         )
                     }
 
+                    if focus == .markets, topMover == nil {
+                        unavailableCard("No market quote is available for this country scope.")
+                    } else if focus == .weather, priorityWeather == nil {
+                        unavailableCard("No weather observation is available for this country scope.")
+                    } else if focus == .overview,
+                              model.news.isEmpty,
+                              topMover == nil,
+                              priorityWeather == nil {
+                        unavailableCard("No current overview data is available for this country scope.")
+                    }
+
                     Button {
-                        model.openOnPhone("dashboard")
+                        model.openOnPhone(
+                            focus.phoneDestination,
+                            country: model.selectedCountry
+                        )
                     } label: {
                         Label("Continue on iPhone", systemImage: "iphone")
                     }
@@ -1095,6 +1199,14 @@ private struct WatchPulseView: View {
             }
             .navigationTitle("Pulse")
             .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+        }
+    }
+
+    private func unavailableCard(_ message: String) -> some View {
+        WatchCard {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -1303,6 +1415,14 @@ private struct WatchNewsView: View {
                             }
                             .font(.caption2)
                             .foregroundStyle(WatchPalette.sage)
+                            if let date = item.chronologyDate {
+                                Text(
+                                    "\(item.chronologyLabel) "
+                                    + date.formatted(date: .abbreviated, time: .shortened)
+                                )
+                                    .font(.system(size: 9).monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
                             Button {
                                 model.openOnPhone(
                                     "news",
@@ -1323,7 +1443,7 @@ private struct WatchNewsView: View {
                 } header: {
                     HStack {
                         WatchSectionLabel(
-                            title: model.selectedCountry.map { "\($0) reporting" } ?? "Top reporting",
+                            title: model.selectedCountry.map { "Latest in \($0)" } ?? "Latest reporting",
                             icon: "newspaper"
                         )
                         Spacer()
@@ -1343,7 +1463,7 @@ private struct WatchNewsView: View {
             if model.isRefreshingNews {
                 HStack(spacing: 7) {
                     ProgressView()
-                    Text("Loading ranked stories…")
+                    Text("Loading latest stories…")
                 }
                 .font(.caption2)
             } else if let error = model.newsLoadError, !error.isEmpty {
@@ -1364,8 +1484,8 @@ private struct WatchNewsView: View {
             } else {
                 Text(
                     model.selectedCountry.map {
-                        "No ranked stories for \($0) in this category."
-                    } ?? "No ranked stories in this category."
+                        "No recent stories for \($0) in this category."
+                    } ?? "No recent stories in this category."
                 )
                     .font(.caption2)
                     .foregroundStyle(.secondary)

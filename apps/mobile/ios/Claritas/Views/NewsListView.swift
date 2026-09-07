@@ -156,8 +156,8 @@ private struct NewsRow: View {
                             .buttonStyle(.plain)
                     }
                     Spacer(minLength: 2)
-                    if let date = item.eventDate {
-                        Text("\(timeBasisLabel) \(date.formatted(date: .numeric, time: .shortened))")
+                    if let date = item.chronologyDate {
+                        Text("\(item.chronologyLabel) \(date.formatted(date: .numeric, time: .shortened))")
                             .monospacedDigit()
                     }
                 }
@@ -265,8 +265,8 @@ private struct NewsRow: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    if let d = item.eventDate {
-                        Text("\(timeBasisLabel) \(DateFormatter.localizedString(from: d, dateStyle: .short, timeStyle: .short))")
+                    if let d = item.chronologyDate {
+                        Text("\(item.chronologyLabel) \(DateFormatter.localizedString(from: d, dateStyle: .short, timeStyle: .short))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -419,20 +419,6 @@ private struct NewsRow: View {
             }
         }
         return nil
-    }
-
-    private var timeBasisLabel: String {
-        guard let basis = item.timeBasis else {
-            return "Reported"
-        }
-        switch basis {
-        case "provider_first_seen":
-            return "First seen"
-        case "publisher_published_or_provider_discovered":
-            return "Source time"
-        default:
-            return basis.hasPrefix("publisher_") ? "Published" : "Reported"
-        }
     }
 
     private func normalizedSourceName(_ value: String?) -> String? {

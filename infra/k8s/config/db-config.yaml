@@ -10,9 +10,13 @@ data:
   AUTH_BASE_URL: "https://api.example.com"
   AUTH_SUCCESS_REDIRECT_URL: "https://app.example.com/auth/success"
   AUTH_FAILURE_REDIRECT_URL: "https://app.example.com/auth/error"
-  AUTH_ALLOWED_REDIRECTS: "https://app.example.com"
-  AUTH_ALLOWED_REDIRECT_SCHEMES: "claritas"
-  AUTH_PROVIDERS: "google,microsoft,apple"
+  AUTH_ALLOWED_REDIRECTS: "https://app.example.com,claritas://auth/callback"
+  # Advertise only brokers whose credentials have been provisioned and whose
+  # external registrations have been verified. See the auth setup guide.
+  AUTH_PROVIDERS: "google"
+  # Single-tenant Microsoft is the safe default. Enable only together with an
+  # intentional common/organizations/consumers tenant selection.
+  AUTH_MICROSOFT_MULTI_TENANT_ENABLED: "false"
   AUTH_ISSUER_URL: "https://auth.example.com/realms/claritas"
   AUTH_KEYCLOAK_CLIENT_ID: "claritas-api"
   AUTH_KEYCLOAK_SCOPE: "openid profile email"
@@ -22,12 +26,13 @@ data:
   AUTH_COOKIE_SECURE: "true"
   AUTH_SESSION_TTL_DAYS: "30"
   AUTH_STATE_TTL_MINUTES: "10"
+  AUTH_NATIVE_HANDOFF_TTL_SECONDS: "60"
   KEYCLOAK_REALM: "claritas"
   KEYCLOAK_WEB_CLIENT_ID: "claritas-web"
   KEYCLOAK_MOBILE_CLIENT_ID: "claritas-mobile"
   KEYCLOAK_WEB_REDIRECT_URIS: "https://app.example.com/*,http://localhost:5173/*"
   KEYCLOAK_WEB_ORIGINS: "https://app.example.com,http://localhost:5173"
-  KEYCLOAK_MOBILE_REDIRECT_URIS: "claritas://auth/*"
+  KEYCLOAK_MOBILE_REDIRECT_URIS: "claritas://auth/callback"
   KEYCLOAK_API_REDIRECT_URIS: "https://app.example.com/api/auth/*/callback,http://localhost:8080/api/auth/*/callback"
   KEYCLOAK_DB_NAME: "keycloak"
   KEYCLOAK_DB_USER: "keycloak_app"

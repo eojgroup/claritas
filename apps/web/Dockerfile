@@ -17,6 +17,7 @@ server {
   server_name _;
   root /usr/share/nginx/html;
   index index.html;
+  add_header Strict-Transport-Security "max-age=31536000" always;
 
   location / {
     try_files $uri /index.html;

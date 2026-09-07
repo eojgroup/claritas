@@ -7,6 +7,14 @@ const workflow = readFileSync(resolve(
   __dirname,
   "../../../.github/workflows/gke-deploy.yml",
 ), "utf8");
+const terraformWorkflow = readFileSync(resolve(
+  __dirname,
+  "../../../.github/workflows/terraform-deploy.yml",
+), "utf8");
+const terraformAuthSecret = readFileSync(resolve(
+  __dirname,
+  "../../../infra/gcp/terraform/k8s-secrets.tf",
+), "utf8");
 
 test("GKE release gates provider liveness without gating instantaneous Singapore occupancy", () => {
   const transportGate = workflow.slice(
@@ -26,4 +34,18 @@ test("GKE release gates provider liveness without gating instantaneous Singapore
   assert.doesNotMatch(singaporeDiagnostic, /singapore_transport_ready/);
   assert.doesNotMatch(singaporeDiagnostic, /exit 1/);
   assert.doesNotMatch(singaporeDiagnostic, /seq 1 24/);
+});
+
+test("identity deploys use an immutable image and preserve omitted live auth keys", () => {
+  assert.match(workflow, /keycloak_image: \$\{\{ steps\.resolve_keycloak_image\.outputs\.image \}\}/);
+  assert.match(workflow, /docker buildx imagetools inspect "\$ref"/);
+  assert.match(workflow, /image="\$\{IMAGE_URI_KEYCLOAK\}@\$\{digest\}"/);
+  assert.match(workflow, /KEYCLOAK_IMAGE: \$\{\{ needs\.build\.outputs\.keycloak_image \}\}/);
+  assert.match(
+    workflow,
+    /kubectl set image -f \.\/infra\/k8s\/keycloak-deployment\.yaml[\s\S]*keycloak="\$KEYCLOAK_IMAGE" --local -o yaml \| kubectl apply -f -/,
+  );
+  assert.match(workflow, /kubectl -n "\$NS" patch secret claritas-auth --type merge/);
+  assert.match(terraformWorkflow, /kubectl -n "\$ns" patch secret claritas-auth --type merge/);
+  assert.match(terraformAuthSecret, /lifecycle \{[\s\S]*ignore_changes = \[data\][\s\S]*\}/);
 });

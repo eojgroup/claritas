@@ -11,13 +11,19 @@ import { ingestWorldBankIndicators } from "./connectors/world-bank";
 import { ingestPodcastIndex, podcastParamsFromEnv, type PodcastIngestParams } from "./connectors/podcastindex";
 import { ingestWikidataLeadership } from "./connectors/wikidata-leadership";
 import {
+  configuredSocialQueries,
+  getSocialProviderStatuses,
+  ingestSocialProvider,
+  type SocialPlatform,
+} from "./connectors/social-media";
+import {
   configuredNewsTranslationTargets,
   newsTranslationEnabled,
   runPendingNewsHeadlineTranslations,
 } from "./news-translation";
 import { query, withTransaction } from "./db";
 
-export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership";
+export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership" | "social";
 export type IngestionRunStatus = "queued" | "running" | "success" | "failed" | "unknown";
 export type IngestionLogLevel = "info" | "warn" | "error";
 
@@ -171,6 +177,16 @@ type LeadershipRunPlan = {
   requestPayload: Record<string, unknown>;
 };
 
+type SocialRunProviders = Record<SocialPlatform, boolean>;
+
+export type SocialRunPlan = {
+  providers: SocialRunProviders;
+  queries: string[];
+  maxResultsPerQuery: number;
+  lookbackHours: number;
+  requestPayload: Record<string, unknown>;
+};
+
 type StepResult = {
   step: string;
   status: "success" | "degraded" | "failed";
@@ -200,11 +216,20 @@ type SourceConfigKey =
   | "fred"
   | "worldBank"
   | "podcastindex"
-  | "wikidata";
+  | "wikidata"
+  | "xSocial"
+  | "redditSocial"
+  | "youtubeSocial"
+  | "blueskySocial";
 
 const SOURCE_CONFIG: Record<
   SourceConfigKey,
-  { sourceName: string; apiBaseUrl: string; provider: string; authType: "api_key" | "none" }
+  {
+    sourceName: string;
+    apiBaseUrl: string;
+    provider: string;
+    authType: "api_key" | "bearer_token" | "oauth2" | "none";
+  }
 > = {
   gdelt: {
     sourceName: "gdelt",
@@ -278,6 +303,30 @@ const SOURCE_CONFIG: Record<
     provider: "wikidata",
     authType: "none",
   },
+  xSocial: {
+    sourceName: "x_social",
+    apiBaseUrl: "https://api.x.com/2",
+    provider: "x",
+    authType: "bearer_token",
+  },
+  redditSocial: {
+    sourceName: "reddit_social",
+    apiBaseUrl: "https://oauth.reddit.com",
+    provider: "reddit",
+    authType: "oauth2",
+  },
+  youtubeSocial: {
+    sourceName: "youtube_social",
+    apiBaseUrl: "https://www.googleapis.com/youtube/v3",
+    provider: "youtube",
+    authType: "api_key",
+  },
+  blueskySocial: {
+    sourceName: "bluesky_social",
+    apiBaseUrl: "https://public.api.bsky.app",
+    provider: "bluesky",
+    authType: "none",
+  },
 };
 
 const PIPELINE_SOURCE_DEFAULT: Record<IngestionPipeline, SourceConfigKey> = {
@@ -286,6 +335,7 @@ const PIPELINE_SOURCE_DEFAULT: Record<IngestionPipeline, SourceConfigKey> = {
   market: "secEdgar",
   podcasts: "podcastindex",
   leadership: "wikidata",
+  social: "blueskySocial",
 };
 
 const activeRunPromises = new Map<number, Promise<void>>();
@@ -322,6 +372,10 @@ const INGESTION_SOURCE_NAMES = [
   "world_bank_wdi",
   "podcastindex",
   "wikidata",
+  "x_social",
+  "reddit_social",
+  "youtube_social",
+  "bluesky_social",
 ] as const;
 
 const INGESTION_SOURCE_SQL = `('${INGESTION_SOURCE_NAMES.join("', '")}')`;
@@ -479,7 +533,8 @@ function resolvePipeline(pipeline: string | null, sourceName: string): Ingestion
     pipeline === "weather" ||
     pipeline === "market" ||
     pipeline === "podcasts" ||
-    pipeline === "leadership"
+    pipeline === "leadership" ||
+    pipeline === "social"
   ) {
     return pipeline;
   }
@@ -491,6 +546,7 @@ function resolvePipeline(pipeline: string | null, sourceName: string): Ingestion
   if (["sec_edgar", "ecb", "oecd", "fred", "world_bank_wdi"].includes(sourceName)) return "market";
   if (sourceName === "podcastindex") return "podcasts";
   if (sourceName === "wikidata") return "leadership";
+  if (["x_social", "reddit_social", "youtube_social", "bluesky_social"].includes(sourceName)) return "social";
   return "news";
 }
 
@@ -965,6 +1021,101 @@ export function buildLeadershipRunPlan(_rawBody: unknown): LeadershipRunPlan {
   return { requestPayload: {} };
 }
 
+export function buildSocialRunPlan(rawBody: unknown): SocialRunPlan {
+  const body = asRecord(rawBody);
+  const providerInput = asRecord(body.providers);
+  const hasExplicitProviderSelection = body.providers != null;
+  const statuses = new Map(getSocialProviderStatuses().map((status) => [status.id, status]));
+  const selected = (platform: SocialPlatform, ...aliases: string[]): boolean => {
+    const provided = [platform, ...aliases]
+      .map((key) => providerInput[key])
+      .find((value) => value !== undefined);
+    return asBoolean(
+      provided,
+      hasExplicitProviderSelection ? false : Boolean(statuses.get(platform)?.available),
+    );
+  };
+  const providers: SocialRunProviders = {
+    x: selected("x", "twitter"),
+    reddit: selected("reddit"),
+    youtube: selected("youtube", "youTube"),
+    bluesky: selected("bluesky", "blueSky", "bsky"),
+  };
+  const enabledProviders = (Object.entries(providers) as Array<[SocialPlatform, boolean]>)
+    .filter(([, enabled]) => enabled)
+    .map(([platform]) => platform);
+  if (enabledProviders.length === 0) {
+    throw new IngestionValidationError("Select at least one configured social provider.");
+  }
+  for (const platform of enabledProviders) {
+    const status = statuses.get(platform);
+    if (!status?.enabled) {
+      throw new IngestionValidationError(`${status?.label ?? platform} social ingestion is disabled by configuration.`);
+    }
+    if (!status.configured) {
+      throw new IngestionValidationError(
+        `${status.label} selected but required access is not configured: ${status.required_environment.join(", ")}.`,
+      );
+    }
+  }
+
+  const queriesInput = body.queries ?? body.searchTerms ?? body.search_terms;
+  const rawQueries = Array.isArray(queriesInput)
+    ? queriesInput
+    : typeof queriesInput === "string"
+      ? queriesInput.split(/[|,\n]/g)
+      : configuredSocialQueries();
+  const queries = Array.from(new Set(
+    rawQueries
+      .map((value) => asString(value)?.replace(/\s+/g, " ").slice(0, 512).trim())
+      .filter((value): value is string => Boolean(value)),
+  )).slice(0, 10);
+  if (queries.length === 0) {
+    throw new IngestionValidationError("Provide at least one non-empty social discovery query.");
+  }
+  const maxResultsPerQuery = clampInt(
+    body.maxResultsPerQuery ?? body.max_results_per_query,
+    1,
+    100,
+    clampInt(process.env.SOCIAL_MAX_RESULTS_PER_QUERY, 1, 100, 25),
+  );
+  const lookbackHours = clampInt(
+    body.lookbackHours ?? body.lookback_hours,
+    1,
+    168,
+    clampInt(process.env.SOCIAL_LOOKBACK_HOURS, 1, 168, 24),
+  );
+  return {
+    providers,
+    queries,
+    maxResultsPerQuery,
+    lookbackHours,
+    requestPayload: {
+      providers,
+      queries,
+      max_results_per_query: maxResultsPerQuery,
+      lookback_hours: lookbackHours,
+      content_classification: "unverified_social_claim",
+    },
+  };
+}
+
+export function classifySocialProviderResult(
+  result: Record<string, unknown>,
+  expectedQueries: number,
+): "success" | "degraded" | "failed" {
+  const successfulQueries = Math.max(0, Number(result.successful_queries) || 0);
+  const failedQueries = Math.max(0, Number(result.failed_queries) || 0);
+  const httpFailures = Math.max(0, Number(result.http_failures) || 0);
+  const dbErrors = Math.max(0, Number(result.db_errors) || 0);
+  const fetched = Math.max(0, Number(result.fetched) || 0);
+  const persisted = Math.max(0, Number(result.inserted) || 0) + Math.max(0, Number(result.updated) || 0);
+  if (expectedQueries > 0 && (successfulQueries === 0 || failedQueries >= expectedQueries)) return "failed";
+  if (fetched > 0 && persisted === 0 && dbErrors >= fetched) return "failed";
+  if (failedQueries > 0 || httpFailures > 0 || dbErrors > 0) return "degraded";
+  return "success";
+}
+
 async function executeProviderStep(
   runId: number,
   steps: StepResult[],
@@ -1314,6 +1465,75 @@ async function executeLeadershipRun(runId: number, plan: LeadershipRunPlan): Pro
   }
 }
 
+async function executeSocialRun(runId: number, plan: SocialRunPlan): Promise<void> {
+  const startedAt = Date.now();
+  const steps: StepResult[] = [];
+  const totals = emptyTotals();
+  try {
+    await updateRunStatus(runId, "running");
+    await safeAppendRunLog(runId, "info", "Social signal ingestion run started.", {
+      request: plan.requestPayload,
+      trust_policy: "All acquired posts remain unverified claims pending independent corroboration.",
+    });
+    for (const platform of ["x", "reddit", "youtube", "bluesky"] as const) {
+      if (!plan.providers[platform]) continue;
+      await executeProviderStep(
+        runId,
+        steps,
+        totals,
+        `${platform}/unverified-social-claims`,
+        () => ingestSocialProvider(platform, {
+          queries: plan.queries,
+          maxResultsPerQuery: plan.maxResultsPerQuery,
+          lookbackHours: plan.lookbackHours,
+        }),
+        (result) => classifySocialProviderResult(result, plan.queries.length),
+      );
+    }
+    const succeeded = steps.filter((step) => step.status !== "failed").length;
+    if (succeeded === 0) throw new Error("All selected social providers failed.");
+    const degradedSteps = steps.filter((step) => step.status !== "success").map((step) => step.step);
+    const stats = {
+      pipeline: "social",
+      health: degradedSteps.length > 0 ? "degraded" : "healthy",
+      content_classification: "unverified_social_claim",
+      duration_ms: Date.now() - startedAt,
+      steps,
+      totals,
+    };
+    await updateRunStatus(runId, "success", {
+      error: degradedSteps.length > 0 ? `Degraded provider steps: ${degradedSteps.join(", ")}` : null,
+      stats,
+      finished: true,
+    });
+    await safeAppendRunLog(
+      runId,
+      degradedSteps.length > 0 ? "warn" : "info",
+      degradedSteps.length > 0
+        ? "Social signal ingestion finished with degraded provider coverage."
+        : "Social signal ingestion finished successfully.",
+      { totals, degraded_steps: degradedSteps },
+    );
+  } catch (err) {
+    const errorMessage = toErrorMessage(err);
+    await updateRunStatus(runId, "failed", {
+      error: errorMessage,
+      stats: {
+        pipeline: "social",
+        content_classification: "unverified_social_claim",
+        duration_ms: Date.now() - startedAt,
+        steps,
+        totals,
+      },
+      finished: true,
+    });
+    await safeAppendRunLog(runId, "error", "Social signal ingestion run failed.", {
+      error: errorMessage,
+      totals,
+    });
+  }
+}
+
 export async function triggerNewsRun(input: {
   actor: TriggerActor;
   plan: NewsRunPlan;
@@ -1465,6 +1685,32 @@ export async function triggerLeadershipRun(input: {
   return { runId: run.id };
 }
 
+export async function triggerSocialRun(input: {
+  actor: TriggerActor;
+  plan: SocialRunPlan;
+}): Promise<{ runId: number }> {
+  const sourceNameOverride: SourceConfigKey = input.plan.providers.x
+    ? "xSocial"
+    : input.plan.providers.reddit
+      ? "redditSocial"
+      : input.plan.providers.youtube
+        ? "youtubeSocial"
+        : "blueskySocial";
+  const run = await createRun({
+    pipeline: "social",
+    actor: input.actor,
+    requestPayload: input.plan.requestPayload,
+    sourceNameOverride,
+  });
+  await safeAppendRunLog(run.id, "info", "Social signal ingestion run queued.", {
+    requested_by: input.actor.email || input.actor.userId,
+    providers: input.plan.providers,
+    content_classification: "unverified_social_claim",
+  });
+  startRunTask(run.id, () => executeSocialRun(run.id, input.plan));
+  return { runId: run.id };
+}
+
 export async function listRuns(options: {
   pipeline?: IngestionPipeline;
   limit?: number;
@@ -1491,7 +1737,8 @@ export async function listRuns(options: {
         OR ($${pipelineIdx} = 'market' AND s.name = 'fred')
         OR ($${pipelineIdx} = 'market' AND s.name = 'world_bank_wdi')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
-        OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`
+        OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata')
+        OR ($${pipelineIdx} = 'social' AND s.name IN ('x_social','reddit_social','youtube_social','bluesky_social')))`
     );
   }
   const limitIdx = params.push(limit);
@@ -1604,7 +1851,8 @@ export async function getMetrics(options?: {
         OR ($${pipelineIdx} = 'market' AND s.name = 'fred')
         OR ($${pipelineIdx} = 'market' AND s.name = 'world_bank_wdi')
         OR ($${pipelineIdx} = 'podcasts' AND s.name = 'podcastindex')
-        OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata'))`
+        OR ($${pipelineIdx} = 'leadership' AND s.name = 'wikidata')
+        OR ($${pipelineIdx} = 'social' AND s.name IN ('x_social','reddit_social','youtube_social','bluesky_social')))`
     );
   }
 

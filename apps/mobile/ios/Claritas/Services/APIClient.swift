@@ -145,7 +145,20 @@ final class APIClient {
         _ = try await request(req, as: EmptyResponse.self)
     }
 
-    func authStartURL(provider: AuthProviderId, redirect: URL, startPathOverride: String? = nil) -> URL? {
+    func authStartURL(
+        provider: AuthProviderId,
+        redirect: URL,
+        nativeCodeChallenge: String,
+        startPathOverride: String? = nil
+    ) -> URL? {
+        let allowedChallengeCharacters = CharacterSet(
+            charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        )
+        guard redirect == NativeAuthCallback.expectedURL,
+              nativeCodeChallenge.utf8.count == 43,
+              nativeCodeChallenge.unicodeScalars.allSatisfy({ allowedChallengeCharacters.contains($0) }) else {
+            return nil
+        }
         let startPath: String
         if let startPathOverride, !startPathOverride.isEmpty {
             startPath = startPathOverride
@@ -153,8 +166,52 @@ final class APIClient {
             startPath = "/api/auth/\(provider.rawValue)/start"
         }
         var comps = URLComponents(url: baseURL.appendingPathComponent(startPath), resolvingAgainstBaseURL: false)
-        comps?.queryItems = [URLQueryItem(name: "redirect", value: redirect.absoluteString)]
+        comps?.queryItems = [
+            URLQueryItem(name: "redirect", value: redirect.absoluteString),
+            URLQueryItem(name: "native_code_challenge", value: nativeCodeChallenge),
+            URLQueryItem(name: "native_code_challenge_method", value: "S256")
+        ]
         return comps?.url
+    }
+
+    /// Exchanges the short-lived, single-use native callback code without
+    /// attaching an existing bearer token or relying on session cookies.
+    func exchangeAuthHandoffCode(_ code: String, codeVerifier: String) async throws -> AuthHandoffResponse {
+        let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedCode.isEmpty, normalizedCode.utf8.count <= 4_096 else {
+            throw APIError(status: -1, message: "Invalid sign-in handoff code")
+        }
+        guard NativeAuthPKCE.isValidVerifier(codeVerifier) else {
+            throw APIError(status: -1, message: "Invalid sign-in code verifier")
+        }
+
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/auth/handoff"))
+        req.httpMethod = "POST"
+        req.httpShouldHandleCookies = false
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        req.httpBody = try JSONEncoder().encode(
+            AuthHandoffRequest(code: normalizedCode, code_verifier: codeVerifier)
+        )
+
+        let (data, resp) = try await session.data(for: req)
+        guard let http = resp as? HTTPURLResponse else {
+            throw APIError(status: -1, message: "No HTTP response")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
+        }
+
+        let handoff = try JSONDecoder.api.decode(AuthHandoffResponse.self, from: data)
+        let token = handoff.token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !token.isEmpty else {
+            throw APIError(status: http.statusCode, message: "Sign-in handoff returned an empty session")
+        }
+        guard handoff.expires_at > Date() else {
+            throw APIError(status: http.statusCode, message: "Sign-in handoff returned an expired session")
+        }
+        return AuthHandoffResponse(token: token, expires_at: handoff.expires_at)
     }
 
     func fetchNews(
@@ -204,6 +261,49 @@ final class APIClient {
         }
         comps.queryItems = items
         return try await request(URLRequest(url: comps.url!), as: [PodcastEpisode].self, rootKey: "items")
+    }
+
+    func fetchSocialSignals(
+        limit: Int = 60,
+        offset: Int = 0,
+        platform: SocialPlatform? = nil,
+        country: String? = nil,
+        query: String? = nil
+    ) async throws -> [SocialSignal] {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("/api/social/signals"),
+            resolvingAgainstBaseURL: false
+        )!
+        var queryItems = [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))),
+            URLQueryItem(name: "offset", value: String(max(offset, 0)))
+        ]
+        if let platform {
+            queryItems.append(URLQueryItem(name: "platform", value: platform.rawValue))
+        }
+        if let country = country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+           country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil {
+            queryItems.append(URLQueryItem(name: "country", value: country))
+        }
+        if let query = query?.trimmingCharacters(in: .whitespacesAndNewlines), !query.isEmpty {
+            queryItems.append(URLQueryItem(name: "q", value: query))
+        }
+        components.queryItems = queryItems
+        let values = try await request(
+            URLRequest(url: components.url!),
+            as: [SocialSignal].self,
+            rootKey: "items"
+        )
+        return SocialSignal.newestFirst(values)
+    }
+
+    func fetchSocialCoverage(days: Int = 7) async throws -> SocialCoverageResponse {
+        var components = URLComponents(
+            url: baseURL.appendingPathComponent("/api/social/coverage"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "days", value: String(min(max(days, 1), 90)))]
+        return try await request(URLRequest(url: components.url!), as: SocialCoverageResponse.self)
     }
 
     func fetchCountryStats(days: Int = 30) async throws -> [CountryStat] {
@@ -370,6 +470,17 @@ final class APIClient {
             "providers": ["secEdgar": true, "ecb": true, "oecd": true]
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        return try await request(req, as: AdminIngestionRunDetail.self)
+    }
+
+    func triggerAdminSocialIngestion() async throws -> AdminIngestionRunDetail {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/admin/ingestion/social/run"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // An empty payload deliberately lets the server select only providers
+        // that are both enabled and configured, while retaining its governed
+        // query, lookback, and result-limit defaults.
+        req.httpBody = Data("{}".utf8)
         return try await request(req, as: AdminIngestionRunDetail.self)
     }
 

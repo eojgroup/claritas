@@ -421,7 +421,7 @@ export function renderBriefingEmail(
     )
     .join("");
   const mapHtml = options.map_cid
-    ? `<h2 style="margin:26px 0 10px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">Geospatial signal pulse</h2>
+    ? `<h2 style="margin:26px 0 10px;font-family:${EMAIL_FONT};font-size:20px;color:${palette.ink}">Global intelligence pulse</h2>
        <img src="cid:${escapeHtml(options.map_cid)}" width="624" alt="World map showing the countries most relevant to this briefing" style="display:block;width:100%;max-width:624px;height:auto;border:0;border-radius:12px;background:${palette.page}" />`
     : "";
   const countryProfile = content.highest_relevance_country;

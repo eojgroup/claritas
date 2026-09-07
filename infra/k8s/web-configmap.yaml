@@ -9,7 +9,7 @@ data:
     <html>
       <head>
         <meta charset="utf-8" />
-        <title>Claritas</title>
+        <title>Claritas — Global Intelligence</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <style>
           body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; 
@@ -21,8 +21,8 @@ data:
       </head>
       <body>
         <div class="card">
-          <h1>Claritas Web</h1>
-          <p>Unified data platform — lightweight landing page.</p>
+          <h1>Claritas — Global Intelligence</h1>
+          <p>A map-led global intelligence workspace for attributed signals, material events, conditions, and evidence.</p>
         </div>
       </body>
     </html>
@@ -32,6 +32,7 @@ data:
       server_name _;
       root /usr/share/nginx/html;
       index index.html;
+      add_header Strict-Transport-Security "max-age=31536000" always;
 
       # Health checks
       location = /healthz { return 200; }

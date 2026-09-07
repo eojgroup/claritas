@@ -12,6 +12,12 @@ import { ingestOpenWeatherCountryWeather } from "./connectors/openweather";
 import { ingestNwsAlerts } from "./connectors/nws";
 import { getCountryWeatherForecast, getCountryWeatherLatest } from "./connectors/weather";
 import { ingestInstitutionalRss } from "./connectors/institutional-rss";
+import {
+  SOCIAL_SIGNAL_WARNING,
+  getSocialCoverage,
+  getSocialProviderStatuses,
+  listSocialSignals,
+} from "./connectors/social-media";
 import { getGdeltEvents, getGdeltSignals, ingestGdelt } from "./connectors/gdelt";
 import { getMarketFilings, getMarketIndicators, ingestSecEdgar } from "./connectors/sec-edgar";
 import { getLatestFxRates, getLatestPolicyRates, ingestEcbData } from "./connectors/ecb";
@@ -52,6 +58,7 @@ import {
   buildNewsRunPlan,
   buildLeadershipRunPlan,
   buildPodcastRunPlan,
+  buildSocialRunPlan,
   buildWeatherRunPlan,
   cancelReleaseNewsRun,
   getMetrics,
@@ -62,6 +69,7 @@ import {
   triggerNewsRun,
   triggerLeadershipRun,
   triggerPodcastRun,
+  triggerSocialRun,
   triggerWeatherRun,
   type IngestionPipeline,
 } from "./ingestion-admin";
@@ -566,7 +574,8 @@ function parsePipeline(value: unknown): IngestionPipeline | undefined {
     value === "weather" ||
     value === "market" ||
     value === "podcasts" ||
-    value === "leadership"
+    value === "leadership" ||
+    value === "social"
   ) {
     return value;
   }
@@ -2436,6 +2445,69 @@ app.get("/api/news/signals", requireAuthenticated, async (req, res) => {
   }
 });
 
+// Social media remains a separate evidence lane. These endpoints describe
+// what an account published, never what Claritas has established as fact.
+app.get("/api/social/signals", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("social");
+    const result = await listSocialSignals({
+      platform: typeof req.query.platform === "string" ? req.query.platform : undefined,
+      country: typeof req.query.country === "string" ? req.query.country : undefined,
+      q: typeof req.query.q === "string" ? req.query.q : undefined,
+      limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
+      offset: typeof req.query.offset === "string" ? Number(req.query.offset) : undefined,
+    });
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.json({
+      ...result,
+      count: result.items.length,
+      classification: {
+        content_type: "social_post",
+        signal_nature: "claim",
+        default_verification_status: "unverified",
+        is_fact: false,
+        warning: SOCIAL_SIGNAL_WARNING,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = /^(platform|country) must/.test(message) ? 400 : 500;
+    return res.status(status).json({ error: message });
+  }
+});
+
+app.get("/api/social/coverage", requireAuthenticated, async (req, res) => {
+  try {
+    trackDemandSignal("social");
+    const coverage = await getSocialCoverage(
+      typeof req.query.days === "string" ? Number(req.query.days) : undefined,
+    );
+    res.setHeader("Cache-Control", "private, no-store");
+    return res.json({
+      ...coverage,
+      providers: getSocialProviderStatuses(),
+      classification: {
+        content_type: "social_post",
+        signal_nature: "claim",
+        default_verification_status: "unverified",
+        is_fact: false,
+        warning: SOCIAL_SIGNAL_WARNING,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/social/providers", requireAuthenticated, (_req, res) => {
+  res.setHeader("Cache-Control", "private, no-store");
+  return res.json({
+    providers: getSocialProviderStatuses(),
+    secrets_exposed: false,
+    warning: SOCIAL_SIGNAL_WARNING,
+  });
+});
+
 // Podcast episodes are intelligence sources. Audio remains external; Claritas returns evidence and outbound links.
 app.get("/api/podcasts", requireAuthenticated, async (req, res) => {
   try {
@@ -3118,7 +3190,7 @@ app.patch("/api/admin/ingestion/automation/:pipeline", requireAdminRole, async (
     const pipeline = parsePipeline(req.params.pipeline?.trim().toLowerCase());
     if (!pipeline) {
       return res.status(400).json({
-        error: "Invalid pipeline. Expected one of: news, weather, market, podcasts, leadership.",
+        error: "Invalid pipeline. Expected one of: news, weather, market, podcasts, leadership, social.",
       });
     }
 
@@ -3192,13 +3264,31 @@ app.post("/api/admin/ingestion/market/run", requireAdminRole, async (req, res) =
   }
 });
 
+app.post("/api/admin/ingestion/social/run", requireAdminRole, async (req, res) => {
+  try {
+    const plan = buildSocialRunPlan(req.body || {});
+    const run = await triggerSocialRun({
+      actor: getRequestActor(res),
+      plan,
+    });
+    const detail = await getRunDetail(run.runId, 150);
+    if (!detail) return res.status(500).json({ error: "Failed to load created run." });
+    return res.status(202).json(detail);
+  } catch (e: any) {
+    if (e instanceof IngestionValidationError) {
+      return res.status(400).json({ error: e.message || String(e) });
+    }
+    return res.status(500).json({ error: e.message || String(e) });
+  }
+});
+
 app.get("/api/admin/ingestion/runs", requireAdminRole, async (req, res) => {
   try {
     const pipelineRaw = typeof req.query.pipeline === "string" ? req.query.pipeline.trim().toLowerCase() : undefined;
     const pipeline = parsePipeline(pipelineRaw);
     if (pipelineRaw && !pipeline) {
       return res.status(400).json({
-        error: "Invalid pipeline. Expected one of: news, weather, market, podcasts, leadership.",
+        error: "Invalid pipeline. Expected one of: news, weather, market, podcasts, leadership, social.",
       });
     }
     const limit = Math.min(Math.max(parseInt(String(req.query.limit || "50"), 10) || 50, 1), 200);
@@ -3246,7 +3336,7 @@ app.get("/api/admin/ingestion/metrics", requireAdminRole, async (req, res) => {
     const pipelineRaw = typeof req.query.pipeline === "string" ? req.query.pipeline.trim().toLowerCase() : undefined;
     const pipeline = parsePipeline(pipelineRaw);
     if (pipelineRaw && !pipeline) {
-      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market, podcasts." });
+      return res.status(400).json({ error: "Invalid pipeline. Expected one of: news, weather, market, podcasts, leadership, social." });
     }
     const metrics = await getMetrics({ days, pipeline });
     return res.json({

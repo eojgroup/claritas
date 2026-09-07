@@ -5,7 +5,10 @@ metadata:
   namespace: claritas
   annotations:
     kubernetes.io/ingress.class: "gce"
+    # FrontendConfig needs the HTTP forwarding rule in order to return the
+    # permanent HTTPS redirect; requests are not forwarded to application pods.
     kubernetes.io/ingress.allow-http: "true"
+    networking.gke.io/v1beta1.FrontendConfig: "claritas-frontendconfig"
     # Keep app/auth certificates independent so auth DNS issues do not block app TLS.
     networking.gke.io/managed-certificates: "claritas-app-cert,claritas-auth-cert"
 spec:

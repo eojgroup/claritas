@@ -219,29 +219,23 @@ resource "google_storage_bucket" "earth_observation" {
 }
 
 ############################################
-# Secret Manager (OAuth credentials)
+# Secret Manager containers (OAuth credentials)
 ############################################
 locals {
-  auth_secrets = {
-    "claritas-auth-google-client-id"        = var.auth_google_client_id
-    "claritas-auth-google-client-secret"    = var.auth_google_client_secret
-    "claritas-auth-microsoft-client-id"     = var.auth_microsoft_client_id
-    "claritas-auth-microsoft-client-secret" = var.auth_microsoft_client_secret
-    "claritas-auth-microsoft-tenant-id"     = var.auth_microsoft_tenant_id
-    "claritas-auth-apple-client-id"         = var.auth_apple_client_id
-    "claritas-auth-apple-team-id"           = var.auth_apple_team_id
-    "claritas-auth-apple-key-id"            = var.auth_apple_key_id
-    "claritas-auth-apple-private-key"       = var.auth_apple_private_key
-    "claritas-auth-keycloak-client-secret"  = var.auth_keycloak_client_secret
-    "claritas-ingest-api-token"             = var.ingest_api_token
-    "claritas-keycloak-admin-password"      = var.keycloak_admin_password
-  }
-
-  auth_secret_names = toset(keys(local.auth_secrets))
-  auth_secret_version_names = toset(nonsensitive([
-    for name, value in local.auth_secrets : name
-    if try(trimspace(value), "") != ""
-  ]))
+  auth_secret_names = toset([
+    "claritas-auth-google-client-id",
+    "claritas-auth-google-client-secret",
+    "claritas-auth-microsoft-client-id",
+    "claritas-auth-microsoft-client-secret",
+    "claritas-auth-microsoft-tenant-id",
+    "claritas-auth-apple-client-id",
+    "claritas-auth-apple-team-id",
+    "claritas-auth-apple-key-id",
+    "claritas-auth-apple-private-key",
+    "claritas-auth-keycloak-client-secret",
+    "claritas-ingest-api-token",
+    "claritas-keycloak-admin-password",
+  ])
 
   terraform_runner_sa = var.terraform_runner_service_account != "" ? var.terraform_runner_service_account : "terraform-github-oidc@${var.project_id}.iam.gserviceaccount.com"
 }
@@ -289,10 +283,15 @@ resource "google_secret_manager_secret" "auth" {
   ]
 }
 
-resource "google_secret_manager_secret_version" "auth" {
-  for_each    = local.auth_secret_version_names
-  secret      = google_secret_manager_secret.auth[each.value].id
-  secret_data = local.auth_secrets[each.value]
+# Auth payloads are merged into the Kubernetes Secret by the release workflows.
+# Relinquish versions created by older Terraform revisions without disabling or
+# destroying them; their lifecycle is operator-managed from this point onward.
+removed {
+  from = google_secret_manager_secret_version.auth
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 

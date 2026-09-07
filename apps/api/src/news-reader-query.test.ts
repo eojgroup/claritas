@@ -77,6 +77,9 @@ test("country and category scope compose before syndicated-story pagination", as
   assert.match(built.sql, /'basis',COALESCE/);
   assert.match(built.sql, /'is_publisher_verified'/);
   assert.match(built.sql, /'is_publisher_verified',COALESCE\([\s\S]*LIKE 'publisher_published%',false\)/);
+  assert.match(built.sql, /'timeline_at',i\.event_time/);
+  assert.match(built.sql, /'published_at',NULLIF\(i\.payload->>'publisher_published_at',''\)/);
+  assert.match(built.sql, /'discovered_at',COALESCE\(/);
   assert.match(built.sql, /assessment\.assessed_at>=i\.updated_at/);
   assert.match(built.sql, /GREATEST\(changed_event\.updated_at,changed_evidence\.created_at\)/);
 });
@@ -140,4 +143,26 @@ test("unassessed metadata counts wholly unassessed story representatives", async
     built.sql,
     /count\(\*\)::int FROM base_news WHERE ranking_is_fallback/,
   );
+});
+
+test("newest is reverse chronological by the same canonical timeline instant returned to clients", async () => {
+  const { buildNewsReaderQuery } = await reader;
+  const built = buildNewsReaderQuery({
+    displayLanguage: "en",
+    limit: 20,
+    offset: 0,
+    q: "",
+    country: "",
+    language: "",
+    sourceCountry: "",
+    provider: "",
+    category: "",
+    sort: "newest",
+    archive: false,
+    includeMetadata: false,
+  });
+
+  assert.match(built.sql, /ROW_NUMBER\(\) OVER \(ORDER BY candidate\.event_time DESC NULLS LAST, candidate\.id DESC\)/);
+  assert.match(built.sql, /'timeline_at',i\.event_time/);
+  assert.match(built.sql, /ORDER BY result_rows\.result_order/);
 });

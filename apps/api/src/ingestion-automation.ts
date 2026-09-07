@@ -4,15 +4,18 @@ import {
   buildNewsRunPlan,
   buildLeadershipRunPlan,
   buildPodcastRunPlan,
+  buildSocialRunPlan,
   buildWeatherRunPlan,
   triggerMarketRun,
   triggerNewsRun,
   triggerLeadershipRun,
   triggerPodcastRun,
+  triggerSocialRun,
   triggerWeatherRun,
   type IngestionPipeline,
 } from "./ingestion-admin";
 import { query, withWorkerLease } from "./db";
+import { getSocialProviderStatuses, type SocialProviderStatus } from "./connectors/social-media";
 
 type DbTimestamp = string | Date;
 
@@ -215,6 +218,23 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
     failure_backoff_minutes: 180,
     default_payload: {},
   },
+  social: {
+    pipeline: "social",
+    enabled: false,
+    schedule_enabled: false,
+    schedule_interval_minutes: 60,
+    intelligent_enabled: true,
+    min_spacing_minutes: 30,
+    freshness_sla_minutes: 180,
+    demand_window_minutes: 30,
+    demand_threshold: 10,
+    failure_backoff_minutes: 60,
+    default_payload: {
+      providers: { x: false, reddit: false, youtube: false, bluesky: true },
+      maxResultsPerQuery: 25,
+      lookbackHours: 24,
+    },
+  },
 };
 
 let automationWorkerTimer: NodeJS.Timeout | null = null;
@@ -256,7 +276,8 @@ function parsePipeline(value: string): IngestionPipeline {
     value === "weather" ||
     value === "market" ||
     value === "podcasts" ||
-    value === "leadership"
+    value === "leadership" ||
+    value === "social"
   ) {
     return value;
   }
@@ -288,6 +309,11 @@ function toAutomationRule(row: AutomationRuleRow): IngestionAutomationRule {
 
 async function ensureAutomationRulesExist(): Promise<void> {
   if (automationRulesEnsured) return;
+  // Keep newly introduced pipeline rows out of automatic startup seeding. The
+  // previous API parses every persisted rule and cannot understand `social`,
+  // so inserting that row before a release has passed its gates would make an
+  // application rollback unsafe. Social is created only by an explicit admin
+  // PATCH after the upgraded release is known-good.
   const pipelines = ["news", "weather", "market", "podcasts", "leadership"] as IngestionPipeline[];
   const values: string[] = [];
   const params: unknown[] = [];
@@ -333,6 +359,41 @@ async function ensureAutomationRulesExist(): Promise<void> {
     params,
   );
   automationRulesEnsured = true;
+}
+
+async function ensureAutomationRuleExists(pipeline: IngestionPipeline): Promise<void> {
+  const defaults = RULE_DEFAULTS[pipeline];
+  await query(
+    `INSERT INTO ingestion_automation_rule (
+       pipeline,
+       enabled,
+       schedule_enabled,
+       schedule_interval_minutes,
+       intelligent_enabled,
+       min_spacing_minutes,
+       freshness_sla_minutes,
+       demand_window_minutes,
+       demand_threshold,
+       failure_backoff_minutes,
+       next_scheduled_at,
+       default_payload
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), $11)
+     ON CONFLICT (pipeline) DO NOTHING`,
+    [
+      defaults.pipeline,
+      defaults.enabled,
+      defaults.schedule_enabled,
+      defaults.schedule_interval_minutes,
+      defaults.intelligent_enabled,
+      defaults.min_spacing_minutes,
+      defaults.freshness_sla_minutes,
+      defaults.demand_window_minutes,
+      defaults.demand_threshold,
+      defaults.failure_backoff_minutes,
+      JSON.stringify(defaults.default_payload),
+    ],
+  );
 }
 
 async function getRule(pipeline: IngestionPipeline): Promise<IngestionAutomationRule | null> {
@@ -479,7 +540,14 @@ export async function updateAutomationRule(
   pipeline: IngestionPipeline,
   patch: IngestionAutomationRulePatch
 ): Promise<IngestionAutomationRule> {
-  const current = await getRule(pipeline);
+  let current = await getRule(pipeline);
+  if (!current && pipeline === "social") {
+    // This explicit administrator mutation is the compatibility boundary for
+    // the new pipeline. The created rule remains disabled by default unless
+    // the same PATCH deliberately enables it.
+    await ensureAutomationRuleExists(pipeline);
+    current = await getRule(pipeline);
+  }
   if (!current) {
     throw new AutomationValidationError(`Automation rule not found for pipeline: ${pipeline}`);
   }
@@ -649,6 +717,8 @@ async function getPipelineEvaluationStates(): Promise<PipelineEvaluationState[]>
        SELECT 'podcasts', MAX(last_synced_at) FROM podcast_feed
        UNION ALL
        SELECT 'leadership', MAX(retrieved_at) FROM country_leadership
+       UNION ALL
+       SELECT 'social', MAX(posted_at) FROM social_signal WHERE expires_at > now()
      ), latest_acquisition AS (
        SELECT 'news'::text AS pipeline, MAX(i.created_at) AS latest_acquired_at
        FROM item i
@@ -657,6 +727,8 @@ async function getPipelineEvaluationStates(): Promise<PipelineEvaluationState[]>
          AND s.name IN ('gdelt', 'institutional_rss', 'govuk_search')
          AND COALESCE(s.metadata->>'retired', 'false') <> 'true'
          AND (lower(s.name) <> 'gdelt' OR i.payload->>'quality_status' = 'accepted')
+       UNION ALL
+       SELECT 'social', MAX(acquired_at) FROM social_signal WHERE expires_at > now()
      ), demand AS (
        SELECT
          rule.pipeline,
@@ -705,7 +777,10 @@ export async function getAutomationOverview(): Promise<{
   poll_seconds: number;
   rules: IngestionAutomationRule[];
   status: IngestionAutomationPipelineStatus[];
-  providers: { fred: { configured: boolean; default_enabled: boolean } };
+  providers: {
+    fred: { configured: boolean; default_enabled: boolean };
+    social: SocialProviderStatus[];
+  };
 }> {
   const rules = await listAutomationRules();
   const status = await getPipelineEvaluationStates();
@@ -716,6 +791,7 @@ export async function getAutomationOverview(): Promise<{
     status,
     providers: {
       fred: { configured: fredConfigured, default_enabled: fredConfigured },
+      social: getSocialProviderStatuses(),
     },
   };
 }
@@ -827,6 +903,12 @@ async function triggerAutomationRun(rule: IngestionAutomationRule, reason: AutoT
     return;
   }
 
+  if (rule.pipeline === "social") {
+    const plan = buildSocialRunPlan(payload);
+    await triggerSocialRun({ actor, plan });
+    return;
+  }
+
   const plan = buildMarketRunPlan(payload);
   await triggerMarketRun({ actor, plan });
 }
@@ -927,6 +1009,11 @@ async function evaluateRule(
 }
 
 async function pruneOperationalHistory(): Promise<void> {
+  // Retention must not depend on a social provider being configured, reachable,
+  // or scheduled. Run this from the general worker's leased maintenance cycle
+  // so expired third-party content is physically removed even when social
+  // ingestion remains disabled or an upstream API is failing.
+  await query(`DELETE FROM social_signal WHERE expires_at <= now()`);
   await query(`DELETE FROM ingestion_demand_signal_minute WHERE bucket_minute < now() - interval '7 days'`);
   await query(
     `DELETE FROM ingestion_run

@@ -139,6 +139,16 @@ specifications.each do |target_name, specification|
   end
   check.call(plist["CFBundlePackageType"] == specification[:package_type], "#{target_name} has the wrong package type")
 
+  if ["Claritas", "Claritas Watch App"].include?(target_name)
+    url_schemes = Array(plist["CFBundleURLTypes"]).flat_map do |entry|
+      Array(entry["CFBundleURLSchemes"])
+    end
+    check.call(
+      url_schemes.include?("claritas"),
+      "#{target_name} must register the claritas URL scheme for auth/widget deep links"
+    )
+  end
+
   next unless target_name.end_with?("Widgets")
 
   extension = plist.fetch("NSExtension", {})

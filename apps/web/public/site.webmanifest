@@ -1,6 +1,7 @@
 {
   "name": "Claritas",
   "short_name": "Claritas",
+  "description": "Map-led global intelligence from attributed news and social signals, weather, markets, transport, and satellite evidence.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#081119",

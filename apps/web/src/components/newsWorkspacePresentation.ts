@@ -1,20 +1,108 @@
 import type { NewsItem, NewsTranslation } from "../lib/api";
 
+type NewsChronologyItem = Pick<NewsItem, "event_time" | "payload" | "time">;
+
+export type NewsChronology = {
+  timestamp: string | null;
+  milliseconds: number | null;
+  label: "Published" | "First seen" | "Source time" | "Reported";
+  basis: "publication" | "discovery" | "mixed" | "unknown";
+};
+
+function parseTimestamp(value: string | null | undefined): { timestamp: string; milliseconds: number } | null {
+  if (!value) return null;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) ? { timestamp: value, milliseconds } : null;
+}
+
+function legacyNewsTimeBasis(item: NewsChronologyItem): string {
+  if (item.time?.basis?.trim()) return item.time.basis.trim();
+  if (!item.payload || typeof item.payload !== "object" || Array.isArray(item.payload)) return "";
+  const value = (item.payload as Record<string, unknown>).time_basis;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * Resolves the one instant used to place a story on the reader timeline while
+ * retaining what that instant means. New API responses explicitly provide
+ * `timeline_at`; the provenance-specific fallbacks keep older cached responses
+ * honest instead of relabelling provider discovery as publication.
+ */
+export function newsChronology(item: NewsChronologyItem): NewsChronology {
+  const rawBasis = legacyNewsTimeBasis(item);
+  const publisherVerified = item.time?.is_publisher_verified === true
+    || rawBasis.startsWith("publisher_");
+  const basis: NewsChronology["basis"] = rawBasis === "provider_first_seen"
+    ? "discovery"
+    : rawBasis === "publisher_published_or_provider_discovered"
+      ? "mixed"
+      : publisherVerified
+        ? "publication"
+        : "unknown";
+  const label: NewsChronology["label"] = basis === "publication"
+    ? "Published"
+    : basis === "discovery"
+      ? "First seen"
+      : basis === "mixed"
+        ? "Source time"
+        : "Reported";
+
+  const explicitTimeline = parseTimestamp(item.time?.timeline_at);
+  const provenanceTimestamp = basis === "publication"
+    ? parseTimestamp(item.time?.published_at)
+    : basis === "discovery"
+      ? parseTimestamp(item.time?.discovered_at)
+      : null;
+  const resolved = explicitTimeline ?? provenanceTimestamp ?? parseTimestamp(item.event_time);
+  return {
+    timestamp: resolved?.timestamp ?? null,
+    milliseconds: resolved?.milliseconds ?? null,
+    label,
+    basis,
+  };
+}
+
+export function compareNewsNewest(
+  left: NewsChronologyItem,
+  right: NewsChronologyItem,
+): number {
+  const leftTime = newsChronology(left).milliseconds;
+  const rightTime = newsChronology(right).milliseconds;
+  if (leftTime != null && rightTime != null) return rightTime - leftTime;
+  if (leftTime != null) return -1;
+  if (rightTime != null) return 1;
+  return 0;
+}
+
+export function latestNewsTimestamp<T extends NewsChronologyItem>(items: readonly T[]): string | null {
+  let latest: { timestamp: string; milliseconds: number } | null = null;
+  for (const item of items) {
+    const chronology = newsChronology(item);
+    if (chronology.timestamp == null || chronology.milliseconds == null) continue;
+    if (!latest || chronology.milliseconds > latest.milliseconds) {
+      latest = {
+        timestamp: chronology.timestamp,
+        milliseconds: chronology.milliseconds,
+      };
+    }
+  }
+  return latest?.timestamp ?? null;
+}
+
 /**
  * Keeps browse-feed chronology deterministic without mutating the response.
  * Dated stories are newest first; undated/invalid stories retain
  * their input order at the end of the list.
  */
-export function newestNewsFirst<T extends Pick<NewsItem, "event_time">>(
+export function newestNewsFirst<T extends NewsChronologyItem>(
   items: readonly T[],
 ): T[] {
   return items
     .map((item, index) => {
-      const parsed = item.event_time ? Date.parse(item.event_time) : Number.NaN;
       return {
         item,
         index,
-        timestamp: Number.isFinite(parsed) ? parsed : null,
+        timestamp: newsChronology(item).milliseconds,
       };
     })
     .sort((left, right) => {

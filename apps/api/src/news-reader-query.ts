@@ -274,6 +274,11 @@ export function buildNewsReaderQuery(input: NewsReaderQueryInput): {
                'basis',COALESCE(NULLIF(i.payload->>'time_basis',''),'unknown'),
                'is_publisher_verified',COALESCE(i.payload->>'publication_time_verified'='true',
                  (i.payload->>'time_basis') LIKE 'publisher_published%',false),
+               -- This is the canonical instant used by the reader's SQL
+               -- ordering.  Keep it separate from the two provenance fields:
+               -- a provider discovery is useful chronology, but is not a
+               -- publisher claim about when an article was published.
+               'timeline_at',i.event_time,
                'published_at',NULLIF(i.payload->>'publisher_published_at',''),
                'discovered_at',COALESCE(
                  NULLIF(i.payload->>'first_provider_seen_at',''),

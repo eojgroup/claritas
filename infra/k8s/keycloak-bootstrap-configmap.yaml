@@ -12,6 +12,8 @@ data:
     KEYCLOAK_URL="${KEYCLOAK_URL:-http://keycloak:8080}"
     KEYCLOAK_ADMIN_REALM="${KEYCLOAK_ADMIN_REALM:-master}"
     KEYCLOAK_REALM="${KEYCLOAK_REALM:-claritas}"
+    AUTH_PROVIDERS="${AUTH_PROVIDERS:-google}"
+    AUTH_MICROSOFT_MULTI_TENANT_ENABLED="${AUTH_MICROSOFT_MULTI_TENANT_ENABLED:-false}"
 
     KEYCLOAK_WEB_CLIENT_ID="${KEYCLOAK_WEB_CLIENT_ID:-claritas-web}"
     KEYCLOAK_MOBILE_CLIENT_ID="${KEYCLOAK_MOBILE_CLIENT_ID:-claritas-mobile}"
@@ -19,7 +21,7 @@ data:
 
     KEYCLOAK_WEB_REDIRECT_URIS="${KEYCLOAK_WEB_REDIRECT_URIS:-https://app.claritas.info/*,http://localhost:5173/*}"
     KEYCLOAK_WEB_ORIGINS="${KEYCLOAK_WEB_ORIGINS:-https://app.claritas.info,http://localhost:5173}"
-    KEYCLOAK_MOBILE_REDIRECT_URIS="${KEYCLOAK_MOBILE_REDIRECT_URIS:-claritas://auth/*}"
+    KEYCLOAK_MOBILE_REDIRECT_URIS="${KEYCLOAK_MOBILE_REDIRECT_URIS:-claritas://auth/callback}"
     KEYCLOAK_API_REDIRECT_URIS="${KEYCLOAK_API_REDIRECT_URIS:-https://app.claritas.info/api/auth/*/callback,http://localhost:8080/api/auth/*/callback}"
 
     log() { echo "[keycloak-bootstrap] $*"; }
@@ -29,6 +31,51 @@ data:
       v="${v#"${v%%[![:space:]]*}"}"
       v="${v%"${v##*[![:space:]]}"}"
       printf "%s" "$v"
+    }
+
+    provider_advertised() {
+      local expected="$1"
+      local -a configured=()
+      local provider=""
+      IFS=',' read -r -a configured <<< "$AUTH_PROVIDERS"
+      for provider in "${configured[@]}"; do
+        provider="$(trim "$provider")"
+        provider="${provider,,}"
+        if [ "$provider" = "$expected" ]; then
+          return 0
+        fi
+      done
+      return 1
+    }
+
+    validate_auth_configuration() {
+      local -a configured=()
+      local provider=""
+      local multi_tenant=""
+
+      IFS=',' read -r -a configured <<< "$AUTH_PROVIDERS"
+      for provider in "${configured[@]}"; do
+        provider="$(trim "$provider")"
+        provider="${provider,,}"
+        case "$provider" in
+          google|microsoft|apple) ;;
+          "") ;;
+          *)
+            log "ERROR: AUTH_PROVIDERS contains unsupported provider ${provider}"
+            return 1
+            ;;
+        esac
+      done
+
+      multi_tenant="$(trim "$AUTH_MICROSOFT_MULTI_TENANT_ENABLED")"
+      multi_tenant="${multi_tenant,,}"
+      case "$multi_tenant" in
+        true|false) AUTH_MICROSOFT_MULTI_TENANT_ENABLED="$multi_tenant" ;;
+        *)
+          log "ERROR: AUTH_MICROSOFT_MULTI_TENANT_ENABLED must be true or false"
+          return 1
+          ;;
+      esac
     }
 
     json_escape() {
@@ -154,9 +201,106 @@ data:
       rm -f "$payload"
     }
 
+    protocol_mapper_ids() {
+      local client_id="$1"
+      local mapper_name="$2"
+      local id=""
+      local name=""
+
+      "$KCADM" get "clients/${client_id}/protocol-mappers/models" \
+        -r "$KEYCLOAK_REALM" \
+        --fields id,name \
+        --format csv \
+        --noquotes \
+        | while IFS=',' read -r id name; do
+            id="$(trim "$id")"
+            name="$(trim "$name")"
+            if [ "$name" = "$mapper_name" ]; then
+              printf '%s\n' "$id"
+            fi
+          done
+    }
+
+    configure_identity_provider_claim_mapper() {
+      local client_id="$1"
+      local mapper_name="claritas-identity-provider"
+      local client_internal=""
+      local payload=""
+      local mapper=""
+      local mapper_id=""
+      local mapper_ids=()
+
+      client_internal="$(client_internal_id "$client_id")"
+      if [ -z "$client_internal" ]; then
+        log "ERROR: Cannot configure identity-provider claim; client ${client_id} does not exist"
+        return 1
+      fi
+
+      mapfile -t mapper_ids < <(protocol_mapper_ids "$client_internal" "$mapper_name")
+      if [ "${#mapper_ids[@]}" -gt 1 ]; then
+        log "ERROR: Client ${client_id} has duplicate ${mapper_name} protocol mappers"
+        return 1
+      fi
+
+      payload="$(mktemp)"
+      cat > "$payload" <<'EOF'
+    {
+      "name": "claritas-identity-provider",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-usersessionmodel-note-mapper",
+      "consentRequired": false,
+      "config": {
+        "user.session.note": "identity_provider",
+        "claim.name": "identity_provider",
+        "jsonType.label": "String",
+        "id.token.claim": "true",
+        "access.token.claim": "false",
+        "userinfo.token.claim": "false",
+        "introspection.token.claim": "false"
+      }
+    }
+    EOF
+
+      if [ "${#mapper_ids[@]}" -eq 1 ]; then
+        mapper_id="${mapper_ids[0]}"
+        log "Updating identity-provider claim mapper on ${client_id}"
+        "$KCADM" update "clients/${client_internal}/protocol-mappers/models/${mapper_id}" \
+          -r "$KEYCLOAK_REALM" -f "$payload"
+      else
+        log "Creating identity-provider claim mapper on ${client_id}"
+        "$KCADM" create "clients/${client_internal}/protocol-mappers/models" \
+          -r "$KEYCLOAK_REALM" -f "$payload"
+        mapfile -t mapper_ids < <(protocol_mapper_ids "$client_internal" "$mapper_name")
+        if [ "${#mapper_ids[@]}" -ne 1 ]; then
+          rm -f "$payload"
+          log "ERROR: Identity-provider claim mapper was not created exactly once"
+          return 1
+        fi
+        mapper_id="${mapper_ids[0]}"
+      fi
+      rm -f "$payload"
+
+      mapper="$("$KCADM" get "clients/${client_internal}/protocol-mappers/models/${mapper_id}" -r "$KEYCLOAK_REALM")"
+      for expected in \
+        '"protocolMapper" : "oidc-usersessionmodel-note-mapper"' \
+        '"user.session.note" : "identity_provider"' \
+        '"claim.name" : "identity_provider"' \
+        '"id.token.claim" : "true"'; do
+        if ! printf '%s' "$mapper" | grep -Fq "$expected"; then
+          log "ERROR: Identity-provider claim mapper failed persisted-config verification"
+          return 1
+        fi
+      done
+    }
+
     upsert_idp() {
       local alias="$1"
       local payload="$2"
+      local expected_provider_id="${3:-$alias}"
+      local required_config_fields="${4:-clientId,clientSecret}"
+      local config_field=""
+      local config_fields=()
+      local instance
       if "$KCADM" get "identity-provider/instances/${alias}" -r "$KEYCLOAK_REALM" >/dev/null 2>&1; then
         log "Updating identity provider ${alias}"
         "$KCADM" update "identity-provider/instances/${alias}" -r "$KEYCLOAK_REALM" -f "$payload"
@@ -164,11 +308,38 @@ data:
         log "Creating identity provider ${alias}"
         "$KCADM" create "identity-provider/instances" -r "$KEYCLOAK_REALM" -f "$payload"
       fi
+
+      instance="$("$KCADM" get "identity-provider/instances/${alias}" -r "$KEYCLOAK_REALM")"
+      if ! printf '%s' "$instance" | grep -Eq '"providerId"[[:space:]]*:[[:space:]]*"'"${expected_provider_id}"'"'; then
+        log "ERROR: Identity provider ${alias} was not persisted with provider ${expected_provider_id}"
+        return 1
+      fi
+      if ! printf '%s' "$instance" | grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true'; then
+        log "ERROR: Identity provider ${alias} was persisted disabled"
+        return 1
+      fi
+      IFS=',' read -r -a config_fields <<< "$required_config_fields"
+      for config_field in "${config_fields[@]}"; do
+        if ! printf '%s' "$instance" | grep -Eq '"'"${config_field}"'"[[:space:]]*:[[:space:]]*"[^"]+"'; then
+          log "ERROR: Identity provider ${alias} is missing required config ${config_field}"
+          return 1
+        fi
+      done
     }
 
     configure_google_idp() {
-      [ -z "${KC_IDP_GOOGLE_CLIENT_ID:-}" ] && return 0
-      [ -z "${KC_IDP_GOOGLE_CLIENT_SECRET:-}" ] && return 0
+      if [ -z "${KC_IDP_GOOGLE_CLIENT_ID:-}" ] && [ -z "${KC_IDP_GOOGLE_CLIENT_SECRET:-}" ]; then
+        if provider_advertised google; then
+          log "ERROR: Google is advertised by AUTH_PROVIDERS but its credentials are absent"
+          return 1
+        fi
+        log "Google IdP credentials not supplied; leaving provider unchanged"
+        return 0
+      fi
+      if [ -z "${KC_IDP_GOOGLE_CLIENT_ID:-}" ] || [ -z "${KC_IDP_GOOGLE_CLIENT_SECRET:-}" ]; then
+        log "ERROR: Google IdP credentials are incomplete"
+        return 1
+      fi
       local payload
       payload="$(mktemp)"
       cat > "$payload" <<EOF
@@ -187,11 +358,37 @@ data:
     }
 
     configure_microsoft_idp() {
-      [ -z "${KC_IDP_MICROSOFT_CLIENT_ID:-}" ] && return 0
-      [ -z "${KC_IDP_MICROSOFT_CLIENT_SECRET:-}" ] && return 0
+      # Older Terraform revisions populated `common` even when Microsoft was
+      # not configured. Treat a tenant-only value as inert for an unadvertised
+      # provider, while still rejecting either half of a staged client pair.
+      if [ -z "${KC_IDP_MICROSOFT_CLIENT_ID:-}" ] && [ -z "${KC_IDP_MICROSOFT_CLIENT_SECRET:-}" ]; then
+        if provider_advertised microsoft; then
+          log "ERROR: Microsoft is advertised by AUTH_PROVIDERS but its credentials are absent"
+          return 1
+        fi
+        log "Microsoft IdP credentials not supplied; leaving provider unchanged"
+        return 0
+      fi
+      if [ -z "${KC_IDP_MICROSOFT_CLIENT_ID:-}" ] || [ -z "${KC_IDP_MICROSOFT_CLIENT_SECRET:-}" ] || [ -z "${KC_IDP_MICROSOFT_TENANT:-}" ]; then
+        log "ERROR: Microsoft IdP credentials are incomplete"
+        return 1
+      fi
+      if [[ ! "${KC_IDP_MICROSOFT_CLIENT_ID}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+        log "ERROR: KC_IDP_MICROSOFT_CLIENT_ID must be an Entra Application (client) ID UUID"
+        return 1
+      fi
       local tenant
       local payload
-      tenant="${KC_IDP_MICROSOFT_TENANT:-common}"
+      tenant="${KC_IDP_MICROSOFT_TENANT}"
+      if [[ "$tenant" =~ ^(common|organizations|consumers)$ ]]; then
+        if [ "$AUTH_MICROSOFT_MULTI_TENANT_ENABLED" != "true" ]; then
+          log "ERROR: Microsoft multi-tenant alias ${tenant} requires AUTH_MICROSOFT_MULTI_TENANT_ENABLED=true"
+          return 1
+        fi
+      elif [[ ! "$tenant" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+        log "ERROR: KC_IDP_MICROSOFT_TENANT must be a Directory (tenant) ID UUID, or an explicitly enabled multi-tenant alias"
+        return 1
+      fi
       payload="$(mktemp)"
       cat > "$payload" <<EOF
     {
@@ -207,19 +404,39 @@ data:
       "config": {
         "clientId": "$(json_escape "${KC_IDP_MICROSOFT_CLIENT_ID}")",
         "clientSecret": "$(json_escape "${KC_IDP_MICROSOFT_CLIENT_SECRET}")",
-        "tenant": "$(json_escape "${tenant}")"
+        "tenantId": "$(json_escape "${tenant}")"
       }
     }
     EOF
-      upsert_idp "microsoft" "$payload"
+      upsert_idp "microsoft" "$payload" "microsoft" "clientId,clientSecret,tenantId"
       rm -f "$payload"
     }
 
     configure_apple_idp() {
-      [ -z "${KC_IDP_APPLE_CLIENT_ID:-}" ] && return 0
-      [ -z "${KC_IDP_APPLE_TEAM_ID:-}" ] && return 0
-      [ -z "${KC_IDP_APPLE_KEY_ID:-}" ] && return 0
-      [ -z "${KC_IDP_APPLE_PRIVATE_KEY:-}" ] && return 0
+      if [ -z "${KC_IDP_APPLE_CLIENT_ID:-}" ] && [ -z "${KC_IDP_APPLE_TEAM_ID:-}" ] && [ -z "${KC_IDP_APPLE_KEY_ID:-}" ] && [ -z "${KC_IDP_APPLE_PRIVATE_KEY:-}" ]; then
+        if provider_advertised apple; then
+          log "ERROR: Apple is advertised by AUTH_PROVIDERS but its credentials are absent"
+          return 1
+        fi
+        log "Apple IdP credentials not supplied; leaving provider unchanged"
+        return 0
+      fi
+      if [ -z "${KC_IDP_APPLE_CLIENT_ID:-}" ] || [ -z "${KC_IDP_APPLE_TEAM_ID:-}" ] || [ -z "${KC_IDP_APPLE_KEY_ID:-}" ] || [ -z "${KC_IDP_APPLE_PRIVATE_KEY:-}" ]; then
+        log "ERROR: Apple IdP credentials are incomplete"
+        return 1
+      fi
+      if [[ ! "${KC_IDP_APPLE_CLIENT_ID}" =~ ^[A-Za-z0-9.-]+$ ]]; then
+        log "ERROR: KC_IDP_APPLE_CLIENT_ID is not a valid Services ID"
+        return 1
+      fi
+      if [[ ! "${KC_IDP_APPLE_TEAM_ID}" =~ ^[A-Z0-9]{10}$ ]] || [[ ! "${KC_IDP_APPLE_KEY_ID}" =~ ^[A-Z0-9]{10}$ ]]; then
+        log "ERROR: Apple Team ID and Key ID must be 10 uppercase letters or digits"
+        return 1
+      fi
+      if [[ "${KC_IDP_APPLE_PRIVATE_KEY}" != *"-----BEGIN PRIVATE KEY-----"* ]] || [[ "${KC_IDP_APPLE_PRIVATE_KEY}" != *"-----END PRIVATE KEY-----"* ]]; then
+        log "ERROR: KC_IDP_APPLE_PRIVATE_KEY must contain the complete PKCS#8 .p8 file"
+        return 1
+      fi
       local payload
       payload="$(mktemp)"
       cat > "$payload" <<EOF
@@ -237,11 +454,13 @@ data:
         "clientId": "$(json_escape "${KC_IDP_APPLE_CLIENT_ID}")",
         "teamId": "$(json_escape "${KC_IDP_APPLE_TEAM_ID}")",
         "keyId": "$(json_escape "${KC_IDP_APPLE_KEY_ID}")",
-        "privateKey": "$(json_escape "${KC_IDP_APPLE_PRIVATE_KEY}")"
+        "clientSecret": "$(json_escape "${KC_IDP_APPLE_PRIVATE_KEY}")",
+        "defaultScope": "name%20email",
+        "tokenExchangeAccountLinkingEnabled": "false"
       }
     }
     EOF
-      upsert_idp "apple" "$payload"
+      upsert_idp "apple" "$payload" "apple" "clientId,clientSecret,teamId,keyId"
       rm -f "$payload"
     }
 
@@ -263,9 +482,21 @@ data:
       exit 1
     fi
 
+    validate_auth_configuration
+
+    server_info="$("$KCADM" get serverinfo)"
+    if ! printf '%s' "$server_info" | grep -Eq '"version"[[:space:]]*:[[:space:]]*"26\.7\.3"'; then
+      log "ERROR: Keycloak server is not the reviewed 26.7.3 release"
+      exit 1
+    fi
+    if ! printf '%s' "$server_info" | grep -Eq '"id"[[:space:]]*:[[:space:]]*"apple"'; then
+      log "ERROR: The checksum-pinned Apple identity-provider extension is not loaded"
+      exit 1
+    fi
+
     if "$KCADM" get "realms/${KEYCLOAK_REALM}" >/dev/null 2>&1; then
       log "Realm ${KEYCLOAK_REALM} exists; updating baseline settings"
-      "$KCADM" update "realms/${KEYCLOAK_REALM}" -s enabled=true -s loginWithEmailAllowed=true -s registrationAllowed=true -s loginTheme="claritas" >/dev/null
+      "$KCADM" update "realms/${KEYCLOAK_REALM}" -s enabled=true -s loginWithEmailAllowed=true -s registrationAllowed=false -s resetPasswordAllowed=false -s loginTheme="claritas" >/dev/null
     else
       log "Creating realm ${KEYCLOAK_REALM}"
       "$KCADM" create realms \
@@ -273,7 +504,8 @@ data:
         -s enabled=true \
         -s displayName="Claritas" \
         -s loginWithEmailAllowed=true \
-        -s registrationAllowed=true \
+        -s registrationAllowed=false \
+        -s resetPasswordAllowed=false \
         -s loginTheme="claritas" >/dev/null
     fi
 
@@ -286,15 +518,10 @@ data:
       upsert_client "${KEYCLOAK_API_CLIENT_ID}" "true" "${KEYCLOAK_API_REDIRECT_URIS}" ""
       log "AUTH_KEYCLOAK_CLIENT_SECRET not set; created ${KEYCLOAK_API_CLIENT_ID} as public PKCE client"
     fi
+    configure_identity_provider_claim_mapper "${KEYCLOAK_API_CLIENT_ID}"
 
-    if ! configure_google_idp; then
-      log "WARN: Google IdP bootstrap failed; configure manually in Keycloak admin."
-    fi
-    if ! configure_microsoft_idp; then
-      log "WARN: Microsoft IdP bootstrap failed; configure manually in Keycloak admin."
-    fi
-    if ! configure_apple_idp; then
-      log "WARN: Apple IdP bootstrap failed; configure manually in Keycloak admin."
-    fi
+    configure_google_idp
+    configure_microsoft_idp
+    configure_apple_idp
 
     log "Bootstrap completed"

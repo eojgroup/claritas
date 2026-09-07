@@ -18,12 +18,7 @@ struct LoginView: View {
     }
 
     private var enabledProviders: [AuthProviderId] {
-        AuthProviderId.allCases.filter { providerEnabled($0) }
-    }
-
-    private var allProvidersReportedDisabled: Bool {
-        guard !model.authProviders.isEmpty else { return false }
-        return model.authProviders.allSatisfy { !$0.enabled }
+        AuthProviderAvailability.enabledProviderIDs(model.authProviders)
     }
 
     private var primaryProvider: AuthProviderId? {
@@ -176,13 +171,16 @@ struct LoginView: View {
 
             if showMethods {
                 VStack(spacing: 10) {
-                    ForEach(AuthProviderId.allCases) { provider in
+                    ForEach(enabledProviders) { provider in
                         let meta = ProviderMeta.meta(for: provider, mode: mode)
                         ProviderButton(
                             provider: provider,
                             title: meta.title,
                             subtitle: meta.subtitle,
-                            enabled: providerEnabled(provider),
+                            enabled: AuthProviderAvailability.isEnabled(
+                                provider,
+                                in: model.authProviders
+                            ),
                             busy: isChecking
                         ) {
                             model.startSignIn(provider: provider)
@@ -283,7 +281,7 @@ struct LoginView: View {
     private var footerPills: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
-                ForEach(["SOC 2 controls", "Encrypted sessions", "Geo-aware policies", "24/7 monitoring"], id: \.self) { item in
+                ForEach(["Role-based access", "Encrypted sessions", "Source traceability", "Cross-domain signals"], id: \.self) { item in
                     Text(item.uppercased())
                         .font(.caption2.weight(.semibold))
                         .tracking(2)
@@ -338,22 +336,6 @@ struct LoginView: View {
         showMethods = true
     }
 
-    private func providerEnabled(_ id: AuthProviderId) -> Bool {
-        if let provider = model.authProviders.first(where: { $0.id == id }) {
-            if provider.enabled {
-                return true
-            }
-            if allProvidersReportedDisabled {
-                // Keep sign-in tappable when backend/provider state is inconsistent.
-                return true
-            }
-            return false
-        }
-        if model.authProviders.isEmpty, model.authError != nil {
-            return true
-        }
-        return false
-    }
 }
 
 private struct ProviderMeta {
@@ -370,7 +352,7 @@ private struct ProviderMeta {
         case .microsoft:
             return ProviderMeta(
                 title: mode == .signin ? "Continue with Microsoft" : "Sign up with Microsoft",
-                subtitle: "Azure AD or Microsoft 365"
+                subtitle: "Microsoft Entra ID or Microsoft 365"
             )
         case .apple:
             return ProviderMeta(

@@ -61,7 +61,8 @@ describe("IntelligenceEventStrip", () => {
     expect(screen.getByText("96% confidence")).toBeTruthy();
     expect(screen.getByText("4 evidence")).toBeTruthy();
     expect(screen.getByText("94% relevance")).toBeTruthy();
-    expect(screen.getByText(/Updated .*2026.*09:05:00/i)).toBeTruthy();
+    expect(screen.getByText(/^Updated /i).closest("time")?.getAttribute("datetime"))
+      .toBe(event.last_activity_time);
     fireEvent.click(screen.getByRole("button", { name: /View all investigations/i }));
     expect(onOpen).toHaveBeenLastCalledWith();
     fireEvent.click(screen.getByRole("button", { name: `Investigate ${event.title}` }));

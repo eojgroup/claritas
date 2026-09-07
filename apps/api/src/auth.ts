@@ -5,6 +5,14 @@ import { Issuer, generators, type Client } from "openid-client";
 import type { Request } from "express";
 import { isDatabaseUnavailableError, query, withTransaction } from "./db";
 import { resolveBillingAccessState, type BillingAccessState } from "./billing";
+import {
+  buildNativeHandoffRedirect,
+  deriveS256CodeChallenge,
+  isValidNativeCodeChallenge,
+  isValidNativeCodeVerifier,
+  isValidNativeHandoffCode,
+  resolveAllowedAuthRedirect,
+} from "./auth-security";
 
 type ProviderName = "google" | "microsoft" | "apple";
 
@@ -14,6 +22,7 @@ type AuthStateRow = {
   nonce: string;
   code_verifier: string;
   redirect_url: string | null;
+  native_code_challenge: string | null;
   expires_at: string;
 };
 
@@ -75,7 +84,11 @@ function parseDatabaseId(value: number | string, field: string): number {
 }
 
 function getEnabledProviders(): ProviderName[] {
-  const configured = (optionalEnv("AUTH_PROVIDERS") || "google,microsoft,apple")
+  // Keep an unconfigured deployment honest: Keycloak can be reachable before
+  // every broker has credentials, so the login screen must not advertise a
+  // provider merely because its route exists. Production opts into additional
+  // brokers explicitly through AUTH_PROVIDERS after their credentials land.
+  const configured = (optionalEnv("AUTH_PROVIDERS") || "google")
     .split(",")
     .map((v) => v.trim().toLowerCase())
     .filter(Boolean);
@@ -128,49 +141,6 @@ function getAllowedRedirects(): string[] {
     .filter(Boolean);
 }
 
-function getAllowedRedirectSchemes(): string[] {
-  return (optionalEnv("AUTH_ALLOWED_REDIRECT_SCHEMES") || "claritas")
-    .split(",")
-    .map((v) => v.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-function resolveRedirectUrl(candidate: string | undefined, fallback: string | undefined): string | undefined {
-  if (!candidate) return fallback;
-  const allowlist = getAllowedRedirects();
-  const allowedSchemes = getAllowedRedirectSchemes();
-
-  if (candidate.startsWith("/") && !candidate.startsWith("//")) {
-    if (!fallback) return candidate;
-    try {
-      const base = new URL(fallback);
-      return `${base.origin}${candidate}`;
-    } catch {
-      return fallback;
-    }
-  }
-
-  try {
-    const url = new URL(candidate);
-    const scheme = url.protocol.replace(":", "").toLowerCase();
-
-    if (allowlist.some((prefix) => candidate.startsWith(prefix))) return candidate;
-
-    if (scheme && scheme !== "http" && scheme !== "https") {
-      return allowedSchemes.includes(scheme) ? candidate : fallback;
-    }
-
-    if (fallback) {
-      const base = new URL(fallback);
-      if (url.origin === base.origin) return candidate;
-    }
-  } catch {
-    return fallback;
-  }
-
-  return fallback;
-}
-
 function getCookieName(): string {
   return optionalEnv("AUTH_COOKIE_NAME") || "claritas_session";
 }
@@ -183,6 +153,11 @@ function getSessionTtlMs(): number {
 function getStateTtlMs(): number {
   const minutes = parseInt(optionalEnv("AUTH_STATE_TTL_MINUTES") || "10", 10);
   return Math.max(minutes, 1) * 60 * 1000;
+}
+
+function getNativeHandoffTtlMs(): number {
+  const seconds = parseInt(optionalEnv("AUTH_NATIVE_HANDOFF_TTL_SECONDS") || "60", 10);
+  return Math.min(Math.max(seconds || 60, 30), 300) * 1000;
 }
 
 function getTokenEndpointAuthMethod(): "none" | "client_secret_post" {
@@ -222,29 +197,81 @@ async function insertAuthState(
   state: string,
   nonce: string,
   codeVerifier: string,
-  redirectUrl: string | undefined
-) {
+  redirectUrl: string | undefined,
+  browserBindingHash: string,
+  nativeCodeChallenge: string | undefined
+): Promise<string> {
   await ensureAuthStateTable();
   const expiresAt = new Date(Date.now() + getStateTtlMs()).toISOString();
   await query(
-    `INSERT INTO auth_state (provider, state, nonce, code_verifier, redirect_url, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [provider, state, nonce, codeVerifier, redirectUrl || null, expiresAt]
+    `INSERT INTO auth_state (
+       provider, state, nonce, code_verifier, redirect_url,
+       browser_binding_hash, native_code_challenge, expires_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      provider,
+      state,
+      nonce,
+      codeVerifier,
+      redirectUrl || null,
+      browserBindingHash,
+      nativeCodeChallenge || null,
+      expiresAt,
+    ]
   );
+  return expiresAt;
 }
 
-async function consumeAuthState(state: string): Promise<AuthStateRow | null> {
+async function consumeAuthState(
+  provider: ProviderName,
+  state: string,
+  browserBindingHash: string
+): Promise<AuthStateRow | null> {
   await ensureAuthStateTable();
   return withTransaction(async (client) => {
     await client.query(`DELETE FROM auth_state WHERE expires_at < now()`);
     const { rows } = await client.query<AuthStateRow>(
       `DELETE FROM auth_state
-       WHERE state = $1
+       WHERE provider = $1
+         AND state = $2
+         AND browser_binding_hash = $3
          AND expires_at >= now()
-       RETURNING provider, state, nonce, code_verifier, redirect_url, expires_at`,
-      [state]
+       RETURNING provider, state, nonce, code_verifier, redirect_url,
+                 native_code_challenge, expires_at`,
+      [provider, state, browserBindingHash]
     );
     return rows[0] || null;
+  });
+}
+
+async function createNativeHandoff(userId: number, codeChallenge: string): Promise<{ code: string; expiresAt: string }> {
+  await ensureAuthStateTable();
+  const code = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + getNativeHandoffTtlMs()).toISOString();
+  await query(
+    `INSERT INTO auth_native_handoff (code_hash, user_id, code_challenge, expires_at)
+     VALUES ($1, $2, $3, $4)`,
+    [hashToken(code), userId, codeChallenge, expiresAt]
+  );
+  return { code, expiresAt };
+}
+
+async function consumeNativeHandoff(code: string, codeVerifier: string): Promise<number | null> {
+  await ensureAuthStateTable();
+  const codeHash = hashToken(code);
+  const codeChallenge = deriveS256CodeChallenge(codeVerifier);
+  return withTransaction(async (client) => {
+    await client.query(`DELETE FROM auth_native_handoff WHERE expires_at < now()`);
+    const { rows } = await client.query<{ user_id: number | string }>(
+      `DELETE FROM auth_native_handoff
+       WHERE code_hash = $1
+         AND code_challenge = $2
+         AND expires_at >= now()
+       RETURNING user_id`,
+      [codeHash, codeChallenge]
+    );
+    return rows[0] ? parseDatabaseId(rows[0].user_id, "auth_native_handoff.user_id") : null;
   });
 }
 
@@ -259,11 +286,26 @@ async function ensureAuthStateTable(): Promise<void> {
           nonce TEXT NOT NULL,
           code_verifier TEXT NOT NULL,
           redirect_url TEXT,
+          browser_binding_hash TEXT,
+          native_code_challenge TEXT,
           created_at TIMESTAMPTZ DEFAULT now(),
           expires_at TIMESTAMPTZ NOT NULL
         )
       `);
+      await query(`ALTER TABLE auth_state ADD COLUMN IF NOT EXISTS browser_binding_hash TEXT`);
+      await query(`ALTER TABLE auth_state ADD COLUMN IF NOT EXISTS native_code_challenge TEXT`);
       await query(`CREATE INDEX IF NOT EXISTS auth_state_expires_idx ON auth_state (expires_at)`);
+      await query(`
+        CREATE TABLE IF NOT EXISTS auth_native_handoff (
+          id BIGSERIAL PRIMARY KEY,
+          code_hash TEXT NOT NULL UNIQUE,
+          user_id BIGINT NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+          code_challenge TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          expires_at TIMESTAMPTZ NOT NULL
+        )
+      `);
+      await query(`CREATE INDEX IF NOT EXISTS auth_native_handoff_expires_idx ON auth_native_handoff (expires_at)`);
     })().catch((err) => {
       ensureAuthStateTablePromise = null;
       throw err;
@@ -282,6 +324,12 @@ async function ensureUserFromClaims(provider: ProviderName, claims: Record<strin
     (typeof claims.email_verified === "string" && claims.email_verified.toLowerCase() === "true");
   const displayName = (claims.name || null) as string | null;
   const avatarUrl = (claims.picture || null) as string | null;
+  const microsoftMultiTenant =
+    provider === "microsoft" && optionalEnv("AUTH_MICROSOFT_MULTI_TENANT_ENABLED")?.toLowerCase() === "true";
+  // Preserve the broker-reported email on auth_identity below, but do not put
+  // a cross-tenant profile attribute into app_user's unique account-email key.
+  const appUserEmail = microsoftMultiTenant ? null : email;
+  const appUserEmailVerified = microsoftMultiTenant ? false : emailVerified;
 
   return withTransaction(async (client) => {
     const { rows: existing } = await client.query<{ id: number }>(
@@ -291,7 +339,9 @@ async function ensureUserFromClaims(provider: ProviderName, claims: Record<strin
 
     let userId = existing[0]?.id;
 
-    if (!userId && email && emailVerified) {
+    // Verified email is not a globally stable Microsoft identity key across
+    // tenants. Multi-tenant mode therefore links only by the broker subject.
+    if (!userId && email && emailVerified && !microsoftMultiTenant) {
       const { rows: byEmail } = await client.query<{ id: number }>(
         `SELECT id FROM app_user WHERE lower(email) = lower($1)`,
         [email]
@@ -304,7 +354,7 @@ async function ensureUserFromClaims(provider: ProviderName, claims: Record<strin
         `INSERT INTO app_user (email, email_verified, display_name, avatar_url)
          VALUES ($1, $2, $3, $4)
          RETURNING id`,
-        [email, emailVerified, displayName, avatarUrl]
+        [appUserEmail, appUserEmailVerified, displayName, avatarUrl]
       );
       userId = created[0].id;
 
@@ -318,14 +368,14 @@ async function ensureUserFromClaims(provider: ProviderName, claims: Record<strin
           [userId, roleId]
         );
       }
-    } else if (displayName || avatarUrl || emailVerified) {
+    } else if (displayName || avatarUrl || appUserEmailVerified) {
       await client.query(
         `UPDATE app_user
          SET display_name = COALESCE($2, display_name),
              avatar_url = COALESCE($3, avatar_url),
              email_verified = email_verified OR $4
          WHERE id = $1`,
-        [userId, displayName, avatarUrl, emailVerified]
+        [userId, displayName, avatarUrl, appUserEmailVerified]
       );
     }
 
@@ -431,34 +481,73 @@ async function getAuthContext(req: Request): Promise<AuthContext | null> {
   };
 }
 
-function setSessionCookie(res: express.Response, token: string, expiresAt: string) {
+function useSecureAuthCookies(): boolean {
+  if (optionalEnv("NODE_ENV") === "production") return true;
   const secureEnv = optionalEnv("AUTH_COOKIE_SECURE");
-  const secureDefault = optionalEnv("NODE_ENV") === "production";
-  const secure = secureEnv ? secureEnv.toLowerCase() === "true" : secureDefault;
+  return secureEnv?.toLowerCase() === "true";
+}
 
+function appendSetCookie(res: express.Response, value: string): void {
+  res.append("Set-Cookie", value);
+}
+
+function getStateBindingCookieName(state: string): string {
+  return `claritas_oauth_state_${hashToken(state).slice(0, 32)}`;
+}
+
+function getStateBindingCookie(req: Request, state: string): string | undefined {
+  const cookies = cookie.parse(req.headers.cookie || "");
+  return cookies[getStateBindingCookieName(state)];
+}
+
+function setStateBindingCookie(
+  res: express.Response,
+  provider: ProviderName,
+  state: string,
+  browserBinding: string,
+  expiresAt: string
+): void {
+  appendSetCookie(res, cookie.serialize(getStateBindingCookieName(state), browserBinding, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: useSecureAuthCookies(),
+    path: `/api/auth/${provider}/callback`,
+    expires: new Date(expiresAt),
+  }));
+}
+
+function clearStateBindingCookie(res: express.Response, provider: ProviderName, state: string): void {
+  appendSetCookie(res, cookie.serialize(getStateBindingCookieName(state), "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: useSecureAuthCookies(),
+    path: `/api/auth/${provider}/callback`,
+    expires: new Date(0),
+    maxAge: 0,
+  }));
+}
+
+function setSessionCookie(res: express.Response, token: string, expiresAt: string) {
   const cookieValue = cookie.serialize(getCookieName(), token, {
     httpOnly: true,
     sameSite: "lax",
-    secure,
+    secure: useSecureAuthCookies(),
     path: "/",
     expires: new Date(expiresAt),
   });
-  res.setHeader("Set-Cookie", cookieValue);
+  appendSetCookie(res, cookieValue);
 }
 
 function clearSessionCookie(res: express.Response) {
-  const secureEnv = optionalEnv("AUTH_COOKIE_SECURE");
-  const secureDefault = optionalEnv("NODE_ENV") === "production";
-  const secure = secureEnv ? secureEnv.toLowerCase() === "true" : secureDefault;
-
   const cookieValue = cookie.serialize(getCookieName(), "", {
     httpOnly: true,
     sameSite: "lax",
-    secure,
+    secure: useSecureAuthCookies(),
     path: "/",
+    expires: new Date(0),
     maxAge: 0,
   });
-  res.setHeader("Set-Cookie", cookieValue);
+  appendSetCookie(res, cookieValue);
 }
 
 function scheduleError(status: number, message: string): Error & { status: number } {
@@ -812,9 +901,24 @@ authRouter.get("/:provider/start", async (req, res) => {
 
     const successFallback = optionalEnv("AUTH_SUCCESS_REDIRECT_URL");
     const redirectCandidate = typeof req.query.redirect === "string" ? req.query.redirect : undefined;
-    const redirectUrl = resolveRedirectUrl(redirectCandidate, successFallback);
+    const resolvedRedirect = resolveAllowedAuthRedirect(redirectCandidate, successFallback, getAllowedRedirects());
+    const nativeCodeChallenge = typeof req.query.native_code_challenge === "string"
+      ? req.query.native_code_challenge
+      : undefined;
+    const nativeCodeChallengeMethod = typeof req.query.native_code_challenge_method === "string"
+      ? req.query.native_code_challenge_method
+      : undefined;
 
-    await insertAuthState(provider, state, nonce, codeVerifier, redirectUrl);
+    if (resolvedRedirect?.kind === "native") {
+      if (!nativeCodeChallenge || !isValidNativeCodeChallenge(nativeCodeChallenge)) {
+        return res.status(400).json({ error: "native_code_challenge must be a valid S256 challenge" });
+      }
+      if (nativeCodeChallengeMethod !== "S256") {
+        return res.status(400).json({ error: "native_code_challenge_method must be S256" });
+      }
+    } else if (nativeCodeChallenge || nativeCodeChallengeMethod) {
+      return res.status(400).json({ error: "native PKCE parameters require an allowed custom redirect" });
+    }
 
     const authUrl = client.authorizationUrl({
       scope: getKeycloakScope(),
@@ -824,7 +928,20 @@ authRouter.get("/:provider/start", async (req, res) => {
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
       kc_idp_hint: getKeycloakIdpHint(provider),
+      prompt: "login",
     });
+
+    const browserBinding = crypto.randomBytes(32).toString("base64url");
+    const expiresAt = await insertAuthState(
+      provider,
+      state,
+      nonce,
+      codeVerifier,
+      resolvedRedirect?.url,
+      hashToken(browserBinding),
+      resolvedRedirect?.kind === "native" ? nativeCodeChallenge : undefined
+    );
+    setStateBindingCookie(res, provider, state, browserBinding, expiresAt);
 
     return res.redirect(authUrl);
   } catch (err: any) {
@@ -839,16 +956,20 @@ async function handleAuthCallback(req: express.Request, res: express.Response) {
       return res.status(404).json({ error: "unknown provider" });
     }
 
-    const redirectUri = getRedirectUri(req, provider);
-    const client = await getClient(redirectUri);
-
-    const params = client.callbackParams(req);
-    const stateParam = typeof params.state === "string" ? params.state : "";
+    const requestState = req.method === "POST" ? req.body?.state : req.query.state;
+    const stateParam = typeof requestState === "string" ? requestState : "";
     if (!stateParam) return res.status(400).json({ error: "missing state" });
 
-    const authState = await consumeAuthState(stateParam);
+    const browserBinding = getStateBindingCookie(req, stateParam);
+    if (!browserBinding) return res.status(400).json({ error: "invalid state" });
+
+    const authState = await consumeAuthState(provider, stateParam, hashToken(browserBinding));
+    clearStateBindingCookie(res, provider, stateParam);
     if (!authState) return res.status(400).json({ error: "invalid state" });
-    if (authState.provider !== provider) return res.status(400).json({ error: "state/provider mismatch" });
+
+    const redirectUri = getRedirectUri(req, provider);
+    const client = await getClient(redirectUri);
+    const params = client.callbackParams(req);
 
     const tokenSet = await client.callback(redirectUri, params, {
       state: authState.state,
@@ -857,37 +978,57 @@ async function handleAuthCallback(req: express.Request, res: express.Response) {
     });
 
     const claims = tokenSet.claims() as Record<string, any>;
-
-    const { userId } = await ensureUserFromClaims(provider, claims);
-    const session = await createSession(userId, req);
-    setSessionCookie(res, session.token, session.expiresAt);
-
-    const successRedirect = authState.redirect_url || optionalEnv("AUTH_SUCCESS_REDIRECT_URL");
-    if (successRedirect) {
-      let redirectTarget = successRedirect;
-      if (!/^https?:\/\//i.test(successRedirect)) {
-        try {
-          const url = new URL(successRedirect);
-          url.searchParams.set("token", session.token);
-          url.searchParams.set("expires_at", session.expiresAt);
-          redirectTarget = url.toString();
-        } catch {
-          redirectTarget = successRedirect;
-        }
-      }
-      return res.redirect(303, redirectTarget);
+    if (claims.identity_provider !== authState.provider) {
+      throw new Error("Identity provider provenance did not match the initiated login.");
     }
 
+    const { userId } = await ensureUserFromClaims(provider, claims);
+
+    if (authState.native_code_challenge) {
+      if (!authState.redirect_url) throw new Error("Native auth state omitted its callback URL.");
+      const handoff = await createNativeHandoff(userId, authState.native_code_challenge);
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Pragma", "no-cache");
+      return res.redirect(303, buildNativeHandoffRedirect(authState.redirect_url, handoff.code));
+    }
+
+    const session = await createSession(userId, req);
+    setSessionCookie(res, session.token, session.expiresAt);
+    if (authState.redirect_url) return res.redirect(303, authState.redirect_url);
     return res.json({ ok: true, session: { expires_at: session.expiresAt } });
   } catch (err: any) {
-    const failureRedirect = optionalEnv("AUTH_FAILURE_REDIRECT_URL");
-    if (failureRedirect) return res.redirect(303, failureRedirect);
+    const failureRedirect = resolveAllowedAuthRedirect(
+      undefined,
+      optionalEnv("AUTH_FAILURE_REDIRECT_URL"),
+      getAllowedRedirects()
+    );
+    if (failureRedirect) return res.redirect(303, failureRedirect.url);
     return res.status(500).json({ error: err.message || String(err) });
   }
 }
 
 authRouter.get("/:provider/callback", handleAuthCallback);
 authRouter.post("/:provider/callback", handleAuthCallback);
+
+authRouter.post("/handoff", async (req, res) => {
+  try {
+    const code = typeof req.body?.code === "string" ? req.body.code : "";
+    const codeVerifier = typeof req.body?.code_verifier === "string" ? req.body.code_verifier : "";
+    if (!isValidNativeHandoffCode(code) || !isValidNativeCodeVerifier(codeVerifier)) {
+      return res.status(400).json({ error: "invalid handoff" });
+    }
+
+    const userId = await consumeNativeHandoff(code, codeVerifier);
+    if (!userId) return res.status(400).json({ error: "invalid handoff" });
+
+    const session = await createSession(userId, req);
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Pragma", "no-cache");
+    return res.json({ token: session.token, expires_at: session.expiresAt });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || String(err) });
+  }
+});
 
 authRouter.get("/me", async (req, res) => {
   try {

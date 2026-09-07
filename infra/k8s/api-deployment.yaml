@@ -139,6 +139,14 @@ spec:
               valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_KEY, optional: true } }
             - name: PODCASTINDEX_API_SECRET
               valueFrom: { secretKeyRef: { name: claritas-podcastindex, key: PODCASTINDEX_API_SECRET, optional: true } }
+            - name: X_BEARER_TOKEN
+              valueFrom: { secretKeyRef: { name: claritas-x-social, key: X_BEARER_TOKEN, optional: true } }
+            - name: REDDIT_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: claritas-reddit, key: REDDIT_CLIENT_ID, optional: true } }
+            - name: REDDIT_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: claritas-reddit, key: REDDIT_CLIENT_SECRET, optional: true } }
+            - name: YOUTUBE_API_KEY
+              valueFrom: { secretKeyRef: { name: claritas-youtube, key: YOUTUBE_API_KEY, optional: true } }
             - name: AISSTREAM_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-aisstream, key: AISSTREAM_API_KEY, optional: true } }
             - name: AISSTREAM_ENABLED
@@ -227,6 +235,28 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCAST_INTELLIGENCE_EXTRACTION_ENABLED, optional: true } }
             - name: PODCASTINDEX_USER_AGENT
               valueFrom: { configMapKeyRef: { name: claritas-config, key: PODCASTINDEX_USER_AGENT, optional: true } }
+            - name: SOCIAL_DISCOVERY_QUERIES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_DISCOVERY_QUERIES, optional: true } }
+            - name: SOCIAL_MAX_RESULTS_PER_QUERY
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_MAX_RESULTS_PER_QUERY, optional: true } }
+            - name: SOCIAL_LOOKBACK_HOURS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_LOOKBACK_HOURS, optional: true } }
+            - name: SOCIAL_RETENTION_DAYS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_RETENTION_DAYS, optional: true } }
+            - name: SOCIAL_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_USER_AGENT, optional: true } }
+            - name: SOCIAL_X_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_X_ENABLED, optional: true } }
+            - name: SOCIAL_REDDIT_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_REDDIT_ENABLED, optional: true } }
+            - name: SOCIAL_YOUTUBE_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_YOUTUBE_ENABLED, optional: true } }
+            - name: SOCIAL_BLUESKY_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: SOCIAL_BLUESKY_ENABLED, optional: true } }
+            - name: REDDIT_API_APPROVED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: REDDIT_API_APPROVED, optional: true } }
+            - name: REDDIT_USER_AGENT
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: REDDIT_USER_AGENT, optional: true } }
             - name: WIKIDATA_USER_AGENT
               valueFrom: { configMapKeyRef: { name: claritas-config, key: WIKIDATA_USER_AGENT, optional: true } }
             - name: BRIEFING_LLM_PROVIDER
@@ -397,6 +427,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_BASE_URL } }
             - name: AUTH_PROVIDERS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_PROVIDERS } }
+            - name: AUTH_MICROSOFT_MULTI_TENANT_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_MICROSOFT_MULTI_TENANT_ENABLED } }
             - name: AUTH_ISSUER_URL
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_ISSUER_URL } }
             - name: AUTH_KEYCLOAK_CLIENT_ID
@@ -415,14 +447,14 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_FAILURE_REDIRECT_URL } }
             - name: AUTH_ALLOWED_REDIRECTS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_ALLOWED_REDIRECTS } }
-            - name: AUTH_ALLOWED_REDIRECT_SCHEMES
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_ALLOWED_REDIRECT_SCHEMES } }
             - name: AUTH_KEYCLOAK_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: claritas-auth, key: AUTH_KEYCLOAK_CLIENT_SECRET, optional: true } }
             - name: INGEST_API_TOKEN
               valueFrom: { secretKeyRef: { name: claritas-auth, key: INGEST_API_TOKEN, optional: true } }
             - name: AUTH_COOKIE_SECURE
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_COOKIE_SECURE } }
+            - name: AUTH_NATIVE_HANDOFF_TTL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_NATIVE_HANDOFF_TTL_SECONDS } }
             - name: AUTH_SESSION_TTL_DAYS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_SESSION_TTL_DAYS } }
             - name: AUTH_STATE_TTL_MINUTES

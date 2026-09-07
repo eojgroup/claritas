@@ -1,11 +1,11 @@
-# React + TypeScript + Vite
+# Claritas Web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The Claritas web app is a map-led global intelligence workspace. It brings
+attributed news and social signals, weather, markets, transport, and satellite evidence into one operating
+picture for teams monitoring material change.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+It is built with React, TypeScript, and Vite. Run `npm run dev` to start the
+web client; Vite proxies `/api` requests to the local API server on port 8080.
 
 ## Expanding the ESLint configuration
 

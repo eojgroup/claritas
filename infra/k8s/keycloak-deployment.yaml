@@ -35,9 +35,13 @@ spec:
                     app: keycloak
       containers:
         - name: keycloak
-          image: quay.io/keycloak/keycloak:26.0.7
+          # This human-readable tag supports manual rendering. The GKE workflow
+          # replaces it locally with the per-commit registry digest before the
+          # manifest is applied; see the pins in infra/keycloak/Dockerfile.
+          image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-keycloak:26.7.3-apple-1.17.0
           args:
             - start
+            - --optimized
             - --db=postgres
             - --db-url-host=127.0.0.1
             - --db-url-port=5432
@@ -65,9 +69,9 @@ spec:
               value: "1"
             - name: KC_DB_POOL_MAX_SIZE
               value: "5"
-            - name: KEYCLOAK_ADMIN
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
               valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_ADMIN } }
-            - name: KEYCLOAK_ADMIN_PASSWORD
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
               valueFrom: { secretKeyRef: { name: claritas-auth, key: KEYCLOAK_ADMIN_PASSWORD } }
           ports:
             - name: http

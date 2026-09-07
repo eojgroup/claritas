@@ -62,6 +62,14 @@ chronology as `provider_first_seen`. It is visibly identified as discovery
 time, receives lower source quality and an additional importance-order penalty,
 and its earliest time is immutable: rediscovery cannot refresh it.
 
+The news API exposes `time.timeline_at` as the canonical instant used for
+reader ordering. Its meaning is never implicit: `time.basis` and
+`time.is_publisher_verified` distinguish a publisher publication from a
+provider-first discovery, while `time.published_at` and `time.discovered_at`
+retain both provenance-specific timestamps. Clients compare parsed instants,
+not ISO-8601 strings, so equivalent timezone and fractional-second spellings
+cannot break reverse chronology.
+
 When an assessment is temporarily unavailable, the API returns an explicit
 wire fallback (`Other`, `Routine`, `is_fallback: true`) and clients label it
 `Unranked — assessment pending`; they do not present missing assessment as a

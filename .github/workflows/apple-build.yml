@@ -35,6 +35,10 @@ jobs:
           gem install xcodeproj --no-document
           ruby validate_xcodeproj.rb
 
+      - name: Test shared chronology and social contracts
+        working-directory: apps/mobile/ios
+        run: swift test
+
       - name: Compile universal iOS and iPadOS application
         working-directory: apps/mobile/ios/Claritas
         run: |

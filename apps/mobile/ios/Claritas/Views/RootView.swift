@@ -6,6 +6,7 @@ struct RootView: View {
         case overview
         case dashboard
         case news
+        case social
         case podcasts
         case weather
         case markets
@@ -23,6 +24,7 @@ struct RootView: View {
             case .overview: return "Overview"
             case .dashboard: return "Overview"
             case .news: return "News"
+            case .social: return "Social signals"
             case .podcasts: return "Podcasts"
             case .weather: return "Weather"
             case .markets: return "Markets"
@@ -42,6 +44,7 @@ struct RootView: View {
             case .overview: return "rectangle.3.group.fill"
             case .dashboard: return "square.grid.2x2"
             case .news: return "newspaper"
+            case .social: return "dot.radiowaves.left.and.right"
             case .podcasts: return "mic.fill"
             case .weather: return "cloud.sun"
             case .markets: return "chart.line.uptrend.xyaxis"
@@ -96,9 +99,9 @@ struct RootView: View {
             guard let destination = note.object as? String else { return }
             if let rawCountry = note.userInfo?["country"] as? String {
                 let country = rawCountry.trimmingCharacters(in: .whitespacesAndNewlines)
-                if destination == "news", country.isEmpty {
+                if country.isEmpty {
                     model.selectedCountry = nil
-                } else if !country.isEmpty {
+                } else {
                     model.selectedCountry = country.uppercased()
                 }
             }
@@ -118,6 +121,9 @@ struct RootView: View {
             switch destination {
             case "news":
                 next = .news
+            case "social":
+                next = .more
+                compactMorePath = [.social]
             case "weather":
                 next = .more
                 compactMorePath = [.weather]
@@ -141,6 +147,7 @@ struct RootView: View {
             if horizontalSizeClass == .regular {
                 switch destination {
                 case "news": sidebarSelection = .news
+                case "social": sidebarSelection = .social
                 case "weather": sidebarSelection = .weather
                 case "markets": sidebarSelection = .markets
                 case "transport": sidebarSelection = .transport
@@ -152,6 +159,9 @@ struct RootView: View {
             } else {
                 sidebarSelection = .overview
             }
+        }
+        .onOpenURL { url in
+            openWidgetURL(url)
         }
         .onReceive(NotificationCenter.default.publisher(for: .claritasPushTokenAvailable)) { note in
             guard let token = note.object as? String, !token.isEmpty else { return }
@@ -242,6 +252,7 @@ struct RootView: View {
             }
             Section("Source lenses") {
                 sidebarLink(.news)
+                sidebarLink(.social)
                 sidebarLink(.transport)
             }
             if model.isAdmin {
@@ -304,6 +315,8 @@ struct RootView: View {
             DashboardView()
         case .news:
             NewsWorkspaceView()
+        case .social:
+            SocialSignalsView()
         case .podcasts:
             PodcastWorkspaceView()
         case .weather:
@@ -331,6 +344,58 @@ struct RootView: View {
 
     private var marketRefreshTaskKey: String {
         "\(model.authStatus.rawValue)-\(model.hasPaidAccess)-quotes"
+    }
+
+    private func openWidgetURL(_ url: URL) {
+        guard url.scheme?.lowercased() == "claritas",
+              url.host?.lowercased() == "widget",
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let domain = components.queryItems?
+                .first(where: { $0.name == "domain" })?
+                .value?
+                .lowercased()
+        else { return }
+
+        if let rawCountry = components.queryItems?
+            .first(where: { $0.name == "country" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased() {
+            if rawCountry == "GLOBAL" {
+                model.selectedCountry = nil
+            } else if rawCountry.count == 2,
+                      rawCountry.unicodeScalars.allSatisfy(CharacterSet.letters.contains) {
+                model.selectedCountry = rawCountry
+            }
+        }
+
+        let destination: Tab
+        switch domain {
+        case "news": destination = .news
+        case "markets": destination = .markets
+        case "weather": destination = .weather
+        case "transport": destination = .transport
+        default: destination = .overview
+        }
+
+        if horizontalSizeClass == .regular {
+            sidebarSelection = destination
+        } else {
+            switch destination {
+            case .overview:
+                compactMorePath = []
+                tab = .dashboard
+            case .news:
+                compactMorePath = []
+                tab = .news
+            case .markets, .weather, .transport:
+                compactMorePath = [destination]
+                tab = .more
+            default:
+                compactMorePath = []
+                tab = .dashboard
+            }
+        }
     }
 
 }
@@ -362,6 +427,13 @@ private struct CompactMoreView: View {
                             detail: "Original reporting linked into canonical event threads",
                             icon: "newspaper",
                             destination: NewsWorkspaceView()
+                        )
+                        Divider()
+                        destinationRow(
+                            title: "Social signals",
+                            detail: "Attributed posts kept separate as unverified claims",
+                            icon: "dot.radiowaves.left.and.right",
+                            destination: SocialSignalsView()
                         )
                         Divider()
                         destinationRow(
@@ -1442,6 +1514,7 @@ private struct AdminIngestionPanelView: View {
         case market
         case podcasts
         case leadership
+        case social
 
         var id: String { rawValue }
         var label: String { rawValue.capitalized }
@@ -1453,6 +1526,7 @@ private struct AdminIngestionPanelView: View {
             case .market: return .market
             case .podcasts: return .podcasts
             case .leadership: return .leadership
+            case .social: return .social
             }
         }
     }
@@ -1506,6 +1580,7 @@ private struct AdminIngestionPanelView: View {
     @State private var isTriggeringNews: Bool = false
     @State private var isTriggeringWeather: Bool = false
     @State private var isTriggeringMarket: Bool = false
+    @State private var isTriggeringSocial: Bool = false
     @State private var overviewError: String?
     @State private var runError: String?
     @State private var actionError: String?
@@ -1615,6 +1690,20 @@ private struct AdminIngestionPanelView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(isTriggeringMarket || isLoadingOverview)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Runs only the social providers currently enabled and configured on the server. Social posts remain attributed, unverified claims in a separate evidence lane.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button(action: { Task { await queueSocialRun() } }) {
+                            Label(isTriggeringSocial ? "Queueing social…" : "Queue Social Run", systemImage: "dot.radiowaves.left.and.right")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isTriggeringSocial || isLoadingOverview)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2163,6 +2252,23 @@ private struct AdminIngestionPanelView: View {
             actionError = error.localizedDescription
         }
         isTriggeringMarket = false
+    }
+
+    private func queueSocialRun() async {
+        isTriggeringSocial = true
+        actionError = nil
+        actionNotice = nil
+        do {
+            let detail = try await model.api.triggerAdminSocialIngestion()
+            selectedRunId = detail.run.id
+            selectedRun = detail.run
+            logs = detail.logs
+            actionNotice = "Social ingestion run #\(detail.run.id) was queued."
+            await refreshOverview(silent: true)
+        } catch {
+            actionError = error.localizedDescription
+        }
+        isTriggeringSocial = false
     }
 
     private func automationRule(for pipeline: IngestionPipeline) -> AdminIngestionAutomationRule? {
@@ -2947,6 +3053,7 @@ private extension IngestionPipeline {
         case .market: return "Market"
         case .podcasts: return "Podcasts"
         case .leadership: return "Leadership"
+        case .social: return "Social"
         }
     }
 }

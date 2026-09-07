@@ -5,6 +5,9 @@ metadata:
   namespace: claritas
 spec:
   timeoutSec: 300
+  customResponseHeaders:
+    headers:
+      - "Strict-Transport-Security: max-age=31536000"
   healthCheck:
     checkIntervalSec: 15
     timeoutSec: 5

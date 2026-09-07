@@ -15,13 +15,17 @@ spec:
       serviceAccountName: keycloak-sa
       containers:
         - name: bootstrap
-          image: quay.io/keycloak/keycloak:26.0.7
+          image: quay.io/keycloak/keycloak:26.7.3@sha256:ff4257d0d64efbe99ed1ddfaf07765cc3c36dc7518bf8324d41961327f441c54
           command: ["/bin/bash", "/bootstrap/bootstrap.sh"]
           env:
             - name: KEYCLOAK_URL
               value: "http://keycloak:8080"
             - name: KEYCLOAK_REALM
               valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_REALM } }
+            - name: AUTH_PROVIDERS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_PROVIDERS } }
+            - name: AUTH_MICROSOFT_MULTI_TENANT_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: AUTH_MICROSOFT_MULTI_TENANT_ENABLED } }
             - name: KEYCLOAK_WEB_CLIENT_ID
               valueFrom: { configMapKeyRef: { name: claritas-config, key: KEYCLOAK_WEB_CLIENT_ID } }
             - name: KEYCLOAK_MOBILE_CLIENT_ID

@@ -45,6 +45,21 @@ jobs:
       TF_VAR_smtp_password: ${{ secrets.SMTP_PASSWORD || '' }}
       TF_VAR_email_public_base_url: ${{ vars.EMAIL_PUBLIC_BASE_URL || 'https://app.claritas.info' }}
       TF_VAR_personal_briefing_email_enabled: ${{ vars.PERSONAL_BRIEFING_EMAIL_ENABLED || 'false' }}
+      # These values initialize new infrastructure and feed the preserve-safe
+      # post-apply Secret merge. Omitted values do not revoke live credentials.
+      TF_VAR_auth_keycloak_client_secret: ${{ secrets.AUTH_KEYCLOAK_CLIENT_SECRET || '' }}
+      TF_VAR_ingest_api_token: ${{ secrets.INGEST_API_TOKEN || '' }}
+      TF_VAR_keycloak_admin: ${{ vars.KEYCLOAK_ADMIN || 'admin' }}
+      TF_VAR_keycloak_admin_password: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD || '' }}
+      TF_VAR_auth_google_client_id: ${{ secrets.KC_IDP_GOOGLE_CLIENT_ID || '' }}
+      TF_VAR_auth_google_client_secret: ${{ secrets.KC_IDP_GOOGLE_CLIENT_SECRET || '' }}
+      TF_VAR_auth_microsoft_client_id: ${{ secrets.KC_IDP_MICROSOFT_CLIENT_ID || '' }}
+      TF_VAR_auth_microsoft_client_secret: ${{ secrets.KC_IDP_MICROSOFT_CLIENT_SECRET || '' }}
+      TF_VAR_auth_microsoft_tenant_id: ${{ secrets.KC_IDP_MICROSOFT_TENANT || '' }}
+      TF_VAR_auth_apple_client_id: ${{ secrets.KC_IDP_APPLE_CLIENT_ID || '' }}
+      TF_VAR_auth_apple_team_id: ${{ secrets.KC_IDP_APPLE_TEAM_ID || '' }}
+      TF_VAR_auth_apple_key_id: ${{ secrets.KC_IDP_APPLE_KEY_ID || '' }}
+      TF_VAR_auth_apple_private_key: ${{ secrets.KC_IDP_APPLE_PRIVATE_KEY || '' }}
 
     steps:
       - name: 📦 Checkout
@@ -184,6 +199,52 @@ jobs:
         run: |
           kubectl get ns "${{ env.K8S_NAMESPACE }}" || kubectl create ns "${{ env.K8S_NAMESPACE }}"
 
+      - name: 🔐 Merge supplied Keycloak/API auth secrets
+        env:
+          AUTH_KEYCLOAK_CLIENT_SECRET: ${{ secrets.AUTH_KEYCLOAK_CLIENT_SECRET }}
+          INGEST_API_TOKEN: ${{ secrets.INGEST_API_TOKEN }}
+          KEYCLOAK_ADMIN: ${{ vars.KEYCLOAK_ADMIN }}
+          KEYCLOAK_ADMIN_PASSWORD: ${{ secrets.KEYCLOAK_ADMIN_PASSWORD }}
+          KC_IDP_GOOGLE_CLIENT_ID: ${{ secrets.KC_IDP_GOOGLE_CLIENT_ID }}
+          KC_IDP_GOOGLE_CLIENT_SECRET: ${{ secrets.KC_IDP_GOOGLE_CLIENT_SECRET }}
+          KC_IDP_MICROSOFT_CLIENT_ID: ${{ secrets.KC_IDP_MICROSOFT_CLIENT_ID }}
+          KC_IDP_MICROSOFT_CLIENT_SECRET: ${{ secrets.KC_IDP_MICROSOFT_CLIENT_SECRET }}
+          KC_IDP_MICROSOFT_TENANT: ${{ secrets.KC_IDP_MICROSOFT_TENANT }}
+          KC_IDP_APPLE_CLIENT_ID: ${{ secrets.KC_IDP_APPLE_CLIENT_ID }}
+          KC_IDP_APPLE_TEAM_ID: ${{ secrets.KC_IDP_APPLE_TEAM_ID }}
+          KC_IDP_APPLE_KEY_ID: ${{ secrets.KC_IDP_APPLE_KEY_ID }}
+          KC_IDP_APPLE_PRIVATE_KEY: ${{ secrets.KC_IDP_APPLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          ns="${{ env.K8S_NAMESPACE }}"
+          kubectl -n "$ns" get secret claritas-auth >/dev/null
+          auth_patch="$(node <<'NODE'
+          const names = [
+            "AUTH_KEYCLOAK_CLIENT_SECRET",
+            "INGEST_API_TOKEN",
+            "KEYCLOAK_ADMIN",
+            "KEYCLOAK_ADMIN_PASSWORD",
+            "KC_IDP_GOOGLE_CLIENT_ID",
+            "KC_IDP_GOOGLE_CLIENT_SECRET",
+            "KC_IDP_MICROSOFT_CLIENT_ID",
+            "KC_IDP_MICROSOFT_CLIENT_SECRET",
+            "KC_IDP_MICROSOFT_TENANT",
+            "KC_IDP_APPLE_CLIENT_ID",
+            "KC_IDP_APPLE_TEAM_ID",
+            "KC_IDP_APPLE_KEY_ID",
+            "KC_IDP_APPLE_PRIVATE_KEY",
+          ];
+          const data = {};
+          for (const name of names) {
+            const value = process.env[name];
+            if (value?.trim()) data[name] = Buffer.from(value).toString("base64");
+          }
+          process.stdout.write(JSON.stringify({ data }));
+          NODE
+          )"
+          kubectl -n "$ns" patch secret claritas-auth --type merge -p "$auth_patch" >/dev/null
+          echo "Merged supplied auth values while preserving omitted live Secret keys."
+
       - name: 🪪 Apply KSA for Workload Identity
         run: |
           kubectl -n "${{ env.K8S_NAMESPACE }}" apply -f infra/k8s/config/serviceaccounts.yaml
@@ -216,6 +277,17 @@ jobs:
           APNS_MATERIALIZATION_BATCH_SIZE: ${{ vars.APNS_MATERIALIZATION_BATCH_SIZE || '500' }}
           APNS_MAX_ACTIVE_DEVICES_PER_USER: ${{ vars.APNS_MAX_ACTIVE_DEVICES_PER_USER || '8' }}
           APNS_MAX_DEVICE_RECORDS_PER_USER: ${{ vars.APNS_MAX_DEVICE_RECORDS_PER_USER || '64' }}
+          SOCIAL_DISCOVERY_QUERIES: ${{ vars.SOCIAL_DISCOVERY_QUERIES }}
+          SOCIAL_MAX_RESULTS_PER_QUERY: ${{ vars.SOCIAL_MAX_RESULTS_PER_QUERY }}
+          SOCIAL_LOOKBACK_HOURS: ${{ vars.SOCIAL_LOOKBACK_HOURS }}
+          SOCIAL_RETENTION_DAYS: ${{ vars.SOCIAL_RETENTION_DAYS }}
+          SOCIAL_USER_AGENT: ${{ vars.SOCIAL_USER_AGENT }}
+          REDDIT_USER_AGENT: ${{ vars.REDDIT_USER_AGENT }}
+          REDDIT_API_APPROVED: ${{ vars.REDDIT_API_APPROVED || 'false' }}
+          SOCIAL_X_ENABLED: ${{ vars.SOCIAL_X_ENABLED || 'true' }}
+          SOCIAL_REDDIT_ENABLED: ${{ vars.SOCIAL_REDDIT_ENABLED || 'false' }}
+          SOCIAL_YOUTUBE_ENABLED: ${{ vars.SOCIAL_YOUTUBE_ENABLED || 'true' }}
+          SOCIAL_BLUESKY_ENABLED: ${{ vars.SOCIAL_BLUESKY_ENABLED || 'true' }}
         run: |
           ns="${{ env.K8S_NAMESPACE }}"
           base="${{ env.DOMAIN }}"
@@ -223,7 +295,7 @@ jobs:
             base="https://${base}"
           fi
           kubectl -n "$ns" apply -f infra/k8s/config/claritas-config.yaml
-          kubectl -n "$ns" patch configmap claritas-config --type merge -p "{\"data\":{\"INSTANCE_CONNECTION_NAME\":\"${{ steps.tf_out.outputs.icn }}\",\"DB_NAME\":\"${{ steps.tf_out.outputs.db_name }}\",\"DB_USER\":\"${{ steps.tf_out.outputs.db_user }}\",\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${base},claritas://\",\"AUTH_ALLOWED_REDIRECT_SCHEMES\":\"claritas\"}}"
+          kubectl -n "$ns" patch configmap claritas-config --type merge -p "{\"data\":{\"INSTANCE_CONNECTION_NAME\":\"${{ steps.tf_out.outputs.icn }}\",\"DB_NAME\":\"${{ steps.tf_out.outputs.db_name }}\",\"DB_USER\":\"${{ steps.tf_out.outputs.db_user }}\",\"AUTH_BASE_URL\":\"${base}\",\"AUTH_SUCCESS_REDIRECT_URL\":\"${base}/auth/success\",\"AUTH_FAILURE_REDIRECT_URL\":\"${base}/auth/error\",\"AUTH_ALLOWED_REDIRECTS\":\"${base},claritas://auth/callback\"}}"
           if [ -n "${SEC_EDGAR_USER_AGENT:-}" ]; then
             sec_patch=$(node -e 'process.stdout.write(JSON.stringify({data:{SEC_EDGAR_USER_AGENT:process.env.SEC_EDGAR_USER_AGENT.trim()}}))')
             kubectl -n "$ns" patch configmap claritas-config --type merge -p "$sec_patch"
@@ -234,7 +306,7 @@ jobs:
           fi
           feature_patch=$(node -e '
             const data={};
-            for (const key of ["EVENT_CORRELATION_ENABLED","EVENT_ALERTS_ENABLED","EARTH_OBSERVATION_ENABLED","COPERNICUS_ENABLED","NASA_FIRMS_ENABLED","NASA_GIBS_ENABLED","USGS_EARTHQUAKES_ENABLED","EO_VISION_ENRICHMENT_ENABLED","EO_VISION_MODEL","EO_VISION_MAX_DAILY_REQUESTS","EO_VISION_MAX_IMAGE_BYTES","EO_MAX_DAILY_PROCESSING_UNITS","EO_MAX_MONTHLY_PROCESSING_UNITS","EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER","EO_MAX_REVISITS_PER_EVENT","EO_REVISIT_INTERVAL_HOURS","EO_ASSET_RETENTION_DAYS","APNS_DELIVERY_ENABLED","APNS_MATERIALIZATION_BATCH_SIZE","APNS_MAX_ACTIVE_DEVICES_PER_USER","APNS_MAX_DEVICE_RECORDS_PER_USER"]) {
+            for (const key of ["EVENT_CORRELATION_ENABLED","EVENT_ALERTS_ENABLED","EARTH_OBSERVATION_ENABLED","COPERNICUS_ENABLED","NASA_FIRMS_ENABLED","NASA_GIBS_ENABLED","USGS_EARTHQUAKES_ENABLED","EO_VISION_ENRICHMENT_ENABLED","EO_VISION_MODEL","EO_VISION_MAX_DAILY_REQUESTS","EO_VISION_MAX_IMAGE_BYTES","EO_MAX_DAILY_PROCESSING_UNITS","EO_MAX_MONTHLY_PROCESSING_UNITS","EO_ESTIMATED_PROCESSING_UNITS_PER_RENDER","EO_MAX_REVISITS_PER_EVENT","EO_REVISIT_INTERVAL_HOURS","EO_ASSET_RETENTION_DAYS","APNS_DELIVERY_ENABLED","APNS_MATERIALIZATION_BATCH_SIZE","APNS_MAX_ACTIVE_DEVICES_PER_USER","APNS_MAX_DEVICE_RECORDS_PER_USER","SOCIAL_DISCOVERY_QUERIES","SOCIAL_MAX_RESULTS_PER_QUERY","SOCIAL_LOOKBACK_HOURS","SOCIAL_RETENTION_DAYS","SOCIAL_USER_AGENT","REDDIT_USER_AGENT","REDDIT_API_APPROVED","SOCIAL_X_ENABLED","SOCIAL_REDDIT_ENABLED","SOCIAL_YOUTUBE_ENABLED","SOCIAL_BLUESKY_ENABLED"]) {
               const value=process.env[key]?.trim(); if (value) data[key]=value;
             }
             process.stdout.write(JSON.stringify({data}));
@@ -261,6 +333,40 @@ jobs:
             kubectl -n "${{ env.K8S_NAMESPACE }}" create secret generic claritas-openweather \
               --from-literal=OPENWEATHER_API_KEY="$OPENWEATHER_API_KEY" \
               --dry-run=client -o yaml | kubectl apply -f -
+          fi
+
+      - name: 🔐 Upsert social provider secrets
+        env:
+          X_BEARER_TOKEN: ${{ secrets.X_BEARER_TOKEN }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          set -euo pipefail
+          ns="${{ env.K8S_NAMESPACE }}"
+          if [ -n "${X_BEARER_TOKEN:-}" ]; then
+            kubectl -n "$ns" create secret generic claritas-x-social \
+              --from-literal=X_BEARER_TOKEN="$X_BEARER_TOKEN" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::notice::X_BEARER_TOKEN not set; preserving any existing X secret. Disable SOCIAL_X_ENABLED and revoke/delete explicitly when retiring access."
+          fi
+          if [ -n "${REDDIT_CLIENT_ID:-}" ] && [ -n "${REDDIT_CLIENT_SECRET:-}" ]; then
+            kubectl -n "$ns" create secret generic claritas-reddit \
+              --from-literal=REDDIT_CLIENT_ID="$REDDIT_CLIENT_ID" \
+              --from-literal=REDDIT_CLIENT_SECRET="$REDDIT_CLIENT_SECRET" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          elif [ -n "${REDDIT_CLIENT_ID:-}${REDDIT_CLIENT_SECRET:-}" ]; then
+            echo "::warning::Reddit credentials are incomplete; preserving any existing Reddit secret"
+          else
+            echo "::notice::Reddit credentials not set; preserving any existing Reddit secret. Keep both Reddit gates false or revoke/delete explicitly when retiring access."
+          fi
+          if [ -n "${YOUTUBE_API_KEY:-}" ]; then
+            kubectl -n "$ns" create secret generic claritas-youtube \
+              --from-literal=YOUTUBE_API_KEY="$YOUTUBE_API_KEY" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          else
+            echo "::notice::YOUTUBE_API_KEY not set; preserving any existing YouTube secret. Disable SOCIAL_YOUTUBE_ENABLED and revoke/delete explicitly when retiring access."
           fi
 
       - name: 🔐 Upsert Secret (claritas-earth-observation)

@@ -87,9 +87,9 @@ variable "auth_microsoft_client_secret" {
 }
 
 variable "auth_microsoft_tenant_id" {
-  description = "OAuth tenant ID for Microsoft (common for multi-tenant)"
+  description = "OAuth tenant ID for Microsoft. Leave empty when Microsoft login is not configured; use common only for intentional multi-tenant login."
   type        = string
-  default     = "common"
+  default     = ""
 }
 
 variable "auth_apple_client_id" {

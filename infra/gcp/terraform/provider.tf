@@ -13,6 +13,9 @@ provider "kubernetes" {
 data "google_client_config" "default" {}
 
 terraform {
+  # `removed` with destroy=false is required for the auth-version handoff.
+  required_version = ">= 1.7.0, < 2.0.0"
+
   required_providers {
     google = {
       source  = "hashicorp/google"

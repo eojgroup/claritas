@@ -121,6 +121,29 @@ describe("PriorityNewsList", () => {
     expect(screen.getByText(/First seen · Aug 14, 2026/i)).toBeTruthy();
   });
 
+  it("renders and labels the canonical publisher timeline instant", () => {
+    const item: NewsItem = {
+      id: 47,
+      kind: "news",
+      title: "A publisher-timed report",
+      summary: null,
+      url: "https://example.com/published-report",
+      country_iso2: "US",
+      event_time: "2026-09-07T10:30:00Z",
+      time: {
+        basis: "publisher_published_verified",
+        is_publisher_verified: true,
+        timeline_at: "2026-09-07T08:30:00Z",
+        published_at: "2026-09-07T08:30:00Z",
+        discovered_at: "2026-09-07T10:30:00Z",
+      },
+    };
+
+    render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountries={() => ["US"]} getCountryName={() => "United States"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
+    expect(screen.getByText(/Published · Sep 7, 2026/i)).toBeTruthy();
+    expect(document.querySelector('time[datetime="2026-09-07T08:30:00Z"]')).toBeTruthy();
+  });
+
   it("discloses when ranking evidence is still limited", () => {
     const item: NewsItem = {
       id: 45,

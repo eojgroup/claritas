@@ -17,7 +17,7 @@ struct CountryProfileView: View {
         guard let iso else { return [] }
         return model.news
             .filter { $0.hasSubjectCountry(iso) }
-            .sorted { ($0.event_time ?? "") > ($1.event_time ?? "") }
+            .sorted { NewsChronology.precedes($0, $1, order: .newestFirst) }
     }
 
     private var latestWeather: CountryWeather? {

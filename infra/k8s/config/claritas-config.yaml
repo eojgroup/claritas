@@ -11,9 +11,15 @@ data:
   AUTH_BASE_URL: "https://app.claritas.info"
   AUTH_SUCCESS_REDIRECT_URL: "https://app.claritas.info/"
   AUTH_FAILURE_REDIRECT_URL: "https://app.claritas.info/"
-  AUTH_ALLOWED_REDIRECTS: "https://app.claritas.info,claritas://"
-  AUTH_ALLOWED_REDIRECT_SCHEMES: "claritas"
-  AUTH_PROVIDERS: "google,microsoft,apple"
+  AUTH_ALLOWED_REDIRECTS: "https://app.claritas.info,claritas://auth/callback"
+  # Google is live. Add microsoft and apple only after the corresponding
+  # broker credentials have been deployed; this value controls what the login
+  # screen advertises, not just the routes accepted by the API.
+  AUTH_PROVIDERS: "google"
+  # A concrete Entra tenant UUID is required by default. Set this to true only
+  # alongside an intentional common/organizations/consumers tenant selection;
+  # Claritas then disables automatic account linking by email for Microsoft.
+  AUTH_MICROSOFT_MULTI_TENANT_ENABLED: "false"
   AUTH_ISSUER_URL: "https://auth.claritas.info/realms/claritas"
   AUTH_KEYCLOAK_CLIENT_ID: "claritas-api"
   AUTH_KEYCLOAK_SCOPE: "openid profile email"
@@ -23,6 +29,7 @@ data:
   AUTH_COOKIE_SECURE: "true"
   AUTH_SESSION_TTL_DAYS: "30"
   AUTH_STATE_TTL_MINUTES: "10"
+  AUTH_NATIVE_HANDOFF_TTL_SECONDS: "60"
   # Daily briefings are text-only. Disabling OpenCode tools allows routing to
   # free/non-tool-capable models and prevents unnecessary container access.
   OPENCODE_DISABLE_TOOLS: "true"
@@ -119,6 +126,23 @@ data:
   MARKET_EVENT_PERCENT_THRESHOLD: "0.05"
   # Used when repository variables do not provide explicit PodcastIndex targets.
   PODCAST_DISCOVERY_TERMS: "geopolitics,security,technology,markets"
+  # Social posts are retained and served as unverified claims in a dedicated
+  # lane. Automation remains absent until an operator explicitly prepares its
+  # disabled rule after the release succeeds, then reviews query scope,
+  # provider terms, and quota/cost. Reddit additionally requires documented
+  # commercial API approval before REDDIT_API_APPROVED may become true, plus an
+  # explicitly configured identifying user agent.
+  SOCIAL_DISCOVERY_QUERIES: '["geopolitics","security","markets","transport disruption","extreme weather"]'
+  SOCIAL_MAX_RESULTS_PER_QUERY: "25"
+  SOCIAL_LOOKBACK_HOURS: "24"
+  SOCIAL_RETENTION_DAYS: "7"
+  SOCIAL_USER_AGENT: "Claritas/1.0 (+https://app.claritas.info; engineering@claritas.info)"
+  REDDIT_USER_AGENT: ""
+  SOCIAL_X_ENABLED: "true"
+  SOCIAL_REDDIT_ENABLED: "false"
+  SOCIAL_YOUTUBE_ENABLED: "true"
+  SOCIAL_BLUESKY_ENABLED: "true"
+  REDDIT_API_APPROVED: "false"
   # Keyless open-data provider controls and identifying user agents.
   GDELT_USER_AGENT: "Claritas/1.0 (+https://app.claritas.info; engineering@claritas.info)"
   GDELT_MAX_RAW_ROWS: "500"
@@ -204,7 +228,7 @@ data:
   KEYCLOAK_MOBILE_CLIENT_ID: "claritas-mobile"
   KEYCLOAK_WEB_REDIRECT_URIS: "https://app.claritas.info/*,http://localhost:5173/*"
   KEYCLOAK_WEB_ORIGINS: "https://app.claritas.info,http://localhost:5173"
-  KEYCLOAK_MOBILE_REDIRECT_URIS: "claritas://auth/*"
+  KEYCLOAK_MOBILE_REDIRECT_URIS: "claritas://auth/callback"
   KEYCLOAK_API_REDIRECT_URIS: "https://app.claritas.info/api/auth/google/callback,https://app.claritas.info/api/auth/microsoft/callback,https://app.claritas.info/api/auth/apple/callback,http://localhost:8080/api/auth/google/callback,http://localhost:8080/api/auth/microsoft/callback,http://localhost:8080/api/auth/apple/callback"
   KEYCLOAK_DB_NAME: "keycloak"
   KEYCLOAK_DB_USER: "keycloak_app"

@@ -8,6 +8,7 @@ import {
   type NewsTag,
 } from "../lib/api";
 import { presentEventLinkage } from "./eventLinkagePresentation";
+import { newsChronology } from "./newsWorkspacePresentation";
 
 const LEADERSHIP_ROLE_PATTERN =
   "(?:president|prime minister|premier|chancellor|monarch|king|queen|head of state|head of government)";
@@ -45,18 +46,6 @@ const newsTimestampParts = (value: string | null | undefined) => {
     zone: exactFormatter.formatToParts(date).find((part) => part.type === "timeZoneName")?.value ?? "Local time",
     exact: exactFormatter.format(date),
   };
-};
-
-const newsTimeBasisLabel = (item: NewsItem) => {
-  const payload =
-    item.payload && typeof item.payload === "object" && !Array.isArray(item.payload)
-      ? (item.payload as Record<string, unknown>)
-      : null;
-  const basis = item.time?.basis || (typeof payload?.time_basis === "string" ? payload.time_basis : "");
-  if (basis === "provider_first_seen") return "First seen";
-  if (basis === "publisher_published_or_provider_discovered") return "Source time";
-  if (basis.startsWith("publisher_")) return "Published";
-  return item.time?.is_publisher_verified ? "Published" : "Reported";
 };
 
 function isLeadershipChangeStory(item: NewsItem): boolean {
@@ -193,8 +182,8 @@ export default function PriorityNewsList({
           item.translation?.summary_status !== "insufficient",
         );
         const linkedEvents = item.linked_events ?? [];
-        const timestamp = newsTimestampParts(item.event_time);
-        const timeBasisLabel = newsTimeBasisLabel(item);
+        const chronology = newsChronology(item);
+        const timestamp = newsTimestampParts(chronology.timestamp);
         const satelliteState = linkedEvents.find((event) => (
           event.earth_observation_state && event.earth_observation_state !== "not_requested"
         ))?.earth_observation_state;
@@ -235,11 +224,11 @@ export default function PriorityNewsList({
               </span>
               <time
                 className="dashboard-news-time"
-                dateTime={item.event_time ?? undefined}
+                dateTime={chronology.timestamp ?? undefined}
                 title={timestamp.exact}
               >
                 <strong>{timestamp.time}</strong>
-                <small>{timeBasisLabel} · {timestamp.date}</small>
+                <small>{chronology.label} · {timestamp.date}</small>
                 <small>{timestamp.zone}</small>
               </time>
               <span
