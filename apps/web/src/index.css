@@ -641,11 +641,11 @@ a {
     var(--shell-sidebar);
 }
 
-.app-shell button,
-.app-shell a,
-.app-shell input,
-.app-shell select,
-.app-shell textarea {
+:is(.app-shell, .app-overlay) button,
+:is(.app-shell, .app-overlay) a,
+:is(.app-shell, .app-overlay) input,
+:is(.app-shell, .app-overlay) select,
+:is(.app-shell, .app-overlay) textarea {
   transition:
     border-color 160ms ease,
     background-color 160ms ease,
@@ -654,15 +654,15 @@ a {
     transform 160ms ease;
 }
 
-.app-shell button:not(:disabled):active {
+:is(.app-shell, .app-overlay) button:not(:disabled):active {
   transform: scale(0.98);
 }
 
-.app-shell button:focus-visible,
-.app-shell a:focus-visible,
-.app-shell input:focus-visible,
-.app-shell select:focus-visible,
-.app-shell textarea:focus-visible {
+:is(.app-shell, .app-overlay) button:focus-visible,
+:is(.app-shell, .app-overlay) a:focus-visible,
+:is(.app-shell, .app-overlay) input:focus-visible,
+:is(.app-shell, .app-overlay) select:focus-visible,
+:is(.app-shell, .app-overlay) textarea:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--shell-accent) 78%, white);
   outline-offset: 2px;
 }
@@ -679,7 +679,7 @@ a {
     box-shadow: var(--shadow-strong);
   }
 
-  .app-shell button:not(:disabled):hover {
+  :is(.app-shell, .app-overlay) button:not(:disabled):hover {
     border-color: var(--shell-border-strong);
   }
 
@@ -989,11 +989,11 @@ a {
     transition: none;
   }
 
-  .app-shell button,
-  .app-shell a,
-  .app-shell input,
-  .app-shell select,
-  .app-shell textarea,
+  :is(.app-shell, .app-overlay) button,
+  :is(.app-shell, .app-overlay) a,
+  :is(.app-shell, .app-overlay) input,
+  :is(.app-shell, .app-overlay) select,
+  :is(.app-shell, .app-overlay) textarea,
   .app-stat-card {
     transition: none;
   }
@@ -1097,19 +1097,21 @@ body {
     linear-gradient(180deg, var(--shell-bg-elevated), var(--shell-bg) 36rem);
 }
 
-.app-shell {
+.app-shell,
+.app-overlay {
   font-size: 0.9375rem;
 }
 
 .app-shell,
-.app-shell input,
-.app-shell select,
-.app-shell textarea,
-.app-shell button {
+.app-overlay,
+:is(.app-shell, .app-overlay) input,
+:is(.app-shell, .app-overlay) select,
+:is(.app-shell, .app-overlay) textarea,
+:is(.app-shell, .app-overlay) button {
   font-variant-numeric: tabular-nums lining-nums;
 }
 
-.app-shell .uppercase {
+:is(.app-shell, .app-overlay) .uppercase {
   letter-spacing: 0.12em;
 }
 
@@ -2858,9 +2860,9 @@ body {
     padding-left: 1rem;
   }
 
-  .app-shell button,
-  .app-shell input,
-  .app-shell select {
+  :is(.app-shell, .app-overlay) button,
+  :is(.app-shell, .app-overlay) input,
+  :is(.app-shell, .app-overlay) select {
     min-height: 44px;
   }
 }

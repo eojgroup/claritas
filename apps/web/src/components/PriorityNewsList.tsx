@@ -198,6 +198,7 @@ export default function PriorityNewsList({
         return (
           <article
             key={item.id}
+            data-news-id={item.id}
             className={`dashboard-news-item ${selectedStory ? "is-selected" : ""} ${
               isPrimary ? "is-primary" : isSecondary ? "is-secondary" : ""
             }`}

@@ -116,6 +116,47 @@ export function newestNewsFirst<T extends NewsChronologyItem>(
     .map(({ item }) => item);
 }
 
+export type NewsDailyTrendPoint = {
+  dateKey: string;
+  label: string;
+  count: number;
+  rollingAvg: number;
+};
+
+/** Calendar days in the loaded reporting scope, bounded to ten years of daily points. */
+export function newsDailyTrend(items: readonly NewsChronologyItem[]): NewsDailyTrendPoint[] {
+  const counts = new Map<number, number>();
+  const dayMilliseconds = 86_400_000;
+  for (const item of items) {
+    const timestamp = newsChronology(item).milliseconds;
+    if (timestamp == null) continue;
+    const day = Math.floor(timestamp / dayMilliseconds) * dayMilliseconds;
+    counts.set(day, (counts.get(day) ?? 0) + 1);
+  }
+  const days = [...counts.keys()].sort((left, right) => left - right);
+  if (days.length === 0) return [];
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  const points: NewsDailyTrendPoint[] = [];
+  const lastDay = days[days.length - 1];
+  const firstDay = Math.max(days[0], lastDay - 3_659 * dayMilliseconds);
+  let rollingCount = 0;
+  for (let day = firstDay; day <= lastDay; day += dayMilliseconds) {
+    const count = counts.get(day) ?? 0;
+    rollingCount += count - (points.length >= 7 ? counts.get(day - 7 * dayMilliseconds) ?? 0 : 0);
+    points.push({
+      dateKey: new Date(day).toISOString().slice(0, 10),
+      label: formatter.format(new Date(day)),
+      count,
+      rollingAvg: Number((rollingCount / Math.min(points.length + 1, 7)).toFixed(2)),
+    });
+  }
+  return points;
+}
+
 export function mergeNewsTranslationIntoItems(
   items: NewsItem[],
   itemId: number,

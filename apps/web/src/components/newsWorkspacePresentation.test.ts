@@ -5,12 +5,44 @@ import {
   mergeNewsTranslationIntoItems,
   latestNewsTimestamp,
   newsChronology,
+  newsDailyTrend,
   newestNewsFirst,
   resolveNewsCoverageSelection,
   sliceNewsTrendForExport,
 } from "./newsWorkspacePresentation";
 
 describe("news workspace presentation", () => {
+  it("counts empty calendar days in seven-day reporting averages", () => {
+    const series = newsDailyTrend([
+      { event_time: "2026-08-01T12:00:00Z" },
+      { event_time: "2026-08-08T12:00:00Z" },
+      { event_time: "2026-08-08T18:00:00Z" },
+      { event_time: "not-a-date" },
+    ]);
+    expect(series).toHaveLength(8);
+    expect(series[1]).toMatchObject({ dateKey: "2026-08-02", count: 0, rollingAvg: 0.5 });
+    expect(series[7]).toMatchObject({ dateKey: "2026-08-08", count: 2, rollingAvg: 0.29 });
+    expect(series.reduce((total, day) => total + day.count, 0)).toBe(3);
+  });
+
+  it("keeps timeline buckets and labels in UTC across offsets and daylight-saving changes", () => {
+    const series = newsDailyTrend([
+      { event_time: "2026-03-07T23:30:00-08:00" },
+      { event_time: "2026-03-10T00:30:00+01:00" },
+    ]);
+    expect(series.map((day) => [day.dateKey, day.label])).toEqual([
+      ["2026-03-08", "Mar 8"],
+      ["2026-03-09", "Mar 9"],
+    ]);
+  });
+
+  it("bounds chart work when a stored timestamp is far outside the reporting period", () => {
+    const series = newsDailyTrend([{ event_time: "0001-01-01T00:00:00Z" }, { event_time: "2026-09-07T00:00:00Z" }]);
+    expect(series).toHaveLength(3_660);
+    expect(series[series.length - 1]).toMatchObject({ dateKey: "2026-09-07", count: 1 });
+    expect(series.every((day) => day.rollingAvg >= 0)).toBe(true);
+  });
+
   it("allows direct inspection without positive coverage and toggles an active country off", () => {
     expect(resolveNewsCoverageSelection("US", null)).toEqual({ action: "select", country: "US" });
     expect(resolveNewsCoverageSelection("US", "US")).toEqual({ action: "clear", country: null });

@@ -4,6 +4,20 @@ import { fetchNews } from "./api";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("fetchNews", () => {
+  it("preserves research-query syntax and forwards cancellation without putting it in the URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const q = '"interest rates" Fed -inflation 50%';
+    await fetchNews({ q, offset: 200, includeMetadata: false }, controller.signal);
+    const url = new URL(String(fetchMock.mock.calls[0][0]), "https://claritas.test");
+    expect(url.searchParams.get("q")).toBe(q);
+    expect(url.searchParams.get("offset")).toBe("200");
+    expect(url.searchParams.get("include_metadata")).toBe("false");
+    expect(url.searchParams.has("signal")).toBe(false);
+    expect(fetchMock.mock.calls[0][1]).toEqual({ credentials: "include", signal: controller.signal });
+  });
+
   it("requests server-ranked category results and preserves ranking evidence", async () => {
     const story = {
       id: 17,

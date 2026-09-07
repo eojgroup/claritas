@@ -52,6 +52,9 @@ import {
 import worldCountries from "world-countries";
 import PriorityNewsList from "./components/PriorityNewsList";
 import NewsCategoryControl from "./components/NewsCategoryControl";
+import ModalSurface from "./components/ModalSurface";
+import useNewsSearch from "./components/useNewsSearch";
+import { parseDashboardSearch, stripDashboardSearchTopicTokens, type SearchTopic } from "./components/dashboardSearch";
 import { newsCategoryLabel } from "./components/newsCategoryPresentation";
 import {
   compareNewsNewest,
@@ -60,6 +63,7 @@ import {
   latestNewsTimestamp,
   mergeNewsTranslationIntoItems,
   newsChronology,
+  newsDailyTrend,
   newestNewsFirst,
   resolveNewsCoverageSelection,
   sliceNewsTrendForExport,
@@ -147,7 +151,6 @@ function newsCategoryCounts(metadata: NewsFeedMetadata | null): Partial<Record<N
 }
 
 type DataWindowPreset = "30d" | "90d" | "180d" | "all";
-type SearchTopic = "all" | "news" | "podcasts" | "weather" | "markets";
 type MapMode = "signals" | "news" | "weather";
 type AppView =
   | "dashboard"
@@ -214,22 +217,6 @@ const SEARCH_TOPIC_OPTIONS: Array<{ id: SearchTopic; label: string }> = [
   { id: "markets", label: "Markets" },
 ];
 
-const SEARCH_TOPIC_ALIASES: Record<string, SearchTopic> = {
-  all: "all",
-  news: "news",
-  podcast: "podcasts",
-  podcasts: "podcasts",
-  audio: "podcasts",
-  weather: "weather",
-  market: "markets",
-  markets: "markets",
-  finance: "markets",
-  financial: "markets",
-  ai: "news",
-  alerts: "news",
-  wx: "weather",
-};
-
 const COUNTRY_LINK_ALIASES: Record<string, string[]> = {
   AE: ["uae", "united arab emirates"],
   CN: ["china", "prc"],
@@ -251,12 +238,6 @@ const PROFILE_SECTIONS = [
   { id: "security", label: "Security", description: "Session posture" },
   { id: "policies", label: "Policies", description: "Compliance links" },
 ] as const;
-
-type ParsedDashboardSearch = {
-  topic: SearchTopic;
-  terms: string[];
-  raw: string;
-};
 
 type JsonObject = Record<string, unknown>;
 type WorldCountryLike = {
@@ -743,41 +724,6 @@ const getMarketIdentity = (quote: MarketQuote): {
   return { code, name, kind };
 };
 
-const parseDashboardSearch = (
-  raw: string,
-  preferredTopic: SearchTopic,
-): ParsedDashboardSearch => {
-  const trimmed = raw.trim();
-  if (!trimmed) return { topic: preferredTopic, terms: [], raw: "" };
-  const tokens = trimmed.split(/\s+/).filter(Boolean);
-  let topic = preferredTopic;
-  const terms: string[] = [];
-  tokens.forEach((token) => {
-    const lower = token.toLowerCase();
-    const topicMatch = lower.match(/^(?:topic|t):([a-z]+)$/);
-    if (topicMatch) {
-      const mapped = SEARCH_TOPIC_ALIASES[topicMatch[1]];
-      if (mapped) {
-        topic = mapped;
-        return;
-      }
-    }
-    terms.push(lower);
-  });
-  return { topic, terms, raw: trimmed };
-};
-
-const stripDashboardSearchTopicTokens = (raw: string) =>
-  raw
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .filter((token) => {
-      const lower = token.toLowerCase();
-      return !/^(?:topic|t):[a-z]+$/.test(lower);
-    })
-    .join(" ");
-
 const safeDownload = (filename: string, data: Blob | string) => {
   const blob = typeof data === "string" ? new Blob([data]) : data;
   const url = URL.createObjectURL(blob);
@@ -1022,6 +968,7 @@ export default function ClaritasDashboard() {
     endIndex?: number;
   }>({});
   const [minTemp, setMinTemp] = useState<number | undefined>(undefined);
+  const [newsSearchArchive, setNewsSearchArchive] = useState<boolean | null>(null);
   const [newsSourceFilter, setNewsSourceFilter] = useState<string>("all");
   const [newsLanguageFilter, setNewsLanguageFilter] = useState("all");
   const [newsHasImageOnly, setNewsHasImageOnly] = useState(false);
@@ -1142,18 +1089,18 @@ export default function ClaritasDashboard() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setNotificationsOpen(false);
+        setMobileNavOpen(false);
+        setMapExpanded(false);
         setSearchOpen(true);
         return;
       }
       if (event.key === "/" && !isTyping) {
         event.preventDefault();
         setNotificationsOpen(false);
+        setMobileNavOpen(false);
+        setMapExpanded(false);
         setSearchOpen(true);
         return;
-      }
-      if (event.key === "Escape") {
-        setSearchOpen(false);
-        setNotificationsOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyboard);
@@ -1216,6 +1163,32 @@ export default function ClaritasDashboard() {
 
   const isAdmin = (authUser?.roles ?? []).includes("admin");
   const hasPaidAccess = authUser?.billing?.has_access ?? true;
+
+  const parsedSearch = useMemo(
+    () => parseDashboardSearch(query, searchTopic),
+    [query, searchTopic],
+  );
+  const searchTerms = parsedSearch.terms;
+  const effectiveSearchTopic = parsedSearch.topic;
+  const hasSearchQuery = searchTerms.length > 0;
+  const searchAppliesToNews =
+    effectiveSearchTopic === "all" || effectiveSearchTopic === "news";
+  const searchAppliesToPodcasts =
+    effectiveSearchTopic === "all" || effectiveSearchTopic === "podcasts";
+  const searchAppliesToWeather =
+    effectiveSearchTopic === "all" || effectiveSearchTopic === "weather";
+  const searchAppliesToMarkets =
+    effectiveSearchTopic === "all" || effectiveSearchTopic === "markets";
+  const newsSearchActive = searchAppliesToNews && hasSearchQuery;
+  const serverNewsSearch = useNewsSearch({
+    q: parsedSearch.newsQuery,
+    country: selectedNewsCountry ?? undefined,
+    category: newsCategory === "all" ? undefined : newsCategory,
+    language: newsLanguageFilter === "all" ? undefined : newsLanguageFilter,
+    sort: newsSortBy,
+    archive: newsSearchArchive ?? (selectedNewsCountry ? newsCountryLoadMode : newsLoadMode) === "archive",
+  }, newsSearchActive && authStatus === "authed" && hasPaidAccess);
+  const { updateItems: updateSearchNewsItems, retry: retryNewsSearch } = serverNewsSearch;
 
   useEffect(() => {
     if (authStatus !== "authed" || !hasPaidAccess) {
@@ -1632,6 +1605,7 @@ export default function ClaritasDashboard() {
       const translation = await ensureNewsTranslationSummary(item.id);
       setNews((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
       setTopNews((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
+      updateSearchNewsItems((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
       setNewsCountryItems((current) => current
         ? mergeNewsTranslationIntoItems(current, item.id, translation)
         : current);
@@ -1645,7 +1619,7 @@ export default function ClaritasDashboard() {
         return next;
       });
     }
-  }, []);
+  }, [updateSearchNewsItems]);
 
   const loadPodcastData = useCallback(async (q = "", signalType: PodcastSignal["type"] | "all" = "all") => {
     const requestId = podcastRequestIdRef.current + 1;
@@ -1862,21 +1836,6 @@ export default function ClaritasDashboard() {
     );
   }, [news, regionCountries]);
 
-  const parsedSearch = useMemo(
-    () => parseDashboardSearch(query, searchTopic),
-    [query, searchTopic],
-  );
-  const searchTerms = parsedSearch.terms;
-  const effectiveSearchTopic = parsedSearch.topic;
-  const hasSearchQuery = searchTerms.length > 0;
-  const searchAppliesToNews =
-    effectiveSearchTopic === "all" || effectiveSearchTopic === "news";
-  const searchAppliesToPodcasts =
-    effectiveSearchTopic === "all" || effectiveSearchTopic === "podcasts";
-  const searchAppliesToWeather =
-    effectiveSearchTopic === "all" || effectiveSearchTopic === "weather";
-  const searchAppliesToMarkets =
-    effectiveSearchTopic === "all" || effectiveSearchTopic === "markets";
   const searchInputPlaceholder =
     effectiveSearchTopic === "weather"
       ? "Search weather topics (e.g. storm, humidity, US)"
@@ -1891,28 +1850,6 @@ export default function ClaritasDashboard() {
   const getSourceLabel = useCallback((item: NewsItem) => {
     return resolveNewsSource(item);
   }, []);
-
-  const matchesNewsSearch = useCallback(
-    (item: NewsItem) => {
-      if (searchTerms.length === 0) return true;
-      const source = getSourceLabel(item) ?? "";
-      const haystack = [
-        item.title ?? "",
-        item.summary ?? "",
-        item.translated_title ?? "",
-        item.ai_summary ?? "",
-        item.url ?? "",
-        getNewsSignalCountries(item).join(" "),
-        source,
-        newsChronology(item).timestamp ?? "",
-        item.kind ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return searchTerms.every((term) => haystack.includes(term));
-    },
-    [getSourceLabel, searchTerms],
-  );
 
   const matchesWeatherSearch = useCallback(
     (item: CountryWeather) => {
@@ -1972,9 +1909,11 @@ export default function ClaritasDashboard() {
   );
 
   const newsSearchScope = useMemo(() => {
-    if (!searchAppliesToNews || searchTerms.length === 0) return newsScope;
-    return newsScope.filter(matchesNewsSearch);
-  }, [newsScope, matchesNewsSearch, searchAppliesToNews, searchTerms.length]);
+    if (!newsSearchActive) return newsScope;
+    const items = serverNewsSearch.response?.items ?? [];
+    if (!regionCountries || selectedNewsCountry) return items;
+    return items.filter((item) => getNewsSignalCountries(item).some((country) => regionCountries.has(country)));
+  }, [newsScope, newsSearchActive, regionCountries, selectedNewsCountry, serverNewsSearch.response]);
 
   const weatherScope = useMemo(() => {
     let rows = weatherStats;
@@ -2051,6 +1990,7 @@ export default function ClaritasDashboard() {
   const newsCoverageLabel = useMemo(() => {
     if (!newsDateBounds) return "No dated articles loaded";
     const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -2063,7 +2003,7 @@ export default function ClaritasDashboard() {
     if (selectedWindowDays == null) return newsDateBounds;
     const endDate = new Date(newsDateBounds.end);
     const startDate = new Date(endDate);
-    startDate.setDate(endDate.getDate() - selectedWindowDays + 1);
+    startDate.setUTCDate(endDate.getUTCDate() - selectedWindowDays + 1);
     const start = getDateKey(startDate);
     if (!start) return newsDateBounds;
     return {
@@ -2075,6 +2015,7 @@ export default function ClaritasDashboard() {
   const newsTrend = useMemo(() => {
     if (!defaultRange) return [];
     const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
       month: "short",
       day: "numeric",
     });
@@ -2106,7 +2047,7 @@ export default function ClaritasDashboard() {
           topCountries: [],
         });
       }
-      cursor.setDate(cursor.getDate() + 1);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
     const selectedIso = selectedCountry?.toUpperCase() ?? null;
@@ -2178,6 +2119,7 @@ export default function ClaritasDashboard() {
 
   const activeRangeLabel = useMemo(() => {
     const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -2235,6 +2177,7 @@ export default function ClaritasDashboard() {
   const mapRangeLabel = useMemo(() => {
     if (!mapRange) return "No range";
     const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
       month: "short",
       day: "numeric",
     });
@@ -2735,20 +2678,10 @@ export default function ClaritasDashboard() {
   }, [marketSearchScope]);
 
   const newsWorkspaceScope = useMemo(() => {
+    if (newsSearchActive) return newsSearchScope;
     if (newsMapCountry !== selectedNewsCountry) return [];
-    if (!newsMapCountry) return newsSearchScope;
-    const countryItems = newsCountryItems ?? [];
-    if (!searchAppliesToNews || searchTerms.length === 0) return countryItems;
-    return countryItems.filter(matchesNewsSearch);
-  }, [
-    matchesNewsSearch,
-    newsCountryItems,
-    newsMapCountry,
-    newsSearchScope,
-    selectedNewsCountry,
-    searchAppliesToNews,
-    searchTerms.length,
-  ]);
+    return newsMapCountry ? newsCountryItems ?? [] : newsSearchScope;
+  }, [newsCountryItems, newsMapCountry, newsSearchActive, newsSearchScope, selectedNewsCountry]);
 
   const newsSourceOptions = useMemo(() => {
     const sources = new Set<string>();
@@ -2792,35 +2725,15 @@ export default function ClaritasDashboard() {
     newsWorkspaceScope,
   ]);
 
-  const newsPageTimelineData = useMemo(() => {
-    const byDate = new Map<string, number>();
-    newsPageItems.forEach((item) => {
-      const timestamp = newsChronology(item).timestamp;
-      const key = timestamp ? getDateKey(timestamp) : null;
-      if (!key) return;
-      byDate.set(key, (byDate.get(key) ?? 0) + 1);
-    });
-    return Array.from(byDate.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, stories]) => ({ date, stories }));
-  }, [newsPageItems]);
-
-  const newsPageTrendData = useMemo(() => {
-    const formatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-    return newsPageTimelineData.map((row, index, rows) => {
-      const window = rows.slice(Math.max(0, index - 6), index + 1);
-      const rollingAvg = window.reduce((sum, item) => sum + item.stories, 0) / window.length;
-      return {
-        dateKey: row.date,
-        label: formatter.format(new Date(`${row.date}T00:00:00Z`)),
-        count: row.stories,
-        comparisonCount: 0,
-        rollingAvg: Number(rollingAvg.toFixed(2)),
-        comparisonRollingAvg: 0,
-        topCountries: [] as string[],
-      };
-    });
-  }, [newsPageTimelineData]);
+  const newsPageTrendData = useMemo(
+    () => newsDailyTrend(newsPageItems).map((row) => ({
+      ...row,
+      comparisonCount: 0,
+      comparisonRollingAvg: 0,
+      topCountries: [] as string[],
+    })),
+    [newsPageItems],
+  );
   const newsPageTrendTotal = useMemo(
     () => newsPageTrendData.reduce((sum, row) => sum + row.count, 0),
     [newsPageTrendData],
@@ -2829,7 +2742,7 @@ export default function ClaritasDashboard() {
     const first = newsPageTrendData[0]?.dateKey;
     const last = newsPageTrendData[newsPageTrendData.length - 1]?.dateKey;
     if (!first || !last) return "No dated stories in the loaded scope";
-    const formatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const formatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
     return `${formatter.format(new Date(`${first}T00:00:00Z`))} – ${formatter.format(new Date(`${last}T00:00:00Z`))}`;
   }, [newsPageTrendData]);
   const handleNewsWorkspaceExportCsv = useCallback(() => {
@@ -3509,16 +3422,16 @@ export default function ClaritasDashboard() {
   }, [podcastCountryLinks, relationCountry]);
 
   const newsSummary = useMemo(() => {
-    const timelineDays = newsPageTimelineData.length;
+    const timelineDays = newsPageTrendData.length;
     const withImages = newsPageItems.filter((item) => Boolean(getNewsImageUrl(item))).length;
     return {
       stories: newsPageItems.length,
       countries: newsPageCountryStats.size,
       dominantSource: newsPageSourceData[0]?.source ?? "—",
-      avgPerDay: timelineDays > 0 ? newsPageItems.length / timelineDays : newsPageItems.length,
+      avgPerDay: timelineDays > 0 ? newsPageTrendTotal / timelineDays : 0,
       withImages,
     };
-  }, [newsPageCountryStats.size, newsPageItems, newsPageSourceData, newsPageTimelineData.length]);
+  }, [newsPageCountryStats.size, newsPageItems, newsPageSourceData, newsPageTrendData.length, newsPageTrendTotal]);
 
   const newsLatestTimestamp = useMemo(
     () => latestNewsTimestamp(newsPageItems),
@@ -3532,17 +3445,18 @@ export default function ClaritasDashboard() {
     ? countryMeta.get(selectedNewsCountry)?.name ?? selectedNewsCountry
     : null;
   const newsScopeMatchesOverarchingCountry = newsMapCountry === selectedNewsCountry;
-  const activeNewsLoading = !newsScopeMatchesOverarchingCountry
-    || (newsMapCountry ? isLoadingNewsCountry : isLoadingNews);
-  const activeNewsLoadError = newsScopeMatchesOverarchingCountry
-    ? (newsMapCountry ? newsCountryLoadError : newsLoadError)
-    : null;
-  const activeNewsFeedMetadata = newsScopeMatchesOverarchingCountry
-    ? (newsMapCountry ? newsCountryFeedMetadata : newsFeedMetadata)
-    : null;
-  const activeNewsRawCount = newsScopeMatchesOverarchingCountry
-    ? (newsMapCountry ? newsCountryItems?.length ?? 0 : news.length)
-    : 0;
+  const activeNewsLoading = newsSearchActive
+    ? serverNewsSearch.loading
+    : !newsScopeMatchesOverarchingCountry || (newsMapCountry ? isLoadingNewsCountry : isLoadingNews);
+  const activeNewsLoadError = newsSearchActive
+    ? serverNewsSearch.error
+    : newsScopeMatchesOverarchingCountry ? (newsMapCountry ? newsCountryLoadError : newsLoadError) : null;
+  const activeNewsFeedMetadata = newsSearchActive
+    ? serverNewsSearch.response
+    : newsScopeMatchesOverarchingCountry ? (newsMapCountry ? newsCountryFeedMetadata : newsFeedMetadata) : null;
+  const activeNewsRawCount = newsSearchActive
+    ? serverNewsSearch.response?.items.length ?? 0
+    : newsScopeMatchesOverarchingCountry ? (newsMapCountry ? newsCountryItems?.length ?? 0 : news.length) : 0;
   const activeNewsTotal = Math.max(activeNewsRawCount, activeNewsFeedMetadata?.page.total ?? 0);
   const activeNewsAppliedCategory: NewsCategoryFilter = activeNewsFeedMetadata
     ? activeNewsFeedMetadata.ranking.category ?? "all"
@@ -3632,9 +3546,12 @@ export default function ClaritasDashboard() {
       }))
       .sort((left, right) => left.name.localeCompare(right.name));
   }, [countryMeta, newsMapCoverageStats]);
-  const activeNewsLoadMode = selectedNewsCountry ? newsCountryLoadMode : newsLoadMode;
+  const activeNewsLoadMode = newsSearchActive && newsSearchArchive != null
+    ? newsSearchArchive ? "archive" : "recent"
+    : selectedNewsCountry ? newsCountryLoadMode : newsLoadMode;
 
   const clearNewsStoryFilters = useCallback(() => {
+    setNewsSearchArchive(null);
     setNewsSourceFilter("all");
     setNewsLanguageFilter("all");
     setNewsHasImageOnly(false);
@@ -3662,12 +3579,18 @@ export default function ClaritasDashboard() {
   }, [clearNewsCountryScope, clearNewsStoryFilters]);
 
   const retryNewsWorkspace = useCallback(() => {
+    if (newsSearchActive) {
+      retryNewsSearch();
+      return;
+    }
     if (newsMapCountry) {
       void loadNewsCountryData(newsMapCountry, newsCountryLoadMode, newsCategory, newsSortBy);
       return;
     }
     void loadNewsData(newsLoadMode, newsCategory, newsSortBy);
   }, [
+    newsSearchActive,
+    retryNewsSearch,
     loadNewsCountryData,
     loadNewsData,
     newsCategory,
@@ -3978,10 +3901,12 @@ export default function ClaritasDashboard() {
         : countries[0] ?? null;
       return {
         key: `news-${item.id}`,
+        newsItemId: item.id,
         kind: "News",
         view: "news" as const,
         title: newsDisplayTitle(item),
         subtitle: [
+          getSourceLabel(item),
           item.translated_title ? "AI translation" : null,
           countries.length > 0 ? countries.join(", ") : null,
           chronologyTimestamp ? new Date(chronologyTimestamp).toLocaleString() : null,
@@ -4057,7 +3982,7 @@ export default function ClaritasDashboard() {
       return markets;
     }
     return [...news.slice(0, 3), ...podcastRows.slice(0, 3), ...weather.slice(0, 1), ...markets.slice(0, 1)];
-  }, [effectiveSearchTopic, marketCountryRows, newsSearchScope, podcastSearchScope, selectedNewsCountry, weatherSearchScope]);
+  }, [effectiveSearchTopic, getSourceLabel, marketCountryRows, newsSearchScope, podcastSearchScope, selectedNewsCountry, weatherSearchScope]);
 
   const signalNotifications = useMemo<SignalNotification[]>(() => {
     const items: SignalNotification[] = [];
@@ -4252,20 +4177,15 @@ export default function ClaritasDashboard() {
   }, [activeView, mapExpanded]);
 
   useEffect(() => {
-    if (!mapExpanded) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setMapExpanded(false);
-      }
+    if (!mobileNavOpen) return;
+    const media = window.matchMedia("(min-width: 1024px)");
+    const closeDesktopDrawer = () => {
+      if (media.matches) setMobileNavOpen(false);
     };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [mapExpanded]);
+    closeDesktopDrawer();
+    media.addEventListener("change", closeDesktopDrawer);
+    return () => media.removeEventListener("change", closeDesktopDrawer);
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     const update = () =>
@@ -4377,7 +4297,18 @@ export default function ClaritasDashboard() {
 
   const handleSearchResult = (result: (typeof aiSearchPreview)[number]) => {
     setActiveView(result.view);
-    if (result.country) {
+    if ("newsItemId" in result) {
+      setSelectedDashboardNewsId(result.newsItemId);
+      setNewsSourceFilter("all");
+      setNewsHasImageOnly(false);
+      const story = newsSearchScope.find((item) => item.id === result.newsItemId);
+      if (story) void requestNewsTranslationSummary(story);
+      requestAnimationFrame(() => {
+        const row = document.querySelector<HTMLElement>(`[data-news-id="${result.newsItemId}"] .dashboard-news-summary`);
+        row?.focus({ preventScroll: true });
+        row?.scrollIntoView({ block: "nearest" });
+      });
+    } else if (result.country) {
       setSelectedCountry(result.country);
     }
     if (result.symbol) {
@@ -4816,14 +4747,23 @@ export default function ClaritasDashboard() {
   return (
     <div className="app-shell app-safe-x min-h-[100dvh] w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)]">
       {mobileNavOpen && (
-        <div className="app-safe-top app-safe-bottom fixed inset-0 z-40 lg:hidden">
-          <div
-            className="absolute inset-0 bg-slate-900/60"
-            onClick={() => setMobileNavOpen(false)}
-          />
-          <aside className="app-sidebar absolute left-0 top-0 h-full w-[min(20rem,88vw)] text-white">
+        <ModalSurface
+          id="mobile-navigation"
+          label="Navigation"
+          onClose={() => setMobileNavOpen(false)}
+          className="app-safe-top app-safe-bottom fixed inset-0 z-40 bg-slate-900/60 lg:hidden"
+          surfaceClassName="app-sidebar absolute left-0 top-0 h-full w-[min(20rem,88vw)] overflow-y-auto text-white"
+        >
             <div className="flex h-full flex-col">
               <div className="px-6 pt-6 pb-4">
+                <button
+                  type="button"
+                  onClick={() => setMobileNavOpen(false)}
+                  aria-label="Close navigation"
+                  className="mb-3 ml-auto grid h-11 w-11 place-items-center rounded-lg border border-white/20"
+                >
+                  <X className="h-5 w-5" />
+                </button>
                 <div className="flex items-center gap-3">
                   <div className="relative h-10 w-14 flex-none">
                     <div className="absolute left-0 top-0 h-10 w-10 rounded-full bg-[color:var(--brand-mark-1)]" />
@@ -4894,8 +4834,7 @@ export default function ClaritasDashboard() {
                 </button>
               </div>
             </div>
-          </aside>
-        </div>
+        </ModalSurface>
       )}
 
       <div className="flex min-h-screen">
@@ -4975,6 +4914,9 @@ export default function ClaritasDashboard() {
               <button
                 type="button"
                 onClick={() => setMobileNavOpen(true)}
+                aria-label="Open navigation"
+                aria-expanded={mobileNavOpen}
+                aria-controls="mobile-navigation"
                 className="lg:hidden inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-ink)] shadow-sm"
               >
                 <Menu className="h-5 w-5" />
@@ -5079,21 +5021,17 @@ export default function ClaritasDashboard() {
           </header>
 
           {searchOpen && (
-            <div
+            <ModalSurface
+              label="Search signals"
+              onClose={() => setSearchOpen(false)}
               className="fixed inset-0 z-50 flex items-start justify-center bg-[color:var(--shell-sidebar)]/55 p-3 pt-[max(4rem,10vh)] backdrop-blur-sm sm:p-6"
-              onClick={() => setSearchOpen(false)}
+              surfaceClassName="app-card flex max-h-[80dvh] w-full max-w-3xl flex-col overflow-hidden rounded-xl"
             >
-              <section
-                role="dialog"
-                aria-modal="true"
-                aria-label="Search signals"
-                className="app-card flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl"
-                onClick={(event) => event.stopPropagation()}
-              >
                 <div className="flex items-center gap-3 border-b border-[color:var(--shell-border)] px-4 py-3">
                   <Search className="h-5 w-5 shrink-0 text-[color:var(--shell-muted)]" />
                   <input
-                    autoFocus
+                    aria-label="Search signals"
+                    maxLength={400}
                     className="min-w-0 flex-1 bg-transparent text-base text-[color:var(--shell-ink)] outline-none placeholder:text-[color:var(--shell-muted)]"
                     placeholder={searchInputPlaceholder}
                     value={query}
@@ -5127,6 +5065,7 @@ export default function ClaritasDashboard() {
                         key={`search-dialog-${option.id}`}
                         type="button"
                         onClick={() => handleSearchTopicChange(option.id)}
+                        aria-pressed={active}
                         className={`rounded-full border px-3 py-1 text-xs font-semibold ${
                           active
                             ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
@@ -5146,6 +5085,16 @@ export default function ClaritasDashboard() {
                 </div>
 
                 <div className="app-scroll-panel min-h-0 flex-1 overflow-y-auto p-3">
+                  {newsSearchActive && (
+                    <div className="mb-3 rounded-lg border border-[color:var(--shell-border)] p-3 text-xs text-[color:var(--shell-muted)]" role={serverNewsSearch.error ? "alert" : "status"}>
+                      {serverNewsSearch.loading
+                        ? "Searching reporting across stored sources…"
+                        : serverNewsSearch.error
+                          ? `Reporting search failed: ${friendlyWorkspaceError(serverNewsSearch.error)}`
+                          : `${serverNewsSearch.response?.page.total ?? newsSearchScope.length} reporting matches · ${activeNewsLoadMode === "archive" ? "archive" : "recent reporting"}${selectedNewsCountry ? ` · ${selectedNewsCountry}` : ""}`}
+                      {serverNewsSearch.error && <button type="button" onClick={retryNewsSearch} className="ml-3 rounded border border-current px-2 py-1">Retry search</button>}
+                    </div>
+                  )}
                   {!hasSearchQuery ? (
                     <div className="grid min-h-48 place-items-center px-6 text-center">
                       <div>
@@ -5154,11 +5103,11 @@ export default function ClaritasDashboard() {
                           Search across the live signal desk
                         </div>
                         <div className="mt-1 text-xs text-[color:var(--shell-muted)]">
-                          Find headlines, countries, weather conditions, companies, or market symbols.
+                          Find reporting across stored sources, countries, weather conditions, companies, or market symbols. News supports “quoted phrases” and -excluded terms.
                         </div>
                       </div>
                     </div>
-                  ) : aiSearchPreview.length === 0 ? (
+                  ) : aiSearchPreview.length === 0 && !serverNewsSearch.loading && !serverNewsSearch.error ? (
                     <div className="grid min-h-48 place-items-center px-6 text-center text-sm text-[color:var(--shell-muted)]">
                       No matching signals for this topic and query.
                     </div>
@@ -5202,22 +5151,16 @@ export default function ClaritasDashboard() {
                     </div>
                   )}
                 </div>
-              </section>
-            </div>
+            </ModalSurface>
           )}
 
           {notificationsOpen && (
-            <div
+            <ModalSurface
+              label="Signal notifications"
+              onClose={() => setNotificationsOpen(false)}
               className="fixed inset-0 z-50 flex justify-end bg-[color:var(--shell-sidebar)]/45 backdrop-blur-sm"
-              onClick={() => setNotificationsOpen(false)}
+              surfaceClassName="app-card app-safe-top app-safe-bottom flex h-full w-full max-w-md flex-col rounded-none border-y-0 border-r-0"
             >
-              <aside
-                role="dialog"
-                aria-modal="true"
-                aria-label="Signal notifications"
-                className="app-card flex h-full w-full max-w-md flex-col rounded-none border-y-0 border-r-0"
-                onClick={(event) => event.stopPropagation()}
-              >
                 <div className="flex items-start gap-3 border-b border-[color:var(--shell-border)] px-4 py-4">
                   <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[color:var(--signal-amber-soft)] text-[color:var(--shell-ink)]">
                     <Bell className="h-4 w-4" />
@@ -5319,8 +5262,7 @@ export default function ClaritasDashboard() {
                     </div>
                   )}
                 </div>
-              </aside>
-            </div>
+            </ModalSurface>
           )}
 
           <main
@@ -6848,14 +6790,12 @@ export default function ClaritasDashboard() {
                 </div>
 
                 {mapExpanded && (
-                  <div
+                  <ModalSurface
+                    label="Expanded map"
+                    onClose={() => setMapExpanded(false)}
                     className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 sm:p-6"
-                    onClick={() => setMapExpanded(false)}
+                    surfaceClassName="app-card max-h-[95dvh] w-full max-w-6xl overflow-y-auto rounded-[1.6rem]"
                   >
-                    <div
-                      className="app-card w-full max-w-6xl rounded-[1.6rem]"
-                      onClick={(event) => event.stopPropagation()}
-                    >
                       <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -6937,8 +6877,7 @@ export default function ClaritasDashboard() {
                           Search topic: {activeSearchTopicLabel}
                         </span>
                       </div>
-                    </div>
-                  </div>
+                  </ModalSurface>
                 )}
 
               </div>
@@ -6964,7 +6903,9 @@ export default function ClaritasDashboard() {
                     <button
                       onClick={() => {
                         const nextMode = activeNewsLoadMode === "archive" ? "recent" : "archive";
-                        if (selectedNewsCountry) {
+                        if (newsSearchActive) {
+                          setNewsSearchArchive(nextMode === "archive");
+                        } else if (selectedNewsCountry) {
                           void loadNewsCountryData(selectedNewsCountry, nextMode, newsCategory, newsSortBy);
                         } else {
                           void loadNewsData(nextMode, newsCategory, newsSortBy);
@@ -6998,6 +6939,22 @@ export default function ClaritasDashboard() {
                       : undefined}
                     resultSummary={activeNewsResultSummary}
                   />
+                  <label className="w-full text-xs text-[color:var(--shell-muted)]">
+                    Search reporting across stored sources
+                    <input
+                      type="search"
+                      value={searchAppliesToNews ? query : ""}
+                      onChange={(event) => {
+                        setSearchTopic("news");
+                        setQuery(event.currentTarget.value);
+                      }}
+                      placeholder='Try "port closure" -exercise or reuters energy'
+                      aria-describedby="news-search-help"
+                      maxLength={400}
+                      className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-ink)]"
+                    />
+                    <span id="news-search-help" className="mt-1 block">Combine words, use “quoted phrases”, or -exclude terms. Searches original and translated reporting plus publishers; choose Load archive for older coverage.</span>
+                  </label>
                   <div className="grid w-full gap-2 text-xs sm:grid-cols-2 lg:grid-cols-5">
                     <label className="text-[color:var(--shell-muted)]">
                       Source
@@ -7070,14 +7027,16 @@ export default function ClaritasDashboard() {
                   </div>
                 </section>
 
-                {(selectedNewsCountry || newsMapNotice || activeNewsLoadError || isLoadingNews || isLoadingNewsCountry) && (
+                {(selectedNewsCountry || newsMapNotice || activeNewsLoadError || activeNewsLoading) && (
                   <section
                     role={activeNewsLoadError ? "alert" : "status"}
                     className={`news-scope-status flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 text-sm ${activeNewsLoadError ? "event-error" : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)]"}`}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="font-semibold text-[color:var(--shell-ink)]">
-                        {activeNewsLoading && newsMapCountryLabel
+                        {newsSearchActive && activeNewsLoading
+                          ? "Searching stored reporting…"
+                          : activeNewsLoading && newsMapCountryLabel
                           ? `Loading ${newsMapCountryLabel} reporting…`
                           : isLoadingNews
                             ? "Refreshing the global reporting stream…"
@@ -7283,6 +7242,20 @@ export default function ClaritasDashboard() {
                           </div>
                         }
                       />
+                      {newsSearchActive && (serverNewsSearch.canLoadMore || serverNewsSearch.atLimit) && (
+                        <div className="border-t border-[color:var(--shell-border)] p-3 text-center text-xs text-[color:var(--shell-muted)]">
+                          {serverNewsSearch.canLoadMore ? (
+                            <button
+                              type="button"
+                              onClick={() => void serverNewsSearch.loadMore()}
+                              disabled={serverNewsSearch.loadingMore}
+                              className="rounded-lg border border-[color:var(--shell-border)] px-4 py-2 font-semibold text-[color:var(--shell-ink)] disabled:opacity-60"
+                            >
+                              {serverNewsSearch.loadingMore ? "Loading more reporting…" : "Load more reporting"}
+                            </button>
+                          ) : "1,000 matches loaded. Refine the query, country, category, or language to explore further."}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </section>
@@ -7297,7 +7270,7 @@ export default function ClaritasDashboard() {
                           News volume
                         </div>
                         <div className="text-sm font-semibold">
-                          Articles in the loaded story scope
+                          Articles in loaded scope · UTC days · up to 10 years
                         </div>
                         <div className="text-xs text-[color:var(--shell-muted)]">
                           {newsPageTrendRangeLabel}

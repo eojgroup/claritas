@@ -1758,7 +1758,7 @@ export async function fetchNews(params?: {
   sort?: NewsSort;
   archive?: boolean;
   includeMetadata?: boolean;
-}): Promise<NewsFeedResponse> {
+}, signal?: AbortSignal): Promise<NewsFeedResponse> {
   const sp = new URLSearchParams();
   const requestedSort = params?.sort ?? "newest";
   sp.set("display_language", params?.displayLanguage ?? CURRENT_INTERFACE_LANGUAGE);
@@ -1773,7 +1773,7 @@ export async function fetchNews(params?: {
   if (params?.category) sp.set("category", params.category);
   if (params?.archive) sp.set("archive", "true");
   if (params?.includeMetadata === false) sp.set("include_metadata", "false");
-  const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`, { credentials: "include" });
+  const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`, { credentials: "include", signal });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch news"));
   const data = await resp.json() as Partial<NewsFeedResponse>;
   const items = Array.isArray(data.items) ? data.items : [];
