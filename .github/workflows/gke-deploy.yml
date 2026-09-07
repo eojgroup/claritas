@@ -1331,8 +1331,9 @@ jobs:
           if [ "$news_ready" -ne 1 ]; then
             echo "::error::News runtime did not prove fresh markets, assessed publisher diversity, and non-GB subject geography." >&2
             printf '%s\n' "$news_body"
-            kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=20m | \
-              grep -E "(news_assessment|News ingestion|gdelt|GDELT|ingestion_automation)" || true
+            kubectl -n "${NAMESPACE}" logs -l app=claritas-api -c claritas-api \
+              --since=20m --tail=2000 --prefix=true --max-log-requests=10 | \
+              grep -E "(news_assessment|news_runtime_health_failed|database_pool_pressure|News ingestion|gdelt|GDELT|ingestion_automation)" || true
             exit 1
           fi
           printf '%s' "$news_body" | node -e '

@@ -883,85 +883,106 @@ async function resolvePublicArticleAddress(url: URL): Promise<{ address: string;
 
 type VerifiedPublisherPage = { html: string; finalUrl: string };
 
-async function requestVerifiedPublisherPage(urlValue: string, redirects = 0): Promise<VerifiedPublisherPage | null> {
-  if (redirects > 3) return null;
-  const url = usableGdeltArticleUrl(urlValue);
-  if (!url) return null;
-  const address = await resolvePublicArticleAddress(url);
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value: VerifiedPublisherPage | null): void => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-    const transport = url.protocol === "https:" ? https : http;
-    const request = transport.request({
-      protocol: url.protocol,
-      hostname: unbracketHostname(url.hostname),
-      port: url.port || undefined,
-      path: `${url.pathname}${url.search}`,
-      method: "GET",
-      headers: {
-        accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
-        "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
-      },
-      // Pin the request to the just-vetted DNS result. Calling global fetch
-      // after a separate lookup would permit a DNS-rebinding race.
-      lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
-      agent: false,
-    }, (response) => {
-      const statusCode = response.statusCode ?? 0;
-      const location = typeof response.headers.location === "string" ? response.headers.location : null;
-      if ([301, 302, 303, 307, 308].includes(statusCode) && location) {
-        response.resume();
-        let redirect: string;
-        try {
-          redirect = new URL(location, url).toString();
-        } catch {
-          finish(null);
-          return;
-        }
-        void requestVerifiedPublisherPage(redirect, redirects + 1).then(finish).catch(() => finish(null));
-        return;
-      }
-      if (statusCode < 200 || statusCode >= 300) {
-        response.resume();
-        finish(null);
-        return;
-      }
-      const contentType = String(response.headers["content-type"] ?? "").toLowerCase();
-      const advertisedLength = Number(response.headers["content-length"]);
-      if (
-        (contentType && !/(?:text\/html|application\/xhtml\+xml)/.test(contentType)) ||
-        (Number.isFinite(advertisedLength) && advertisedLength > GDELT_ARTICLE_HTML_MAX_BYTES)
-      ) {
-        response.resume();
-        finish(null);
-        return;
-      }
-      const chunks: Buffer[] = [];
-      let total = 0;
-      response.on("data", (chunk: Buffer | string) => {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        total += buffer.byteLength;
-        if (total > GDELT_ARTICLE_HTML_MAX_BYTES) {
-          request.destroy();
-          finish(null);
-          return;
-        }
-        chunks.push(buffer);
-      });
-      response.on("error", () => finish(null));
-      response.on("end", () => finish({ html: Buffer.concat(chunks).toString("utf8"), finalUrl: url.toString() }));
-    });
-    request.setTimeout(8_000, () => {
-      request.destroy();
-      finish(null);
-    });
-    request.on("error", () => finish(null));
-    request.end();
+type PublisherPageDependencies = {
+  resolveAddress?: typeof resolvePublicArticleAddress;
+  request?: (options: http.RequestOptions, callback: (response: http.IncomingMessage) => void) => http.ClientRequest;
+};
+
+export async function requestVerifiedPublisherPage(
+  urlValue: string,
+  dependencies: PublisherPageDependencies = {},
+): Promise<VerifiedPublisherPage | null> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // One wall-clock budget covers DNS, connection setup, every redirect and
+  // the complete body. Socket inactivity timeouts can be kept alive forever
+  // by a slow publisher and leave all four verification workers occupied.
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => { controller.abort(); resolve(null); }, 8_000);
   });
+  const acquire = async (): Promise<VerifiedPublisherPage | null> => {
+    let target = urlValue;
+    for (let redirects = 0; redirects <= 3; redirects += 1) {
+      const url = usableGdeltArticleUrl(target);
+      if (!url || controller.signal.aborted) return null;
+      const address = await (dependencies.resolveAddress ?? resolvePublicArticleAddress)(url);
+      // A DNS lookup cannot itself be cancelled. Do not open a late socket
+      // after the caller has already moved on to other publisher evidence.
+      if (controller.signal.aborted) return null;
+      const result = await new Promise<VerifiedPublisherPage | { redirect: string } | null>((resolve) => {
+        let settled = false;
+        const finish = (value: VerifiedPublisherPage | { redirect: string } | null): void => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        };
+        const transport = url.protocol === "https:" ? https : http;
+        const request = (dependencies.request ?? transport.request)({
+          protocol: url.protocol,
+          hostname: unbracketHostname(url.hostname),
+          port: url.port || undefined,
+          path: `${url.pathname}${url.search}`,
+          method: "GET",
+          headers: {
+            accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+            "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
+          },
+          // Pin the socket to the vetted address, retaining Host/SNI and TLS
+          // verification for the original publisher hostname.
+          lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
+          family: address.family,
+          agent: false,
+          signal: controller.signal,
+        }, (response) => {
+          const statusCode = response.statusCode ?? 0;
+          const location = typeof response.headers.location === "string" ? response.headers.location : null;
+          if ([301, 302, 303, 307, 308].includes(statusCode) && location) {
+            response.destroy();
+            try { finish({ redirect: new URL(location, url).toString() }); }
+            catch { finish(null); }
+            return;
+          }
+          if (statusCode < 200 || statusCode >= 300) {
+            response.destroy();
+            finish(null);
+            return;
+          }
+          const contentType = String(response.headers["content-type"] ?? "").toLowerCase();
+          const advertisedLength = Number(response.headers["content-length"]);
+          if (
+            (contentType && !/(?:text\/html|application\/xhtml\+xml)/.test(contentType)) ||
+            (Number.isFinite(advertisedLength) && advertisedLength > GDELT_ARTICLE_HTML_MAX_BYTES)
+          ) {
+            response.destroy();
+            finish(null);
+            return;
+          }
+          const chunks: Buffer[] = [];
+          let total = 0;
+          response.on("data", (chunk: Buffer | string) => {
+            const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+            total += buffer.byteLength;
+            if (total > GDELT_ARTICLE_HTML_MAX_BYTES) {
+              response.destroy();
+              finish(null);
+              return;
+            }
+            chunks.push(buffer);
+          });
+          response.on("error", () => finish(null));
+          response.on("aborted", () => finish(null));
+          response.on("end", () => finish({ html: Buffer.concat(chunks).toString("utf8"), finalUrl: url.toString() }));
+        });
+        request.on("error", () => finish(null));
+        request.end();
+      });
+      if (!result || !("redirect" in result)) return result;
+      target = result.redirect;
+    }
+    return null;
+  };
+  try { return await Promise.race([acquire().catch(() => null), timeout]); }
+  finally { clearTimeout(timer); controller.abort(); }
 }
 
 async function resolveGdeltPublisherEvidence(url: string): Promise<GdeltPublisherEvidence> {
