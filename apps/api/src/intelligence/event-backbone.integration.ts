@@ -57,7 +57,10 @@ test("canonical publisher identity converges direct and aggregator discoveries",
 test("GDELT quarantine binds JSON parameters and preserves the first-seen history of existing stories", async () => {
   await withTransaction(async (client) => {
     const name = `gdelt-quarantine-fixture-${randomUUID()}`;
-    const source = await client.query<{ id: number }>("INSERT INTO source(name,auth_type) VALUES($1,'none') RETURNING id", [name]);
+    const source = await client.query<{ id: number }>(
+      "INSERT INTO source(name,api_base_url,auth_type) VALUES($1,'https://example.org/','none') RETURNING id",
+      [name],
+    );
     const sourceId = source.rows[0].id;
     const url = `https://example.org/${name}`;
     const firstSeen = "2026-09-07T18:00:00.000Z";

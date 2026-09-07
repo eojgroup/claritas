@@ -228,7 +228,6 @@ data:
       local payload=""
       local mapper=""
       local mapper_id=""
-      local mapper_ids=()
 
       client_internal="$(client_internal_id "$client_id")"
       if [ -z "$client_internal" ]; then
@@ -236,8 +235,8 @@ data:
         return 1
       fi
 
-      mapfile -t mapper_ids < <(protocol_mapper_ids "$client_internal" "$mapper_name")
-      if [ "${#mapper_ids[@]}" -gt 1 ]; then
+      mapper_id="$(protocol_mapper_ids "$client_internal" "$mapper_name")"
+      if [[ "$mapper_id" == *$'\n'* ]]; then
         log "ERROR: Client ${client_id} has duplicate ${mapper_name} protocol mappers"
         return 1
       fi
@@ -261,22 +260,21 @@ data:
     }
     EOF
 
-      if [ "${#mapper_ids[@]}" -eq 1 ]; then
-        mapper_id="${mapper_ids[0]}"
+      if [ -n "$mapper_id" ]; then
         log "Updating identity-provider claim mapper on ${client_id}"
+        # The mapper PUT uses the representation id, not the id in its URL.
         "$KCADM" update "clients/${client_internal}/protocol-mappers/models/${mapper_id}" \
-          -r "$KEYCLOAK_REALM" -f "$payload"
+          -r "$KEYCLOAK_REALM" -f "$payload" -s id="$mapper_id"
       else
         log "Creating identity-provider claim mapper on ${client_id}"
         "$KCADM" create "clients/${client_internal}/protocol-mappers/models" \
           -r "$KEYCLOAK_REALM" -f "$payload"
-        mapfile -t mapper_ids < <(protocol_mapper_ids "$client_internal" "$mapper_name")
-        if [ "${#mapper_ids[@]}" -ne 1 ]; then
+        mapper_id="$(protocol_mapper_ids "$client_internal" "$mapper_name")"
+        if [ -z "$mapper_id" ] || [[ "$mapper_id" == *$'\n'* ]]; then
           rm -f "$payload"
           log "ERROR: Identity-provider claim mapper was not created exactly once"
           return 1
         fi
-        mapper_id="${mapper_ids[0]}"
       fi
       rm -f "$payload"
 

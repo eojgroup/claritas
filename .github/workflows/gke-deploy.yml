@@ -1081,6 +1081,10 @@ jobs:
               kubectl -n "$NS" describe pod "$pod" || true
               kubectl -n "$NS" logs "$pod" -c bootstrap --tail=200 || true
             done
+            # Admin API failures can expose only "unknown_error" to kcadm;
+            # the corresponding server exception identifies the failed update.
+            kubectl -n "$NS" logs -l app=keycloak -c keycloak \
+              --since=15m --tail=200 --prefix=true --max-log-requests=5 || true
             exit 1
           fi
           kubectl -n "$NS" logs "job/${job}" --tail=200 || true

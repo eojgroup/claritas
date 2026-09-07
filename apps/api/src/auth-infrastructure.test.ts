@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -38,6 +39,114 @@ test("Keycloak bootstrap script is valid Bash", () => {
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
+function runMapperBootstrap(options: { listFailure?: boolean; duplicate?: boolean } = {}) {
+  const script = embeddedBootstrapScript();
+  const start = script.indexOf("client_internal_id() {");
+  const end = script.indexOf("upsert_idp() {", start);
+  assert.ok(start >= 0 && end > start);
+  const directory = mkdtempSync(resolve(tmpdir(), "claritas-keycloak-mapper-"));
+  try {
+    // This fixture models the pinned Keycloak CLI's -f / -s behavior and the
+    // mapper PUT contract: its representation id must match the existing model.
+    const result = spawnSync("bash", [], {
+      input: `set -euo pipefail
+KCADM=fixture
+KEYCLOAK_REALM=claritas
+log() { echo "$*"; }
+trim() { echo "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'; }
+fixture() {
+  local action="$1" resource="$2" payload="" supplied_id=""
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -f) payload="$2"; shift 2 ;;
+      -s) supplied_id="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  case "$action $resource" in
+    'get clients') echo '[{ "id" : "client-123" }]' ;;
+    'get clients/client-123/protocol-mappers/models')
+      if [ "$FIXTURE_LIST_FAILURE" = true ]; then
+        echo 'mapper listing failed' >&2
+        return 42
+      fi
+      if [ -f "$FIXTURE_DIRECTORY/mapper.json" ]; then
+        echo 'mapper-123,claritas-identity-provider'
+      fi
+      if [ "$FIXTURE_DUPLICATE" = true ]; then
+        echo 'mapper-duplicate-1,claritas-identity-provider'
+        echo 'mapper-duplicate-2,claritas-identity-provider'
+      fi
+      ;;
+    'create clients/client-123/protocol-mappers/models')
+      cp "$payload" "$FIXTURE_DIRECTORY/mapper.json"
+      echo create >> "$FIXTURE_DIRECTORY/mutations"
+      ;;
+    'update clients/client-123/protocol-mappers/models/mapper-123')
+      if [ "$supplied_id" != 'id=mapper-123' ]; then
+        echo 'mapping with id null does not exist' >&2
+        return 1
+      fi
+      cp "$payload" "$FIXTURE_DIRECTORY/mapper.json"
+      echo update >> "$FIXTURE_DIRECTORY/mutations"
+      ;;
+    'get clients/client-123/protocol-mappers/models/mapper-123')
+      sed 's/": /" : /g' "$FIXTURE_DIRECTORY/mapper.json"
+      ;;
+    *) echo "Unexpected fixture command: $action $resource" >&2; return 1 ;;
+  esac
+}
+${script.slice(start, end)}
+configure_identity_provider_claim_mapper claritas-api
+configure_identity_provider_claim_mapper claritas-api
+`,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FIXTURE_DIRECTORY: directory,
+        FIXTURE_LIST_FAILURE: String(options.listFailure ?? false),
+        FIXTURE_DUPLICATE: String(options.duplicate ?? false),
+      },
+    });
+    return {
+      ...result,
+      mutations: existsSync(resolve(directory, "mutations"))
+        ? readFileSync(resolve(directory, "mutations"), "utf8").trim().split("\n")
+        : [],
+      mapper: existsSync(resolve(directory, "mapper.json"))
+        ? JSON.parse(readFileSync(resolve(directory, "mapper.json"), "utf8"))
+        : null,
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test("identity-provider mapper bootstrap creates once and updates the same mapper on repeat", () => {
+  const result = runMapperBootstrap();
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.deepEqual(result.mutations, ["create", "update"]);
+  assert.equal(result.mapper.protocolMapper, "oidc-usersessionmodel-note-mapper");
+  assert.equal(result.mapper.config["user.session.note"], "identity_provider");
+  assert.equal(result.mapper.config["id.token.claim"], "true");
+  assert.equal(result.mapper.config["access.token.claim"], "false");
+});
+
+test("identity-provider mapper bootstrap stops on lookup failure without creating a duplicate", () => {
+  const result = runMapperBootstrap({ listFailure: true });
+  assert.equal(result.status, 42, result.stderr || result.stdout);
+  assert.deepEqual(result.mutations, []);
+  assert.match(result.stderr, /mapper listing failed/);
+});
+
+test("identity-provider mapper bootstrap rejects duplicate existing mappers", () => {
+  const result = runMapperBootstrap({ duplicate: true });
+  assert.equal(result.status, 1, result.stderr || result.stdout);
+  assert.deepEqual(result.mutations, []);
+  assert.match(result.stdout, /duplicate claritas-identity-provider protocol mappers/);
 });
 
 test("Keycloak server checks accept large valid responses and reject missing requirements", () => {
