@@ -1,0 +1,60 @@
+name: Read-only news runtime diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: News release ingestion run ID (blank selects latest)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT_ID: claritas-457808
+      REGION: europe-west2
+      CLUSTER: claritas-cluster
+      NAMESPACE: claritas
+      RUN_ID: ${{ inputs.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate diagnostic input
+        run: |
+          if [[ -n "$RUN_ID" && ! "$RUN_ID" =~ ^[1-9][0-9]{0,14}$ ]]; then
+            echo 'Invalid ingestion run identifier.' >&2
+            exit 1
+          fi
+          node --check infra/scripts/news-runtime-diagnostics.cjs
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/920949118609/locations/global/workloadIdentityPools/claritas-oidc-pool/providers/gh-provider
+          service_account: terraform-github-oidc@claritas-457808.iam.gserviceaccount.com
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.CLUSTER }}
+          location: ${{ env.REGION }}
+          project_id: ${{ env.PROJECT_ID }}
+          use_auth_provider: false
+      - name: Collect sanitized diagnostics from every API pod
+        run: |
+          set -euo pipefail
+          mapfile -t pods < <(kubectl -n "$NAMESPACE" get pods -l app=claritas-api -o json | jq -r '.items[] | select(.status.phase=="Running") | .metadata.name')
+          if [[ "${#pods[@]}" -eq 0 ]]; then
+            echo 'No running API pods found.' >&2
+            exit 1
+          fi
+          for pod in "${pods[@]}"; do
+            echo "Diagnostics for pod/$pod"
+            kubectl -n "$NAMESPACE" logs "$pod" -c claritas-api --since=30m --tail=1000 --timestamps=true |
+              node infra/scripts/news-runtime-diagnostics.cjs --logs
+          done
+          kubectl -n "$NAMESPACE" exec -i "${pods[0]}" -c claritas-api -- node - "$RUN_ID" < infra/scripts/news-runtime-diagnostics.cjs
