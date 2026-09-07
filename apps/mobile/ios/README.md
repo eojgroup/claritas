@@ -54,6 +54,7 @@ embedded WidgetKit extension targets:
    - Four stable tabs: Overview, News, Investigate, and More.
    - A condensed map-first Dashboard for posture and country context, with the Signal Desk as the canonical investigation path.
    - News cards that open the linked canonical event when one exists; the event timeline links back to the original source URL.
+   - News search queries the server across the selected country, category and Recent/Archive window, with loaded/total counts. Source and image filters refine the returned results.
    - Social, podcast, weather, market, transport, daily briefing, imagery catalogue, account/reference tools, and eligible admin controls under More.
 
 ## Widget configuration and data contract
@@ -69,6 +70,8 @@ embedded WidgetKit extension targets:
   they never store an auth token or make an authenticated API request. Open the
   containing app after first install/sign-in so it can populate the snapshot.
 - The snapshot refreshes after news, market, weather, and transport updates.
+  News search, archive and category filters preserve the last unfiltered recent
+  widget snapshot and its original freshness time.
   A visible stale state is shown after two hours instead of presenting old data
   as current.
 - Widget taps use
@@ -92,6 +95,10 @@ embedded WidgetKit extension targets:
 - The watch stores the session token in its device-only Keychain and calls the same authenticated Claritas API.
 - Signing out on iPhone clears the watch token on the next sync.
 - Open the iPhone app once after installing the watch app, then tap `Connect` on watch if it does not sync automatically.
+- Relaunching Watch restores the latest context received from iPhone, including
+  offline session and scope updates. “Open on iPhone” reports acknowledgement or
+  connection errors and carries a bounded article snapshot so an older selected
+  story remains available even when it has left the phone's latest feed.
 
 ## Remote notifications and APNs
 

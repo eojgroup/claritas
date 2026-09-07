@@ -1367,7 +1367,11 @@ struct NewsWorkspaceView: View {
     }
 
     private var newsRequestKey: String {
-        "\(loadMode.rawValue)|\(selectedNewsCountry ?? "global")|\(model.selectedNewsCategory)|\(sort.serverSort.rawValue)"
+        "\(loadMode.rawValue)|\(selectedNewsCountry ?? "global")|\(model.selectedNewsCategory)|\(sort.serverSort.rawValue)|\(searchQuery)"
+    }
+
+    private var searchQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var loadedScopeMatchesSelection: Bool {
@@ -1375,6 +1379,7 @@ struct NewsWorkspaceView: View {
             && model.newsScopeCountry == selectedNewsCountry
             && model.newsScopeCategory == model.selectedNewsCategory
             && model.newsScopeSort == sort.serverSort
+            && model.newsScopeQuery == searchQuery
     }
 
     private var newestLoadedStoryDate: Date? {
@@ -1393,7 +1398,6 @@ struct NewsWorkspaceView: View {
 
     private var rows: [NewsItem] {
         guard loadedScopeMatchesSelection else { return [] }
-        let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var filtered = model.news
 
         if sourceFilter != "all" {
@@ -1401,22 +1405,6 @@ struct NewsWorkspaceView: View {
         }
         if imagesOnly {
             filtered = filtered.filter(newsHasImage)
-        }
-
-        if !term.isEmpty {
-            filtered = filtered.filter { item in
-                [
-                    item.presentationTitle,
-                    item.title ?? "",
-                    item.presentationSummary ?? "",
-                    item.summary ?? "",
-                    item.subjectCountries.joined(separator: " "),
-                    newsSourceLabel(item) ?? ""
-                ]
-                .joined(separator: " ")
-                .lowercased()
-                .contains(term)
-            }
         }
 
         let ordered: [NewsItem]
@@ -1477,7 +1465,7 @@ struct NewsWorkspaceView: View {
     }
 
     private var hasLocalFilters: Bool {
-        !query.isEmpty || sourceFilter != "all" || imagesOnly
+        sourceFilter != "all" || imagesOnly
     }
 
     private var newsCoveragePoints: [CountryBubblePoint] {
@@ -1536,6 +1524,11 @@ struct NewsWorkspaceView: View {
         }
         .task(id: newsRequestKey) {
             if model.news.isEmpty || !loadedScopeMatchesSelection {
+                if !searchQuery.isEmpty {
+                    do { try await Task.sleep(nanoseconds: 350_000_000) }
+                    catch { return }
+                }
+                guard !Task.isCancelled else { return }
                 await reloadNews()
             }
         }
@@ -1646,7 +1639,7 @@ struct NewsWorkspaceView: View {
                     .font(.headline)
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search headlines, summaries, or countries", text: $query)
+                    TextField("Search reporting across sources", text: $query)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
@@ -1669,7 +1662,10 @@ struct NewsWorkspaceView: View {
                         .buttonStyle(.bordered)
                         .disabled(normalizedCountryScopeInput == nil)
                 }
-                Text("Country scope reloads the complete server feed, including countries with zero map coverage. Search and source remain local filters.")
+                Text("Search checks reporting on the server within this country, category and Recent/Archive window. Source and image filters apply to the loaded results.")
+                    .font(.caption2)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                Text("Use quotes for exact phrases and -word to exclude. Search by topic, publisher, domain or provider.")
                     .font(.caption2)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 Toggle("Only articles with images", isOn: $imagesOnly)
@@ -1725,7 +1721,7 @@ struct NewsWorkspaceView: View {
     private var newsCategorySelector: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(model.newsCategoryOptions(mode: loadMode, country: selectedNewsCountry)) { category in
+                ForEach(model.newsCategoryOptions(mode: loadMode, country: selectedNewsCountry, query: searchQuery)) { category in
                     let selected = model.selectedNewsCategory == category.code
                     Button {
                         model.setNewsCategory(category.code)
@@ -1900,7 +1896,7 @@ struct NewsWorkspaceView: View {
             Image(systemName: hasLocalFilters ? "line.3.horizontal.decrease.circle" : "newspaper")
                 .font(.title2)
                 .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
-            Text(hasLocalFilters ? "No stories match these filters" : "No stories in this window")
+            Text(hasLocalFilters ? "No stories match these filters" : !searchQuery.isEmpty ? "No reporting matches this search" : "No stories in this window")
                 .font(.headline)
             Text(newsEmptyExplanation)
                 .font(.caption)
@@ -1910,6 +1906,13 @@ struct NewsWorkspaceView: View {
                 if hasLocalFilters {
                     Button("Clear filters") { clearLocalFilters() }
                         .buttonStyle(.borderedProminent)
+                } else if !searchQuery.isEmpty {
+                    Button("Clear search") { query = "" }
+                        .buttonStyle(.borderedProminent)
+                    if loadMode == .recent {
+                        Button("Check archive") { loadMode = .archive }
+                            .buttonStyle(.bordered)
+                    }
                 } else if loadMode == .recent {
                     Button("Check archive") { loadMode = .archive }
                         .buttonStyle(.borderedProminent)
@@ -1932,6 +1935,9 @@ struct NewsWorkspaceView: View {
         if hasLocalFilters {
             return "The server returned stories for \(newsScopeTitle), but none match the filters currently applied on this device."
         }
+        if !searchQuery.isEmpty {
+            return "No reporting matched “\(searchQuery)” in \(newsScopeTitle) and this window. Try another phrase, check the archive, or change country or category."
+        }
         if selectedNewsCountry != nil, loadMode == .recent {
             return "No quality-checked recent reporting was returned for \(newsScopeTitle). This is a verified empty result, not a map failure; the archive may contain older coverage."
         }
@@ -1952,7 +1958,10 @@ struct NewsWorkspaceView: View {
         if let country = model.selectedCountry?.uppercased() {
             labels.append("Country \(country)")
         }
-        if !query.isEmpty || sourceFilter != "all" || imagesOnly {
+        if !searchQuery.isEmpty {
+            labels.append("Search: \(searchQuery)")
+        }
+        if sourceFilter != "all" || imagesOnly {
             labels.append("Local filters")
         }
         if sort != .newest {
@@ -1963,15 +1972,18 @@ struct NewsWorkspaceView: View {
 
     private var newsScopeStatus: String {
         if model.isRefreshingNews {
-            return "Loading the complete \(loadMode.rawValue) feed for this scope…"
+            return "Loading \(loadMode.rawValue) reporting for this scope…"
         }
         if let error = model.newsLoadError, !error.isEmpty, !loadedScopeMatchesSelection {
             return "This scope could not be loaded. Retry below."
         }
         if !loadedScopeMatchesSelection {
-            return "Waiting to load the complete \(loadMode.rawValue) feed for this scope…"
+            return "Waiting to load \(loadMode.rawValue) reporting for this scope…"
         }
-        return "\(model.news.count) \(loadMode.rawValue) stories loaded from the server"
+        if let total = model.newsPageTotal, total > model.news.count {
+            return "\(model.news.count) of \(total) matching \(loadMode.rawValue) stories loaded · refine search to dive deeper"
+        }
+        return "\(model.news.count) matching \(loadMode.rawValue) stories loaded from the server"
     }
 
     private var normalizedCountryScopeInput: String? {
@@ -1991,7 +2003,8 @@ struct NewsWorkspaceView: View {
             mode: loadMode,
             country: selectedNewsCountry,
             category: model.selectedNewsCategory,
-            sort: sort.serverSort
+            sort: sort.serverSort,
+            query: searchQuery
         )
     }
 
@@ -2063,10 +2076,10 @@ struct NewsWorkspaceView: View {
     private func selectedRankedStoryPanel(compact: Bool) -> some View {
         if let item = model.selectedNewsItem,
            model.selectedNewsItemID == item.id {
-            BrandCard(title: "Selected ranked report", icon: "scope") {
+            BrandCard(title: "Selected report", icon: "scope") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("Opened from the overview. The latest feed below remains chronological.")
+                        Text("Opened from another view or device; this report may be cached. Its source link and event evidence remain available below.")
                             .font(.caption)
                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         Spacer(minLength: 4)

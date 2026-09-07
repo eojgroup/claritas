@@ -72,6 +72,14 @@ struct WatchRootView: View {
         .onOpenURL { url in
             openWidgetURL(url)
         }
+        .alert("Continue on iPhone", isPresented: Binding(
+            get: { model.phoneHandoffMessage != nil },
+            set: { if !$0 { model.phoneHandoffMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { model.phoneHandoffMessage = nil }
+        } message: {
+            Text(model.phoneHandoffMessage ?? "")
+        }
     }
 
     private func openWidgetURL(_ url: URL) {

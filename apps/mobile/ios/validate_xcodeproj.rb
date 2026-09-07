@@ -216,7 +216,7 @@ if File.file?(world_countries_path)
   begin
     world_countries = JSON.parse(File.read(world_countries_path))
     features = world_countries.fetch("features", [])
-    iso_codes = features.filter_map { |feature| feature.dig("properties", "iso2") }
+    iso_codes = features.map { |feature| feature.dig("properties", "iso2") }.compact
     check.call(world_countries["type"] == "FeatureCollection", "WorldCountries.geojson must be a feature collection")
     check.call(features.length >= 170, "WorldCountries.geojson must retain global country coverage")
     check.call(iso_codes.length == iso_codes.uniq.length, "WorldCountries.geojson must contain unique ISO-2 features")
@@ -225,9 +225,9 @@ if File.file?(world_countries_path)
       polygons = geometry["type"] == "Polygon" ? [geometry["coordinates"]] : geometry["coordinates"] || []
       polygons.flat_map do |polygon|
         polygon.flat_map do |ring|
-          ring.each_cons(2).filter_map do |left, right|
+          ring.each_cons(2).map do |left, right|
             [feature.dig("properties", "iso2"), (left[0].to_f - right[0].to_f).abs] if (left[0].to_f - right[0].to_f).abs > 180
-          end
+          end.compact
         end
       end
     end

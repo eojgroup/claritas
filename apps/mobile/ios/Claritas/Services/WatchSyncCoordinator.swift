@@ -83,6 +83,7 @@ final class WatchSyncCoordinator: NSObject, WCSessionDelegate {
                     "country": message["country"] as? String ?? "",
                     "eventID": message["eventID"] as? String ?? "",
                     "newsID": message["newsID"] as? String ?? "",
+                    "newsSnapshot": message["newsSnapshot"] as? Data ?? Data(),
                     "category": message["category"] as? String ?? ""
                 ]
             )

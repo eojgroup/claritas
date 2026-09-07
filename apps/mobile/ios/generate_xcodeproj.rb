@@ -45,11 +45,12 @@ version_file = File.join(ROOT, "VERSION")
 version_settings = if File.file?(version_file)
   File
     .readlines(version_file, chomp: true)
-    .filter_map do |line|
+    .map do |line|
       key, value = line.split("=", 2)
       next if key.nil? || value.nil?
       [key.strip, value.strip]
     end
+    .compact
     .to_h
 else
   {}

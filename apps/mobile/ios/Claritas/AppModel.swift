@@ -106,6 +106,7 @@ final class AppModel: ObservableObject {
     @Published var selectedNewsCategory: String = NewsCategoryCatalog.allCode
     @Published private(set) var newsScopeCategory: String = NewsCategoryCatalog.allCode
     @Published private(set) var newsScopeSort: NewsSortMode = .newest
+    @Published private(set) var newsScopeQuery: String = ""
     @Published private(set) var newsCategoryFacets: [NewsCategoryFacet] = []
     @Published private(set) var newsPageTotal: Int? = nil
     @Published private(set) var newsUnassessedCount: Int? = nil
@@ -156,6 +157,9 @@ final class AppModel: ObservableObject {
     private var transportRequestID = UUID()
     private var dataGeneration = UUID()
     private var widgetFreshness = WidgetSnapshotFreshness.empty
+    private var widgetNews: [NewsItem] = []
+    private var widgetNewsTotal: Int?
+    private var widgetNewsCountry: String?
 
     var isAdmin: Bool {
         (authUser?.roles ?? []).contains { $0.lowercased() == "admin" }
@@ -622,8 +626,9 @@ final class AppModel: ObservableObject {
             newsScopeCountry = initialNewsCountry
             newsScopeCategory = initialNewsCategory
             newsScopeSort = .newest
+            newsScopeQuery = ""
             newsLoadError = nil
-            widgetFreshness.news = Date()
+            captureWidgetNews(newsPage, country: initialNewsCountry, category: initialNewsCategory, mode: .recent, query: "")
         }
         if case .failure(let error) = resolvedNews, newsRequestID == initialNewsRequestID {
             newsLoadError = (error as? APIError)?.message ?? error.localizedDescription
@@ -666,6 +671,10 @@ final class AppModel: ObservableObject {
         selectedNewsCategory = NewsCategoryCatalog.allCode
         newsScopeCategory = NewsCategoryCatalog.allCode
         newsScopeSort = .newest
+        newsScopeQuery = ""
+        widgetNews = []
+        widgetNewsTotal = nil
+        widgetNewsCountry = nil
         newsCategoryFacets = []
         newsPageTotal = nil
         newsUnassessedCount = nil
@@ -829,9 +838,10 @@ final class AppModel: ObservableObject {
         synchronizeWatchContext()
     }
 
-    func newsCategoryOptions(mode: NewsLoadMode, country: String?) -> [NewsCategoryOption] {
+    func newsCategoryOptions(mode: NewsLoadMode, country: String?, query: String = "") -> [NewsCategoryOption] {
         guard newsMetadataIncluded,
               newsLoadMode == mode,
+              newsScopeQuery == query.trimmingCharacters(in: .whitespacesAndNewlines),
               newsScopeCountry == normalizedCountry(country) else {
             return NewsCategoryCatalog.options
         }
@@ -922,7 +932,8 @@ final class AppModel: ObservableObject {
         mode: NewsLoadMode = .recent,
         country: String? = nil,
         category: String? = nil,
-        sort: NewsSortMode = .newest
+        sort: NewsSortMode = .newest,
+        query: String = ""
     ) async {
         guard hasPaidAccess else {
             clearAppData()
@@ -942,22 +953,25 @@ final class AppModel: ObservableObject {
         }
 
         do {
+            let requestedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
             let loadedPage = try await fetchNewsBatch(
                 mode: mode,
                 country: requestedCountry,
                 category: requestedCategory,
-                sort: sort
+                sort: sort,
+                query: requestedQuery
             )
-            guard newsRequestID == requestID else { return }
+            guard newsRequestID == requestID, !Task.isCancelled else { return }
             applyNewsPage(loadedPage, sort: sort)
             newsLoadMode = mode
             newsScopeCountry = requestedCountry
             newsScopeCategory = requestedCategory
             newsScopeSort = sort
-            widgetFreshness.news = Date()
+            newsScopeQuery = requestedQuery
+            captureWidgetNews(loadedPage, country: requestedCountry, category: requestedCategory, mode: mode, query: requestedQuery)
             updateWidgetSnapshot()
         } catch {
-            guard newsRequestID == requestID else { return }
+            guard newsRequestID == requestID, !Task.isCancelled else { return }
             if isPaymentRequired(error) {
                 clearAppData()
                 await refreshAccess()
@@ -1191,9 +1205,9 @@ final class AppModel: ObservableObject {
 
     private func updateWidgetSnapshot() {
         WidgetSnapshotStore.save(
-            news: news,
-            newsTotal: newsPageTotal,
-            newsScopeCountry: newsScopeCountry,
+            news: widgetNews,
+            newsTotal: widgetNewsTotal,
+            newsScopeCountry: widgetNewsCountry,
             countryStats: countryStats,
             countryMarkets: countryMarkets,
             weather: weather,
@@ -1209,6 +1223,22 @@ final class AppModel: ObservableObject {
                 transport: widgetFreshness.transport
             )
         )
+    }
+
+    private func captureWidgetNews(
+        _ page: NewsPage,
+        country: String?,
+        category: String,
+        mode: NewsLoadMode,
+        query: String
+    ) {
+        // Search, category and historical views must never become a widget's
+        // current, all-category reporting totals or refresh its freshness date.
+        guard mode == .recent, category == NewsCategoryCatalog.allCode, query.isEmpty else { return }
+        widgetNews = page.items
+        widgetNewsTotal = page.page.total
+        widgetNewsCountry = country
+        widgetFreshness.news = Date()
     }
 
     private func scheduleTransportRefresh() {
@@ -1313,14 +1343,15 @@ final class AppModel: ObservableObject {
         mode: NewsLoadMode,
         country: String?,
         category: String,
-        sort: NewsSortMode
+        sort: NewsSortMode,
+        query: String = ""
     ) async throws -> NewsPage {
         switch mode {
         case .recent:
             return try await api.fetchNews(
                 limit: recentNewsLimit,
                 offset: 0,
-                q: nil,
+                q: query.isEmpty ? nil : query,
                 country: country,
                 category: category,
                 sort: sort.rawValue,
@@ -1334,10 +1365,11 @@ final class AppModel: ObservableObject {
             var metadataPage: NewsPage?
 
             for pageIndex in 0..<archiveNewsMaxPages {
+                try Task.checkCancellation()
                 let batch = try await api.fetchNews(
                     limit: archiveNewsPageSize,
                     offset: offset,
-                    q: nil,
+                    q: query.isEmpty ? nil : query,
                     country: country,
                     category: category,
                     sort: sort.rawValue,

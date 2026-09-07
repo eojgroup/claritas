@@ -580,6 +580,34 @@ enum IntelligenceLinkagePresentation {
     }
 }
 
+/// Carries an exact cached report from Watch even after it leaves the phone's
+/// latest page. Raw provider payloads are excluded from the bounded message.
+enum NewsHandoffSnapshot {
+    static let maximumBytes = 32_768
+
+    static func encode(_ item: NewsItem) -> Data? {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        guard let encoded = try? encoder.encode(item),
+              var object = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any] else {
+            return nil
+        }
+        object.removeValue(forKey: "payload")
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              data.count <= maximumBytes else { return nil }
+        return data
+    }
+
+    static func decode(_ data: Data, expectedID: Int) -> NewsItem? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        guard expectedID > 0, data.count <= maximumBytes,
+              let item = try? decoder.decode(NewsItem.self, from: data),
+              item.id == expectedID else { return nil }
+        return item
+    }
+}
+
 struct NewsItem: Codable, Identifiable {
     let id: Int
     let kind: String?

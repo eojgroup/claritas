@@ -36,6 +36,7 @@ final class WatchAppModel: ObservableObject {
     @Published private(set) var newsPageTotal: Int?
     @Published private(set) var newsUnassessedCount: Int?
     @Published private(set) var newsMetadataIncluded: Bool = false
+    @Published var phoneHandoffMessage: String?
 
     private let connectivity = WatchConnectivityClient()
     private var api = APIClient()
@@ -314,13 +315,26 @@ final class WatchAppModel: ObservableObject {
         newsID: Int? = nil,
         category: String? = nil
     ) {
+        let selectedReport = newsID.flatMap { id in
+            (selectedCategoryNews + news).first { $0.id == id }
+        }
         connectivity.openOnPhone(
             destination,
             country: country,
             eventID: eventID,
             newsID: newsID,
-            category: category
-        )
+            category: category,
+            newsSnapshot: selectedReport.flatMap(NewsHandoffSnapshot.encode)
+        ) { [weak self] result in
+            Task { @MainActor in
+                switch result {
+                case .success:
+                    self?.phoneHandoffMessage = "Your selection is ready in Claritas on iPhone."
+                case .failure(let error):
+                    self?.phoneHandoffMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     func selectNewsCategory(_ category: String) async {

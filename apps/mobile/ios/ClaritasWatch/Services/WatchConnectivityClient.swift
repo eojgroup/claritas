@@ -13,8 +13,8 @@ final class WatchConnectivityClient: NSObject, WCSessionDelegate {
     func requestContext() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
-        if !session.applicationContext.isEmpty {
-            onContext?(session.applicationContext)
+        if !session.receivedApplicationContext.isEmpty {
+            onContext?(session.receivedApplicationContext)
         }
         guard session.isReachable else { return }
         session.sendMessage(["request": "claritasContext"], replyHandler: { [weak self] context in
@@ -27,10 +27,15 @@ final class WatchConnectivityClient: NSObject, WCSessionDelegate {
         country: String? = nil,
         eventID: String? = nil,
         newsID: Int? = nil,
-        category: String? = nil
+        category: String? = nil,
+        newsSnapshot: Data? = nil,
+        completion: @escaping (Result<Void, Error>) -> Void
     ) {
-        guard WCSession.isSupported(), WCSession.default.isReachable else { return }
-        var message = ["openOnPhone": destination]
+        guard WCSession.isSupported(), WCSession.default.isReachable else {
+            completion(.failure(HandoffError.phoneUnavailable))
+            return
+        }
+        var message: [String: Any] = ["openOnPhone": destination]
         if let country, !country.isEmpty {
             message["country"] = country.uppercased()
         }
@@ -43,10 +48,19 @@ final class WatchConnectivityClient: NSObject, WCSessionDelegate {
         if let category {
             message["category"] = NewsCategoryCatalog.normalized(category)
         }
+        if let newsSnapshot, newsSnapshot.count <= NewsHandoffSnapshot.maximumBytes {
+            message["newsSnapshot"] = newsSnapshot
+        }
         WCSession.default.sendMessage(
             message,
-            replyHandler: nil,
-            errorHandler: nil
+            replyHandler: { reply in
+                if reply["status"] as? String == "opened" {
+                    completion(.success(()))
+                } else {
+                    completion(.failure(HandoffError.notAcknowledged))
+                }
+            },
+            errorHandler: { error in completion(.failure(error)) }
         )
     }
 
@@ -56,12 +70,26 @@ final class WatchConnectivityClient: NSObject, WCSessionDelegate {
         error: Error?
     ) {
         guard activationState == .activated else { return }
-        if !session.applicationContext.isEmpty {
-            onContext?(session.applicationContext)
+        if !session.receivedApplicationContext.isEmpty {
+            onContext?(session.receivedApplicationContext)
         }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
         onContext?(applicationContext)
+    }
+
+    private enum HandoffError: LocalizedError {
+        case phoneUnavailable
+        case notAcknowledged
+
+        var errorDescription: String? {
+            switch self {
+            case .phoneUnavailable:
+                return "iPhone is not reachable. Open Claritas on your paired iPhone, then try again."
+            case .notAcknowledged:
+                return "iPhone did not confirm this selection. Open Claritas on iPhone and try again."
+            }
+        }
     }
 }

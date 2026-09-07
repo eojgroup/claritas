@@ -117,6 +117,12 @@ struct RootView: View {
                       let parsedNewsID = Int(newsID), parsedNewsID > 0 {
                 model.selectedNewsItemID = parsedNewsID
             }
+            if destination == "news",
+               let newsID = model.selectedNewsItemID,
+               let snapshot = note.userInfo?["newsSnapshot"] as? Data,
+               let item = NewsHandoffSnapshot.decode(snapshot, expectedID: newsID) {
+                model.selectNewsItem(item)
+            }
             let next: Tab
             switch destination {
             case "news":
