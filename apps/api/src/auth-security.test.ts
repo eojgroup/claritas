@@ -134,5 +134,5 @@ test("auth implementation binds state and exchanges native codes without URL bea
   assert.match(productionConfig, /AUTH_ALLOWED_REDIRECTS: "https:\/\/app\.claritas\.info,claritas:\/\/auth\/callback"/);
   assert.match(gkeWorkflow, /claritas:\/\/auth\/callback/);
   assert.match(terraformWorkflow, /claritas:\/\/auth\/callback/);
-  assert.doesNotMatch(`${productionConfig}\n${gkeWorkflow}\n${terraformWorkflow}`, /AUTH_ALLOWED_REDIRECT_SCHEMES/);
+  assert.doesNotMatch(`${authSource}\n${gkeWorkflow}\n${terraformWorkflow}`, /AUTH_ALLOWED_REDIRECT_SCHEMES/);
 });
