@@ -447,7 +447,10 @@ function isUnsafeArticleHost(hostname: string): boolean {
   if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
   if (/^127\./.test(host) || /^0\./.test(host) || /^169\.254\./.test(host) || /^10\./.test(host)) return true;
   if (/^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
-  return host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:");
+  // Unique/link-local prefixes describe IPv6 literals, not publisher names
+  // such as fda.gov and fdic.gov. DNS answers are vetted before connecting.
+  return isIP(host) === 6
+    && (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:"));
 }
 
 function usableGdeltArticleUrl(value: string | null | undefined): URL | null {
@@ -1118,37 +1121,35 @@ async function mapWithConcurrency<T, R>(
  * Without this tombstone, a stale item that was accepted before this policy
  * could remain sorted as current even after a later verification rejects it.
  */
-async function quarantineGdeltArticle(
+export function buildGdeltQuarantineQuery(
   sourceId: number,
-  url: string | null,
+  url: string,
   title: string | null | undefined,
   reason: GdeltDocQualityResult["reason"],
   checkedAt: string,
   providerSeenAt: string | null,
-): Promise<boolean> {
-  if (!url) return false;
+): { sql: string; params: Array<string | number | null> } {
   const canonicalUrl = canonicalGdeltUrl(url);
-  const { rows } = await query<{ id: number }>(
-    `INSERT INTO item (
+  return { sql: `INSERT INTO item (
        source_id,external_id,kind,title,url,event_time,payload
      ) VALUES (
-       $1,$2,'news_article',$3,$2,$6::timestamptz,jsonb_build_object(
+       $1,$2,'news_article',$3,$2,($6::text)::timestamptz,jsonb_build_object(
          'provider','gdelt',
          'quality_status','rejected',
-         'quality_rejection_reason',$4,
-         'quality_checked_at',$5,
-         'first_provider_seen_at',$6,
-         'last_provider_seen_at',$6,
-         'provider_seen_at',$6,
-         'canonical_url',$7,
-         'canonical_url_algorithm',$8
+         'quality_rejection_reason',$4::text,
+         'quality_checked_at',$5::text,
+         'first_provider_seen_at',$6::text,
+         'last_provider_seen_at',$6::text,
+         'provider_seen_at',$6::text,
+         'canonical_url',$7::text,
+         'canonical_url_algorithm',$8::text
        )
      )
      ON CONFLICT (source_id,external_id) DO UPDATE SET
        payload = item.payload || jsonb_build_object(
            'quality_status', 'rejected',
-           'quality_rejection_reason', $4,
-           'quality_checked_at', $5,
+           'quality_rejection_reason', $4::text,
+           'quality_checked_at', $5::text,
            'first_provider_seen_at', COALESCE(
              item.payload->>'first_provider_seen_at',
              item.payload->>'provider_seen_at',
@@ -1164,12 +1165,12 @@ async function quarantineGdeltArticle(
      WHERE item.kind='news_article'
        AND (
          item.payload->>'quality_status' IS DISTINCT FROM 'rejected'
-         OR item.payload->>'quality_rejection_reason' IS DISTINCT FROM $4
+         OR item.payload->>'quality_rejection_reason' IS DISTINCT FROM $4::text
          OR item.payload->>'canonical_url' IS DISTINCT FROM $7::text
          OR item.payload->>'canonical_url_algorithm' IS DISTINCT FROM $8::text
        )
      RETURNING id`,
-    [
+    params: [
       sourceId,
       url,
       title ?? null,
@@ -1179,7 +1180,20 @@ async function quarantineGdeltArticle(
       canonicalUrl,
       GDELT_CANONICAL_URL_ALGORITHM,
     ],
-  );
+  };
+}
+
+async function quarantineGdeltArticle(
+  sourceId: number,
+  url: string | null,
+  title: string | null | undefined,
+  reason: GdeltDocQualityResult["reason"],
+  checkedAt: string,
+  providerSeenAt: string | null,
+): Promise<boolean> {
+  if (!url) return false;
+  const statement = buildGdeltQuarantineQuery(sourceId, url, title, reason, checkedAt, providerSeenAt);
+  const { rows } = await query<{ id: number }>(statement.sql, statement.params);
   return rows.length > 0;
 }
 

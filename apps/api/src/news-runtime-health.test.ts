@@ -112,6 +112,16 @@ test("news runtime health fails closed for stale markets or a GB-only heatmap", 
   assert.equal(gbOnly.checks.non_gb_geography, false);
 });
 
+test("runtime diagnostics identify PostgreSQL bind failures without disclosing SQL or upstream text", () => {
+  const result = evaluateNewsRuntimeHealth({
+    ...healthy,
+    release_gdelt_gal_error: 'could not determine data type of parameter $4; SQL=private query token=secret',
+  }, now);
+  assert.equal(result.release_run.gdelt_diagnostics.gal.error, "GDELT GAL persistence parameter type error ($4).");
+  assert.doesNotMatch(JSON.stringify(result.release_run.gdelt_diagnostics), /private query|token|secret/);
+  assert.equal(result.ready, true, "diagnostic classification must not change the release criteria");
+});
+
 test("first-seen reporting can supply current markets but not the publisher-time anchor", () => {
   const currentFallback = evaluateNewsRuntimeHealth({
     ...healthy,

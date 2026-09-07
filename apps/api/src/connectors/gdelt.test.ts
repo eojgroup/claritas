@@ -924,6 +924,28 @@ test("GDELT rejects impossible publisher calendar dates instead of normalizing t
   ), null);
 });
 
+test("GDELT admits public publisher names that resemble private IPv6 prefixes", async () => {
+  const { assessGdeltDocArticleQuality } = await connector;
+  const article = {
+    title: "Regulator publishes an updated market assessment",
+    providerSeenAt: "2026-09-07T20:00:00Z",
+    publication: null,
+    now: new Date("2026-09-07T20:15:00Z"),
+  };
+  for (const host of ["fda.gov", "fdic.gov", "fc-news.example", "FDA.GOV."]) {
+    assert.equal(assessGdeltDocArticleQuality({
+      ...article,
+      url: `https://${host}/news/market-assessment`,
+    }).reason, "publisher_publication_unverified", host);
+  }
+  for (const host of ["[fc00::1]", "[fd00::1]", "[fe80::1]", "[::1]"]) {
+    assert.equal(assessGdeltDocArticleQuality({
+      ...article,
+      url: `http://${host}/news/market-assessment`,
+    }).reason, "missing_or_unsafe_url", host);
+  }
+});
+
 test("GDELT rejects private article addresses and pins publisher verification to public DNS answers", async () => {
   const { assessGdeltDocArticleQuality, isPublicGdeltArticleAddress } = await connector;
   for (const address of ["127.0.0.1", "10.0.0.8", "172.16.0.1", "192.168.1.9", "169.254.169.254", "::1", "[::1]", "fd12::1"]) {
@@ -956,7 +978,7 @@ test("GDELT rejects private article addresses and pins publisher verification to
 });
 
 test("a stale GDELT rediscovery quarantines its prior item without rewriting its publication time", async () => {
-  const { assessGdeltDocArticleQuality } = await connector;
+  const { assessGdeltDocArticleQuality, buildGdeltQuarantineQuery } = await connector;
   const staleRediscovery = assessGdeltDocArticleQuality({
     title: "Previously accepted story is rediscovered years later",
     url: "https://publisher.example.com/news/2021/09/13/previously-accepted-story",
@@ -972,15 +994,14 @@ test("a stale GDELT rediscovery quarantines its prior item without rewriting its
   });
   assert.equal(staleRediscovery.reason, "publisher_published_at_stale");
 
-  const source = readFileSync(resolve(__dirname, "gdelt.ts"), "utf8");
-  const quarantine = source.slice(
-    source.indexOf("async function quarantineGdeltArticle"),
-    source.indexOf("const EXISTING_GDELT_TIME_VERIFIED_SQL"),
-  );
+  const statement = buildGdeltQuarantineQuery(1, "https://publisher.example.com/news/old", "Old story",
+    staleRediscovery.reason, "2026-08-16T03:00:00Z", "2026-08-16T02:45:00Z");
+  const quarantine = statement.sql;
   assert.match(quarantine, /'quality_status', 'rejected'/);
   assert.match(quarantine, /'quality_rejection_reason', \$4/);
   assert.match(quarantine, /INSERT INTO item[\s\S]*event_time/);
   assert.doesNotMatch(quarantine, /event_time\s*=/);
+  assert.equal(statement.params[3], "publisher_published_at_stale");
 });
 
 test("GAL fallback is relevance filtered, deduplicated and bounded", async () => {

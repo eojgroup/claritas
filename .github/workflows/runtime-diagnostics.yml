@@ -54,7 +54,9 @@ jobs:
           fi
           for pod in "${pods[@]}"; do
             echo "Diagnostics for pod/$pod"
-            kubectl -n "$NAMESPACE" logs "$pod" -c claritas-api --since=30m --tail=1000 --timestamps=true |
-              node infra/scripts/news-runtime-diagnostics.cjs --logs
+            if ! kubectl -n "$NAMESPACE" logs "$pod" -c claritas-api --since=30m --tail=1000 --timestamps=true |
+              node infra/scripts/news-runtime-diagnostics.cjs --logs; then
+              echo "::warning::Logs unavailable for pod/$pod; continuing to durable run diagnostics."
+            fi
           done
           kubectl -n "$NAMESPACE" exec -i "${pods[0]}" -c claritas-api -- node - "$RUN_ID" < infra/scripts/news-runtime-diagnostics.cjs

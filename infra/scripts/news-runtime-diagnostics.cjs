@@ -64,6 +64,7 @@ function classifyError(value) {
 }
 
 function counters(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const output = {};
   for (const key of ["fetched", "accepted", "selected", "inserted", "updated", "unchanged", "skipped", "candidates", "budget", "gkg_sampled", "gkg_archives_scanned", "gkg_canonical_country_url_probes", "persistence_failures", "alias_synchronization_failures", "duration_ms", "assessed"]) {
     if (typeof value[key] === "number" && Number.isFinite(value[key])) output[key] = value[key];
@@ -77,8 +78,10 @@ function counters(value = {}) {
 }
 
 function summarizeRun(run) {
-  const step = run.stats?.steps?.find((candidate) => candidate.step === "gdelt/doc-event-gkg");
+  const steps = Array.isArray(run.stats?.steps) ? run.stats.steps : [];
+  const step = steps.find((candidate) => candidate?.step === "gdelt/doc-event-gkg");
   const result = step?.result || {};
+  const lanes = Array.isArray(result.articles?.discovery_lanes) ? result.articles.discovery_lanes : [];
   return {
     run_id: Number(run.id), status: run.status, trigger_mode: run.trigger_mode,
     started_at: run.started_at, finished_at: run.finished_at,
@@ -86,7 +89,7 @@ function summarizeRun(run) {
     step_error: classifyError(step?.error), doc_error: classifyError(result.doc_error),
     gal_error: classifyError(result.gal_error || result.gal_supplement_error),
     doc: counters(result.articles), gal: counters(result.gal_fallback || result.gal_supplement),
-    doc_lanes: (result.articles?.discovery_lanes || []).map((lane) => ({
+    doc_lanes: lanes.filter((lane) => lane && typeof lane === "object").slice(0, 12).map((lane) => ({
       id: /^[a-z_]{1,40}$/.test(lane.id) ? lane.id : "other",
       status: lane.status, counters: counters(lane), error: classifyError(lane.error),
     })),

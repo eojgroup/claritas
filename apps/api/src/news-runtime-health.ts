@@ -370,6 +370,8 @@ function safeDiagnosticTimestamp(value: string | null | undefined): string | nul
  */
 function safeGdeltError(value: string | null | undefined, product: "DOC" | "GAL"): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
+  const untypedParameter = /\bcould not determine data type of parameter \$([0-9]{1,3})\b/i.exec(value);
+  if (untypedParameter) return `GDELT ${product} persistence parameter type error ($${untypedParameter[1]}).`;
   const httpStatuses = Array.from(value.matchAll(/\bHTTP\s+([1-5][0-9]{2})\b/gi))
     .map((match) => match[1])
     .filter((status, index, values) => values.indexOf(status) === index)

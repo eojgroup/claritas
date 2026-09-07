@@ -6,6 +6,7 @@ import { consumeDomainEvent } from "./consumer";
 import { buildEventDedupeKey } from "./correlation";
 import { buildNewsReaderQuery } from "../news-reader-query";
 import { buildNewsSearchPredicate } from "../news-search";
+import { buildGdeltQuarantineQuery } from "../connectors/gdelt";
 import {
   correlateAndUpsertIntelligenceSignal,
   recomputeIntelligenceEventAggregateTx,
@@ -51,6 +52,37 @@ test("canonical publisher identity converges direct and aggregator discoveries",
   assert.equal(rows[0].govuk_direct, "gov.uk");
   assert.equal(rows[0].govuk_aggregated, rows[0].govuk_direct);
   assert.notEqual(rows[0].unrelated, rows[0].ecb_direct);
+});
+
+test("GDELT quarantine binds JSON parameters and preserves the first-seen history of existing stories", async () => {
+  await withTransaction(async (client) => {
+    const name = `gdelt-quarantine-fixture-${randomUUID()}`;
+    const source = await client.query<{ id: number }>("INSERT INTO source(name,auth_type) VALUES($1,'none') RETURNING id", [name]);
+    const sourceId = source.rows[0].id;
+    const url = `https://example.org/${name}`;
+    const firstSeen = "2026-09-07T18:00:00.000Z";
+    const checkedAt = "2026-09-07T21:00:00.000Z";
+    const rejected = buildGdeltQuarantineQuery(sourceId, url, "A rejected publisher story", "publisher_published_at_stale", checkedAt, firstSeen);
+    const inserted = await client.query(rejected.sql, rejected.params);
+    assert.equal(inserted.rows.length, 1);
+    const original = await client.query("SELECT event_time::text,payload FROM item WHERE id=$1", [inserted.rows[0].id]);
+    assert.equal(original.rows[0].payload.quality_status, "rejected");
+    assert.equal(original.rows[0].payload.quality_checked_at, checkedAt);
+    assert.equal(original.rows[0].payload.first_provider_seen_at, firstSeen);
+    await client.query("UPDATE item SET payload=payload || '{\"quality_status\":\"accepted\"}'::jsonb WHERE id=$1", [inserted.rows[0].id]);
+    const laterSeen = "2026-09-07T21:05:00.000Z";
+    const update = buildGdeltQuarantineQuery(sourceId, url, "Rediscovered headline", "publisher_publication_unverified", checkedAt, laterSeen);
+    assert.equal((await client.query(update.sql, update.params)).rows.length, 1);
+    const final = await client.query("SELECT event_time::text,payload FROM item WHERE id=$1", [inserted.rows[0].id]);
+    assert.equal(final.rows[0].payload.quality_status, "rejected");
+    assert.equal(final.rows[0].payload.quality_rejection_reason, "publisher_publication_unverified");
+    assert.equal(final.rows[0].payload.first_provider_seen_at, firstSeen);
+    assert.equal(final.rows[0].payload.last_provider_seen_at, laterSeen);
+    assert.equal(final.rows[0].event_time, original.rows[0].event_time);
+    assert.equal((await client.query(update.sql, update.params)).rows.length, 0, "unchanged rejection stays idempotent");
+    await client.query("DELETE FROM event_outbox WHERE aggregate_type='item' AND aggregate_id IN (SELECT id::text FROM item WHERE source_id=$1)", [sourceId]);
+    await client.query("DELETE FROM source WHERE id=$1", [sourceId]);
+  });
 });
 
 test("news reader query executes with and without metadata across bind layouts", async () => {
