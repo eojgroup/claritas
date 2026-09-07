@@ -49,3 +49,11 @@ test("identity deploys use an immutable image and preserve omitted live auth key
   assert.match(terraformWorkflow, /kubectl -n "\$ns" patch secret claritas-auth --type merge/);
   assert.match(terraformAuthSecret, /lifecycle \{[\s\S]*ignore_changes = \[data\][\s\S]*\}/);
 });
+
+test("production workflows recover only pods Kubernetes has already marked for deletion", () => {
+  for (const releaseWorkflow of [workflow, terraformWorkflow]) {
+    assert.match(releaseWorkflow, /select\(\.metadata\.deletionTimestamp != null\)/);
+    assert.match(releaseWorkflow, /delete pod "\$pod" --force --grace-period=0 --wait=false/);
+    assert.doesNotMatch(releaseWorkflow, /delete pods? -l .*--force/);
+  }
+});

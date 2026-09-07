@@ -428,8 +428,27 @@ jobs:
       - name: 🔄 Restart API after Terraform-managed configuration changes
         run: |
           set -euo pipefail
-          kubectl -n "${{ env.K8S_NAMESPACE }}" rollout restart deployment/claritas-api
-          kubectl -n "${{ env.K8S_NAMESPACE }}" rollout status deployment/claritas-api --timeout=300s
+          ns="${{ env.K8S_NAMESPACE }}"
+
+          cleanup_stale_terminating_pods() {
+            local -a terminating_pods=()
+            mapfile -t terminating_pods < <(
+              kubectl -n "$ns" get pods -l app=claritas-api -o json \
+                | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | .metadata.name'
+            )
+            for pod in "${terminating_pods[@]}"; do
+              echo "::warning title=Removing stale terminating pod::${pod} was already marked for deletion and is blocking the API rollout."
+              kubectl -n "$ns" delete pod "$pod" --force --grace-period=0 --wait=false
+            done
+          }
+
+          cleanup_stale_terminating_pods
+          kubectl -n "$ns" rollout restart deployment/claritas-api
+          if ! kubectl -n "$ns" rollout status deployment/claritas-api --timeout=120s; then
+            kubectl -n "$ns" get deployment,replicaset,pod -l app=claritas-api -o wide || true
+            cleanup_stale_terminating_pods
+            kubectl -n "$ns" rollout status deployment/claritas-api --timeout=180s
+          fi
 
       - name: 🔄 Show deployments
         run: |

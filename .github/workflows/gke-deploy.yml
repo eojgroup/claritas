@@ -928,6 +928,19 @@ jobs:
           set -euo pipefail
           ns="${NAMESPACE}"
 
+          cleanup_stale_terminating_pods() {
+            local deployment="$1"
+            local -a terminating_pods=()
+            mapfile -t terminating_pods < <(
+              kubectl -n "$ns" get pods -l "app=${deployment}" -o json \
+                | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | .metadata.name'
+            )
+            for pod in "${terminating_pods[@]}"; do
+              echo "::warning title=Removing stale terminating pod::${pod} was already marked for deletion and is blocking deployment ${deployment}."
+              kubectl -n "$ns" delete pod "$pod" --force --grace-period=0 --wait=false
+            done
+          }
+
           snapshot_deployment() {
             local deployment="$1"
             local deployment_json="$RUNNER_TEMP/claritas-current-${deployment}.json"
@@ -936,7 +949,11 @@ jobs:
 
             # Capture what is actually serving before the first workload
             # manifest is applied. Every regular container (including database
-            # sidecars) is pinned to its runtime digest in the saved full spec.
+            # sidecar) is pinned to its runtime digest in the saved full spec.
+            # A pod with deletionTimestamp set has already left the desired
+            # workload; remove only that stale object so it cannot keep an
+            # otherwise available rollout in ProgressDeadlineExceeded forever.
+            cleanup_stale_terminating_pods "$deployment"
             kubectl -n "$ns" rollout status "deployment/${deployment}" --timeout=300s >&2
             kubectl -n "$ns" get "deployment/${deployment}" -o json > "$deployment_json"
             kubectl -n "$ns" get pods -l "app=${deployment}" -o json > "$pods_json"
