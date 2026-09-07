@@ -1069,10 +1069,14 @@ jobs:
           job="keycloak-bootstrap-${GITHUB_RUN_ID}"
           kubectl -n "$NS" delete job "$job" --ignore-not-found=true || true
           sed -E "s/^\s*name: keycloak-bootstrap$/  name: ${job}/" infra/k8s/keycloak-bootstrap-job.yaml | kubectl -n "$NS" apply -f -
-          if ! kubectl -n "$NS" wait --for=condition=complete "job/${job}" --timeout=600s; then
+          if ! ./infra/scripts/wait-for-k8s-job.sh "$NS" "$job" 600; then
             echo "::error::Keycloak bootstrap job failed" >&2
             kubectl -n "$NS" describe "job/${job}" || true
-            kubectl -n "$NS" logs "job/${job}" --tail=200 || true
+            kubectl -n "$NS" get pods -l "job-name=${job}" -o wide || true
+            for pod in $(kubectl -n "$NS" get pods -l "job-name=${job}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true); do
+              kubectl -n "$NS" describe pod "$pod" || true
+              kubectl -n "$NS" logs "$pod" -c bootstrap --tail=200 || true
+            done
             exit 1
           fi
           kubectl -n "$NS" logs "job/${job}" --tail=200 || true

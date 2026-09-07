@@ -150,7 +150,7 @@ data:
       local client_id="$1"
       "$KCADM" get clients -r "$KEYCLOAK_REALM" -q clientId="$client_id" --fields id \
         | sed -n 's/.*"id" : "\([^"]*\)".*/\1/p' \
-        | head -n 1
+        | sed -n '1p'
     }
 
     upsert_client() {
@@ -286,7 +286,7 @@ data:
         '"user.session.note" : "identity_provider"' \
         '"claim.name" : "identity_provider"' \
         '"id.token.claim" : "true"'; do
-        if ! printf '%s' "$mapper" | grep -Fq "$expected"; then
+        if ! grep -Fq "$expected" <<< "$mapper"; then
           log "ERROR: Identity-provider claim mapper failed persisted-config verification"
           return 1
         fi
@@ -310,17 +310,17 @@ data:
       fi
 
       instance="$("$KCADM" get "identity-provider/instances/${alias}" -r "$KEYCLOAK_REALM")"
-      if ! printf '%s' "$instance" | grep -Eq '"providerId"[[:space:]]*:[[:space:]]*"'"${expected_provider_id}"'"'; then
+      if ! grep -Eq '"providerId"[[:space:]]*:[[:space:]]*"'"${expected_provider_id}"'"' <<< "$instance"; then
         log "ERROR: Identity provider ${alias} was not persisted with provider ${expected_provider_id}"
         return 1
       fi
-      if ! printf '%s' "$instance" | grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true'; then
+      if ! grep -Eq '"enabled"[[:space:]]*:[[:space:]]*true' <<< "$instance"; then
         log "ERROR: Identity provider ${alias} was persisted disabled"
         return 1
       fi
       IFS=',' read -r -a config_fields <<< "$required_config_fields"
       for config_field in "${config_fields[@]}"; do
-        if ! printf '%s' "$instance" | grep -Eq '"'"${config_field}"'"[[:space:]]*:[[:space:]]*"[^"]+"'; then
+        if ! grep -Eq '"'"${config_field}"'"[[:space:]]*:[[:space:]]*"[^"]+"' <<< "$instance"; then
           log "ERROR: Identity provider ${alias} is missing required config ${config_field}"
           return 1
         fi
@@ -484,12 +484,14 @@ data:
 
     validate_auth_configuration
 
+    # Feed grep directly: grep -q can close a pipe before printf finishes a
+    # large serverinfo response, producing a false failure under pipefail.
     server_info="$("$KCADM" get serverinfo)"
-    if ! printf '%s' "$server_info" | grep -Eq '"version"[[:space:]]*:[[:space:]]*"26\.7\.3"'; then
+    if ! grep -Eq '"version"[[:space:]]*:[[:space:]]*"26\.7\.3"' <<< "$server_info"; then
       log "ERROR: Keycloak server is not the reviewed 26.7.3 release"
       exit 1
     fi
-    if ! printf '%s' "$server_info" | grep -Eq '"id"[[:space:]]*:[[:space:]]*"apple"'; then
+    if ! grep -Eq '"id"[[:space:]]*:[[:space:]]*"apple"' <<< "$server_info"; then
       log "ERROR: The checksum-pinned Apple identity-provider extension is not loaded"
       exit 1
     fi

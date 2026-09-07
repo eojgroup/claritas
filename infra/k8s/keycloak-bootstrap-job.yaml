@@ -5,13 +5,15 @@ metadata:
   namespace: claritas
 spec:
   backoffLimit: 2
+  activeDeadlineSeconds: 540
   ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
         app: keycloak-bootstrap
     spec:
-      restartPolicy: OnFailure
+      # Retain each failed attempt and its logs until the workflow diagnoses it.
+      restartPolicy: Never
       serviceAccountName: keycloak-sa
       containers:
         - name: bootstrap

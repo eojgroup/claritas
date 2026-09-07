@@ -40,6 +40,51 @@ test("Keycloak bootstrap script is valid Bash", () => {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("Keycloak server checks accept large valid responses and reject missing requirements", () => {
+  const script = embeddedBootstrapScript();
+  const start = script.indexOf('server_info="$("$KCADM" get serverinfo)"');
+  const end = script.indexOf('if "$KCADM" get "realms/', start);
+  assert.ok(start >= 0 && end > start);
+  const checks = script.slice(start, end);
+  const padding = `${"x".repeat(200)}\n`.repeat(10_000);
+
+  for (const [header, expectedStatus, expectedMessage] of [
+    ['{"version" : "26.7.3", "id" : "apple"}', 0, "verified"],
+    ['{"version" : "26.6.0", "id" : "apple"}', 1, "not the reviewed"],
+    ['{"version" : "26.7.3", "id" : "google"}', 1, "extension is not loaded"],
+  ] as const) {
+    // Execute the production checks with a response larger than a pipe buffer.
+    // The original printf | grep -q pipeline rejected the valid first fixture.
+    const fixtureResult = spawnSync("bash", [], {
+      input: `set -euo pipefail
+log() { echo "$*"; }
+KCADM=fixture
+fixture() { command cat <<'KEYCLOAK_FIXTURE'
+${header}
+${padding}
+KEYCLOAK_FIXTURE
+}
+${checks}
+echo verified
+`,
+      encoding: "utf8",
+    });
+    assert.equal(fixtureResult.status, expectedStatus, fixtureResult.stderr || fixtureResult.stdout);
+    assert.ok(fixtureResult.stdout.includes(expectedMessage), fixtureResult.stdout);
+  }
+});
+
+test("Keycloak bootstrap retains failed attempts and stops waiting when the job fails", () => {
+  assert.match(bootstrapJob, /restartPolicy: Never/);
+  assert.match(bootstrapJob, /activeDeadlineSeconds: 540/);
+  const start = releaseWorkflow.indexOf("- name: 🔑 Bootstrap Keycloak realm and IdPs");
+  const end = releaseWorkflow.indexOf("- name: 🧩 Run DB migrations", start);
+  const step = releaseWorkflow.slice(start, end);
+  assert.match(step, /wait-for-k8s-job\.sh "\$NS" "\$job" 600/);
+  assert.match(step, /logs "\$pod" -c bootstrap --tail=200/);
+  assert.doesNotMatch(step, /wait --for=condition=complete/);
+});
+
 test("advertised identity providers fail closed during bootstrap", () => {
   assert.match(bootstrapJob, /- name: AUTH_PROVIDERS\s+valueFrom: \{ configMapKeyRef: \{ name: claritas-config, key: AUTH_PROVIDERS \} \}/);
   assert.match(bootstrapConfig, /Google is advertised by AUTH_PROVIDERS but its credentials are absent/);
