@@ -12,6 +12,10 @@ data:
   AUTH_SUCCESS_REDIRECT_URL: "https://app.claritas.info/"
   AUTH_FAILURE_REDIRECT_URL: "https://app.claritas.info/"
   AUTH_ALLOWED_REDIRECTS: "https://app.claritas.info,claritas://auth/callback"
+  # Rolling-release compatibility only: the pre-V56 API requires this key at
+  # container creation. The current API ignores it and validates exact parsed
+  # redirect origins through AUTH_ALLOWED_REDIRECTS.
+  AUTH_ALLOWED_REDIRECT_SCHEMES: "claritas"
   # Google is live. Add microsoft and apple only after the corresponding
   # broker credentials have been deployed; this value controls what the login
   # screen advertises, not just the routes accepted by the API.

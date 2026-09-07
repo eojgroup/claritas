@@ -77,6 +77,12 @@ test("API client receives broker provenance and local account entry points stay 
   assert.match(bootstrapConfig, /directAccessGrantsEnabled\\": false/);
 });
 
+test("the rolling release keeps the legacy redirect key without weakening the current API", () => {
+  assert.match(applicationConfig, /AUTH_ALLOWED_REDIRECT_SCHEMES: "claritas"/);
+  assert.doesNotMatch(apiDeployment, /- name: AUTH_ALLOWED_REDIRECT_SCHEMES/);
+  assert.match(applicationConfig, /current API ignores it and validates exact parsed/);
+});
+
 test("GKE redirects HTTP at the edge and returns HSTS from every HTTPS backend", () => {
   assert.match(frontendConfig, /apiVersion: networking\.gke\.io\/v1beta1/);
   assert.match(frontendConfig, /redirectToHttps:\s+enabled: true\s+responseCodeName: PERMANENT_REDIRECT/);
