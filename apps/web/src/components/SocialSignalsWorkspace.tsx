@@ -51,9 +51,10 @@ function authorInitial(signal: SocialSignal) {
 
 type SocialSignalsWorkspaceProps = {
   initialCountry?: string | null;
+  eventId?: string | null;
 };
 
-export default function SocialSignalsWorkspace({ initialCountry }: SocialSignalsWorkspaceProps) {
+export default function SocialSignalsWorkspace({ initialCountry, eventId }: SocialSignalsWorkspaceProps) {
   const [signals, setSignals] = useState<SocialSignal[]>([]);
   const [totalSignals, setTotalSignals] = useState(0);
   const [coverage, setCoverage] = useState<SocialCoverage | null>(null);
@@ -78,6 +79,7 @@ export default function SocialSignalsWorkspace({ initialCountry }: SocialSignals
     try {
       const [signalsResult, coverageResult] = await Promise.allSettled([
         fetchSocialSignals({
+          eventId: eventId || undefined,
           platform: nextPlatform,
           country: nextCountry || undefined,
           q: nextQuery || undefined,
@@ -99,7 +101,7 @@ export default function SocialSignalsWorkspace({ initialCountry }: SocialSignals
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
-  }, [country, platform, query]);
+  }, [country, platform, query, eventId]);
 
   useEffect(() => {
     const nextCountry = (initialCountry ?? "").toUpperCase();
@@ -108,7 +110,7 @@ export default function SocialSignalsWorkspace({ initialCountry }: SocialSignals
     // Global country changes should immediately refresh this source lens. Local
     // filter edits still submit explicitly through the form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialCountry]);
+  }, [initialCountry, eventId]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -136,6 +138,7 @@ export default function SocialSignalsWorkspace({ initialCountry }: SocialSignals
         </div>
       </section>
 
+      <p className="text-xs text-[color:var(--shell-muted)]">{eventId ? "Showing posts linked by topic and time to the selected map investigation. Country scope includes the investigation location, not the posting account location." : "Country scope includes provider location and linked investigations. Posts without geographic context remain available in the global view."}</p>
       <form onSubmit={submit} className="operational-control-bar grid gap-3 rounded-xl p-4 md:grid-cols-[minmax(12rem,0.7fr)_minmax(9rem,0.35fr)_minmax(8rem,0.3fr)_auto] md:items-end">
         <label className="text-xs font-semibold text-[color:var(--shell-muted)]">
           Search posts
@@ -171,6 +174,7 @@ export default function SocialSignalsWorkspace({ initialCountry }: SocialSignals
       {coverage && coverage.providers.length > 0 && (
         <section className="app-card rounded-xl p-4" aria-label="Social provider status">
           <div className="text-[10px] uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">Provider coverage</div>
+          {coverage.collection && <p className="mt-2 text-xs text-[color:var(--shell-muted)]">Collection: {coverage.collection.enabled && coverage.collection.schedule_enabled ? "scheduled" : "not scheduled"} · Last run: {coverage.collection.last_status ?? "never run"}{coverage.collection.last_run_at ? ` · ${dateLabel(coverage.collection.last_run_at)}` : ""}</p>}
           <div className="mt-3 flex flex-wrap gap-2">
             {coverage.providers.map((provider) => {
               const observed = coverage.coverage.find((entry) => entry.platform === provider.platform);

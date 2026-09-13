@@ -76,6 +76,7 @@ export type SocialCoverageRow = {
 };
 
 export type SocialCoverage = {
+  collection?: { enabled: boolean; schedule_enabled: boolean; last_status: string | null; last_run_at: string | null };
   window_days: number;
   coverage: SocialCoverageRow[];
   providers: SocialProviderCoverage[];
@@ -114,6 +115,7 @@ async function responseError(response: Response, fallback: string) {
 }
 
 export async function fetchSocialSignals(params?: {
+  eventId?: string;
   platform?: SocialPlatform | "all";
   country?: string;
   q?: string;
@@ -126,6 +128,7 @@ export async function fetchSocialSignals(params?: {
   if (params?.platform && params.platform !== "all") search.set("platform", params.platform);
   if (params?.country?.trim()) search.set("country", params.country.trim().toUpperCase());
   if (params?.q?.trim()) search.set("q", params.q.trim());
+  if (params?.eventId) search.set("eventId", params.eventId);
 
   const response = await fetch(`/api/social/signals?${search.toString()}`, {
     credentials: "include",
@@ -158,6 +161,7 @@ export async function fetchSocialCoverage(): Promise<SocialCoverage> {
     coverage?: unknown;
     generated_at?: unknown;
     window_days?: unknown;
+    collection?: SocialCoverage["collection"];
   };
   const rawProviders = Array.isArray(payload.providers)
     ? payload.providers
@@ -207,6 +211,7 @@ export async function fetchSocialCoverage(): Promise<SocialCoverage> {
   const generatedAt = payload.generated_at;
   const windowDays = Number(payload.window_days);
   return {
+    collection: payload.collection,
     window_days: Number.isFinite(windowDays) ? Math.max(1, windowDays) : 7,
     coverage,
     providers,

@@ -2454,6 +2454,7 @@ app.get("/api/social/signals", requireAuthenticated, async (req, res) => {
   try {
     trackDemandSignal("social");
     const result = await listSocialSignals({
+      eventId: typeof req.query.eventId === "string" ? req.query.eventId : undefined,
       platform: typeof req.query.platform === "string" ? req.query.platform : undefined,
       country: typeof req.query.country === "string" ? req.query.country : undefined,
       q: typeof req.query.q === "string" ? req.query.q : undefined,
@@ -2474,7 +2475,7 @@ app.get("/api/social/signals", requireAuthenticated, async (req, res) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const status = /^(platform|country) must/.test(message) ? 400 : 500;
+    const status = /^(platform|country|eventId) must/.test(message) ? 400 : 500;
     return res.status(status).json({ error: message });
   }
 });

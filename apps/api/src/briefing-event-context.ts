@@ -1,3 +1,4 @@
+import type { SocialEventContext } from "./intelligence/social-context";
 export type BriefingEventNewsLink = {
   title: string;
   original_title: string | null;
@@ -68,6 +69,7 @@ export type BriefingIntelligenceEvent = {
   earth_observation: BriefingEventEarthObservation[];
   evidence: Array<Record<string, unknown>>;
   entities: Array<Record<string, unknown>>;
+  social_context?: SocialEventContext[];
   epistemic_notice: string;
 };
 
@@ -170,6 +172,7 @@ export function projectBriefingPriorityEvents<T extends BriefingIntelligenceEven
     const extraReasons = record(event).reasons;
     return {
       ...priorityEvent,
+      social_context: event.social_context?.slice(0, 3).map((post) => ({ ...post, text: text(post.text, 500), author: text(post.author, 160), url: boundedProjectionUrl(post.url) ?? "" })),
       title: text(event.title, 220),
       what,
       ...(supplementalSummary && supplementalSummary !== what ? { summary: supplementalSummary } : {}),
@@ -626,7 +629,10 @@ async function queryBriefingEvents(input: {
      LIMIT ${limitRef}`,
     params,
   );
-  return rows.map(normalizeBriefingEventContextRow).filter((event) => event.source_quality.priority_eligible);
+  const events = rows.map(normalizeBriefingEventContextRow).filter((event) => event.source_quality.priority_eligible);
+  const { getSocialEventContexts } = await import("./intelligence/social-context");
+  const social = await getSocialEventContexts(events.map((event) => event.id));
+  return events.map((event) => ({ ...event, social_context: social.filter((post) => post.event_id === event.id) }));
 }
 
 export async function getBriefingIntelligenceEvents(

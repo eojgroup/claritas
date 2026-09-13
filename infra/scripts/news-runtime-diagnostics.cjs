@@ -120,6 +120,21 @@ async function main() {
   });
   try {
     await client.connect();
+    const social = await client.query(`SELECT
+      (SELECT count(*)::int FROM social_signal WHERE expires_at > now()) AS retained_posts,
+      (SELECT max(posted_at) FROM social_signal WHERE expires_at > now()) AS latest_post,
+      (SELECT jsonb_build_object('enabled',enabled,'scheduled',schedule_enabled,'next_run',next_scheduled_at)
+       FROM ingestion_automation_rule WHERE pipeline='social') AS collection,
+      (SELECT jsonb_build_object('id',id,'status',status,'started_at',started_at,'stats',stats)
+       FROM ingestion_run WHERE pipeline='social' ORDER BY id DESC LIMIT 1) AS last_run`);
+    console.log(JSON.stringify({ social_runtime: social.rows[0] }));
+    try {
+      const { fetchBlueskySignals } = require(process.cwd() + "/dist/connectors/social-media.js");
+      const probe = await fetchBlueskySignals("geopolitics", 3);
+      console.log(JSON.stringify({ social_provider_probe: { provider: "bluesky", posts: probe.signals.length, requests: probe.requests } }));
+    } catch (error) {
+      console.log(JSON.stringify({ social_provider_probe: { provider: "bluesky", error: classifyError(error) } }));
+    }
     const result = await client.query(`SELECT id,status,trigger_mode,started_at,finished_at,stats
       FROM ingestion_run WHERE pipeline='news' AND trigger_mode='release_gate'
         AND ($1::bigint IS NULL OR id=$1::bigint) ORDER BY id DESC LIMIT 1`, [runID || null]);

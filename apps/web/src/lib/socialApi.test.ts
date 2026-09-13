@@ -65,10 +65,10 @@ describe("social API presentation contract", () => {
     }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await fetchSocialSignals({ platform: "bluesky", country: "de", q: "rail", limit: 25 });
+    const response = await fetchSocialSignals({ platform: "bluesky", country: "de", q: "rail", limit: 25, eventId: "selected-investigation" });
     expect(response.page.total).toBe(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/social/signals?limit=25&offset=0&platform=bluesky&country=DE&q=rail",
+      "/api/social/signals?limit=25&offset=0&platform=bluesky&country=DE&q=rail&eventId=selected-investigation",
       { credentials: "include" },
     );
     vi.unstubAllGlobals();

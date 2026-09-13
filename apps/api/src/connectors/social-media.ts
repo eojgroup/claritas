@@ -1023,6 +1023,7 @@ export function presentSocialSignal(row: PersistedSocialSignalRow) {
 }
 
 export async function listSocialSignals(options: {
+  eventId?: string;
   platform?: string;
   country?: string;
   q?: string;
@@ -1035,6 +1036,8 @@ export async function listSocialSignals(options: {
   }
   const country = normalizedCountry(options.country) ?? "";
   if (options.country && !country) throw new Error("country must be a two-letter ISO 3166-1 code.");
+  const eventId = options.eventId ?? "";
+  if (eventId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) throw new Error("eventId must be a UUID.");
   const search = cleanText(options.q, 300) ?? "";
   const limit = boundedInt(options.limit, 1, 200, 50);
   const offset = boundedInt(options.offset, 0, 100_000, 0);
@@ -1043,11 +1046,15 @@ export async function listSocialSignals(options: {
      FROM social_signal ss
      WHERE ss.expires_at > now()
        AND ($1::text='' OR ss.platform=$1)
-       AND ($2::text='' OR ss.country_iso2=$2::char(2))
+       AND ($2::text='' OR ss.country_iso2=$2::char(2) OR EXISTS (
+         SELECT 1 FROM social_event_context link JOIN intelligence_event event ON event.id=link.event_id
+         WHERE link.signal_id=ss.id AND event.primary_country_iso2=$2::char(2)))
+       AND ($6::text='' OR EXISTS (SELECT 1 FROM social_event_context link
+         WHERE link.signal_id=ss.id AND link.event_id=NULLIF($6,'')::uuid))
        AND ($3::text='' OR ss.content_text ILIKE '%'||$3||'%' OR COALESCE(ss.title,'') ILIKE '%'||$3||'%' OR COALESCE(ss.author_handle,'') ILIKE '%'||$3||'%' OR COALESCE(ss.author_display_name,'') ILIKE '%'||$3||'%')
      ORDER BY ss.posted_at DESC,ss.id DESC
      LIMIT $4 OFFSET $5`,
-    [platform, country, search, limit, offset],
+    [platform, country, search, limit, offset, eventId],
   );
   return {
     items: rows.map(presentSocialSignal),
@@ -1072,7 +1079,14 @@ export async function getSocialCoverage(daysInput?: number) {
      GROUP BY platform ORDER BY signal_count DESC,platform ASC`,
     [days],
   );
+  const { rows: collection } = await query<{ enabled: boolean; schedule_enabled: boolean; next_scheduled_at: string | null; last_status: string | null; last_run_at: string | null }>(
+    `SELECT rule.enabled,rule.schedule_enabled,rule.next_scheduled_at,
+       (SELECT status FROM ingestion_run WHERE pipeline='social' ORDER BY id DESC LIMIT 1) AS last_status,
+       (SELECT started_at FROM ingestion_run WHERE pipeline='social' ORDER BY id DESC LIMIT 1) AS last_run_at
+     FROM ingestion_automation_rule rule WHERE pipeline='social'`,
+  );
   return {
+    collection: collection[0] ?? { enabled: false, schedule_enabled: false, next_scheduled_at: null, last_status: null, last_run_at: null },
     window_days: days,
     coverage: rows.map((row) => ({
       ...row,

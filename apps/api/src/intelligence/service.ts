@@ -1,3 +1,4 @@
+import { getSocialEventContexts } from "./social-context";
 import type { PoolClient } from "pg";
 import {
   buildEventUnderstanding,
@@ -335,7 +336,8 @@ export async function listIntelligenceEvents(options: {
      LIMIT ${limitRef} OFFSET ${offsetRef}`,
     params,
   );
-  return rows.map(eventToApi);
+  const social = await getSocialEventContexts(rows.map((row) => row.id));
+  return rows.map((row) => ({ ...eventToApi(row), social_context_count: social.filter((post) => post.event_id === row.id).length }));
 }
 
 export async function getIntelligenceEvent(eventId: string) {
@@ -495,6 +497,7 @@ export async function getIntelligenceEvent(eventId: string) {
   )).map((row: any) => buildLinkedNewsPresentation(row));
   return {
     event: normalizedEvent,
+    social_context: await getSocialEventContexts([eventId]),
     understanding: buildEventUnderstanding(normalizedEvent as Record<string, unknown>, evidence),
     evidence,
     linked_news: linkedNews,

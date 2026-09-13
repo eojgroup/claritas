@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SocialSignalsWorkspace from "./SocialSignalsWorkspace";
 import { fetchSocialCoverage, fetchSocialSignals, type SocialSignal } from "../lib/socialApi";
@@ -53,6 +53,12 @@ const example: SocialSignal = {
 };
 
 describe("SocialSignalsWorkspace", () => {
+  it("follows the map investigation when the selected event changes", async () => {
+    const { rerender } = render(<SocialSignalsWorkspace initialCountry="SE" eventId="first" />);
+    await waitFor(() => expect(fetchSocialSignals).toHaveBeenLastCalledWith(expect.objectContaining({ country: "SE", eventId: "first" })));
+    rerender(<SocialSignalsWorkspace initialCountry="SE" eventId="second" />);
+    await waitFor(() => expect(fetchSocialSignals).toHaveBeenLastCalledWith(expect.objectContaining({ country: "SE", eventId: "second" })));
+  });
   beforeEach(() => {
     vi.mocked(fetchSocialSignals).mockResolvedValue({
       items: [example],

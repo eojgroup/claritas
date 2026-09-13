@@ -1,3 +1,4 @@
+import { socialEventDiscoveryQueries, refreshSocialEventContext } from "./intelligence/social-context";
 import { ingestOpenWeatherCountryWeather } from "./connectors/openweather";
 import { ingestNwsAlerts } from "./connectors/nws";
 import { ingestGdelt } from "./connectors/gdelt";
@@ -1475,7 +1476,9 @@ async function executeSocialRun(runId: number, plan: SocialRunPlan): Promise<voi
       request: plan.requestPayload,
       trust_policy: "All acquired posts remain unverified claims pending independent corroboration.",
     });
+    const eventQueries = await socialEventDiscoveryQueries();
     for (const platform of ["x", "reddit", "youtube", "bluesky"] as const) {
+      const queries = platform === "bluesky" ? [...new Set([...plan.queries, ...eventQueries])].slice(0, 10) : plan.queries;
       if (!plan.providers[platform]) continue;
       await executeProviderStep(
         runId,
@@ -1483,15 +1486,16 @@ async function executeSocialRun(runId: number, plan: SocialRunPlan): Promise<voi
         totals,
         `${platform}/unverified-social-claims`,
         () => ingestSocialProvider(platform, {
-          queries: plan.queries,
+          queries,
           maxResultsPerQuery: plan.maxResultsPerQuery,
           lookbackHours: plan.lookbackHours,
         }),
-        (result) => classifySocialProviderResult(result, plan.queries.length),
+        (result) => classifySocialProviderResult(result, queries.length),
       );
     }
     const succeeded = steps.filter((step) => step.status !== "failed").length;
     if (succeeded === 0) throw new Error("All selected social providers failed.");
+    await refreshSocialEventContext();
     const degradedSteps = steps.filter((step) => step.status !== "success").map((step) => step.step);
     const stats = {
       pipeline: "social",

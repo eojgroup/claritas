@@ -201,7 +201,7 @@ describe("IntelligenceWorkspace", () => {
 
     render(<IntelligenceWorkspace initialEventId={event.id} onSelectEvent={onSelectEvent} />);
     const navigator = await screen.findByRole("combobox", { name: "Event" });
-    expect((navigator as HTMLSelectElement).value).toBe(event.id);
+    await waitFor(() => expect((navigator as HTMLSelectElement).value).toBe(event.id));
     expect(screen.getByText("Active investigation")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Jump to the selected evidence thread/i })).toBeTruthy();
 

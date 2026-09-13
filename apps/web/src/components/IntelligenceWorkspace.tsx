@@ -599,7 +599,7 @@ export default function IntelligenceWorkspace({
                   {presentation.focus && <div className="mt-1 line-clamp-1 text-[11px] text-[color:var(--shell-muted)]">Focus · {presentation.focus}</div>}
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[color:var(--shell-muted)]">
                     <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{presentation.locationLabel}</span>
-                    <span>{event.evidence_count} linked</span>
+                    <span>{event.evidence_count} linked{event.social_context_count ? ` · ${event.social_context_count} social claims` : ""}</span>
                     {event.earth_observation_available && <span className="inline-flex items-center gap-1 text-[color:var(--signal-emerald)]"><Satellite className="h-3 w-3" />Imagery</span>}
                   </div>
                   <time dateTime={event.last_activity_time} className="mt-2 block text-[10px] tabular-nums text-[color:var(--shell-muted)]">
@@ -791,6 +791,17 @@ export default function IntelligenceWorkspace({
                 ) : (
                   <div role="status" className="mt-3 rounded-xl border border-dashed border-[color:var(--shell-border)] p-4 text-xs leading-5 text-[color:var(--shell-muted)]">No news record is explicitly linked to this event yet. Sensor and official evidence below remain available, but Claritas does not imply a reporting connection.</div>
                 )}
+              </section>
+
+              <section aria-labelledby="social-context-heading" className="rounded-xl border border-[color:var(--shell-border)] p-4">
+                <h3 id="social-context-heading" className="text-lg font-semibold">Social context for this investigation</h3>
+                <p className="mt-1 text-xs text-[color:var(--shell-muted)]">Topic and time matched claims inform questions and uncertainty in the briefing. They do not increase factual confidence or establish causation.</p>
+                {(detail.social_context ?? []).map((post) => <article key={post.signal_id} className="mt-3 rounded-lg bg-[color:var(--shell-bg)] p-3">
+                  <div className="text-xs font-semibold">{post.author} · {post.platform} · Unverified claim</div>
+                  <p className="mt-2 text-sm">{post.text}</p>
+                  <a href={post.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs underline">View attributed post</a>
+                </article>)}
+                {!detail.social_context?.length && <p className="mt-3 text-xs text-[color:var(--shell-muted)]">No retained posts meet the topic and time criteria for this event. This does not mean there is no public discussion.</p>}
               </section>
 
               <section aria-labelledby="evidence-thread-heading">

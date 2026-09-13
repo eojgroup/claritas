@@ -1198,6 +1198,7 @@ export type IntelligenceEvent = {
   longitude?: number | null;
   monitoring_tier?: number | null;
   evidence_count: number;
+  social_context_count?: number;
   earth_observation_available: boolean;
   metadata?: Record<string, unknown>;
 };
@@ -1360,7 +1361,14 @@ export type GibsEventContext = {
   notice: string;
 };
 
+export type SocialEventContext = {
+  event_id: string; signal_id: number; platform: string; text: string; url: string;
+  author: string; posted_at: string; matched_terms: string[];
+  classification: "unverified_social_claim"; assessment_boundary: string;
+};
+
 export type IntelligenceEventDetail = {
+  social_context?: SocialEventContext[];
   event: IntelligenceEvent;
   evidence: IntelligenceEvidence[];
   understanding?: {

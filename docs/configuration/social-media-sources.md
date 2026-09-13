@@ -102,10 +102,10 @@ REDDIT_USER_AGENT=Claritas/1.0 by ClaritasEngineering (engineering@claritas.info
 REDDIT_API_APPROVED=false
 ```
 
-Safe rollout defaults are Bluesky enabled, credentialed sources effective only
-when their credentials exist, seven-day retention, and no persisted social
-automation rule until an administrator prepares its disabled controls after a
-successful release. The Kubernetes ConfigMap contains only controls; the
+Migration V57 enables hourly Bluesky-only collection with seven-day retention.
+Credentialed providers remain explicitly opt-in. The social coverage response
+includes collection enablement, scheduling, and the last run status. API
+availability alone does not establish live ingestion.
 deployment reads tokens and client secrets from three optional Secrets created
 by the release workflow:
 
@@ -284,12 +284,8 @@ untrustworthy.” `GET /api/social/coverage?days=7` returns no credentials:
    absence of geotag evidence stays unmapped.
 4. Check duplicate handling by rerunning the same query. Provider external IDs
    update engagement instead of creating a second post.
-5. Only then enable the `social` automation rule in Admin. Keep the interval
-   within provider quotas and monitor run failures, post caps, and storage
-   expiry. On the first successful social release, the panel shows **Prepare
-   social automation** instead of controls: use it only after the production
-   release workflow has passed all gates. That explicit action creates a
-   disabled rule; review it and save again to enable the desired trigger modes.
+5. V57 schedules Bluesky hourly. Use Admin to pause collection or change its
+   cadence. Review quotas and credentials before adding other providers.
    Physical expiry does not depend on a successful social-provider run: the
    general ingestion maintenance cycle deletes expired social rows at least
    every six hours while the production automation worker is running.
@@ -315,3 +311,22 @@ untrustworthy.” `GET /api/social/coverage?days=7` returns no credentials:
 - Respect each provider's deletion, retention, attribution, branding, and quota
   terms. Disable a provider immediately when its approved access no longer
   covers Claritas usage.
+
+
+## Investigation alignment
+
+Social runs add up to eight bounded discovery queries from active map events.
+Retained posts link only when their publisher timestamp fits the event window,
+at least three meaningful title terms overlap (at least 60% of title terms),
+and the event's named country or location appears in the post when known.
+Links are contextual, not corroboration. Event confidence, severity, canonical
+evidence counts, and map ranking are unchanged by social volume or verification
+badges. Country filtering can follow the linked investigation's geography without
+claiming that the author posted from that location.
+
+The web source explorer passes `eventId` from the selected map investigation.
+Event details and briefing inputs share the same bounded `social_context` with
+account attribution, original URL, timestamp, matched terms, and an explicit
+uncertainty boundary. Conclusions must label these as unverified claims. Expired
+posts are excluded immediately and deletion cascades to context links. No
+matching posts means coverage is unavailable, not that discussion is absent.

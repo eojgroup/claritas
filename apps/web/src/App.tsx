@@ -6883,7 +6883,7 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "social" && (
-              <SocialSignalsWorkspace initialCountry={selectedCountry} />
+              <SocialSignalsWorkspace initialCountry={selectedCountry} eventId={selectedIntelligenceEventId} />
             )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
