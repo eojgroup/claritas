@@ -76,8 +76,19 @@ test("native PKCE uses RFC 7636 S256 syntax and known derivation", () => {
   assert.equal(isValidNativeCodeChallenge(`${challenge}=`), false);
   assert.equal(
     buildNativeHandoffRedirect("claritas://auth/callback?discard=me#discard", "abc_123"),
-    "claritas://auth/callback?code=abc_123",
+    "claritas://auth/callback?code=abc_123#",
   );
+});
+
+test("native handoff explicitly clears inherited browser fragments", () => {
+  for (const suffix of ["", "#", "#provider-fragment", "?token=discard#token=discard"]) {
+    const location = buildNativeHandoffRedirect(`claritas://auth/callback${suffix}`, "one-time-code");
+    assert.equal(location, "claritas://auth/callback?code=one-time-code#");
+    // URL.hash is empty for both absent and empty fragments, so assert the
+    // serialized Location too: only the trailing # prevents inheritance.
+    assert.ok(location.endsWith("#"));
+    assert.equal(new URL(location).searchParams.get("token"), null);
+  }
 });
 
 test("auth implementation binds state and exchanges native codes without URL bearers", () => {

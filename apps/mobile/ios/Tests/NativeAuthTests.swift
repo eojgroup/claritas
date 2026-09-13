@@ -48,6 +48,16 @@ final class NativeAuthTests: XCTestCase {
         XCTAssertNil(NativeAuthCallback.parse(mixed))
     }
 
+    func testExplicitEmptyFragmentAcceptsServerHandoff() {
+        let callback = URL(string: "claritas://auth/callback?code=single-use-code#")!
+
+        XCTAssertTrue(NativeAuthCallback.matchesExpectedEndpoint(callback))
+        XCTAssertEqual(NativeAuthCallback.parse(callback), .handoffCode("single-use-code"))
+        XCTAssertNil(NativeAuthCallback.parse(URL(string: "claritas://auth/callback#code=fragment-only")!))
+        XCTAssertNil(NativeAuthCallback.parse(URL(string: "claritas://auth/callback?token=bearer#")!))
+        XCTAssertNil(NativeAuthCallback.parse(URL(string: "claritas://evil/callback?code=value#")!))
+    }
+
     func testCallbackRejectsEveryEndpointVariation() {
         let invalidURLs = [
             "https://auth/callback?code=value",

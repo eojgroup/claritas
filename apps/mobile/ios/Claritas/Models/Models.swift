@@ -57,7 +57,9 @@ enum NativeAuthCallback {
             && components.user == nil
             && components.password == nil
             && components.port == nil
-            && components.fragment == nil
+            // The server uses an explicit empty fragment to prevent HTTP
+            // redirects from inheriting an identity provider's fragment.
+            && (components.fragment == nil || components.fragment == "")
     }
 
     static func parse(_ url: URL) -> NativeAuthCallbackPayload? {

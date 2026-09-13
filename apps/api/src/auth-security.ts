@@ -112,5 +112,8 @@ export function buildNativeHandoffRedirect(redirectUrl: string, code: string): s
   url.search = "";
   url.hash = "";
   url.searchParams.set("code", code);
+  // An absent fragment inherits the browser's previous fragment on a 303
+  // (RFC 9110 section 10.2.2). Explicitly empty it before crossing into the app.
+  url.hash = "#";
   return url.toString();
 }
