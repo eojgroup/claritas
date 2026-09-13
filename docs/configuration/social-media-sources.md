@@ -319,6 +319,7 @@ Social runs add up to eight bounded discovery queries from active map events.
 Retained posts link only when their publisher timestamp fits the event window,
 at least three meaningful title terms overlap (at least 60% of title terms),
 and the event's named country or location appears in the post when known.
+Links refresh after collection and every five minutes as new investigations arrive.
 Links are contextual, not corroboration. Event confidence, severity, canonical
 evidence counts, and map ranking are unchanged by social volume or verification
 badges. Country filtering can follow the linked investigation's geography without

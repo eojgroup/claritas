@@ -16,6 +16,7 @@ import {
 } from "./ingestion-admin";
 import { query, withWorkerLease } from "./db";
 import { getSocialProviderStatuses, type SocialProviderStatus } from "./connectors/social-media";
+import { refreshSocialEventContext } from "./intelligence/social-context";
 
 type DbTimestamp = string | Date;
 
@@ -241,6 +242,7 @@ let automationWorkerTimer: NodeJS.Timeout | null = null;
 let automationWorkerRunning = false;
 let automationRulesEnsured = false;
 let lastOperationalPruneAt = 0;
+let lastSocialContextRefreshAt = 0;
 
 function clampInt(raw: unknown, min: number, max: number, fallback: number): number {
   const parsed =
@@ -1044,6 +1046,12 @@ async function runAutomationCycle(): Promise<void> {
       for (const rule of rules) {
         const state = states.get(rule.pipeline);
         if (state) await evaluateRule(rule, state);
+      }
+      // Events can arrive after posts, including across an application rollout.
+      // Reconcile retained claims independently of the hourly provider schedule.
+      if (Date.now() - lastSocialContextRefreshAt >= 5 * 60_000) {
+        await refreshSocialEventContext();
+        lastSocialContextRefreshAt = Date.now();
       }
       if (Date.now() - lastOperationalPruneAt >= 6 * 3_600_000) {
         await pruneOperationalHistory();
