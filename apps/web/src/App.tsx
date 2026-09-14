@@ -1,3 +1,4 @@
+import SourceInvestigationLinks from "./components/SourceInvestigationLinks";
 import {
   useCallback,
   useEffect,
@@ -1417,10 +1418,10 @@ export default function ClaritasDashboard() {
         limit: 3,
         country: normalizedCountry ?? undefined,
         category: category === "all" ? undefined : category,
-        sort: "importance",
+        sort: "newest",
       });
       if (topNewsRequestIdRef.current !== requestId) return;
-      setTopNews(response.items.slice(0, 3));
+      setTopNews(newestNewsFirst(response.items).slice(0, 3));
       setTopNewsFeedMetadata(metadataFromNewsFeed(response));
       setTopNewsScopeKey(scopeKey);
     } catch (err) {
@@ -3490,11 +3491,6 @@ export default function ClaritasDashboard() {
     [activeTopNewsMetadata],
   );
   const topNewsTotal = Math.max(visibleTopNews.length, activeTopNewsMetadata?.page.total ?? 0);
-  const topNewsHasPendingAssessment = visibleTopNews.some((item) => (
-    !item.importance || item.importance.is_fallback === true
-  ));
-  const topNewsAssessmentIncomplete = topNewsHasPendingAssessment
-    || (activeTopNewsMetadata?.ranking.selected_unassessed_count ?? 0) > 0;
   const topNewsCountryLabel = selectedNewsCountry
     ? countryMeta.get(selectedNewsCountry)?.name ?? selectedNewsCountry
     : "Global";
@@ -6485,26 +6481,14 @@ export default function ClaritasDashboard() {
                             {listMode === "news" ? "Reporting overview" : "Live feed"}
                           </div>
                           <div className="text-sm font-semibold">
-                            {listMode === "news" ? "Top reporting" : "Latest intelligence drops"}
+                            {listMode === "news" ? "Latest reporting" : "Latest intelligence drops"}
                           </div>
                           <div className="text-xs text-[color:var(--shell-muted)]">
                             {listMode === "news"
                               ? `${topNewsCountryLabel} ${newsCategoryLabel(topNewsAppliedCategory).toLowerCase()} · ${
-                                isTopNewsScopeLoading
-                                  ? visibleTopNews.length > 0 && topNewsAppliedCategory !== newsCategory
-                                    ? `showing previous stories while updating to ${newsCategoryLabel(newsCategory).toLowerCase()}`
-                                    : visibleTopNews.length > 0
-                                      ? "refreshing the last successful ranking"
-                                      : "loading ranking assessment"
-                                  : topNewsLoadError
-                                    ? visibleTopNews.length > 0
-                                      ? "showing the last successful ranking; update failed"
-                                      : "ranking update unavailable"
-                                    : !activeTopNewsMetadata
-                                      ? "ranking metadata unavailable"
-                                      : topNewsAssessmentIncomplete
-                                        ? "assessment coverage incomplete; pending stories are marked unranked"
-                                        : "evidence-ranked importance with publisher balance"
+                                isTopNewsScopeLoading ? "refreshing newest stories"
+                                  : topNewsLoadError ? "update failed; showing previous stories"
+                                    : "newest first · publication or first-seen time"
                               }`
                               : `${regionLabel} · latest source update ${latestEventLabel}`}
                           </div>
@@ -6633,7 +6617,7 @@ export default function ClaritasDashboard() {
                                         onClick={() => selectNewsCategory("all")}
                                         className="min-h-11 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                                       >
-                                        Show all top stories
+                                        Show all latest stories
                                       </button>
                                     )}
                                   </div>
@@ -6883,7 +6867,7 @@ export default function ClaritasDashboard() {
               </div>
             )}
             {activeView === "social" && (
-              <SocialSignalsWorkspace initialCountry={selectedCountry} eventId={selectedIntelligenceEventId} />
+              <SocialSignalsWorkspace initialCountry={selectedCountry} eventId={selectedIntelligenceEventId} onOpenEvent={handleOpenIntelligence} onOpenMap={() => { setMapMode("signals"); setActiveView("dashboard"); }} />
             )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
@@ -7993,6 +7977,7 @@ export default function ClaritasDashboard() {
                             <h2 className="mt-2 text-lg font-semibold leading-6 text-[color:var(--shell-ink)]">
                               {episode.title}
                             </h2>
+                            <SourceInvestigationLinks links={episode.linked_events} onOpenEvent={handleOpenIntelligence} onOpenMap={() => { setMapMode("signals"); setActiveView("dashboard"); }} />
                             {episode.summary && (
                               <p className="mt-2 line-clamp-3 text-sm leading-6 text-[color:var(--shell-muted)]">
                                 {episode.summary}

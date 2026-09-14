@@ -145,6 +145,10 @@ private struct NewsRow: View {
                         .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                         .lineLimit(1)
                 }
+                Text(item.chronologyDisplayText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
                 NewsPriorityMetadataView(item: item, compact: true)
                 HStack(spacing: 5) {
                     if let source = sourceLabel {
@@ -156,10 +160,7 @@ private struct NewsRow: View {
                             .buttonStyle(.plain)
                     }
                     Spacer(minLength: 2)
-                    if let date = item.chronologyDate {
-                        Text("\(item.chronologyLabel) \(date.formatted(date: .numeric, time: .shortened))")
-                            .monospacedDigit()
-                    }
+
                 }
                 .font(.caption2)
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -238,6 +239,10 @@ private struct NewsRow: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                 }
+                Text(item.chronologyDisplayText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
                 NewsPriorityMetadataView(item: item)
                 HStack(spacing: 8) {
                     if let source = sourceLabel {
@@ -265,11 +270,7 @@ private struct NewsRow: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    if let d = item.chronologyDate {
-                        Text("\(item.chronologyLabel) \(DateFormatter.localizedString(from: d, dateStyle: .short, timeStyle: .short))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+
                 }
                 if let s = item.presentationSummary {
                     if item.ai_summary != nil {

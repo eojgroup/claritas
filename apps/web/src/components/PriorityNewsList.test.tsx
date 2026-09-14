@@ -142,6 +142,9 @@ describe("PriorityNewsList", () => {
     render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountries={() => ["US"]} getCountryName={() => "United States"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
     expect(screen.getByText(/Published · Sep 7, 2026/i)).toBeTruthy();
     expect(document.querySelector('time[datetime="2026-09-07T08:30:00Z"]')).toBeTruthy();
+    const mobileTime = document.querySelector(".dashboard-news-mobile-timestamp");
+    expect(mobileTime?.getAttribute("datetime")).toBe("2026-09-07T08:30:00Z");
+    expect(mobileTime?.textContent).toMatch(/Published Sep 7, 2026/);
   });
 
   it("discloses when ranking evidence is still limited", () => {

@@ -1,6 +1,6 @@
 import type { NewsItem, NewsTranslation } from "../lib/api";
 
-type NewsChronologyItem = Pick<NewsItem, "event_time" | "payload" | "time">;
+type NewsChronologyItem = Pick<NewsItem, "event_time" | "payload" | "time"> & { id?: number };
 
 export type NewsChronology = {
   timestamp: string | null;
@@ -91,8 +91,8 @@ export function latestNewsTimestamp<T extends NewsChronologyItem>(items: readonl
 
 /**
  * Keeps browse-feed chronology deterministic without mutating the response.
- * Dated stories are newest first; undated/invalid stories retain
- * their input order at the end of the list.
+ * Dated stories are newest first; undated/invalid stories remain at the end. IDs break ties consistently
+ * with the API and Apple clients.
  */
 export function newestNewsFirst<T extends NewsChronologyItem>(
   items: readonly T[],
@@ -107,11 +107,11 @@ export function newestNewsFirst<T extends NewsChronologyItem>(
     })
     .sort((left, right) => {
       if (left.timestamp != null && right.timestamp != null) {
-        return right.timestamp - left.timestamp || left.index - right.index;
+        return right.timestamp - left.timestamp || (right.item.id ?? 0) - (left.item.id ?? 0) || left.index - right.index;
       }
       if (left.timestamp != null) return -1;
       if (right.timestamp != null) return 1;
-      return left.index - right.index;
+      return (right.item.id ?? 0) - (left.item.id ?? 0) || left.index - right.index;
     })
     .map(({ item }) => item);
 }

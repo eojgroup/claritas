@@ -1,3 +1,4 @@
+import SourceInvestigationLinks from "./SourceInvestigationLinks";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowUpRight, BadgeCheck, CircleAlert, Eye, MessageCircle, RefreshCw, Repeat2, Search, ThumbsUp } from "lucide-react";
 import {
@@ -52,9 +53,11 @@ function authorInitial(signal: SocialSignal) {
 type SocialSignalsWorkspaceProps = {
   initialCountry?: string | null;
   eventId?: string | null;
+  onOpenEvent?: (id: string) => void;
+  onOpenMap?: () => void;
 };
 
-export default function SocialSignalsWorkspace({ initialCountry, eventId }: SocialSignalsWorkspaceProps) {
+export default function SocialSignalsWorkspace({ initialCountry, eventId, onOpenEvent, onOpenMap }: SocialSignalsWorkspaceProps) {
   const [signals, setSignals] = useState<SocialSignal[]>([]);
   const [totalSignals, setTotalSignals] = useState(0);
   const [coverage, setCoverage] = useState<SocialCoverage | null>(null);
@@ -246,6 +249,7 @@ export default function SocialSignalsWorkspace({ initialCountry, eventId }: Soci
                 </a>
               </div>
             </div>
+            <SourceInvestigationLinks links={signal.linked_events} onOpenEvent={onOpenEvent} onOpenMap={onOpenMap} />
           </article>
         ))}
       </section>

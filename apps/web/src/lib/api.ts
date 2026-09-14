@@ -197,7 +197,10 @@ export type PodcastExternalLink = {
   url: string;
 };
 
+export type SourceInvestigationLink = { id: string; title: string; country_iso2: string | null; rationale: string };
+
 export type PodcastEpisode = {
+  linked_events?: SourceInvestigationLink[];
   id: number;
   episode_id: number;
   podcast_index_id: number;

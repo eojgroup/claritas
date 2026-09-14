@@ -344,6 +344,26 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
+                if !detail.social_context.isEmpty {
+                    BrandCard(title: "Social context", icon: "bubble.left.and.bubble.right") {
+                        Text("Attributed claims for this investigation. Compare them with the evidence below before drawing a conclusion.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ForEach(detail.social_context) { post in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("\(post.author) · \(post.platform) · Unverified claim")
+                                    .font(.caption.weight(.semibold))
+                                Text(post.text).font(.subheadline)
+                                Text(post.posted_at.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                if let url = URL(string: post.url) {
+                                    Link("View attributed post", destination: url).font(.caption)
+                                }
+                            }
+                            .padding(.vertical, 6)
+                        }
+                    }
+                }
+
                 BrandCard(title: "Event imagery", icon: "sensor.tag.radiowaves.forward") {
                     Text("Visual context for the active investigation: \(detail.event.title)")
                         .font(.subheadline.weight(.semibold))

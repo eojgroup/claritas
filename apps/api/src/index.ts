@@ -2530,6 +2530,15 @@ app.get("/api/podcasts", requireAuthenticated, async (req, res) => {
          pf.podcast_index_id AS podcast_index_feed_id, pf.title AS feed_title,
          pf.author AS feed_author, pf.image_url AS feed_image_url, pf.site_url AS feed_site_url,
          pe.duration_seconds, pe.image_url, pe.transcript_status,
+         COALESCE((SELECT jsonb_agg(linked) FROM (
+           SELECT DISTINCT event.id,event.title,event.primary_country_iso2 AS country_iso2,
+             'Transcript-backed claim linked to this investigation; inspect the cited segment.' AS rationale
+           FROM intelligence_signal signal
+           JOIN intelligence_event_evidence evidence
+             ON evidence.source_record_type='intelligence_signal' AND evidence.source_record_id=signal.id::text AND evidence.domain='podcast'
+           JOIN intelligence_event event ON event.id=evidence.event_id
+           WHERE signal.episode_id=pe.id ORDER BY event.title LIMIT 5
+         ) linked),'[]'::jsonb) AS linked_events,
          CASE
            WHEN jsonb_typeof(pe.external_links) = 'array' THEN pe.external_links
            ELSE '[]'::jsonb

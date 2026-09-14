@@ -79,8 +79,16 @@ describe("news workspace presentation", () => {
       { id: 5, event_time: "2026-08-20T17:30:00Z" },
     ];
 
-    expect(newestNewsFirst(responseItems).map((item) => item.id)).toEqual([3, 5, 1, 2, 4]);
+    expect(newestNewsFirst(responseItems).map((item) => item.id)).toEqual([3, 5, 1, 4, 2]);
     expect(responseItems.map((item) => item.id)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("uses the same descending identifier tie-break as Apple clients", () => {
+    expect(newestNewsFirst([
+      { id: 1, event_time: "2026-09-14T08:00:00Z" },
+      { id: 3, event_time: "2026-09-14T10:00:00+02:00" },
+      { id: 2, event_time: "2026-09-14T08:00:00.000Z" },
+    ]).map((item) => item.id)).toEqual([3, 2, 1]);
   });
 
   it("orders absolute instants rather than lexically comparing ISO spellings", () => {

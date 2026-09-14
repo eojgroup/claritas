@@ -16,6 +16,7 @@ final class SocialSignalTests: XCTestCase {
             handle: "portwatch"
         )
 
+        XCTAssertEqual(value.linked_events?.first?.id, "investigation-9")
         XCTAssertEqual(value.authorLabel, "Port Watch")
         XCTAssertEqual(value.handleLabel, "@portwatch")
         XCTAssertEqual(value.responsible_party.name, "Port Watch")
@@ -75,6 +76,7 @@ final class SocialSignalTests: XCTestCase {
         platform: SocialPlatform = .x
     ) throws -> SocialSignal {
         let object: [String: Any] = [
+            "linked_events": [["id": "investigation-9", "title": "Port closure", "country_iso2": "SE", "rationale": "Topic and time context"]],
             "id": id,
             "platform": platform.rawValue,
             "content_type": "social_post",

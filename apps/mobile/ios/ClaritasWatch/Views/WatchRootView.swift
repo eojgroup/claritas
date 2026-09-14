@@ -1423,14 +1423,10 @@ private struct WatchNewsView: View {
                             }
                             .font(.caption2)
                             .foregroundStyle(WatchPalette.sage)
-                            if let date = item.chronologyDate {
-                                Text(
-                                    "\(item.chronologyLabel) "
-                                    + date.formatted(date: .abbreviated, time: .shortened)
-                                )
-                                    .font(.system(size: 9).monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text(item.chronologyDisplayText)
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                             Button {
                                 model.openOnPhone(
                                     "news",
@@ -1608,6 +1604,7 @@ private struct WatchPodcastsView: View {
 }
 
 private struct WatchPodcastDetailView: View {
+    @EnvironmentObject private var model: WatchAppModel
     let episode: PodcastEpisode
 
     var body: some View {
@@ -1627,6 +1624,13 @@ private struct WatchPodcastDetailView: View {
                         .lineLimit(6)
                 }
 
+                ForEach(Array(episode.linked_events.prefix(2))) { link in
+                    Button("Investigate on iPhone") {
+                        model.openOnPhone("intelligence", country: link.country_iso2, eventID: link.id)
+                    }
+                    .font(.caption2)
+                    .buttonStyle(.bordered)
+                }
                 ForEach(episode.signals.prefix(3)) { signal in
                     WatchCard {
                         VStack(alignment: .leading, spacing: 4) {

@@ -765,7 +765,7 @@ private struct ClaritasWidgetView: View {
                 if let headlineAt = entry.scope.headlineAt {
                     HStack(spacing: 4) {
                         Text(entry.scope.headlineBasis ?? "Reported")
-                        Text(headlineAt, style: .relative)
+                        Text(headlineAt.formatted(date: .numeric, time: .shortened))
                     }
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(ClaritasWidgetPalette.secondary)

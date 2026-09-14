@@ -24,6 +24,8 @@ test("retained social claims share event/country context without changing canoni
     assert.equal(context[0].author, "Fixture account");
     const scoped = await listSocialSignals({ country: "SE", eventId: id });
     assert.equal(scoped.items.length, 1);
+    assert.equal(scoped.items[0].linked_events[0].id, id);
+    assert.equal(scoped.items[0].linked_events[0].country_iso2, "SE");
     assert.equal(scoped.items[0].country_iso2, null, "event geography must not rewrite post location");
     assert.equal((await listSocialSignals({ country: "NO", eventId: id })).items.length, 0);
     assert.equal(Number((await query(`SELECT confidence FROM intelligence_event WHERE id=$1`, [id])).rows[0].confidence), 0.7);

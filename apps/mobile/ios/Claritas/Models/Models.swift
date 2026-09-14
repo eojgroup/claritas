@@ -721,6 +721,17 @@ struct NewsItem: Codable, Identifiable {
         return .reported
     }
 
+    var chronologyDisplayText: String {
+        guard let date = chronologyDate else { return "Timestamp unavailable" }
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        let zone = TimeZone.current.abbreviation(for: date) ?? TimeZone.current.identifier
+        return "\(chronologyLabel) \(formatter.string(from: date)) \(zone)"
+    }
+
     var chronologyLabel: String {
         chronologyBasis.label
     }
@@ -1067,7 +1078,15 @@ struct PodcastExternalLink: Codable, Identifiable {
     var resolvedURL: URL? { URL(string: url) }
 }
 
+struct SourceInvestigationLink: Codable, Identifiable {
+    let id: String
+    let title: String
+    let country_iso2: String?
+    let rationale: String?
+}
+
 struct PodcastEpisode: Codable, Identifiable {
+    let linked_events: [SourceInvestigationLink]
     let id: Int
     let episode_id: Int
     let podcast_index_id: Int
@@ -1090,6 +1109,7 @@ struct PodcastEpisode: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id
+        case linked_events
         case episode_id
         case podcast_index_id
         case title
@@ -1112,6 +1132,7 @@ struct PodcastEpisode: Codable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        linked_events = try container.decodeIfPresent([SourceInvestigationLink].self, forKey: .linked_events) ?? []
         id = try container.decodeFlexibleInt(forKey: .id)
         episode_id = try container.decodeFlexibleInt(forKey: .episode_id)
         podcast_index_id = try container.decodeFlexibleInt(forKey: .podcast_index_id)
@@ -2978,7 +2999,35 @@ struct IntelligenceLinkedNews: Codable, Identifiable {
     }
 }
 
+struct SocialEventContext: Codable, Identifiable {
+    var id: String { "\(event_id):\(signal_id)" }
+    let event_id: String
+    let signal_id: Int
+    let platform: String
+    let text: String
+    let url: String
+    let author: String
+    let posted_at: Date
+    let assessment_boundary: String
+
+    enum CodingKeys: String, CodingKey {
+        case event_id, signal_id, platform, text, url, author, posted_at, assessment_boundary
+    }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        event_id = try values.decode(String.self, forKey: .event_id)
+        signal_id = try values.decodeFlexibleInt(forKey: .signal_id)
+        platform = try values.decode(String.self, forKey: .platform)
+        text = try values.decode(String.self, forKey: .text)
+        url = try values.decode(String.self, forKey: .url)
+        author = try values.decode(String.self, forKey: .author)
+        posted_at = try values.decode(Date.self, forKey: .posted_at)
+        assessment_boundary = try values.decode(String.self, forKey: .assessment_boundary)
+    }
+}
+
 struct IntelligenceEventDetail: Codable {
+    let social_context: [SocialEventContext]
     let event: IntelligenceEvent
     let understanding: IntelligenceEventUnderstanding?
     let evidence: [IntelligenceEvidence]
@@ -2989,11 +3038,12 @@ struct IntelligenceEventDetail: Codable {
     let epistemic_notice: String
 
     enum CodingKeys: String, CodingKey {
-        case event, understanding, evidence, linked_news, locations, earth_observations, related_events, epistemic_notice
+        case event, understanding, evidence, linked_news, locations, earth_observations, related_events, epistemic_notice, social_context
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        social_context = try container.decodeIfPresent([SocialEventContext].self, forKey: .social_context) ?? []
         event = try container.decode(IntelligenceEvent.self, forKey: .event)
         understanding = try container.decodeIfPresent(IntelligenceEventUnderstanding.self, forKey: .understanding)
         evidence = try container.decodeIfPresent([IntelligenceEvidence].self, forKey: .evidence) ?? []
@@ -3164,6 +3214,7 @@ struct SocialCredibility: Codable {
 }
 
 struct SocialSignal: Codable, Identifiable {
+    var linked_events: [SourceInvestigationLink]? = nil
     let id: Int
     let platform: SocialPlatform
     let content_type: String

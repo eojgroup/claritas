@@ -94,7 +94,7 @@ struct DashboardView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Label("TOP REPORTING", systemImage: "newspaper")
+                Label("LATEST REPORTING", systemImage: "newspaper")
                     .font(.caption2.weight(.bold))
                     .tracking(1.1)
                     .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
@@ -109,7 +109,7 @@ struct DashboardView: View {
 
             if let error = model.rankedNewsLoadError, !error.isEmpty, !model.isRefreshingRankedNews {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Ranked reporting could not be loaded", systemImage: "exclamationmark.triangle")
+                    Label("Latest reporting could not be loaded", systemImage: "exclamationmark.triangle")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
                     Text(error)
@@ -135,8 +135,8 @@ struct DashboardView: View {
                     }
                     Text(
                         model.isRefreshingRankedNews || !mobileNewsScopeMatchesSelection
-                            ? "Loading ranked reporting for this category…"
-                            : "No ranked reporting is available in this category."
+                            ? "Loading latest reporting for this category…"
+                            : "No recent reporting is available in this category."
                     )
                     .font(.subheadline)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -155,14 +155,13 @@ struct DashboardView: View {
                                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                     .multilineTextAlignment(.leading)
                                     .lineLimit(index == 0 ? 2 : 1)
+                                Text(item.chronologyDisplayText)
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    .fixedSize(horizontal: false, vertical: true)
                                 NewsPriorityMetadataView(item: item, compact: true)
                                 HStack(spacing: 6) {
                                     Text(newsSourceLabel(item) ?? "Reporting source")
-                                    if let date = item.chronologyDate {
-                                        Text("·")
-                                        Text("\(item.chronologyLabel) \(date.formatted(date: .omitted, time: .shortened))")
-                                            .monospacedDigit()
-                                    }
                                     if let event = item.linked_events.first {
                                         Text("· \(IntelligenceLinkagePresentation.label(for: event.correlation_factors).capitalized)")
                                             .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))

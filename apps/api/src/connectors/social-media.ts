@@ -100,6 +100,7 @@ const BLUESKY_SENSITIVE_LABELS = new Set([
 
 type PersistedSocialSignalRow = {
   id: number;
+  linked_events?: Array<{ id: string; title: string; country_iso2: string | null; rationale: string }>;
   platform: SocialPlatform;
   content_type: "social_post";
   signal_nature: "claim";
@@ -976,6 +977,7 @@ export function presentSocialSignal(row: PersistedSocialSignalRow) {
   const payload = record(row.payload);
   return {
     id: Number(row.id),
+    linked_events: row.linked_events ?? [],
     platform: row.platform,
     content_type: row.content_type,
     signal_nature: row.signal_nature,
@@ -1042,7 +1044,13 @@ export async function listSocialSignals(options: {
   const limit = boundedInt(options.limit, 1, 200, 50);
   const offset = boundedInt(options.offset, 0, 100_000, 0);
   const { rows } = await query<PersistedSocialSignalRow & { total_count: number }>(
-    `SELECT ss.*, COUNT(*) OVER()::int AS total_count
+    `SELECT ss.*, COUNT(*) OVER()::int AS total_count,
+       COALESCE((SELECT jsonb_agg(linked ORDER BY linked.title) FROM (
+         SELECT event.id,event.title,event.primary_country_iso2 AS country_iso2,
+           'Shared topic and event timing; unverified context, not corroboration.' AS rationale
+         FROM social_event_context link JOIN intelligence_event event ON event.id=link.event_id
+         WHERE link.signal_id=ss.id ORDER BY event.last_activity_time DESC LIMIT 5
+       ) linked),'[]'::jsonb) AS linked_events
      FROM social_signal ss
      WHERE ss.expires_at > now()
        AND ($1::text='' OR ss.platform=$1)
@@ -1081,7 +1089,7 @@ export async function getSocialCoverage(daysInput?: number) {
   );
   const { rows: collection } = await query<{ enabled: boolean; schedule_enabled: boolean; next_scheduled_at: string | null; last_status: string | null; last_run_at: string | null }>(
     `SELECT rule.enabled,rule.schedule_enabled,rule.next_scheduled_at,
-       (SELECT status FROM ingestion_run WHERE pipeline='social' ORDER BY id DESC LIMIT 1) AS last_status,
+       (SELECT CASE WHEN stats->>'health'='degraded' THEN 'partial coverage' ELSE status END FROM ingestion_run WHERE pipeline='social' ORDER BY id DESC LIMIT 1) AS last_status,
        (SELECT started_at FROM ingestion_run WHERE pipeline='social' ORDER BY id DESC LIMIT 1) AS last_run_at
      FROM ingestion_automation_rule rule WHERE pipeline='social'`,
   );

@@ -77,6 +77,14 @@ struct WatchSocialSignalsView: View {
                                         .font(.system(size: 8))
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
+                                    ForEach(Array((signal.linked_events ?? []).prefix(2))) { link in
+                                        Button("Investigate on iPhone") {
+                                            model.openOnPhone("intelligence", country: link.country_iso2, eventID: link.id)
+                                        }
+                                        .font(.caption2)
+                                        .buttonStyle(.bordered)
+                                        .accessibilityLabel("Open investigation on iPhone: \(link.title)")
+                                    }
                                     if let engagement = engagementSummary(signal) {
                                         Text(engagement)
                                             .font(.system(size: 8).monospacedDigit())

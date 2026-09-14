@@ -314,7 +314,8 @@ export default function PriorityNewsList({
                         : "Select for source and country context.")}
                 </small>
                 <span className="dashboard-news-mobile-source">
-                  {timestamp.time} · {countries.length > 0 ? countries.join("/") : "Global"} · {" "}
+                  <time dateTime={chronology.timestamp ?? undefined} className="dashboard-news-mobile-timestamp">{chronology.timestamp ? `${chronology.label} ${timestamp.date} · ${timestamp.time} ${timestamp.zone}` : "Timestamp unavailable"}</time>
+                  {countries.length > 0 ? countries.join("/") : "Global"} · {" "}
                   {publisherLabel || sourceLabel || "Unknown"}
                   {providerLabel ? ` · via ${providerLabel}` : ""}
                 </span>

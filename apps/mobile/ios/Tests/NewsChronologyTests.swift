@@ -56,6 +56,9 @@ final class NewsChronologyTests: XCTestCase {
         )
 
         XCTAssertEqual(published.chronologyLabel, "Published")
+        XCTAssertTrue(published.chronologyDisplayText.hasPrefix("Published "))
+        XCTAssertTrue(published.chronologyDisplayText.contains("2026"))
+        XCTAssertTrue(published.chronologyDisplayText.contains(TimeZone.current.abbreviation(for: published.chronologyDate!) ?? TimeZone.current.identifier))
         XCTAssertEqual(
             published.chronologyDate,
             APIDateParser.parse("2026-09-07T08:00:00Z")

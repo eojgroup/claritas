@@ -235,6 +235,16 @@ struct SocialSignalsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
 
+                ForEach(signal.linked_events ?? []) { link in
+                    Button {
+                        NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: "intelligence", userInfo: ["eventID": link.id])
+                    } label: {
+                        Label("Open investigation: \(link.title)", systemImage: "arrow.triangle.branch")
+                            .font(.caption.weight(.semibold))
+                            .multilineTextAlignment(.leading)
+                    }
+                    .buttonStyle(.bordered)
+                }
                 HStack(spacing: 14) {
                     ForEach(engagementMetrics(for: signal)) { metric in
                         engagement(metric.icon, metric.value)

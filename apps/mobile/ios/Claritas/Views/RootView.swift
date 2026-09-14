@@ -1123,6 +1123,16 @@ struct PodcastWorkspaceView: View {
                         .lineLimit(4)
                 }
 
+                ForEach(episode.linked_events) { link in
+                    Button {
+                        NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: "intelligence", userInfo: ["eventID": link.id])
+                    } label: {
+                        Label("Open investigation: \(link.title)", systemImage: "arrow.triangle.branch")
+                            .font(.subheadline.weight(.semibold))
+                            .multilineTextAlignment(.leading)
+                    }
+                    .buttonStyle(.bordered)
+                }
                 if !episode.external_links.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {

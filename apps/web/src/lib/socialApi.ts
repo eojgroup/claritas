@@ -1,3 +1,4 @@
+import type { SourceInvestigationLink } from "./api";
 export const SOCIAL_PLATFORMS = ["x", "youtube", "reddit", "bluesky"] as const;
 
 export type SocialPlatform = (typeof SOCIAL_PLATFORMS)[number];
@@ -37,6 +38,7 @@ export type SocialCredibility = {
 };
 
 export type SocialSignal = {
+  linked_events?: SourceInvestigationLink[];
   id: number;
   platform: SocialPlatform;
   content_type: "social_post";

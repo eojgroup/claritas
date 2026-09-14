@@ -902,12 +902,12 @@ final class AppModel: ObservableObject {
                 q: nil,
                 country: requestedCountry,
                 category: requestedCategory,
-                sort: NewsSortMode.importance.rawValue,
+                sort: NewsSortMode.newest.rawValue,
                 archive: false,
                 includeMetadata: true
             )
             guard rankedNewsRequestID == requestID else { return }
-            rankedNews = Array(loadedPage.items.prefix(3))
+            rankedNews = Array(NewsChronology.sorted(loadedPage.items, order: .newestFirst).prefix(3))
             let includesMetadata = loadedPage.page.metadata_included
                 ?? !loadedPage.facets.categories.isEmpty
             rankedNewsCategoryFacets = includesMetadata ? loadedPage.facets.categories : []

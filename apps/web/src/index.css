@@ -5052,3 +5052,6 @@ body {
     display: none;
   }
 }
+
+/* Keep publisher/discovery timestamps readable on narrow news cards. */
+.dashboard-news-mobile-timestamp { display: block; white-space: normal; font-size: 0.72rem; line-height: 1.5; font-variant-numeric: tabular-nums; color: var(--shell-ink); margin-bottom: 0.2rem; }
