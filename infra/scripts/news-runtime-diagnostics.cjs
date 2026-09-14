@@ -123,6 +123,9 @@ async function main() {
     const social = await client.query(`SELECT
       (SELECT count(*)::int FROM social_signal WHERE expires_at > now()) AS retained_posts,
       (SELECT max(posted_at) FROM social_signal WHERE expires_at > now()) AS latest_post,
+      (SELECT count(DISTINCT link.signal_id)::int FROM social_event_context link JOIN social_signal ss ON ss.id=link.signal_id WHERE ss.expires_at > now()) AS posts_with_investigations,
+      (SELECT count(DISTINCT event_id)::int FROM social_event_context link JOIN social_signal ss ON ss.id=link.signal_id WHERE ss.expires_at > now()) AS linked_investigations,
+      (SELECT count(*)::int FROM intelligence_event_evidence WHERE domain='podcast') AS podcast_evidence_links,
       (SELECT jsonb_build_object('enabled',enabled,'scheduled',schedule_enabled,'next_run',next_scheduled_at)
        FROM ingestion_automation_rule WHERE pipeline='social') AS collection,
       (SELECT jsonb_build_object('id',id,'status',status,'started_at',started_at,'stats',stats)
