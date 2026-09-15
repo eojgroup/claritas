@@ -536,7 +536,8 @@ export class OpenCodeLlmClient implements LlmClient {
 
         const providerError = findProviderError(message);
         if (providerError) {
-          throw new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`);
+          const status = providerError.match(/\((\d{3})\)/)?.[1];
+          throw new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`, status ? Number(status) : 502);
         }
 
         try {

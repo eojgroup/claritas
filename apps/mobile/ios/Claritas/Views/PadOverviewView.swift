@@ -63,6 +63,8 @@ struct PadOverviewView: View {
                         destination = .briefing
                     }
 
+                    newsPanel
+
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: 16) {
                             SignalMapPanel(
@@ -88,15 +90,10 @@ struct PadOverviewView: View {
 
                     metrics
 
-                    HStack(alignment: .top, spacing: 16) {
-                        newsPanel
-                            .frame(maxWidth: .infinity, alignment: .top)
-                        VStack(spacing: 16) {
-                            focusPanel
-                            marketPanel
-                            weatherPanel
-                        }
-                        .frame(minWidth: 290, idealWidth: 320, maxWidth: 360)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16)], alignment: .leading, spacing: 16) {
+                        focusPanel
+                        marketPanel
+                        weatherPanel
                     }
                 }
                 .padding(22)
@@ -288,6 +285,10 @@ struct PadOverviewView: View {
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                     .lineLimit(2)
+                                Text(item.chronologyDisplayText)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 NewsPriorityMetadataView(item: item, compact: true)
                                 Text(item.publisher ?? item.source_name ?? "News")
                                     .font(.caption)

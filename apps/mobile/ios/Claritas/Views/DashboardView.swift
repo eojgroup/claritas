@@ -1346,6 +1346,7 @@ struct NewsWorkspaceView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var selectedTopic = ""
     @State private var query: String = ""
     @State private var sourceFilter: String = "all"
     @State private var countryScopeInput: String = ""
@@ -1398,6 +1399,9 @@ struct NewsWorkspaceView: View {
     private var rows: [NewsItem] {
         guard loadedScopeMatchesSelection else { return [] }
         var filtered = model.news
+        if !selectedTopic.isEmpty {
+            filtered = filtered.filter { $0.tags.contains { $0.kind == "topic" && $0.code == selectedTopic } }
+        }
 
         if sourceFilter != "all" {
             filtered = filtered.filter { (newsSourceLabel($0) ?? "").lowercased() == sourceFilter.lowercased() }
@@ -1464,7 +1468,7 @@ struct NewsWorkspaceView: View {
     }
 
     private var hasLocalFilters: Bool {
-        sourceFilter != "all" || imagesOnly
+        sourceFilter != "all" || imagesOnly || !selectedTopic.isEmpty
     }
 
     private var newsCoveragePoints: [CountryBubblePoint] {
@@ -1538,6 +1542,41 @@ struct NewsWorkspaceView: View {
         }
     }
 
+    private var topicOptions: [(code: String, label: String, count: Int)] {
+        guard loadedScopeMatchesSelection else { return [] }
+        var counts: [String: Int] = [:]
+        var labels: [String: String] = [:]
+        for item in model.news {
+            var seen = Set<String>()
+            for tag in item.tags where tag.kind == "topic" && !tag.code.isEmpty {
+                if seen.insert(tag.code).inserted { counts[tag.code, default: 0] += 1 }
+                labels[tag.code] = tag.label
+            }
+        }
+        return counts.map { (code: $0.key, label: labels[$0.key] ?? $0.key, count: $0.value) }
+            .sorted { $0.count == $1.count ? $0.label < $1.label : $0.count > $1.count }
+    }
+
+    private var topicOverview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Topics in loaded reporting")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            Picker("Topic", selection: $selectedTopic) {
+                Text("All topics").tag("")
+                ForEach(topicOptions, id: \.code) { topic in
+                    Text("\(topic.label) · \(topic.count)").tag(topic.code)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(ClaritasPalette.shellAccent(for: colorScheme))
+            Text("\(rows.count) stories shown · \(sort.title) order")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var compactNewsContent: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
@@ -1573,6 +1612,7 @@ struct NewsWorkspaceView: View {
             .pickerStyle(.segmented)
 
             newsCategorySelector
+            topicOverview
 
             selectedRankedStoryPanel(compact: true)
 
@@ -1588,7 +1628,9 @@ struct NewsWorkspaceView: View {
             }
 
             newsScopeBar
-            newsCoverageMapCard(height: 224, compact: true)
+            DisclosureGroup("Explore coverage map") {
+                newsCoverageMapCard(height: 224, compact: true)
+            }
             storyResults(compact: true)
         }
         .padding(.horizontal, 14)
@@ -1622,9 +1664,9 @@ struct NewsWorkspaceView: View {
             newsScopeBar
             newsCategorySelector
             selectedRankedStoryPanel(compact: false)
-            newsCoverageMapCard(height: 310, compact: false)
-            filterPanel
+            DisclosureGroup("Search, sources & sorting") { filterPanel }
             storyPanel(compact: false)
+            newsCoverageMapCard(height: 310, compact: false)
             analyticsPanels
         }
         .padding(.horizontal, 20)
@@ -2026,6 +2068,7 @@ struct NewsWorkspaceView: View {
     }
 
     private func clearLocalFilters() {
+        selectedTopic = ""
         query = ""
         sourceFilter = "all"
         imagesOnly = false
@@ -2066,6 +2109,7 @@ struct NewsWorkspaceView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Stories")
                     .font(.headline)
+                topicOverview
                 storyResults(compact: compact)
             }
         }

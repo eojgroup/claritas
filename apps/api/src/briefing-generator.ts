@@ -1,3 +1,4 @@
+import { generateBriefingWithFallback } from "./briefing-fallback";
 import { query } from "./db";
 import { createLlmClientFromEnv, getLlmRuntimeConfig, type LlmClient } from "./llm";
 import { getCountryLeadershipLatest } from "./connectors/wikidata-leadership";
@@ -810,13 +811,13 @@ export async function generateDailySignalBriefing(
 ) {
   const status = options.status || "published";
   const context = await collectBriefingContext(options);
-  const response = await llmClient.generateStructured<BriefingModelOutput>({
+  const response = await generateBriefingWithFallback<BriefingModelOutput>(llmClient, {
     title: `Claritas briefing ${options.briefingDate}`,
     system: buildSystemPrompt(),
     prompt: buildUserPrompt(context, options.instructions),
     schema: BRIEFING_OUTPUT_SCHEMA,
     retryCount: 2,
-  });
+  }, context);
 
   const normalized = normalizeModelOutput(response.output, context);
   const generatedAt = new Date().toISOString();

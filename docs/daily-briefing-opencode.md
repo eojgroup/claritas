@@ -331,3 +331,9 @@ A `200` response confirms the key and free router work, leaving the OpenCode req
 - The prompt instructs the model not to invent facts and not to provide investment advice.
 - The API validates the generated JSON before saving it.
 - OpenCode should be protected with `OPENCODE_SERVER_PASSWORD` and should not be exposed publicly.
+
+### Provider outages
+
+If narrative generation reports no available endpoints (including the free OpenRouter router), rate limiting, or a provider/server outage, the daily briefing publishes a **Daily source digest** from the already-collected evidence. It explicitly says synthesis is unavailable, lists retained coverage and attributed report titles, and preserves source references and the existing investigation context in metadata. It adds no causal conclusions or confidence uplift. Metadata identifies `provider: deterministic`, `fallback: true`, and `fallback_reason: generation_provider_unavailable`.
+
+Successful generation remains unchanged. Authentication/configuration failures remain actionable errors. The fallback does not select another model, require new credentials, or introduce paid inference; subsequent daily runs try the configured provider again.

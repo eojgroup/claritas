@@ -1,5 +1,31 @@
 import type { NewsItem, NewsTranslation } from "../lib/api";
 
+export type NewsTopic = { code: string; label: string; count: number };
+
+/** Counts each tagged story once; facets describe the loaded feed, not the entire archive. */
+export function newsTopicFacets(items: readonly Pick<NewsItem, "id" | "tags">[]): NewsTopic[] {
+  const topics = new Map<string, { label: string; ids: Set<number> }>();
+  for (const item of items) {
+    for (const tag of item.tags ?? []) {
+      const code = tag.code.trim().toLocaleLowerCase();
+      const label = tag.label.trim();
+      if (tag.kind !== "topic" || !code || !label) continue;
+      const topic = topics.get(code) ?? { label, ids: new Set<number>() };
+      topic.ids.add(item.id);
+      topics.set(code, topic);
+    }
+  }
+  return [...topics].map(([code, { label, ids }]) => ({ code, label, count: ids.size }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+}
+
+export function filterNewsByTopic<T extends Pick<NewsItem, "tags">>(items: readonly T[], code: string | null): T[] {
+  const normalized = code?.trim().toLocaleLowerCase();
+  return items.filter((item) => !normalized || item.tags?.some((tag) => (
+    tag.kind === "topic" && tag.code.trim().toLocaleLowerCase() === normalized
+  )));
+}
+
 type NewsChronologyItem = Pick<NewsItem, "event_time" | "payload" | "time"> & { id?: number };
 
 export type NewsChronology = {

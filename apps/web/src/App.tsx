@@ -1,3 +1,5 @@
+import NewsOverview from "./components/NewsOverview";
+import { filterNewsByTopic, type NewsTopic } from "./components/newsWorkspacePresentation";
 import SourceInvestigationLinks from "./components/SourceInvestigationLinks";
 import {
   useCallback,
@@ -974,6 +976,7 @@ export default function ClaritasDashboard() {
   const [newsLanguageFilter, setNewsLanguageFilter] = useState("all");
   const [newsHasImageOnly, setNewsHasImageOnly] = useState(false);
   const [newsCategory, setNewsCategory] = useState<NewsCategoryFilter>("all");
+  const [newsTopic, setNewsTopic] = useState<Pick<NewsTopic, "code" | "label"> | null>(null);
   const [newsSortBy, setNewsSortBy] = useState<NewsSort>("newest");
   const [weatherConditionFilter, setWeatherConditionFilter] = useState<string>("all");
   const [weatherCountryFilter, setWeatherCountryFilter] = useState("");
@@ -2705,7 +2708,7 @@ export default function ClaritasDashboard() {
   }, [newsLanguageFilter, newsWorkspaceScope]);
 
   const newsPageItems = useMemo(() => {
-    let items = newsWorkspaceScope;
+    let items = filterNewsByTopic(newsWorkspaceScope, newsTopic?.code ?? null);
     if (newsSourceFilter !== "all") {
       const normalized = newsSourceFilter.trim().toLowerCase();
       items = items.filter((item) => (getSourceLabel(item) ?? "").toLowerCase() === normalized);
@@ -2724,6 +2727,7 @@ export default function ClaritasDashboard() {
     newsSortBy,
     newsSourceFilter,
     newsWorkspaceScope,
+    newsTopic,
   ]);
 
   const newsPageTrendData = useMemo(
@@ -3498,6 +3502,7 @@ export default function ClaritasDashboard() {
     ? `Update failed · showing ${visibleTopNews.length} previous ${visibleTopNews.length === 1 ? "story" : "stories"}`
     : `${visibleTopNews.length} ${visibleTopNews.length === 1 ? "story" : "stories"} shown${topNewsTotal > visibleTopNews.length ? ` · ${topNewsTotal} available` : ""} in ${newsCategoryLabel(topNewsAppliedCategory).toLocaleLowerCase()}`;
   const newsHasWorkspaceFilters = Boolean(
+    newsTopic ||
     newsSourceFilter !== "all"
     || newsLanguageFilter !== "all"
     || newsCategory !== "all"
@@ -3547,6 +3552,7 @@ export default function ClaritasDashboard() {
     : selectedNewsCountry ? newsCountryLoadMode : newsLoadMode;
 
   const clearNewsStoryFilters = useCallback(() => {
+    setNewsTopic(null);
     setNewsSearchArchive(null);
     setNewsSourceFilter("all");
     setNewsLanguageFilter("all");
@@ -6871,8 +6877,12 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
+                <NewsOverview items={newsWorkspaceScope} visibleCount={newsPageItems.length}
+                  scope={newsMapCountryLabel || regionLabel} selectedTopic={newsTopic}
+                  onSelectTopic={setNewsTopic} loading={activeNewsLoading}
+                  onOpenInvestigations={() => { setMapMode("signals"); setActiveView("dashboard"); }} />
                 <IntelligenceEventStrip country={selectedNewsCountry} onOpen={handleOpenIntelligence} />
-                <section
+                <details className="news-filter-panel"><summary>Search, sources & sorting</summary><section
                   className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3"
                 >
                   <div>
@@ -7009,7 +7019,7 @@ export default function ClaritasDashboard() {
                       </label>
                     </div>
                   </div>
-                </section>
+                </section></details>
 
                 {(selectedNewsCountry || newsMapNotice || activeNewsLoadError || activeNewsLoading) && (
                   <section
@@ -7046,89 +7056,6 @@ export default function ClaritasDashboard() {
                     )}
                   </section>
                 )}
-
-                <section className={`kpi-strip grid-cols-2 gap-3 xl:grid-cols-4 ${!activeNewsLoading && newsPageItems.length > 0 ? "grid" : "hidden"}`}>
-                  <div className="app-stat-card rounded-2xl p-4">
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Stories
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {newsSummary.stories}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Items after filters
-                    </div>
-                  </div>
-                  <div className="app-stat-card rounded-2xl p-4">
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Coverage
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {newsSummary.countries}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Countries represented
-                    </div>
-                  </div>
-                  <div className="app-stat-card rounded-2xl p-4">
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Dominant source
-                    </div>
-                    <div className="mt-2 truncate text-base font-semibold text-[color:var(--shell-ink)]">
-                      {newsSummary.dominantSource}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Highest share in scope
-                    </div>
-                  </div>
-                  <div className="app-stat-card rounded-2xl p-4">
-                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                      Visual richness
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
-                      {newsSummary.withImages}
-                    </div>
-                    <div className="text-xs text-[color:var(--shell-muted)]">
-                      Stories with imagery
-                    </div>
-                  </div>
-                </section>
-
-                <section className="app-card rounded-xl p-4" aria-label="News coverage overview">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">Coverage overview</div>
-                      <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                        {countryStatsCoverage
-                          ? `${countryStatsCoverage.mapped} mapped quality-checked stories across ${newsPageMapData.length} countries · last ${countryStatsCoverage.window_days} days`
-                          : `${newsPageMapData.length} countries represented in the loaded stream`}
-                      </div>
-                      <p className="mt-1 text-xs text-[color:var(--shell-muted)]">Choose a country to request its reporting directly. The map no longer depends on whichever publishers happen to fill the first global result page.</p>
-                    </div>
-                    <span className={`news-freshness-chip is-${newsFreshness.tone}`}>{newsFreshness.label}</span>
-                  </div>
-                  {newsCoverageTopCountries.length > 0 && (
-                    <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Countries with the most recent news coverage">
-                      {newsCoverageTopCountries.map((row, index) => {
-                        const active = selectedNewsCountry === row.country;
-                        return (
-                          <button
-                            key={row.country}
-                            type="button"
-                            onClick={() => handleNewsMapSelect(row.country)}
-                            aria-pressed={active}
-                            className={`news-country-shortcut shrink-0 rounded-lg border px-3 py-2 text-left ${active ? "is-active" : ""}`}
-                          >
-                            <span className="block text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-muted)]">#{index + 1} coverage</span>
-                            <span className="mt-0.5 block text-sm font-semibold text-[color:var(--shell-ink)]">{countryMeta.get(row.country)?.name ?? row.country}</span>
-                            <span className="block text-[10px] text-[color:var(--shell-muted)]">{row.count} {row.count === 1 ? "story" : "stories"} · {row.provider_count || 0} {row.provider_count === 1 ? "provider" : "providers"}</span>
-                            {row.latest_at && <span className="mt-0.5 block text-[9px] text-[color:var(--shell-muted)]">{describeNewsFreshness(row.latest_at).label}</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
 
                 <section className="news-primary-grid grid grid-cols-1 gap-4 xl:grid-cols-[minmax(20rem,0.72fr)_minmax(32rem,1.28fr)]">
                   <div className={`${cardBase} geo-panel news-map-panel overflow-hidden`}>
@@ -7243,6 +7170,90 @@ export default function ClaritasDashboard() {
                     </div>
                   </div>
                 </section>
+
+                <section className={`kpi-strip grid-cols-2 gap-3 xl:grid-cols-4 ${!activeNewsLoading && newsPageItems.length > 0 ? "grid" : "hidden"}`}>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Stories
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {newsSummary.stories}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Items after filters
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Coverage
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {newsSummary.countries}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Countries represented
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Dominant source
+                    </div>
+                    <div className="mt-2 truncate text-base font-semibold text-[color:var(--shell-ink)]">
+                      {newsSummary.dominantSource}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Highest share in scope
+                    </div>
+                  </div>
+                  <div className="app-stat-card rounded-2xl p-4">
+                    <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
+                      Visual richness
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold text-[color:var(--shell-ink)]">
+                      {newsSummary.withImages}
+                    </div>
+                    <div className="text-xs text-[color:var(--shell-muted)]">
+                      Stories with imagery
+                    </div>
+                  </div>
+                </section>
+
+                <section className="app-card rounded-xl p-4" aria-label="News coverage overview">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">Coverage overview</div>
+                      <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
+                        {countryStatsCoverage
+                          ? `${countryStatsCoverage.mapped} mapped quality-checked stories across ${newsPageMapData.length} countries · last ${countryStatsCoverage.window_days} days`
+                          : `${newsPageMapData.length} countries represented in the loaded stream`}
+                      </div>
+                      <p className="mt-1 text-xs text-[color:var(--shell-muted)]">Choose a country to request its reporting directly. The map no longer depends on whichever publishers happen to fill the first global result page.</p>
+                    </div>
+                    <span className={`news-freshness-chip is-${newsFreshness.tone}`}>{newsFreshness.label}</span>
+                  </div>
+                  {newsCoverageTopCountries.length > 0 && (
+                    <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Countries with the most recent news coverage">
+                      {newsCoverageTopCountries.map((row, index) => {
+                        const active = selectedNewsCountry === row.country;
+                        return (
+                          <button
+                            key={row.country}
+                            type="button"
+                            onClick={() => handleNewsMapSelect(row.country)}
+                            aria-pressed={active}
+                            className={`news-country-shortcut shrink-0 rounded-lg border px-3 py-2 text-left ${active ? "is-active" : ""}`}
+                          >
+                            <span className="block text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--shell-muted)]">#{index + 1} coverage</span>
+                            <span className="mt-0.5 block text-sm font-semibold text-[color:var(--shell-ink)]">{countryMeta.get(row.country)?.name ?? row.country}</span>
+                            <span className="block text-[10px] text-[color:var(--shell-muted)]">{row.count} {row.count === 1 ? "story" : "stories"} · {row.provider_count || 0} {row.provider_count === 1 ? "provider" : "providers"}</span>
+                            {row.latest_at && <span className="mt-0.5 block text-[9px] text-[color:var(--shell-muted)]">{describeNewsFreshness(row.latest_at).label}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
 
                 <section className={`news-analysis-grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,0.9fr)] ${newsPageItems.length > 0 ? "grid" : "hidden"}`}>
                   <div

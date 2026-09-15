@@ -1376,6 +1376,9 @@ private struct WatchNewsView: View {
                     }
                 }
                 Section {
+                    Text("\(min(model.selectedCategoryNews.count, 3)) of \(model.selectedCategoryNews.count) loaded stories")
+                        .font(.caption2)
+                        .foregroundStyle(WatchPalette.sage)
                     watchNewsEmptyState
                     ForEach(model.selectedCategoryNews.prefix(3)) { item in
                         VStack(alignment: .leading, spacing: 4) {
