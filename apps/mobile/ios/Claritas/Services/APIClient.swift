@@ -222,6 +222,7 @@ final class APIClient {
         category: String? = nil,
         sort: String = "newest",
         archive: Bool = false,
+        daily: Bool = false,
         includeMetadata: Bool = true
     ) async throws -> NewsPage {
         var comps = URLComponents(url: baseURL.appendingPathComponent("/api/news"), resolvingAgainstBaseURL: false)!
@@ -231,6 +232,7 @@ final class APIClient {
                                      URLQueryItem(name: "sort", value: sort == "newest" ? "newest" : "importance"),
                                      URLQueryItem(name: "archive", value: archive ? "true" : "false"),
                                      URLQueryItem(name: "include_metadata", value: includeMetadata ? "true" : "false")]
+        if daily { items.append(URLQueryItem(name: "window", value: "day")) }
         if let q { items.append(URLQueryItem(name: "q", value: q)) }
         if let country { items.append(URLQueryItem(name: "country", value: country)) }
         if let category,

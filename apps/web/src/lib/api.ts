@@ -114,6 +114,7 @@ export type NewsLinkedIntelligenceEvent = {
   source_diversity?: number;
   domain_count?: number;
   evidence_count?: number;
+  additional_evidence_count?: number;
   domains?: string[];
   correlation_score?: number | null;
   correlation_factors?: Record<string, unknown>;
@@ -1768,6 +1769,7 @@ export async function fetchNews(params?: {
   category?: NewsCategory;
   sort?: NewsSort;
   archive?: boolean;
+  daily?: boolean;
   includeMetadata?: boolean;
 }, signal?: AbortSignal): Promise<NewsFeedResponse> {
   const sp = new URLSearchParams();
@@ -1782,6 +1784,7 @@ export async function fetchNews(params?: {
   if (params?.sourceCountry) sp.set("source_country", params.sourceCountry);
   if (params?.provider) sp.set("provider", params.provider);
   if (params?.category) sp.set("category", params.category);
+  if (params?.daily) sp.set("window", "day");
   if (params?.archive) sp.set("archive", "true");
   if (params?.includeMetadata === false) sp.set("include_metadata", "false");
   const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`, { credentials: "include", signal });

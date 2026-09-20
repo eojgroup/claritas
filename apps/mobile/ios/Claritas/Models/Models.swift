@@ -235,6 +235,20 @@ struct NewsLinkedEvent: Codable, Identifiable {
     let relevance_score: Double
     let domain_count: Int
     let evidence_count: Int
+    var additional_evidence_count: Int? = nil
+
+    var hasAdditionalContext: Bool {
+        (additional_evidence_count ?? 0) > 0 || earth_observation_state == "imagery_available"
+    }
+
+    var additionalContextLabel: String {
+        let count = additional_evidence_count ?? 0
+        let records = count == 1 ? "1 additional source" : "\(count) additional sources"
+        return earth_observation_state == "imagery_available"
+            ? (count > 0 ? "\(records) · satellite imagery" : "Satellite imagery available")
+            : records
+    }
+
     let domains: [String]
     let correlation_score: Double?
     // The API keeps the governed correlation components alongside the link.
@@ -628,6 +642,7 @@ struct NewsItem: Codable, Identifiable {
     let translated_title: String?
     let ai_summary: String?
     let translation: NewsTranslation?
+    var additionalContextEvents: [NewsLinkedEvent] { linked_events.filter(\.hasAdditionalContext) }
     let linked_events: [NewsLinkedEvent]
     let publisher: String?
     let primary_category: String?

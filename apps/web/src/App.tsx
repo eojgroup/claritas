@@ -1,3 +1,4 @@
+import NewsHighlights from "./components/NewsHighlights";
 import NewsOverview from "./components/NewsOverview";
 import { filterNewsByTopic, type NewsTopic } from "./components/newsWorkspacePresentation";
 import SourceInvestigationLinks from "./components/SourceInvestigationLinks";
@@ -6470,6 +6471,7 @@ export default function ClaritasDashboard() {
                       className="order-[3] xl:col-span-12"
                       style={{ gridColumn: "1 / -1" }}
                     >
+                      <NewsHighlights country={selectedNewsCountry} category={newsCategory} />
                       <IntelligenceEventStrip
                         country={selectedCountry}
                         onOpen={handleOpenIntelligence}
@@ -6877,6 +6879,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
+                <NewsHighlights country={selectedNewsCountry} category={newsCategory} />
                 <NewsOverview items={newsWorkspaceScope} visibleCount={newsPageItems.length}
                   scope={newsMapCountryLabel || regionLabel} selectedTopic={newsTopic}
                   onSelectTopic={setNewsTopic} loading={activeNewsLoading}

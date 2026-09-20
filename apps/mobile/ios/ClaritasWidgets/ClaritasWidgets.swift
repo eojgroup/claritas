@@ -8,8 +8,8 @@ private let claritasScopedWidgetKind = "ClaritasScopedWidget"
 private let claritasSnapshotKey = "claritas.widget.snapshot"
 
 private enum ClaritasWidgetPalette {
-    static let backgroundTop = Color(red: 13.0 / 255.0, green: 36.0 / 255.0, blue: 25.0 / 255.0)
-    static let backgroundBottom = Color(red: 8.0 / 255.0, green: 26.0 / 255.0, blue: 18.0 / 255.0)
+    static let backgroundTop = Color(red: 8.0 / 255.0, green: 25.0 / 255.0, blue: 38.0 / 255.0)
+    static let backgroundBottom = Color(red: 4.0 / 255.0, green: 14.0 / 255.0, blue: 23.0 / 255.0)
     static let primary = Color(red: 243.0 / 255.0, green: 247.0 / 255.0, blue: 250.0 / 255.0)
     static let secondary = Color(red: 178.0 / 255.0, green: 194.0 / 255.0, blue: 207.0 / 255.0)
     static let gold = Color(red: 224.0 / 255.0, green: 203.0 / 255.0, blue: 161.0 / 255.0)

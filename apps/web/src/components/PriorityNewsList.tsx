@@ -181,7 +181,8 @@ export default function PriorityNewsList({
           item.translation?.summary_status !== "generated" &&
           item.translation?.summary_status !== "insufficient",
         );
-        const linkedEvents = item.linked_events ?? [];
+        const linkedEvents = (item.linked_events ?? []).filter((event) =>
+          (event.additional_evidence_count ?? 0) > 0 || event.earth_observation_state === "imagery_available");
         const chronology = newsChronology(item);
         const timestamp = newsTimestampParts(chronology.timestamp);
         const satelliteState = linkedEvents.find((event) => (
@@ -432,9 +433,9 @@ export default function PriorityNewsList({
                     <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--signal-sky-soft)] p-3">
                       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
                         <RadioTower className="h-3.5 w-3.5" />
-                        Likely linked investigations
+                        Additional context
                       </div>
-                      <p className="event-link-panel-intro">These connections are ranked from matching evidence such as location, timing, or entities. They are not claims that one signal caused another.</p>
+                      <p className="event-link-panel-intro">Explore other sources and observations linked to this story. Satellite imagery provides visual context, not confirmation.</p>
                       <div className="mt-2 space-y-2">
                         {linkedEvents.slice(0, 3).map((linkedEvent) => {
                           const linkage = presentEventLinkage(
@@ -458,7 +459,7 @@ export default function PriorityNewsList({
                                   {linkedEvent.title}
                                 </strong>
                                 <span className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px]">
-                                  <span className="event-link-chip">{linkage.label} event</span>
+                                  <span className="event-link-chip">{linkedEvent.additional_evidence_count ?? 0} additional sources</span>
                                   {linkedEvent.earth_observation_state === "imagery_available"
                                     ? <span className="text-[color:var(--signal-emerald)]">Imagery available</span>
                                     : linkedEvent.earth_observation_state === "processing"

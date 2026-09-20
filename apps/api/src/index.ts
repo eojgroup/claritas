@@ -2335,6 +2335,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       category,
       sort: sort as "importance" | "newest",
       archive,
+      daily: req.query.window === "day",
       includeMetadata,
     });
     const { rows } = await pool.query(newsQuery.sql, newsQuery.params);
@@ -2347,6 +2348,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
         sort,
         category: category || null,
         archive,
+        daily: req.query.window === "day",
         assessed_at: result.latest_assessed_at ?? null,
         unassessed_count: result.unassessed_count == null ? null : Number(result.unassessed_count),
         selected_unassessed_count: result.selected_unassessed_count == null

@@ -121,97 +121,66 @@ private struct NewsRow: View {
     }
 
     private var compactBody: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if let imageURL = proxiedImageURL() {
-                RemoteImage(url: imageURL)
-                    .frame(width: 84, height: 60)
-                    .background(ClaritasPalette.shellSurface(for: colorScheme))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                if let urlString = item.url, let url = URL(string: urlString) {
-                    Link(item.presentationTitle, destination: url)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-                        .lineLimit(2)
-                } else {
-                    Text(item.presentationTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                }
-                if let disclosure = item.translationDisclosure {
-                    Text(disclosure)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                        .lineLimit(1)
-                }
-                Text(item.chronologyDisplayText)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                NewsPriorityMetadataView(item: item, compact: true)
-                HStack(spacing: 5) {
-                    if let source = sourceLabel {
-                        Text(source).lineLimit(1)
-                    }
-                    ForEach(Array(item.subjectCountries.prefix(3)), id: \.self) { iso in
-                        Text("·")
-                        Button(iso) { onSelectCountry(iso) }
-                            .buttonStyle(.plain)
-                    }
-                    Spacer(minLength: 2)
-
-                }
-                .font(.caption2)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(sourceLabel ?? "Reporting source") · \(item.chronologyDisplayText)")
+                .font(.caption)
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                if let summary = item.presentationSummary, !summary.isEmpty {
-                    Text(summary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let urlString = item.url, let url = URL(string: urlString) {
+                Link(item.presentationTitle, destination: url)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(item.presentationTitle)
+                    .font(.subheadline.weight(.semibold))
+            }
+            if let disclosure = item.translationDisclosure {
+                Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let summary = item.presentationSummary, !summary.isEmpty {
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    .lineLimit(2)
+            }
+            HStack(spacing: 8) {
+                Text(item.primaryCategoryLabel)
+                    .font(.caption)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .overlay(Capsule().stroke(ClaritasPalette.shellBorder(for: colorScheme)))
+                ForEach(Array(item.subjectCountries.prefix(3)), id: \.self) { iso in
+                    Button(iso) { onSelectCountry(iso) }
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                if let event = item.linked_events.first {
-                    Button {
-                        onOpenEvent(event.id)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 5) {
-                                Label(IntelligenceLinkagePresentation.label(for: event.correlation_factors), systemImage: "link.badge.plus")
-                                if item.linked_events.count > 1 {
-                                    Text("+\(item.linked_events.count - 1)")
-                                }
-                                Spacer(minLength: 0)
-                                Image(systemName: "chevron.right")
-                            }
-                            .font(.caption2.weight(.bold))
-                            Text(event.title)
-                                .font(.caption2.weight(.semibold))
-                                .multilineTextAlignment(.leading)
-                                .lineLimit(1)
-                            Text(IntelligenceLinkagePresentation.explanation(for: event.correlation_factors))
-                                .font(.caption2)
-                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                .lineLimit(1)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
-                        .padding(8)
-                        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 9))
-                        .contentShape(RoundedRectangle(cornerRadius: 9))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                    .accessibilityLabel("Open \(IntelligenceLinkagePresentation.label(for: event.correlation_factors).lowercased()): \(event.title)")
+                        .frame(minWidth: 44, minHeight: 44)
+                        .buttonStyle(.plain)
                 }
             }
-            Spacer(minLength: 0)
+            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+            if let event = item.additionalContextEvents.first {
+                Button { onOpenEvent(event.id) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.stack.3d.up")
+                        Text(event.additionalContextLabel)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                .accessibilityLabel("Explore additional context: \(event.additionalContextLabel)")
+            }
         }
-        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 16)
         .padding(.horizontal, selected ? 8 : 0)
         .background(
             selected ? ClaritasPalette.shellHighlight(for: colorScheme).opacity(0.28) : Color.clear,
             in: RoundedRectangle(cornerRadius: 10)
         )
-        .contentShape(Rectangle())
     }
 
     private var regularBody: some View {
@@ -294,12 +263,12 @@ private struct NewsRow: View {
                             .lineLimit(2)
                     }
                 }
-                if !item.linked_events.isEmpty {
+                if !item.additionalContextEvents.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("EVENT LINKS · \(item.linked_events.count)")
+                        Text("ADDITIONAL CONTEXT")
                             .font(.caption2.weight(.bold))
                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                        ForEach(item.linked_events.prefix(3)) { event in
+                        ForEach(item.additionalContextEvents.prefix(3)) { event in
                             Button {
                                 onOpenEvent(event.id)
                             } label: {
@@ -322,7 +291,7 @@ private struct NewsRow: View {
                                         Text(event.title)
                                             .font(.caption.weight(.semibold))
                                             .lineLimit(2)
-                                        Text("\(event.domain_count) lenses · \(event.evidence_count) records · \(Int(event.confidence * 100))% confidence")
+                                        Text(event.additionalContextLabel)
                                             .font(.caption2)
                                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                         Text(IntelligenceLinkagePresentation.explanation(for: event.correlation_factors))
@@ -343,8 +312,8 @@ private struct NewsRow: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("Open \(IntelligenceLinkagePresentation.label(for: event.correlation_factors).lowercased()): \(event.title)")
                         }
-                        if item.linked_events.count > 3 {
-                            Text("+\(item.linked_events.count - 3) more linked investigations")
+                        if item.additionalContextEvents.count > 3 {
+                            Text("+\(item.additionalContextEvents.count - 3) more linked investigations")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -460,3 +429,77 @@ struct RemoteImage: View {
 
 // Helpers to unwrap AnyCodable payload values more ergonomically
 // no-op
+
+/// Refreshes independently without changing the latest-first reader feed.
+struct NewsHighlightsView: View {
+    let country: String?
+    let category: String
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var items: [NewsItem] = []
+    @State private var loadedScope = ""
+    @State private var failed = false
+    private var scope: String { "\(country ?? "global")|\(category)" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Top news · past 24 hours").font(.headline)
+            Text("Ranked by importance · refreshes every 5 minutes")
+                .font(.caption2).foregroundStyle(.secondary)
+            if loadedScope != scope {
+                ProgressView("Loading highlights…").font(.caption)
+            } else if items.isEmpty {
+                Text(failed ? "Highlights are temporarily unavailable." : "No stories in the past 24 hours for this scope.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(String(format: "%02d", index + 1))
+                            .font(.title3.monospacedDigit())
+                            .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(item.publisher ?? item.source_name ?? "Reporting source") · \(item.chronologyDisplayText)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            if let raw = item.url, let url = URL(string: raw) {
+                                Link(item.presentationTitle, destination: url)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                                    .multilineTextAlignment(.leading)
+                            } else {
+                                Text(item.presentationTitle).font(.subheadline.weight(.semibold))
+                            }
+                            if let disclosure = item.translationDisclosure {
+                                Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+                    if index < items.count - 1 { Divider() }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(ClaritasPalette.shellBorder(for: colorScheme)))
+        .task(id: scope) {
+            while !Task.isCancelled {
+                do {
+                    let page = try await model.api.fetchNews(limit: 3, country: country,
+                        category: category, sort: "importance", daily: true, includeMetadata: false)
+                    guard !Task.isCancelled else { return }
+                    items = page.items
+                    failed = false
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    items = []
+                    failed = true
+                }
+                loadedScope = scope
+                do { try await Task.sleep(nanoseconds: 300_000_000_000) }
+                catch { return }
+            }
+        }
+    }
+}

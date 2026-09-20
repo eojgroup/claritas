@@ -1,40 +1,40 @@
 import SwiftUI
 
 enum ClaritasPalette {
-    // Forest surfaces and sage accents shared by iPhone and iPad.
-    static let darkBlue = Color(hex: "#163C30")
-    static let darkGreen = Color(hex: "#194C35")
-    static let lightGreen = Color(hex: "#D3E7D6")
-    static let sage = Color(hex: "#91B39A")
-    static let orange = Color(hex: "#D3C3A5")
-    static let orangeStrong = Color(hex: "#927A54")
-    static let grey = Color(hex: "#526B5C")
+    // Navy structure with beige surfaces and warm orange accents.
+    static let darkBlue = Color(hex: "#0B1E2D")
+    static let darkGreen = Color(hex: "#253D46")
+    static let lightGreen = Color(hex: "#CBD5D8")
+    static let sage = Color(hex: "#829EAC")
+    static let orange = Color(hex: "#F0A266")
+    static let orangeStrong = Color(hex: "#B3542D")
+    static let grey = Color(hex: "#657580")
     static let beige = Color(hex: "#D3C3A5")
     static let brown = orangeStrong
     static let offWhite = Color(hex: "#F7F2E8")
-    static let text = Color(hex: "#17382C")
+    static let text = Color(hex: "#0B2028")
 
     static let positive = darkGreen
     static let negative = Color(hex: "#A73B32")
 
     static func shellBackground(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#081A12") : Color(hex: "#EDF2ED")
+        scheme == .dark ? Color(hex: "#07141E") : Color(hex: "#ECEFF0")
     }
 
     static func shellBackgroundElevated(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#163C30") : Color(hex: "#E3ECE4")
+        scheme == .dark ? Color(hex: "#0B1E2D") : Color(hex: "#E2E7E9")
     }
 
     static func shellSurface(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#132D20").opacity(0.96) : Color(hex: "#F7F5F0").opacity(0.94)
+        scheme == .dark ? Color(hex: "#102735").opacity(0.96) : Color(hex: "#F7F5F0").opacity(0.94)
     }
 
     static func shellRaised(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#1B3829").opacity(0.98) : Color(hex: "#FFFFFF").opacity(0.98)
+        scheme == .dark ? Color(hex: "#173140").opacity(0.98) : Color(hex: "#FFFFFF").opacity(0.98)
     }
 
     static func shellSurfaceMuted(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#203E2E").opacity(0.88) : Color(hex: "#E6EEE7").opacity(0.92)
+        scheme == .dark ? Color(hex: "#203A48").opacity(0.88) : Color(hex: "#E5EAEC").opacity(0.92)
     }
 
     static func shellBorder(for scheme: ColorScheme) -> Color {
@@ -50,11 +50,11 @@ enum ClaritasPalette {
     }
 
     static func shellMuted(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#B3C7B9") : grey
+        scheme == .dark ? Color(hex: "#B8C3C9") : grey
     }
 
     static func shellSidebar(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#07180F") : Color(hex: "#163C30")
+        scheme == .dark ? Color(hex: "#06111A") : Color(hex: "#0B1E2D")
     }
 
     static func shellHighlight(for scheme: ColorScheme) -> Color {
@@ -62,11 +62,11 @@ enum ClaritasPalette {
     }
 
     static func shellAccent(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#A8D7B2") : Color(hex: "#246346")
+        scheme == .dark ? orange : orangeStrong
     }
 
     static func shellAccentSecondary(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#91C7A2") : Color(hex: "#366B50")
+        scheme == .dark ? Color(hex: "#91ADBA") : Color(hex: "#426779")
     }
 
     static func positiveText(for scheme: ColorScheme) -> Color {
@@ -78,7 +78,7 @@ enum ClaritasPalette {
     }
 
     static func dataBlue(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#9AB6C4") : Color(hex: "#366B50")
+        scheme == .dark ? Color(hex: "#9AB6C4") : Color(hex: "#426779")
     }
 
     static func glassHighlight(for scheme: ColorScheme) -> Color {
@@ -128,8 +128,8 @@ struct BrandBackground<Content: View>: View {
                     ClaritasPalette.shellBackgroundElevated(for: colorScheme),
                     ClaritasPalette.shellBackground(for: colorScheme),
                     colorScheme == .dark
-                        ? Color(hex: "#081A12")
-                        : Color(hex: "#E3ECE4")
+                        ? Color(hex: "#07141E")
+                        : Color(hex: "#E4E8EA")
                 ],
                 startPoint: .top,
                 endPoint: .bottom

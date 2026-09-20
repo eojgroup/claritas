@@ -270,93 +270,97 @@ struct PadOverviewView: View {
     }
 
     private var newsPanel: some View {
-        BrandCard(title: "Top reporting", icon: "newspaper") {
-            VStack(spacing: 0) {
-                padNewsCategorySelector
-                    .padding(.bottom, 6)
-                ForEach(topFocusedNews) { item in
-                    Button {
-                        model.selectNewsItem(item)
-                        destination = .news
-                    } label: {
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(item.presentationTitle)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-                                    .lineLimit(2)
-                                Text(item.chronologyDisplayText)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                NewsPriorityMetadataView(item: item, compact: true)
-                                Text(item.publisher ?? item.source_name ?? "News")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                if let disclosure = item.translationDisclosure {
-                                    Text(disclosure)
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+        VStack(spacing: 12) {
+            NewsHighlightsView(country: selectedNewsCountry, category: model.selectedNewsCategory)
+            BrandCard(title: "Latest reporting", icon: "newspaper") {
+                VStack(spacing: 0) {
+                    padNewsCategorySelector
+                        .padding(.bottom, 6)
+                    ForEach(topFocusedNews) { item in
+                        Button {
+                            model.selectNewsItem(item)
+                            destination = .news
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(item.presentationTitle)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                                        .lineLimit(2)
+                                    Text(item.chronologyDisplayText)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    NewsPriorityMetadataView(item: item, compact: true)
+                                    Text(item.publisher ?? item.source_name ?? "News")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    if let disclosure = item.translationDisclosure {
+                                        Text(disclosure)
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                    }
+                                    if let event = item.additionalContextEvents.first {
+                                        Text(event.additionalContextLabel)
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                            .lineLimit(1)
+                                    }
                                 }
-                                if let event = item.linked_events.first {
-                                    Text("\(IntelligenceLinkagePresentation.label(for: event.correlation_factors).capitalized) · \(event.title)")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                        .lineLimit(1)
-                                }
+                                Spacer()
+                                Text(newsCountryLabel(item))
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
                             }
-                            Spacer()
-                            Text(newsCountryLabel(item))
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
+                            .padding(.vertical, 10)
                         }
-                        .padding(.vertical, 10)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(
-                        "Open reporting: \(item.presentationTitle). \(item.priorityAccessibilitySummary)"
-                    )
-                    Divider()
-                }
-                if let error = model.rankedNewsLoadError, !error.isEmpty, !model.isRefreshingRankedNews {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Ranked reporting could not be loaded", systemImage: "exclamationmark.triangle")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                            .lineLimit(3)
-                        Button("Retry") {
-                            Task {
-                                await model.refreshRankedNews(
-                                    country: selectedNewsCountry,
-                                    category: model.selectedNewsCategory
-                                )
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 18)
-                } else if focusedNews.isEmpty {
-                    HStack(spacing: 8) {
-                        if model.isRefreshingRankedNews || !padNewsScopeMatchesSelection {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Text(
-                            model.isRefreshingRankedNews || !padNewsScopeMatchesSelection
-                                ? "Loading ranked reporting for this category…"
-                                : "No ranked reporting matches the current scope."
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            "Open reporting: \(item.presentationTitle). \(item.priorityAccessibilitySummary)"
                         )
-                        .font(.subheadline)
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        Divider()
                     }
-                    .padding(.vertical, 18)
+                    if let error = model.rankedNewsLoadError, !error.isEmpty, !model.isRefreshingRankedNews {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Ranked reporting could not be loaded", systemImage: "exclamationmark.triangle")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                .lineLimit(3)
+                            Button("Retry") {
+                                Task {
+                                    await model.refreshRankedNews(
+                                        country: selectedNewsCountry,
+                                        category: model.selectedNewsCategory
+                                    )
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 18)
+                    } else if focusedNews.isEmpty {
+                        HStack(spacing: 8) {
+                            if model.isRefreshingRankedNews || !padNewsScopeMatchesSelection {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(
+                                model.isRefreshingRankedNews || !padNewsScopeMatchesSelection
+                                    ? "Loading ranked reporting for this category…"
+                                    : "No ranked reporting matches the current scope."
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        }
+                        .padding(.vertical, 18)
+                    }
                 }
             }
         }
+
     }
 
     private var padNewsCategorySelector: some View {

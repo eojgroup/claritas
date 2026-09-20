@@ -9,6 +9,7 @@ function classifyError(value) {
   const message = typeof value === "string" ? value : String(value.message || "");
   const result = { fingerprint: createHash("sha256").update(message).digest("hex").slice(0, 16) };
   const patterns = [
+    ["briefing_provider_unavailable", /no endpoints (?:available|found)/i],
     ["postgres_bind_type", /could not determine data type of parameter \$(\d+)/i],
     ["postgres_inconsistent_bind_type", /inconsistent types deduced for parameter \$(\d+)/i],
     ["postgres_bind_count", /bind message supplies (\d+) parameters, but prepared statement.*requires (\d+)/i],
@@ -120,6 +121,16 @@ async function main() {
   });
   try {
     await client.connect();
+    const briefings = await client.query(`SELECT
+      (SELECT max(briefing_date) FROM daily_signal_briefing WHERE status='published') AS latest_published_date,
+      (SELECT count(*)::int FROM user_daily_briefing_schedule WHERE enabled=true) AS enabled_schedules,
+      (SELECT count(*)::int FROM user_daily_briefing_schedule WHERE enabled=true
+        AND (last_scheduled_for IS NULL OR last_scheduled_for < timezone(schedule_timezone,now())::date)
+        AND timezone(schedule_timezone,now())::time >= scheduled_time) AS due_schedules`);
+    const briefingJobs = await client.query(`SELECT briefing_date,status,created_at,finished_at,error
+      FROM daily_signal_briefing_generation_job ORDER BY created_at DESC LIMIT 5`);
+    console.log(JSON.stringify({ briefing_runtime: briefings.rows[0],
+      recent_briefing_jobs: briefingJobs.rows.map(({ error, ...job }) => ({ ...job, error: classifyError(error) })) }));
     const social = await client.query(`SELECT
       (SELECT count(*)::int FROM social_signal WHERE expires_at > now()) AS retained_posts,
       (SELECT max(posted_at) FROM social_signal WHERE expires_at > now()) AS latest_post,

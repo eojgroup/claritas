@@ -1,11 +1,11 @@
 import SwiftUI
 
 enum WatchPalette {
-    static let navy = Color(hex: "#081A12")
-    static let forest = Color(hex: "#163C2A")
-    static let sage = Color(hex: "#91C7A2")
-    static let orange = Color(hex: "#D3C3A5")
-    static let beige = Color(hex: "#B3C7B9")
+    static let navy = Color(hex: "#07141E")
+    static let forest = Color(hex: "#142B39")
+    static let sage = Color(hex: "#91ADBA")
+    static let orange = Color(hex: "#F0A266")
+    static let beige = Color(hex: "#B8C3C9")
     static let cream = Color(hex: "#F2F0EA")
     static let negative = Color(hex: "#C77A72")
 }

@@ -116,3 +116,19 @@ shows publisher headlines, available excerpts, provenance and links under the
 source policy in [data-source governance](./data-source-governance.md); it does
 not claim a licence to republish Bloomberg, Reuters, Apple News or another
 publisher's full article body.
+
+## Daily highlights and reading order
+
+The main feed and home reporting preview remain newest first by default. A separate
+“Top news · past 24 hours” panel requests `/api/news?window=day&sort=importance&limit=3`.
+The API applies the rolling 24-hour window before ranking and publisher diversification.
+Web and Apple highlights refresh every five minutes while mounted, independently of
+the daily narrative briefing. Country and category scopes are retained. Empty scopes
+show an empty state rather than falling back to older stories.
+
+Article cards show additional context only when the API reports extra retained evidence
+or available satellite imagery. `additional_evidence_count` excludes the current article,
+same-URL copies, news copies with the same headline, machine-coded GDELT event records,
+and derived/model assessments. Extra records are counted by source URL or source record
+identity. Queued imagery and a one-article event alone do not unlock the context link.
+This is a presentation gate, not a claim of independent corroboration.

@@ -93,6 +93,8 @@ struct DashboardView: View {
         let ranked = mobileNewsScopeMatchesSelection ? model.rankedNews : []
 
         return VStack(alignment: .leading, spacing: 0) {
+            NewsHighlightsView(country: mobileNewsCountry, category: model.selectedNewsCategory)
+                .padding(.bottom, 16)
             HStack {
                 Label("LATEST REPORTING", systemImage: "newspaper")
                     .font(.caption2.weight(.bold))
@@ -149,29 +151,23 @@ struct DashboardView: View {
                         openCompactDestination("news")
                     } label: {
                         HStack(alignment: .top, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("\(newsSourceLabel(item) ?? "Reporting source") · \(item.chronologyDisplayText)")
+                                    .font(.caption2)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 Text(item.presentationTitle)
                                     .font(.subheadline.weight(index == 0 ? .semibold : .medium))
                                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                     .multilineTextAlignment(.leading)
-                                    .lineLimit(index == 0 ? 2 : 1)
-                                Text(item.chronologyDisplayText)
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                NewsPriorityMetadataView(item: item, compact: true)
-                                HStack(spacing: 6) {
-                                    Text(newsSourceLabel(item) ?? "Reporting source")
-                                    if let event = item.linked_events.first {
-                                        Text("· \(IntelligenceLinkagePresentation.label(for: event.correlation_factors).capitalized)")
-                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                    }
+                                    .lineLimit(3)
+                                if let summary = item.presentationSummary, !summary.isEmpty {
+                                    Text(summary)
+                                        .font(.subheadline)
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                        .lineLimit(2)
                                 }
-                                .font(.caption2)
-                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                .lineLimit(1)
-                                if let event = item.linked_events.first {
-                                    Text("Open: \(event.title)")
+                                if let event = item.additionalContextEvents.first {
+                                    Text(event.additionalContextLabel)
                                         .font(.caption2.weight(.semibold))
                                         .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                                         .lineLimit(1)
@@ -183,7 +179,7 @@ struct DashboardView: View {
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 .padding(.top, 3)
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 14)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -1614,6 +1610,10 @@ struct NewsWorkspaceView: View {
             newsCategorySelector
             topicOverview
 
+            if loadMode == .recent && !hasLocalFilters && searchQuery.isEmpty {
+                NewsHighlightsView(country: selectedNewsCountry, category: model.selectedNewsCategory)
+            }
+
             selectedRankedStoryPanel(compact: true)
 
             if hasActiveFilters {
@@ -1640,6 +1640,9 @@ struct NewsWorkspaceView: View {
 
     private var regularNewsContent: some View {
         VStack(spacing: 16) {
+            if loadMode == .recent && !hasLocalFilters && searchQuery.isEmpty {
+                NewsHighlightsView(country: selectedNewsCountry, category: model.selectedNewsCategory)
+            }
             BrandCard {
                 VStack(alignment: .leading, spacing: 14) {
                     BrandSectionHeader(

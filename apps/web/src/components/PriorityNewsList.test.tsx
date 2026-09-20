@@ -51,7 +51,7 @@ describe("PriorityNewsList", () => {
     };
     render(<PriorityNewsList items={[item]} selectedId={item.id} emptyState={null} getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountries={() => ["AE"]} getCountryName={() => "United Arab Emirates"} onToggle={() => undefined} onSelectCountry={() => undefined} onOpenEvent={onOpenEvent} />);
     expect(screen.getAllByText(/imagery available/i).length).toBeGreaterThan(0);
-    expect(screen.getByText("Likely linked investigations")).toBeTruthy();
+    expect(screen.getByText("Additional context")).toBeTruthy();
     expect(screen.getByText(/Why shown: the same named location/i)).toBeTruthy();
     expect(screen.getByText("High")).toBeTruthy();
     expect(screen.getByText(/Why it ranks: Material transport interruption/i)).toBeTruthy();
@@ -211,4 +211,18 @@ describe("PriorityNewsList", () => {
     expect(document.querySelector(".dashboard-news-item.is-primary")).toBeTruthy();
     expect(screen.getByText("US · GB")).toBeTruthy();
   });
+});
+
+it("hides a source-only event but shows independently retained context", () => {
+  const item: NewsItem = { id: 90, kind: "news", summary: null, country_iso2: null, event_time: null, title: "Single report", url: "https://example.com/report",
+    linked_events: [{ id: "event-1", title: "Single report", event_type: "news", severity: "low",
+      evidence_count: 1, additional_evidence_count: 0 }] };
+  const props = { selectedId: 90, emptyState: null, getImageUrl: () => undefined,
+    getSourceLabel: () => "Publisher", getCountries: () => [], getCountryName: () => "",
+    onToggle: () => undefined, onSelectCountry: () => undefined };
+  const { rerender } = render(<PriorityNewsList {...props} items={[item]} />);
+  expect(screen.queryByText("Additional context")).toBeNull();
+  rerender(<PriorityNewsList {...props} items={[{ ...item, linked_events: [{ ...item.linked_events![0], additional_evidence_count: 2 }] }]} />);
+  expect(screen.getByText("Additional context")).toBeTruthy();
+  expect(screen.getByText("2 additional sources")).toBeTruthy();
 });

@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateBriefingWithFallback } from "./briefing-fallback";
-import { LlmProviderError, type LlmClient } from "./llm";
+// Keep the client and error class in the same module instance on Node 20/tsx.
+// Mixing dynamic and static imports gives instanceof a different constructor.
+import { LlmProviderError, OpenCodeLlmClient, type LlmClient } from "./llm";
 const request = { system: "system", prompt: "prompt", schema: {} };
 const context = { briefing_date: "2026-09-15", news: [{ title: "Port closure reported", publisher: "Publisher", url: "https://example.com/report", event_time: "2026-09-15T06:00:00Z" }], intelligence_events: [{ title: "Port investigation" }], counts: { news: 1, podcasts: 0 } };
 const failing = (error: Error): LlmClient => ({ async generateStructured() { throw error; } });
@@ -29,7 +31,6 @@ test("successful provider output is preserved", async () => {
   assert.deepEqual(await generateBriefingWithFallback(client, request, context), response);
 });
 test("OpenCode embedded endpoint and authentication statuses reach daily generation correctly", async () => {
-  const { OpenCodeLlmClient } = await import("./llm");
   const originalFetch = globalThis.fetch;
   try {
     for (const status of [404, 401]) {

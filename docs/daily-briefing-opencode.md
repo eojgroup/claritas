@@ -337,3 +337,9 @@ A `200` response confirms the key and free router work, leaving the OpenCode req
 If narrative generation reports no available endpoints (including the free OpenRouter router), rate limiting, or a provider/server outage, the daily briefing publishes a **Daily source digest** from the already-collected evidence. It explicitly says synthesis is unavailable, lists retained coverage and attributed report titles, and preserves source references and the existing investigation context in metadata. It adds no causal conclusions or confidence uplift. Metadata identifies `provider: deterministic`, `fallback: true`, and `fallback_reason: generation_provider_unavailable`.
 
 Successful generation remains unchanged. Authentication/configuration failures remain actionable errors. The fallback does not select another model, require new credentials, or introduce paid inference; subsequent daily runs try the configured provider again.
+
+The September 2026 deployment regression was a Node 20/tsx test module identity issue:
+load `OpenCodeLlmClient` and `LlmProviderError` with the same static import in the fallback
+test. Mixing dynamic and static imports caused `instanceof` to fail in CI and blocked
+the source-digest fallback release. The read-only runtime diagnostics now report the
+latest published briefing, due schedules, and sanitized recent generation failures.

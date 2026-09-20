@@ -185,3 +185,11 @@ test("newest is reverse chronological by the same canonical timeline instant ret
   assert.match(built.sql, /'timeline_at',i\.event_time/);
   assert.match(built.sql, /ORDER BY result_rows\.result_order/);
 });
+
+test("daily highlights use a 24-hour scope without changing the default feed window", async () => {
+  const { buildNewsReaderQuery } = await reader;
+  const input = { displayLanguage: "en", limit: 3, offset: 0, q: "", country: "", language: "",
+    sourceCountry: "", provider: "", category: "", sort: "importance" as const, archive: false, includeMetadata: false };
+  assert.match(buildNewsReaderQuery({ ...input, daily: true }).sql, /now\(\) - interval '24 hours'/);
+  assert.match(buildNewsReaderQuery(input).sql, /now\(\) - interval '48 hours'/);
+});

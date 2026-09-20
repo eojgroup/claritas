@@ -19,6 +19,7 @@ export type NewsReaderQueryInput = {
   category: string;
   sort: "importance" | "newest";
   archive: boolean;
+  daily?: boolean;
   includeMetadata: boolean;
 };
 
@@ -57,7 +58,8 @@ export function buildNewsReaderQuery(input: NewsReaderQueryInput): {
   // The default workspace is a current operational briefing, not a disguised
   // archive. Two days covers overnight/closed-market context without allowing
   // a thin category to look healthy because it still contains week-old rows.
-  if (!archive) where.push("i.event_time >= now() - interval '48 hours'");
+  if (input.daily) where.push("i.event_time >= now() - interval '24 hours'");
+  else if (!archive) where.push("i.event_time >= now() - interval '48 hours'");
   const search = buildNewsSearchPredicate(q, params.length + 1);
   params.push(...search.params);
   if (search.sql) where.push(search.sql);
@@ -355,6 +357,22 @@ export function buildNewsReaderQuery(input: NewsReaderQueryInput): {
           'evidence_count', (
             SELECT count(*)::int FROM intelligence_event_evidence all_evidence
             WHERE all_evidence.event_id=event.id
+          ),
+          'additional_evidence_count', (
+            SELECT count(DISTINCT COALESCE(NULLIF(extra.provenance->>'url',''),
+              extra.source_record_type || ':' || extra.source_record_id))::int
+            FROM intelligence_event_evidence extra
+            WHERE extra.event_id=event.id
+              AND NOT (extra.source_record_type='item' AND extra.source_record_id=i.id::text)
+              AND extra.relationship IN ('reported','observed','corroborates','contradicts','context')
+              AND extra.source_record_type <> 'global_event'
+              AND (extra.domain <> 'news' OR (
+                NULLIF(extra.provenance->>'url','') IS NOT NULL
+                AND lower(BTRIM(extra.metadata->>'original_title')) IS DISTINCT FROM lower(BTRIM(i.title))
+              ))
+              AND (NULLIF(extra.provenance->>'url','') IS NULL
+                OR regexp_replace(split_part(extra.provenance->>'url','?',1),'/$','')
+                   IS DISTINCT FROM regexp_replace(split_part(i.url,'?',1),'/$',''))
           ),
           'domains', (
             SELECT COALESCE(jsonb_agg(domain ORDER BY domain), '[]'::jsonb)
