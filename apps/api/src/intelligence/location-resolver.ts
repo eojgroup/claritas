@@ -1,5 +1,5 @@
 import { query } from "../db";
-import { normalizeLocationAlias } from "./location-normalization";
+import { normalizeLocationAlias, locationAliasTextPredicateSql } from "./location-normalization";
 
 export { normalizeLocationAlias } from "./location-normalization";
 
@@ -102,7 +102,8 @@ export async function resolveLocationFromText(
      FROM intelligence_location_alias alias
      JOIN intelligence_location location ON location.id = alias.location_id
      WHERE length(alias.normalized_alias) >= 3
-       AND position(alias.normalized_alias in $1) > 0
+       AND ${locationAliasTextPredicateSql()}
+       AND NOT (location.location_type = 'country' AND alias.alias_type = 'abbreviation')
        AND location.active
        AND ($2::text IS NULL OR location.country_iso2 = $2 OR location.country_iso2 IS NULL)
      ORDER BY length(alias.normalized_alias) DESC, alias.confidence DESC,

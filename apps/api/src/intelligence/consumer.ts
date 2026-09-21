@@ -1,3 +1,4 @@
+import { attachAirportTransportContext } from "./airport-transport-context";
 import { query, withTransaction } from "../db";
 import worldCountries from "world-countries";
 import { hasEarthquakeHeadlineSignal } from "../earthquake-language";
@@ -122,7 +123,7 @@ export function classifyEventType(text: string) {
     [/wildfire|forest fire|bushfire|active fire/, "wildfire"],
     [/flood|inundation|flash flood/, "flood"],
     [/hurricane|typhoon|cyclone|storm/, "severe_storm"],
-    [/port|shipping|vessel|tanker|canal|strait/, "transport_disruption"],
+    [/\b(?:ports?|shipping|vessels?|tankers?|canals?|straits?)\b/, "transport_disruption"],
     [/airport|aviation|flight|airspace/, "aviation_disruption"],
     [/drought|crop|harvest/, "agricultural_stress"],
     [/attack|explosion|strike|conflict/, "security_incident"],
@@ -484,6 +485,9 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     return;
   }
   const selected = await correlateAndUpsertIntelligenceSignal(signalInput);
+  if (eventType === "aviation_disruption" && location?.location_type === "airport") {
+    await attachAirportTransportContext(selected.id);
+  }
   await attachIntelligenceSignalToMajorEventContext(signalInput, { excludeEventId: selected.id });
 }
 

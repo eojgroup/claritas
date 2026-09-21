@@ -7,3 +7,8 @@ export function normalizeLocationAlias(value: string): string {
     .trim()
     .replace(/\s+/g, " ");
 }
+
+/** Match whole normalized words, never CAN inside cancelled or Iran inside viral text. */
+export function locationAliasTextPredicateSql(): string {
+  return "position(' ' || alias.normalized_alias || ' ' in ' ' || $1 || ' ') > 0";
+}

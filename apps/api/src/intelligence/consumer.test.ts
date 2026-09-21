@@ -217,3 +217,10 @@ test("coverage assessments do not make the canonical event newly active", async 
     relationship: "context",
   }).toISOString(), evidenceObservedAt.toISOString());
 });
+
+test("airport reporting is aviation, not the port substring", async () => {
+  const { classifyEventType } = await consumer;
+  assert.equal(classifyEventType("Bristol Airport flights cancelled or delayed - updates"), "aviation_disruption");
+  assert.equal(classifyEventType("Report on elections"), "reported_development");
+  assert.equal(classifyEventType("Port closure delays tankers"), "transport_disruption");
+});
