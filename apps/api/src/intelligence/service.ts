@@ -1,3 +1,5 @@
+import { getRegionalContext } from "./regional-context";
+import { activeSocialEvidenceSql, buildSignalCoverage, eventOriginDomainSql, eventSignalDomainsSql, eventNewsPrioritySql, eventPriorityScoreSql, eventPriorityReasons } from "./event-priority";
 import { getRegionalReporting } from "./regional-reporting";
 import { getSocialEventContexts } from "./social-context";
 import type { PoolClient } from "pg";
@@ -67,6 +69,11 @@ type EventRow = {
   longitude?: number | null;
   monitoring_tier?: number | null;
   evidence_count?: number;
+  origin_domain?: string;
+  signal_domains?: string[];
+  priority_score?: number;
+  news_priority?: number;
+  origin_topic_rank?: number;
   earth_observation_available?: boolean;
   earth_observation_state?: "imagery_available" | "processing" | "queued" | "not_requested";
 };
@@ -196,6 +203,10 @@ function eventToApi(row: EventRow) {
   const expiresAt = iso(row.expires_at);
   return {
     ...row,
+    origin_domain: row.origin_domain ?? String(row.metadata?.origin_domain ?? "news"),
+    signal_domains: row.signal_domains ?? [],
+    priority_score: Number(row.priority_score ?? row.relevance_score),
+    priority_reasons: eventPriorityReasons(row),
     confidence: Number(row.confidence),
     source_diversity: Number(row.source_diversity),
     domain_count: Number(row.domain_count),
@@ -248,7 +259,10 @@ export function intelligenceEventEarthObservationStateSql() {
  * therefore still available even when one attached article fails quality.
  */
 function intelligenceEventHasDisplayableEvidenceSql(eventAlias = "event") {
-  return `EXISTS (
+  return `(COALESCE(${eventAlias}.metadata->>'canonical_evidence_key','') NOT LIKE 'social:social_signal:%'
+    OR EXISTS (SELECT 1 FROM social_signal retained_origin
+      WHERE concat('social:social_signal:',retained_origin.id)=${eventAlias}.metadata->>'canonical_evidence_key'
+        AND retained_origin.expires_at>now())) AND EXISTS (
     SELECT 1
     FROM intelligence_event_evidence evidence
     LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
@@ -256,6 +270,7 @@ function intelligenceEventHasDisplayableEvidenceSql(eventAlias = "event") {
       WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
         THEN evidence.source_record_id::bigint END
     WHERE evidence.event_id=${eventAlias}.id
+      AND ${activeSocialEvidenceSql()}
       AND (
         evidence.source_record_type <> 'item'
         OR (
@@ -312,7 +327,12 @@ export async function listIntelligenceEvents(options: {
   const limitRef = add(limit);
   const offsetRef = add(offset);
   const { rows } = await query<EventRow>(
-    `SELECT event.*, location.canonical_name AS location_name,
+    `WITH candidates AS (
+       SELECT event.*, location.canonical_name AS location_name,
+            ${eventOriginDomainSql()} AS origin_domain,
+            ${eventSignalDomainsSql()} AS signal_domains,
+            ${eventNewsPrioritySql()} AS news_priority,
+            ${eventPriorityScoreSql()} AS raw_priority,
             location.location_type,
             COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,location.latitude) AS latitude,
             COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude,
@@ -322,7 +342,7 @@ export async function listIntelligenceEvents(options: {
              LEFT JOIN item source_item ON source_item.id=CASE
                WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
                  THEN evidence.source_record_id::bigint END
-             WHERE evidence.event_id = event.id
+             WHERE evidence.event_id = event.id AND ${activeSocialEvidenceSql()}
                AND (evidence.source_record_type <> 'item'
                  OR (CASE WHEN lower(COALESCE(evidence_source.name, '')) = 'gdelt'
                      THEN source_item.payload->>'quality_status' = 'accepted'
@@ -333,7 +353,14 @@ export async function listIntelligenceEvents(options: {
      FROM intelligence_event event
      LEFT JOIN intelligence_location location ON location.id = event.primary_location_id
      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-     ORDER BY event.relevance_score DESC, event.last_activity_time DESC, event.id
+     ), ranked AS (
+       SELECT candidates.*,row_number() OVER (PARTITION BY origin_domain,event_type ORDER BY raw_priority DESC,last_activity_time DESC,id) AS origin_topic_rank
+       FROM candidates
+     )
+     SELECT ranked.*,raw_priority AS priority_score,GREATEST(0,raw_priority-CASE WHEN severity='critical' THEN 0
+       ELSE LEAST(0.24,(origin_topic_rank-1)*0.08) END) AS feed_order_score
+     FROM ranked
+     ORDER BY feed_order_score DESC,last_activity_time DESC,id
      LIMIT ${limitRef} OFFSET ${offsetRef}`,
     params,
   );
@@ -345,6 +372,10 @@ export async function getIntelligenceEvent(eventId: string) {
   const [eventResult, evidenceResult, locationsResult, observationsResult, relatedResult] = await Promise.all([
     query<EventRow>(
       `SELECT event.*, location.canonical_name AS location_name,
+              ${eventOriginDomainSql()} AS origin_domain,
+              ${eventSignalDomainsSql()} AS signal_domains,
+              ${eventNewsPrioritySql()} AS news_priority,
+              ${eventPriorityScoreSql()} AS priority_score,
               location.location_type,
               COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,location.latitude) AS latitude,
               COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude,
@@ -354,7 +385,7 @@ export async function getIntelligenceEvent(eventId: string) {
                LEFT JOIN item source_item ON source_item.id=CASE
                  WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
                    THEN evidence.source_record_id::bigint END
-               WHERE evidence.event_id = event.id
+               WHERE evidence.event_id = event.id AND ${activeSocialEvidenceSql()}
                  AND (evidence.source_record_type <> 'item'
                    OR (CASE WHEN lower(COALESCE(evidence_source.name, '')) = 'gdelt'
                        THEN source_item.payload->>'quality_status' = 'accepted'
@@ -407,6 +438,7 @@ export async function getIntelligenceEvent(eventId: string) {
        LEFT JOIN podcast_episode podcast_episode ON podcast_episode.id=podcast_signal.episode_id
        LEFT JOIN item podcast_item ON podcast_item.id=podcast_episode.item_id
        WHERE evidence.event_id = $1::uuid
+         AND ${activeSocialEvidenceSql()}
          AND (
            evidence.source_record_type <> 'item'
            OR (CASE WHEN lower(COALESCE(source.name, '')) = 'gdelt'
@@ -461,6 +493,7 @@ export async function getIntelligenceEvent(eventId: string) {
        FROM intelligence_event_relationship relationship
        JOIN intelligence_event related ON related.id = relationship.to_event_id
        WHERE relationship.from_event_id = $1::uuid
+         AND ${intelligenceEventHasDisplayableEvidenceSql("related")}
        ORDER BY relationship.confidence DESC, related.last_activity_time DESC
        LIMIT 20`,
       [eventId],
@@ -496,13 +529,15 @@ export async function getIntelligenceEvent(eventId: string) {
   const linkedNews = evidence.filter((row: any) => (
     row.domain === "news" && row.source_record_type === "item"
   )).map((row: any) => buildLinkedNewsPresentation(row));
-  const [socialContext, regionalReporting] = await Promise.all([
-    getSocialEventContexts([eventId]), getRegionalReporting(normalizedEvent),
+  const [socialContext, regionalReporting, contextSignals] = await Promise.all([
+    getSocialEventContexts([eventId]), getRegionalReporting(normalizedEvent), getRegionalContext(normalizedEvent),
   ]);
   return {
     event: normalizedEvent,
     social_context: socialContext,
     regional_reporting: regionalReporting,
+    signal_coverage: buildSignalCoverage(evidence, socialContext),
+    context_signals: contextSignals,
     understanding: buildEventUnderstanding(normalizedEvent as Record<string, unknown>, evidence),
     evidence,
     linked_news: linkedNews,
@@ -596,7 +631,7 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
      FROM (
        SELECT event_id,
               (count(DISTINCT domain)
-                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')))::int AS domain_count,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment') AND domain<>'social'))::int AS domain_count,
               (count(DISTINCT COALESCE(
                 NULLIF(provenance->>'source_diversity_key',''),
                 NULLIF(provenance->>'publisher',''),
@@ -604,17 +639,17 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
                 source_id::text,
                 source_record_type
               ))
-                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')))::int AS source_diversity,
-              avg(confidence) FILTER (WHERE relationship NOT IN ('model_interpretation','assessment','context')) AS average_confidence,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment') AND domain<>'social'))::int AS source_diversity,
+              avg(confidence) FILTER (WHERE relationship NOT IN ('model_interpretation','assessment','context') AND domain<>'social') AS average_confidence,
               max(CASE WHEN jsonb_typeof(metadata->'signal_relevance_score')='number'
                 THEN (metadata->>'signal_relevance_score')::double precision END)
-                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS base_relevance,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment') AND domain<>'social') AS base_relevance,
               max(CASE WHEN jsonb_typeof(metadata->'signal_urgency_score')='number'
                 THEN (metadata->>'signal_urgency_score')::double precision END)
-                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS max_urgency,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment') AND domain<>'social') AS max_urgency,
               max(CASE WHEN jsonb_typeof(metadata->'signal_materiality_score')='number'
                 THEN (metadata->>'signal_materiality_score')::double precision END)
-                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS max_materiality,
+                FILTER (WHERE relationship NOT IN ('model_interpretation','assessment') AND domain<>'social') AS max_materiality,
               bool_or(relationship='observed' AND domain IN ('earth_observation','disaster')) AS has_physical_observation
        FROM intelligence_event_evidence WHERE event_id = $1 GROUP BY event_id
      ) aggregate

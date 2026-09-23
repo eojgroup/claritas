@@ -650,6 +650,16 @@ final class APIClient {
         return try await request(URLRequest(url: comps.url!), as: [IntelligenceEvent].self, rootKey: "events")
     }
 
+    func resolveIntelligenceSource(domain: String, recordType: String, recordID: String) async throws -> IntelligenceSourceResolution {
+        var req = URLRequest(url: baseURL.appendingPathComponent("/api/intelligence/resolve-source"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "domain": domain, "source_record_type": recordType, "source_record_id": recordID,
+        ])
+        return try await request(req, as: IntelligenceSourceResolution.self)
+    }
+
     func fetchIntelligenceEvent(id: String) async throws -> IntelligenceEventDetail {
         let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
         let url = baseURL.appendingPathComponent("/api/intelligence/events/\(encoded)")

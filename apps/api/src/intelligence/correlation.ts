@@ -27,7 +27,7 @@ const EVENT_FAMILIES: readonly (readonly string[])[] = [
   ["flood"],
   ["severe_storm"],
   ["agricultural_stress"],
-  ["transport_disruption", "aviation_disruption"],
+  ["transport_disruption", "aviation_disruption", "transport_activity_change"],
   ["security_incident"],
   ["market_move"],
   ["reported_development"],

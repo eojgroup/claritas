@@ -1123,16 +1123,7 @@ struct PodcastWorkspaceView: View {
                         .lineLimit(4)
                 }
 
-                ForEach(episode.linked_events) { link in
-                    Button {
-                        NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: "intelligence", userInfo: ["eventID": link.id])
-                    } label: {
-                        Label("Open investigation: \(link.title)", systemImage: "arrow.triangle.branch")
-                            .font(.subheadline.weight(.semibold))
-                            .multilineTextAlignment(.leading)
-                    }
-                    .buttonStyle(.bordered)
-                }
+                SourceInvestigationButton(domain: "podcast", recordType: "podcast_episode", recordID: String(episode.episode_id))
                 if !episode.external_links.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -1168,6 +1159,7 @@ struct PodcastWorkspaceView: View {
                             }
                             Text(signal.title)
                                 .font(.subheadline.weight(.semibold))
+                            SourceInvestigationButton(domain: "podcast", recordType: "intelligence_signal", recordID: String(signal.id))
                             if let summary = signal.summary {
                                 Text(summary)
                                     .font(.caption)

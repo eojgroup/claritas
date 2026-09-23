@@ -127,6 +127,7 @@ import {
   listIntelligenceLocations,
 } from "./intelligence/service";
 import { getEventBackboneHealth, startEventBackbone } from "./intelligence/event-bus";
+import { parseInvestigationSource, resolveInvestigationSource } from "./intelligence/source-resolution";
 import { getRapidSourceStatus, runFirmsNow, runUsgsNow, startRapidSourceWorker } from "./intelligence/rapid-sources";
 import {
   enqueueEarthDiscovery,
@@ -1947,6 +1948,17 @@ app.put("/api/ingest/briefings/daily/:date", requireIngestionAccess, async (req,
 
 // Cross-domain intelligence graph. These routes return evidence references and
 // governed EO metadata; they never expose upstream provider credentials.
+app.post("/api/intelligence/resolve-source", requireAuthenticated, async (req, res) => {
+  const source = parseInvestigationSource(req.body);
+  if (!source) return res.status(400).json({ error: "A supported source domain, record type and record id are required." });
+  try {
+    res.setHeader("Cache-Control", "no-store");
+    return res.json(await resolveInvestigationSource(source));
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
   try {
     const since = typeof req.query.since === "string" && !Number.isNaN(Date.parse(req.query.since))

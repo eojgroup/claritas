@@ -8,6 +8,7 @@ import {
   attachIntelligenceSignalToExistingEvent,
   attachIntelligenceSignalToMajorEventContext,
   correlateAndUpsertIntelligenceSignal,
+  recomputeIntelligenceEventAggregateTx,
   upsertStandaloneContextSourceSignal,
   type TargetedEarthquakeContextAudit,
 } from "./service";
@@ -79,7 +80,7 @@ function podcastSignalRecordId(episodeId: number, signalType: string, canonicalK
 }
 
 /**
- * Podcast extraction is interpretive context, not an event detector. Only a
+ * Podcast extraction is interpretive evidence. Only a
  * transcript-supported, sufficiently confident finding with a concrete entity
  * anchor is allowed to attempt the existing anchored-correlation policy.
  */
@@ -114,7 +115,8 @@ export function isAcceptedNewsQuality(payload: unknown, sourceName: unknown) {
 }
 
 export function classifyEventType(text: string) {
-  const normalized = text.toLowerCase();
+  // Classify the actual reporting, never a provider's broad topic tags.
+  const normalized = text.slice(0, 8_000).replace(/GDELT themes:[^\n]*/gi, "").toLowerCase();
   // News classification receives headline + summary. Keep the detector's
   // bounded-input guarantee without letting a long summary hide a clear
   // earthquake headline at the start of the record.
@@ -123,12 +125,63 @@ export function classifyEventType(text: string) {
     [/wildfire|forest fire|bushfire|active fire/, "wildfire"],
     [/flood|inundation|flash flood/, "flood"],
     [/hurricane|typhoon|cyclone|storm/, "severe_storm"],
-    [/\b(?:ports?|shipping|vessels?|tankers?|canals?|straits?)\b/, "transport_disruption"],
-    [/\b(?:airports?|aviation|flights?|airspace)\b/, "aviation_disruption"],
     [/drought|crop|harvest/, "agricultural_stress"],
-    [/attack|explosion|strike|conflict/, "security_incident"],
+    [/\b(?:attack|explosion|airstrike|missile strike|armed conflict|bombing)\b/, "security_incident"],
   ];
-  return mappings.find(([pattern]) => pattern.test(normalized))?.[1] ?? "reported_development";
+  const physical = mappings.find(([pattern]) => pattern.test(normalized))?.[1];
+  if (physical) return physical;
+  const disruption = /\b(?:disrupt\w*|clos(?:ed|ure|ures|ing)|cancel\w*|delay\w*|suspend\w*|block(?:ed|age|ages|ade)|congestion|grounded|shutdown|halt(?:ed|s)?|strike|accident|derail\w*)\b/;
+  if (disruption.test(normalized)) {
+    if (/\b(?:airports?|aviation|flights?|airspace|airlines?)\b/.test(normalized)) return "aviation_disruption";
+    if (/\b(?:transport|ports?|shipping|vessels?|tankers?|canals?|straits?|rail\w*|trains?|roads?|freight|logistics|supply chain)\b/.test(normalized)) return "transport_disruption";
+  }
+  return "reported_development";
+}
+
+/** Machine topic codes are classification metadata, not publisher prose. */
+export function newsReaderSummary(summary: unknown) {
+  if (typeof summary !== "string") return null;
+  const normalized = summary.replace(/\s+/g, " ").trim();
+  return normalized && !/^GDELT themes:/i.test(normalized) ? normalized.slice(0, 1_800) : null;
+}
+
+export function podcastSignalQualifiesForEventOrigin(input: {
+  signalType: string;
+  confidence: unknown;
+  evidenceCount: unknown;
+  entities: unknown;
+}) {
+  return podcastSignalQualifiesForEventContext(input)
+    && input.signalType === "event"
+    && Number(input.confidence) >= 0.7;
+}
+
+export function socialSignalQualifiesForEventOrigin(input: { text: string; hasPlaceAnchor: boolean }) {
+  const text = input.text.trim();
+  if (text.length < 40 || text.length > 20_000) return false;
+  const instruments = explicitInstrumentKeys(text);
+  // Engagement, author location, hashtags and search-query terms are not
+  // event evidence. Require a described development and a content anchor.
+  const describedEvent = classifyEventType(text) !== "reported_development"
+    || /\b(?:announced|acquir(?:es|ed|ing)|acquisition|merger|earnings|shares? (?:rose|fell|rise|fall)|trading halt|resigned|elected|approved|launched)\b/i.test(text);
+  return describedEvent && (input.hasPlaceAnchor || instruments.length > 0);
+}
+
+export function transportComparisonWindow(rows: Array<{ bucket: string | Date; total: number }>, observed: Date) {
+  if (Number.isNaN(observed.getTime()) || observed.getUTCHours() === 0) return null;
+  const currentDay = dayKey(observed);
+  const sorted = rows.filter((row) => Number.isFinite(Number(row.total)) && !Number.isNaN(new Date(row.bucket).getTime()))
+    .sort((left, right) => new Date(left.bucket).getTime() - new Date(right.bucket).getTime());
+  const current = sorted.find((row) => dayKey(new Date(row.bucket)) === currentDay);
+  const history = sorted.filter((row) => dayKey(new Date(row.bucket)) < currentDay).map((row) => Number(row.total));
+  // Missing telemetry is not a zero-traffic observation.
+  if (!current || history.length < 7) return null;
+  return {
+    current: Number(current.total), previousEquivalent: history.at(-1)!,
+    sevenDayMedian: calculateRollingBaseline(history, 7),
+    twentyEightDayMedian: calculateRollingBaseline(history, 28),
+    sampleHours: Math.min(28, history.length) * observed.getUTCHours(),
+  };
 }
 
 type WorldCountry = { cca2?: string; name?: { common?: string; official?: string } };
@@ -330,7 +383,7 @@ function weatherSeverity(value: string | null): IntelligenceSeverity {
 async function countryLocation(countryIso2: string | null | undefined) {
   if (!countryIso2) return null;
   const { rows } = await query<any>(
-    `SELECT id,slug,canonical_name,country_iso2,latitude,longitude,importance_score,monitoring_tier
+    `SELECT id,slug,location_type,canonical_name,country_iso2,latitude,longitude,importance_score,monitoring_tier
      FROM intelligence_location WHERE slug=$1 AND active`,
     [`country-${countryIso2.toLowerCase()}`],
   );
@@ -348,21 +401,20 @@ async function handleNewsStory(event: DomainEventEnvelope) {
   );
   const story = rows[0];
   if (!story || !isAcceptedNewsQuality(story.payload, story.source_name)) return;
+  if (typeof story.title !== "string" || story.title.trim().length < 10) return;
   const targetedDiscovery = targetedEarthquakeDiscoveryDecision(story.payload);
   const occurred = new Date(story.event_time ?? story.created_at);
-  const text = `${story.title ?? ""} ${story.summary ?? ""}`;
+  if (Number.isNaN(occurred.getTime())) return;
+  const readerSummary = newsReaderSummary(story.summary);
+  const text = `${story.title ?? ""} ${readerSummary ?? ""}`;
   const gkgCoordinate = trustedGdeltLocations(story.payload)[0] ?? null;
   const location = (gkgCoordinate
     ? await resolveNearestLocation(gkgCoordinate.latitude, gkgCoordinate.longitude, 150)
     : null)
     ?? await resolveLocationFromText(text, story.country_iso2)
     ?? await countryLocation(story.country_iso2);
-  // Precisely located offshore/local reporting remains usable even when the
-  // provider omitted a country and no catalogue location is nearby. A valid
-  // targeted contract may also continue without article coordinates because
-  // its event identity is verified separately and never reused as article
-  // geography.
-  if (!location && !story.country_iso2 && !gkgCoordinate && !targetedDiscovery.linkEligible) return;
+  // A company, instrument or policy story need not have physical geography.
+  // Keep an honest unlocated event instead of excluding it from the desk.
   // A fully validated targeted contract already carries an exact
   // observation-backed earthquake identity. It may therefore supply the
   // family for a local-language title; malformed and review-only contracts
@@ -384,16 +436,12 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     locationImportance: Number(location?.importance_score ?? 0.45),
     domainCount: 1,
   });
-  const newsAnchor = gkgCoordinate
-    ? `${Math.round(gkgCoordinate.latitude * 10) / 10},${Math.round(gkgCoordinate.longitude * 10) / 10}`
-    : location?.id ?? story.country_iso2;
   const signalInput = {
-    dedupeKey: targetedDiscovery.present
-      ? buildEventDedupeKey(["targeted-news-source", itemId])
-      : buildEventDedupeKey([eventType, newsAnchor, dayKey(occurred)]),
+    // Shared country/type/date is context, never a unique event identity.
+    dedupeKey: buildEventDedupeKey(["news-source", itemId]),
     eventType,
     title: String(story.title ?? "Reported development"),
-    summary: String(story.summary ?? "A publisher reported a development. Independent corroboration may still be limited.").slice(0, 1_800),
+    summary: readerSummary ?? "Publisher reporting. Open the source for the full story; no publisher summary is available.",
     status: "emerging",
     severity: eventType === "security_incident" ? "high" : "medium",
     confidence: Math.min(0.85, reliability),
@@ -409,7 +457,9 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     materialityScore: Number(location?.importance_score ?? 0.45),
     scoreComponents: priority.components,
     metadata: {
-      extraction: "deterministic-keyword-v2",
+      extraction: "deterministic-keyword-v3",
+      origin_domain: "news",
+      epistemic_class: "reported_claim",
       source_title_preserved: true,
       coordinate_source: gkgCoordinate ? "gdelt_gkg_location" : location?.match_basis ?? null,
       targeted_discovery_present: targetedDiscovery.present,
@@ -435,7 +485,8 @@ async function handleNewsStory(event: DomainEventEnvelope) {
       sourceRecordId: String(itemId),
       sourceId: story.source_id,
       observedAt: occurred,
-      publishedAt: occurred,
+      publishedAt: story.payload?.publication_time_verified === false
+        || story.payload?.time_basis === "provider_first_seen" ? null : occurred,
       locationId: location?.id ?? null,
       confidence: reliability,
       relationship: "reported",
@@ -444,7 +495,9 @@ async function handleNewsStory(event: DomainEventEnvelope) {
       attribution: story.payload?.source ?? story.source_name,
       metadata: {
         original_title: story.title,
-        original_summary: story.summary,
+        original_summary: readerSummary,
+        time_basis: story.payload?.time_basis ?? "publisher_published",
+        publication_time_verified: story.payload?.publication_time_verified ?? null,
         language_code: story.language_code,
         extracted_coordinate: gkgCoordinate,
         targeted_discovery_present: targetedDiscovery.present,
@@ -529,32 +582,37 @@ async function handlePodcastSignal(event: DomainEventEnvelope) {
 
   const entities = stringList(signal.entities);
   const countries = countryList(signal.countries);
+  const canOriginate = podcastSignalQualifiesForEventOrigin({
+    signalType: signal.signal_type, confidence: signal.confidence,
+    evidenceCount: signal.evidence_count, entities: signal.entities,
+  });
   // Country match is intentionally not used as a correlation anchor. It only
   // supplies navigational context once the entity/location policy accepts a
   // link, and ambiguous country extraction is not promoted at all.
   const country = countries.length === 1 ? countries[0] : null;
-  const location = country ? await countryLocation(country) : null;
+  const text = `${signal.title ?? ""} ${signal.summary ?? ""}`;
+  const location = await resolveLocationFromText(text, country)
+    ?? (country ? await countryLocation(country) : null);
   const sourceTime = new Date(signal.event_time ?? event.occurred_at);
   const occurred = Number.isNaN(sourceTime.getTime()) ? new Date(event.occurred_at) : sourceTime;
   if (Number.isNaN(occurred.getTime())) return;
   const confidence = Math.min(0.75, Math.max(0.55, Number(signal.confidence)));
-  const text = `${signal.title ?? ""} ${signal.summary ?? ""}`;
   const eventType = classifyEventType(text);
   const recordId = podcastSignalRecordId(episodeId, signal.signal_type, signal.canonical_key);
   const priority = computeSignalPriority({
     sourceReliability: confidence,
     sourceDiversity: 1,
     freshnessHours: Math.max(0, (Date.now() - occurred.getTime()) / 3_600_000),
-    // A podcast signal never escalates an event by itself. Its role is limited
-    // to contextual evidence after a governed attach decision.
+    // Interpretation can open an investigation, but cannot escalate its
+    // severity or claim independent corroboration.
     severity: "low",
     locationImportance: Number(location?.importance_score ?? 0.35),
     domainCount: 1,
   });
   const contextInput = {
-    dedupeKey: buildEventDedupeKey(["podcast-context", recordId]),
+    dedupeKey: buildEventDedupeKey(["podcast-source", recordId]),
     eventType,
-    title: `Podcast context: ${signal.title}`.slice(0, 300),
+    title: String(signal.title || "Podcast-reported development").slice(0, 300),
     summary: String(signal.summary || signal.title || "Podcast transcript context.").slice(0, 1_800),
     status: "monitoring",
     severity: "low",
@@ -566,10 +624,12 @@ async function handlePodcastSignal(event: DomainEventEnvelope) {
     relevanceScore: Math.min(0.55, priority.score),
     urgencyScore: 0.2,
     materialityScore: 0.2,
-    scoreComponents: { ...priority.components, contextual_only: true },
+    scoreComponents: { ...priority.components, independent_corroboration: false },
     metadata: {
       source_kind: "podcast_transcript",
-      podcast_context_only: true,
+      origin_domain: "podcast",
+      epistemic_class: "model_interpretation",
+      podcast_context_only: !canOriginate,
     },
     entityKeys: collectEntityKeys(entities, explicitInstrumentKeys(text)),
     evidence: {
@@ -582,7 +642,7 @@ async function handlePodcastSignal(event: DomainEventEnvelope) {
       publishedAt: occurred,
       locationId: location?.id ?? null,
       confidence,
-      relationship: "context",
+      relationship: "model_interpretation",
       provenance: {
         provider: "podcastindex",
         publisher: signal.feed_title,
@@ -604,10 +664,138 @@ async function handlePodcastSignal(event: DomainEventEnvelope) {
       },
     },
   } satisfies Parameters<typeof attachIntelligenceSignalToExistingEvent>[0];
-  const selected = await attachIntelligenceSignalToExistingEvent(contextInput);
+  const selected = canOriginate
+    ? await correlateAndUpsertIntelligenceSignal(contextInput)
+    : await attachIntelligenceSignalToExistingEvent(contextInput);
   await attachIntelligenceSignalToMajorEventContext(contextInput, {
     excludeEventId: selected?.id ?? null,
   });
+}
+
+async function handleSocialSignal(event: DomainEventEnvelope) {
+  const id = Number(event.payload.social_signal_id ?? event.aggregate_id);
+  if (!Number.isSafeInteger(id) || id <= 0) return;
+  const { rows } = await query<any>(
+    `SELECT * FROM social_signal WHERE id=$1 AND expires_at>now()`, [id],
+  );
+  const post = rows[0];
+  if (!post) return;
+  const text = String(post.content_text ?? "");
+  // A geotag locates the author, not necessarily the described event. Only
+  // locations explicitly named in the post are used as event geography.
+  const location = await resolveLocationFromText(text);
+  if (!socialSignalQualifiesForEventOrigin({ text, hasPlaceAnchor: Boolean(location) })) return;
+  const occurred = new Date(post.posted_at);
+  if (Number.isNaN(occurred.getTime())) return;
+  const priority = computeSignalPriority({
+    sourceReliability: 0.35, sourceDiversity: 1,
+    freshnessHours: Math.max(0, (Date.now() - occurred.getTime()) / 3_600_000),
+    severity: "low", locationImportance: Number(location?.importance_score ?? 0.3), domainCount: 1,
+  });
+  await correlateAndUpsertIntelligenceSignal({
+    dedupeKey: buildEventDedupeKey(["social-source", id]),
+    eventType: classifyEventType(text),
+    title: `Social claim: ${post.title || text}`.replace(/\s+/g, " ").slice(0, 300),
+    summary: text.slice(0, 1_800), status: "monitoring", severity: "low", confidence: 0.35,
+    startTime: occurred, lastActivityTime: occurred,
+    primaryLocationId: location?.id ?? null, primaryCountryIso2: location?.country_iso2 ?? null,
+    latitude: location?.latitude ?? null, longitude: location?.longitude ?? null, coordinatesAreExact: false,
+    relevanceScore: Math.min(0.4, priority.score), urgencyScore: 0.15, materialityScore: 0.15,
+    scoreComponents: { ...priority.components, unverified_social_claim: true, independent_corroboration: false },
+    metadata: { origin_domain: "social", epistemic_class: "unverified_social_claim", author_geography_used: false },
+    entityKeys: explicitInstrumentKeys(text),
+    evidence: {
+      domain: "social", evidenceType: "unverified_social_claim", sourceRecordType: "social_signal", sourceRecordId: String(id),
+      sourceId: post.source_id, observedAt: occurred, publishedAt: occurred,
+      locationId: location?.id ?? null, confidence: 0.35, relationship: "context",
+      provenance: { provider: post.platform, publisher: post.responsible_party_name, url: post.url, author_account_id: post.author_account_id },
+      attribution: post.responsible_party_name,
+      metadata: {
+        title: post.title || text.slice(0, 300), summary: text.slice(0, 1_800),
+        verification_status: "unverified", expires_at: post.expires_at,
+        assessment_boundary: "An attributed social claim. It can open an investigation, but does not independently confirm the reported event.",
+      },
+    },
+  });
+}
+
+async function handleImageryObservation(event: DomainEventEnvelope) {
+  const id = String(event.payload.observation_id ?? event.aggregate_id);
+  if (!TARGETED_DISCOVERY_UUID.test(id)) return;
+  const { rows } = await query<any>(
+    `SELECT observation.*,scene.provider,scene.mission,scene.collection,scene.source_url,
+            scene.provider_scene_id,location.canonical_name,location.country_iso2,
+            location.latitude,location.longitude
+     FROM earth_observation observation
+     JOIN earth_scene scene ON scene.id=observation.scene_id
+     LEFT JOIN intelligence_location location ON location.id=observation.location_id
+     WHERE observation.id=$1::uuid AND observation.status='available'`, [id],
+  );
+  const observation = rows[0];
+  if (!observation) return;
+  const occurred = new Date(observation.captured_at);
+  if (Number.isNaN(occurred.getTime())) return;
+  let eventId = observation.event_id as string | null;
+  if (!eventId) {
+    const selected = await correlateAndUpsertIntelligenceSignal({
+      dedupeKey: buildEventDedupeKey(["imagery-source", observation.scene_id, observation.location_id]),
+      eventType: "imagery_review",
+      title: `Satellite imagery${observation.canonical_name ? ` at ${observation.canonical_name}` : " available for review"}`,
+      summary: "A satellite image is available for review. Image availability alone does not establish a disruption or its impact.",
+      status: "monitoring", severity: "low", confidence: 0.55,
+      startTime: occurred, lastActivityTime: occurred,
+      primaryLocationId: observation.location_id, primaryCountryIso2: observation.country_iso2,
+      latitude: observation.latitude, longitude: observation.longitude, coordinatesAreExact: false,
+      relevanceScore: 0.25, urgencyScore: 0.1, materialityScore: 0.1,
+      scoreComponents: { imagery_review: true, independent_impact_confirmation: false },
+      metadata: { origin_domain: "imagery", epistemic_class: "observed_image", observation_id: id },
+      evidence: {
+        domain: "earth_observation", evidenceType: observation.product_type,
+        sourceRecordType: "earth_observation", sourceRecordId: id,
+        observedAt: occurred, locationId: observation.location_id,
+        confidence: 0.55, relationship: "observed",
+        provenance: {
+          provider: observation.provider, mission: observation.mission, collection: observation.collection,
+          scene_id: observation.scene_id, provider_scene_id: observation.provider_scene_id,
+          url: observation.source_url, verification_scope: "contextual_observation_not_automatic_confirmation",
+          source_diversity_key: `${observation.provider}:${observation.mission}:${observation.collection}`,
+        },
+        license: observation.license, attribution: observation.attribution,
+        metadata: { observation_id: id, assessment_boundary: "The observed image is not automatic confirmation of an event or impact." },
+      },
+    });
+    eventId = selected.id;
+    await query(
+      `UPDATE earth_observation observation SET event_id=$2::uuid,updated_at=now()
+       WHERE observation.id=$1::uuid AND observation.event_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM earth_observation sibling
+           WHERE sibling.scene_id=observation.scene_id
+             AND sibling.location_id IS NOT DISTINCT FROM observation.location_id
+             AND sibling.product_type=observation.product_type AND sibling.event_id=$2::uuid
+             AND sibling.id<>observation.id)`, [id, eventId],
+    );
+  }
+  const interpretation = observation.analysis_details?.model_interpretation;
+  if (eventId && interpretation && typeof interpretation.summary === "string") {
+    const confidence = Math.min(0.75, Math.max(0, Number(interpretation.confidence) || 0));
+    // Attach the interpretation to its actual observed image, never run a
+    // second broad correlation that could select a different event.
+    await withTransaction(async (client) => {
+      await client.query(
+        `INSERT INTO intelligence_event_evidence (
+           event_id,domain,evidence_type,source_record_type,source_record_id,observed_at,
+           location_id,confidence,relationship,provenance,attribution,metadata
+         ) VALUES ($1,'earth_observation','model_interpretation','earth_observation_vision',$2,$3,
+                   $4,$5,'model_interpretation',$6::jsonb,$7,$8::jsonb)
+         ON CONFLICT (event_id,domain,source_record_type,source_record_id) DO UPDATE SET
+           confidence=EXCLUDED.confidence,provenance=EXCLUDED.provenance,metadata=EXCLUDED.metadata`,
+        [eventId, `${id}:${interpretation.prompt_version ?? "eo-vision-v1"}`, occurred, observation.location_id,
+         confidence, JSON.stringify({ provider: "openrouter", observation_id: id, actual_model: interpretation.actual_model }),
+         `Model interpretation; ${observation.attribution}`, JSON.stringify(interpretation)],
+      );
+      await recomputeIntelligenceEventAggregateTx(client, eventId!);
+    });
+  }
 }
 
 async function handleGdeltEvent(event: DomainEventEnvelope) {
@@ -864,26 +1052,23 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
     movement.country_iso2, observed,
   );
   const { rows: hours } = await query<{ bucket: string | Date; total: number }>(
-    `SELECT date_trunc('day',bucket) AS bucket,
+    `SELECT date_trunc('day',bucket AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS bucket,
             sum(departures+arrivals)::int AS total
      FROM transport_movement_hour
-     WHERE country_iso2=$1 AND location_name=$2 AND bucket>=now()-interval '29 days'
-     GROUP BY date_trunc('day',bucket) ORDER BY bucket`,
-    [movement.country_iso2, movement.location_name],
+     WHERE country_iso2=$1 AND location_name=$2
+       AND bucket>=(date_trunc('day',$3::timestamptz AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')-interval '28 days'
+       AND bucket<date_trunc('hour',$3::timestamptz)
+       AND extract(hour FROM bucket AT TIME ZONE 'UTC')<extract(hour FROM $3::timestamptz AT TIME ZONE 'UTC')
+     GROUP BY date_trunc('day',bucket AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' ORDER BY bucket`,
+    [movement.country_iso2, movement.location_name, observed],
   );
-  const values = hours.map((row) => Number(row.total));
-  if (values.length < 7) {
+  const comparison = transportComparisonWindow(hours, observed);
+  if (!comparison) {
     await refreshEarthquakeContext();
     return;
   }
-  const current = values.at(-1) ?? 0;
-  const previous = values.at(-2) ?? 0;
-  const anomaly = detectTransportAnomaly({
-    current, previousEquivalent: previous,
-    sevenDayMedian: calculateRollingBaseline(values.slice(-8, -1), 7),
-    twentyEightDayMedian: calculateRollingBaseline(values.slice(0, -1), 28),
-    sampleHours: Math.min(28, values.length - 1) * 24,
-  });
+  const current = comparison.current;
+  const anomaly = detectTransportAnomaly(comparison);
   if (!anomaly.anomalous) {
     await refreshEarthquakeContext();
     return;
@@ -900,8 +1085,8 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
   const change = anomaly.percentChange == null ? "a new baseline" : `${Math.abs(anomaly.percentChange * 100).toFixed(0)}% ${anomaly.direction}`;
   const signalInput = {
     dedupeKey: buildEventDedupeKey(["transport-anomaly", movement.location_name, dayKey(observed)]),
-    eventType: "transport_disruption", title: `${movement.location_name} movement anomaly`,
-    summary: `Observed arrivals and departures are ${change} the robust rolling baseline. Coverage reflects Claritas telemetry sources, not total port-authority traffic.`,
+    eventType: "transport_activity_change", title: `${movement.location_name} movement anomaly`,
+    summary: `Observed arrivals and departures are ${change} the rolling baseline for the same completed UTC hours. Coverage reflects Claritas telemetry sources, not total traffic; the change alone does not establish disruption.`,
     severity, confidence: anomaly.confidence, startTime: observed, lastActivityTime: observed,
     primaryLocationId: location?.id ?? null, primaryCountryIso2: movement.country_iso2,
     latitude: location?.latitude ?? null, longitude: location?.longitude ?? null,
@@ -912,7 +1097,8 @@ async function handleTransportMovement(event: DomainEventEnvelope) {
       domain: "transport", evidenceType: "rolling_baseline_anomaly", sourceRecordType: "transport_movement_event", sourceRecordId: String(id),
       observedAt: observed, locationId: location?.id ?? null, confidence: anomaly.confidence, relationship: "derived",
       provenance: { provider: movement.source_name, methodology: anomaly.methodology }, attribution: movement.source_name,
-      metadata: { current, baseline: anomaly.baseline, percent_change: anomaly.percentChange, event_type: movement.event_type, vehicle_category: movement.vehicle_category },
+      metadata: { current, baseline: anomaly.baseline, percent_change: anomaly.percentChange,
+        comparison_hours_utc: observed.getUTCHours(), event_type: movement.event_type, vehicle_category: movement.vehicle_category },
     },
   } satisfies Parameters<typeof correlateAndUpsertIntelligenceSignal>[0];
   const selected = await correlateAndUpsertIntelligenceSignal(signalInput);
@@ -996,9 +1182,107 @@ export async function processDomainEvent(event: DomainEventEnvelope) {
       case "transport.movement.recorded": return handleTransportMovement(event);
       case "market.instrument.observed": return handleMarketIndicator(event);
       case "podcast.signal.extracted": return handlePodcastSignal(event);
+      case "social.signal.ingested":
+      case "social.signal.updated": return handleSocialSignal(event);
+      case "earth.scene.available":
+      case "earth.vision.available": return handleImageryObservation(event);
       default: return;
     }
   }
+}
+
+/** Opens supported, already-stored sources without fetching or inventing data. */
+export async function promoteSourceToInvestigation(input: {
+  domain: string;
+  sourceRecordType: string;
+  sourceRecordId: string;
+}): Promise<string | null> {
+  const id = input.sourceRecordId.trim();
+  if (!id || id.length > 500) return null;
+  let type: string;
+  let evidenceId = id;
+  let evidenceDomain = input.domain;
+  let evidenceRecordType = input.sourceRecordType;
+  let payload: Record<string, unknown> = {};
+  const numericId = /^\d+$/.test(id) && Number.isSafeInteger(Number(id)) && Number(id) > 0;
+  if (input.domain === "news" && input.sourceRecordType === "item" && numericId) {
+    type = "news.story.updated";
+    payload = { item_id: Number(id) };
+  } else if (input.domain === "social" && input.sourceRecordType === "social_signal" && numericId) {
+    type = "social.signal.updated";
+    payload = { social_signal_id: Number(id) };
+  } else if (["imagery", "earth_observation"].includes(input.domain)
+      && input.sourceRecordType === "earth_observation" && TARGETED_DISCOVERY_UUID.test(id)) {
+    type = "earth.scene.available";
+    evidenceDomain = "earth_observation";
+    payload = { observation_id: id };
+  } else if (input.domain === "podcast" && input.sourceRecordType === "podcast_episode" && numericId) {
+    const { rows } = await query<{ episode_id: number; signal_type: string; canonical_key: string }>(
+      `SELECT signal.episode_id,signal.signal_type,signal.canonical_key
+       FROM intelligence_signal signal
+       WHERE signal.episode_id=$1 AND signal.signal_type IN ('event','risk','claim')
+         AND signal.confidence>=0.55 AND jsonb_array_length(signal.entities)>0
+         AND EXISTS (SELECT 1 FROM intelligence_signal_evidence transcript WHERE transcript.signal_id=signal.id)
+       ORDER BY (signal.signal_type='event' AND signal.confidence>=0.7) DESC,
+         EXISTS (SELECT 1 FROM intelligence_event_evidence evidence
+           WHERE evidence.domain='podcast' AND evidence.source_record_type='intelligence_signal'
+             AND evidence.source_record_id=concat('podcast:',signal.episode_id::text,':',signal.signal_type,':',signal.canonical_key)) DESC,
+         signal.confidence DESC,signal.id
+       LIMIT 1`, [id],
+    );
+    if (!rows[0]) return null;
+    payload = rows[0];
+    evidenceId = podcastSignalRecordId(rows[0].episode_id, rows[0].signal_type, rows[0].canonical_key);
+    evidenceRecordType = "intelligence_signal";
+    type = "podcast.signal.extracted";
+  } else if (input.domain === "podcast" && input.sourceRecordType === "intelligence_signal") {
+    const { rows } = await query<{ episode_id: number; signal_type: string; canonical_key: string }>(
+      `SELECT episode_id,signal_type,canonical_key FROM intelligence_signal
+       WHERE ($1::bigint IS NOT NULL AND id=$1)
+          OR concat('podcast:',episode_id::text,':',signal_type,':',canonical_key)=$2
+       LIMIT 1`, [numericId ? id : null, id],
+    );
+    if (!rows[0]) return null;
+    payload = rows[0];
+    evidenceId = podcastSignalRecordId(rows[0].episode_id, rows[0].signal_type, rows[0].canonical_key);
+    type = "podcast.signal.extracted";
+  } else return null;
+  await processDomainEvent({
+    id: `source-review:${input.domain}:${id}`, type, aggregate_type: input.sourceRecordType,
+    aggregate_id: id, occurred_at: new Date().toISOString(), payload,
+  });
+  const { rows } = await query<{ event_id: string }>(
+    `SELECT evidence.event_id FROM intelligence_event_evidence evidence
+     JOIN intelligence_event event ON event.id=evidence.event_id
+     WHERE evidence.domain=$1 AND evidence.source_record_type=$2 AND evidence.source_record_id=$3
+       AND event.status<>'dismissed'
+       AND (evidence.domain<>'news' OR EXISTS (
+         SELECT 1 FROM item story JOIN source ON source.id=story.source_id
+         WHERE story.id::text=evidence.source_record_id AND story.kind='news_article'
+           AND length(btrim(story.title))>=10
+           AND story.payload->>'canonical_alias_of_item_id' IS NULL
+           AND COALESCE(story.payload->>'quality_status',
+             CASE WHEN lower(source.name)='gdelt' THEN 'unverified' ELSE 'accepted' END)='accepted'
+       ))
+       AND (evidence.domain<>'social' OR EXISTS (
+         SELECT 1 FROM social_signal post WHERE post.id::text=evidence.source_record_id AND post.expires_at>now()
+       ))
+       AND (evidence.domain<>'podcast' OR EXISTS (
+         SELECT 1 FROM intelligence_signal signal
+         WHERE concat('podcast:',signal.episode_id::text,':',signal.signal_type,':',signal.canonical_key)=evidence.source_record_id
+           AND signal.signal_type IN ('event','risk','claim') AND signal.confidence>=0.55
+           AND jsonb_array_length(signal.entities)>0
+           AND EXISTS (SELECT 1 FROM intelligence_signal_evidence transcript WHERE transcript.signal_id=signal.id)
+       ))
+       AND (evidence.domain<>'earth_observation' OR EXISTS (
+         SELECT 1 FROM earth_observation observation
+         WHERE observation.id::text=evidence.source_record_id AND observation.status='available'
+       ))
+     ORDER BY CASE WHEN event.metadata->>'canonical_evidence_key'=concat($1::text,':',$2::text,':',$3::text)
+                   THEN 0 ELSE 1 END,event.last_activity_time DESC LIMIT 1`,
+    [evidenceDomain, evidenceRecordType, evidenceId],
+  );
+  return rows[0]?.event_id ?? null;
 }
 
 export async function consumeDomainEvent(event: DomainEventEnvelope, consumerName = "correlation-v1") {

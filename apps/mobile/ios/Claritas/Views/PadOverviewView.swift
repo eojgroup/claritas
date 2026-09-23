@@ -63,6 +63,8 @@ struct PadOverviewView: View {
                         destination = .briefing
                     }
 
+                    IntelligenceEventPulseView(presentation: .horizontal)
+
                     newsPanel
 
                     ViewThatFits(in: .horizontal) {
@@ -118,7 +120,7 @@ struct PadOverviewView: View {
                     .font(.caption.weight(.semibold))
                     .tracking(1.4)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                Text("Geospatial signal desk")
+                Text("Signal desk")
                     .font(.largeTitle.weight(.semibold))
                 Text("Cross-source relevance, evidence, and operational context in a touch-first review surface.")
                     .font(.subheadline)
@@ -271,7 +273,6 @@ struct PadOverviewView: View {
 
     private var newsPanel: some View {
         VStack(spacing: 12) {
-            NewsHighlightsView(country: selectedNewsCountry, category: model.selectedNewsCategory)
             BrandCard(title: "Latest reporting", icon: "newspaper") {
                 VStack(spacing: 0) {
                     padNewsCategorySelector

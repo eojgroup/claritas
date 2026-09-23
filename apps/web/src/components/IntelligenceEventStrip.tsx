@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowUpRight, Clock3, Link2, MapPin, RadioTower, Satellite } from "lucide-react";
 import { fetchIntelligenceEvents, type IntelligenceEvent } from "../lib/api";
 import { presentEvent } from "./eventPresentation";
+import { eventOrigin, sourceFamilyLabel } from "./eventSourcePresentation";
 
 type Props = {
   country?: string | null;
@@ -61,15 +62,15 @@ export default function IntelligenceEventStrip({ country, onOpen }: Props) {
 
   return (
     <section className="app-card rounded-xl px-4 py-3" aria-label="High-impact intelligence events">
-      <div className="mb-3 flex items-center justify-between gap-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <RadioTower className="h-4 w-4 text-[color:var(--signal-sky)]" />
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
-              Priority events on the map
+              Priority events · all sources
             </div>
             <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-              {loading ? "Linking reporting, location and observation…" : events.length ? `${events.length} current events ranked by attention` : "No material correlated changes"}
+              {loading ? "Loading events across all sources…" : events.length ? `${events.length} current events to investigate` : "No current events in this scope"}
             </div>
           </div>
         </div>
@@ -77,6 +78,7 @@ export default function IntelligenceEventStrip({ country, onOpen }: Props) {
           View all investigations <ArrowUpRight className="h-3.5 w-3.5" />
         </button>
       </div>
+      <p className="mb-4 max-w-4xl text-xs leading-5 text-[color:var(--shell-muted)]">One priority queue for news, earth observation, imagery, transport, podcasts, socials and weather. Priority reflects potential impact and the available connections; it does not mean a claim is confirmed.</p>
       {events.length > 0 && (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {events.map((event) => {
@@ -99,10 +101,12 @@ export default function IntelligenceEventStrip({ country, onOpen }: Props) {
                   </span>
                   <span className="text-[10px] font-medium text-[color:var(--shell-muted)]">{Math.round(event.confidence * 100)}% confidence</span>
                 </div>
-                <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-accent)]">{presentation.typeLabel}</div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] font-semibold text-[color:var(--shell-accent)]">{eventOrigin(event) && <span className="event-origin-chip">Started from {eventOrigin(event)}</span>}<span>{presentation.typeLabel}</span></div>
                 <h3 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-5 text-[color:var(--shell-ink)]">{presentation.headline}</h3>
                 {presentation.focus && <p className="mt-1 line-clamp-1 text-[11px] text-[color:var(--shell-muted)]">Signal focus · {presentation.focus}</p>}
-                <p className="mt-2 line-clamp-1 text-xs leading-5 text-[color:var(--shell-muted)]">{presentation.summary}</p>
+                <p className="mt-2 line-clamp-2 text-xs leading-5 text-[color:var(--shell-muted)]">{presentation.summary}</p>
+                <div className="event-source-chips my-3" aria-label="Connected source types">{(event.signal_domains ?? []).map((domain) => <span key={domain}>{sourceFamilyLabel(domain)}</span>)}</div>
+                {event.priority_reasons?.[0] && <p className="mb-3 text-[11px] leading-4 text-[color:var(--shell-muted)]"><strong>Why it matters:</strong> {event.priority_reasons[0]}</p>}
                 <div className="mt-auto border-t border-[color:var(--shell-border)] pt-3">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-[color:var(--shell-ink)]"><MapPin className="h-3.5 w-3.5 text-[color:var(--shell-accent-2)]" />{locationLabel}</div>
                   <time
@@ -122,9 +126,9 @@ export default function IntelligenceEventStrip({ country, onOpen }: Props) {
                     </time>
                   )}
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[color:var(--shell-muted)]">
-                    <span className="inline-flex items-center gap-1"><Link2 className="h-3 w-3" />{event.evidence_count} evidence</span>
-                    <span>{Math.round(event.relevance_score * 100)}% relevance</span>
-                    {event.earth_observation_available && <span className="inline-flex items-center gap-1 text-[color:var(--signal-emerald)]"><Satellite className="h-3 w-3" />Imagery</span>}
+                    <span className="inline-flex items-center gap-1"><Link2 className="h-3 w-3" />{event.evidence_count} linked records</span>
+                    <span>{event.domain_count} source types</span>
+                    {event.earth_observation_available && <span className="inline-flex items-center gap-1 text-[color:var(--signal-emerald)]"><Satellite className="h-3 w-3" />Imagery available</span>}
                   </div>
                 </div>
               </button>

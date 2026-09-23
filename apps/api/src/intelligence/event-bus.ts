@@ -1,6 +1,7 @@
 import { PubSub, type Message } from "@google-cloud/pubsub";
 import { query, withTransaction, withWorkerLease } from "../db";
 import { consumeDomainEvent } from "./consumer";
+import { enqueueUnifiedSourceReplay } from "./source-replay";
 import type { DomainEventEnvelope } from "./types";
 
 type OutboxRow = {
@@ -20,6 +21,7 @@ const pubsub = eventBusMode === "pubsub" ? new PubSub() : null;
 let publisherTimer: NodeJS.Timeout | null = null;
 let publisherRunning = false;
 let subscriptionStarted = false;
+let unifiedSourcesReplayed = false;
 
 const integerEnv = (name: string, fallback: number, min: number, max: number) => {
   const parsed = Number.parseInt(process.env[name] ?? "", 10);
@@ -98,6 +100,10 @@ async function publishEnvelope(envelope: DomainEventEnvelope) {
 }
 
 async function publisherCycle() {
+  if (!unifiedSourcesReplayed) {
+    await enqueueUnifiedSourceReplay();
+    unifiedSourcesReplayed = true;
+  }
   const batch = await claimOutboxBatch(integerEnv("EVENT_OUTBOX_BATCH_SIZE", 25, 1, 100));
   for (const row of batch) {
     try {

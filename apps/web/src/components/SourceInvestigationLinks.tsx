@@ -1,14 +1,16 @@
 import { ArrowUpRight, GitCompareArrows, MapPin } from "lucide-react";
 import type { SourceInvestigationLink } from "../lib/api";
+import InvestigateSourceButton from "./InvestigateSourceButton";
 
-export default function SourceInvestigationLinks({ links = [], onOpenEvent, onOpenMap }: {
+export default function SourceInvestigationLinks({ links = [], source, onOpenEvent, onOpenMap }: {
   links?: SourceInvestigationLink[];
+  source?: { domain: string; recordType: string; recordId: string };
   onOpenEvent?: (id: string) => void;
   onOpenMap?: () => void;
 }) {
   return <section className="mt-4 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3" aria-label="Investigation connections">
     <div className="flex items-center gap-2 text-xs font-semibold text-[color:var(--shell-ink)]"><GitCompareArrows className="h-4 w-4" />Put this source in context</div>
-    <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">{links.length ? "Open the investigation to compare reporting, observations, and claims before using them in a conclusion." : "No investigation has been matched yet. Explore the map for related evidence; this source alone does not establish an event."}</p>
+    <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">{links.length ? "Open the investigation to compare reporting, observations, and claims before using them in a conclusion." : "No investigation is linked yet. Investigate this source to look for related reporting, signals and regional context."}</p>
     <div className="mt-2 grid gap-2 sm:grid-cols-2">
       {links.slice(0, 4).map((link) => <button key={link.id} title={link.rationale} type="button" onClick={() => onOpenEvent?.(link.id)} className="flex min-h-12 items-center gap-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-left hover:border-[color:var(--shell-accent)]">
         <MapPin className="h-4 w-4 shrink-0 text-[color:var(--shell-accent)]" />
@@ -16,6 +18,7 @@ export default function SourceInvestigationLinks({ links = [], onOpenEvent, onOp
         <ArrowUpRight className="h-4 w-4 shrink-0" />
       </button>)}
     </div>
+    {!links.length && source && onOpenEvent && <InvestigateSourceButton domain={source.domain} sourceRecordType={source.recordType} sourceRecordId={source.recordId} onOpen={onOpenEvent} />}
     {!links.length && onOpenMap && <button type="button" onClick={onOpenMap} className="mt-2 inline-flex min-h-10 items-center gap-2 text-xs font-semibold text-[color:var(--shell-ink)]">Explore the signal map <ArrowUpRight className="h-4 w-4" /></button>}
   </section>;
 }

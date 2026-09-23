@@ -26,6 +26,8 @@ struct DashboardView: View {
                         openCompactDestination("briefing")
                     }
 
+                    IntelligenceEventPulseView(presentation: .horizontal)
+
                     mobileNewsPulse
 
                     SignalMapPanel(
@@ -34,8 +36,6 @@ struct DashboardView: View {
                         showsCountryProfile: false,
                         onExpand: { showsExpandedMap = true }
                     )
-
-                    IntelligenceEventPulseView(presentation: .horizontal)
 
                     mobileQuickActions
 
@@ -93,8 +93,6 @@ struct DashboardView: View {
         let ranked = mobileNewsScopeMatchesSelection ? model.rankedNews : []
 
         return VStack(alignment: .leading, spacing: 0) {
-            NewsHighlightsView(country: mobileNewsCountry, category: model.selectedNewsCategory)
-                .padding(.bottom, 16)
             HStack {
                 Label("LATEST REPORTING", systemImage: "newspaper")
                     .font(.caption2.weight(.bold))
@@ -1324,6 +1322,7 @@ struct NewsWorkspaceView: View {
         case oldest
         case source
 
+        static var allCases: [Sort] { [.newest, .oldest, .source] }
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -1611,7 +1610,7 @@ struct NewsWorkspaceView: View {
             topicOverview
 
             if loadMode == .recent && !hasLocalFilters && searchQuery.isEmpty {
-                NewsHighlightsView(country: selectedNewsCountry, category: model.selectedNewsCategory)
+                IntelligenceEventPulseView(country: selectedNewsCountry)
             }
 
             selectedRankedStoryPanel(compact: true)
@@ -1641,7 +1640,7 @@ struct NewsWorkspaceView: View {
     private var regularNewsContent: some View {
         VStack(spacing: 16) {
             if loadMode == .recent && !hasLocalFilters && searchQuery.isEmpty {
-                NewsHighlightsView(country: selectedNewsCountry, category: model.selectedNewsCategory)
+                IntelligenceEventPulseView(country: selectedNewsCountry)
             }
             BrandCard {
                 VStack(alignment: .leading, spacing: 14) {

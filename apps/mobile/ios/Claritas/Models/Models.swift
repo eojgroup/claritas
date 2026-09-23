@@ -2744,6 +2744,57 @@ struct IntelligenceEvent: Codable, Identifiable, Hashable {
     let monitoring_tier: Int?
     let evidence_count: Int
     let earth_observation_available: Bool
+    var origin_domain: String? = nil
+    var signal_domains: [String]? = nil
+    var priority_score: Double? = nil
+    var priority_reasons: [String]? = nil
+
+    var originLabel: String { SignalDomainPresentation.label(origin_domain ?? "signal") }
+    var originIcon: String { SignalDomainPresentation.icon(origin_domain ?? "signal") }
+    var signalTypesLabel: String {
+        let domains = signal_domains ?? []
+        return domains.isEmpty ? "\(domain_count) signal types" : domains.map(SignalDomainPresentation.label).joined(separator: " · ")
+    }
+}
+
+enum SignalDomainPresentation {
+    static func group(domain: String, recordType: String, relationship: String) -> String {
+        if domain == "podcast" { return "podcast" }
+        if relationship == "model_interpretation" { return "model_interpretation" }
+        if domain == "disaster" { return "earth_observation" }
+        if domain == "earth_observation" && ["earth_observation", "earth_scene"].contains(recordType) { return "imagery" }
+        return domain
+    }
+
+    static func label(_ domain: String) -> String {
+        switch domain {
+        case "news": return "News"
+        case "earth_observation", "disaster": return "Earth observation"
+        case "imagery": return "Imagery"
+        case "transport": return "Transport"
+        case "podcast": return "Podcast"
+        case "social", "socials": return "Socials"
+        case "weather": return "Weather"
+        case "market": return "Markets"
+        case "model_interpretation": return "Model interpretation"
+        default: return domain.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    static func icon(_ domain: String) -> String {
+        switch domain {
+        case "news": return "newspaper"
+        case "earth_observation", "disaster": return "sensor.tag.radiowaves.forward"
+        case "imagery": return "photo.on.rectangle"
+        case "transport": return "airplane"
+        case "podcast": return "mic"
+        case "social", "socials": return "bubble.left.and.bubble.right"
+        case "weather": return "cloud.sun"
+        case "market": return "chart.line.uptrend.xyaxis"
+        case "model_interpretation": return "sparkles"
+        default: return "dot.radiowaves.left.and.right"
+        }
+    }
 }
 
 struct IntelligenceEvidence: Codable, Identifiable {
@@ -3076,7 +3127,41 @@ struct RegionalReporting: Codable {
     let items: [Item]
 }
 
+struct IntelligenceSourceResolution: Codable {
+    let event_id: String?
+    let status: String
+    let reason: String?
+}
+
+struct IntelligenceSignalCoverage: Codable, Identifiable {
+    var id: String { domain }
+    let domain: String
+    let label: String
+    let count: Int
+    let state: String
+}
+
+struct IntelligenceContextSignal: Codable, Identifiable {
+    struct Metric: Codable {
+        let label: String
+        let value: Double
+        let unit: String
+    }
+    let id: String
+    let domain: String
+    let title: String
+    let summary: String
+    let scope_label: String
+    let relationship: String
+    let observed_at: Date?
+    let metrics: [Metric]
+    let coverage_notice: String
+    let native_route: String?
+}
+
 struct IntelligenceEventDetail: Codable {
+    let signal_coverage: [IntelligenceSignalCoverage]
+    let context_signals: [IntelligenceContextSignal]
     let social_context: [SocialEventContext]
     let regional_reporting: RegionalReporting?
     let event: IntelligenceEvent
@@ -3088,12 +3173,19 @@ struct IntelligenceEventDetail: Codable {
     let related_events: [IntelligenceRelatedEvent]
     let epistemic_notice: String
 
+    var unattachedSocialContext: [SocialEventContext] {
+        let attachedIDs = Set(evidence.filter { $0.source_record_type == "social_signal" }.map(\.source_record_id))
+        return social_context.filter { !attachedIDs.contains(String($0.signal_id)) }
+    }
+
     enum CodingKeys: String, CodingKey {
-        case event, understanding, evidence, linked_news, locations, earth_observations, related_events, epistemic_notice, social_context, regional_reporting
+        case event, understanding, evidence, linked_news, locations, earth_observations, related_events, epistemic_notice, social_context, regional_reporting, signal_coverage, context_signals
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        signal_coverage = try container.decodeIfPresent([IntelligenceSignalCoverage].self, forKey: .signal_coverage) ?? []
+        context_signals = try container.decodeIfPresent([IntelligenceContextSignal].self, forKey: .context_signals) ?? []
         social_context = try container.decodeIfPresent([SocialEventContext].self, forKey: .social_context) ?? []
         regional_reporting = try container.decodeIfPresent(RegionalReporting.self, forKey: .regional_reporting)
         event = try container.decode(IntelligenceEvent.self, forKey: .event)

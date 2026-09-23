@@ -11,6 +11,15 @@ import {
 
 const NOW = new Date("2026-08-21T12:00:00Z");
 
+test("transport topic tags distinguish a business development from disruption", () => {
+  const acquisition = newsStructuredTopicMateriality({ gkg: { themes: ["SUPPLY_CHAIN", "SHIPPING_DISRUPTION"] } },
+    "DHL Supply Chain anuncia la adquisición estratégica de Open Market en Colombia");
+  assert.ok(!acquisition.codes.includes("transport_supply_disruption"));
+  assert.ok(acquisition.codes.includes("transport_supply_development"));
+  const closure = newsStructuredTopicMateriality({}, "Port closure delays freight across the region");
+  assert.ok(closure.codes.includes("transport_supply_disruption"));
+});
+
 test("news query metadata toggles keep PostgreSQL parameter indexes contiguous", () => {
   const withMetadata = createNewsQueryParameterPlan("en", true);
   assert.deepEqual(withMetadata.params, ["en", [

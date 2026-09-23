@@ -9,6 +9,7 @@ import {
 } from "../lib/api";
 import { presentEventLinkage } from "./eventLinkagePresentation";
 import { newsChronology } from "./newsWorkspacePresentation";
+import InvestigateSourceButton from "./InvestigateSourceButton";
 
 const LEADERSHIP_ROLE_PATTERN =
   "(?:president|prime minister|premier|chancellor|monarch|king|queen|head of state|head of government)";
@@ -126,7 +127,7 @@ export default function PriorityNewsList({
     <div className="priority-news-list">
       {items.length > 0 && (
         <div className="dashboard-news-columns" aria-hidden="true">
-          <span>Importance</span>
+          <span>Event</span>
           <span>Time</span>
           <span>Place</span>
           <span>Headline</span>
@@ -158,17 +159,6 @@ export default function PriorityNewsList({
         const selectedStory = selectedId === item.id;
         const isPrimary = Boolean(primaryIso && countries.includes(primaryIso));
         const isSecondary = Boolean(secondaryIso && countries.includes(secondaryIso));
-        const rankingPending = !item.importance || item.importance.is_fallback === true;
-        const importanceTier = rankingPending ? null : item.importance?.tier ?? null;
-        const importanceTierLabel = importanceTier
-          ? `${importanceTier[0].toUpperCase()}${importanceTier.slice(1)}`
-          : "Unranked";
-        const firstImportanceReason = item.importance?.reasons.find((reason) => reason.label.trim())?.label.trim() ?? null;
-        const importanceReason = rankingPending
-          ? firstImportanceReason && !/assessment pending/i.test(firstImportanceReason)
-            ? `Assessment pending · ${firstImportanceReason}`
-            : "Assessment pending"
-          : firstImportanceReason;
         const evidenceTags = presentationTags(item.tags);
         const isLeadershipChange = isLeadershipChangeStory(item);
         const translationRequired = isNewsTranslationRequired(item);
@@ -181,8 +171,7 @@ export default function PriorityNewsList({
           item.translation?.summary_status !== "generated" &&
           item.translation?.summary_status !== "insufficient",
         );
-        const linkedEvents = (item.linked_events ?? []).filter((event) =>
-          (event.additional_evidence_count ?? 0) > 0 || event.earth_observation_state === "imagery_available");
+        const linkedEvents = item.linked_events ?? [];
         const chronology = newsChronology(item);
         const timestamp = newsTimestampParts(chronology.timestamp);
         const satelliteState = linkedEvents.find((event) => (
@@ -215,14 +204,9 @@ export default function PriorityNewsList({
               className="dashboard-news-summary"
               aria-expanded={selectedStory}
             >
-              <span
-                className={`news-priority-marker ${importanceTier ? `is-${importanceTier}` : "is-unranked"}`}
-                aria-label={rankingPending
-                  ? "Unranked: assessment pending"
-                  : `Importance ${importanceTierLabel}${importanceReason ? `: ${importanceReason}` : ""}`}
-              >
-                <small>{rankingPending ? "Assessment" : "Importance"}</small>
-                <span>{importanceTierLabel}</span>
+              <span className="news-priority-marker is-event" aria-label={linkedEvents.length ? `${linkedEvents.length} linked investigations` : "Open to investigate this source"}>
+                <RadioTower size={14} aria-hidden="true" />
+                <span>{linkedEvents.length ? "Linked" : "Explore"}</span>
               </span>
               <time
                 className="dashboard-news-time"
@@ -248,11 +232,6 @@ export default function PriorityNewsList({
               </span>
               <span className="dashboard-news-headline">
                 <strong>{displayTitle}</strong>
-                {importanceReason && (
-                  <span className="news-importance-reason">
-                    {rankingPending ? "Ranking status" : "Why it ranks"}: {importanceReason}
-                  </span>
-                )}
                 {evidenceTags.length > 0 && (
                   <span className="news-evidence-tags" aria-label="Story tags">
                     {evidenceTags.map((tag) => (
@@ -334,7 +313,7 @@ export default function PriorityNewsList({
             </button>
 
             {selectedStory && (
-              <div className="dashboard-news-detail">
+              <div className={`dashboard-news-detail ${img ? "has-image" : ""}`}>
                 {img && (
                   <figure className="dashboard-news-image">
                     <img
@@ -365,13 +344,6 @@ export default function PriorityNewsList({
                       <span>Geography inferred from publisher country · low confidence</span>
                     )}
                     {typeof item.tone === "number" && <span>Tone {item.tone.toFixed(1)}</span>}
-                    <span>
-                      {rankingPending
-                        ? "Unranked · assessment pending"
-                        : item.importance
-                          ? `${importanceTierLabel} importance · ${Math.round(Math.max(0, Math.min(1, item.importance.confidence)) * 100)}% confidence`
-                          : "Unranked · assessment pending"}
-                    </span>
                     <span>
                       {countries.length > 0
                         ? countries.map((country) => `${getCountryName(country)} · ${country}`).join(" / ")
@@ -433,9 +405,9 @@ export default function PriorityNewsList({
                     <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--signal-sky-soft)] p-3">
                       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">
                         <RadioTower className="h-3.5 w-3.5" />
-                        Additional context
+                        Event connections
                       </div>
-                      <p className="event-link-panel-intro">Explore other sources and observations linked to this story. Satellite imagery provides visual context, not confirmation.</p>
+                      <p className="event-link-panel-intro">Follow this report into an event to compare related news, observations, transport and other sources. Every connection includes its reason.</p>
                       <div className="mt-2 space-y-2">
                         {linkedEvents.slice(0, 3).map((linkedEvent) => {
                           const linkage = presentEventLinkage(
@@ -481,6 +453,7 @@ export default function PriorityNewsList({
                       </div>
                     </div>
                   )}
+                  {!linkedEvents.length && onOpenEvent && <div className="news-start-investigation"><strong>What else is connected?</strong><p>Open an event investigation to find related signals, reporting and regional data.</p><InvestigateSourceButton domain="news" sourceRecordType="item" sourceRecordId={String(item.id)} onOpen={onOpenEvent} /></div>}
                   <div className="dashboard-news-actions">
                     {item.url && (
                       <a

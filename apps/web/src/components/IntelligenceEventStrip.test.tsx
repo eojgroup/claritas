@@ -37,7 +37,7 @@ describe("IntelligenceEventStrip", () => {
   it("renders an accessible empty state without fabricating a signal", async () => {
     vi.mocked(fetchIntelligenceEvents).mockResolvedValue([]);
     render(<IntelligenceEventStrip onOpen={() => undefined} />);
-    expect(await screen.findByText("No material correlated changes")).toBeTruthy();
+    expect(await screen.findByText("No current events in this scope")).toBeTruthy();
     expect(screen.getByRole("region", { name: "High-impact intelligence events" })).toBeTruthy();
   });
 
@@ -47,10 +47,10 @@ describe("IntelligenceEventStrip", () => {
       resolveRequest = resolve;
     }));
     render(<IntelligenceEventStrip onOpen={() => undefined} />);
-    expect(screen.getByText("Linking reporting, location and observation…")).toBeTruthy();
-    expect(screen.queryByText("No material correlated changes")).toBeNull();
+    expect(screen.getByText("Loading events across all sources…")).toBeTruthy();
+    expect(screen.queryByText("No current events in this scope")).toBeNull();
     await act(async () => resolveRequest([]));
-    expect(await screen.findByText("No material correlated changes")).toBeTruthy();
+    expect(await screen.findByText("No current events in this scope")).toBeTruthy();
   });
 
   it("renders priority, exact freshness, provenance counts, and opens the investigation", async () => {
@@ -59,8 +59,8 @@ describe("IntelligenceEventStrip", () => {
     render(<IntelligenceEventStrip country="SG" onOpen={onOpen} />);
     expect(await screen.findByText(event.title)).toBeTruthy();
     expect(screen.getByText("96% confidence")).toBeTruthy();
-    expect(screen.getByText("4 evidence")).toBeTruthy();
-    expect(screen.getByText("94% relevance")).toBeTruthy();
+    expect(screen.getByText("4 linked records")).toBeTruthy();
+    expect(screen.getByText("3 source types")).toBeTruthy();
     expect(screen.getByText(/^Updated /i).closest("time")?.getAttribute("datetime"))
       .toBe(event.last_activity_time);
     fireEvent.click(screen.getByRole("button", { name: /View all investigations/i }));

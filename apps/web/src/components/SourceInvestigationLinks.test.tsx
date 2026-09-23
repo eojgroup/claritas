@@ -13,7 +13,7 @@ it("opens the exact matched investigation rather than a broad country view", () 
 it("labels unmatched sources and offers map exploration without inventing a link", () => {
   const onOpenMap = vi.fn();
   render(<SourceInvestigationLinks links={[]} onOpenMap={onOpenMap} />);
-  expect(screen.getByText(/No investigation has been matched yet/)).toBeTruthy();
+  expect(screen.getByText(/No investigation is linked yet/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Explore the signal map/ }));
   expect(onOpenMap).toHaveBeenCalledOnce();
 });

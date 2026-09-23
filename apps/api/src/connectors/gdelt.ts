@@ -3634,7 +3634,8 @@ async function ingestDocArticles(
          payload, dedupe_hash, language_code, source_country_iso2, tone
        ) VALUES ($1,$2,'news_article',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        ON CONFLICT (source_id, external_id) DO UPDATE SET
-         title = COALESCE(EXCLUDED.title, item.title), summary = COALESCE(EXCLUDED.summary, item.summary),
+         title = COALESCE(EXCLUDED.title, item.title),
+         summary = CASE WHEN item.summary ILIKE 'GDELT themes:%' THEN NULL ELSE item.summary END,
          url = EXCLUDED.url,
          country_iso2 = ${MERGED_GDELT_COUNTRY_SQL},
          -- Preserve the earliest effective publisher/discovery date. A
@@ -3646,7 +3647,7 @@ async function ingestDocArticles(
          source_country_iso2 = COALESCE(EXCLUDED.source_country_iso2, item.source_country_iso2),
          tone = COALESCE(EXCLUDED.tone, item.tone), updated_at = now()
        WHERE item.title IS DISTINCT FROM COALESCE(EXCLUDED.title, item.title)
-          OR item.summary IS DISTINCT FROM COALESCE(EXCLUDED.summary, item.summary)
+          OR item.summary ILIKE 'GDELT themes:%'
           OR item.url IS DISTINCT FROM EXCLUDED.url
           OR item.country_iso2 IS DISTINCT FROM ${MERGED_GDELT_COUNTRY_SQL}
           OR item.event_time IS DISTINCT FROM ${MERGED_GDELT_EVENT_TIME_SQL}
@@ -3657,7 +3658,7 @@ async function ingestDocArticles(
           OR item.tone IS DISTINCT FROM COALESCE(EXCLUDED.tone, item.tone)
        RETURNING id::text,(xmax = 0) AS inserted,event_time::text`,
       [sourceId, externalId, article.title || null,
-       signal ? `GDELT themes: ${(signal.themes as string[]).slice(0, 4).join(", ")}` : null,
+       null,
        url, countryIso2, eventTime, JSON.stringify(payload), dedupeHash,
        languageCode, sourceCountry, signal?.tone ?? null]
     );

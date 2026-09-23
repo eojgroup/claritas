@@ -56,7 +56,7 @@ test("cross-domain signals at one specific location converge within an event fam
     longitude: 103.85,
     sourceReliability: 0.9,
   }], { threshold: 0.58, maxHours: 96, maxDistanceKm: 100 });
-  assert.deepEqual(eventFamilyTypes("aviation_disruption"), ["transport_disruption", "aviation_disruption"]);
+  assert.deepEqual(eventFamilyTypes("aviation_disruption"), ["transport_disruption", "aviation_disruption", "transport_activity_change"]);
   assert.equal(ranked[0].correlation.accepted, true);
   assert.equal(ranked[0].correlation.components.event_type, 1);
   assert.equal(ranked[0].correlation.components.location, 1);

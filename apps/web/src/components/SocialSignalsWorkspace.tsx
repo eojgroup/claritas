@@ -249,7 +249,7 @@ export default function SocialSignalsWorkspace({ initialCountry, eventId, onOpen
                 </a>
               </div>
             </div>
-            <SourceInvestigationLinks links={signal.linked_events} onOpenEvent={onOpenEvent} onOpenMap={onOpenMap} />
+            <SourceInvestigationLinks source={{ domain: "social", recordType: "social_signal", recordId: String(signal.id) }} links={signal.linked_events} onOpenEvent={onOpenEvent} onOpenMap={onOpenMap} />
           </article>
         ))}
       </section>

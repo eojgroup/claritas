@@ -31,7 +31,7 @@ struct IntelligenceWorkspaceView: View {
                 compactWorkspace
             }
         }
-        .task(id: includeExpired) { await load() }
+        .task(id: "\(includeExpired)|\(model.selectedCountry ?? "global")") { await load() }
         .task(id: selectedID) { await loadDetail() }
         .task(id: selectedID) { await loadGibsContext() }
         .navigationDestination(isPresented: $showsCompactDetail) {
@@ -65,6 +65,9 @@ struct IntelligenceWorkspaceView: View {
             }
             .onChange(of: evidenceNavigationID) { _ in
                 withAnimation { proxy.scrollTo(detailScrollTarget, anchor: .top) }
+            }
+            .onChange(of: detail?.event.id) { _ in
+                proxy.scrollTo("investigation-overview", anchor: .top)
             }
         }
     }
@@ -110,11 +113,11 @@ struct IntelligenceWorkspaceView: View {
     private var workspaceHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
             BrandSectionHeader(
-                kicker: "One event · every evidence lens",
+                kicker: "Every source · one event stream",
                 title: "Signal desk",
                 detail: horizontalSizeClass == .compact
-                    ? "Choose an investigation to open its assessment, imagery, and linked evidence immediately."
-                    : "Choose an investigation on the left; its complete evidence thread stays visible on the right."
+                    ? "Open an event, choose a signal type, then inspect the source and its connection."
+                    : "Open an event, choose a signal type, then inspect the source and its connection."
             )
 
             Picker("Event visibility", selection: $includeExpired) {
@@ -171,7 +174,7 @@ struct IntelligenceWorkspaceView: View {
     @ViewBuilder
     private var eventCollection: some View {
         if isLoading && events.isEmpty {
-            ProgressView("Loading correlated events")
+            ProgressView("Loading priority events")
                 .frame(maxWidth: .infinity, minHeight: 160)
         } else if events.isEmpty {
             emptyState
@@ -181,11 +184,9 @@ struct IntelligenceWorkspaceView: View {
     }
 
     private var eventList: some View {
-        BrandCard(title: "Investigations", icon: "dot.radiowaves.left.and.right") {
+        BrandCard(title: "Priority events", icon: "dot.radiowaves.left.and.right") {
             VStack(alignment: .leading, spacing: 10) {
-                Text(horizontalSizeClass == .compact
-                    ? "Tap an investigation to open its detail now. Back returns to this list without losing the active selection."
-                    : "Select an investigation to keep its assessment, imagery, and linked evidence open in the detail pane.")
+                Text("News, earth observation, imagery, transport, podcasts, socials and weather, ranked together.")
                     .font(.caption)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
 
@@ -203,7 +204,7 @@ struct IntelligenceWorkspaceView: View {
 
                                 VStack(alignment: .leading, spacing: 7) {
                                     HStack {
-                                        Text(isSelected ? "ACTIVE INVESTIGATION" : event.event_type.replacingOccurrences(of: "_", with: " ").uppercased())
+                                        Label(event.originLabel.uppercased(), systemImage: event.originIcon)
                                             .font(.caption2.weight(.bold))
                                             .tracking(isSelected ? 0.7 : 0)
                                             .foregroundStyle(isSelected ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
@@ -214,9 +215,9 @@ struct IntelligenceWorkspaceView: View {
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                         .multilineTextAlignment(.leading)
-                                    HStack(spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 4) {
                                         Label(event.location_name ?? event.primary_country_iso2 ?? "Global", systemImage: "mappin")
-                                        Text("\(event.domain_count) signal types · \(event.evidence_count) evidence")
+                                        Text("\(event.evidence_count) sources · \(event.signalTypesLabel)")
                                     }
                                     .font(.caption2)
                                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -273,8 +274,9 @@ struct IntelligenceWorkspaceView: View {
             }
         } else if let detail, detail.event.id == selectedID {
             VStack(alignment: .leading, spacing: 14) {
-                BrandCard(title: "Assessment", icon: "scope") {
-                    Label("ACTIVE INVESTIGATION", systemImage: "scope")
+                Color.clear.frame(height: 0).id("investigation-overview")
+                BrandCard(title: "Event overview", icon: "scope") {
+                    Label("STARTED FROM \(detail.event.originLabel.uppercased())", systemImage: detail.event.originIcon)
                         .font(.caption2.weight(.bold))
                         .tracking(0.9)
                         .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
@@ -316,7 +318,8 @@ struct IntelligenceWorkspaceView: View {
                         eventUnderstandingRow(
                             label: "Why it matters",
                             icon: "sparkles",
-                            text: detail.understanding?.why_interesting
+                            text: (detail.event.priority_reasons?.isEmpty == false ? detail.event.priority_reasons?.joined(separator: " · ") : nil)
+                                ?? detail.understanding?.why_interesting
                                 ?? "Claritas prioritised this event from its severity, relevance, recency, and linked evidence. Correlation does not establish causation."
                         )
                     }
@@ -353,259 +356,92 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
-                let linkedSignalEvidence = detail.evidence.filter { !isContextAssessment($0) }
-                if !linkedSignalEvidence.isEmpty {
-                    let evidenceByDomain = Dictionary(grouping: linkedSignalEvidence, by: signalGroup)
-                    BrandCard(title: "Signal connections", icon: "link") {
-                        Text("Every source below is attached to the active investigation. “Likely linked” means the recorded linkage passed a governed threshold; it does not mean one signal caused another.")
-                            .font(.caption)
-                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                        VStack(spacing: 4) {
-                            Text("This investigation").font(.caption2).foregroundStyle(.secondary)
-                            Text(detail.event.title).font(.caption.weight(.semibold))
-                            Text("↓ Connected evidence · choose a type to inspect").font(.caption2).foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .multilineTextAlignment(.center)
-                        .padding(10)
-                        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
-                            ForEach(sortedSignalDomains(evidenceByDomain), id: \.self) { domain in
-                                let records = evidenceByDomain[domain] ?? []
-                                let hasLikelyLink = records.contains {
-                                    IntelligenceLinkagePresentation.decision(in: $0.correlation_factors) == "attached"
-                                }
-                                Button {
-                                    evidenceFilter = domain
-                                    evidenceFilterEventID = detail.event.id
-                                    detailScrollTarget = "investigation-evidence"
-                                    evidenceNavigationID = UUID()
-                                } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 7) {
-                                        Image(systemName: signalDomainIcon(domain))
-                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                        Text("\(signalDomainLabel(domain)) · \(records.count)")
-                                            .font(.caption.weight(.bold))
-                                        Spacer(minLength: 0)
-                                    }
-                                    Text(hasLikelyLink ? "LIKELY LINKED SIGNALS" : "EVENT EVIDENCE")
-                                        .font(.caption2.weight(.bold))
-                                        .foregroundStyle(hasLikelyLink ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
-                                    Text("Example: \(signalLinkExplanation(records))")
-                                        .lineLimit(2)
-                                        .font(.caption2)
-                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                    if !records.isEmpty {
-                                        Text(Set(records.flatMap { IntelligenceLinkagePresentation.dimensions(for: $0.correlation_factors) }).sorted().joined(separator: " + "))
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                    }
-                                    ProgressView(value: Double(records.count), total: Double(evidenceByDomain.values.map(\.count).max() ?? 1))
-                                        .tint(ClaritasPalette.shellAccent(for: colorScheme))
-                                        .accessibilityLabel("\(records.count) sources")
-                                    Text("Review \(records.count) sources →")
-                                        .font(.caption2.weight(.semibold))
-                                }
-                                .frame(maxWidth: .infinity, alignment: .topLeading)
-                                .padding(10)
-                                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 11))
-                                .overlay(RoundedRectangle(cornerRadius: 11).stroke(
-                                    evidenceFilterEventID == detail.event.id && evidenceFilter == domain
-                                        ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellBorder(for: colorScheme)
-                                ))
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityAddTraits(evidenceFilterEventID == detail.event.id && evidenceFilter == domain ? .isSelected : [])
-                            }
-                        }
-                        if !detail.social_context.isEmpty {
-                            Button {
-                                detailScrollTarget = "investigation-socials"
-                                evidenceNavigationID = UUID()
-                            } label: {
-                                Label("Socials · \(detail.social_context.count) unverified claims →", systemImage: "bubble.left.and.bubble.right")
-                                    .font(.caption)
-                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        Text("Importance reflects source diversity, signal types, physical observations and anchored related events. Model interpretations and unverified social claims do not count as independent corroboration.")
-                            .font(.caption2)
-                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    }
-                }
+                signalExplorer(detail)
+                signalReader(detail)
 
-                if let regional = detail.regional_reporting {
-                    BrandCard(title: "Nearby reporting", icon: "map") {
-                        Text("Explore the area · place + time only").font(.caption.weight(.semibold))
-                        Text(regional.notice).font(.caption2).foregroundStyle(.secondary)
-                        Text("\(regional.window_start.formatted(date: .abbreviated, time: .shortened)) – \(regional.window_end.formatted(date: .abbreviated, time: .shortened)) · publication or discovery time")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        ForEach(regional.items) { item in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("\(item.scope_label) · context only").font(.caption2.weight(.semibold))
-                                if let url = URL(string: item.url) {
-                                    Link(destination: url) {
-                                        Text(item.title).font(.subheadline.weight(.semibold))
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                Text("\(item.publisher) · Source timeline \(item.observed_at.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 6)
-                        }
-                        if regional.items.isEmpty {
-                            Text("No additional reporting in this place and time window.").font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if !detail.social_context.isEmpty {
-                    Color.clear.frame(height: 0).id("investigation-socials")
-                    BrandCard(title: "Social context", icon: "bubble.left.and.bubble.right") {
-                        Text("Attributed claims for this investigation. Compare them with the evidence below before drawing a conclusion.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        ForEach(detail.social_context) { post in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("\(post.author) · \(post.platform) · Unverified claim")
-                                    .font(.caption.weight(.semibold))
-                                Text(post.text).font(.subheadline)
-                                Text(post.posted_at.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                                if let url = URL(string: post.url) {
-                                    Link("View attributed post", destination: url).font(.caption)
-                                }
-                            }
-                            .padding(.vertical, 6)
-                        }
-                    }
-                }
-
-                BrandCard(title: "Event imagery", icon: "sensor.tag.radiowaves.forward") {
-                    Text("Visual context for the active investigation: \(detail.event.title)")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-                    Text("Images stay with the selected event so their location and evidence status remain clear. They provide context, not automatic proof of a report or its cause.")
-                        .font(.caption)
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-
-                    if let observation = detail.earth_observations.sortedForDisplay.first(where: { $0.preferredDisplayAsset != nil }) {
-                        VStack(alignment: .leading, spacing: 9) {
-                            EventImageryHero(observation: observation)
-                            Label("EVENT-SPECIFIC OBSERVATION", systemImage: "checkmark.seal")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
-                            Text("Linked to this investigation and its mapped area · \(observation.displayProductName) captured \(observation.capture_start.formatted(date: .abbreviated, time: .shortened)).")
-                                .font(.caption)
-                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                            if let interpretation = observation.model_interpretation?.summary, !interpretation.isEmpty {
-                                Text(interpretation)
-                                    .font(.caption2)
-                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                    .lineLimit(3)
-                            }
-                        }
-
-                        let additionalObservations = Array(detail.earth_observations.sortedForDisplay
-                            .filter { $0.preferredDisplayAsset != nil }
-                            .dropFirst()
-                            .prefix(4))
-                        if !additionalObservations.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("MORE OBSERVATIONS FOR THIS EVENT")
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(alignment: .top, spacing: 10) {
-                                        ForEach(additionalObservations) { observation in
-                                            EarthObservationTile(observation: observation)
-                                                .frame(width: 250)
-                                        }
-                                    }
-                                    .padding(.vertical, 1)
-                                }
-                            }
-                        }
-                    } else if let layer = gibsTrueColorLayer {
-                        VStack(alignment: .leading, spacing: 9) {
-                            EventImageryHero(browseLayer: layer, unavailableLabel: "NASA context preview unavailable")
-                            HStack {
-                                Text("REGIONAL BROWSE CONTEXT · NOT PROOF")
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                Spacer()
-                                Text(layer.date)
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                            }
-                            Text("\(layer.title) is associated with this event’s mapped area, but it is not event-specific observation evidence.")
-                                .font(.caption)
-                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                            Text(gibsContext?.notice ?? "NASA GIBS browse imagery provides context and is not proof of physical change or causation.")
-                                .font(.caption2)
-                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                            if let sourceURL = URL(string: layer.provenance.source_url) {
-                                Link("NASA GIBS provenance", destination: sourceURL)
-                                    .font(.caption2.weight(.semibold))
-                            }
-                            Text(layer.provenance.attribution)
-                                .font(.caption2)
-                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                        }
-                        .padding(10)
-                        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 14))
-                    } else {
-                        Label("No defensible event-specific observation is available yet", systemImage: "photo.badge.exclamationmark")
-                            .font(.subheadline.weight(.semibold))
-                        Text("The evidence thread remains usable without imagery. Claritas never substitutes a scene from an unrelated event or location.")
-                            .font(.caption)
-                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    }
-                }
-
-                let linkedReporting = detail.linked_news.filter {
-                    $0.relationship.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "assessment"
-                }
-                BrandCard(title: "Linked reporting", icon: "newspaper") {
-                    if linkedReporting.isEmpty {
-                        Label("No linked reporting yet", systemImage: "newspaper.fill")
+                if !detail.earth_observations.isEmpty || gibsTrueColorLayer != nil {
+                    BrandCard(title: "Event imagery", icon: "sensor.tag.radiowaves.forward") {
+                        Text("Visual context for the active investigation: \(detail.event.title)")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-                        Text("No news record is explicitly linked to this event yet. Sensor and official evidence below remain available, but Claritas does not imply a reporting connection.")
+                        Text("Images stay with the selected event so their location and evidence status remain clear. They provide context, not automatic proof of a report or its cause.")
                             .font(.caption)
                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    } else {
-                        ForEach(linkedReporting) { report in
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack(alignment: .firstTextBaseline) {
-                                    Text(report.publisher ?? "Publisher record")
+
+                        if let observation = detail.earth_observations.sortedForDisplay.first(where: { $0.preferredDisplayAsset != nil }) {
+                            VStack(alignment: .leading, spacing: 9) {
+                                EventImageryHero(observation: observation)
+                                Label("EVENT-SPECIFIC OBSERVATION", systemImage: "checkmark.seal")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
+                                Text("Linked to this investigation and its mapped area · \(observation.displayProductName) captured \(observation.capture_start.formatted(date: .abbreviated, time: .shortened)).")
+                                    .font(.caption)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                if let interpretation = observation.model_interpretation?.summary, !interpretation.isEmpty {
+                                    Text(interpretation)
+                                        .font(.caption2)
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                        .lineLimit(3)
+                                }
+                            }
+
+                            let additionalObservations = Array(detail.earth_observations.sortedForDisplay
+                                .filter { $0.preferredDisplayAsset != nil }
+                                .dropFirst()
+                                .prefix(4))
+                            if !additionalObservations.isEmpty {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("MORE OBSERVATIONS FOR THIS EVENT")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    ScrollView(.horizontal, showsIndicators: false) {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            ForEach(additionalObservations) { observation in
+                                                EarthObservationTile(observation: observation, showsInvestigationLink: false)
+                                                    .frame(width: 250)
+                                            }
+                                        }
+                                        .padding(.vertical, 1)
+                                    }
+                                }
+                            }
+                        } else if let layer = gibsTrueColorLayer {
+                            VStack(alignment: .leading, spacing: 9) {
+                                EventImageryHero(browseLayer: layer, unavailableLabel: "NASA context preview unavailable")
+                                HStack {
+                                    Text("REGIONAL BROWSE CONTEXT · NOT PROOF")
                                         .font(.caption2.weight(.bold))
                                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                     Spacer()
-                                    Text(report.observed_at.formatted(date: .abbreviated, time: .shortened))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
+                                    Text(layer.date)
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 }
-                                Text(report.title ?? report.evidence_type.replacingOccurrences(of: "_", with: " ").capitalized)
-                                    .font(.subheadline.weight(.semibold))
-                                if let summary = report.summary, !summary.isEmpty {
-                                    Text(summary)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(4)
+                                Text("\(layer.title) is associated with this event’s mapped area, but it is not event-specific observation evidence.")
+                                    .font(.caption)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                Text(gibsContext?.notice ?? "NASA GIBS browse imagery provides context and is not proof of physical change or causation.")
+                                    .font(.caption2)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                if let sourceURL = URL(string: layer.provenance.source_url) {
+                                    Link("NASA GIBS provenance", destination: sourceURL)
+                                        .font(.caption2.weight(.semibold))
                                 }
-                                if let source = report.url, let url = URL(string: source) {
-                                    Link("Open publisher source", destination: url)
-                                        .font(.caption.weight(.semibold))
-                                }
+                                Text(layer.provenance.attribution)
+                                    .font(.caption2)
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                             }
-                            .padding(.vertical, 6)
-                            if report.id != linkedReporting.last?.id { Divider() }
+                            .padding(10)
+                            .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 14))
+                        } else {
+                            Label("No defensible event-specific observation is available yet", systemImage: "photo.badge.exclamationmark")
+                                .font(.subheadline.weight(.semibold))
+                            Text("The evidence thread remains usable without imagery. Claritas never substitutes a scene from an unrelated event or location.")
+                                .font(.caption)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         }
                     }
+
                 }
 
                 let contextAssessments = detail.evidence.filter(isContextAssessment)
@@ -626,95 +462,6 @@ struct IntelligenceWorkspaceView: View {
                             .padding(.vertical, 5)
                             if item.id != contextAssessments.last?.id { Divider() }
                         }
-                    }
-                }
-
-                Text("Sources and observations")
-                    .font(.headline)
-                    .id("investigation-evidence")
-                BrandCard(title: "Evidence thread", icon: "point.topleft.down.to.point.bottomright.curvepath") {
-                    let activeFilter = evidenceFilterEventID == detail.event.id ? evidenceFilter : nil
-                    Picker("Signal type", selection: Binding(
-                        get: { activeFilter ?? "all" },
-                        set: { evidenceFilter = $0 == "all" ? nil : $0; evidenceFilterEventID = detail.event.id }
-                    )) {
-                        Text("All evidence · \(detail.evidence.count)").tag("all")
-                        ForEach(Set(detail.evidence.map(signalGroup)).sorted(), id: \.self) { group in
-                            Text(signalDomainLabel(group)).tag(group)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    ForEach(detail.evidence.filter { activeFilter == nil || signalGroup($0) == activeFilter }.sorted { $0.observed_at < $1.observed_at }) { item in
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: evidenceIcon(item.relationship))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                .frame(width: 22, height: 22)
-                                .background(ClaritasPalette.dataBlue(for: colorScheme).opacity(0.12), in: Circle())
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(evidenceLabel(item.relationship).uppercased())
-                                        .font(.caption2.weight(.bold))
-                                    Text(item.domain.replacingOccurrences(of: "_", with: " ").uppercased())
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text(item.observed_at.formatted(date: .abbreviated, time: .shortened))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if isContextAssessment(item) {
-                                    Label(contextStatusLabel(for: item).uppercased(), systemImage: contextStatusIcon(for: item))
-                                        .font(.caption2.weight(.bold))
-                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                    Text("This status describes data availability or comparison readiness; it is not a positive linked signal.")
-                                        .font(.caption2)
-                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                } else if item.correlation_factors != nil {
-                                    HStack(spacing: 6) {
-                                        Label(
-                                            IntelligenceLinkagePresentation.label(for: item.correlation_factors),
-                                            systemImage: "link.badge.plus"
-                                        )
-                                        .font(.caption2.weight(.bold))
-                                        .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
-                                        if IntelligenceLinkagePresentation.decision(in: item.correlation_factors) == "attached",
-                                           let score = item.correlation_score {
-                                            Text("Match score \(Int((score * 100).rounded()))%")
-                                                .font(.caption2.monospacedDigit())
-                                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                        }
-                                    }
-                                    Text(IntelligenceLinkagePresentation.explanation(for: item.correlation_factors))
-                                        .font(.caption2)
-                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                        .lineLimit(2)
-                                }
-                                Text(item.source_title ?? item.evidence_type.replacingOccurrences(of: "_", with: " ").capitalized)
-                                    .font(.caption.weight(.semibold))
-                                if let summary = item.source_summary, !summary.isEmpty {
-                                    Text(summary).font(.caption2).foregroundStyle(.secondary).lineLimit(3)
-                                }
-                                Text("\(item.source_name ?? item.source_record_type) · \(Int(item.confidence * 100))% confidence")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                if let attribution = item.attribution, !attribution.isEmpty {
-                                    Text("Attribution: \(attribution)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if let license = item.license, !license.isEmpty {
-                                    Text("License: \(license)")
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                if let source = item.source_url, let url = URL(string: source) {
-                                    Link("Open source record", destination: url).font(.caption2.weight(.semibold))
-                                }
-                            }
-                        }
-                        .padding(.vertical, 6)
-                        if item.id != detail.evidence.sorted(by: { $0.observed_at < $1.observed_at }).last?.id { Divider() }
                     }
                 }
 
@@ -794,6 +541,259 @@ struct IntelligenceWorkspaceView: View {
         }
     }
 
+    private func signalExplorer(_ detail: IntelligenceEventDetail) -> some View {
+        let groups = Dictionary(grouping: detail.evidence.filter { !isContextAssessment($0) }, by: signalGroup)
+        let domains = Array(Set(groups.keys)
+            .union(detail.context_signals.map(\.domain))
+            .union(detail.unattachedSocialContext.isEmpty ? [] : ["social"])
+            .union(detail.regional_reporting?.items.isEmpty == false ? ["news"] : [])).sorted {
+                if $0 == $1 { return false }
+                if $0 == detail.event.origin_domain { return true }
+                if $1 == detail.event.origin_domain { return false }
+                return signalDomainLabel($0) < signalDomainLabel($1)
+            }
+        let activeFilter = evidenceFilterEventID == detail.event.id ? evidenceFilter : nil
+        return BrandCard(title: "Related signals", icon: "point.3.connected.trianglepath.dotted") {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Started from \(detail.event.originLabel)", systemImage: detail.event.originIcon)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                Text(detail.event.title)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(detail.evidence.filter { !isContextAssessment($0) }.count + detail.unattachedSocialContext.count) attached sources · \(detail.related_events.count) related events")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(ClaritasPalette.shellHighlight(for: colorScheme).opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down")
+                Text("Choose a signal type to see the sources and why they connect")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+            .padding(.leading, 15)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 9)], alignment: .leading, spacing: 9) {
+                ForEach(domains, id: \.self) { domain in
+                    let records = groups[domain] ?? []
+                    let contextCount = detail.context_signals.filter { $0.domain == domain && !$0.metrics.isEmpty }.count
+                        + (domain == "news" ? (detail.regional_reporting?.items.count ?? 0) : 0)
+                    let count = records.count + (domain == "social" ? detail.unattachedSocialContext.count : 0)
+                    Button {
+                        evidenceFilter = activeFilter == domain ? nil : domain
+                        evidenceFilterEventID = detail.event.id
+                        detailScrollTarget = "investigation-evidence"
+                        evidenceNavigationID = UUID()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack {
+                                Image(systemName: signalDomainIcon(domain))
+                                    .font(.title3)
+                                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                Spacer(minLength: 0)
+                                Text(count + contextCount == 0 ? "—" : "\(count > 0 ? count : contextCount)")
+                                    .font(.title3.monospacedDigit().weight(.semibold))
+                            }
+                            Text(signalDomainLabel(domain)).font(.caption.weight(.bold))
+                            Text(count > 0 ? "Attached sources" : contextCount > 0 ? "Regional context" : "Coverage status")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            let dimensions = Set(records.flatMap { IntelligenceLinkagePresentation.dimensions(for: $0.correlation_factors) }).sorted()
+                            Text(dimensions.isEmpty ? (count > 0 ? "Review the connection →" : "Place + time only →") : dimensions.joined(separator: " + "))
+                                .font(.caption2)
+                                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(11)
+                        .frame(maxWidth: .infinity, minHeight: 115, alignment: .topLeading)
+                        .background(activeFilter == domain ? ClaritasPalette.shellHighlight(for: colorScheme) : ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(activeFilter == domain ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellBorder(for: colorScheme)))
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(signalDomainLabel(domain)): \(count) attached sources, \(contextCount) regional context records")
+                    .accessibilityAddTraits(activeFilter == domain ? .isSelected : [])
+                }
+            }
+            let missing = detail.signal_coverage.filter { $0.state == "none" }.map(\.label)
+            if !missing.isEmpty {
+                Text("No attached sources: \(missing.joined(separator: ", ")).")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Text("A connection describes shared evidence, place, timing, topic or entity. Regional context and model interpretation do not establish confirmation.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func signalReader(_ detail: IntelligenceEventDetail) -> some View {
+        let activeFilter = evidenceFilterEventID == detail.event.id ? evidenceFilter : nil
+        let records = detail.evidence.filter { !isContextAssessment($0) && (activeFilter == nil || signalGroup($0) == activeFilter) }
+            .sorted { $0.observed_at > $1.observed_at }
+        return BrandCard(title: activeFilter.map(signalDomainLabel) ?? "All related sources", icon: "list.bullet.rectangle") {
+            if activeFilter != nil {
+                Button("Show all signal types") { evidenceFilter = nil }
+                    .font(.caption.weight(.semibold))
+                    .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+            }
+            ForEach(records) { item in
+                evidenceSourceRow(item)
+                if item.id != records.last?.id { Divider() }
+            }
+            if activeFilter == nil || activeFilter == "social" {
+                ForEach(detail.unattachedSocialContext) { post in
+                    VStack(alignment: .leading, spacing: 7) {
+                        Label("Socials · unverified claim", systemImage: "bubble.left.and.bubble.right")
+                            .font(.caption2.weight(.bold)).foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                        Text(post.text).font(.subheadline)
+                        Text("\(post.author) · \(post.platform) · \(post.posted_at.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        if let url = URL(string: post.url) {
+                            Link("Open attributed post ↗", destination: url).font(.caption.weight(.semibold))
+                                .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                        }
+                    }.padding(.vertical, 8)
+                }
+            }
+            ForEach(detail.context_signals.filter { activeFilter == nil || $0.domain == activeFilter }) { context in
+                regionalSignalRow(context)
+            }
+            if (activeFilter == nil || activeFilter == "news"), let regional = detail.regional_reporting {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("In the same region", systemImage: "map")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Place + time only · not linked reporting").font(.caption.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                    Text(regional.notice).font(.caption2).foregroundStyle(.secondary)
+                    Text("\(regional.window_start.formatted(date: .abbreviated, time: .shortened)) – \(regional.window_end.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    ForEach(regional.items) { item in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("\(item.scope_label) · \(item.publisher)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Text(item.title).font(.subheadline.weight(.semibold))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(item.observed_at.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2).foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                if let url = URL(string: item.url) {
+                                    Link("Open source ↗", destination: url).font(.caption.weight(.semibold))
+                                        .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                                }
+                            }
+                            SourceInvestigationButton(domain: "news", recordType: "item", recordID: item.id) { id in
+                                selectEvent(id, revealDetail: true)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        if item.id != regional.items.last?.id { Divider() }
+                    }
+                    if regional.items.isEmpty {
+                        Text("No other reporting is available in this place and time window.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(12)
+                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .id("investigation-evidence")
+    }
+
+    private func evidenceSourceRow(_ item: IntelligenceEvidence) -> some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 9) {
+                if let summary = item.source_summary, !summary.isEmpty {
+                    Text(summary).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                }
+                Text(IntelligenceLinkagePresentation.explanation(for: item.correlation_factors))
+                    .font(.caption).foregroundStyle(.secondary)
+                if let score = item.correlation_score, IntelligenceLinkagePresentation.decision(in: item.correlation_factors) == "attached" {
+                    Text("Connection match: \(Int((score * 100).rounded()))% · not a probability of causation")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if let attribution = item.attribution, !attribution.isEmpty {
+                    Text(attribution).font(.caption2).foregroundStyle(.secondary)
+                }
+                if let license = item.license, !license.isEmpty {
+                    Text(license).font(.caption2).foregroundStyle(.secondary)
+                }
+                if let source = item.source_url, let url = URL(string: source) {
+                    Link("Open original source ↗", destination: url)
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                }
+            }.padding(.vertical, 8)
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: signalDomainIcon(signalGroup(item)))
+                    .font(.subheadline)
+                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                    .frame(width: 32, height: 32)
+                    .background(ClaritasPalette.dataBlue(for: colorScheme).opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("\(signalDomainLabel(signalGroup(item))) · \(evidenceLabel(item.relationship))")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                    Text(item.source_title ?? item.evidence_type.replacingOccurrences(of: "_", with: " ").capitalized)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(item.source_name ?? "Source record") · \(item.observed_at.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Text(IntelligenceLinkagePresentation.label(for: item.correlation_factors))
+                        .font(.caption2.weight(.semibold)).foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                    let dimensions = IntelligenceLinkagePresentation.dimensions(for: item.correlation_factors)
+                    if !dimensions.isEmpty {
+                        Text(dimensions.joined(separator: " + "))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+        }
+    }
+
+    private func regionalSignalRow(_ context: IntelligenceContextSignal) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label("\(signalDomainLabel(context.domain)) · regional context", systemImage: signalDomainIcon(context.domain))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+            Text(context.title).font(.subheadline.weight(.semibold))
+            Text(context.summary).font(.caption)
+            if !context.metrics.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 115))], alignment: .leading) {
+                    ForEach(Array(context.metrics.enumerated()), id: \.offset) { _, metric in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(metric.value.formatted(.number.precision(.fractionLength(0...1))))
+                                .font(.title3.monospacedDigit().weight(.semibold))
+                            Text("\(metric.label) · \(metric.unit)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            Text("\(context.scope_label) · place + time only")
+                .font(.caption2.weight(.semibold))
+            if let observed = context.observed_at {
+                Text("As of \(observed.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Text(context.coverage_notice).font(.caption2).foregroundStyle(.secondary)
+            if let route = context.native_route {
+                Button("Explore \(signalDomainLabel(context.domain).lowercased()) →") {
+                    NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: route, userInfo: ["country": detail?.event.primary_country_iso2 ?? ""])
+                }
+                .font(.caption.weight(.semibold))
+                .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+            }
+        }
+        .padding(12)
+        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+    }
+
     private func eventUnderstandingRow(label: String, icon: String, text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
@@ -816,9 +816,9 @@ struct IntelligenceWorkspaceView: View {
         VStack(spacing: 9) {
             Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.title)
-            Text("No material correlated events")
+            Text("No current events in this scope")
                 .font(.headline)
-            Text("Source dashboards remain available while the event graph waits for defensible evidence.")
+            Text("Events can start from any source. Browse the source sections or change your country scope.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -995,37 +995,12 @@ struct IntelligenceWorkspaceView: View {
     }
 
     private func signalGroup(_ item: IntelligenceEvidence) -> String {
-        item.relationship == "model_interpretation" ? "model_interpretation" : item.domain
+        SignalDomainPresentation.group(domain: item.domain, recordType: item.source_record_type, relationship: item.relationship)
     }
 
-    private func signalDomainLabel(_ domain: String) -> String {
-        switch domain {
-        case "model_interpretation": return "Model interpretation"
-        case "social": return "Socials"
-        case "news": return "News report"
-        case "weather": return "Weather signal"
-        case "transport": return "Transport signal"
-        case "podcast": return "Podcast episode"
-        case "earth_observation": return "Earth observation"
-        case "market": return "Market signal"
-        case "disaster": return "Disaster monitoring"
-        default: return domain.replacingOccurrences(of: "_", with: " ").capitalized
-        }
-    }
+    private func signalDomainLabel(_ domain: String) -> String { SignalDomainPresentation.label(domain) }
 
-    private func signalDomainIcon(_ domain: String) -> String {
-        switch domain {
-        case "model_interpretation": return "sparkles"
-        case "social": return "bubble.left.and.bubble.right"
-        case "news": return "newspaper"
-        case "weather": return "cloud.sun"
-        case "transport": return "point.topleft.down.to.point.bottomright.curvepath"
-        case "podcast": return "mic"
-        case "earth_observation", "disaster": return "sensor.tag.radiowaves.forward"
-        case "market": return "chart.line.uptrend.xyaxis"
-        default: return "dot.radiowaves.left.and.right"
-        }
-    }
+    private func signalDomainIcon(_ domain: String) -> String { SignalDomainPresentation.icon(domain) }
 
     private func contextStatusCode(for item: IntelligenceEvidence) -> String? {
         let metadata = item.metadata?.object
@@ -1313,11 +1288,12 @@ struct IntelligenceEventPulseView: View {
     @State private var isLoading = true
     var presentation: Presentation = .list
     var sourceLens: String? = nil
+    var country: String? = nil
+    @State private var loadError: String?
 
-    private var pulseTitle: String {
-        guard let sourceLens, !sourceLens.isEmpty else { return "Priority investigations" }
-        return "Investigations in \(sourceLens) scope"
-    }
+    private var scopeCountry: String? { country ?? model.selectedCountry }
+
+    private var pulseTitle: String { "Priority events" }
 
     var body: some View {
         Group {
@@ -1329,25 +1305,52 @@ struct IntelligenceEventPulseView: View {
                 }
             } else if !events.isEmpty {
                 BrandCard(title: pulseTitle, icon: "dot.radiowaves.left.and.right") {
-                    if let sourceLens, !sourceLens.isEmpty {
-                        Text("Shown because these investigations are active in the current geography. Open one to verify whether \(sourceLens) evidence is attached; scope overlap alone is not a causal link.")
-                            .font(.caption2)
-                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    Text("One stream across news, earth observation, imagery, transport, podcasts, socials and weather.")
+                        .font(.caption2)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    if let sourceLens {
+                        Text("Current events in this geography. Inspect the source groups to see whether \(SignalDomainPresentation.label(sourceLens).lowercased()) is attached.")
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], spacing: 10) {
-                        ForEach(events.prefix(4)) { event in
+                        ForEach(events.prefix(6)) { event in
                             eventButton(event, horizontal: true)
                         }
                     }
+                    Button {
+                        NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: "intelligence")
+                    } label: {
+                        Label("View all events & related signals", systemImage: "arrow.right")
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
                 }
             } else {
-                Color.clear.frame(height: 0)
+                BrandCard(title: pulseTitle, icon: "dot.radiowaves.left.and.right") {
+                    Text(loadError ?? "No current events in this scope. Source reporting remains available below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
-        .task(id: model.selectedCountry) {
-            isLoading = true
-            events = (try? await model.api.fetchIntelligenceEvents(limit: 4, country: model.selectedCountry)) ?? []
-            isLoading = false
+        .task(id: scopeCountry) {
+            events = []
+            loadError = nil
+            while !Task.isCancelled {
+                isLoading = events.isEmpty
+                do {
+                    let nextEvents = try await model.api.fetchIntelligenceEvents(limit: 6, country: scopeCountry)
+                    guard !Task.isCancelled else { return }
+                    events = nextEvents
+                    loadError = nil
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    loadError = "Priority events could not be loaded. Pull to refresh or try again shortly."
+                }
+                isLoading = false
+                do { try await Task.sleep(nanoseconds: 300_000_000_000) }
+                catch { return }
+            }
         }
     }
 
@@ -1365,7 +1368,7 @@ struct IntelligenceEventPulseView: View {
                     Circle()
                         .fill(severityColor(event.severity))
                         .frame(width: 7, height: 7)
-                    Text(event.severity.rawValue.uppercased())
+                    Text("\(event.severity.rawValue.uppercased()) PRIORITY")
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.8)
                         .foregroundStyle(severityColor(event.severity))
@@ -1374,6 +1377,9 @@ struct IntelligenceEventPulseView: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 }
+                Label(event.originLabel.uppercased(), systemImage: event.originIcon)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                 Text(event.title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
@@ -1387,7 +1393,7 @@ struct IntelligenceEventPulseView: View {
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 .lineLimit(1)
                 HStack {
-                    Text("\(event.domain_count) signal types · \(event.evidence_count) evidence")
+                    Text("\(event.evidence_count) sources · \(event.signalTypesLabel)")
                         .font(.caption2)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                     Spacer()
@@ -1395,6 +1401,13 @@ struct IntelligenceEventPulseView: View {
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 }
+                if let reason = event.priority_reasons?.first {
+                    Text(reason).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Explore related signals →")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                 if let expiresAt = event.expires_at {
                     Text("\(event.freshness_state == "expired" ? "Expired" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption2.monospacedDigit())
@@ -1490,6 +1503,7 @@ private struct EarthObservationTile: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     let observation: EarthObservation
+    var showsInvestigationLink = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -1545,6 +1559,9 @@ private struct EarthObservationTile: View {
                 }
                 .padding(8)
                 .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 8))
+            }
+            if showsInvestigationLink {
+                SourceInvestigationButton(domain: "imagery", recordType: "earth_observation", recordID: observation.id)
             }
             if let url = URL(string: observation.source_url) {
                 Link("Provider provenance", destination: url).font(.caption.weight(.semibold))

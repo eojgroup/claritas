@@ -1162,21 +1162,23 @@ async function processVisionEnrichment(job: any) {
          JSON.stringify(interpretationRecord)],
       );
       await recomputeIntelligenceEventAggregateTx(client, target.event_id);
-      await client.query(
-        `INSERT INTO event_outbox (event_type,aggregate_type,aggregate_id,dedupe_key,payload,occurred_at)
-         VALUES ('earth.vision.available','earth_observation',$1,$2,$3::jsonb,now())
-         ON CONFLICT (dedupe_key) DO NOTHING`,
-        [target.id, `earth-vision-available:${target.id}:${EO_VISION_PROMPT_VERSION}`,
-         JSON.stringify({
-           observation_id: target.id,
-           event_id: target.event_id,
-           location_id: target.location_id,
-           relationship: "model_interpretation",
-           actual_model: response.actualModel,
-           prompt_version: EO_VISION_PROMPT_VERSION,
-         })],
-      );
     }
+    // Standalone imagery can open an investigation too. Publishing only
+    // after a prior event exists leaves that source permanently attach-only.
+    await client.query(
+      `INSERT INTO event_outbox (event_type,aggregate_type,aggregate_id,dedupe_key,payload,occurred_at)
+       VALUES ('earth.vision.available','earth_observation',$1,$2,$3::jsonb,now())
+       ON CONFLICT (dedupe_key) DO NOTHING`,
+      [target.id, `earth-vision-available:${target.id}:${EO_VISION_PROMPT_VERSION}`,
+       JSON.stringify({
+         observation_id: target.id,
+         event_id: target.event_id,
+         location_id: target.location_id,
+         relationship: "model_interpretation",
+         actual_model: response.actualModel,
+         prompt_version: EO_VISION_PROMPT_VERSION,
+       })],
+    );
   });
   await updateProviderState("openrouter_vision", { success: true, event: Boolean(target.event_id) });
   return {

@@ -6,6 +6,7 @@ export type IntelligenceDomain =
   | "earth_observation"
   | "disaster"
   | "podcast"
+  | "social"
   | "assessment";
 
 export type EvidenceRelationship =

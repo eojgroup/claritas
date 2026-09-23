@@ -1,4 +1,3 @@
-import NewsHighlights from "./components/NewsHighlights";
 import NewsOverview from "./components/NewsOverview";
 import { filterNewsByTopic, type NewsTopic } from "./components/newsWorkspacePresentation";
 import SourceInvestigationLinks from "./components/SourceInvestigationLinks";
@@ -978,7 +977,7 @@ export default function ClaritasDashboard() {
   const [newsHasImageOnly, setNewsHasImageOnly] = useState(false);
   const [newsCategory, setNewsCategory] = useState<NewsCategoryFilter>("all");
   const [newsTopic, setNewsTopic] = useState<Pick<NewsTopic, "code" | "label"> | null>(null);
-  const [newsSortBy, setNewsSortBy] = useState<NewsSort>("newest");
+  const newsSortBy: NewsSort = "newest";
   const [weatherConditionFilter, setWeatherConditionFilter] = useState<string>("all");
   const [weatherCountryFilter, setWeatherCountryFilter] = useState("");
   const [weatherHumidityFloor, setWeatherHumidityFloor] = useState<number | undefined>(undefined);
@@ -1546,16 +1545,6 @@ export default function ClaritasDashboard() {
     newsSortBy,
   ]);
 
-  const selectNewsSort = useCallback((sort: NewsSort) => {
-    if (sort === newsSortBy) return;
-    setNewsSortBy(sort);
-    setSelectedDashboardNewsId(null);
-    setNewsWorkspaceChartRange({});
-    void loadNewsData("recent", newsCategory, sort);
-    if (newsMapCountry) {
-      void loadNewsCountryData(newsMapCountry, "recent", newsCategory, sort);
-    }
-  }, [loadNewsCountryData, loadNewsData, newsCategory, newsMapCountry, newsSortBy]);
 
   useEffect(() => {
     if (authStatus !== "authed" || !hasPaidAccess) return;
@@ -6471,7 +6460,6 @@ export default function ClaritasDashboard() {
                       className="order-[3] xl:col-span-12"
                       style={{ gridColumn: "1 / -1" }}
                     >
-                      <NewsHighlights country={selectedNewsCountry} category={newsCategory} />
                       <IntelligenceEventStrip
                         country={selectedCountry}
                         onOpen={handleOpenIntelligence}
@@ -6879,13 +6867,12 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "news" && (
               <div className="workspace-page news-workspace space-y-4">
-                <NewsHighlights country={selectedNewsCountry} category={newsCategory} />
                 <NewsOverview items={newsWorkspaceScope} visibleCount={newsPageItems.length}
                   scope={newsMapCountryLabel || regionLabel} selectedTopic={newsTopic}
                   onSelectTopic={setNewsTopic} loading={activeNewsLoading}
-                  onOpenInvestigations={() => { setMapMode("signals"); setActiveView("dashboard"); }} />
+                  onOpenInvestigations={() => handleOpenIntelligence()} />
                 <IntelligenceEventStrip country={selectedNewsCountry} onOpen={handleOpenIntelligence} />
-                <details className="news-filter-panel"><summary>Search, sources & sorting</summary><section
+                <details className="news-filter-panel"><summary>Search & sources</summary><section
                   className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3"
                 >
                   <div>
@@ -7000,17 +6987,7 @@ export default function ClaritasDashboard() {
                         ))}
                       </select>
                     </label>
-                    <label className="text-[color:var(--shell-muted)]">
-                      Sort
-                      <select
-                        value={newsSortBy}
-                        onChange={(event) => selectNewsSort(event.currentTarget.value as NewsSort)}
-                        className="mt-1 w-full rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-[color:var(--shell-ink)]"
-                      >
-                        <option value="newest">Latest first</option>
-                        <option value="importance">Importance-ranked</option>
-                      </select>
-                    </label>
+                    <div className="text-[color:var(--shell-muted)]">Reporting order<span className="mt-1 block px-2 py-1 text-[color:var(--shell-ink)]">Latest first · priority is shown in events</span></div>
                     <div className="flex items-end">
                       <label className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-[color:var(--shell-muted)]">
                         <input
@@ -7108,7 +7085,7 @@ export default function ClaritasDashboard() {
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="news-freshness-chip">
-                          {newsSortBy === "newest" ? "Latest first" : "Importance-ranked"}
+                          Latest first
                         </span>
                         <span className={`news-freshness-chip is-${newsFreshness.tone}`}>{newsFreshness.label}</span>
                       </div>
@@ -7991,7 +7968,7 @@ export default function ClaritasDashboard() {
                             <h2 className="mt-2 text-lg font-semibold leading-6 text-[color:var(--shell-ink)]">
                               {episode.title}
                             </h2>
-                            <SourceInvestigationLinks links={episode.linked_events} onOpenEvent={handleOpenIntelligence} onOpenMap={() => { setMapMode("signals"); setActiveView("dashboard"); }} />
+                            <SourceInvestigationLinks source={{ domain: "podcast", recordType: "podcast_episode", recordId: String(episode.id) }} links={episode.linked_events} onOpenEvent={handleOpenIntelligence} onOpenMap={() => { setMapMode("signals"); setActiveView("dashboard"); }} />
                             {episode.summary && (
                               <p className="mt-2 line-clamp-3 text-sm leading-6 text-[color:var(--shell-muted)]">
                                 {episode.summary}

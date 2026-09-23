@@ -1178,6 +1178,10 @@ export type AdminIngestionProviderCapabilities = {
 export type IntelligenceSeverity = "low" | "medium" | "high" | "critical";
 
 export type IntelligenceEvent = {
+  origin_domain?: string;
+  signal_domains?: string[];
+  priority_score?: number;
+  priority_reasons?: string[];
   id: string;
   event_type: string;
   title: string;
@@ -1379,6 +1383,13 @@ export type RegionalReporting = {
 };
 
 export type IntelligenceEventDetail = {
+  signal_coverage?: Array<{ domain: string; label: string; count: number; state: "linked" | "context" | "none" }>;
+  context_signals?: Array<{
+    id: string; domain: string; title: string; summary: string; scope_label: string;
+    relationship: "regional_context"; observed_at: string | null;
+    metrics: Array<{ label: string; value: number; unit: string }>;
+    coverage_notice: string; native_route: string | null;
+  }>;
   regional_reporting?: RegionalReporting | null;
   social_context?: SocialEventContext[];
   event: IntelligenceEvent;
@@ -2395,6 +2406,17 @@ export async function fetchIntelligenceEvents(params?: {
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence events"));
   const data = await resp.json();
   return (data.events ?? []) as IntelligenceEvent[];
+}
+
+export async function resolveSourceInvestigation(source: {
+  domain: string; source_record_type: string; source_record_id: string;
+}): Promise<{ event_id: string | null; status: "available" | "pending" | "ineligible"; reason?: string }> {
+  const resp = await fetch(`${API_BASE}/api/intelligence/resolve-source`, {
+    method: "POST", credentials: "include",
+    headers: { "content-type": "application/json" }, body: JSON.stringify(source),
+  });
+  if (!resp.ok) throw new Error(await readError(resp, "Unable to open source investigation"));
+  return await resp.json();
 }
 
 export async function fetchIntelligenceEvent(id: string): Promise<IntelligenceEventDetail> {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export const NEWS_ASSESSMENT_METHODOLOGY = "trader-news-priority-v2";
+export const NEWS_ASSESSMENT_METHODOLOGY = "trader-news-priority-v3";
 
 export const NEWS_CATEGORIES = [
   "markets",
@@ -178,14 +178,19 @@ const STRUCTURED_TOPIC_MATERIALITY_RULES: Array<{ code: string; score: number; p
     pattern: /\b(?:sanctions?|armed conflict|warfare|military escalation|ceasefires?|trade embargo)\b/i,
   },
   {
-    code: "energy_supply_disruption",
+    code: "energy_supply_development",
     score: 0.86,
     pattern: /\b(?:energy supply|crude oil|natural gas|liquefied natural gas|\blng\b|opec|pipelines?|power grid|refiner(?:y|ies))\b/i,
   },
   {
     code: "transport_supply_disruption",
     score: 0.84,
-    pattern: /\b(?:supply chain|shipping disruption|port disruption|freight disruption|canal closure|airspace closure)\b/i,
+    pattern: /\b(?:(?:supply chain|shipping|port|freight) disruptions?|(?:canal|airspace|port|airport) closures?|(?:closed|blocked) (?:ports?|canals?|airspace)|(?:shipping|freight|flights?) (?:delayed|cancelled|canceled|halted))\b/i,
+  },
+  {
+    code: "transport_supply_development",
+    score: 0.45,
+    pattern: /\b(?:supply chains?|shipping|freight|logistics)\b/i,
   },
 ];
 
@@ -303,6 +308,7 @@ export function newsStructuredTopicMateriality(
       // evidence; exact BLS and ECB statistical-release feeds are safe
       // release-level context.
       if (rule.pattern.test(signal)
+          && (rule.code !== "transport_supply_disruption" || scope !== "provider_topic" || rule.pattern.test(itemText))
           && (!broadInstitutionalFeed || scope === "item_context" || rule.pattern.test(itemText))
           && (!matched.has(rule.code) || matched.get(rule.code)!.score < rule.score)) {
         matched.set(rule.code, { score: rule.score, signal });

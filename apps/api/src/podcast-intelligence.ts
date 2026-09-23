@@ -262,10 +262,9 @@ export async function extractPodcastIntelligence(
         );
         linkedEvidenceCount += 1;
       }
-      // Transcript extraction is deliberately a contextual source. It can ask
-      // the evidence graph to consider an existing event only when a finding
-      // is directly supported by one or more timestamped transcript segments
-      // and names a concrete entity; it can never create an event by itself.
+      // Findings must have timestamped transcript evidence and concrete
+      // entities. The consumer may originate an explicitly interpreted event
+      // for high-confidence event findings; risks and claims are attach-only.
       if (
         ["event", "risk", "claim"].includes(type)
         && confidence != null && confidence >= 0.55
@@ -289,7 +288,7 @@ export async function extractPodcastIntelligence(
               episode_id: episodeId,
               signal_type: type,
               canonical_key: key,
-              contextual_only: true,
+              interpretation_only: true,
             }),
           ],
         );

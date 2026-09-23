@@ -21,7 +21,6 @@ export default function NewsOverview({ items, visibleCount, scope, selectedTopic
   if (selectedFacet && !visibleTopics.includes(selectedFacet)) visibleTopics.push(selectedFacet);
   const latest = latestNewsTimestamp(items);
   const linkedStories = items.filter((item) => item.linked_events?.length).length;
-  const highPriority = items.filter((item) => !item.importance?.is_fallback && ["top", "high"].includes(item.importance?.tier ?? "")).length;
   const timeLabel = latest ? new Intl.DateTimeFormat(undefined, {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short",
   }).format(new Date(latest)) : "No dated stories";
@@ -32,7 +31,7 @@ export default function NewsOverview({ items, visibleCount, scope, selectedTopic
         <div>
           <span className="news-overview-eyebrow">Your news desk · {scope}</span>
           <h2>Reporting at a glance</h2>
-          <p>Choose a topic, read the latest reports, then follow linked event evidence.</p>
+          <p>Browse reports in time order. Open any story to investigate its connections across all sources.</p>
         </div>
         <button type="button" className="news-overview-action" onClick={onOpenInvestigations}>
           <RadioTower aria-hidden="true" size={16} /> Explore event evidence <ArrowUpRight aria-hidden="true" size={15} />
@@ -40,7 +39,7 @@ export default function NewsOverview({ items, visibleCount, scope, selectedTopic
       </div>
       <dl className="news-overview-stats">
         <div><dt>Stories shown</dt><dd>{loading ? "—" : visibleCount.toLocaleString()} <span>of {items.length.toLocaleString()} loaded</span></dd></div>
-        <div><dt>High importance</dt><dd>{loading ? "—" : highPriority.toLocaleString()} <span>in loaded reporting</span></dd></div>
+        <div><dt>Topics</dt><dd>{loading ? "—" : topics.length.toLocaleString()} <span>in loaded reporting</span></dd></div>
         <div><dt>Linked to events</dt><dd>{loading ? "—" : linkedStories.toLocaleString()} <span>reports with context</span></dd></div>
         <div><dt>Latest source time</dt><dd className="news-overview-latest"><time dateTime={latest ?? undefined}>{loading ? "Updating…" : timeLabel}</time></dd></div>
       </dl>

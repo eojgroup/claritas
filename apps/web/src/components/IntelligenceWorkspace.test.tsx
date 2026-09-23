@@ -151,19 +151,20 @@ describe("IntelligenceWorkspace", () => {
   it("renders event detail, satellite context, evidence labels, provenance, and uncertainty", async () => {
     render(<IntelligenceWorkspace initialCountry="AE" />);
     expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+    fireEvent.click(screen.getByText(/Imagery assessment ·/));
     expect((await screen.findByAltText(/Natural color observation/i)).getAttribute("loading")).toBe("lazy");
     expect((await screen.findByAltText(/NASA GIBS true-color context/i)).getAttribute("loading")).toBe("lazy");
     expect(screen.getByText("Regional browse context · not proof")).toBeTruthy();
     expect(screen.getByText("What happened")).toBeTruthy();
     expect(screen.getByText("Port of Fujairah, United Arab Emirates")).toBeTruthy();
     expect(screen.getByText("The location supports strategically important energy flows.")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Which reporting is likely associated with this event?" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Related signals" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Port operator responds to reported fire" })).toBeTruthy();
-    expect(screen.getByText("Event-linked observation available")).toBeTruthy();
+    expect(screen.getByText("Imagery assessment · Event-linked observation available")).toBeTruthy();
     expect(screen.getByRole("link", { name: /NASA GIBS provenance/i }).getAttribute("href")).toBe("https://gibs.earthdata.nasa.gov/wms/example.jpg");
     expect(screen.getByText("Observed")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Active fire hotspot" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Open source/i }).getAttribute("href")).toBe("https://firms.modaps.eosdis.nasa.gov/");
+    expect(screen.getAllByRole("link", { name: /Open source/i }).some((link) => link.getAttribute("href") === "https://firms.modaps.eosdis.nasa.gov/")).toBe(true);
     expect(screen.getByText("Attribution: NASA FIRMS")).toBeTruthy();
     expect(screen.getByText(/Correlation does not establish causation/i)).toBeTruthy();
   });
@@ -393,20 +394,20 @@ describe("IntelligenceWorkspace", () => {
     });
 
     render(<IntelligenceWorkspace initialEventId={event.id} />);
-    expect(await screen.findByRole("heading", { name: "Signal connections" })).toBeTruthy();
-    expect(screen.getAllByText("News report").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Weather signal").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Transport signal").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Podcast episode").length).toBeGreaterThan(0);
+    expect(await screen.findByRole("heading", { name: "Related signals" })).toBeTruthy();
+    expect(screen.getAllByText("News").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Weather").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Transport").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Podcasts").length).toBeGreaterThan(0);
     expect([...document.querySelectorAll(".event-link-explanation")].some((element) => (
       element.textContent?.includes("Why shown: Shown as a likely connection because of")
     ))).toBe(true);
     expect(screen.getAllByText("Context").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Transport signal · 1" }));
-    expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("1 record · Transport signal");
+    fireEvent.click(screen.getByRole("button", { name: /1 Transport Context \/ interpretation/ }));
+    expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("1 record · Transport");
     expect(document.querySelector("#event-evidence-transport-evidence")).toBeTruthy();
     expect(document.querySelector("#event-evidence-weather-evidence")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /All evidence/ }));
+    fireEvent.click(screen.getByRole("button", { name: /All sources/ }));
     expect(document.querySelector("#event-evidence-weather-evidence")).toBeTruthy();
   });
 
@@ -480,20 +481,17 @@ describe("IntelligenceWorkspace", () => {
 
     render(<IntelligenceWorkspace initialEventId={event.id} />);
 
-    expect(await screen.findByRole("heading", { name: "What can Claritas assess around this event?" })).toBeTruthy();
-    expect(screen.getAllByText("No local weather coverage").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Transport comparison pending").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Insufficient nearby transport coverage").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("No nearby transport coverage").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("heading", { name: "Signal connections" })).toBeNull();
-    expect(screen.getByText(/No news record is explicitly linked to this event yet/i)).toBeTruthy();
-    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
-    expect(screen.getByText("0 source records")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Related signals" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Around this event" })).toBeTruthy();
+    expect(screen.getAllByText("Coverage limited").length).toBe(2);
+    expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("0 records");
     expect(screen.getByText(/0 linked reports/i)).toBeTruthy();
     expect(screen.queryByText("Automated reporting coverage assessment")).toBeNull();
     expect(screen.getByRole("heading", { name: "No local weather sample available" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Nearby transport comparison pending" })).toBeTruthy();
-    expect(screen.getAllByText(/not a positive linked signal/i).length).toBe(4);
+    fireEvent.click(screen.getByRole("button", { name: /Weather Coverage limited/ }));
+    expect(screen.getByText("No linked weather records")).toBeTruthy();
+
   });
 
   it("opens the exact event id supplied by an alert", async () => {
@@ -556,6 +554,7 @@ describe("IntelligenceWorkspace", () => {
     const onOpenImagery = vi.fn();
     render(<IntelligenceWorkspace initialEventId={event.id} onOpenImagery={onOpenImagery} />);
     await screen.findByRole("heading", { name: event.title });
+    fireEvent.click(screen.getByText(/Imagery assessment ·/));
     fireEvent.click(screen.getByRole("button", { name: "Inspect event imagery" }));
     expect(onOpenImagery).toHaveBeenCalledWith(event.id);
   });

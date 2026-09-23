@@ -45,20 +45,6 @@ struct NewsPriorityMetadataView: View {
     var compact: Bool = false
     @Environment(\.colorScheme) private var colorScheme
 
-    private var tierCode: String? {
-        if item.importance?.is_fallback == true { return "unranked" }
-        return item.importance?.tier?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-
-    private var tierTone: Color {
-        switch tierCode {
-        case "top": return ClaritasPalette.negativeText(for: colorScheme)
-        case "high": return ClaritasPalette.shellAccent(for: colorScheme)
-        case "notable": return ClaritasPalette.dataBlue(for: colorScheme)
-        default: return ClaritasPalette.shellMuted(for: colorScheme)
-        }
-    }
-
     private var visibleTags: [NewsTag] {
         item.presentationTags
     }
@@ -66,26 +52,11 @@ struct NewsPriorityMetadataView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 2 : 4) {
             HStack(spacing: 5) {
-                if let tier = item.importanceTierLabel {
-                    Text(tier.uppercased())
-                        .font(.caption2.weight(.bold))
-                        .tracking(0.6)
-                        .foregroundStyle(tierTone)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(tierTone.opacity(0.12), in: Capsule())
-                }
                 Text(item.primaryCategoryLabel.uppercased())
                     .font(.caption2.weight(.bold))
                     .tracking(0.5)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                     .lineLimit(1)
-            }
-            if let reason = item.primaryImportanceReason, !reason.isEmpty {
-                Text(reason)
-                    .font(.caption2)
-                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    .lineLimit(compact ? 1 : 2)
             }
             if !visibleTags.isEmpty {
                 Text(visibleTags.map(\.label).joined(separator: " · "))
@@ -158,21 +129,7 @@ private struct NewsRow: View {
                 }
             }
             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-            if let event = item.additionalContextEvents.first {
-                Button { onOpenEvent(event.id) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "square.stack.3d.up")
-                        Text(event.additionalContextLabel)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.caption.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                .accessibilityLabel("Explore additional context: \(event.additionalContextLabel)")
-            }
+            SourceInvestigationButton(domain: "news", recordType: "item", recordID: String(item.id), onOpenEvent: onOpenEvent)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 16)
@@ -197,7 +154,8 @@ private struct NewsRow: View {
                     Link(item.presentationTitle, destination: url)
                         .font(.headline)
                         .foregroundStyle(colorScheme == .dark ? ClaritasPalette.sage : ClaritasPalette.darkBlue)
-                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     Text(item.presentationTitle)
                         .font(.headline)
@@ -263,62 +221,7 @@ private struct NewsRow: View {
                             .lineLimit(2)
                     }
                 }
-                if !item.additionalContextEvents.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("ADDITIONAL CONTEXT")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                        ForEach(item.additionalContextEvents.prefix(3)) { event in
-                            Button {
-                                onOpenEvent(event.id)
-                            } label: {
-                                HStack(alignment: .top, spacing: 7) {
-                                    Image(systemName: event.earth_observation_state == "imagery_available"
-                                        ? "sensor.tag.radiowaves.forward"
-                                        : "dot.radiowaves.left.and.right")
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 5) {
-                                            Text(IntelligenceLinkagePresentation.label(for: event.correlation_factors))
-                                                .font(.caption2.weight(.bold))
-                                                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
-                                            if IntelligenceLinkagePresentation.decision(in: event.correlation_factors) == "attached",
-                                               let score = event.correlation_score {
-                                                Text("Match score \(Int((score * 100).rounded()))%")
-                                                    .font(.caption2.monospacedDigit())
-                                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                            }
-                                        }
-                                        Text(event.title)
-                                            .font(.caption.weight(.semibold))
-                                            .lineLimit(2)
-                                        Text(event.additionalContextLabel)
-                                            .font(.caption2)
-                                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                        Text(IntelligenceLinkagePresentation.explanation(for: event.correlation_factors))
-                                            .font(.caption2)
-                                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                            .lineLimit(2)
-                                    }
-                                    Spacer(minLength: 4)
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                }
-                                .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
-                                .padding(9)
-                                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
-                                .contentShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Open \(IntelligenceLinkagePresentation.label(for: event.correlation_factors).lowercased()): \(event.title)")
-                        }
-                        if item.additionalContextEvents.count > 3 {
-                            Text("+\(item.additionalContextEvents.count - 3) more linked investigations")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
+                SourceInvestigationButton(domain: "news", recordType: "item", recordID: String(item.id), onOpenEvent: onOpenEvent)
             }
             Spacer(minLength: 0)
         }
@@ -430,83 +333,56 @@ struct RemoteImage: View {
 // Helpers to unwrap AnyCodable payload values more ergonomically
 // no-op
 
-/// Refreshes independently without changing the latest-first reader feed.
-struct NewsHighlightsView: View {
-    let country: String?
-    let category: String
+/// Every source enters the same event → related signals → original source flow.
+struct SourceInvestigationButton: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var items: [NewsItem] = []
-    @State private var loadedScope = ""
-    @State private var failed = false
-    private var scope: String { "\(country ?? "global")|\(category)" }
+    let domain: String
+    let recordType: String
+    let recordID: String
+    var onOpenEvent: (String) -> Void = { eventID in
+        NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: "intelligence", userInfo: ["eventID": eventID])
+    }
+    @State private var isLoading = false
+    @State private var message: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Top news · past 24 hours").font(.headline)
-            Text("Ranked by importance · refreshes every 5 minutes")
-                .font(.caption2).foregroundStyle(.secondary)
-            if loadedScope != scope {
-                ProgressView("Loading highlights…").font(.caption)
-            } else if items.isEmpty {
-                Text(failed ? "Highlights are temporarily unavailable." : "No stories in the past 24 hours for this scope.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    HStack(alignment: .top, spacing: 10) {
-                        Text(String(format: "%02d", index + 1))
-                            .font(.title3.monospacedDigit())
-                            .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(item.publisher ?? item.source_name ?? "Reporting source") · \(item.chronologyDisplayText)")
-                                .font(.caption2).foregroundStyle(.secondary)
-                            if let raw = item.url, let url = URL(string: raw) {
-                                Link(destination: url) {
-                                    Text(item.presentationTitle)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                    .buttonStyle(.plain)
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-                                    .multilineTextAlignment(.leading)
-                            } else {
-                                Text(item.presentationTitle).font(.subheadline.weight(.semibold))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if let disclosure = item.translationDisclosure {
-                                Text(disclosure).font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
-                    if index < items.count - 1 { Divider() }
+        VStack(alignment: .leading, spacing: 5) {
+            Button {
+                Task { await openInvestigation() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isLoading { ProgressView().controlSize(.small) }
+                    else { Image(systemName: "point.3.connected.trianglepath.dotted") }
+                    Text(isLoading ? "Finding related signals…" : "Explore event & related signals")
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
                 }
+                .font(.caption.weight(.semibold))
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .disabled(isLoading)
+            if let message {
+                Text(message).font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(ClaritasPalette.shellBorder(for: colorScheme)))
-        .task(id: scope) {
-            while !Task.isCancelled {
-                do {
-                    let page = try await model.api.fetchNews(limit: 3, country: country,
-                        category: category, sort: "importance", daily: true, includeMetadata: false)
-                    guard !Task.isCancelled else { return }
-                    items = page.items
-                    failed = false
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    items = []
-                    failed = true
-                }
-                loadedScope = scope
-                do { try await Task.sleep(nanoseconds: 300_000_000_000) }
-                catch { return }
+    }
+
+    @MainActor private func openInvestigation() async {
+        isLoading = true
+        message = nil
+        defer { isLoading = false }
+        do {
+            let resolution = try await model.api.resolveIntelligenceSource(domain: domain, recordType: recordType, recordID: recordID)
+            if let eventID = resolution.event_id {
+                model.selectedIntelligenceEventID = eventID
+                onOpenEvent(eventID)
+            } else {
+                message = resolution.reason ?? "An event is not available for this source yet."
             }
+        } catch {
+            message = "Related signals could not be loaded. Try again."
         }
     }
 }
