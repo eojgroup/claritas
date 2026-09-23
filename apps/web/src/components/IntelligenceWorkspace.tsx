@@ -37,7 +37,7 @@ import {
   isAnalyticalEarthProduct,
   sortEarthObservationsForDisplay,
 } from "./earthObservationPresentation";
-import { presentEventLinkage, signalDomainLabel } from "./eventLinkagePresentation";
+import { connectionDimensions, presentEventLinkage, signalDomainLabel } from "./eventLinkagePresentation";
 import { presentEvent } from "./eventPresentation";
 
 const severities: Array<IntelligenceSeverity | "all"> = ["all", "critical", "high", "medium", "low"];
@@ -202,6 +202,7 @@ export default function IntelligenceWorkspace({
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [evidenceFilter, setEvidenceFilter] = useState<{ eventId: string; label: string } | null>(null);
   const [detailRetry, setDetailRetry] = useState(0);
   const [watches, setWatches] = useState<IntelligenceWatch[]>([]);
   const [alerts, setAlerts] = useState<IntelligenceAlert[]>([]);
@@ -380,15 +381,20 @@ export default function IntelligenceWorkspace({
     ?? leadEarthObservation?.assets?.[0]
     ?? null;
   const linkedSignalGroups = useMemo(() => {
-    const groups = new Map<string, { label: string; count: number; first: IntelligenceEvidence }>();
+    const groups = new Map<string, { label: string; count: number; first: IntelligenceEvidence; dimensions: Set<string> }>();
     evidenceThread.filter((item) => !isContextAssessment(item)).forEach((item) => {
-      const label = signalDomainLabel(item.domain, item.source_record_type);
+      const label = item.relationship === "model_interpretation" ? "Model interpretation" : signalDomainLabel(item.domain, item.source_record_type);
       const existing = groups.get(label);
-      if (existing) existing.count += 1;
-      else groups.set(label, { label, count: 1, first: item });
+      if (existing) {
+        existing.count += 1;
+        connectionDimensions(item.correlation_factors).forEach((dimension) => existing.dimensions.add(dimension));
+      } else groups.set(label, { label, count: 1, first: item, dimensions: new Set(connectionDimensions(item.correlation_factors)) });
     });
     return [...groups.values()].sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
   }, [evidenceThread]);
+  const activeEvidenceFilter = evidenceFilter?.eventId === detail?.event.id ? evidenceFilter?.label : null;
+  const visibleEvidence = evidenceThread.filter((item) => !activeEvidenceFilter ||
+    (item.relationship === "model_interpretation" ? "Model interpretation" : signalDomainLabel(item.domain, item.source_record_type)) === activeEvidenceFilter);
   const contextAssessments = useMemo(
     () => evidenceThread.filter(isContextAssessment),
     [evidenceThread],
@@ -737,26 +743,33 @@ export default function IntelligenceWorkspace({
                   <div className="flex flex-wrap items-end justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Link2 className="h-3.5 w-3.5" />Likely linked signals</div>
-                      <h3 id="linked-signals-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">What other signals are associated with this event?</h3>
+                      <h3 id="linked-signals-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">Signal connections</h3>
                     </div>
                     <span className="text-xs text-[color:var(--shell-muted)]">{linkedSignalGroups.length} signal {linkedSignalGroups.length === 1 ? "type" : "types"}</span>
                   </div>
                   <p className="mt-2 max-w-3xl text-xs leading-5 text-[color:var(--shell-muted)]">News, weather, transport, podcasts, and other sources are shown only with their association rationale. Matching location, mapped geography, entities, and timing can explain a connection; none of those factors alone establishes causation.</p>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {linkedSignalGroups.slice(0, 6).map((group) => {
+                  <div className="signal-connection-hub"><span>This investigation</span><strong>{detailPresentation?.headline}</strong><small>↓ Connected evidence · choose a type to inspect</small></div>
+                  <div className="event-signal-grid mt-3">
+                    {linkedSignalGroups.map((group) => {
                       const linkage = presentEventLinkage(group.first.correlation_score, group.first.correlation_factors);
                       return (
-                        <article key={group.label} className="event-signal-group rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
+                        <button type="button" key={group.label} aria-pressed={activeEvidenceFilter === group.label}
+                          onClick={() => { setEvidenceFilter({ eventId: detail.event.id, label: group.label }); document.getElementById("evidence-thread-heading")?.scrollIntoView?.({ behavior: "smooth", block: "start" }); document.getElementById("evidence-thread-heading")?.focus({ preventScroll: true }); }}
+                          className="text-left event-signal-group rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
                           <div className="flex items-start justify-between gap-2">
                             <span className="text-xs font-semibold text-[color:var(--shell-ink)]">{group.label}</span>
                             <span className="rounded-full border border-[color:var(--shell-border)] px-2 py-0.5 text-[9px] font-semibold uppercase text-[color:var(--shell-muted)]">{group.count} {group.count === 1 ? "item" : "items"}</span>
                           </div>
-                          <div className="mt-2 flex items-center gap-1.5"><span className="event-link-chip">{linkage.label}</span><span className="min-w-0 truncate text-[10px] text-[color:var(--shell-muted)]" title={linkage.shortReason}>{linkage.shortReason}</span></div>
-                          <p className="mt-2 text-[10px] leading-4 text-[color:var(--shell-muted)]">Details and source provenance appear in the evidence timeline below.</p>
-                        </article>
+                          <div className="mt-2 flex items-center gap-1.5"><span className="event-link-chip">{linkage.label}</span><span className="min-w-0 truncate text-[10px] text-[color:var(--shell-muted)]" title={linkage.shortReason}>Example: {linkage.shortReason}</span></div>
+                          <div className="connection-dimensions" aria-label="Connection dimensions across this group">{[...group.dimensions].map((dimension) => <span key={dimension}>{dimension}</span>)}</div>
+                          <div className="signal-coverage-track" aria-hidden="true"><span style={{ width: `${group.count / Math.max(...linkedSignalGroups.map((entry) => entry.count)) * 100}%` }} /></div>
+                          <p className="mt-2 text-[10px] leading-4 text-[color:var(--shell-muted)]">Review {group.count} {group.count === 1 ? "source" : "sources"} →</p>
+                        </button>
                       );
                     })}
+                    {!!detail.social_context?.length && <a href="#social-context-heading" className="event-signal-group rounded-lg border border-[color:var(--shell-border)] p-3 text-xs"><strong>Socials · {detail.social_context.length}</strong><p className="mt-2">Unverified claims · review attributed posts →</p></a>}
                   </div>
+                  <p className="mt-3 text-xs text-[color:var(--shell-muted)]">Importance reflects source diversity, signal types, physical observations and anchored related events. Model interpretations and unverified social claims do not count as independent corroboration.</p>
                 </section>
               )}
 
@@ -783,7 +796,8 @@ export default function IntelligenceWorkspace({
                           <h4 className="mt-2 text-sm font-semibold leading-5 text-[color:var(--shell-ink)]">{item.title}</h4>
                           {item.summary && <p className="mt-1 line-clamp-3 text-xs leading-5 text-[color:var(--shell-muted)]">{item.summary}</p>}
                           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[10px] text-[color:var(--shell-muted)]"><span className="event-link-chip">{linkage.label} report</span><span>{confidenceLabel(item.confidence)} source confidence</span>{item.url && <a href={item.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[color:var(--signal-sky)]">Read report <ExternalLink className="h-3 w-3" /></a>}</div>
-                          <p className="event-link-explanation"><strong>Why shown:</strong> {linkage.explanation}</p>
+                          {<div className="connection-dimensions" aria-label="Matching dimensions">{connectionDimensions(evidence?.correlation_factors).map((dimension) => <span key={dimension}>{dimension}</span>)}</div>}
+                        <p className="event-link-explanation"><strong>Why shown:</strong> {linkage.explanation}</p>
                         </article>
                       );
                     })}
@@ -792,6 +806,21 @@ export default function IntelligenceWorkspace({
                   <div role="status" className="mt-3 rounded-xl border border-dashed border-[color:var(--shell-border)] p-4 text-xs leading-5 text-[color:var(--shell-muted)]">No news record is explicitly linked to this event yet. Sensor and official evidence below remain available, but Claritas does not imply a reporting connection.</div>
                 )}
               </section>
+
+              {detail.regional_reporting && <section className="regional-reporting rounded-xl border border-dashed border-[color:var(--shell-border)] p-4" aria-labelledby="regional-reporting-heading">
+                <div className="text-xs uppercase tracking-wider text-[color:var(--shell-muted)]">Explore the area · place + time only</div>
+                <h3 id="regional-reporting-heading" className="mt-1 text-lg font-semibold">Nearby reporting</h3>
+                <p className="mt-2 text-xs leading-5 text-[color:var(--shell-muted)]">{detail.regional_reporting.notice}</p>
+                <p className="mt-1 text-xs text-[color:var(--shell-muted)]">{dateLabel(detail.regional_reporting.window_start)} – {dateLabel(detail.regional_reporting.window_end)} · publication or discovery time</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {detail.regional_reporting.items.map((item) => <article key={item.id} className="min-w-0 rounded-lg bg-[color:var(--shell-bg)] p-3">
+                    <span className="regional-context-chip">{item.scope_label} · context only</span>
+                    <a href={item.url} target="_blank" rel="noreferrer" className="mt-2 block text-sm font-semibold text-left">{item.title}</a>
+                    <p className="mt-2 text-xs text-[color:var(--shell-muted)]">{item.publisher} · Source timeline {dateLabel(item.observed_at)}</p>
+                  </article>)}
+                </div>
+                {!detail.regional_reporting.items.length && <p className="mt-2 text-xs text-[color:var(--shell-muted)]">No additional reporting in this place and time window.</p>}
+              </section>}
 
               <section aria-labelledby="social-context-heading" className="rounded-xl border border-[color:var(--shell-border)] p-4">
                 <h3 id="social-context-heading" className="text-lg font-semibold">Social context for this investigation</h3>
@@ -806,12 +835,17 @@ export default function IntelligenceWorkspace({
 
               <section aria-labelledby="evidence-thread-heading">
                 <div className="flex items-end justify-between gap-3">
-                  <div><div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Evidence timeline</div><h3 id="evidence-thread-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">Sources and observations in chronological order</h3></div>
+                  <div><div className="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]">Evidence timeline</div><h3 tabIndex={-1} id="evidence-thread-heading" className="mt-1 text-lg font-semibold text-[color:var(--shell-ink)]">Sources and observations in chronological order</h3></div>
                   <span className="text-xs text-[color:var(--shell-muted)]">{evidenceThread.length} items · {detail.event.domain_count} domains</span>
                 </div>
                 <p className="mt-2 max-w-3xl text-xs leading-5 text-[color:var(--shell-muted)]">Every item is labelled by what it contributes and why it is included. Coverage assessments describe data availability; associated signals remain qualified and do not establish cause.</p>
+                <div className="mt-3 flex flex-wrap gap-2" aria-label="Filter evidence by signal type">
+                  <button type="button" className="event-evidence-filter" aria-pressed={!activeEvidenceFilter} onClick={() => setEvidenceFilter(null)}>All evidence · {evidenceThread.length}</button>
+                  {linkedSignalGroups.map((group) => <button type="button" className="event-evidence-filter" key={group.label} aria-pressed={activeEvidenceFilter === group.label} onClick={() => setEvidenceFilter({ eventId: detail.event.id, label: group.label })}>{group.label} · {group.count}</button>)}
+                </div>
+                <p role="status" aria-label="Evidence filter results" className="mt-2 text-xs text-[color:var(--shell-muted)]">{visibleEvidence.length} {visibleEvidence.length === 1 ? "record" : "records"} · {activeEvidenceFilter || "All evidence"}</p>
                 <ol className="mt-4 space-y-3 border-l border-[color:var(--shell-border)] pl-4">
-                  {evidenceThread.map((item) => {
+                  {visibleEvidence.map((item) => {
                     const relationship = relationshipLabels[item.relationship.trim().toLocaleLowerCase()] ?? relationshipLabels.context;
                     const sourceUrl = evidenceUrl(item);
                     const summary = evidenceSummary(item);
@@ -833,6 +867,7 @@ export default function IntelligenceWorkspace({
                         </div>
                         <h4 className="mt-2 text-sm font-semibold capitalize text-[color:var(--shell-ink)]">{evidenceTitle(item)}</h4>
                         {summary && <p className="mt-1 text-xs leading-5 text-[color:var(--shell-muted)]">{summary}</p>}
+                        {!assessment && <div className="connection-dimensions" aria-label="Matching dimensions">{connectionDimensions(item.correlation_factors).map((dimension) => <span key={dimension}>{dimension}</span>)}</div>}
                         <p className="event-link-explanation"><strong>{assessment ? "Assessment scope:" : "Why shown:"}</strong> {assessment ? "This status describes data availability or comparison readiness; it is not a positive linked signal." : linkage.explanation}</p>
                         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] text-[color:var(--shell-muted)]">
                           <span>{item.source_name || item.source_record_type}</span>

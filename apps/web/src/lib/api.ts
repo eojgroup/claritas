@@ -1371,7 +1371,15 @@ export type SocialEventContext = {
   classification: "unverified_social_claim"; assessment_boundary: string;
 };
 
+export type RegionalReporting = {
+  window_start: string;
+  window_end: string;
+  notice: string;
+  items: Array<{ id: string; title: string; url: string; publisher: string; observed_at: string; published_at: string | null; scope_label: string }>;
+};
+
 export type IntelligenceEventDetail = {
+  regional_reporting?: RegionalReporting | null;
   social_context?: SocialEventContext[];
   event: IntelligenceEvent;
   evidence: IntelligenceEvidence[];

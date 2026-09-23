@@ -1,3 +1,4 @@
+import { getRegionalReporting } from "./regional-reporting";
 import { getSocialEventContexts } from "./social-context";
 import type { PoolClient } from "pg";
 import {
@@ -495,9 +496,13 @@ export async function getIntelligenceEvent(eventId: string) {
   const linkedNews = evidence.filter((row: any) => (
     row.domain === "news" && row.source_record_type === "item"
   )).map((row: any) => buildLinkedNewsPresentation(row));
+  const [socialContext, regionalReporting] = await Promise.all([
+    getSocialEventContexts([eventId]), getRegionalReporting(normalizedEvent),
+  ]);
   return {
     event: normalizedEvent,
-    social_context: await getSocialEventContexts([eventId]),
+    social_context: socialContext,
+    regional_reporting: regionalReporting,
     understanding: buildEventUnderstanding(normalizedEvent as Record<string, unknown>, evidence),
     evidence,
     linked_news: linkedNews,
@@ -559,16 +564,30 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
        source_diversity = aggregate.source_diversity,
        confidence = GREATEST(event.confidence, aggregate.average_confidence),
        relevance_score = LEAST(1,
-         COALESCE(aggregate.base_relevance,event.relevance_score)
+         COALESCE(aggregate.base_relevance,
+           CASE WHEN jsonb_typeof(event.score_components->'base_relevance')='number'
+             THEN (event.score_components->>'base_relevance')::double precision END,
+           event.relevance_score)
          + LEAST(0.16,GREATEST(0,aggregate.domain_count-1)*0.05)
          + LEAST(0.10,GREATEST(0,aggregate.source_diversity-1)*0.025)
          + CASE WHEN aggregate.has_physical_observation THEN 0.08 ELSE 0 END
+         + LEAST(0.06, 0.02 * (SELECT count(DISTINCT related.event_type)
+             FROM intelligence_event_relationship edge
+             JOIN intelligence_event related ON related.id=edge.to_event_id
+             WHERE edge.from_event_id=event.id AND edge.relationship='related'
+               AND related.event_type<>event.event_type
+               AND related.status IN ('emerging','active','monitoring')
+               AND ${intelligenceEventExpiresAtSql("related")}>now()))
        ),
        urgency_score = GREATEST(event.urgency_score,COALESCE(aggregate.max_urgency,0)),
        materiality_score = GREATEST(event.materiality_score,COALESCE(aggregate.max_materiality,0)),
        score_components = event.score_components || jsonb_build_object(
-         'aggregation_methodology','evidence-diversity-v3',
-         'base_relevance',aggregate.base_relevance,
+         'aggregation_methodology','evidence-diversity-v4',
+         'related_event_bonus_cap',0.06,
+         'base_relevance',COALESCE(aggregate.base_relevance,
+           CASE WHEN jsonb_typeof(event.score_components->'base_relevance')='number'
+             THEN (event.score_components->>'base_relevance')::double precision END,
+           event.relevance_score),
          'domain_count',aggregate.domain_count,
          'source_diversity',aggregate.source_diversity,
          'physical_observation',aggregate.has_physical_observation
@@ -586,7 +605,7 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
                 source_record_type
               ))
                 FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')))::int AS source_diversity,
-              avg(confidence) FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS average_confidence,
+              avg(confidence) FILTER (WHERE relationship NOT IN ('model_interpretation','assessment','context')) AS average_confidence,
               max(CASE WHEN jsonb_typeof(metadata->'signal_relevance_score')='number'
                 THEN (metadata->>'signal_relevance_score')::double precision END)
                 FILTER (WHERE relationship NOT IN ('model_interpretation','assessment')) AS base_relevance,
@@ -680,7 +699,12 @@ async function findCorrelationCandidates(
      FROM intelligence_event event
      LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
      WHERE event.status IN ('emerging','active','monitoring')
-       AND event.event_type=ANY($1::text[])
+       AND (event.event_type=ANY($1::text[])
+         OR ($4::uuid IS NOT NULL AND event.primary_location_id=$4::uuid)
+         OR (cardinality($9::text[])>0 AND EXISTS (
+           SELECT 1 FROM intelligence_event_entity anchor
+           WHERE anchor.event_id=event.id AND anchor.entity_key=ANY($9::text[])
+         )))
        AND event.last_activity_time BETWEEN $2::timestamptz-make_interval(secs=>$3::int)
                                         AND $2::timestamptz+make_interval(secs=>$3::int)
        AND (
@@ -695,7 +719,13 @@ async function findCorrelationCandidates(
            WHERE entity.event_id=event.id AND entity.entity_key=ANY($9::text[])
          ))
        )
-     ORDER BY event.last_activity_time DESC,event.relevance_score DESC
+     ORDER BY CASE
+       WHEN cardinality($9::text[])>0 AND EXISTS (
+         SELECT 1 FROM intelligence_event_entity anchor
+         WHERE anchor.event_id=event.id AND anchor.entity_key=ANY($9::text[])
+       ) THEN 2
+       WHEN event.primary_location_id=$4::uuid THEN 1 ELSE 0 END DESC,
+       event.last_activity_time DESC,event.relevance_score DESC
      LIMIT 50`,
     [eventFamilyTypes(input.eventType), input.evidence.observedAt, Math.round(bounds.maxHours * 3_600),
      anchoredLocationId, latitude, longitude, bounds.maxDistanceKm, country, entityKeys],
@@ -800,9 +830,11 @@ async function persistRelatedEventRelationships(
     const supports = [
       components.location === 1 ? "the same specific location" : null,
       components.spatial >= 0.25 ? "bounded spatial proximity" : null,
-      components.entity >= 0.25 ? "shared entity anchors" : null,
+      components.instrument === 1 ? "the same financial instrument" : null,
+      components.entity >= 0.25 ? `shared entity anchors${correlation.matchedEntities?.length ? ` (${correlation.matchedEntities.join(", ")})` : ""}` : null,
+      components.event_type === 1 ? "the same event topic" : null,
     ].filter((value): value is string => Boolean(value));
-    const rationale = `Potentially related by compatible event family/time and ${supports.join(" and ")} (weighted correlation ${correlation.score.toFixed(4)}). This link does not assert causation or that the events are identical.`;
+    const rationale = `Potentially related by nearby timing and ${supports.join(" and ")} (weighted correlation ${correlation.score.toFixed(4)}). This link does not assert causation or that the events are identical.`;
     await client.query(
       `WITH candidate AS (
          SELECT id FROM intelligence_event WHERE id=$2::uuid AND id<>$1::uuid
@@ -841,7 +873,7 @@ async function correlateIntelligenceSignal(
   return withTransaction(async (client) => {
     const upsertOptions = options.createWhenUnmatched
       ? {}
-      : { suppressAlertCandidate: true, suppressEarthObservation: true };
+      : { suppressAlertCandidate: true, suppressEarthObservation: true, preserveCanonical: true };
     const entityKeys = normalizedEntityKeys(input.entityKeys);
     const location = await loadSignalLocation(client, input.primaryLocationId);
     const coordinates = resolveSignalCoordinates({
@@ -855,6 +887,28 @@ async function correlateIntelligenceSignal(
       : { ...input, latitude: null, longitude: null };
     await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, [correlationLockKey(normalizedInput, location, entityKeys)]);
     const bounds = correlationBounds(normalizedInput.eventType);
+    const candidates = await findCorrelationCandidates(client, normalizedInput, location, entityKeys, bounds);
+    const signalCandidate: CorrelationCandidate = {
+      eventType: normalizedInput.eventType,
+      observedAt: normalizedInput.evidence.observedAt,
+      latitude: normalizedInput.latitude ?? null,
+      longitude: normalizedInput.longitude ?? null,
+      locationId: location?.location_type === "country" ? null : location?.id ?? null,
+      countryIso2: normalizedInput.primaryCountryIso2 ?? null,
+      entityKeys,
+      sourceReliability: normalizedInput.evidence.confidence,
+    };
+    const ranked = rankCorrelationCandidates(signalCandidate, candidates.map((candidate) => ({
+      ...candidate,
+      eventType: candidate.event_type,
+      observedAt: new Date(candidate.last_activity_time),
+      latitude: candidate.candidate_latitude == null ? null : Number(candidate.candidate_latitude),
+      longitude: candidate.candidate_longitude == null ? null : Number(candidate.candidate_longitude),
+      locationId: candidate.location_type === "country" ? null : candidate.primary_location_id,
+      countryIso2: candidate.primary_country_iso2,
+      entityKeys: candidate.entity_keys ?? [],
+      sourceReliability: Number(candidate.confidence),
+    })), bounds);
     const existingSource = await findExistingSourceEvent(client, normalizedInput);
     if (existingSource) {
       const storedFactors = existingSource.correlation_factors && typeof existingSource.correlation_factors === "object"
@@ -878,31 +932,21 @@ async function correlateIntelligenceSignal(
         String(storedFactors.methodology ?? (storedDecision === "created" ? "source-origin-v2" : "weighted-v1")),
         "Existing source record retained its canonical event assignment.",
       );
-      return selected;
+      const related = qualifiedRelatedCorrelationCandidates(ranked, selected.id, bounds.threshold);
+      await persistRelatedEventRelationships(client, selected.id, related);
+      for (const { candidate } of related) await recomputeIntelligenceEventAggregateTx(client, candidate.id);
+      const updated = await recomputeIntelligenceEventAggregateTx(client, selected.id);
+      return updated ? eventToApi(updated) : selected;
     }
 
-    const candidates = await findCorrelationCandidates(client, normalizedInput, location, entityKeys, bounds);
-    const signalCandidate: CorrelationCandidate = {
-      eventType: normalizedInput.eventType,
-      observedAt: normalizedInput.evidence.observedAt,
-      latitude: normalizedInput.latitude ?? null,
-      longitude: normalizedInput.longitude ?? null,
-      locationId: location?.location_type === "country" ? null : location?.id ?? null,
-      countryIso2: normalizedInput.primaryCountryIso2 ?? null,
-      entityKeys,
-      sourceReliability: normalizedInput.evidence.confidence,
-    };
-    const ranked = rankCorrelationCandidates(signalCandidate, candidates.map((candidate) => ({
-      ...candidate,
-      eventType: candidate.event_type,
-      observedAt: new Date(candidate.last_activity_time),
-      latitude: candidate.candidate_latitude == null ? null : Number(candidate.candidate_latitude),
-      longitude: candidate.candidate_longitude == null ? null : Number(candidate.candidate_longitude),
-      locationId: candidate.location_type === "country" ? null : candidate.primary_location_id,
-      countryIso2: candidate.primary_country_iso2,
-      entityKeys: candidate.entity_keys ?? [],
-      sourceReliability: Number(candidate.confidence),
-    })), bounds);
+    if (!options.createWhenUnmatched) {
+      for (const entry of ranked) {
+        const { temporal, entity, instrument } = entry.correlation.components;
+        if (temporal > 0 && (entity >= 0.5 || instrument === 1) && entry.correlation.score >= bounds.threshold) {
+          entry.correlation.accepted = true;
+        }
+      }
+    }
     const { strongest, accepted, decisionSubject } = selectCorrelationOutcome(ranked);
     if (accepted) await client.query(`SELECT id FROM intelligence_event WHERE id=$1::uuid FOR UPDATE`, [accepted.candidate.id]);
 
@@ -914,7 +958,7 @@ async function correlateIntelligenceSignal(
     const decision = accepted ? "attached" as const : "created" as const;
     const methodology = accepted?.correlation.methodology ?? strongest?.correlation.methodology ?? "source-origin-v2";
     const factors = accepted
-      ? { ...accepted.correlation.components, methodology, decision }
+      ? { ...accepted.correlation.components, matched_entities: accepted.correlation.matchedEntities ?? [], methodology, decision }
       : {
           ...(strongest?.correlation.components ?? {}),
           methodology,
@@ -946,7 +990,11 @@ async function correlateIntelligenceSignal(
       selected.id,
       qualifiedRelatedCorrelationCandidates(ranked, selected.id, bounds.threshold),
     );
-    return selected;
+    const updated = await recomputeIntelligenceEventAggregateTx(client, selected.id);
+    for (const { candidate } of qualifiedRelatedCorrelationCandidates(ranked, selected.id, bounds.threshold)) {
+      await recomputeIntelligenceEventAggregateTx(client, candidate.id);
+    }
+    return updated ? eventToApi(updated) : selected;
   });
 }
 
@@ -1225,7 +1273,7 @@ export async function upsertStandaloneContextSourceSignal(input: IntelligenceSig
 export async function upsertIntelligenceSignalTx(
   client: PoolClient,
   input: IntelligenceSignalInput,
-  options: { suppressAlertCandidate?: boolean; suppressEarthObservation?: boolean } = {},
+  options: { suppressAlertCandidate?: boolean; suppressEarthObservation?: boolean; preserveCanonical?: boolean } = {},
 ) {
   const existing = await client.query<Pick<EventRow, "id" | "severity" | "confidence" | "metadata">>(
     `SELECT id,severity,confidence,metadata FROM intelligence_event WHERE dedupe_key = $1 FOR UPDATE`,
@@ -1247,7 +1295,7 @@ export async function upsertIntelligenceSignalTx(
     eventMetadata.exact_geography = true;
     eventMetadata.geography_provenance_key = canonicalEvidenceKey;
   }
-  const replaceCanonical = shouldReplaceCanonicalSignal({
+  const replaceCanonical = !options.preserveCanonical && shouldReplaceCanonicalSignal({
     eventExists: Boolean(existing.rows[0]),
     existingCanonicalEvidenceKey: existing.rows[0]?.metadata?.canonical_evidence_key,
     existingCanonicalRank: existingCanonicalRank(existing.rows[0]),
@@ -1256,6 +1304,8 @@ export async function upsertIntelligenceSignalTx(
   });
   const existingSeverity = existing.rows[0]?.severity;
   const severity = existingSeverity ? maxSeverity(existingSeverity, input.severity) : input.severity;
+  const confidence = existing.rows[0] && ["context", "model_interpretation", "assessment"].includes(input.evidence.relationship)
+    ? Number(existing.rows[0].confidence) : input.confidence;
   const eventResult = await client.query<EventRow>(
     `INSERT INTO intelligence_event (
        dedupe_key, event_type, title, summary, status, severity, confidence,
@@ -1307,7 +1357,7 @@ export async function upsertIntelligenceSignalTx(
      RETURNING *`,
     [
       input.dedupeKey, input.eventType, input.title, input.summary, input.status ?? "active",
-      severity, Math.min(1, Math.max(0, input.confidence)), input.startTime, input.lastActivityTime,
+      severity, Math.min(1, Math.max(0, confidence)), input.startTime, input.lastActivityTime,
       input.primaryLocationId ?? null, input.primaryCountryIso2?.toUpperCase() ?? null,
       trustedIncomingCoordinates?.latitude ?? null,
       trustedIncomingCoordinates?.longitude ?? null,

@@ -35,10 +35,13 @@ export function presentEventLinkage(
   const eventType = factorNumber(factors, "event_type");
   const country = factorNumber(factors, "country");
   const governedRationale = factorString(factors, "rationale");
+  const matchedEntities = Array.isArray(factors?.matched_entities)
+    ? factors.matched_entities.filter((value): value is string => typeof value === "string").slice(0, 3) : [];
   const uniqueCountryCandidate = factors?.unique_country_candidate === true;
   const anchorReasons: string[] = [];
   const supportingReasons: string[] = [];
 
+  if (factorNumber(factors, "instrument") === 1) anchorReasons.push(`the same financial instrument${matchedEntities.some((value) => value.startsWith("instrument:")) ? ` (${matchedEntities.filter((value) => value.startsWith("instrument:")).map((value) => value.slice(11).toUpperCase()).join(", ")})` : ""}`);
   if (location >= 0.99) anchorReasons.push("the same named location");
   else if (spatial >= 0.45) anchorReasons.push("nearby mapped geography");
   else if (spatial >= 0.25) anchorReasons.push("overlapping mapped geography");
@@ -106,4 +109,16 @@ function joinReasons(reasons: string[]) {
   if (reasons.length <= 1) return reasons[0] ?? "available evidence";
   if (reasons.length === 2) return `${reasons[0]} and ${reasons[1]}`;
   return `${reasons.slice(0, -1).join(", ")}, and ${reasons[reasons.length - 1]}`;
+}
+
+/** Show only dimensions that actually contributed to the stored connection. */
+export function connectionDimensions(factors: CorrelationFactors): string[] {
+  return [
+    factorNumber(factors, "location") >= 0.99 ? "Named place" : null,
+    factorNumber(factors, "spatial") >= 0.25 ? "Nearby area" : null,
+    factorNumber(factors, "instrument") === 1 ? "Same stock / instrument" : null,
+    factorNumber(factors, "entity") >= 0.25 ? "Shared entity" : null,
+    factorNumber(factors, "event_type") >= 0.99 ? "Same event topic" : null,
+    factorNumber(factors, "temporal") > 0 ? "Nearby timing" : null,
+  ].filter((value): value is string => value !== null);
 }

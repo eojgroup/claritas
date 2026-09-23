@@ -221,6 +221,9 @@ test("coverage assessments do not make the canonical event newly active", async 
 test("airport reporting is aviation, not the port substring", async () => {
   const { classifyEventType } = await consumer;
   assert.equal(classifyEventType("Bristol Airport flights cancelled or delayed - updates"), "aviation_disruption");
+  for (const airport of ["Heathrow", "Dubai International", "Singapore Changi", "Frankfurt"]) {
+    assert.equal(classifyEventType(`${airport} Airport flights cancelled or delayed`), "aviation_disruption");
+  }
   assert.equal(classifyEventType("Report on elections"), "reported_development");
   assert.equal(classifyEventType("Port closure delays tankers"), "transport_disruption");
 });

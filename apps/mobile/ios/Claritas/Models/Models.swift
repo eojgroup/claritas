@@ -539,10 +539,29 @@ enum IntelligenceLinkagePresentation {
     /// service. Country and time are normally supporting context; the one
     /// exception is the governed news fallback for exactly one major
     /// same-family event in that country and time window.
+    static func dimensions(for factors: JSONValue?) -> [String] {
+        var values: [String] = []
+        if factor("location", in: factors) >= 0.99 { values.append("Named place") }
+        if factor("spatial", in: factors) >= 0.25 { values.append("Nearby area") }
+        if factor("instrument", in: factors) == 1 { values.append("Same stock / instrument") }
+        if factor("entity", in: factors) >= 0.25 { values.append("Shared entity") }
+        if factor("event_type", in: factors) >= 0.99 { values.append("Same event topic") }
+        if factor("temporal", in: factors) > 0 { values.append("Nearby timing") }
+        return values
+    }
+
     static func reasons(for factors: JSONValue?) -> [String] {
         guard factors?.object != nil else { return [] }
         var anchorReasons: [String] = []
         var supportingReasons: [String] = []
+        if factor("instrument", in: factors) == 1 {
+            var symbols: [String] = []
+            if let value = factors?.object?["matched_entities"], case .array(let keys) = value {
+                symbols = keys.compactMap(\.string).filter { $0.hasPrefix("instrument:") }
+                    .prefix(3).map { String($0.dropFirst(11)).uppercased() }
+            }
+            anchorReasons.append("the same financial instrument" + (symbols.isEmpty ? "" : " (\(symbols.joined(separator: ", ")))") )
+        }
         if factor("location", in: factors) >= 1 { anchorReasons.append("the same mapped location") }
         if factor("spatial", in: factors) >= 0.45 { anchorReasons.append("a nearby mapped area") }
         if factor("entity", in: factors) >= 0.5 { anchorReasons.append("shared named entities") }
@@ -3041,8 +3060,25 @@ struct SocialEventContext: Codable, Identifiable {
     }
 }
 
+struct RegionalReporting: Codable {
+    struct Item: Codable, Identifiable {
+        let id: String
+        let title: String
+        let url: String
+        let publisher: String
+        let observed_at: Date
+        let published_at: String?
+        let scope_label: String
+    }
+    let window_start: Date
+    let window_end: Date
+    let notice: String
+    let items: [Item]
+}
+
 struct IntelligenceEventDetail: Codable {
     let social_context: [SocialEventContext]
+    let regional_reporting: RegionalReporting?
     let event: IntelligenceEvent
     let understanding: IntelligenceEventUnderstanding?
     let evidence: [IntelligenceEvidence]
@@ -3053,12 +3089,13 @@ struct IntelligenceEventDetail: Codable {
     let epistemic_notice: String
 
     enum CodingKeys: String, CodingKey {
-        case event, understanding, evidence, linked_news, locations, earth_observations, related_events, epistemic_notice, social_context
+        case event, understanding, evidence, linked_news, locations, earth_observations, related_events, epistemic_notice, social_context, regional_reporting
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         social_context = try container.decodeIfPresent([SocialEventContext].self, forKey: .social_context) ?? []
+        regional_reporting = try container.decodeIfPresent(RegionalReporting.self, forKey: .regional_reporting)
         event = try container.decode(IntelligenceEvent.self, forKey: .event)
         understanding = try container.decodeIfPresent(IntelligenceEventUnderstanding.self, forKey: .understanding)
         evidence = try container.decodeIfPresent([IntelligenceEvidence].self, forKey: .evidence) ?? []

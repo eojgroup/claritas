@@ -393,7 +393,7 @@ describe("IntelligenceWorkspace", () => {
     });
 
     render(<IntelligenceWorkspace initialEventId={event.id} />);
-    expect(await screen.findByRole("heading", { name: "What other signals are associated with this event?" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Signal connections" })).toBeTruthy();
     expect(screen.getAllByText("News report").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Weather signal").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Transport signal").length).toBeGreaterThan(0);
@@ -402,6 +402,12 @@ describe("IntelligenceWorkspace", () => {
       element.textContent?.includes("Why shown: Shown as a likely connection because of")
     ))).toBe(true);
     expect(screen.getAllByText("Context").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Transport signal · 1" }));
+    expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("1 record · Transport signal");
+    expect(document.querySelector("#event-evidence-transport-evidence")).toBeTruthy();
+    expect(document.querySelector("#event-evidence-weather-evidence")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /All evidence/ }));
+    expect(document.querySelector("#event-evidence-weather-evidence")).toBeTruthy();
   });
 
   it("presents coverage assessments as explicit statuses instead of likely linked signals", async () => {
@@ -479,9 +485,9 @@ describe("IntelligenceWorkspace", () => {
     expect(screen.getAllByText("Transport comparison pending").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Insufficient nearby transport coverage").length).toBeGreaterThan(0);
     expect(screen.getAllByText("No nearby transport coverage").length).toBeGreaterThan(0);
-    expect(screen.queryByRole("heading", { name: "What other signals are associated with this event?" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Signal connections" })).toBeNull();
     expect(screen.getByText(/No news record is explicitly linked to this event yet/i)).toBeTruthy();
-    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.getAllByRole("status").length).toBeGreaterThan(0);
     expect(screen.getByText("0 source records")).toBeTruthy();
     expect(screen.getByText(/0 linked reports/i)).toBeTruthy();
     expect(screen.queryByText("Automated reporting coverage assessment")).toBeNull();
@@ -585,4 +591,18 @@ describe("IntelligenceWorkspace", () => {
       metadata: { email_enabled: true },
     })));
   });
+  it("shows regional reporting separately from linked evidence and exposes connection dimensions", async () => {
+    const detail = await fetchIntelligenceEvent(event.id);
+    vi.mocked(fetchIntelligenceEvent).mockResolvedValue({ ...detail, regional_reporting: {
+      window_start: "2026-08-10T08:00:00Z", window_end: "2026-08-12T08:00:00Z",
+      notice: "Nearby reporting shares a place and time window only. It is not linked evidence and does not increase importance or confidence.",
+      items: [{ id: "regional", title: "Other regional development", url: "https://example.test/regional", publisher: "Regional Wire", observed_at: "2026-08-11T08:00:00Z", published_at: null, scope_label: "Same country · AE" }],
+    } });
+    render(<IntelligenceWorkspace initialEventId={event.id} />);
+    expect(await screen.findByRole("heading", { name: "Nearby reporting" })).toBeTruthy();
+    expect(screen.getByText("Same country · AE · context only")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Other regional development" }).closest(".regional-reporting")).toBeTruthy();
+    expect(document.querySelector("#event-evidence-regional")).toBeNull();
+  });
+
 });

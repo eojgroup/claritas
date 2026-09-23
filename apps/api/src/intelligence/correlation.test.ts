@@ -4,6 +4,7 @@ import {
   buildAlertDedupeKey,
   buildEventDedupeKey,
   computeSignalPriority,
+  explicitInstrumentKeys,
   eventFamilyTypes,
   evaluateMarketMove,
   haversineDistanceKm,
@@ -211,4 +212,40 @@ test("market movements emit only above the governed threshold", () => {
   assert.equal(evaluateMarketMove(105, 100, 0.05)?.severity, "medium");
   assert.equal(evaluateMarketMove(112, 100, 0.05)?.severity, "high");
   assert.equal(evaluateMarketMove(1, 0, 0.05), null);
+});
+
+
+test("financial mentions produce specific instrument anchors without treating ordinary words as tickers", () => {
+  assert.deepEqual(explicitInstrumentKeys("$AAPL and NASDAQ: AAPL versus $MSFT; $100, CAN and flight delays"), ["instrument:aapl", "instrument:msft"]);
+});
+
+test("instrument and company links span locations but never merge different event topics", () => {
+  const observedAt = new Date("2026-09-23T10:00:00Z");
+  const news = { eventType: "reported_development", observedAt, entityKeys: ["instrument:aapl", "supplier", "company"] };
+  const market = { id: "market", eventType: "market_move", observedAt, entityKeys: ["instrument:aapl", "apple"] };
+  const ranked = rankCorrelationCandidates(news, [market]);
+  assert.equal(ranked[0].correlation.accepted, false);
+  assert.equal(ranked[0].correlation.components.instrument, 1);
+  assert.equal(qualifiedRelatedCorrelationCandidates(ranked, "news", 0.58).length, 1);
+  const stale = rankCorrelationCandidates(news, [{ ...market, observedAt: new Date("2026-09-01T10:00:00Z") }]);
+  assert.equal(qualifiedRelatedCorrelationCandidates(stale, "news", 0.58).length, 0);
+  const company = rankCorrelationCandidates({ ...news, entityKeys: ["acme company"] }, [{ ...market, entityKeys: ["acme company"] }]);
+  assert.equal(qualifiedRelatedCorrelationCandidates(company, "news", 0.58).length, 1);
+});
+
+test("cross-topic geographic links need a specific place and proximity; topic and country are insufficient", () => {
+  const base = { observedAt: new Date("2026-09-23T10:00:00Z"), countryIso2: "GB", latitude: 51.38, longitude: -2.71, locationId: "airport" };
+  const ranked = rankCorrelationCandidates({ ...base, eventType: "aviation_disruption" }, [{ ...base, id: "storm", eventType: "severe_storm" }]);
+  assert.equal(ranked[0].correlation.accepted, false);
+  assert.equal(qualifiedRelatedCorrelationCandidates(ranked, "airport-event", 0.58).length, 1);
+  const broad = rankCorrelationCandidates({ eventType: "market_move", observedAt: base.observedAt, countryIso2: "GB" }, [{ id: "generic", eventType: "market_move", observedAt: base.observedAt, countryIso2: "GB" }]);
+  assert.equal(qualifiedRelatedCorrelationCandidates(broad, "other", 0.58).length, 0);
+});
+
+
+test("a shared company or stock relates general stories without merging them", () => {
+  const signal = { eventType: "reported_development", observedAt: new Date("2026-09-23T10:00:00Z"), entityKeys: ["instrument:aapl"] };
+  const ranked = rankCorrelationCandidates(signal, [{ ...signal, id: "other-story" }]);
+  assert.equal(ranked[0].correlation.accepted, false);
+  assert.equal(qualifiedRelatedCorrelationCandidates(ranked, "story", 0.58).length, 1);
 });

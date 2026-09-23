@@ -1,15 +1,18 @@
-import { query } from "../db";
+import { withTransaction } from "../db";
+import { recomputeIntelligenceEventAggregateTx } from "./service";
 
 /** Bounded observed flight context; never infer a cancellation from absent ADS-B samples. */
 export async function attachAirportTransportContext(eventId: string): Promise<number> {
-  const result = await query(`INSERT INTO intelligence_event_evidence (
+  return withTransaction(async (client) => {
+    const result = await client.query(`INSERT INTO intelligence_event_evidence (
       event_id,domain,evidence_type,source_record_type,source_record_id,
       observed_at,location_id,confidence,relationship,provenance,attribution,correlation_score,correlation_factors,metadata)
     SELECT event.id,'transport','nearby_flight_observation','airport_flight',flight.id::text,
       flight.observed_at,location.id,0.6,'context',
-      jsonb_build_object('provider',flight.source_name,'entity_id',flight.entity_id),
+      jsonb_build_object('provider',flight.source_name,'source_diversity_key',flight.source_name,'entity_id',flight.entity_id),
       flight.source_name,0.6,
-      jsonb_build_object('decision','attached','association_type','contextual','rationale',
+      jsonb_build_object('decision','attached','association_type','contextual','location',1,
+        'temporal',GREATEST(0,1-abs(extract(epoch FROM (flight.observed_at-event.start_time)))/21600),'rationale',
         'Flight observed within 10 km of the named airport and six hours of the report; not cancellation confirmation.'),
       jsonb_build_object('title','Flight activity near ' || location.canonical_name,
         'description',concat_ws(' ',COALESCE(flight.callsign,flight.flight_number,flight.entity_id),
@@ -27,12 +30,12 @@ export async function attachAirportTransportContext(eventId: string): Promise<nu
         AND ST_DWithin(ST_SetSRID(ST_MakePoint(snapshot.longitude,snapshot.latitude),4326)::geography,location.center,10000)
       ORDER BY snapshot.observed_at DESC, snapshot.id LIMIT 10
     ) flight
-    WHERE event.id=$1::uuid AND event.event_type='aviation_disruption' AND event.status <> 'dismissed'
+    WHERE event.id=$1::uuid AND event.event_type IN ('aviation_disruption','transport_disruption','severe_storm','security_incident','wildfire','flood') AND event.status <> 'dismissed'
     ON CONFLICT (event_id,domain,source_record_type,source_record_id) DO NOTHING
     RETURNING id`, [eventId]);
-  // Context must not increase confidence, severity or claim cancellation counts.
-  if (result.rows.length) await query(`UPDATE intelligence_event SET domain_count=(
-    SELECT count(DISTINCT domain) FROM intelligence_event_evidence WHERE event_id=$1::uuid
-  ),updated_at=now() WHERE id=$1::uuid`, [eventId]);
-  return result.rows.length;
+    // Use the shared diversity/priority policy for every airport. Context is
+    // not independent confirmation and never changes severity or urgency.
+    if (result.rows.length) await recomputeIntelligenceEventAggregateTx(client, eventId);
+    return result.rows.length;
+  });
 }

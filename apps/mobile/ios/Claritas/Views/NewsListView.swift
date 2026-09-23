@@ -461,12 +461,19 @@ struct NewsHighlightsView: View {
                             Text("\(item.publisher ?? item.source_name ?? "Reporting source") · \(item.chronologyDisplayText)")
                                 .font(.caption2).foregroundStyle(.secondary)
                             if let raw = item.url, let url = URL(string: raw) {
-                                Link(item.presentationTitle, destination: url)
+                                Link(destination: url) {
+                                    Text(item.presentationTitle)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                    .buttonStyle(.plain)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                     .multilineTextAlignment(.leading)
                             } else {
                                 Text(item.presentationTitle).font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             if let disclosure = item.translationDisclosure {
                                 Text(disclosure).font(.caption2).foregroundStyle(.secondary)

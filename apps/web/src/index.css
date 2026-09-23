@@ -5097,3 +5097,23 @@ body {
   .news-highlights li + li { border-top: 1px solid var(--shell-border); }
   .dashboard-news-headline { text-align: left; }
 }
+
+/* Shared investigation pattern: overview, signal type, source detail. */
+.event-signal-group { min-width: 0; overflow-wrap: anywhere; }
+.event-signal-group[aria-pressed="true"], .event-evidence-filter[aria-pressed="true"] { border-color: var(--shell-accent); background: var(--shell-surface-muted, var(--shell-surface)); }
+.signal-coverage-track { height: 4px; margin-top: 12px; border-radius: 8px; background: var(--shell-border); overflow: hidden; }
+.signal-coverage-track span { display: block; height: 100%; background: var(--shell-accent); }
+.event-evidence-filter { border: 1px solid var(--shell-border); border-radius: 16px; padding: 8px 12px; min-height: 44px; font-size: 12px; color: var(--shell-ink); text-align: left; }
+.news-highlights li > div { min-width: 0; flex: 1; text-align: left; overflow-wrap: anywhere; }
+.news-highlight-rank { flex: 0 0 2ch; }
+.news-highlights a, .news-highlights strong { text-align: left; }
+
+.event-signal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); gap: 8px; }
+
+.signal-connection-hub { display: grid; gap: 4px; max-width: 32rem; margin: 16px auto 0; padding: 12px; text-align: center; border: 1px solid var(--shell-border); border-radius: 12px; background: var(--shell-bg); }
+.signal-connection-hub span, .signal-connection-hub small { font-size: 11px; color: var(--shell-muted); }
+.signal-connection-hub strong { font-size: 14px; color: var(--shell-ink); }
+.connection-dimensions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.connection-dimensions span { font-size: 10px; padding: 3px 6px; border-radius: 5px; background: var(--shell-surface); border: 1px solid var(--shell-border); color: var(--shell-ink); }
+
+.regional-context-chip { display: inline-block; padding: 3px 6px; border: 1px dashed var(--shell-border); border-radius: 5px; color: var(--shell-muted); font-size: 10px; }

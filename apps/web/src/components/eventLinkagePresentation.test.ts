@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { presentEventLinkage, signalDomainLabel } from "./eventLinkagePresentation";
+import { connectionDimensions, presentEventLinkage, signalDomainLabel } from "./eventLinkagePresentation";
 
 describe("event linkage presentation", () => {
   it("discloses anchored matching factors without claiming causation", () => {
@@ -56,4 +56,10 @@ describe("event linkage presentation", () => {
     expect(signalDomainLabel("transport", "ais_vessel")).toBe("Transport signal");
     expect(signalDomainLabel("news", "item")).toBe("News report");
   });
+});
+
+
+it("exposes the recorded matching dimensions without inventing geography", () => {
+  expect(connectionDimensions({ instrument: 1, temporal: 0.8, event_type: 1 })).toEqual(["Same stock / instrument", "Same event topic", "Nearby timing"]);
+  expect(connectionDimensions({ country: 1 })).toEqual([]);
 });

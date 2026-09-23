@@ -76,7 +76,10 @@ export function qualifiedRelatedCorrelationCandidates<T extends CorrelationCandi
       const { location, spatial, entity } = correlation.components;
       return candidate.id !== selectedEventId
         && correlation.score >= minimumScore
-        && (location === 1 || spatial >= 0.25 || entity >= 0.25);
+        && correlation.components.temporal > 0
+        && (correlation.components.event_type === 1
+          ? (location === 1 || spatial >= 0.25 || entity >= 0.25)
+          : ((location === 1 && spatial >= 0.45) || entity >= 0.5 || correlation.components.instrument === 1));
     })
     .slice(0, Math.max(0, Math.min(10, Math.trunc(limit))));
 }
@@ -153,6 +156,7 @@ export function scoreCorrelation(
   const union = new Set([...leftEntities, ...rightEntities]);
   const shared = [...leftEntities].filter((value) => rightEntities.has(value)).length;
   const entity = union.size ? shared / union.size : 0;
+  const instrument = [...leftEntities].some((key) => key.startsWith("instrument:") && rightEntities.has(key)) ? 1 : 0;
   const eventType = eventFamilyTypes(left.eventType)[0] === eventFamilyTypes(right.eventType)[0] ? 1 : 0;
   const sourceReliability = clamp(((left.sourceReliability ?? 0.7) + (right.sourceReliability ?? 0.7)) / 2);
 
@@ -162,10 +166,11 @@ export function scoreCorrelation(
     location,
     country,
     entity,
+    instrument,
     event_type: eventType,
     source_reliability: sourceReliability,
   };
-  const score = clamp(
+  const anchoredEventScore = clamp(
     temporal * 0.18
       + spatial * 0.18
       + location * 0.22
@@ -174,11 +179,19 @@ export function scoreCorrelation(
       + eventType * 0.15
       + sourceReliability * 0.07,
   );
+  // Entity/instrument connections can span countries and need no physical
+  // coordinates. Time remains mandatory; broad topic/time alone earns no edge.
+  const entityScore = (entity >= 0.5 || instrument === 1)
+    ? temporal * 0.3 + Math.max(entity, instrument) * 0.5 + sourceReliability * 0.1 + eventType * 0.1
+    : 0;
+  // Entity attention can relate two stories without proving they are the same event.
+  const score = Math.max(anchoredEventScore, entityScore);
   return {
     score: Number(score.toFixed(4)),
-    accepted: score >= threshold && (location === 1 || spatial >= 0.45 || entity >= 0.5),
+    matchedEntities: [...leftEntities].filter((key) => rightEntities.has(key)).slice(0, 8),
+    accepted: eventType === 1 && temporal > 0 && anchoredEventScore >= threshold && (location === 1 || spatial >= 0.45 || entity >= 0.5 || instrument === 1),
     components,
-    methodology: `weighted-v1; max_hours=${maxHours}; max_distance_km=${maxDistanceKm}; threshold=${threshold}`,
+    methodology: `multi-dimension-v2; max_hours=${maxHours}; max_distance_km=${maxDistanceKm}; threshold=${threshold}`,
   };
 }
 
@@ -252,4 +265,10 @@ export function computeSignalPriority(input: {
     + components.physical_observation * 0.08
     + components.anomaly * 0.06;
   return { score: Number(clamp(score).toFixed(4)), components, methodology: "signal-priority-v1" };
+}
+
+/** Explicit financial mentions only: never interpret an ordinary word as a ticker. */
+export function explicitInstrumentKeys(text: string): string[] {
+  return [...new Set(Array.from(text.slice(0, 8000).matchAll(/(?:\$|\b(?:NASDAQ|NYSE|LSE|XETRA)\s*:\s*)([A-Z][A-Z0-9.-]{0,14})\b/g),
+    (match) => `instrument:${match[1].toLowerCase()}`))].slice(0, 20);
 }

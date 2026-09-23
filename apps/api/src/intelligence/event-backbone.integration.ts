@@ -488,6 +488,39 @@ test("outbox consumption, multi-domain evidence, alerts, and idempotency share o
   assert.ok(Number(afterPhysical.rows[0].relevance_score) > Number(afterModel.rows[0].relevance_score));
 });
 
+test("entity-linked topics stay distinct, explain their connection and receive an idempotent importance bonus", async () => {
+  const now = new Date();
+  const key = `instrument:fixture-${randomUUID()}`;
+  const signal = (eventType: string, domain: "news" | "market") => ({
+    dedupeKey: buildEventDedupeKey([key, domain]), eventType,
+    title: `Fixture ${domain} about ${key}`, summary: "Entity connection without geography",
+    severity: "low" as const, confidence: 0.8, startTime: now, lastActivityTime: now,
+    relevanceScore: 0.3, urgencyScore: 0.2, materialityScore: 0.2,
+    entityKeys: [key], scoreComponents: {},
+    evidence: { domain, evidenceType: "fixture", sourceRecordType: "integration_dimensions",
+      sourceRecordId: `${key}:${domain}`, observedAt: now, confidence: 0.8,
+      relationship: "reported" as const, provenance: { provider: domain } },
+  });
+  const news = await correlateAndUpsertIntelligenceSignal(signal("reported_development", "news"));
+  const market = await correlateAndUpsertIntelligenceSignal(signal("market_move", "market"));
+  assert.notEqual(news.id, market.id);
+  const related = await query("SELECT * FROM intelligence_event_relationship WHERE from_event_id=$1 AND to_event_id=$2", [news.id, market.id]);
+  assert.equal(related.rows.length, 1);
+  assert.match(related.rows[0].rationale, /same financial instrument/);
+  const before = await query("SELECT relevance_score,confidence FROM intelligence_event WHERE id=$1", [news.id]);
+  assert.ok(Number(before.rows[0].relevance_score) > news.relevance_score);
+  await correlateAndUpsertIntelligenceSignal(signal("reported_development", "news"));
+  const after = await query("SELECT relevance_score,confidence FROM intelligence_event WHERE id=$1", [news.id]);
+  assert.equal(Number(after.rows[0].relevance_score), Number(before.rows[0].relevance_score));
+  assert.equal(Number(after.rows[0].confidence), 0.8);
+  const { getRegionalReporting } = await import("./regional-reporting");
+  const regional = await getRegionalReporting({ id: news.id, primary_country_iso2: "GB", start_time: now });
+  assert.ok(regional);
+  assert.ok(regional.items.length <= 6);
+  const { attachAirportTransportContext } = await import("./airport-transport-context");
+  assert.equal(await attachAirportTransportContext(news.id), 0);
+});
+
 test.after(async () => {
   await pool.end();
 });

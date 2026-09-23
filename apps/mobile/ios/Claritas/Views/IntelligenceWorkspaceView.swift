@@ -18,6 +18,10 @@ struct IntelligenceWorkspaceView: View {
     @State private var detailError: String?
     @State private var includeExpired = false
     @State private var showsCompactDetail = false
+    @State private var evidenceFilter: String?
+    @State private var evidenceFilterEventID: String?
+    @State private var evidenceNavigationID = UUID()
+    @State private var detailScrollTarget = "investigation-evidence"
 
     var body: some View {
         BrandBackground {
@@ -32,10 +36,7 @@ struct IntelligenceWorkspaceView: View {
         .task(id: selectedID) { await loadGibsContext() }
         .navigationDestination(isPresented: $showsCompactDetail) {
             BrandBackground {
-                ScrollView {
-                    eventDetail
-                        .padding(14)
-                }
+                detailScrollView
                 .refreshable {
                     await loadDetail()
                     await loadGibsContext()
@@ -53,6 +54,17 @@ struct IntelligenceWorkspaceView: View {
             if next == .regular {
                 showsCompactDetail = false
                 if selectedID == nil { selectedID = events.first?.id }
+            }
+        }
+    }
+
+    private var detailScrollView: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                eventDetail.padding(14)
+            }
+            .onChange(of: evidenceNavigationID) { _ in
+                withAnimation { proxy.scrollTo(detailScrollTarget, anchor: .top) }
             }
         }
     }
@@ -85,10 +97,7 @@ struct IntelligenceWorkspaceView: View {
 
                 Divider()
 
-                ScrollView {
-                    eventDetail
-                        .padding(16)
-                }
+                detailScrollView
                 .frame(maxWidth: .infinity)
                 .refreshable {
                     await loadDetail()
@@ -207,7 +216,7 @@ struct IntelligenceWorkspaceView: View {
                                         .multilineTextAlignment(.leading)
                                     HStack(spacing: 8) {
                                         Label(event.location_name ?? event.primary_country_iso2 ?? "Global", systemImage: "mappin")
-                                        Text("\(event.domain_count) lenses · \(event.evidence_count) evidence")
+                                        Text("\(event.domain_count) signal types · \(event.evidence_count) evidence")
                                     }
                                     .font(.caption2)
                                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -344,7 +353,118 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
+                let linkedSignalEvidence = detail.evidence.filter { !isContextAssessment($0) }
+                if !linkedSignalEvidence.isEmpty {
+                    let evidenceByDomain = Dictionary(grouping: linkedSignalEvidence, by: signalGroup)
+                    BrandCard(title: "Signal connections", icon: "link") {
+                        Text("Every source below is attached to the active investigation. “Likely linked” means the recorded linkage passed a governed threshold; it does not mean one signal caused another.")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        VStack(spacing: 4) {
+                            Text("This investigation").font(.caption2).foregroundStyle(.secondary)
+                            Text(detail.event.title).font(.caption.weight(.semibold))
+                            Text("↓ Connected evidence · choose a type to inspect").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .multilineTextAlignment(.center)
+                        .padding(10)
+                        .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 10) {
+                            ForEach(sortedSignalDomains(evidenceByDomain), id: \.self) { domain in
+                                let records = evidenceByDomain[domain] ?? []
+                                let hasLikelyLink = records.contains {
+                                    IntelligenceLinkagePresentation.decision(in: $0.correlation_factors) == "attached"
+                                }
+                                Button {
+                                    evidenceFilter = domain
+                                    evidenceFilterEventID = detail.event.id
+                                    detailScrollTarget = "investigation-evidence"
+                                    evidenceNavigationID = UUID()
+                                } label: {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 7) {
+                                        Image(systemName: signalDomainIcon(domain))
+                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                        Text("\(signalDomainLabel(domain)) · \(records.count)")
+                                            .font(.caption.weight(.bold))
+                                        Spacer(minLength: 0)
+                                    }
+                                    Text(hasLikelyLink ? "LIKELY LINKED SIGNALS" : "EVENT EVIDENCE")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(hasLikelyLink ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
+                                    Text("Example: \(signalLinkExplanation(records))")
+                                        .lineLimit(2)
+                                        .font(.caption2)
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                    if !records.isEmpty {
+                                        Text(Set(records.flatMap { IntelligenceLinkagePresentation.dimensions(for: $0.correlation_factors) }).sorted().joined(separator: " + "))
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                    }
+                                    ProgressView(value: Double(records.count), total: Double(evidenceByDomain.values.map(\.count).max() ?? 1))
+                                        .tint(ClaritasPalette.shellAccent(for: colorScheme))
+                                        .accessibilityLabel("\(records.count) sources")
+                                    Text("Review \(records.count) sources →")
+                                        .font(.caption2.weight(.semibold))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .padding(10)
+                                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 11))
+                                .overlay(RoundedRectangle(cornerRadius: 11).stroke(
+                                    evidenceFilterEventID == detail.event.id && evidenceFilter == domain
+                                        ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellBorder(for: colorScheme)
+                                ))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(evidenceFilterEventID == detail.event.id && evidenceFilter == domain ? .isSelected : [])
+                            }
+                        }
+                        if !detail.social_context.isEmpty {
+                            Button {
+                                detailScrollTarget = "investigation-socials"
+                                evidenceNavigationID = UUID()
+                            } label: {
+                                Label("Socials · \(detail.social_context.count) unverified claims →", systemImage: "bubble.left.and.bubble.right")
+                                    .font(.caption)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Text("Importance reflects source diversity, signal types, physical observations and anchored related events. Model interpretations and unverified social claims do not count as independent corroboration.")
+                            .font(.caption2)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                    }
+                }
+
+                if let regional = detail.regional_reporting {
+                    BrandCard(title: "Nearby reporting", icon: "map") {
+                        Text("Explore the area · place + time only").font(.caption.weight(.semibold))
+                        Text(regional.notice).font(.caption2).foregroundStyle(.secondary)
+                        Text("\(regional.window_start.formatted(date: .abbreviated, time: .shortened)) – \(regional.window_end.formatted(date: .abbreviated, time: .shortened)) · publication or discovery time")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        ForEach(regional.items) { item in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("\(item.scope_label) · context only").font(.caption2.weight(.semibold))
+                                if let url = URL(string: item.url) {
+                                    Link(destination: url) {
+                                        Text(item.title).font(.subheadline.weight(.semibold))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                Text("\(item.publisher) · Source timeline \(item.observed_at.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6)
+                        }
+                        if regional.items.isEmpty {
+                            Text("No additional reporting in this place and time window.").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
                 if !detail.social_context.isEmpty {
+                    Color.clear.frame(height: 0).id("investigation-socials")
                     BrandCard(title: "Social context", icon: "bubble.left.and.bubble.right") {
                         Text("Attributed claims for this investigation. Compare them with the evidence below before drawing a conclusion.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -509,45 +629,22 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
-                let linkedSignalEvidence = detail.evidence.filter { !isContextAssessment($0) }
-                if !linkedSignalEvidence.isEmpty {
-                    let evidenceByDomain = Dictionary(grouping: linkedSignalEvidence, by: \.domain)
-                    BrandCard(title: "How signals link to this event", icon: "link") {
-                        Text("Every source below is attached to the active investigation. “Likely linked” means the recorded linkage passed a governed threshold; it does not mean one signal caused another.")
-                            .font(.caption)
-                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 10)], spacing: 10) {
-                            ForEach(evidenceByDomain.keys.sorted(), id: \.self) { domain in
-                                let records = evidenceByDomain[domain] ?? []
-                                let hasLikelyLink = records.contains {
-                                    IntelligenceLinkagePresentation.decision(in: $0.correlation_factors) == "attached"
-                                }
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 7) {
-                                        Image(systemName: signalDomainIcon(domain))
-                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                        Text("\(signalDomainLabel(domain)) · \(records.count)")
-                                            .font(.caption.weight(.bold))
-                                        Spacer(minLength: 0)
-                                    }
-                                    Text(hasLikelyLink ? "LIKELY LINKED SIGNALS" : "EVENT EVIDENCE")
-                                        .font(.caption2.weight(.bold))
-                                        .foregroundStyle(hasLikelyLink ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
-                                    Text(signalLinkExplanation(records))
-                                        .font(.caption2)
-                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                        .lineLimit(3)
-                                }
-                                .frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
-                                .padding(10)
-                                .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 11))
-                            }
+                Text("Sources and observations")
+                    .font(.headline)
+                    .id("investigation-evidence")
+                BrandCard(title: "Evidence thread", icon: "point.topleft.down.to.point.bottomright.curvepath") {
+                    let activeFilter = evidenceFilterEventID == detail.event.id ? evidenceFilter : nil
+                    Picker("Signal type", selection: Binding(
+                        get: { activeFilter ?? "all" },
+                        set: { evidenceFilter = $0 == "all" ? nil : $0; evidenceFilterEventID = detail.event.id }
+                    )) {
+                        Text("All evidence · \(detail.evidence.count)").tag("all")
+                        ForEach(Set(detail.evidence.map(signalGroup)).sorted(), id: \.self) { group in
+                            Text(signalDomainLabel(group)).tag(group)
                         }
                     }
-                }
-
-                BrandCard(title: "Evidence thread", icon: "point.topleft.down.to.point.bottomright.curvepath") {
-                    ForEach(detail.evidence.sorted { $0.observed_at < $1.observed_at }) { item in
+                    .pickerStyle(.menu)
+                    ForEach(detail.evidence.filter { activeFilter == nil || signalGroup($0) == activeFilter }.sorted { $0.observed_at < $1.observed_at }) { item in
                         HStack(alignment: .top, spacing: 10) {
                             Image(systemName: evidenceIcon(item.relationship))
                                 .font(.caption.weight(.semibold))
@@ -887,14 +984,30 @@ struct IntelligenceWorkspaceView: View {
             .background((severity == .critical ? Color.red : severity == .high ? Color.orange : Color.secondary).opacity(0.12), in: Capsule())
     }
 
+    private func sortedSignalDomains(_ groups: [String: [IntelligenceEvidence]]) -> [String] {
+        groups.keys.sorted { left, right in
+            let leftCount = groups[left]?.count ?? 0
+            let rightCount = groups[right]?.count ?? 0
+            return leftCount == rightCount
+                ? signalDomainLabel(left) < signalDomainLabel(right)
+                : leftCount > rightCount
+        }
+    }
+
+    private func signalGroup(_ item: IntelligenceEvidence) -> String {
+        item.relationship == "model_interpretation" ? "model_interpretation" : item.domain
+    }
+
     private func signalDomainLabel(_ domain: String) -> String {
         switch domain {
-        case "news": return "News reporting"
-        case "weather": return "Weather"
-        case "transport": return "Transport"
-        case "podcast": return "Podcast"
+        case "model_interpretation": return "Model interpretation"
+        case "social": return "Socials"
+        case "news": return "News report"
+        case "weather": return "Weather signal"
+        case "transport": return "Transport signal"
+        case "podcast": return "Podcast episode"
         case "earth_observation": return "Earth observation"
-        case "market": return "Market"
+        case "market": return "Market signal"
         case "disaster": return "Disaster monitoring"
         default: return domain.replacingOccurrences(of: "_", with: " ").capitalized
         }
@@ -902,6 +1015,8 @@ struct IntelligenceWorkspaceView: View {
 
     private func signalDomainIcon(_ domain: String) -> String {
         switch domain {
+        case "model_interpretation": return "sparkles"
+        case "social": return "bubble.left.and.bubble.right"
         case "news": return "newspaper"
         case "weather": return "cloud.sun"
         case "transport": return "point.topleft.down.to.point.bottomright.curvepath"
@@ -1200,7 +1315,7 @@ struct IntelligenceEventPulseView: View {
     var sourceLens: String? = nil
 
     private var pulseTitle: String {
-        guard let sourceLens, !sourceLens.isEmpty else { return "Correlated event pulse" }
+        guard let sourceLens, !sourceLens.isEmpty else { return "Priority investigations" }
         return "Investigations in \(sourceLens) scope"
     }
 
@@ -1219,20 +1334,9 @@ struct IntelligenceEventPulseView: View {
                             .font(.caption2)
                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                     }
-                    if presentation == .horizontal {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(spacing: 10) {
-                                ForEach(events.prefix(4)) { event in
-                                    eventButton(event, horizontal: true)
-                                        .frame(width: 248)
-                                }
-                            }
-                            .padding(.horizontal, 1)
-                        }
-                    } else {
-                        ForEach(events.prefix(3)) { event in
-                            eventButton(event, horizontal: false)
-                            if event.id != events.prefix(3).last?.id { Divider() }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], spacing: 10) {
+                        ForEach(events.prefix(4)) { event in
+                            eventButton(event, horizontal: true)
                         }
                     }
                 }
@@ -1274,7 +1378,7 @@ struct IntelligenceEventPulseView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                     .multilineTextAlignment(.leading)
-                    .lineLimit(horizontal ? 3 : 2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Label(
                     event.location_name ?? event.primary_country_iso2 ?? "Location unresolved",
                     systemImage: "mappin"
@@ -1283,7 +1387,7 @@ struct IntelligenceEventPulseView: View {
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 .lineLimit(1)
                 HStack {
-                    Text("\(event.domain_count) lenses · \(event.evidence_count) evidence")
+                    Text("\(event.domain_count) signal types · \(event.evidence_count) evidence")
                         .font(.caption2)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                     Spacer()

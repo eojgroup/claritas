@@ -2,7 +2,7 @@ import { attachAirportTransportContext } from "./airport-transport-context";
 import { query, withTransaction } from "../db";
 import worldCountries from "world-countries";
 import { hasEarthquakeHeadlineSignal } from "../earthquake-language";
-import { buildEventDedupeKey, computeSignalPriority, evaluateMarketMove } from "./correlation";
+import { buildEventDedupeKey, computeSignalPriority, evaluateMarketMove, explicitInstrumentKeys } from "./correlation";
 import { resolveLocationFromText, resolveNearestLocation } from "./location-resolver";
 import {
   attachIntelligenceSignalToExistingEvent,
@@ -124,7 +124,7 @@ export function classifyEventType(text: string) {
     [/flood|inundation|flash flood/, "flood"],
     [/hurricane|typhoon|cyclone|storm/, "severe_storm"],
     [/\b(?:ports?|shipping|vessels?|tankers?|canals?|straits?)\b/, "transport_disruption"],
-    [/airport|aviation|flight|airspace/, "aviation_disruption"],
+    [/\b(?:airports?|aviation|flights?|airspace)\b/, "aviation_disruption"],
     [/drought|crop|harvest/, "agricultural_stress"],
     [/attack|explosion|strike|conflict/, "security_incident"],
   ];
@@ -422,6 +422,7 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     entityKeys: targetedEntityKeys.length
       ? targetedEntityKeys
       : collectEntityKeys(
+          explicitInstrumentKeys(text),
           gkgCoordinate?.name,
           story.payload?.gkg?.persons,
           story.payload?.gkg?.organizations,
@@ -485,7 +486,7 @@ async function handleNewsStory(event: DomainEventEnvelope) {
     return;
   }
   const selected = await correlateAndUpsertIntelligenceSignal(signalInput);
-  if (eventType === "aviation_disruption" && location?.location_type === "airport") {
+  if (location?.location_type === "airport") {
     await attachAirportTransportContext(selected.id);
   }
   await attachIntelligenceSignalToMajorEventContext(signalInput, { excludeEventId: selected.id });
@@ -570,7 +571,7 @@ async function handlePodcastSignal(event: DomainEventEnvelope) {
       source_kind: "podcast_transcript",
       podcast_context_only: true,
     },
-    entityKeys: collectEntityKeys(entities),
+    entityKeys: collectEntityKeys(entities, explicitInstrumentKeys(text)),
     evidence: {
       domain: "podcast",
       evidenceType: `podcast_${signal.signal_type}`,
@@ -968,7 +969,7 @@ async function handleMarketIndicator(event: DomainEventEnvelope) {
     relevanceScore: priority.score, urgencyScore: Math.min(1, Math.abs(change) * 5), materialityScore: magnitude,
     scoreComponents: { ...priority.components, percent_change: change, threshold },
     metadata: { symbol, previous_value: previous, current_value: current.value, frequency: current.frequency },
-    entityKeys: collectEntityKeys(symbol, current.instrument_name),
+    entityKeys: collectEntityKeys(symbol, current.instrument_name, typeof symbol === "string" ? `instrument:${symbol.toLowerCase()}` : null),
     evidence: {
       domain: "market", evidenceType: "threshold_move", sourceRecordType: "market_indicator", sourceRecordId: String(id),
       sourceId: current.source_id, observedAt: observed, locationId: location?.id ?? null,

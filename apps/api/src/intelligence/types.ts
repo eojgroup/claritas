@@ -32,6 +32,7 @@ export type CorrelationCandidate = {
 };
 export type CorrelationScore = {
   score: number;
+  matchedEntities?: string[];
   accepted: boolean;
   components: {
     temporal: number;
@@ -39,6 +40,7 @@ export type CorrelationScore = {
     location: number;
     country: number;
     entity: number;
+    instrument?: number;
     event_type: number;
     source_reliability: number;
   };
