@@ -111,6 +111,21 @@ async function main() {
   }
   const runID = process.argv[2] || "";
   if (runID && !/^[1-9][0-9]{0,14}$/.test(runID)) throw new Error("Invalid run identifier");
+  // Exercise the same stored-data reads as the dashboard without user data,
+  // tokens, titles or URLs in the diagnostic output.
+  process.env.PGOPTIONS = "-c default_transaction_read_only=on";
+  process.env.DB_POOL_MAX = "1";
+  const { listIntelligenceEvents } = require(process.cwd() + "/dist/intelligence/service.js");
+  const { pool } = require(process.cwd() + "/dist/db.js");
+  try {
+    const started = Date.now();
+    try {
+      const events = await listIntelligenceEvents({ limit: 4 });
+      console.log(JSON.stringify({ intelligence_feed_probe: { count: events.length, duration_ms: Date.now() - started } }));
+    } catch (error) {
+      console.log(JSON.stringify({ intelligence_feed_probe: { duration_ms: Date.now() - started, error: classifyError(error) } }));
+    }
+  } finally { await pool.end(); }
   const { Client } = require("pg");
   const client = new Client({
     host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 5432),
