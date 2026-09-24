@@ -1337,6 +1337,11 @@ export async function upsertIntelligenceSignalTx(
     incomingEvidenceKey: canonicalEvidenceKey,
     incomingCanonicalRank,
   });
+  // Origin describes the source that opened the investigation, even when a
+  // stronger source later becomes its canonical headline. Context must also
+  // retain its own epistemic label rather than relabelling the whole event.
+  if (existing.rows[0]) delete eventMetadata.origin_domain;
+  if (!replaceCanonical) delete eventMetadata.epistemic_class;
   const existingSeverity = existing.rows[0]?.severity;
   const severity = existingSeverity ? maxSeverity(existingSeverity, input.severity) : input.severity;
   const confidence = existing.rows[0] && ["context", "model_interpretation", "assessment"].includes(input.evidence.relationship)
@@ -1355,6 +1360,7 @@ export async function upsertIntelligenceSignalTx(
        $18::jsonb || jsonb_build_object('canonical_signal_rank',$20::double precision,'canonical_evidence_key',$21::text)
      )
      ON CONFLICT (dedupe_key) DO UPDATE SET
+       event_type = CASE WHEN $19::boolean THEN EXCLUDED.event_type ELSE intelligence_event.event_type END,
        title = CASE WHEN $19::boolean THEN EXCLUDED.title ELSE intelligence_event.title END,
        summary = CASE WHEN $19::boolean THEN EXCLUDED.summary ELSE intelligence_event.summary END,
        status = CASE

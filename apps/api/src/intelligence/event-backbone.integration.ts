@@ -521,6 +521,38 @@ test("entity-linked topics stay distinct, explain their connection and receive a
   assert.equal(await attachAirportTransportContext(news.id), 0);
 });
 
+test("source replay corrects classification while later interpretations preserve the event origin", async () => {
+  const suffix = randomUUID();
+  const now = new Date();
+  const input = {
+    dedupeKey: `integration-origin-${suffix}`, eventType: "transport_disruption",
+    title: "DHL acquisition in Colombia", summary: "Publisher reports an acquisition.",
+    severity: "low" as const, confidence: 0.7, startTime: now, lastActivityTime: now,
+    primaryCountryIso2: "CO", relevanceScore: 0.4, urgencyScore: 0.2, materialityScore: 0.3,
+    scoreComponents: {}, metadata: { origin_domain: "news", epistemic_class: "reported_claim" },
+    evidence: { domain: "news" as const, evidenceType: "fixture", sourceRecordType: "integration_origin",
+      sourceRecordId: suffix, observedAt: now, confidence: 0.7, relationship: "reported" as const,
+      provenance: { provider: "fixture" } },
+  };
+  const created = await upsertIntelligenceSignal(input);
+  await upsertIntelligenceSignal({ ...input, eventType: "corporate_development" });
+  await upsertIntelligenceSignal({ ...input, eventType: "reported_development",
+    metadata: { origin_domain: "podcast", epistemic_class: "model_interpretation" },
+    evidence: { ...input.evidence, domain: "podcast", confidence: 0.4, sourceRecordId: `${suffix}-podcast`, relationship: "model_interpretation" },
+  });
+  const stored = await query("SELECT event_type,metadata FROM intelligence_event WHERE id=$1", [created.id]);
+  assert.equal(stored.rows[0].event_type, "corporate_development");
+  assert.equal(stored.rows[0].metadata.origin_domain, "news");
+  assert.equal(stored.rows[0].metadata.epistemic_class, "reported_claim");
+  const { listIntelligenceEvents, getIntelligenceEvent } = await import("./service");
+  const feed = await listIntelligenceEvents({ country: "CO", limit: 100 });
+  assert.ok(feed.some((event) => event.id === created.id && event.origin_domain === "news"));
+  const detail = await getIntelligenceEvent(created.id);
+  assert.equal(detail?.event.origin_domain, "news");
+  assert.equal(detail?.signal_coverage.find((group) => group.domain === "podcast")?.state, "context");
+  assert.ok(detail?.context_signals.some((signal) => signal.domain === "transport" && signal.relationship === "regional_context"));
+});
+
 test.after(async () => {
   await pool.end();
 });
