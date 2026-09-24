@@ -3548,7 +3548,6 @@ export default function ClaritasDashboard() {
     setNewsLanguageFilter("all");
     setNewsHasImageOnly(false);
     setNewsCategory("all");
-    setNewsSortBy("newest");
     setSelectedDashboardNewsId(null);
     setNewsWorkspaceChartRange({});
     void loadNewsData("recent", "all", "newest");
