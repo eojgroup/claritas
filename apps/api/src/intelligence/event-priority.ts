@@ -7,7 +7,8 @@ const sqlAlias = (value: string) => {
 export function activeSocialEvidenceSql(alias = "evidence") {
   const evidence = sqlAlias(alias);
   return `(${evidence}.domain<>'social' OR EXISTS (SELECT 1 FROM social_signal retained
-    WHERE retained.id::text=${evidence}.source_record_id AND retained.expires_at>now()))`;
+    WHERE retained.id=CASE WHEN ${evidence}.source_record_id ~ '^[0-9]{1,18}$'
+      THEN ${evidence}.source_record_id::bigint END AND retained.expires_at>now()))`;
 }
 
 export function eventOriginDomainSql(alias = "event") {
@@ -37,16 +38,19 @@ export function eventNewsPrioritySql(alias = "event") {
   const event = sqlAlias(alias);
   return `COALESCE((SELECT max(assessment.score)/100
     FROM intelligence_event_evidence report
-    JOIN item article ON report.source_record_type='item' AND report.source_record_id=article.id::text
+    JOIN item article ON article.id=CASE WHEN report.source_record_type='item'
+      AND report.source_record_id ~ '^[0-9]{1,18}$' THEN report.source_record_id::bigint END
     JOIN news_item_assessment assessment ON assessment.item_id=article.id AND assessment.assessed_at>=article.updated_at
     WHERE report.event_id=${event}.id AND report.domain='news'
       AND COALESCE(article.payload->>'quality_status','accepted')='accepted'),0)`;
 }
 
-export function eventPriorityScoreSql(alias = "event") {
+export function eventPriorityScoreSql(alias = "event", precomputed = false) {
   const event = sqlAlias(alias);
-  return `LEAST(CASE WHEN ${eventOriginDomainSql(event)} IN ('social','podcast') AND ${event}.source_diversity=0 THEN 0.6 ELSE 1 END,
-    0.55*GREATEST(${event}.relevance_score,${eventNewsPrioritySql(event)})
+  const origin = precomputed ? `${event}.origin_domain` : eventOriginDomainSql(event);
+  const newsPriority = precomputed ? `${event}.news_priority` : eventNewsPrioritySql(event);
+  return `LEAST(CASE WHEN ${origin} IN ('social','podcast') AND ${event}.source_diversity=0 THEN 0.6 ELSE 1 END,
+    0.55*GREATEST(${event}.relevance_score,${newsPriority})
     + 0.20*${event}.urgency_score + 0.15*${event}.materiality_score
     + 0.10*GREATEST(0,1-GREATEST(0,extract(epoch FROM (now()-${event}.last_activity_time)))/259200))`;
 }

@@ -327,12 +327,27 @@ export async function listIntelligenceEvents(options: {
   const limitRef = add(limit);
   const offsetRef = add(offset);
   const { rows } = await query<EventRow>(
-    `WITH candidates AS (
-       SELECT event.*, location.canonical_name AS location_name,
-            ${eventOriginDomainSql()} AS origin_domain,
+    `WITH candidates AS MATERIALIZED (
+       SELECT event.*,
+              ${eventOriginDomainSql()} AS origin_domain,
+              ${eventNewsPrioritySql()} AS news_priority
+       FROM intelligence_event event
+       WHERE ${where.join(" AND ")}
+     ), scored AS (
+       SELECT candidates.*,${eventPriorityScoreSql("candidates", true)} AS raw_priority
+       FROM candidates
+     ), ranked AS (
+       SELECT scored.*,row_number() OVER (PARTITION BY origin_domain,event_type ORDER BY raw_priority DESC,last_activity_time DESC,id) AS origin_topic_rank
+       FROM scored
+     ), selected AS MATERIALIZED (
+       SELECT ranked.*,raw_priority AS priority_score,GREATEST(0,raw_priority-CASE WHEN severity='critical' THEN 0
+         ELSE LEAST(0.24,(origin_topic_rank-1)*0.08) END) AS feed_order_score
+       FROM ranked
+       ORDER BY feed_order_score DESC,last_activity_time DESC,id
+       LIMIT ${limitRef} OFFSET ${offsetRef}
+     )
+     SELECT event.*,location.canonical_name AS location_name,
             ${eventSignalDomainsSql()} AS signal_domains,
-            ${eventNewsPrioritySql()} AS news_priority,
-            ${eventPriorityScoreSql()} AS raw_priority,
             location.location_type,
             COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,location.latitude) AS latitude,
             COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude,
@@ -350,18 +365,9 @@ export async function listIntelligenceEvents(options: {
                    END))) AS evidence_count,
             ${intelligenceEventExpiresAtSql("event")} AS expires_at,
             (${intelligenceEventEarthObservationStateSql()}) AS earth_observation_state
-     FROM intelligence_event event
-     LEFT JOIN intelligence_location location ON location.id = event.primary_location_id
-     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-     ), ranked AS (
-       SELECT candidates.*,row_number() OVER (PARTITION BY origin_domain,event_type ORDER BY raw_priority DESC,last_activity_time DESC,id) AS origin_topic_rank
-       FROM candidates
-     )
-     SELECT ranked.*,raw_priority AS priority_score,GREATEST(0,raw_priority-CASE WHEN severity='critical' THEN 0
-       ELSE LEAST(0.24,(origin_topic_rank-1)*0.08) END) AS feed_order_score
-     FROM ranked
-     ORDER BY feed_order_score DESC,last_activity_time DESC,id
-     LIMIT ${limitRef} OFFSET ${offsetRef}`,
+     FROM selected event
+     LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
+     ORDER BY event.feed_order_score DESC,event.last_activity_time DESC,event.id`,
     params,
   );
   const social = await getSocialEventContexts(rows.map((row) => row.id));

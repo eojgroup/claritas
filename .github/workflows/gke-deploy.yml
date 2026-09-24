@@ -1244,6 +1244,19 @@ jobs:
               });
           '
 
+          # Validate the dashboard reads too: /readyz only checks connectivity.
+          timeout --signal=TERM --kill-after=5s 60s \
+            kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
+              const { listIntelligenceEvents, getIntelligenceEvent } = require("./dist/intelligence/service.js");
+              const { pool } = require("./dist/db.js");
+              (async () => {
+                const started = Date.now();
+                const events = await listIntelligenceEvents({ limit: 100 });
+                if (events[0] && !await getIntelligenceEvent(events[0].id)) throw new Error("Priority event detail unavailable");
+                console.log(JSON.stringify({ event: "release_intelligence_read_verified", count: events.length, duration_ms: Date.now()-started }));
+              })().catch((error) => { console.error(error.message); process.exitCode=1; }).finally(() => pool.end());
+            '
+
           refresh_queued=0
           release_news_run_id=""
           for attempt in $(seq 1 20); do
