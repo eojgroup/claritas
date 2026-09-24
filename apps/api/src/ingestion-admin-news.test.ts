@@ -278,10 +278,10 @@ test("bounded assessment worker refreshes item and event changes without treatin
   assert.doesNotMatch(worker, /count\(DISTINCT domain\)/);
   assert.match(worker, /withWorkerLease\("news-item-assessment"/);
   assert.match(worker, /statement_timestamp\(\) AS assessment_watermark/);
-  assert.match(worker, /WHEN assessment\.item_id IS NULL\s+AND item\.event_time>=now\(\)-interval '8 days'\s+AND item\.event_time<=now\(\)\+interval '5 minutes' THEN 0/);
-  assert.match(worker, /WHEN assessment\.item_id IS NOT NULL\s+AND item\.event_time>=now\(\)-interval '8 days'\s+AND item\.event_time<=now\(\)\+interval '5 minutes' THEN 1/);
+  assert.match(worker, /WHEN item\.event_time>=now\(\)-interval '4 hours'\s+AND item\.event_time<=now\(\)\+interval '5 minutes' THEN 0/);
+  assert.match(worker, /WHEN item\.event_time>=now\(\)-interval '8 days'\s+AND item\.event_time<=now\(\)\+interval '5 minutes' THEN 1/);
   assert.match(worker, /WHEN assessment\.item_id IS NOT NULL THEN 2\s+ELSE 3/);
-  assert.match(worker, /assessment\.assessed_at ASC NULLS LAST/);
+  assert.match(worker, /assessment\.assessed_at ASC NULLS FIRST/);
   assert.match(worker, /item\.event_time\+interval '168 hours'/);
   assert.doesNotMatch(worker, /date_trunc\('hour',now\(\)\)/);
   assert.match(worker, /assessed_at=EXCLUDED\.assessed_at/);

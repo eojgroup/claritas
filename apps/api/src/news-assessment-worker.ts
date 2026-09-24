@@ -29,6 +29,17 @@ function integerEnv(name: string, fallback: number, minimum: number, maximum: nu
   return Math.min(maximum, Math.max(minimum, Number.isFinite(parsed) ? parsed : fallback));
 }
 
+// Keep the live reader current during methodology upgrades and source replay.
+// Within each time window the oldest assessment goes first, so a repeatedly
+// updated article cannot monopolise the batch.
+export const NEWS_ASSESSMENT_QUEUE_PRIORITY_SQL = `CASE
+  WHEN item.event_time>=now()-interval '4 hours'
+   AND item.event_time<=now()+interval '5 minutes' THEN 0
+  WHEN item.event_time>=now()-interval '8 days'
+   AND item.event_time<=now()+interval '5 minutes' THEN 1
+  WHEN assessment.item_id IS NOT NULL THEN 2
+  ELSE 3 END`;
+
 export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESSMENT_BATCH_SIZE", 80, 1, 200)) {
   const boundedBatch = Math.max(1, Math.min(Math.trunc(batchSize), 200));
   const { rows } = await query<AssessmentCandidateRow>(
@@ -68,17 +79,8 @@ export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESS
                AND GREATEST(changed_event.updated_at,changed_evidence.created_at)>assessment.assessed_at
            )
          )
-       ORDER BY CASE
-                  WHEN assessment.item_id IS NULL
-                   AND item.event_time>=now()-interval '8 days'
-                   AND item.event_time<=now()+interval '5 minutes' THEN 0
-                  WHEN assessment.item_id IS NOT NULL
-                   AND item.event_time>=now()-interval '8 days'
-                   AND item.event_time<=now()+interval '5 minutes' THEN 1
-                  WHEN assessment.item_id IS NOT NULL THEN 2
-                  ELSE 3
-                END,
-                assessment.assessed_at ASC NULLS LAST,
+       ORDER BY ${NEWS_ASSESSMENT_QUEUE_PRIORITY_SQL},
+                assessment.assessed_at ASC NULLS FIRST,
                 COALESCE(item.event_time,item.created_at) DESC NULLS LAST,
                 item.id DESC
        LIMIT $2

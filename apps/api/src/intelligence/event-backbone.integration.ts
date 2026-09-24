@@ -553,6 +553,24 @@ test("source replay corrects classification while later interpretations preserve
   assert.ok(detail?.context_signals.some((signal) => signal.domain === "transport" && signal.relationship === "regional_context"));
 });
 
+test("current news assessments cannot be starved by a methodology-upgrade backlog", async () => {
+  const { NEWS_ASSESSMENT_QUEUE_PRIORITY_SQL } = await import("../news-assessment-worker");
+  const { rows } = await query<{ id: number }>(`
+    WITH fixture(id,event_time,assessed_at) AS (VALUES
+      (1,now()-interval '2 days',now()-interval '2 days'),
+      (2,now()-interval '1 hour',now()-interval '30 minutes'),
+      (3,now()-interval '3 days',NULL::timestamptz),
+      (4,now()-interval '2 hours',NULL::timestamptz),
+      (5,now()-interval '30 minutes',now()-interval '10 minutes')
+    )
+    SELECT item.id FROM fixture item
+    CROSS JOIN LATERAL (SELECT CASE WHEN item.assessed_at IS NULL THEN NULL ELSE item.id END AS item_id,
+      item.assessed_at) assessment
+    ORDER BY ${NEWS_ASSESSMENT_QUEUE_PRIORITY_SQL},assessment.assessed_at ASC NULLS FIRST,item.id
+    LIMIT 3`);
+  assert.deepEqual(rows.map((row) => row.id), [4, 2, 5]);
+});
+
 test.after(async () => {
   await pool.end();
 });
