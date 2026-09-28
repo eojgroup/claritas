@@ -14,6 +14,7 @@ on:
       - 'infra/gcp/sql/**'
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
+      - 'infra/scripts/wait-for-api-readiness.cjs'
       - 'infra/scripts/reconcile-cloud-sql-password.sh'
       - '.github/workflows/gke-deploy.yml'
   pull_request:
@@ -28,6 +29,7 @@ on:
       - 'infra/keycloak/**'
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
+      - 'infra/scripts/wait-for-api-readiness.cjs'
       - 'infra/scripts/reconcile-cloud-sql-password.sh'
   workflow_dispatch:
 
@@ -1233,16 +1235,14 @@ jobs:
               console.error(`Required production runtime configuration missing: ${missing.join(", ")}`);
               process.exit(1);
             }
-            fetch("http://127.0.0.1:8080/readyz", { signal: AbortSignal.timeout(5_000) })
-              .then((response) => {
-                if (!response.ok) throw new Error(`readiness returned ${response.status}`);
-                console.log("FRED, maritime provider path, ingestion automation, news assessment, daily scheduler, and API readiness are configured.");
-              })
-              .catch((error) => {
-                console.error(error);
-                process.exit(1);
-              });
+            console.log("FRED, maritime provider path, ingestion automation, news assessment, and daily scheduler are configured.");
           '
+
+          # Newly ready pods can briefly contend with startup workers. Retry
+          # within a fixed budget; sustained failures still stop and roll back.
+          timeout --signal=TERM --kill-after=5s 75s \
+            kubectl -n "${NAMESPACE}" exec -i deployment/claritas-api -c claritas-api -- node - \
+              < infra/scripts/wait-for-api-readiness.cjs
 
           # Validate the dashboard reads too: /readyz only checks connectivity.
           timeout --signal=TERM --kill-after=5s 60s \
