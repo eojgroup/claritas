@@ -117,6 +117,21 @@ async function main() {
   process.env.DB_POOL_MAX = "1";
   const { listIntelligenceEvents } = require(process.cwd() + "/dist/intelligence/service.js");
   const { pool } = require(process.cwd() + "/dist/db.js");
+  const originalQuery = pool.query.bind(pool);
+  let explained = false;
+  pool.query = async (sql, params) => {
+    if (!explained && typeof sql === "string" && /WITH candidates AS/.test(sql)) {
+      explained = true;
+      const plan = await originalQuery(`EXPLAIN (FORMAT JSON) ${sql}`, params);
+      const summarizePlan = (node) => ({
+        node: node["Node Type"], relation: node["Relation Name"], index: node["Index Name"],
+        subplan: node["Subplan Name"], rows: node["Plan Rows"], cost: node["Total Cost"],
+        plans: (node.Plans || []).map(summarizePlan),
+      });
+      console.log(JSON.stringify({ intelligence_feed_plan: summarizePlan(plan.rows[0]["QUERY PLAN"][0].Plan) }));
+    }
+    return originalQuery(sql, params);
+  };
   try {
     const started = Date.now();
     try {
