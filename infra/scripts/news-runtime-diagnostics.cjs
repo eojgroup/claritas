@@ -116,10 +116,11 @@ async function main() {
   process.env.PGOPTIONS = "-c default_transaction_read_only=on";
   process.env.DB_POOL_MAX = "1";
   const { listIntelligenceEvents } = require(process.cwd() + "/dist/intelligence/service.js");
-  const { pool } = require(process.cwd() + "/dist/db.js");
-  const originalQuery = pool.query.bind(pool);
+  const db = require(process.cwd() + "/dist/db.js");
+  const { pool } = db;
+  const originalQuery = db.query;
   let explained = false;
-  pool.query = async (sql, params) => {
+  db.query = async (sql, params) => {
     if (!explained && typeof sql === "string" && /WITH candidates AS/.test(sql)) {
       explained = true;
       const plan = await originalQuery(`EXPLAIN (FORMAT JSON) ${sql}`, params);
