@@ -551,6 +551,15 @@ test("source replay corrects classification while later interpretations preserve
   assert.equal(detail?.event.origin_domain, "news");
   assert.equal(detail?.signal_coverage.find((group) => group.domain === "podcast")?.state, "context");
   assert.ok(detail?.context_signals.some((signal) => signal.domain === "transport" && signal.relationship === "regional_context"));
+  const archivedAt = new Date(now.getTime() - 9 * 86_400_000);
+  const archived = await upsertIntelligenceSignal({ ...input,
+    dedupeKey: `${input.dedupeKey}-archived`, startTime: archivedAt, lastActivityTime: archivedAt,
+    evidence: { ...input.evidence, sourceRecordId: `${suffix}-archived`, observedAt: archivedAt },
+  });
+  const current = await listIntelligenceEvents({ country: "CO", limit: 100 });
+  assert.ok(!current.some((event) => event.id === archived.id));
+  const history = await listIntelligenceEvents({ country: "CO", limit: 100, includeExpired: true });
+  assert.ok(history.some((event) => event.id === archived.id), "indexed current-event bounds must not restrict historical investigations");
 });
 
 test("current news assessments cannot be starved by a methodology-upgrade backlog", async () => {

@@ -258,10 +258,13 @@ export function intelligenceEventEarthObservationStateSql() {
  * an event with independent weather, transport, or observation evidence is
  * therefore still available even when one attached article fails quality.
  */
+// OFFSET 0 keeps this existence check correlated: a pulled-up semi-join can
+// scan every historical evidence row before selecting the current events.
 function intelligenceEventHasDisplayableEvidenceSql(eventAlias = "event") {
   return `(COALESCE(${eventAlias}.metadata->>'canonical_evidence_key','') NOT LIKE 'social:social_signal:%'
     OR EXISTS (SELECT 1 FROM social_signal retained_origin
-      WHERE concat('social:social_signal:',retained_origin.id)=${eventAlias}.metadata->>'canonical_evidence_key'
+      WHERE retained_origin.id=CASE WHEN ${eventAlias}.metadata->>'canonical_evidence_key' ~ '^social:social_signal:[0-9]{1,18}$'
+        THEN split_part(${eventAlias}.metadata->>'canonical_evidence_key',':',3)::bigint END
         AND retained_origin.expires_at>now())) AND EXISTS (
     SELECT 1
     FROM intelligence_event_evidence evidence
@@ -280,6 +283,7 @@ function intelligenceEventHasDisplayableEvidenceSql(eventAlias = "event") {
           END
         )
       )
+    LIMIT 1 OFFSET 0
   )`;
 }
 
@@ -302,12 +306,14 @@ export async function listIntelligenceEvents(options: {
       AND event.source_diversity <= 1
       AND event.relevance_score < 0.65
     )`,
-    intelligenceEventHasDisplayableEvidenceSql("event"),
   ];
   const add = (value: unknown) => { params.push(value); return `$${params.length}`; };
   const explicitlyArchivedStatus = options.status === "resolved" || options.status === "dismissed";
   if (!options.includeExpired && !explicitlyArchivedStatus) {
     where.push(`event.status IN ('emerging','active','monitoring')`);
+    // All visibility policies expire within seven days; bound the indexed scan
+    // before applying the exact per-type expiry expression.
+    where.push(`event.last_activity_time > now()-interval '168 hours'`);
     where.push(`${intelligenceEventExpiresAtSql("event")} > now()`);
   }
   if (options.status) where.push(`event.status = ${add(options.status)}`);
@@ -327,12 +333,15 @@ export async function listIntelligenceEvents(options: {
   const limitRef = add(limit);
   const offsetRef = add(offset);
   const { rows } = await query<EventRow>(
-    `WITH candidates AS MATERIALIZED (
+    `WITH eligible AS MATERIALIZED (
+       SELECT event.* FROM intelligence_event event
+       WHERE ${where.join(" AND ")}
+     ), candidates AS MATERIALIZED (
        SELECT event.*,
               ${eventOriginDomainSql()} AS origin_domain,
               ${eventNewsPrioritySql()} AS news_priority
-       FROM intelligence_event event
-       WHERE ${where.join(" AND ")}
+       FROM eligible event
+       WHERE ${intelligenceEventHasDisplayableEvidenceSql("event")}
      ), scored AS (
        SELECT candidates.*,${eventPriorityScoreSql("candidates", true)} AS raw_priority
        FROM candidates

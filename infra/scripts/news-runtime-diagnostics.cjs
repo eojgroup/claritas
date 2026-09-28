@@ -121,7 +121,7 @@ async function main() {
   const originalQuery = db.query;
   let explained = false;
   db.query = async (sql, params) => {
-    if (!explained && typeof sql === "string" && /WITH candidates AS/.test(sql)) {
+    if (!explained && typeof sql === "string" && /WITH (?:candidates|eligible) AS/.test(sql)) {
       explained = true;
       const plan = await originalQuery(`EXPLAIN (FORMAT JSON) ${sql}`, params);
       const summarizePlan = (node) => ({
