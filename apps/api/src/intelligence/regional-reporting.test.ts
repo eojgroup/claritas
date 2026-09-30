@@ -23,3 +23,9 @@ test("named-place discovery works for airports worldwide without substring geogr
   assert.equal(mentionsNamedLocation("Viral report", null, ["Iran"]), false);
   assert.equal(mentionsNamedLocation("São Paulo airport", null, ["Sao Paulo"]), true);
 });
+
+test("headline overlap requires two distinctive terms rather than a shared country", async () => {
+  const { sharedHeadlineTerms } = await import("./regional-reporting");
+  assert.deepEqual(sharedHeadlineTerms("Shark stranded in South Korean canal", "Rescue of stranded shark draws visitors to canal"), ["stranded", "shark", "canal"]);
+  assert.deepEqual(sharedHeadlineTerms("Shark stranded in South Korean canal", "Court decision in South Korea"), []);
+});

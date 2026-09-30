@@ -61,13 +61,14 @@ it("follows a Colombian news report into an event with related sources and separ
   expect(screen.getByText("Shared mentions: dhl")).toBeTruthy();
   expect(screen.getByText("Shared entity")).toBeTruthy();
   expect(screen.queryByRole("heading", { name: story.title!, level: 5 })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /Transport Regional data only/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Transport Nearby data · context/ }));
   expect(screen.getByText("No linked transport records")).toBeTruthy();
   const context = screen.getByRole("region", { name: "Around this event" });
   expect(within(context).getByText("Aircraft observed")).toBeTruthy();
   expect(within(context).getByText("aircraft").parentElement?.textContent).toBe("24 aircraft");
   expect(within(context).getByText(/These counts do not prove disruption/)).toBeTruthy();
   expect(within(context).getByRole("link", { name: /Colombia announces a regional investment programme/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /News Linked records/ })).toBeTruthy();
   expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("0 records");
 });
 

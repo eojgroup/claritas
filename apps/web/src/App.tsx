@@ -1657,7 +1657,7 @@ export default function ClaritasDashboard() {
     fetchMarketIndicators({ category: "company_fact", limit: 200 }).then(setMarketIndicators).catch(() => setMarketIndicators([]));
     fetchMarketQuotes().then((rows) => {
       setMarketQuotes(rows);
-      setSelectedSymbol((current) => current && rows.some((row) => row.symbol === current) ? current : rows[0]?.symbol ?? null);
+      setSelectedSymbol((current) => current && rows.some((row) => row.symbol === current) ? current : null);
     }).catch(() => setMarketQuotes([]));
     fetchFxRates().then(setFxRates).catch(() => setFxRates([]));
     fetchPolicyRates().then(setPolicyRates).catch(() => setPolicyRates([]));

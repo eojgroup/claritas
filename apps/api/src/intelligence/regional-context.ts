@@ -9,10 +9,38 @@ export type RegionalContextSignal = {
 };
 
 /** Historical, country-scoped context. No totals here assert local impact. */
-export async function getRegionalContext(input: { primary_country_iso2?: string | null; start_time: string | Date | null }): Promise<RegionalContextSignal[]> {
+export async function getRegionalContext(input: { primary_country_iso2?: string | null; start_time: string | Date | null;
+  latitude?: number | null; longitude?: number | null; metadata?: Record<string, unknown> | null;
+  location_type?: string | null }): Promise<RegionalContextSignal[]> {
   const country = input.primary_country_iso2;
   const window = regionalReportingWindow(input.start_time);
-  if (!country || !window) return [];
+  if (!window) return [];
+  const exactPoint = input.metadata?.exact_geography === true && Number.isFinite(input.latitude) && Number.isFinite(input.longitude);
+  const local = exactPoint ? await query<{ mode: string; entities: number; providers: number; observed_at: Date }>(
+    `SELECT mode,count(DISTINCT entity_id)::int AS entities,count(DISTINCT source_name)::int AS providers,
+            max(observed_at) AS observed_at FROM (
+       SELECT mode,entity_id,source_name,observed_at FROM transport_track_point
+       WHERE observed_at BETWEEN $1::timestamptz-interval '6 hours' AND $1::timestamptz+interval '6 hours'
+         AND latitude IS NOT NULL AND longitude IS NOT NULL
+         AND ST_DWithin(ST_SetSRID(ST_MakePoint(longitude,latitude),4326)::geography,
+           ST_SetSRID(ST_MakePoint($2,$3),4326)::geography,$4::double precision*1000)
+       ORDER BY observed_at DESC LIMIT 5000
+     ) nearby GROUP BY mode`,
+    [input.start_time, input.longitude, input.latitude, input.location_type === "airport" ? 30 : 75],
+  ) : { rows: [] };
+  const localSignals: RegionalContextSignal[] = exactPoint ? [{
+    id: `local-transport-${input.latitude}-${input.longitude}`, domain: "transport",
+    title: "Tracked transport near the mapped event",
+    summary: local.rows.length ? "Retained aircraft and vessel positions near this event during a 12-hour window."
+      : "No retained aircraft or vessel positions were found near this event in the 12-hour window.",
+    scope_label: `Within ${input.location_type === "airport" ? 30 : 75} km · 6 hours before and after · mapped coordinates`,
+    relationship: "regional_context",
+    observed_at: local.rows.map((row) => new Date(row.observed_at).toISOString()).sort().at(-1) ?? null,
+    metrics: local.rows.map((row) => ({ label: row.mode === "aviation" ? "Tracked aircraft" : "Tracked vessels", value: Number(row.entities), unit: "sampled vehicles" })),
+    coverage_notice: "Nearby positions are sampled and may omit vehicles. Presence does not prove disruption; absence does not prove normal operations. Counts do not measure a change from baseline.",
+    native_route: null,
+  }] : [];
+  if (!country) return localSignals;
   const [activity, movements, weather] = await Promise.all([
     query<{ mode: string; entities: number; providers: number; observed_at: Date }>(
       `SELECT mode,count(DISTINCT entity_id)::int AS entities,count(DISTINCT source_name)::int AS providers,
@@ -37,7 +65,7 @@ export async function getRegionalContext(input: { primary_country_iso2?: string 
     { label: "Observed port departures", value: Number(movements.rows[0].departures ?? 0), unit: "movements" },
     { label: "Observed port arrivals", value: Number(movements.rows[0].arrivals ?? 0), unit: "movements" },
   );
-  return [{
+  return [...localSignals, {
     id: `regional-transport-${country}`, domain: "transport", title: "Transport activity around this development",
     summary: transportMetrics.length ? "Observed aircraft, vessel and port activity in the country during the event window." : "No retained transport observations were found for this country and time window.",
     scope_label: scope, relationship: "regional_context", observed_at: timestamp, metrics: transportMetrics,

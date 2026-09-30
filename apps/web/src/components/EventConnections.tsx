@@ -40,12 +40,13 @@ export default function EventConnections({ detail, onOpenImagery }: { detail: In
     // Keep context claims / scenes visible without adding them to evidence counts twice.
     const count = items.length + (items.length ? 0 : social.length + imagery.length);
     const context = detail.context_signals?.filter((item) => sourceFamily(item.domain) === family.domain) ?? [];
+    const nearbyReports = family.domain === "news" ? detail.regional_reporting?.items.length ?? 0 : 0;
     const unavailable = assessments.filter((item) => evidenceFamily(item) === family.domain);
     const dimensions = [...new Set(items.flatMap((item) => connectionDimensions(item.correlation_factors)))];
     const contextOnly = family.domain === "social" || family.domain === "model_interpretation"
       || (items.length > 0 && items.every((item) => ["context", "model_interpretation", "derived"].includes(item.relationship.trim().toLowerCase())));
-    const state = count ? contextOnly ? "context" : "linked" : context.length ? "context" : "none";
-    return { ...family, items, count, social, imagery, context, unavailable, dimensions, state, reportedCount: coverage?.count ?? 0 };
+    const state = count ? contextOnly ? "context" : "linked" : context.length || nearbyReports ? "context" : "none";
+    return { ...family, items, count, social, imagery, context, nearbyReports, unavailable, dimensions, state, reportedCount: coverage?.count ?? 0 };
   }).filter((family) => !["market", "official", "model_interpretation"].includes(family.domain) || family.count > 0 || family.context.length > 0);
   const selectedGroup = groups.find((group) => group.domain === selected);
   const visibleRecords = selected === "all" ? records : selectedGroup?.items ?? [];
@@ -66,7 +67,7 @@ export default function EventConnections({ detail, onOpenImagery }: { detail: In
         return <button type="button" key={group.domain} aria-pressed={selected === group.domain} aria-controls="event-connection-records" onClick={() => choose(group.domain)} className={`event-connection-node ${group.state === "none" ? "is-empty" : ""}`}>
           <span className="event-connection-node-top"><Icon size={17} aria-hidden="true" /><strong>{group.count || "—"}</strong></span>
           <span className="event-connection-node-label">{group.label}</span>
-          <small>{group.count ? group.state === "context" ? "Context / interpretation" : "Linked records" : group.context.length ? "Regional data only" : group.unavailable.length ? "Coverage limited" : "No linked data"}</small>
+          <small>{group.count ? group.state === "context" ? "Context / interpretation" : "Linked records" : group.nearbyReports ? `${group.nearbyReports} nearby reports · context` : group.context.length ? "Nearby data · context" : group.unavailable.length ? "Coverage limited" : "No linked data"}</small>
           {group.dimensions.length > 0 && <span className="event-node-dimensions">{group.dimensions.slice(0, 2).join(" · ")}</span>}
         </button>;
       })}
@@ -95,7 +96,7 @@ export default function EventConnections({ detail, onOpenImagery }: { detail: In
       </ol>
       {visibleRecords.length > 6 && <button type="button" className="event-show-records" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer records" : `Show all ${visibleRecords.length} records`}</button>}
       {selected === "imagery" && detail.earth_observations.length > 0 && <div className="event-connection-empty"><strong>{detail.earth_observations.length} event-linked {detail.earth_observations.length === 1 ? "scene" : "scenes"}</strong><p>Scenes provide visual context. Open the imagery assessment below to inspect acquisition time, resolution and interpretation.</p>{onOpenImagery && <button type="button" onClick={() => onOpenImagery(detail.event.id)}>Inspect event imagery <ArrowUpRight size={14} /></button>}</div>}
-      {selectedGroup && !selectedGroup.count && <div className="event-connection-empty"><strong>No linked {selectedGroup.label.toLowerCase()} records</strong><p>{selectedGroup.context.length ? "Regional data is available below. It shares a place and time window; it is not evidence of this event’s impact." : "No matching data is available in this investigation. This does not establish that no activity occurred."}</p>{selectedGroup.unavailable.map((item) => <p key={item.id}>{summary(item) || title(item)}</p>)}</div>}
+      {selectedGroup && !selectedGroup.count && <div className="event-connection-empty"><strong>No linked {selectedGroup.label.toLowerCase()} records</strong><p>{selectedGroup.context.length || selectedGroup.nearbyReports ? "Nearby context is available below. It shares a place and time window; it is not evidence of this event’s impact." : "No matching data is available in this investigation. This does not establish that no activity occurred."}</p>{selectedGroup.unavailable.map((item) => <p key={item.id}>{summary(item) || title(item)}</p>)}</div>}
       {selected === "all" && records.length === 0 && <p className="event-connection-empty">No linked evidence records are available yet. Coverage and regional context remain visible below.</p>}
     </div>
 
