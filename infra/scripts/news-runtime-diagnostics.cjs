@@ -9,6 +9,8 @@ function classifyError(value) {
   const message = typeof value === "string" ? value : String(value.message || "");
   const result = { fingerprint: createHash("sha256").update(message).digest("hex").slice(0, 16) };
   const patterns = [
+    ["provider_policy_restriction", /guardrail|data policy|privacy settings|data collection/i],
+    ["provider_tool_restriction", /support tool|tool use|tool calling/i],
     ["briefing_provider_unavailable", /no endpoints (?:available|found)/i],
     ["postgres_bind_type", /could not determine data type of parameter \$(\d+)/i],
     ["postgres_inconsistent_bind_type", /inconsistent types deduced for parameter \$(\d+)/i],
@@ -158,10 +160,28 @@ async function main() {
       (SELECT count(*)::int FROM user_daily_briefing_schedule WHERE enabled=true
         AND (last_scheduled_for IS NULL OR last_scheduled_for < timezone(schedule_timezone,now())::date)
         AND timezone(schedule_timezone,now())::time >= scheduled_time) AS due_schedules`);
-    const briefingJobs = await client.query(`SELECT briefing_date,status,created_at,finished_at,error
+    const briefingJobs = await client.query(`SELECT briefing_date,status,created_at,finished_at,error,generation->>'provider' AS provider
       FROM daily_signal_briefing_generation_job ORDER BY created_at DESC LIMIT 5`);
     console.log(JSON.stringify({ briefing_runtime: briefings.rows[0],
       recent_briefing_jobs: briefingJobs.rows.map(({ error, ...job }) => ({ ...job, error: classifyError(error) })) }));
+    console.log(JSON.stringify({ narrative_runtime: {
+      provider: process.env.BRIEFING_LLM_PROVIDER || "opencode",
+      model: process.env.OPENCODE_MODEL || null,
+      provider_id: process.env.OPENCODE_PROVIDER_ID || null,
+      model_id: process.env.OPENCODE_MODEL_ID || null,
+      tools_disabled: process.env.OPENCODE_DISABLE_TOOLS || null,
+    } }));
+    const translationUsage = await client.query(`SELECT * FROM news_translation_usage
+      WHERE usage_date = (now() AT TIME ZONE 'UTC')::date`);
+    const translationCache = await client.query(`SELECT max(title_generated_at) AS latest_translation,
+      count(*)::int AS retained_translations FROM item_translation`);
+    console.log(JSON.stringify({ translation_runtime: {
+      enabled: process.env.NEWS_TRANSLATION_ENABLED !== "false",
+      key_configured: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
+      model: process.env.NEWS_TRANSLATION_MODEL || "openrouter/free",
+      targets: process.env.NEWS_TRANSLATION_TARGET_LANGUAGES || "en",
+      cache: translationCache.rows[0], usage: translationUsage.rows[0] || null,
+    } }));
     const social = await client.query(`SELECT
       (SELECT count(*)::int FROM social_signal WHERE expires_at > now()) AS retained_posts,
       (SELECT max(posted_at) FROM social_signal WHERE expires_at > now()) AS latest_post,

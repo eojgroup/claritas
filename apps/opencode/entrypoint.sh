@@ -52,7 +52,8 @@ const providerApiKeyEnv = {
   deepseek: "DEEPSEEK_API_KEY",
 };
 
-const normalizedModel = model && model.trim();
+const configuredModel = model && model.trim();
+const normalizedModel = configuredModel === "openrouter/free" ? "openrouter/openrouter/free" : configuredModel;
 let config = {};
 
 if (customConfig && customConfig.trim()) {
@@ -69,6 +70,10 @@ config.$schema = "https://opencode.ai/config.json";
 if (normalizedModel && !config.model) {
   config.model = normalizedModel;
 }
+
+// Normalize an explicit custom config as well; otherwise it can override the
+// corrected environment model with the invalid model ID "free".
+if (config.model === "openrouter/free") config.model = "openrouter/openrouter/free";
 
 if (normalizedModel && !config.provider) {
   const slashIndex = normalizedModel.indexOf("/");

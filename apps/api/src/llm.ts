@@ -181,7 +181,9 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 function parseOpenCodeModel(): OpenCodeModelConfig {
   const combined = getOptionalEnv("OPENCODE_MODEL") || getOptionalEnv("LLM_MODEL");
   const explicitProvider = getOptionalEnv("OPENCODE_PROVIDER_ID");
-  const explicitModel = getOptionalEnv("OPENCODE_MODEL_ID");
+  const configuredModel = getOptionalEnv("OPENCODE_MODEL_ID");
+  const explicitModel = explicitProvider === "openrouter" && configuredModel === "free"
+    ? "openrouter/free" : configuredModel;
 
   if (explicitProvider || explicitModel) {
     return {
@@ -193,6 +195,12 @@ function parseOpenCodeModel(): OpenCodeModelConfig {
 
   if (!combined) {
     return { providerID: null, modelID: null, label: null };
+  }
+
+  // The router slug contains its own provider prefix. Accept the widely used
+  // OpenRouter spelling without accidentally asking OpenCode for model "free".
+  if (combined === "openrouter/free") {
+    return { providerID: "openrouter", modelID: "openrouter/free", label: "openrouter/openrouter/free" };
   }
 
   const slashIndex = combined.indexOf("/");
@@ -537,7 +545,17 @@ export class OpenCodeLlmClient implements LlmClient {
         const providerError = findProviderError(message);
         if (providerError) {
           const status = providerError.match(/\((\d{3})\)/)?.[1];
-          throw new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`, status ? Number(status) : 502);
+          const failure = new LlmProviderError(`OpenCode generation failed: ${addOpenCodeErrorGuidance(providerError)}`, status ? Number(status) : 502);
+          // A successful OpenCode HTTP response can still contain a provider
+          // failure. Recover with the same configured model using plain text,
+          // just as we do for an OpenCode transport failure. Authentication and
+          // account-policy errors remain actionable, never paid-model fallbacks.
+          if (this.config.openRouterApiKey && this.config.providerID === "openrouter"
+            && (failure.status === 429 || (failure.status ?? 0) >= 500
+              || (failure.status === 404 && /no endpoints/i.test(providerError)))) {
+            return this.generateViaOpenRouterFallback<T>(request, failure);
+          }
+          throw failure;
         }
 
         try {
@@ -624,6 +642,17 @@ export class OpenCodeLlmClient implements LlmClient {
         openCodeError.status,
         openCodeError.responseBody
       );
+    }
+
+    if (isFreeOpenRouterModel(model)) {
+      const response = await new FreeOpenRouterLlmClient({
+        apiKey: this.config.openRouterApiKey, model,
+        timeoutMs: this.config.openRouterTimeoutMs, applicationTitle: "Claritas Daily Briefing",
+      }).generateStructured<T>({ ...request, maxOutputTokens: request.maxOutputTokens ?? 4096 });
+      return { ...response, metadata: { ...response.metadata,
+        fallback_from_provider: "opencode", fallback_reason: openCodeError.message,
+        opencode_model: this.config.label,
+      } };
     }
 
     const maxAttempts = Math.min(Math.max((request.retryCount ?? 2) + 1, 1), 3);

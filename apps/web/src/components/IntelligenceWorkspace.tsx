@@ -1,3 +1,4 @@
+import EventVisualContext from "./EventVisualContext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -606,9 +607,10 @@ export default function IntelligenceWorkspace({
                 </div>
               </section>
 
+              <EventVisualContext key={detail.event.id} detail={detail} />
               <EventConnections key={detail.event.id} detail={detail} onOpenImagery={onOpenImagery} />
 
-              <details id="event-imagery-assessment" className="event-imagery-disclosure rounded-xl border border-[color:var(--shell-border)] p-4">
+              <details open={Boolean(gibsTrueColor || displayedEarthObservations.length)} id="event-imagery-assessment" className="event-imagery-disclosure rounded-xl border border-[color:var(--shell-border)] p-4">
                 <summary>Imagery assessment · {satelliteAssessment}</summary>
                 <div className="mt-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">

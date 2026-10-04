@@ -5213,3 +5213,24 @@ body {
   .event-connection-node small { margin-top: 3px; }
   .event-node-dimensions { display: none; }
 }
+
+/* Evidence and election context share the existing adaptive workspace palette. */
+.event-visual-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.event-visual-context figure { margin: 0; overflow: hidden; border: 1px solid var(--shell-border); border-radius: 1rem; background: var(--shell-bg); }
+.event-visual-context figcaption { padding: .85rem 1rem; font-size: .8rem; }
+.event-visual-context figcaption span { display: block; margin-top: .2rem; color: var(--shell-muted); font-size: .7rem; }
+.event-visual-context svg { display: block; width: 100%; }
+.event-visual-context figure p { padding: .6rem 1rem; color: var(--shell-muted); font-size: .7rem; line-height: 1.5; }
+.event-map-zoom { display: flex; align-items: center; gap: .75rem; padding: .3rem 1rem; font-size: .75rem; }
+.event-map-zoom input { width: 100%; accent-color: var(--shell-accent); }
+.event-news-images { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
+.event-news-image { width: 100%; height: 12rem; object-fit: cover; }
+.country-elections { margin-top: 1.25rem; border-top: 1px solid var(--shell-border); padding-top: 1rem; }
+.country-elections h4 { font-weight: 650; }
+.country-elections p, .country-elections small { font-size: .7rem; color: var(--shell-muted); line-height: 1.5; }
+.country-elections ol { list-style: none; padding: 0; margin: .75rem 0; }
+.country-elections li { display: grid; grid-template-columns: 6rem 1fr; gap: .75rem; padding: .65rem 0; border-bottom: 1px solid var(--shell-border); font-size: .8rem; }
+.country-elections time { font-weight: 600; color: var(--shell-accent-2); }
+.country-elections small { display: block; }
+.country-elections a:hover { text-decoration: underline; }
+@media (max-width: 720px) { .event-visual-grid, .event-news-images { grid-template-columns: 1fr; } }

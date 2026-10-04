@@ -1,3 +1,5 @@
+import { useDailyBriefing } from "./components/useDailyBriefing";
+import CountryElections from "./components/CountryElections";
 import NewsOverview from "./components/NewsOverview";
 import { filterNewsByTopic, type NewsTopic } from "./components/newsWorkspacePresentation";
 import SourceInvestigationLinks from "./components/SourceInvestigationLinks";
@@ -761,7 +763,6 @@ import {
   fetchDailyBriefingSchedule,
   fetchDailyBriefingEmailStatus,
   fetchDailyBriefingPreferenceOptions,
-  fetchDailySignalBriefingLatest,
   fetchCountryMarketOverview,
   fetchCountryMarketDetail,
   fetchFxRates,
@@ -798,7 +799,6 @@ import {
   type DailyBriefingSchedule,
   type DailyBriefingEmailStatus,
   type DailyBriefingPreferenceOptions,
-  type DailySignalBriefing,
   type FxRate,
   type MarketFiling,
   type MarketIndicator,
@@ -953,8 +953,6 @@ export default function ClaritasDashboard() {
   const [newsTranslationErrorIds, setNewsTranslationErrorIds] = useState<Set<number>>(
     () => new Set(),
   );
-  const [dailyBriefing, setDailyBriefing] = useState<DailySignalBriefing | null>(null);
-  const [dailyBriefingError, setDailyBriefingError] = useState<string | null>(null);
   const [dataWindowPreset, setDataWindowPreset] =
     useState<DataWindowPreset>("30d");
   const [mapMode, setMapMode] = useState<MapMode>("signals");
@@ -1167,6 +1165,7 @@ export default function ClaritasDashboard() {
 
   const isAdmin = (authUser?.roles ?? []).includes("admin");
   const hasPaidAccess = authUser?.billing?.has_access ?? true;
+  const { briefing: dailyBriefing, error: dailyBriefingError, refresh: refreshDailyBriefing } = useDailyBriefing(authStatus === "authed" && hasPaidAccess);
 
   const parsedSearch = useMemo(
     () => parseDashboardSearch(query, searchTopic),
@@ -1661,15 +1660,6 @@ export default function ClaritasDashboard() {
     }).catch(() => setMarketQuotes([]));
     fetchFxRates().then(setFxRates).catch(() => setFxRates([]));
     fetchPolicyRates().then(setPolicyRates).catch(() => setPolicyRates([]));
-    fetchDailySignalBriefingLatest()
-      .then((briefing) => {
-        setDailyBriefing(briefing);
-        setDailyBriefingError(null);
-      })
-      .catch((err) => {
-        setDailyBriefing(null);
-        setDailyBriefingError(err instanceof Error ? err.message : String(err));
-      });
     void loadNewsData("recent", "all", "newest");
     void loadPodcastData();
   }, [authStatus, hasPaidAccess, loadNewsData, loadPodcastData]);
@@ -5554,6 +5544,8 @@ export default function ClaritasDashboard() {
                             {dailyBriefing?.update_text ||
                               (dailyBriefingError ? "Briefing unavailable." : "Awaiting briefing.")}
                           </p>
+                          {dailyBriefingError && <p role="status" className="mt-2 text-xs">Could not refresh the briefing. {dailyBriefing ? "Showing the last loaded edition." : "Please retry."}</p>}
+                          <button type="button" onClick={() => void refreshDailyBriefing()} className="mt-2 text-xs font-semibold text-[color:var(--shell-accent-2)]">Refresh briefing</button>
                           <div className="briefing-source-links mt-3">
                             <span>Linked evidence</span>
                             <button type="button" onClick={() => setActiveView("podcasts")}>
@@ -6405,6 +6397,7 @@ export default function ClaritasDashboard() {
                                   </div>
                                 )}
                               </div>
+                              <CountryElections profile={selectedLeadershipProfile} />
                             </section>
 
                           </div>

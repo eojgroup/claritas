@@ -104,3 +104,15 @@ Content-Type: application/json
 ```
 
 Both endpoints require an authenticated Claritas session.
+
+### Recovery and observability
+
+Headline translation also runs on a 15-minute recovery timer independently of
+news acquisition. Both paths share a worker lease and process one bounded chunk
+per target, preserving the existing daily free-only budget and on-demand reserve.
+Automatic work is limited to accepted canonical reporting from the last 48 hours;
+opening a historical story can still request its translation. Failed acquisition
+and release runs that skip translation no longer suppress the recovery path.
+The read-only runtime diagnostic workflow reports key presence (never the key),
+model, targets, cache freshness and UTC-day usage. A configured worker still
+requires an available free provider and an unexhausted budget.

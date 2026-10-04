@@ -343,3 +343,19 @@ load `OpenCodeLlmClient` and `LlmProviderError` with the same static import in t
 test. Mixing dynamic and static imports caused `instanceof` to fail in CI and blocked
 the source-digest fallback release. The read-only runtime diagnostics now report the
 latest published briefing, due schedules, and sanitized recent generation failures.
+
+### Narrative recovery
+
+`OPENCODE_MODEL=openrouter/free` is accepted as shorthand for
+`openrouter/openrouter/free`: OpenCode receives provider `openrouter` and the
+complete model ID `openrouter/free`. Embedded provider availability errors now
+use the same direct OpenRouter recovery path as transport failures. Free models
+retain zero-price routing limits and verified zero-cost responses; no paid model
+is selected. Authentication failures remain errors.
+
+Published source digests are eligible for same-day narrative recovery with at
+least one hour between attempts and at most three generation jobs per briefing
+date. A successful narrative stops recovery. Existing digests remain readable
+while retries run, and dashboard readers refresh on returning to the tab or every
+five visible minutes. This also replaces today's fallback after rollout without
+requiring users to alter their schedules. It does not resend already sent email.

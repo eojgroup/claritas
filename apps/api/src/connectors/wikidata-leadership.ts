@@ -1,4 +1,5 @@
 import { query, withTransaction } from "../db";
+import { fetchWikidataElections, type CountryElection } from "./wikidata-elections";
 
 const WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql";
 const WIKIDATA_ENTITY_URL = "https://www.wikidata.org/wiki";
@@ -77,6 +78,8 @@ export type CountryLeadership = {
   government_type: string | null;
   summary: string;
   roles: CountryLeadershipRole[];
+  elections?: CountryElection[];
+  elections_retrieved_at?: string | null;
   source_name: "wikidata";
   source_url: string;
   source_license: "CC0";
@@ -157,6 +160,8 @@ type LeadershipDbRow = {
   person_wikidata_id: string | null;
   started_at: string | Date | null;
   role_source_url: string | null;
+  elections: CountryElection[] | null;
+  elections_retrieved_at: string | null;
 };
 
 function entityId(value: string | undefined): string | null {
@@ -415,6 +420,11 @@ export async function ingestWikidataLeadership(): Promise<LeadershipIngestResult
     );
   }
 
+  // Election-provider failures must not discard the last known calendar or block leadership updates.
+  let elections: Map<string, CountryElection[]> | null = null;
+  try { elections = await fetchWikidataElections(); }
+  catch (error) { console.warn("Leadership election refresh failed:", error instanceof Error ? error.message : String(error)); }
+
   const existing = await query<{ country: string }>(
     `SELECT upper(country_iso2) AS country FROM country_leadership`
   );
@@ -448,7 +458,7 @@ export async function ingestWikidataLeadership(): Promise<LeadershipIngestResult
            source_license = EXCLUDED.source_license,
            source_updated_at = EXCLUDED.source_updated_at,
            retrieved_at = EXCLUDED.retrieved_at,
-           payload = EXCLUDED.payload`,
+           payload = COALESCE(country_leadership.payload, '{}'::jsonb) || EXCLUDED.payload`,
         [
           country.country,
           country.country_name,
@@ -458,7 +468,7 @@ export async function ingestWikidataLeadership(): Promise<LeadershipIngestResult
           country.source_url,
           country.source_updated_at,
           country.retrieved_at,
-          JSON.stringify({ role_count: country.roles.length }),
+          JSON.stringify({ role_count: country.roles.length, ...(elections ? { elections: elections.get(country.country) ?? [], elections_retrieved_at: retrievedAt } : {}) }),
         ]
       );
 
@@ -522,6 +532,8 @@ export async function getCountryLeadershipLatest(): Promise<CountryLeadership[]>
        cl.wikidata_country_id,
        cl.government_type,
        cl.summary,
+       cl.payload->'elections' AS elections,
+       cl.payload->>'elections_retrieved_at' AS elections_retrieved_at,
        cl.source_name,
        cl.source_url,
        cl.source_license,
@@ -568,6 +580,8 @@ export async function getCountryLeadershipLatest(): Promise<CountryLeadership[]>
       government_type: row.government_type,
       summary: row.summary,
       roles: [],
+      elections: row.elections ?? [],
+      elections_retrieved_at: row.elections_retrieved_at ?? null,
       source_name: "wikidata",
       source_url: row.source_url,
       source_license: "CC0",

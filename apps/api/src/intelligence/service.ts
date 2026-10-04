@@ -416,6 +416,7 @@ export async function getIntelligenceEvent(eventId: string) {
     ),
     query(
       `SELECT evidence.*, source.name AS source_name,
+              source_item.payload->>'image_url' AS image_url,
               location.canonical_name AS location_name,
               COALESCE(source_item.title, podcast_signal.title,
                 NULLIF(concat_ws(' / ',global_source.actor1_name,global_source.actor2_name),''),

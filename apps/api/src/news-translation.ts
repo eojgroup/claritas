@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { query } from "./db";
+import { query, withWorkerLease } from "./db";
 import {
   createFreeOpenRouterLlmClientFromEnv,
   isFreeOpenRouterModel,
@@ -313,7 +313,11 @@ async function loadPendingCandidates(
   // Explicit item requests remain addressable for historical drill-down. The
   // automatic queue processes only canonical stories so synchronized aliases
   // cannot consume translation budget or starve fresh reporting.
-  const aliasFilter = ids.length > 0 ? "" : "AND NOT (i.payload ? 'canonical_alias_of_item_id')";
+  const aliasFilter = ids.length > 0 ? "" : `
+    AND NOT (i.payload ? 'canonical_alias_of_item_id')
+    AND COALESCE(i.payload->>'quality_status', 'accepted') = 'accepted'
+    AND COALESCE(i.event_time, i.created_at) >= now() - interval '48 hours'
+    AND COALESCE(i.event_time, i.created_at) <= now() + interval '5 minutes'`;
   if (ids.length > 0) params.push(ids);
   const { rows } = await query<NewsTranslationCandidate>(
     `SELECT i.id, i.title, i.summary, lower(i.language_code) AS language_code
@@ -777,7 +781,7 @@ export async function getNewsTranslation(
   return rows[0] ? toNewsTranslation(rows[0]) : null;
 }
 
-export async function runPendingNewsHeadlineTranslations(options: {
+async function runPendingNewsHeadlineTranslationsInternal(options: {
   targetLanguage?: string;
   limit?: number;
   llmClient?: LlmClient;
@@ -836,7 +840,10 @@ export async function runPendingNewsHeadlineTranslations(options: {
        AND i.language_code IS NOT NULL
        AND split_part(lower(i.language_code), '-', 1) <> split_part($1, '-', 1)
        AND translation.item_id IS NULL
-       AND NOT (i.payload ? 'canonical_alias_of_item_id')`,
+       AND NOT (i.payload ? 'canonical_alias_of_item_id')
+       AND COALESCE(i.payload->>'quality_status', 'accepted') = 'accepted'
+       AND COALESCE(i.event_time, i.created_at) >= now() - interval '48 hours'
+       AND COALESCE(i.event_time, i.created_at) <= now() + interval '5 minutes'`,
     [targetLanguage],
   );
   return {
@@ -859,6 +866,51 @@ export async function runPendingNewsHeadlineTranslations(options: {
         ? processed.errors.join(" ").slice(0, 1_000)
         : null,
   };
+}
+
+let headlineBatchRunning = false;
+
+// Shared lease protects the ingest hook and independent recovery worker across replicas.
+export async function runPendingNewsHeadlineTranslations(options: {
+  targetLanguage?: string; limit?: number; llmClient?: LlmClient;
+} = {}): Promise<NewsTranslationBatchResult> {
+  let result: NewsTranslationBatchResult | null = null;
+  if (!headlineBatchRunning) {
+    headlineBatchRunning = true;
+    try {
+      await withWorkerLease("news-headline-translation", 120, async () => {
+        result = await runPendingNewsHeadlineTranslationsInternal({
+          ...options, limit: options.limit ?? Math.min(getNewsTranslationRuntimeConfig().chunk_size, intFromEnv("NEWS_TRANSLATION_BATCH_SIZE", 100, 1, 100)),
+        });
+      });
+    } finally { headlineBatchRunning = false; }
+  }
+  return result ?? {
+    target_language_code: options.targetLanguage ?? "en", requested: 0, translated: 0,
+    summaries_generated: 0, summaries_insufficient: 0, remaining: 0, status: "partial",
+    requests_reserved: 0, failed: 0, reason: "Another worker is processing translations.",
+  };
+}
+
+let translationWorkerStarted = false;
+let translationWorkerRunning = false;
+export function startNewsTranslationWorker(): void {
+  if (translationWorkerStarted || !newsTranslationEnabled()) return;
+  translationWorkerStarted = true;
+  const cycle = async () => {
+    if (translationWorkerRunning || !getNewsTranslationRuntimeConfig().available) return;
+    translationWorkerRunning = true;
+    try {
+      for (const targetLanguage of configuredNewsTranslationTargets()) {
+        const result = await runPendingNewsHeadlineTranslations({ targetLanguage });
+        console.log(JSON.stringify({ event: "news_translation_cycle", ...result }));
+      }
+    } catch (error) {
+      console.error("News translation recovery cycle failed:", error);
+    } finally { translationWorkerRunning = false; }
+  };
+  setTimeout(() => { void cycle(); }, 15_000).unref();
+  setInterval(() => { void cycle(); }, 15 * 60_000).unref();
 }
 
 async function ensureNewsSummaryTranslationInternal(options: {

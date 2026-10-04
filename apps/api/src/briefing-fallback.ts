@@ -48,6 +48,7 @@ export async function generateBriefingWithFallback<T>(
       metadata: {
         fallback: true,
         fallback_reason: "generation_provider_unavailable",
+        provider_status: error.status ?? null,
         source_references: context.news.slice(0, 5).map(({ title, publisher, source_name, url, event_time }) => ({ title, publisher, source_name, url, event_time })),
       },
     };

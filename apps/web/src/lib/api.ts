@@ -355,6 +355,8 @@ export type CountryLeadership = {
   government_type: string | null;
   summary: string;
   roles: CountryLeadershipRole[];
+  elections?: Array<{ id: string; title: string; date: string; date_precision: "day" | "month" | "year"; election_type: string; source_url: string; source_license: "CC0"; retrieved_at: string }>;
+  elections_retrieved_at?: string | null;
   source_name: "wikidata";
   source_url: string;
   source_license: "CC0";
@@ -1212,6 +1214,7 @@ export type IntelligenceEvent = {
 };
 
 export type IntelligenceEvidence = {
+  image_url?: string | null;
   id: string;
   domain: string;
   evidence_type: string;
@@ -1423,6 +1426,8 @@ export type IntelligenceEventDetail = {
   locations: Array<{
     id: string;
     canonical_name: string;
+    latitude?: number | null;
+    longitude?: number | null;
     location_type: string;
     country_iso2?: string | null;
     relationship: string;

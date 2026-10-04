@@ -1,3 +1,4 @@
+import { startNewsTranslationWorker } from "./news-translation";
 import express from "express";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import { fetchPublicImage, ImageProxyError } from "./image-proxy";
@@ -1360,13 +1361,22 @@ async function getActiveDailyBriefingGenerationJob(
 }
 
 async function ensurePublishedDailyBriefingGenerationJob(briefingDate: string): Promise<string | null> {
-  const published = await query<{ id: number }>(
-    `SELECT id FROM daily_signal_briefing
+  const published = await query<{ id: number; is_digest: boolean }>(
+    `SELECT id, COALESCE(metadata->'llm'->>'fallback', 'false') = 'true' AS is_digest
+     FROM daily_signal_briefing
      WHERE briefing_date = $1::date AND status = 'published'
      LIMIT 1`,
     [briefingDate]
   );
-  if (published.rows[0]) return null;
+  if (published.rows[0] && !published.rows[0].is_digest) return null;
+  if (published.rows[0]?.is_digest) {
+    const retries = await query<{ allowed: boolean }>(
+      `SELECT count(*) < 3 AND COALESCE(max(created_at), '-infinity'::timestamptz) < now() - interval '1 hour' AS allowed
+       FROM daily_signal_briefing_generation_job WHERE briefing_date = $1::date`,
+      [briefingDate],
+    );
+    if (!retries.rows[0]?.allowed) return null;
+  }
 
   const activeJob = await getActiveDailyBriefingGenerationJob(briefingDate);
   if (activeJob) {
@@ -1420,6 +1430,16 @@ async function runDailyBriefingSchedulerCycle(): Promise<void> {
   try {
     await withWorkerLease("daily-briefing-scheduler", 120, async () => {
       await recoverStaleDailyBriefingGenerationJobs();
+      // A published fallback is useful coverage, but must not suppress synthesis
+      // recovery for the rest of the day after a transient provider outage.
+      const digests = await query<{ briefing_date: string | Date }>(
+        `SELECT briefing_date FROM daily_signal_briefing
+         WHERE briefing_date = (now() AT TIME ZONE 'UTC')::date
+           AND status = 'published' AND metadata->'llm'->>'fallback' = 'true'`,
+      );
+      for (const digest of digests.rows) {
+        await ensurePublishedDailyBriefingGenerationJob(dateToApiString(digest.briefing_date));
+      }
       const dueSchedules = await getDueDailyBriefingSchedules();
       const scheduleGroups = new Map<string, {
         localScheduleDate: string;
@@ -3728,6 +3748,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
 startDatabasePoolMonitoring();
 startIngestionAutomationWorker();
 startNewsAssessmentWorker();
+startNewsTranslationWorker();
 startDailyBriefingSchedulerWorker();
 startPersonalBriefingWorker();
 startImportantEventEmailWorker();
