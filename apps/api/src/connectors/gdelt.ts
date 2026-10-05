@@ -51,6 +51,7 @@ const GDELT_DOC_DEFAULT_MAX_PROVIDER_SEEN_AGE_HOURS = 3;
 const GDELT_MAX_FUTURE_SKEW_MS = 5 * 60_000;
 const GDELT_ARTICLE_HTML_MAX_BYTES = 350_000;
 const GDELT_ARTICLE_VERIFICATION_CONCURRENCY = 4;
+const GDELT_DOC_DISCOVERY_TIMEOUT_MS = 120_000;
 export const GDELT_DOC_MIN_REQUEST_SPACING_MS = 12_000;
 const GDELT_DOC_REQUEST_TIMEOUT_MS = 35_000;
 const GDELT_DOC_MAX_RETRY_DELAY_MS = 30_000;
@@ -2679,6 +2680,7 @@ export async function waitForGdeltDocRequestWindow(
   options: {
     now?: () => number;
     wait?: (milliseconds: number) => Promise<void>;
+    signal?: AbortSignal;
   } = {},
 ): Promise<void> {
   const now = options.now ?? Date.now;
@@ -2687,23 +2689,41 @@ export async function waitForGdeltDocRequestWindow(
   // after every wait so an already queued request cannot escape on the older
   // process-wide spacing deadline.
   while (true) {
+    options.signal?.throwIfAborted();
     const waitMs = Math.max(0, deadline() - now());
     if (waitMs <= 0) return;
-    await wait(waitMs);
+    await awaitGdeltDeadline(wait(waitMs), options.signal);
   }
+}
+
+/** Include queueing and shared provider cooldowns in the caller's deadline. */
+export async function awaitGdeltDeadline<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return operation;
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error("GDELT DOC discovery deadline exceeded"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try { return await Promise.race([operation, aborted]); }
+  finally { signal.removeEventListener("abort", onAbort); }
 }
 
 async function withGdeltDocRateLimit(
   operation: () => Promise<Response>,
   attempt: number,
+  signal?: AbortSignal,
 ): Promise<Response> {
   let release!: () => void;
   const turn = new Promise<void>((resolve) => { release = resolve; });
   const previous = gdeltDocRequestTail;
   gdeltDocRequestTail = previous.then(() => turn);
-  await previous;
+  let acquired = false;
   try {
-    await waitForGdeltDocRequestWindow(() => gdeltDocNextRequestAt);
+    await awaitGdeltDeadline(previous, signal);
+    await waitForGdeltDocRequestWindow(() => gdeltDocNextRequestAt, { signal });
+    signal?.throwIfAborted();
+    acquired = true;
     try {
       const response = await operation();
       if (GDELT_DOC_RETRYABLE_STATUSES.has(response.status)) {
@@ -2722,12 +2742,12 @@ async function withGdeltDocRateLimit(
     // Preserve a longer provider cooldown established above. This occurs
     // before releasing the next queued request, eliminating a Retry-After
     // race with targeted-event discovery running in parallel.
-    deferGdeltDocRequests(GDELT_DOC_MIN_REQUEST_SPACING_MS);
+    if (acquired) deferGdeltDocRequests(GDELT_DOC_MIN_REQUEST_SPACING_MS);
     release();
   }
 }
 
-async function fetchRetry(url: string, attempts = 2): Promise<Response> {
+async function fetchRetry(url: string, attempts = 2, deadline?: AbortSignal): Promise<Response> {
   let lastResponse: Response | null = null;
   let lastError: unknown = null;
   const target = new URL(url);
@@ -2740,15 +2760,18 @@ async function fetchRetry(url: string, attempts = 2): Promise<Response> {
         accept: "application/json, text/plain;q=0.9, */*;q=0.8",
         "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
       },
-      signal: AbortSignal.timeout(isGdeltDoc ? GDELT_DOC_REQUEST_TIMEOUT_MS : 20_000),
+      signal: deadline
+        ? AbortSignal.any([deadline, AbortSignal.timeout(isGdeltDoc ? GDELT_DOC_REQUEST_TIMEOUT_MS : 20_000)])
+        : AbortSignal.timeout(isGdeltDoc ? GDELT_DOC_REQUEST_TIMEOUT_MS : 20_000),
     });
     let response: Response;
     try {
       response = isGdeltDoc
-        ? await withGdeltDocRateLimit(request, attempt)
+        ? await withGdeltDocRateLimit(request, attempt, deadline)
         : await request();
     } catch (error) {
       lastError = error;
+      if (deadline?.aborted) throw error;
       if (attempt === maximumAttempts - 1) break;
       const delayMs = gdeltDocRetryDelayMs(null, null, attempt);
       if (!isGdeltDoc) await sleep(delayMs);
@@ -3283,6 +3306,9 @@ async function ingestDocArticles(
     error?: string;
   }> = [];
   let rawArticleCount = 0;
+  // DOC is optional acquisition. Bound all lanes together so an unhealthy
+  // endpoint cannot consume the release window before GAL/raw fallbacks run.
+  const discoveryDeadline = AbortSignal.timeout(GDELT_DOC_DISCOVERY_TIMEOUT_MS);
   for (const lane of laneBudgets) {
     try {
       const apiUrl = new URL(process.env.GDELT_DOC_API_URL || DOC_API_URL);
@@ -3301,7 +3327,7 @@ async function ingestDocArticles(
       // fetchRetry serializes every DOC request (including retries) through
       // the process-wide limiter. The per-lane catch lets a provider failure
       // in one topic degrade coverage without discarding successful lanes.
-      const response = await fetchRetry(apiUrl.toString(), 2);
+      const response = await fetchRetry(apiUrl.toString(), 2, discoveryDeadline);
       const data = parseGdeltDocApiResponse(await response.text(), {
         laneId: lane.id,
         status: response.status,
@@ -3346,7 +3372,7 @@ async function ingestDocArticles(
       // A final 429 is an egress-wide provider throttle, not a topic-specific
       // query failure. Further lanes from the same process/IP only extend the
       // outage and can starve the independent GAL fallback behind them.
-      if (/\bGDELT HTTP 429\b/i.test(message)) break;
+      if (discoveryDeadline.aborted || /\bGDELT HTTP 429\b/i.test(message)) break;
     }
   }
   if (!discoveryLanes.some((lane) => lane.status === "healthy")) {

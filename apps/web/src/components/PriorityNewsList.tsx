@@ -1,3 +1,4 @@
+import CountryFlag from "./CountryFlag";
 import type { ReactNode } from "react";
 import { ArrowUpRight, ChevronDown, RadioTower, Satellite } from "lucide-react";
 import {
@@ -470,7 +471,7 @@ export default function PriorityNewsList({
                         type="button"
                         onClick={() => onSelectCountry(iso)}
                       >
-                        Open country context
+                        <CountryFlag country={iso} />Open country context
                       </button>
                     )}
                     {onOpenWorkspace && (

@@ -1,3 +1,6 @@
+import CountryFlag from "./CountryFlag";
+import { useCountryContexts } from "./countryContext";
+import { countryIso, countryReferencePoint, countryFlagEmoji } from "./countryPresentation";
 import {
   memo,
   useCallback,
@@ -347,6 +350,7 @@ export default memo(function WorldMapBubbles({
   points = [],
   onSelectPoint,
 }: WorldMapBubblesProps) {
+  const countryContexts = useCountryContexts();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const viewRef = useRef<ViewTransform>({ scale: 1, x: 0, y: 0 });
@@ -428,7 +432,7 @@ export default memo(function WorldMapBubbles({
     const next: BubbleMarker[] = [];
     data.forEach((datum) => {
       const iso = datum.country.toUpperCase();
-      const coordinate =
+      const coordinate = countryReferencePoint(countryContexts[countryIso(iso) ?? iso]) ??
         WORLD_GEOMETRY.centroidByIso.get(iso) ??
         WORLD_GEOMETRY.centroidByIso.get(iso === "UK" ? "GB" : iso);
       if (!coordinate) return;
@@ -442,7 +446,7 @@ export default memo(function WorldMapBubbles({
       });
     });
     return next.sort((a, b) => a.count - b.count);
-  }, [data]);
+  }, [data, countryContexts]);
   const eventPoints = useMemo(
     () => points
       .filter((point) =>
@@ -1073,7 +1077,7 @@ export default memo(function WorldMapBubbles({
                     letterSpacing={0.5 / view.scale}
                     className="world-map-label"
                   >
-                    {marker.country}
+                    <tspan aria-hidden="true">{countryFlagEmoji(marker.country)} </tspan>{marker.country}
                   </text>
                 )}
                 {isFeatured && (
@@ -1218,7 +1222,7 @@ export default memo(function WorldMapBubbles({
       {hoveredCountry && !tip && (
         <div className="map-country-readout pointer-events-none absolute left-3 top-3">
           <span>
-            {WORLD_GEOMETRY.nameByIso.get(hoveredCountry) ?? hoveredCountry}
+            <CountryFlag country={hoveredCountry} />{WORLD_GEOMETRY.nameByIso.get(hoveredCountry) ?? hoveredCountry}
           </span>
           <strong>
             {hoveredMarker
@@ -1263,7 +1267,7 @@ export default memo(function WorldMapBubbles({
         >
           <span>{featuredLabel}</span>
           <strong>
-            {WORLD_GEOMETRY.nameByIso.get(featuredMarker.country) ??
+            <CountryFlag country={featuredMarker.country} />{WORLD_GEOMETRY.nameByIso.get(featuredMarker.country) ??
               featuredMarker.country}
             <small> · {featuredMarker.country}</small>
           </strong>
@@ -1355,7 +1359,7 @@ export default memo(function WorldMapBubbles({
           }}
         >
           <div className="font-semibold">
-            {WORLD_GEOMETRY.nameByIso.get(tip.country) ?? tip.country}
+            <CountryFlag country={tip.country} />{WORLD_GEOMETRY.nameByIso.get(tip.country) ?? tip.country}
             <span className="ml-1 opacity-60">· {tip.country}</span>
           </div>
           <div>

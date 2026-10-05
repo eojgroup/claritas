@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { CountryDataContext } from "./countryContext";
+import type { CountryContext } from "../lib/api";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import EventVisualContext from "./EventVisualContext";
@@ -20,4 +22,12 @@ it("shows estimated positions and publisher thumbnails with their limitations", 
   expect(screen.getByAltText("Publisher photo").getAttribute("src")).toContain("proxy-image");
   expect(screen.getByText(/Publisher-supplied illustration/)).toBeTruthy();
   expect(screen.getByRole("img", { name: /Correlation network/ })).toBeTruthy();
+});
+
+it("uses Wikidata country context to center an unresolved map without adding an incident pin", () => {
+  const context = { coordinates: { latitude: 4.7, longitude: -74, precision_degrees: 1, basis: "country_reference_point" } } as CountryContext;
+  const detail = { ...base, event: { ...base.event, primary_country_iso2: "CO" } };
+  const { container } = render(<CountryDataContext.Provider value={{ CO: context }}><EventVisualContext detail={detail} /></CountryDataContext.Provider>);
+  expect(screen.getByText(/View centered on Wikidata/)).toBeTruthy();
+  expect(container.querySelectorAll("circle")).toHaveLength(0);
 });

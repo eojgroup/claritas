@@ -5234,3 +5234,15 @@ body {
 .country-elections small { display: block; }
 .country-elections a:hover { text-decoration: underline; }
 @media (max-width: 720px) { .event-visual-grid, .event-news-images { grid-template-columns: 1fr; } }
+
+.country-flag.country-flag { display: inline-block; width: 1.1rem; margin-right: .3rem; font-size: .85rem; line-height: 1; vertical-align: -.05em; flex-shrink: 0; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.country-facts { margin: .75rem 0; padding: 1rem; border: 1px solid var(--shell-border); border-radius: .75rem; }
+.country-facts h4 { font-size: .85rem; font-weight: 650; }
+.country-facts dl { display: grid; gap: .65rem; margin: .8rem 0; }
+.country-facts dt { font-size: .65rem; text-transform: uppercase; letter-spacing: .05em; color: var(--shell-muted); }
+.country-facts dd { margin: .2rem 0 0; font-size: .8rem; }
+.country-facts p, .country-facts figcaption { margin-top: .6rem; color: var(--shell-muted); font-size: .7rem; line-height: 1.5; }
+.country-facts a:hover { text-decoration: underline; }
+.country-facts figure { margin: .75rem 0; }
+.country-facts small { display: block; overflow-wrap: anywhere; }
+.country-locator-image { width: 100%; max-height: 12rem; object-fit: contain; background: #f5f5f5; border-radius: .4rem; }

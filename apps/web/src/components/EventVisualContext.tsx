@@ -1,3 +1,6 @@
+import CountryFlag from "./CountryFlag";
+import { useCountryContext } from "./countryContext";
+import { countryReferencePoint } from "./countryPresentation";
 import { useState } from "react";
 import { geoMercator, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
@@ -17,7 +20,9 @@ export default function EventVisualContext({ detail }: { detail: IntelligenceEve
   const located = detail.locations.filter((location) => validPoint(location.latitude, location.longitude));
   const coordinates = detail.understanding?.coordinates;
   const primary = coordinates && validPoint(coordinates.latitude, coordinates.longitude) ? coordinates : null;
-  const center = primary ?? located[0];
+  const countryContext = useCountryContext(detail.event.primary_country_iso2);
+  const referencePoint = countryReferencePoint(countryContext);
+  const center = primary ?? located[0] ?? (referencePoint ? { longitude: referencePoint[0], latitude: referencePoint[1] } : null);
   const projection = geoMercator().center(center ? [center.longitude!, Math.max(-75, Math.min(75, center.latitude!))] : [0, 15]).scale(95 * zoom).translate([320, 150]);
   const path = geoPath(projection);
   const points = [...(primary ? [{ id: "event", latitude: primary.latitude, longitude: primary.longitude, canonical_name: primary.label, relationship: primary.basis === "estimated_mapped" ? "Estimated event location" : "Source-observed event location" }] : []), ...located];
@@ -31,7 +36,7 @@ export default function EventVisualContext({ detail }: { detail: IntelligenceEve
   return <section className="event-visual-context" aria-label="Event visual context">
     <div className="event-visual-grid">
       <figure className="event-location-map">
-        <figcaption><strong>Geographic context</strong><span>{center ? detail.event.location_name || "Event area" : "Location not resolved · world overview"}</span></figcaption>
+        <figcaption><strong><CountryFlag country={detail.event.primary_country_iso2} />Geographic context</strong><span>{center ? detail.event.location_name || "Event area" : "Location not resolved · world overview"}</span></figcaption>
         <svg viewBox="0 0 640 300" role="img" aria-label="Map of event and linked locations">
           <rect width="640" height="300" fill="var(--shell-bg)" />
           <g fill="var(--shell-sidebar)" stroke="var(--shell-border)" strokeWidth="0.6">{land.features.map((country, index) => <path key={String(country.id ?? index)} d={path(country) ?? undefined} />)}</g>
@@ -42,7 +47,7 @@ export default function EventVisualContext({ detail }: { detail: IntelligenceEve
           })}
         </svg>
         <label className="event-map-zoom">Zoom <input aria-label="Event map zoom" type="range" min="1" max="12" step="0.5" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>
-        <p>{primary?.basis === "estimated_mapped" ? "Estimated geography; pin is not a verified incident position." : primary ? "Source-observed geography." : located.length ? "Linked places; no precise incident position is available." : "No coordinates available; no incident pin is inferred."} Map: Natural Earth.</p>
+        <p>{primary?.basis === "estimated_mapped" ? "Estimated geography; pin is not a verified incident position." : primary ? "Source-observed geography." : located.length ? "Linked places; no precise incident position is available." : "No coordinates available; no incident pin is inferred."} {!primary && !located.length && referencePoint && " View centered on Wikidata’s country reference point."} Map: Natural Earth.</p>
       </figure>
       <figure className="event-correlation-graphic">
         <figcaption><strong>Evidence connections</strong><span>{records.length} records · {groups.length} source types</span></figcaption>

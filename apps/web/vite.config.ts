@@ -1,8 +1,10 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Transform world-countries' legacy JSON import syntax for current Node.
+  test: { server: { deps: { inline: ['world-countries'] } } },
   plugins: [react()],
   build: {
     rollupOptions: {

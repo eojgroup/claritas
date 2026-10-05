@@ -1,3 +1,6 @@
+import { CountryDataContext } from "./components/countryContext";
+import CountryFlag from "./components/CountryFlag";
+import CountryFacts from "./components/CountryFacts";
 import { useDailyBriefing } from "./components/useDailyBriefing";
 import CountryElections from "./components/CountryElections";
 import NewsOverview from "./components/NewsOverview";
@@ -908,6 +911,7 @@ export default function ClaritasDashboard() {
   const [weatherForecastDetail, setWeatherForecastDetail] = useState<CountryWeatherForecastDetail | null>(null);
   const [weatherForecastLoading, setWeatherForecastLoading] = useState(false);
   const [leadershipStats, setLeadershipStats] = useState<CountryLeadership[]>([]);
+  const countryContexts = useMemo(() => Object.fromEntries(leadershipStats.flatMap((country) => country.country_context ? [[country.country, country.country_context]] : [])), [leadershipStats]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [countryMarkets, setCountryMarkets] = useState<CountryMarketOverview[]>([]);
   const [countryMarketDetail, setCountryMarketDetail] = useState<CountryMarketDetail | null>(null);
@@ -4726,6 +4730,7 @@ export default function ClaritasDashboard() {
   }
 
   return (
+    <CountryDataContext.Provider value={countryContexts}>
     <div className="app-shell app-safe-x min-h-[100dvh] w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)]">
       {mobileNavOpen && (
         <ModalSurface
@@ -5966,6 +5971,7 @@ export default function ClaritasDashboard() {
                                 Country profile · {selectedCountryContext.iso}
                               </div>
                               <div className="mt-0.5 text-lg font-semibold text-[color:var(--shell-ink)]">
+                                <CountryFlag country={selectedCountryContext.iso} />
                                 {selectedCountryContext.meta?.name ??
                                   selectedCountryContext.iso}
                               </div>
@@ -5989,6 +5995,7 @@ export default function ClaritasDashboard() {
                           </div>
 
                           <div className="country-profile-scroll app-scroll-panel min-h-0 flex-1 overflow-y-auto">
+                            <CountryFacts context={selectedLeadershipProfile?.country_context} country={selectedCountryContext.iso} name={selectedLeadershipProfile?.country_name ?? selectedCountryContext.iso} />
                             <SatelliteContextPanel
                               country={selectedCountryContext.iso}
                               compact
@@ -10296,5 +10303,6 @@ export default function ClaritasDashboard() {
           })}
       </nav>
     </div>
+    </CountryDataContext.Provider>
   );
 }

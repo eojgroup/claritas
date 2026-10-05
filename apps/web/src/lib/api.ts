@@ -348,6 +348,17 @@ export type CountryLeadershipRole = {
   source_url: string;
 };
 
+export type CountryContext = {
+  capitals: Array<{ id: string; name: string; source_url: string }>;
+  languages: Array<{ id: string; name: string; source_url: string }>;
+  currencies: Array<{ id: string; name: string; source_url: string }>;
+  neighbours: Array<{ id: string; name: string; source_url: string }>;
+  coordinates: { latitude: number; longitude: number; precision_degrees: number | null; basis: "country_reference_point" } | null;
+  locator_maps: Array<{ source_url: string; file_name: string; thumbnail_url?: string; license?: string; license_url?: string; attribution?: string }>;
+  flag: { source_url: string; file_name: string } | null;
+  source_url: string; source_license: "CC0"; retrieved_at: string;
+};
+
 export type CountryLeadership = {
   country: string;
   country_name: string;
@@ -355,6 +366,7 @@ export type CountryLeadership = {
   government_type: string | null;
   summary: string;
   roles: CountryLeadershipRole[];
+  country_context?: CountryContext | null;
   elections?: Array<{ id: string; title: string; date: string; date_precision: "day" | "month" | "year"; election_type: string; source_url: string; source_license: "CC0"; retrieved_at: string }>;
   elections_retrieved_at?: string | null;
   source_name: "wikidata";

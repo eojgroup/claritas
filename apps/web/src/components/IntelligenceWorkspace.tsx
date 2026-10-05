@@ -1,3 +1,4 @@
+import CountryFlag from "./CountryFlag";
 import EventVisualContext from "./EventVisualContext";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -527,7 +528,7 @@ export default function IntelligenceWorkspace({
                   <div className="mt-2 text-sm font-semibold leading-5 text-[color:var(--shell-ink)]">{presentation.headline}</div>
                   {presentation.focus && <div className="mt-1 line-clamp-1 text-[11px] text-[color:var(--shell-muted)]">Focus · {presentation.focus}</div>}
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[color:var(--shell-muted)]">
-                    <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" />{presentation.locationLabel}</span>
+                    <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3" /><CountryFlag country={event.primary_country_iso2} />{presentation.locationLabel}</span>
                     <span>{event.evidence_count} linked records</span>{eventOrigin(event) && <span>From {eventOrigin(event)}</span>}
                     {event.earth_observation_available && <span className="inline-flex items-center gap-1 text-[color:var(--signal-emerald)]"><Satellite className="h-3 w-3" />Imagery</span>}
                   </div>
@@ -564,7 +565,7 @@ export default function IntelligenceWorkspace({
                     <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-accent)]">{detailPresentation?.typeLabel}</div>
                     <h2 className="mt-1 text-2xl font-semibold text-[color:var(--shell-ink)]">{detailPresentation?.headline}</h2>
                     {detailPresentation?.focus && <div className="mt-1 text-xs text-[color:var(--shell-muted)]">Signal focus · {detailPresentation.focus}</div>}
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[color:var(--shell-muted)]"><span className="inline-flex items-center gap-2"><MapPin className="h-3.5 w-3.5" />{detailPresentation?.locationLabel}</span><span>Started {dateLabel(detail.event.start_time)}</span><span>Updated {dateLabel(detail.event.last_activity_time)}</span>{detail.event.expires_at && <span className={detail.event.freshness_state === "expired" ? "text-[color:var(--signal-coral)]" : ""}>{detail.event.freshness_state === "expired" ? "Expired" : "Current until"} {dateLabel(detail.event.expires_at)}</span>}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[color:var(--shell-muted)]"><span className="inline-flex items-center gap-2"><MapPin className="h-3.5 w-3.5" /><CountryFlag country={detail.event.primary_country_iso2} />{detailPresentation?.locationLabel}</span><span>Started {dateLabel(detail.event.start_time)}</span><span>Updated {dateLabel(detail.event.last_activity_time)}</span>{detail.event.expires_at && <span className={detail.event.freshness_state === "expired" ? "text-[color:var(--signal-coral)]" : ""}>{detail.event.freshness_state === "expired" ? "Expired" : "Current until"} {dateLabel(detail.event.expires_at)}</span>}</div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
                     {watchTarget && <button type="button" disabled={watchPending} onClick={() => void toggleWatch()} className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] px-3 py-2 text-xs font-semibold text-[color:var(--shell-ink)] disabled:opacity-50">{activeWatch ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}{activeWatch ? "Stop watching" : `Watch ${watchTarget.key}`}</button>}

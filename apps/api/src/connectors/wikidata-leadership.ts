@@ -1,3 +1,4 @@
+import { fetchWikidataCountryContext, type CountryContext } from "./wikidata-country-context";
 import { query, withTransaction } from "../db";
 import { fetchWikidataElections, type CountryElection } from "./wikidata-elections";
 
@@ -79,6 +80,7 @@ export type CountryLeadership = {
   summary: string;
   roles: CountryLeadershipRole[];
   elections?: CountryElection[];
+  country_context?: CountryContext | null;
   elections_retrieved_at?: string | null;
   source_name: "wikidata";
   source_url: string;
@@ -161,6 +163,7 @@ type LeadershipDbRow = {
   started_at: string | Date | null;
   role_source_url: string | null;
   elections: CountryElection[] | null;
+  country_context: CountryContext | null;
   elections_retrieved_at: string | null;
 };
 
@@ -425,6 +428,10 @@ export async function ingestWikidataLeadership(): Promise<LeadershipIngestResult
   try { elections = await fetchWikidataElections(); }
   catch (error) { console.warn("Leadership election refresh failed:", error instanceof Error ? error.message : String(error)); }
 
+  let countryContexts = new Map<string, CountryContext>();
+  try { countryContexts = await fetchWikidataCountryContext(countries.map((country) => country.wikidata_country_id)); }
+  catch (error) { console.warn("Wikidata country context refresh failed:", error instanceof Error ? error.message : String(error)); }
+
   const existing = await query<{ country: string }>(
     `SELECT upper(country_iso2) AS country FROM country_leadership`
   );
@@ -468,7 +475,7 @@ export async function ingestWikidataLeadership(): Promise<LeadershipIngestResult
           country.source_url,
           country.source_updated_at,
           country.retrieved_at,
-          JSON.stringify({ role_count: country.roles.length, ...(elections ? { elections: elections.get(country.country) ?? [], elections_retrieved_at: retrievedAt } : {}) }),
+          JSON.stringify({ role_count: country.roles.length, ...(countryContexts.has(country.country) ? { country_context: countryContexts.get(country.country) } : {}), ...(elections ? { elections: elections.get(country.country) ?? [], elections_retrieved_at: retrievedAt } : {}) }),
         ]
       );
 
@@ -533,6 +540,7 @@ export async function getCountryLeadershipLatest(): Promise<CountryLeadership[]>
        cl.government_type,
        cl.summary,
        cl.payload->'elections' AS elections,
+       cl.payload->'country_context' AS country_context,
        cl.payload->>'elections_retrieved_at' AS elections_retrieved_at,
        cl.source_name,
        cl.source_url,
@@ -581,6 +589,7 @@ export async function getCountryLeadershipLatest(): Promise<CountryLeadership[]>
       summary: row.summary,
       roles: [],
       elections: row.elections ?? [],
+      country_context: row.country_context ?? null,
       elections_retrieved_at: row.elections_retrieved_at ?? null,
       source_name: "wikidata",
       source_url: row.source_url,

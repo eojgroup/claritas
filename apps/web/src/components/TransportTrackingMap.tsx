@@ -1,3 +1,4 @@
+import { countryFlagEmoji } from "./countryPresentation";
 import {
   useEffect,
   useMemo,
@@ -590,7 +591,7 @@ export default function TransportTrackingMap({
                   }}
                 >
                   <circle r={isSelected || isComparison ? 11 : 8} />
-                  <text y={3.2} textAnchor="middle">{iso}</text>
+                  <text y={3.2} textAnchor="middle">{iso}</text><text x={16} y={4} fontSize={12} aria-hidden="true">{countryFlagEmoji(iso)}</text>
                 </g>
               );
             })}

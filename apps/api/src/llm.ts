@@ -165,14 +165,18 @@ export function assertFreeOpenRouterResponseCost(usage: unknown): 0 {
   return 0;
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+export async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, {
+    const response = await fetch(url, {
       ...init,
       signal: controller.signal,
     });
+    // The deadline covers downloading the body, not just receiving headers.
+    // Buffer before returning so provider fallbacks handle a stalled stream.
+    const body = await response.text();
+    return new Response([204, 205, 304].includes(response.status) ? null : body, { status: response.status, statusText: response.statusText, headers: response.headers });
   } finally {
     clearTimeout(timeout);
   }

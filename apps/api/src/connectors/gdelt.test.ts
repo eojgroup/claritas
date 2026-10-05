@@ -142,8 +142,8 @@ test("GDELT DOC lanes degrade independently behind the shared rate limiter", () 
     source.indexOf("export function hasUsableGdeltDocCoverage"),
   );
   assert.match(ingestDoc, /for \(const lane of laneBudgets\)/);
-  assert.match(ingestDoc, /const response = await fetchRetry\(apiUrl\.toString\(\), 2\)/);
-  assert.match(ingestDoc, /if \(\/\\bGDELT HTTP 429\\b\/i\.test\(message\)\) break/);
+  assert.match(ingestDoc, /const response = await fetchRetry\(apiUrl\.toString\(\), 2, discoveryDeadline\)/);
+  assert.match(ingestDoc, /if \(discoveryDeadline\.aborted \|\| \/\\bGDELT HTTP 429\\b\/i\.test\(message\)\) break/);
   assert.match(ingestDoc, /parseGdeltDocApiResponse\(await response\.text\(\)/);
   assert.match(ingestDoc, /status: "failed"/);
   assert.match(ingestDoc, /if \(!discoveryLanes\.some\(\(lane\) => lane\.status === "healthy"\)\)/);
@@ -151,8 +151,8 @@ test("GDELT DOC lanes degrade independently behind the shared rate limiter", () 
   assert.match(ingestDoc, /const allowProviderFirstSeen = !params\.targetedDiscovery/);
   assert.match(ingestDoc, /continuation\.providerFirstSeenAt \?\? providerSeenAt/);
   assert.match(source, /const isGdeltDoc = hostname === "api\.gdeltproject\.org"/);
-  assert.match(source, /withGdeltDocRateLimit\(request, attempt\)/);
-  assert.match(source, /await waitForGdeltDocRequestWindow\(\(\) => gdeltDocNextRequestAt\)/);
+  assert.match(source, /withGdeltDocRateLimit\(request, attempt, deadline\)/);
+  assert.match(source, /waitForGdeltDocRequestWindow\(\(\) => gdeltDocNextRequestAt, \{ signal \}\)/);
   assert.ok(
     source.indexOf("deferGdeltDocRequests(GDELT_DOC_MIN_REQUEST_SPACING_MS)")
       < source.indexOf("release();"),
@@ -1169,4 +1169,19 @@ test("GAL parsing cannot be crashed by an invalid numeric XML entity", async () 
   );
   assert.equal(parsed.articles.length, 1);
   assert.equal(parsed.articles[0].title, "Government security update");
+});
+
+test("GDELT discovery deadline interrupts a blocked queue and provider cooldown", async () => {
+  const { awaitGdeltDeadline, waitForGdeltDocRequestWindow } = await connector;
+  const controller = new AbortController();
+  const blocked = new Promise<void>(() => {});
+  const queued = awaitGdeltDeadline(blocked, controller.signal);
+  const cooldown = waitForGdeltDocRequestWindow(() => 30_000, {
+    now: () => 0, wait: () => blocked, signal: controller.signal,
+  });
+  controller.abort(new Error("discovery deadline exceeded"));
+  await assert.rejects(queued, /discovery deadline exceeded/);
+  await assert.rejects(cooldown, /discovery deadline exceeded/);
+  await assert.rejects(awaitGdeltDeadline(blocked, controller.signal), /discovery deadline exceeded/);
+  assert.equal(await awaitGdeltDeadline(Promise.resolve("next acquisition")), "next acquisition");
 });
