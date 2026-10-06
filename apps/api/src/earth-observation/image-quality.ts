@@ -191,6 +191,9 @@ export function earthObservationToApi(row: any) {
     limitations: Array.isArray(rawModelInterpretation.limitations)
       ? rawModelInterpretation.limitations.slice(0, 8) : [],
     confidence: Number.isFinite(modelConfidence) ? modelConfidence : null,
+    object_counts: Array.isArray(rawModelInterpretation.object_counts) ? rawModelInterpretation.object_counts : [],
+    count_changes: Array.isArray(rawModelInterpretation.count_changes) ? rawModelInterpretation.count_changes : [],
+    visual_signal_score: Number(rawModelInterpretation.visual_signal_score) || 0,
     provider: rawModelInterpretation.provider ?? null,
     model: rawModelInterpretation.actual_model ?? rawModelInterpretation.model ?? null,
     requested_model: rawModelInterpretation.requested_model ?? null,

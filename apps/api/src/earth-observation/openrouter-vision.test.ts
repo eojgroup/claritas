@@ -14,6 +14,7 @@ const interpretation = {
   possible_changes: ["Possible new plume relative to contextual reporting"],
   limitations: ["Single image; no causal attribution"],
   confidence: 0.63,
+  object_counts: [],
 };
 
 test("OpenRouter free router sends a bounded multimodal request and retains the actual model", async () => {
@@ -33,6 +34,7 @@ test("OpenRouter free router sends a bounded multimodal request and retains the 
   assert.match(body.messages[0].content[1].image_url.url, /^data:image\/jpeg;base64,/);
   assert.equal(body.response_format.type, "json_schema");
   assert.equal(body.response_format.json_schema.strict, true);
+  assert.ok(body.response_format.json_schema.schema.required.includes("object_counts"));
   assert.deepEqual(body.usage, { include: true });
   assert.equal(result.actualModel, "google/gemma-4-26b-a4b-it:free");
   assert.deepEqual(result.interpretation, interpretation);

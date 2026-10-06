@@ -580,6 +580,55 @@ test("current news assessments cannot be starved by a methodology-upgrade backlo
   assert.deepEqual(rows.map((row) => row.id), [4, 2, 5]);
 });
 
+test("satellite count relevance is capped, idempotent and independent of news-photo corroboration", async () => {
+  const id = randomUUID();
+  try {
+    await query(`INSERT INTO intelligence_event(id,dedupe_key,event_type,title,summary,confidence,relevance_score,start_time,last_activity_time)
+      VALUES ($1,$2,'imagery_review','Image count fixture','Visible objects',.7,.3,now(),now())`,[id,`image-count-${id}`]);
+    await query(`INSERT INTO intelligence_event_evidence(event_id,domain,evidence_type,source_record_type,source_record_id,observed_at,confidence,relationship,provenance,metadata)
+      VALUES ($1::uuid,'news','reported_event','fixture',$1::text,now(),.7,'reported','{}','{"signal_relevance_score":0.3}')`,[id]);
+    for (const [sourceType,sourceId,bonus] of [["earth_observation_vision","satellite-a",.04],["earth_observation_vision","satellite-b",.04],["news_image","photo",1]] as const) {
+      await query(`INSERT INTO intelligence_event_evidence(event_id,domain,evidence_type,source_record_type,source_record_id,observed_at,confidence,relationship,provenance,metadata)
+        VALUES ($1,$2,'object_count',$3,$4,now(),.99,'model_interpretation','{}',$5::jsonb)`,
+        [id,sourceType==='news_image'?'news':'earth_observation',sourceType,sourceId,JSON.stringify({ visual_signal_score: bonus })]);
+      const result = await withTransaction((client)=>recomputeIntelligenceEventAggregateTx(client,id));
+      assert.ok(result);
+      assert.ok(Math.abs(Number(result.relevance_score)-.34)<.00001);
+      assert.equal(Number(result.confidence),.7); assert.equal(result.domain_count,1); assert.equal(result.source_diversity,1);
+    }
+    await query(`UPDATE intelligence_event_evidence SET observed_at=now()-interval '5 days' WHERE event_id=$1 AND source_record_type='earth_observation_vision'`,[id]);
+    const expired = await withTransaction((client)=>recomputeIntelligenceEventAggregateTx(client,id));
+    assert.ok(expired); assert.equal(Number(expired.relevance_score),.3);
+  } finally { await query(`DELETE FROM intelligence_event WHERE id=$1`,[id]); }
+});
+
+test("identical news images share an analysis and expired previews leave the collection", async () => {
+  const { createHash } = await import("node:crypto");
+  const { listNewsImages,getNewsImagePreview } = await import("../image-analysis/news-image-store");
+  const suffix = randomUUID(); const hash = createHash("sha256").update(suffix).digest("hex");
+  const source = await query<{ id: number }>(`SELECT id FROM source WHERE name='usgs-earthquakes'`);
+  const items: Array<number> = [];
+  try {
+    await query(`INSERT INTO news_image_asset(content_hash,preview,width,height,analysis) VALUES ($1,$2,1024,768,$3::jsonb)`,[hash,Buffer.from("preview"),JSON.stringify({ summary: suffix })]);
+    for (const index of [1,2]) {
+      const item = await query<{ id: number }>(`INSERT INTO item(source_id,external_id,kind,title,url,event_time) VALUES ($1,$2,'news_article',$2,$3,now()) RETURNING id`,
+        [source.rows[0].id,`image-fixture-${suffix}-${index}`,`https://example.invalid/${suffix}/${index}`]);
+      items.push(item.rows[0].id);
+      await query(`INSERT INTO news_article_image(item_id,content_hash,image_url,discovery,publisher,article_url) VALUES ($1,$2,$3,'publisher_metadata','Fixture publisher',$4)`,
+        [item.rows[0].id,hash,`https://example.invalid/${suffix}.jpg`,`https://example.invalid/${suffix}/${index}`]);
+    }
+    const images = await listNewsImages({ search: suffix });
+    assert.equal(images.length,1); assert.equal(images[0].capture_verified,false);
+    assert.equal((await getNewsImagePreview(images[0].id))?.preview.toString(),"preview");
+    await query(`UPDATE news_image_asset SET expires_at=now()-interval '1 second' WHERE content_hash=$1`,[hash]);
+    assert.deepEqual(await listNewsImages({ search: suffix }),[]);
+    assert.equal(await getNewsImagePreview(images[0].id),null);
+  } finally {
+    await query(`DELETE FROM item WHERE id=ANY($1::bigint[])`,[items]);
+    await query(`DELETE FROM news_image_asset WHERE content_hash=$1`,[hash]);
+  }
+});
+
 test.after(async () => {
   await pool.end();
 });

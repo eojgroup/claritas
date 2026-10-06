@@ -1,3 +1,4 @@
+import { NewsImageCards } from "./NewsImageGallery";
 import CountryFlag from "./CountryFlag";
 import { useCountryContext } from "./countryContext";
 import { countryReferencePoint } from "./countryPresentation";
@@ -69,7 +70,8 @@ export default function EventVisualContext({ detail }: { detail: IntelligenceEve
         <p>Solid: linked records · Dashed: context only. Connections show association, not causation. Inspect matching factors below.</p>
       </figure>
     </div>
-    {photos.length > 0 && <div className="event-news-images" aria-label="Images from linked reporting">{photos.map((item) => <figure key={item.id}>
+    {detail.news_images?.length ? <NewsImageCards images={detail.news_images} /> : null}
+    {!detail.news_images?.length && photos.length > 0 && <div className="event-news-images" aria-label="Images from linked reporting">{photos.map((item) => <figure key={item.id}>
       <SatelliteImage sources={[item.image_url]} alt={item.source_title || item.title || "Image supplied with linked reporting"} className="event-news-image" />
       <figcaption>{item.source_url ? <a href={item.source_url} target="_blank" rel="noreferrer">{item.source_name || "Publisher image"}</a> : item.source_name || "Publisher image"}<span>Publisher-supplied illustration · not independent confirmation</span></figcaption>
     </figure>)}</div>}

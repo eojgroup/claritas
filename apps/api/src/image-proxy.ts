@@ -62,7 +62,7 @@ async function resolveImageAddress(value: string, dependencies: ImageProxyDepend
 type ImageResult = { contentType: string; body: Buffer };
 type ImageHop = ImageResult | { redirect: string };
 
-function requestImage(url: URL, address: ResolvedAddress, signal: AbortSignal, dependencies: ImageProxyDependencies): Promise<ImageHop> {
+function requestImage(url: URL, address: ResolvedAddress, signal: AbortSignal, dependencies: ImageProxyDependencies, allowedTypes = IMAGE_TYPES, maxBytes = MAX_IMAGE_BYTES): Promise<ImageHop> {
   return new Promise((resolve, reject) => {
     const request = dependencies.request({
       protocol: "https:", hostname: url.hostname.replace(/^\[|\]$/g, ""),
@@ -71,7 +71,7 @@ function requestImage(url: URL, address: ResolvedAddress, signal: AbortSignal, d
       // hostname for Host/SNI and TLS verification. Never resolve it again.
       family: address.family,
       lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
-      headers: { accept: Array.from(IMAGE_TYPES).join(", "), "accept-encoding": "identity" },
+      headers: { accept: Array.from(allowedTypes).join(", "), "accept-encoding": "identity" },
     }, (response) => {
       const status = response.statusCode ?? 502;
       const fail = (error: ImageProxyError) => { response.destroy(); reject(error); };
@@ -86,13 +86,13 @@ function requestImage(url: URL, address: ResolvedAddress, signal: AbortSignal, d
       if (status < 200 || status >= 300) { fail(new ImageProxyError(502, "upstream error")); return; }
       const contentType = String(response.headers["content-type"] ?? "").split(";")[0].trim().toLowerCase();
       // SVG can execute script when opened directly under the app origin.
-      if (!IMAGE_TYPES.has(contentType)) { fail(new ImageProxyError(415, "upstream is not a supported image")); return; }
-      if (Number(response.headers["content-length"]) > MAX_IMAGE_BYTES) { fail(new ImageProxyError(413, "image too large")); return; }
+      if (!allowedTypes.has(contentType)) { fail(new ImageProxyError(415, "upstream is not a supported image")); return; }
+      if (Number(response.headers["content-length"]) > maxBytes) { fail(new ImageProxyError(413, "image too large")); return; }
       const chunks: Buffer[] = [];
       let size = 0;
       response.on("data", (chunk: Buffer) => {
         size += chunk.length;
-        if (size > MAX_IMAGE_BYTES) { fail(new ImageProxyError(413, "image too large")); return; }
+        if (size > maxBytes) { fail(new ImageProxyError(413, "image too large")); return; }
         chunks.push(chunk);
       });
       response.on("end", () => resolve({ contentType, body: Buffer.concat(chunks, size) }));
@@ -104,7 +104,7 @@ function requestImage(url: URL, address: ResolvedAddress, signal: AbortSignal, d
   });
 }
 
-export async function fetchPublicImage(value: string, dependencies = defaultDependencies): Promise<ImageResult> {
+async function fetchPublicResource(value: string, dependencies: ImageProxyDependencies, allowedTypes: Set<string>, maxBytes: number): Promise<ImageResult> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
@@ -120,7 +120,7 @@ export async function fetchPublicImage(value: string, dependencies = defaultDepe
       // DNS resolution itself cannot be cancelled, so check before opening a
       // socket after the overall timeout has already returned to the caller.
       controller.signal.throwIfAborted();
-      const result = await requestImage(url, address, controller.signal, dependencies);
+      const result = await requestImage(url, address, controller.signal, dependencies, allowedTypes, maxBytes);
       if (!("redirect" in result)) return result;
       target = result.redirect;
     }
@@ -128,4 +128,14 @@ export async function fetchPublicImage(value: string, dependencies = defaultDepe
   };
   try { return await Promise.race([fetchImage(), timeout]); }
   finally { clearTimeout(timer); }
+}
+
+export async function fetchPublicImage(value: string, dependencies = defaultDependencies): Promise<ImageResult> {
+  return fetchPublicResource(value, dependencies, IMAGE_TYPES, MAX_IMAGE_BYTES);
+}
+
+/** Bounded public HTTPS article metadata fetch, with the image proxy's DNS pinning. */
+export async function fetchPublicHtml(value: string): Promise<string> {
+  const response = await fetchPublicResource(value, defaultDependencies, new Set(["text/html", "application/xhtml+xml"]), 1_000_000);
+  return response.body.toString("utf8");
 }

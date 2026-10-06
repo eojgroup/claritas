@@ -1,3 +1,4 @@
+import { listNewsImages } from "../image-analysis/news-image-store";
 import { getRegionalContext } from "./regional-context";
 import { activeSocialEvidenceSql, buildSignalCoverage, eventOriginDomainSql, eventSignalDomainsSql, eventNewsPrioritySql, eventPriorityScoreSql, eventPriorityReasons } from "./event-priority";
 import { getRegionalReporting } from "./regional-reporting";
@@ -545,8 +546,8 @@ export async function getIntelligenceEvent(eventId: string) {
   const linkedNews = evidence.filter((row: any) => (
     row.domain === "news" && row.source_record_type === "item"
   )).map((row: any) => buildLinkedNewsPresentation(row));
-  const [socialContext, regionalReporting, contextSignals] = await Promise.all([
-    getSocialEventContexts([eventId]), getRegionalReporting(normalizedEvent), getRegionalContext(normalizedEvent),
+  const [socialContext, regionalReporting, contextSignals, newsImages] = await Promise.all([
+    getSocialEventContexts([eventId]), getRegionalReporting(normalizedEvent), getRegionalContext(normalizedEvent), listNewsImages({ eventId, limit: 20 }),
   ]);
   return {
     event: normalizedEvent,
@@ -557,6 +558,7 @@ export async function getIntelligenceEvent(eventId: string) {
     understanding: buildEventUnderstanding(normalizedEvent as Record<string, unknown>, evidence),
     evidence,
     linked_news: linkedNews,
+    news_images: newsImages,
     locations: locationsResult.rows.map((row: any) => ({
       ...row,
       distance_km: row.distance_km == null ? null : Number(row.distance_km),
@@ -622,6 +624,7 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
          + LEAST(0.16,GREATEST(0,aggregate.domain_count-1)*0.05)
          + LEAST(0.10,GREATEST(0,aggregate.source_diversity-1)*0.025)
          + CASE WHEN aggregate.has_physical_observation THEN 0.08 ELSE 0 END
+         + COALESCE(aggregate.visual_signal_bonus,0)
          + LEAST(0.06, 0.02 * (SELECT count(DISTINCT related.event_type)
              FROM intelligence_event_relationship edge
              JOIN intelligence_event related ON related.id=edge.to_event_id
@@ -633,7 +636,7 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
        urgency_score = GREATEST(event.urgency_score,COALESCE(aggregate.max_urgency,0)),
        materiality_score = GREATEST(event.materiality_score,COALESCE(aggregate.max_materiality,0)),
        score_components = event.score_components || jsonb_build_object(
-         'aggregation_methodology','evidence-diversity-v4',
+         'aggregation_methodology','evidence-diversity-v5',
          'related_event_bonus_cap',0.06,
          'base_relevance',COALESCE(aggregate.base_relevance,
            CASE WHEN jsonb_typeof(event.score_components->'base_relevance')='number'
@@ -641,7 +644,9 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
            event.relevance_score),
          'domain_count',aggregate.domain_count,
          'source_diversity',aggregate.source_diversity,
-         'physical_observation',aggregate.has_physical_observation
+         'physical_observation',aggregate.has_physical_observation,
+         'visual_analysis_bonus',COALESCE(aggregate.visual_signal_bonus,0),
+         'visual_analysis_bonus_cap',0.04
        ),
        updated_at = now()
      FROM (
@@ -666,7 +671,11 @@ export async function recomputeIntelligenceEventAggregateTx(client: PoolClient, 
               max(CASE WHEN jsonb_typeof(metadata->'signal_materiality_score')='number'
                 THEN (metadata->>'signal_materiality_score')::double precision END)
                 FILTER (WHERE relationship NOT IN ('model_interpretation','assessment') AND domain<>'social') AS max_materiality,
-              bool_or(relationship='observed' AND domain IN ('earth_observation','disaster')) AS has_physical_observation
+              bool_or(relationship='observed' AND domain IN ('earth_observation','disaster')) AS has_physical_observation,
+              max(CASE WHEN relationship='model_interpretation' AND source_record_type='earth_observation_vision'
+                AND observed_at BETWEEN now()-interval '72 hours' AND now()+interval '5 minutes'
+                AND jsonb_typeof(metadata->'visual_signal_score')='number'
+                THEN LEAST(0.04,GREATEST(0,(metadata->>'visual_signal_score')::double precision)) ELSE 0 END) AS visual_signal_bonus
        FROM intelligence_event_evidence WHERE event_id = $1 GROUP BY event_id
      ) aggregate
      WHERE event.id = aggregate.event_id

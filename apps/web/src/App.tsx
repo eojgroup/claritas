@@ -1,3 +1,4 @@
+import NewsImageGallery from "./components/NewsImageGallery";
 import { CountryDataContext } from "./components/countryContext";
 import CountryFlag from "./components/CountryFlag";
 import CountryFacts from "./components/CountryFacts";
@@ -9445,6 +9446,7 @@ export default function ClaritasDashboard() {
                     onOpen={handleOpenIntelligence}
                   />
                 )}
+                <NewsImageGallery eventId={selectedIntelligenceEventId} country={selectedCountry} />
                 <EarthObservationWorkspace
                   eventId={selectedIntelligenceEventId}
                   onOpenEvent={handleOpenIntelligence}

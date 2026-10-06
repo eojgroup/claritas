@@ -81,6 +81,12 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: USGS_EARTHQUAKES_ENABLED, optional: true } }
             - name: EO_VISION_ENRICHMENT_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_VISION_ENRICHMENT_ENABLED, optional: true } }
+            - name: NEWS_IMAGE_COLLECTION_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_IMAGE_COLLECTION_ENABLED, optional: true } }
+            - name: NEWS_IMAGE_ANALYSIS_ENABLED
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_IMAGE_ANALYSIS_ENABLED, optional: true } }
+            - name: NEWS_IMAGE_MAX_DAILY_ARTICLES
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_IMAGE_MAX_DAILY_ARTICLES, optional: true } }
             - name: EO_VISION_MODEL
               valueFrom: { configMapKeyRef: { name: claritas-config, key: EO_VISION_MODEL, optional: true } }
             - name: EO_VISION_MAX_DAILY_REQUESTS

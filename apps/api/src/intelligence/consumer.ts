@@ -789,7 +789,7 @@ async function handleImageryObservation(event: DomainEventEnvelope) {
                    $4,$5,'model_interpretation',$6::jsonb,$7,$8::jsonb)
          ON CONFLICT (event_id,domain,source_record_type,source_record_id) DO UPDATE SET
            confidence=EXCLUDED.confidence,provenance=EXCLUDED.provenance,metadata=EXCLUDED.metadata`,
-        [eventId, `${id}:${interpretation.prompt_version ?? "eo-vision-v1"}`, occurred, observation.location_id,
+        [eventId, `${id}:${interpretation.prompt_version ?? "eo-vision-v1"}${interpretation.source_content_hash ? `:${interpretation.source_content_hash}` : ""}`, occurred, observation.location_id,
          confidence, JSON.stringify({ provider: "openrouter", observation_id: id, actual_model: interpretation.actual_model }),
          `Model interpretation; ${observation.attribution}`, JSON.stringify(interpretation)],
       );

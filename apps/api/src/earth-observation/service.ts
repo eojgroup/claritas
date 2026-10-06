@@ -1,3 +1,5 @@
+import { reserveVisionRequest } from "../image-analysis/usage";
+import { gateObjectCounts, compareObjectCounts, visualSignalScore } from "../image-analysis/object-counts";
 import { createHash } from "crypto";
 import { Storage } from "@google-cloud/storage";
 import sharp from "sharp";
@@ -906,11 +908,18 @@ async function processRender(job: any) {
     }
     await client.query(
       `UPDATE earth_observation SET status='available',generated_at=now(),last_error=NULL,
-              methodology=(COALESCE(methodology,'{}'::jsonb)-'refresh_claimed'-'refresh_pending')
-                || jsonb_build_object('render_context',$2::jsonb),updated_at=now()
+              methodology=(COALESCE(methodology,'{}'::jsonb)-'refresh_claimed'-'refresh_pending'-'vision_enrichment')
+                || jsonb_build_object('render_context',$2::jsonb),
+              analysis_details=CASE WHEN analysis_details->'model_interpretation'->>'source_content_hash' IS DISTINCT FROM $3
+                THEN analysis_details-'model_interpretation' ELSE analysis_details END,
+              analysis_summary=CASE WHEN analysis_details->'model_interpretation' IS NOT NULL
+                AND analysis_details->'model_interpretation'->>'source_content_hash' IS DISTINCT FROM $3
+                THEN NULL ELSE analysis_summary END,updated_at=now()
        WHERE id=$1`,
-      [target.id, JSON.stringify(renderContext)],
+      [target.id, JSON.stringify(renderContext),previewHash],
     );
+    await client.query(`DELETE FROM intelligence_event_evidence WHERE source_record_type='earth_observation_vision'
+      AND provenance->>'observation_id'=$1 AND metadata->>'source_content_hash' IS DISTINCT FROM $2`,[target.id,previewHash]);
     await client.query(
       `INSERT INTO intelligence_event_evidence (
          event_id, domain, evidence_type, source_record_type, source_record_id,
@@ -1003,7 +1012,24 @@ async function processRender(job: any) {
   return { ...committedResult, vision_enqueued: visionEnqueued };
 }
 
+export async function requestEarthObservationAnalysis(observationId: string) {
+  const status = vision.status();
+  if (!status.enabled || !status.configured) throw new Error(status.reason ?? "Image analysis is unavailable.");
+  const result = await query<any>(`SELECT observation.* FROM earth_observation observation
+    WHERE observation.id=$1 AND observation.status='available' AND EXISTS
+      (SELECT 1 FROM earth_observation_asset asset WHERE asset.observation_id=observation.id AND asset.asset_type='preview'
+       AND (asset.expires_at IS NULL OR asset.expires_at>now()))`,[observationId]);
+  const observation = result.rows[0];
+  if (!observation) return null;
+  const enqueued = await enqueueVisionEnrichment(observation,observationId);
+  const existing = await query<{ status: string }>(`SELECT status FROM earth_processing_job WHERE observation_id=$1 AND parameters->>'prompt_version'=$2 ORDER BY created_at DESC LIMIT 1`,[observationId,EO_VISION_PROMPT_VERSION]);
+  return { observation_id: observationId,enqueued,status: existing.rows[0]?.status ?? "queued",prompt_version: EO_VISION_PROMPT_VERSION };
+}
+
 async function enqueueVisionEnrichment(job: any, observationId: string) {
+  const asset = await query<{ content_hash: string }>(`SELECT content_hash FROM earth_observation_asset WHERE observation_id=$1 AND asset_type='preview' AND (expires_at IS NULL OR expires_at>now())`,[observationId]);
+  const hash = asset.rows[0]?.content_hash;
+  if (!hash) return false;
   const { rows } = await query(
     `INSERT INTO earth_processing_job (
        dedupe_key,job_type,provider,event_id,location_id,scene_id,
@@ -1011,28 +1037,12 @@ async function enqueueVisionEnrichment(job: any, observationId: string) {
      ) VALUES ($1,'vision_enrichment','openrouter_vision',$2,$3,$4,$5,$6,2,$7::jsonb)
      ON CONFLICT (dedupe_key) DO NOTHING
      RETURNING id`,
-    [`vision:${observationId}:${EO_VISION_PROMPT_VERSION}`, job.event_id ?? null,
+    [`vision:${observationId}:${EO_VISION_PROMPT_VERSION}:${hash}`, job.event_id ?? null,
      job.location_id ?? null, job.scene_id ?? null, observationId,
      Math.min(100, Math.max(1, Number(job.priority ?? 20) + 10)),
-     JSON.stringify({ prompt_version: EO_VISION_PROMPT_VERSION, source_asset_type: "preview" })],
+     JSON.stringify({ prompt_version: EO_VISION_PROMPT_VERSION, source_asset_type: "preview", source_content_hash: hash })],
   );
   return rows.length > 0;
-}
-
-async function reserveVisionRequest() {
-  const dailyLimit = normalizeVisionDailyLimit(process.env.EO_VISION_MAX_DAILY_REQUESTS);
-  if (dailyLimit <= 0) return { reserved: false, dailyLimit };
-  const { rows } = await query<{ process_requests: number }>(
-    `INSERT INTO earth_provider_usage (provider,usage_date,process_requests)
-     VALUES ('openrouter_vision',(now() AT TIME ZONE 'UTC')::date,1)
-     ON CONFLICT (provider,usage_date) DO UPDATE SET
-       process_requests=earth_provider_usage.process_requests+1,
-       updated_at=now()
-     WHERE earth_provider_usage.process_requests < $1
-     RETURNING process_requests`,
-    [dailyLimit],
-  );
-  return { reserved: rows.length > 0, dailyLimit, used: Number(rows[0]?.process_requests ?? dailyLimit) };
 }
 
 async function deferVisionUntilNextUtcDay(jobId: string, dailyLimit: number) {
@@ -1058,10 +1068,10 @@ async function processVisionEnrichment(job: any) {
   const { rows } = await query<any>(
     `SELECT observation.id,observation.status,observation.event_id,observation.location_id,
             observation.scene_id,observation.product_type,observation.captured_at,
-            observation.attribution,observation.license,
+            observation.attribution,observation.license,observation.methodology,
             scene.provider_scene_id,scene.mission,scene.collection,scene.cloud_cover,scene.resolution_m,
             event.event_type,event.title AS event_title,event.summary AS event_summary,event.severity,
-            asset.gcs_object,asset.mime_type,asset.size_bytes
+            asset.gcs_object,asset.mime_type,asset.size_bytes,asset.width,asset.height,asset.content_hash
      FROM earth_observation observation
      JOIN earth_scene scene ON scene.id=observation.scene_id
      LEFT JOIN intelligence_event event ON event.id=observation.event_id
@@ -1074,6 +1084,7 @@ async function processVisionEnrichment(job: any) {
   if (!target) throw new OpenRouterVisionError("Earth observation no longer exists.", 404, false);
   if (target.status !== "available") throw new OpenRouterVisionError("EO vision requires an available physical observation.", 409, true);
   if (!target.gcs_object) throw new OpenRouterVisionError("EO vision preview asset is unavailable.", 404, true);
+  if (job.parameters?.source_content_hash && job.parameters.source_content_hash !== target.content_hash) return { skipped: true, reason: "Preview pixels changed; the replacement render has its own analysis job." };
   const bucketName = process.env.EO_ASSET_BUCKET?.trim();
   if (!bucketName) throw new OpenRouterVisionError("EO_ASSET_BUCKET is not configured.", 503, false);
   const maxSourceBytes = integerEnv("EO_VISION_MAX_IMAGE_BYTES", 8 * 1_024 * 1_024, 256 * 1_024, 12 * 1_024 * 1_024);
@@ -1084,11 +1095,15 @@ async function processVisionEnrichment(job: any) {
   if (sourceImage.length > maxSourceBytes) {
     throw new OpenRouterVisionError(`EO vision preview exceeds the ${maxSourceBytes}-byte input limit.`, 413, false);
   }
-  const image = await sharp(sourceImage)
+  const resized = await sharp(sourceImage)
     .rotate()
-    .resize({ width: 768, height: 768, fit: "inside", withoutEnlargement: true })
+    .resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true })
     .jpeg({ quality: 82 })
-    .toBuffer();
+    .toBuffer({ resolveWithObject: true });
+  const image = resized.data;
+  const effectivePixelSize = Number(target.methodology?.render_context?.effective_pixel_size_m);
+  const deliveredResolution = Number.isFinite(effectivePixelSize) && effectivePixelSize > 0
+    ? effectivePixelSize * Math.max(Number(target.width) / resized.info.width, Number(target.height) / resized.info.height) : null;
   const budget = await reserveVisionRequest();
   if (!budget.reserved) {
     const availableAt = await deferVisionUntilNextUtcDay(job.id, budget.dailyLimit);
@@ -1102,6 +1117,9 @@ async function processVisionEnrichment(job: any) {
       event_title: boundedContextText(target.event_title, 240),
       event_summary: boundedContextText(target.event_summary, 800),
       severity: boundedContextText(target.severity, 20),
+      source_kind: "satellite",
+      image_width: resized.info.width, image_height: resized.info.height,
+      effective_pixel_size_m: deliveredResolution,
       product_type: target.product_type,
       captured_at: iso(target.captured_at),
       provider_scene_id: target.provider_scene_id,
@@ -1112,8 +1130,38 @@ async function processVisionEnrichment(job: any) {
       epistemic_class: "model_interpretation_of_observed_physical_signal",
     },
   });
+  const counts = gateObjectCounts(response.interpretation.object_counts ?? [], {
+    source_kind: "satellite", product_type: target.product_type,
+    native_resolution_m: target.resolution_m == null ? null : Number(target.resolution_m),
+    effective_pixel_size_m: deliveredResolution, cloud_cover: target.cloud_cover == null ? null : Number(target.cloud_cover),
+    width: resized.info.width, height: resized.info.height,
+  });
+  const prior = await query<any>(
+    `SELECT observation.id,observation.captured_at,observation.analysis_details
+     FROM earth_observation observation JOIN earth_scene scene ON scene.id=observation.scene_id
+     JOIN earth_observation_asset asset ON asset.observation_id=observation.id AND asset.asset_type='preview'
+       AND (asset.expires_at IS NULL OR asset.expires_at>now())
+     WHERE observation.id<>$1 AND observation.location_id=$2 AND observation.product_type=$3
+       AND observation.status='available' AND observation.captured_at<$4 AND observation.captured_at>$4::timestamptz-interval '7 days'
+       AND scene.mission=$5 AND scene.collection=$6 AND scene.resolution_m=$7
+       AND $8::jsonb<>'null'::jsonb AND observation.methodology->'render_context'->'aoi_bbox'=$8::jsonb
+       AND observation.methodology->'render_context'->'effective_pixel_size_m'=$9::jsonb
+       AND observation.analysis_details->'model_interpretation'->'count_context'->'width'=$11::jsonb
+       AND observation.analysis_details->'model_interpretation'->'count_context'->'height'=$12::jsonb
+       AND observation.analysis_details->'model_interpretation'->>'prompt_version'=$10
+       AND observation.analysis_details->'model_interpretation'->>'source_content_hash'=asset.content_hash
+     ORDER BY observation.captured_at DESC LIMIT 1`,
+    [target.id,target.location_id,target.product_type,target.captured_at,target.mission,target.collection,target.resolution_m,
+     JSON.stringify(target.methodology?.render_context?.aoi_bbox ?? null),JSON.stringify(target.methodology?.render_context?.effective_pixel_size_m ?? null),EO_VISION_PROMPT_VERSION,JSON.stringify(resized.info.width),JSON.stringify(resized.info.height)]);
+  const baseline = prior.rows[0];
+  const changes = baseline ? compareObjectCounts(counts, baseline.analysis_details?.model_interpretation?.object_counts ?? [], baseline.id, iso(baseline.captured_at)!) : [];
   const interpretationRecord = {
     ...response.interpretation,
+    source_content_hash: target.content_hash,
+    object_counts: counts, count_changes: changes,
+    visual_signal_score: visualSignalScore(counts, changes),
+    count_scope: "Visible objects within the displayed scene; not total port inventory or proof of stationary vessels.",
+    count_context: { source_kind: "satellite", effective_pixel_size_m: deliveredResolution, width: resized.info.width, height: resized.info.height },
     provider: "openrouter",
     requested_model: response.requestedModel,
     actual_model: response.actualModel,
@@ -1123,15 +1171,17 @@ async function processVisionEnrichment(job: any) {
   };
   const confidence = Math.min(0.75, response.interpretation.confidence);
   await withTransaction(async (client) => {
-    await client.query(
+    const saved = await client.query(
       `UPDATE earth_observation SET
          methodology=methodology || jsonb_build_object('vision_enrichment',$2::jsonb),
          analysis_summary=$3,
          analysis_details=analysis_details || jsonb_build_object('model_interpretation',$2::jsonb),
          updated_at=now()
-       WHERE id=$1 AND status='available'`,
-      [target.id, JSON.stringify(interpretationRecord), response.interpretation.summary],
+       WHERE id=$1 AND status='available' AND EXISTS
+         (SELECT 1 FROM earth_observation_asset asset WHERE asset.observation_id=$1 AND asset.asset_type='preview' AND asset.content_hash=$4) RETURNING id`,
+      [target.id, JSON.stringify(interpretationRecord), response.interpretation.summary,target.content_hash],
     );
+    if (!saved.rows.length) throw new OpenRouterVisionError("Preview changed during analysis; findings were discarded.",409,true);
     if (target.event_id) {
       await client.query(
         `INSERT INTO intelligence_event_evidence (
@@ -1147,7 +1197,7 @@ async function processVisionEnrichment(job: any) {
            published_at=EXCLUDED.published_at,confidence=EXCLUDED.confidence,
            provenance=EXCLUDED.provenance,attribution=EXCLUDED.attribution,
            correlation_score=EXCLUDED.correlation_score,metadata=EXCLUDED.metadata`,
-        [target.event_id, `${target.id}:${EO_VISION_PROMPT_VERSION}`, target.captured_at,
+        [target.event_id, `${target.id}:${EO_VISION_PROMPT_VERSION}:${target.content_hash}`, target.captured_at,
          target.location_id, confidence,
          JSON.stringify({
            provider: "openrouter",
@@ -1169,7 +1219,7 @@ async function processVisionEnrichment(job: any) {
       `INSERT INTO event_outbox (event_type,aggregate_type,aggregate_id,dedupe_key,payload,occurred_at)
        VALUES ('earth.vision.available','earth_observation',$1,$2,$3::jsonb,now())
        ON CONFLICT (dedupe_key) DO NOTHING`,
-      [target.id, `earth-vision-available:${target.id}:${EO_VISION_PROMPT_VERSION}`,
+      [target.id, `earth-vision-available:${target.id}:${EO_VISION_PROMPT_VERSION}:${target.content_hash}`,
        JSON.stringify({
          observation_id: target.id,
          event_id: target.event_id,

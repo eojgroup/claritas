@@ -1,3 +1,5 @@
+import ImageAnalysisSummary from "./ImageAnalysisSummary";
+import type { ImageAnalysis } from "../lib/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChevronLeft, ChevronRight, Cloud, Images, MapPin, Maximize2, RefreshCw, Satellite, ScanSearch } from "lucide-react";
 import {
@@ -51,7 +53,7 @@ type SatelliteSlide = {
   visualClass?: "natural" | "enhanced" | "analytical" | "radar" | "browse";
   naturalColor?: boolean;
   linkageLimitation?: string | null;
-  modelInterpretation?: {
+  modelInterpretation?: ImageAnalysis & {
     summary?: string | null;
     findings?: string[];
     possible_changes?: string[];
@@ -545,6 +547,7 @@ export default function SatelliteContextPanel({
             {current.modelInterpretation && !compact && (
               <div className="mt-3 rounded-lg border border-[color:var(--viz-violet)]/40 bg-[color:var(--shell-bg)] p-3">
                 <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--viz-violet)]">Model interpretation · not a sensor measurement</div>
+                <ImageAnalysisSummary analysis={current.modelInterpretation} />
                 {current.modelInterpretation.summary && <p className="mt-1 text-[11px] leading-4 text-[color:var(--shell-ink)]">{current.modelInterpretation.summary}</p>}
                 {current.modelInterpretation.findings?.[0] && <p className="mt-1 text-[10px] leading-4 text-[color:var(--shell-muted)]"><span className="font-semibold text-[color:var(--shell-ink)]">Observed feature:</span> {current.modelInterpretation.findings[0]}</p>}
                 {current.modelInterpretation.possible_changes?.[0] && <p className="mt-1 text-[10px] leading-4 text-[color:var(--shell-muted)]"><span className="font-semibold text-[color:var(--shell-ink)]">Possible change:</span> {current.modelInterpretation.possible_changes[0]}</p>}

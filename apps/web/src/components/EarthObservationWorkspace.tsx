@@ -1,3 +1,4 @@
+import ImageAnalysisSummary from "./ImageAnalysisSummary";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -15,6 +16,7 @@ import {
   fetchEarthObservations,
   fetchIntelligenceEvent,
   requestEarthObservationComparison,
+  requestEarthObservationAnalysis,
   type EarthObservation,
   type EarthProviderStatus,
   type IntelligenceEventDetail,
@@ -97,6 +99,7 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
   const [loading, setLoading] = useState(scoped);
   const [error, setError] = useState<string | null>(null);
   const [eventDetail, setEventDetail] = useState<IntelligenceEventDetail | null>(null);
+  const [analysisRequests,setAnalysisRequests] = useState<Record<string,string>>({});
   const requestId = useRef(0);
 
   const load = useCallback(async () => {
@@ -429,6 +432,13 @@ export default function EarthObservationWorkspace({ eventId, locationId, onOpenE
                   <p className="mt-3 text-xs leading-5 text-[color:var(--shell-muted)]">{text(item.imagery?.interpretation ?? item.imagery?.display_guidance, analytical ? "This is a derived analytical layer; colours are not a natural view of the scene." : "Use as visual context alongside event timing and linked reporting.")}</p>
                   <div className="mt-3 rounded-lg border border-[color:var(--signal-amber)]/40 bg-[color:var(--signal-amber-soft)] p-3 text-xs leading-5 text-[color:var(--shell-ink)]"><strong className="block">What this scene can support</strong>{sceneConclusion(item)}</div>
                   {item.analysis_summary && item.analysis_summary_role !== "model_interpretation" && <div className="mt-3 rounded-lg border border-[color:var(--shell-border)] p-3 text-xs leading-5 text-[color:var(--shell-muted)]"><strong className="block text-[color:var(--shell-ink)]">Observation note</strong>{item.analysis_summary}</div>}
+                  <button type="button" className="mt-3 text-xs underline" disabled={analysisRequests[item.id] === "Queuing…"} onClick={() => {
+                    setAnalysisRequests((values) => ({ ...values,[item.id]: "Queuing…" }));
+                    void requestEarthObservationAnalysis(item.id).then((result) => setAnalysisRequests((values) => ({ ...values,[item.id]: result.status === "success" ? "Analysis available; refresh evidence." : `Analysis ${result.status}; subject to the shared daily budget.` })))
+                      .catch((reason) => setAnalysisRequests((values) => ({ ...values,[item.id]: reason instanceof Error ? reason.message : "Analysis unavailable." })));
+                  }}>Analyze visible objects</button>
+                  {analysisRequests[item.id] && <p className="mt-1 text-xs" role="status">{analysisRequests[item.id]}</p>}
+                  <ImageAnalysisSummary analysis={item.model_interpretation} />
                   {item.model_interpretation?.summary && <div className="mt-3 rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs leading-5 text-amber-950"><strong className="block">Model interpretation · not a sensor measurement</strong>{item.model_interpretation.summary}<small className="mt-1 block">{item.model_interpretation.notice}</small></div>}
                   <div className="mt-3 border-t border-[color:var(--shell-border)] pt-3 text-[10px] leading-4 text-[color:var(--shell-muted)]"><ShieldCheck className="mr-1 inline h-3 w-3" />{item.attribution || item.provider}{item.license ? ` · ${item.license}` : ""}</div>
                   <div className="mt-3 flex flex-wrap gap-3"><a href={item.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--signal-sky)]">Provider provenance <ExternalLink className="h-3 w-3" /></a>{item.event_id && onOpenEvent && <button type="button" onClick={() => onOpenEvent(item.event_id as string)} className="inline-flex items-center gap-1 text-xs font-semibold text-[color:var(--signal-sky)]">Open event evidence <Link2 className="h-3 w-3" /></button>}</div>

@@ -1252,6 +1252,27 @@ export type IntelligenceEvidence = {
   native_route?: string | null;
 };
 
+export type ImageObjectCount = {
+  object_type: "truck" | "vessel"; area: "port_yard" | "harbor" | "offshore" | "image";
+  status: "estimated" | "not_resolvable"; count_min: number | null; count_max: number | null;
+  confidence: number; reason: string; boxes: Array<[number, number, number, number]>;
+};
+export type ImageCountChange = {
+  object_type: "truck" | "vessel"; area: string; baseline_id: string; baseline_captured_at: string;
+  delta_min: number; delta_max: number; direction: "increase" | "decrease" | "overlapping_estimates";
+};
+export type ImageAnalysis = {
+  summary?: string | null; object_counts?: ImageObjectCount[]; count_changes?: ImageCountChange[];
+  limitations?: string[]; confidence?: number | null; visual_signal_score?: number;
+};
+export type NewsImage = {
+  id: string; item_id: string | number; content_hash: string; image_url: string; preview_url: string;
+  publisher: string; article_title: string; article_url: string; article_published_at: string | null;
+  caption: string | null; collected_at: string; expires_at: string; width: number; height: number;
+  license: string; analysis: ImageAnalysis | null; analysis_model: string | null;
+  captured_at: null; capture_verified: false; notice: string; analysis_status: "available" | "pending" | "unavailable";
+};
+
 export type EarthObservationAsset = {
   id: string;
   asset_type: string;
@@ -1285,7 +1306,7 @@ export type EarthObservation = {
   location_name?: string | null;
   analysis_summary?: string | null;
   analysis_summary_role?: string | null;
-  model_interpretation?: {
+  model_interpretation?: ImageAnalysis & {
     summary?: string | null;
     findings?: string[];
     possible_changes?: string[];
@@ -1398,6 +1419,7 @@ export type RegionalReporting = {
 };
 
 export type IntelligenceEventDetail = {
+  news_images?: NewsImage[];
   signal_coverage?: Array<{ domain: string; label: string; count: number; state: "linked" | "context" | "none" }>;
   context_signals?: Array<{
     id: string; domain: string; title: string; summary: string; scope_label: string;
@@ -2616,4 +2638,21 @@ export function imageProxy(url?: string | null): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+export async function fetchNewsImages(params: { eventId?: string; country?: string; search?: string; limit?: number } = {}): Promise<NewsImage[]> {
+  const query = new URLSearchParams();
+  if (params.eventId) query.set("event_id", params.eventId);
+  if (params.country) query.set("country", params.country);
+  if (params.search) query.set("search", params.search);
+  if (params.limit) query.set("limit", String(params.limit));
+  const response = await fetch(`${API_BASE}/api/news-images?${query}`, { credentials: "include" });
+  if (!response.ok) throw new Error(await readError(response,"News images could not be loaded."));
+  return ((await response.json()) as { images: NewsImage[] }).images;
+}
+
+export async function requestEarthObservationAnalysis(observationId: string): Promise<{ status: string; enqueued: boolean }> {
+  const response = await fetch(`${API_BASE}/api/earth-observation/observations/${encodeURIComponent(observationId)}/analyze`, { method: "POST", credentials: "include" });
+  if (!response.ok) throw new Error(await readError(response,"Image analysis could not be queued."));
+  return response.json() as Promise<{ status: string; enqueued: boolean }>;
 }

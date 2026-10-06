@@ -1,3 +1,5 @@
+import { startNewsImageWorker } from "./image-analysis/news-image-worker";
+import { listNewsImages, getNewsImagePreview } from "./image-analysis/news-image-store";
 import { startNewsTranslationWorker } from "./news-translation";
 import express from "express";
 import { createHash, randomBytes, randomUUID } from "crypto";
@@ -139,6 +141,7 @@ import {
   listEarthObservations,
   requestEarthComparison,
   startEarthObservationWorker,
+  requestEarthObservationAnalysis,
 } from "./earth-observation/service";
 import {
   ApnsRegistrationError,
@@ -2195,6 +2198,30 @@ app.delete("/api/intelligence/watchlist/:id", requireAuthenticated, async (req, 
   }
 });
 
+app.get("/api/news-images", requireAuthenticated, async (req, res) => {
+  try {
+    const eventId = typeof req.query.event_id === "string" ? req.query.event_id : undefined;
+    const country = typeof req.query.country === "string" ? req.query.country.toUpperCase() : undefined;
+    if (eventId && !UUID_PATTERN.test(eventId)) return res.status(400).json({ error: "Invalid event id." });
+    if (country && !/^[A-Z]{2}$/.test(country)) return res.status(400).json({ error: "Invalid country." });
+    const images = await listNewsImages({ eventId, country, search: typeof req.query.search === "string" ? req.query.search : undefined, limit: Number(req.query.limit) || 30 });
+    return res.json({ images, count: images.length });
+  } catch (error) { return res.status(500).json({ error: error instanceof Error ? error.message : String(error) }); }
+});
+app.get("/api/news-images/:id/preview", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).send("Invalid image id.");
+    const asset = await getNewsImagePreview(req.params.id);
+    if (!asset) return res.status(404).send("Image unavailable or expired.");
+    if (req.get("if-none-match") === `"${asset.content_hash}"`) return res.status(304).send();
+    res.setHeader("Content-Type", "image/jpeg");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("ETag", `"${asset.content_hash}"`);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    return res.send(asset.preview);
+  } catch { return res.status(503).send("Image temporarily unavailable."); }
+});
+
 app.get("/api/earth-observation/events/:eventId/gibs", requireAuthenticated, async (req, res) => {
   try {
     if (!UUID_PATTERN.test(req.params.eventId)) return res.status(400).json({ error: "Event id must be a UUID." });
@@ -2263,6 +2290,14 @@ app.post("/api/earth-observation/observations/:id/compare", requireAuthenticated
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
+});
+
+app.post("/api/earth-observation/observations/:id/analyze", requireAuthenticated, async (req,res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Invalid observation id." });
+    const result = await requestEarthObservationAnalysis(req.params.id);
+    return result ? res.status(202).json(result) : res.status(404).json({ error: "Available image not found." });
+  } catch (error) { return res.status(503).json({ error: error instanceof Error ? error.message : String(error) }); }
 });
 
 app.get("/api/earth-observation/assets/:id", requireAuthenticated, async (req, res) => {
@@ -3748,6 +3783,7 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
 startDatabasePoolMonitoring();
 startIngestionAutomationWorker();
 startNewsAssessmentWorker();
+startNewsImageWorker();
 startNewsTranslationWorker();
 startDailyBriefingSchedulerWorker();
 startPersonalBriefingWorker();
