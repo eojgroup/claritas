@@ -611,7 +611,7 @@ test("identical news images share an analysis and expired previews leave the col
   try {
     await query(`INSERT INTO news_image_asset(content_hash,preview,width,height,analysis) VALUES ($1,$2,1024,768,$3::jsonb)`,[hash,Buffer.from("preview"),JSON.stringify({ summary: suffix })]);
     for (const index of [1,2]) {
-      const item = await query<{ id: number }>(`INSERT INTO item(source_id,external_id,kind,title,url,event_time) VALUES ($1,$2,'news_article',$2,$3,now()) RETURNING id`,
+      const item = await query<{ id: number }>(`INSERT INTO item(source_id,external_id,kind,title,url,event_time,payload) VALUES ($1,$2,'news_article',$2,$3,now(),'{}'::jsonb) RETURNING id`,
         [source.rows[0].id,`image-fixture-${suffix}-${index}`,`https://example.invalid/${suffix}/${index}`]);
       items.push(item.rows[0].id);
       await query(`INSERT INTO news_article_image(item_id,content_hash,image_url,discovery,publisher,article_url) VALUES ($1,$2,$3,'publisher_metadata','Fixture publisher',$4)`,
