@@ -193,7 +193,7 @@ test("news runtime health fails closed unless the exact release-owned GDELT run 
     release_gdelt_gkg_archives_scanned: 0,
   }, now);
   assert.equal(rawArchiveOutage.ready, false);
-  assert.equal(rawArchiveOutage.checks.release_gdelt_raw_enrichment, false);
+  assert.equal(rawArchiveOutage.checks.release_gdelt_source_provenance, false);
 
   const partialOlderArchiveOutage = evaluateNewsRuntimeHealth({
     ...healthy,
@@ -202,7 +202,7 @@ test("news runtime health fails closed unless the exact release-owned GDELT run 
     release_gdelt_gkg_archives_scanned: 1,
   }, now);
   assert.equal(partialOlderArchiveOutage.ready, true);
-  assert.equal(partialOlderArchiveOutage.checks.release_gdelt_raw_enrichment, true);
+  assert.equal(partialOlderArchiveOutage.checks.release_gdelt_source_provenance, true);
 
   const scannedButUnusableGkg = evaluateNewsRuntimeHealth({
     ...healthy,
@@ -212,7 +212,7 @@ test("news runtime health fails closed unless the exact release-owned GDELT run 
     release_gdelt_gkg_sampled: 0,
   }, now);
   assert.equal(scannedButUnusableGkg.ready, false);
-  assert.equal(scannedButUnusableGkg.checks.release_gdelt_raw_enrichment, false);
+  assert.equal(scannedButUnusableGkg.checks.release_gdelt_source_provenance, false);
 
   const decodedAndProbedButNotRandomlyLinkedGkg = evaluateNewsRuntimeHealth({
     ...healthy,
@@ -220,21 +220,21 @@ test("news runtime health fails closed unless the exact release-owned GDELT run 
     release_gdelt_gkg_matched_country_rows: 0,
   }, now);
   assert.equal(decodedAndProbedButNotRandomlyLinkedGkg.ready, true);
-  assert.equal(decodedAndProbedButNotRandomlyLinkedGkg.checks.release_gdelt_raw_enrichment, true);
+  assert.equal(decodedAndProbedButNotRandomlyLinkedGkg.checks.release_gdelt_source_provenance, true);
 
   const linkedWithoutAcceptedDocGeography = evaluateNewsRuntimeHealth({
     ...healthy,
     release_gdelt_gkg_matched_country_rows: 0,
   }, now);
   assert.equal(linkedWithoutAcceptedDocGeography.ready, true);
-  assert.equal(linkedWithoutAcceptedDocGeography.checks.release_gdelt_raw_enrichment, true);
+  assert.equal(linkedWithoutAcceptedDocGeography.checks.release_gdelt_source_provenance, true);
 
   const decodedWithoutCanonicalCountryProbe = evaluateNewsRuntimeHealth({
     ...healthy,
     release_gdelt_gkg_canonical_country_url_probes: 0,
   }, now);
   assert.equal(decodedWithoutCanonicalCountryProbe.ready, false);
-  assert.equal(decodedWithoutCanonicalCountryProbe.checks.release_gdelt_raw_enrichment, false);
+  assert.equal(decodedWithoutCanonicalCountryProbe.checks.release_gdelt_source_provenance, false);
 });
 
 test("news runtime query shares trusted subject-country and accepted GDELT rules", () => {
@@ -270,4 +270,29 @@ test("news runtime query shares trusted subject-country and accepted GDELT rules
   assert.match(sql, /current_rollup AS/);
   assert.match(sql, /publisher_time_anchor AS/);
   assert.match(sql, /FROM current_rollup\s+CROSS JOIN publisher_time_anchor\s+CROSS JOIN geography_rollup/);
+});
+
+
+test("minute GAL acquisition proves multilingual source provenance without blocking on optional raw archives", () => {
+  const row: NewsRuntimeHealthRow = {
+    ...healthy,
+    release_gdelt_step_status: "success",
+    release_gdelt_doc_status: "not_requested",
+    release_gdelt_gal_mode: "primary",
+    release_gdelt_gal_status: "healthy",
+    release_gdelt_gal_accepted: 120,
+    release_gdelt_gal_latest_event_time: "2026-08-21T11:55:00Z",
+    release_gdelt_raw_archive_status: "degraded",
+    release_gdelt_gkg_archives_scanned: 0,
+    release_gdelt_gkg_sampled: 0,
+    release_gdelt_gkg_canonical_country_url_probes: 0,
+  };
+  assert.equal(evaluateNewsRuntimeHealth(row, now).ready, true);
+  assert.equal(evaluateNewsRuntimeHealth({ ...row, release_gdelt_gal_accepted: 0 }, now).ready, false);
+  assert.equal(evaluateNewsRuntimeHealth({ ...row, release_gdelt_gal_latest_event_time: "2026-08-20T11:55:00Z" }, now).ready, false);
+  assert.equal(evaluateNewsRuntimeHealth({ ...row, release_gdelt_gal_accepted: 0,
+    release_gdelt_gal_no_new_articles: true, release_gdelt_gal_latest_interval_at: "2026-08-21T11:56:00Z" }, now).ready, true,
+    "a proved current incremental no-change poll must not fail a release");
+  assert.equal(evaluateNewsRuntimeHealth({ ...row, non_gb_24h_count: 0 }, now).ready, false,
+    "metadata provenance must not replace the independent global geography gate");
 });

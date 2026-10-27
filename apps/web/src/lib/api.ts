@@ -94,6 +94,11 @@ export type NewsItem = {
   translated_title?: string | null;
   ai_summary?: string | null;
   translation?: NewsTranslation | null;
+  translation_availability?: {
+    status: "available" | "pending" | "quota_limited" | "disabled" | "unavailable";
+    reason: string | null;
+    retry_after?: string | null;
+  } | null;
   linked_events?: NewsLinkedIntelligenceEvent[];
   primary_category?: NewsCategory | null;
   categories?: NewsCategory[];

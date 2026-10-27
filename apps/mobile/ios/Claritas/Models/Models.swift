@@ -256,6 +256,12 @@ enum ClaritasInterfaceLanguage {
     static let current = "en"
 }
 
+struct NewsTranslationAvailability: Codable {
+    let status: String
+    let reason: String?
+    let retry_after: String?
+}
+
 struct NewsTranslation: Codable {
     let target_language_code: String
     let headline_kind: String?
@@ -705,6 +711,7 @@ struct NewsItem: Codable, Identifiable {
     let translated_title: String?
     let ai_summary: String?
     let translation: NewsTranslation?
+    let translation_availability: NewsTranslationAvailability?
     var additionalContextEvents: [NewsLinkedEvent] { linked_events.filter(\.hasAdditionalContext) }
     let linked_events: [NewsLinkedEvent]
     let publisher: String?
@@ -733,10 +740,18 @@ struct NewsItem: Codable, Identifiable {
     }
 
     var translationDisclosure: String? {
-        guard hasAITranslatedHeadline, let translation else { return nil }
-        let source = language_code?.uppercased() ?? "SOURCE"
-        let target = translation.target_language_code.uppercased()
-        return "AI translation · \(source)→\(target)"
+        if hasAITranslatedHeadline, let translation {
+            let source = language_code?.uppercased() ?? "SOURCE"
+            return "AI translation · \(source)→\(translation.target_language_code.uppercased())"
+        }
+        guard requiresTranslation else { return nil }
+        switch translation_availability?.status {
+        case "quota_limited": return "Original language · free translation quota reached"
+        case "disabled": return "Original language · translations disabled"
+        case "unavailable": return "Original language · translation unavailable"
+        case "available", "pending": return "Original language · translation pending"
+        default: return "Original language · translation status unavailable"
+        }
     }
 
     /// The canonical server event timestamp retained for compatibility with
@@ -917,6 +932,7 @@ struct NewsItem: Codable, Identifiable {
         case translated_title
         case ai_summary
         case translation
+        case translation_availability
         case linked_events
         case publisher
         case primary_category
@@ -944,6 +960,7 @@ struct NewsItem: Codable, Identifiable {
         translated_title = try container.decodeIfPresent(String.self, forKey: .translated_title)
         ai_summary = try container.decodeIfPresent(String.self, forKey: .ai_summary)
         translation = try container.decodeIfPresent(NewsTranslation.self, forKey: .translation)
+        translation_availability = try container.decodeIfPresent(NewsTranslationAvailability.self, forKey: .translation_availability)
         linked_events = try container.decodeIfPresent([NewsLinkedEvent].self, forKey: .linked_events) ?? []
         publisher = try container.decodeIfPresent(String.self, forKey: .publisher)
         primary_category = try container.decodeIfPresent(String.self, forKey: .primary_category)

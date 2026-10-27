@@ -10,12 +10,12 @@ process.env.DB_PASSWORD ||= "claritas_test";
 
 const ingestion = import("./ingestion-admin");
 
-test("scheduled news defaults enable governed providers within the hourly headline ceiling", async () => {
+test("scheduled news defaults enable governed providers with a bounded multilingual sample", async () => {
   const { buildNewsRunPlan } = await ingestion;
   const plan = buildNewsRunPlan({});
 
   assert.deepEqual(plan.providers, { gdelt: true, institutionalRss: true, govUk: true });
-  assert.deepEqual(plan.gdelt, { timespan: "1h", maxRecords: 25, maxRawRows: 190 });
+  assert.deepEqual(plan.gdelt, { timespan: "1h", maxRecords: 120, maxRawRows: 190 });
   assert.equal(plan.runTranslations, true);
 });
 
@@ -54,7 +54,7 @@ test("news run plan caps GDELT volume and validates duration syntax", async () =
     providers: { gdelt: true, institutionalRss: false, govUk: false },
     gdelt: { timespan: "1h", maxRecords: 500, maxRawRows: 5_000 },
   });
-  assert.deepEqual(plan.gdelt, { timespan: "1h", maxRecords: 25, maxRawRows: 190 });
+  assert.deepEqual(plan.gdelt, { timespan: "1h", maxRecords: 250, maxRawRows: 190 });
   assert.throws(
     () => buildNewsRunPlan({ gdelt: { timespan: "yesterday" } }),
     IngestionValidationError,
@@ -328,4 +328,14 @@ test("news country coverage exposes freshness and provider depth", () => {
   assert.match(attribution, /metadata->>'retired'/);
   assert.match(attribution, /count\(DISTINCT story_key\)::int AS count/);
   assert.doesNotMatch(attribution, /COALESCE\(i\.event_time,i\.created_at\)/);
+});
+
+
+test("incremental GDELT no-change polls and busy ownership are reported accurately", async () => {
+  const { classifyGdeltNewsCoverage } = await ingestion;
+  const primary = { health: "healthy", selected: 0, no_new_articles: true,
+    latest_interval_at: new Date().toISOString(), latest_event_time: new Date().toISOString() };
+  assert.equal(classifyGdeltNewsCoverage({ gal_primary: primary, doc_status: "not_requested" }), "success");
+  assert.equal(classifyGdeltNewsCoverage({ gal_primary: { ...primary, latest_interval_at: "2020-01-01T00:00:00Z" }, doc_status: "not_requested" }), "failed");
+  assert.equal(classifyGdeltNewsCoverage({ gal_primary: { health: "busy" }, doc_status: "not_requested" }), "degraded");
 });

@@ -37,7 +37,7 @@ data:
   # Daily briefings are text-only. Disabling OpenCode tools allows routing to
   # free/non-tool-capable models and prevents unnecessary container access.
   OPENCODE_DISABLE_TOOLS: "true"
-  # Non-English headlines are translated during news ingestion. Summaries stay
+  # Non-English headlines are translated by the independent worker. Summaries stay
   # opt-in and are generated only when a user opens a story.
   NEWS_TRANSLATION_ENABLED: "true"
   NEWS_TRANSLATION_TARGET_LANGUAGES: "en"
@@ -46,10 +46,11 @@ data:
   # reservation. The automatic sub-cap leaves capacity for reader requests.
   NEWS_TRANSLATION_BATCH_SIZE: "100"
   NEWS_TRANSLATION_MODEL: "openrouter/free"
-  NEWS_TRANSLATION_CHUNK_SIZE: "12"
-  NEWS_TRANSLATION_MAX_CHUNK_SOURCE_CHARACTERS: "4500"
+  NEWS_TRANSLATION_CHUNK_SIZE: "25"
+  NEWS_TRANSLATION_MAX_CHUNK_SOURCE_CHARACTERS: "8000"
   NEWS_TRANSLATION_MAX_RETRIES: "1"
-  NEWS_TRANSLATION_MAX_OUTPUT_TOKENS: "2048"
+  NEWS_TRANSLATION_MAX_OUTPUT_TOKENS: "4096"
+  NEWS_TRANSLATION_POLL_SECONDS: "60"
   NEWS_TRANSLATION_MAX_DAILY_REQUESTS: "30"
   NEWS_TRANSLATION_MAX_AUTOMATIC_DAILY_REQUESTS: "24"
   NEWS_TRANSLATION_MAX_DAILY_CHARACTERS: "250000"

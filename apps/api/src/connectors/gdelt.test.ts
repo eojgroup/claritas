@@ -144,7 +144,7 @@ test("GDELT DOC lanes degrade independently behind the shared rate limiter", () 
   assert.match(ingestDoc, /for \(const lane of laneBudgets\)/);
   assert.match(ingestDoc, /const response = await fetchRetry\(apiUrl\.toString\(\), 2, discoveryDeadline\)/);
   assert.match(ingestDoc, /if \(discoveryDeadline\.aborted \|\| \/\\bGDELT HTTP 429\\b\/i\.test\(message\)\) break/);
-  assert.match(ingestDoc, /parseGdeltDocApiResponse\(await response\.text\(\)/);
+  assert.match(ingestDoc, /parseGdeltDocApiResponse\(await readGdeltText\(response, 3_000_000, discoveryDeadline\)/);
   assert.match(ingestDoc, /status: "failed"/);
   assert.match(ingestDoc, /if \(!discoveryLanes\.some\(\(lane\) => lane\.status === "healthy"\)\)/);
   assert.match(ingestDoc, /\(acceptedByLane\.get\(laneId\) \?\? 0\) >= laneBudget/);
@@ -185,14 +185,9 @@ test("GDELT GAL isolates record-level persistence failures and gives its rolling
     request: async () => {
       requests += 1;
       if (requests === 1) {
-        return {
-          ok: true,
-          status: 200,
-          headers: new Headers({ "content-type": "application/rss+xml" }),
-          text: async () => {
-            throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
-          },
-        } as Response;
+        return new Response(new ReadableStream({
+          start(controller) { controller.error(new DOMException("The operation was aborted due to timeout", "TimeoutError")); },
+        }), { status: 200, headers: { "content-type": "application/rss+xml" } });
       }
       return new Response("<rss><channel /></rss>", {
         status: 200,
@@ -543,7 +538,7 @@ test("raw GDELT archive failures are isolated from DOC and GAL acquisition", () 
     source.indexOf("export async function getGdeltEvents"),
   );
   const beforeDoc = ingest.slice(0, ingest.indexOf("if (includeDoc)"));
-  assert.match(beforeDoc, /getLatestArchiveUrls\(\)\.then/);
+  assert.match(beforeDoc, /getLatestArchiveUrls\(params\.signal\)\.then/);
   assert.doesNotMatch(beforeDoc, /await getLatestArchiveUrls\(\)/);
   assert.match(ingest, /event_archive_error/);
   assert.match(ingest, /raw_archive_status = "degraded"/);

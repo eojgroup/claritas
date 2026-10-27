@@ -133,10 +133,10 @@ private struct NewsRow: View {
             .accessibilityHint(showsDetails ? "Collapses report details" : "Expands the full headline, summary and original source")
             .accessibilityValue(showsDetails ? "Expanded" : "Collapsed")
 
+            if let disclosure = item.translationDisclosure {
+                Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+            }
             if showsDetails {
-                if let disclosure = item.translationDisclosure {
-                    Text(disclosure).font(.caption2).foregroundStyle(.secondary)
-                }
                 if let summary = item.presentationSummary, !summary.isEmpty {
                     Text(summary)
                         .font(.subheadline)

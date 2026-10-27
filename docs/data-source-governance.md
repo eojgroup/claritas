@@ -36,24 +36,29 @@ source URL, public timestamp, subject-country inference and OGL notice. GOV.UK's
 `public_timestamp` is labelled as the publisher's public timestamp rather than
 silently claiming that every value is the first publication time.
 
-GDELT DOC remains the preferred global publisher-discovery path. Scheduled DOC
-requests are divided into bounded subject lanes so financial reporting is not
-crowded out by a high-volume disaster query. Individual lane failures are
-reported and do not discard other successful lanes. If DOC is rate limited or
-unavailable, Claritas records that provider step as degraded and may
-ingest at most 25 relevance-filtered links from GDELT's official rolling Article
-List RSS feed. This fallback is deliberately a bounded sample, not complete
-global coverage. Because GAL RSS does not declare article language, the fallback
-admits only headlines with defensible English-language signals; ambiguous or
-non-English headlines are rejected instead of bypassing translation policy. The
-feed and raw archives are retrieved from GDELT's TLS-backed Google Cloud Storage
-origin. Publisher-owned metadata or an unambiguous URL date is stored as
-`publisher_published_verified`. Otherwise only a URL's first current discovery
-by Claritas may be stored as `provider_first_seen`; it is lower-ranked, visibly
-labelled, and never refreshed by later rediscovery. Article-body text is not
-stored or parsed for this fallback. Bounded publisher meta description,
-keywords and JSON-LD location fields may be used transiently for subject-country
-inference.
+GDELT's [minute Article List metadata](https://blog.gdeltproject.org/announcing-the-gdelt-article-list-rss-feed/)
+is the primary global publisher-discovery path. It supplies original headlines,
+short publisher metadata descriptions, language codes and source URLs. No article
+body is retrieved for translation. A bounded language/publisher-balanced sample
+(default 120 per scheduled run, at most 250 per manual run) admits multilingual
+reporting without depending on the rate-limited DOC search endpoint. Interval
+cursors, persisted totals, omitted candidates, missing intervals and retry counts
+make sampling limits explicit; this is not complete global coverage.
+
+GAL's `date` can mean publication or discovery, so it is retained as provider
+metadata and never silently labelled as a verified publication timestamp. The
+immutable minute-file identity provides first-seen context; canonical URL
+rediscovery never refreshes an existing story's chronology. Unsafe or non-article
+URLs and stale verified publisher dates remain excluded. Publisher jurisdiction
+and article language are never substituted for the subject country.
+
+DOC remains a supplemental source for configured topic queries and fallback.
+Requests are paced, and a 429 pauses further search rather than multiplying
+retries across every query lane. Successful lanes retain their original language
+and still pass quality checks. The rolling RSS fallback lacks language metadata
+and remains a smaller, explicitly qualified last resort. Feed objects and raw
+archives use GDELT's TLS-backed Google Cloud Storage origin. Independent
+institutional RSS and GOV.UK acquisition continue while GDELT runs.
 
 ## Reviewed but not enabled
 

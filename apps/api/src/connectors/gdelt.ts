@@ -5,10 +5,16 @@ import https from "node:https";
 import { isIP } from "node:net";
 import { unzipSync } from "fflate";
 import worldCountries from "world-countries";
-import { query, withTransaction } from "../db";
+import { query, withTransaction, withWorkerLease } from "../db";
 import { hasEarthquakeHeadlineSignal } from "../earthquake-language";
 import { trustedNewsDirectCountrySql } from "../news-country-attribution";
 import { inferNewsCountry, trustedSubjectCountryIso2 } from "./country-inference";
+import { awaitGdeltOperation, readGdeltBody, readGdeltText } from "./gdelt-io";
+import {
+  fetchGdeltGalMetadataMinute, parseGdeltGalMetadata, planGdeltGalMinutes,
+  selectGdeltGalMetadataSample, gdeltMinuteDate, GDELT_GAL_METADATA_VERSION,
+  type GdeltGalMetadataCursor, type GdeltGalMetadataRecord,
+} from "./gdelt-gal-metadata";
 
 const DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc";
 const DEFAULT_DATA_BASE_URL = "https://storage.googleapis.com/data.gdeltproject.org/gdeltv2";
@@ -238,6 +244,8 @@ export type GdeltIngestParams = {
   includeEvents?: boolean;
   includeGkg?: boolean;
   targetedDiscovery?: GdeltTargetedDiscoveryContext;
+  signal?: AbortSignal;
+  onProgress?: (phase: string, details?: Record<string, unknown>) => void | Promise<void>;
 };
 
 export type GdeltTargetedDiscoveryContext = {
@@ -1059,7 +1067,10 @@ export function assessGdeltDocArticleQuality(input: {
     timeBasis: null,
   });
   const title = input.title?.trim() ?? "";
-  if (!title || title.length < 12 || title.length > 500 || GDELT_LOW_VALUE_TITLE.test(title)) {
+  // Four ideographs can convey a complete headline (for example a rate cut).
+  // An English character minimum silently excluded otherwise valid CJK news.
+  const minimumTitleLength = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(title) ? 4 : 12;
+  if (!title || Array.from(title).length < minimumTitleLength || title.length > 500 || GDELT_LOW_VALUE_TITLE.test(title)) {
     return reject("missing_title");
   }
   const url = usableGdeltArticleUrl(input.url);
@@ -1577,6 +1588,7 @@ async function reconcileGdeltCanonicalBatch(
  */
 export async function reconcileGdeltCanonicalHistory(
   sourceId: number,
+  signal?: AbortSignal,
 ): Promise<GdeltCanonicalReconciliationResult> {
   const active = gdeltCanonicalReconciliations.get(sourceId);
   if (active) return active;
@@ -1594,6 +1606,7 @@ export async function reconcileGdeltCanonicalHistory(
     // reaches completion. A partial item pass cannot safely prove that a
     // newly discovered canonical URL has no tracked historical alias.
     while (true) {
+      signal?.throwIfAborted();
       const repairSignals = signalBatchesRemaining > 0;
       let step: GdeltCanonicalReconciliationStep;
       try {
@@ -1634,8 +1647,9 @@ export async function reconcileGdeltCanonicalHistory(
   }
 }
 
-async function requireGdeltCanonicalItemHistory(sourceId: number): Promise<void> {
-  const reconciliation = await reconcileGdeltCanonicalHistory(sourceId);
+async function requireGdeltCanonicalItemHistory(sourceId: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  const reconciliation = await reconcileGdeltCanonicalHistory(sourceId, signal);
   if (!reconciliation.itemComplete) {
     throw new Error(
       `GDELT article canonical URL reconciliation is incomplete (`
@@ -2739,7 +2753,7 @@ async function withGdeltDocRateLimit(
     signal?.throwIfAborted();
     acquired = true;
     try {
-      const response = await operation();
+      const response = await awaitGdeltOperation(operation(), signal);
       if (GDELT_DOC_RETRYABLE_STATUSES.has(response.status)) {
         deferGdeltDocRequests(gdeltDocRetryDelayMs(
           response.status,
@@ -2782,7 +2796,7 @@ async function fetchRetry(url: string, attempts = 2, deadline?: AbortSignal): Pr
     try {
       response = isGdeltDoc
         ? await withGdeltDocRateLimit(request, attempt, deadline)
-        : await request();
+        : await awaitGdeltOperation(request(), deadline);
     } catch (error) {
       lastError = error;
       if (deadline?.aborted) throw error;
@@ -2792,15 +2806,17 @@ async function fetchRetry(url: string, attempts = 2, deadline?: AbortSignal): Pr
       continue;
     }
     if (response.ok) return response;
+    if (lastResponse) void lastResponse.body?.cancel().catch(() => undefined);
     lastResponse = response;
     if (!GDELT_DOC_RETRYABLE_STATUSES.has(response.status)) break;
     const delayMs = gdeltDocRetryDelayMs(response.status, response.headers.get("retry-after"), attempt);
+    if (isGdeltDoc && response.status === 429) break;
     // A final 429 must slow the following lane too. Sleeping only inside this
     // request lets the next lane immediately hit the same provider cooldown.
     if (!isGdeltDoc && attempt < maximumAttempts - 1) await sleep(delayMs);
     if (attempt === maximumAttempts - 1) break;
   }
-  const body = lastResponse ? (await lastResponse.text()).slice(0, 300) : "No response";
+  const body = lastResponse ? (await readGdeltText(lastResponse, 32_000, deadline)).slice(0, 300) : "No response";
   const errorDetail = lastError instanceof Error ? lastError.message : String(lastError ?? body);
   throw new Error(
     `GDELT HTTP ${lastResponse?.status ?? "network_error"} after ${maximumAttempts} attempt(s) `
@@ -2816,6 +2832,7 @@ export async function fetchGdeltGalText(
     maxBytes?: number;
     request?: typeof fetch;
     wait?: (milliseconds: number) => Promise<void>;
+    signal?: AbortSignal;
   } = {},
 ): Promise<string> {
   const maximumAttempts = Math.max(1, Math.trunc(options.attempts ?? 3));
@@ -2831,19 +2848,20 @@ export async function fetchGdeltGalText(
     let response: Response | null = null;
     let retryable = true;
     try {
-      response = await request(url, {
+      const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+      response = await awaitGdeltOperation(request(url, {
         headers: {
           accept: "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8",
           "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)",
         },
         // Keep the signal alive while response.text() consumes the body. GAL
         // is a rolling 1MB+ object, so a mid-download stall must be retried.
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+        signal,
+      }), signal);
       lastStatus = response.status;
       if (!response.ok) {
         retryable = GDELT_DOC_RETRYABLE_STATUSES.has(response.status);
-        const detail = (await response.text()).slice(0, 300);
+        const detail = (await readGdeltText(response, maxBytes, signal)).slice(0, 300);
         lastError = new Error(`HTTP ${response.status}: ${detail}`);
       } else {
         const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
@@ -2856,7 +2874,7 @@ export async function fetchGdeltGalText(
           retryable = false;
           throw new Error(`GDELT GAL response exceeds ${maxBytes} bytes`);
         }
-        const body = await response.text();
+        const body = await readGdeltText(response, maxBytes, signal);
         if (Buffer.byteLength(body, "utf8") > maxBytes) {
           retryable = false;
           throw new Error(`GDELT GAL response exceeds ${maxBytes} bytes`);
@@ -2867,8 +2885,9 @@ export async function fetchGdeltGalText(
       lastError = error;
     }
 
+    options.signal?.throwIfAborted();
     if (!retryable || attempt === maximumAttempts - 1) break;
-    await wait(gdeltDocRetryDelayMs(response?.status ?? null, response?.headers.get("retry-after") ?? null, attempt));
+    await awaitGdeltOperation(wait(gdeltDocRetryDelayMs(response?.status ?? null, response?.headers.get("retry-after") ?? null, attempt)), options.signal);
   }
 
   const errorDetail = lastError instanceof Error ? lastError.message : String(lastError ?? "No response");
@@ -2879,16 +2898,21 @@ export async function fetchGdeltGalText(
 }
 
 function firstZipText(bytes: Uint8Array): string {
-  const files = unzipSync(bytes);
+  let totalSize = 0;
+  const files = unzipSync(bytes, { filter: (file) => {
+    totalSize += file.originalSize;
+    if (totalSize > 64 * 1024 * 1024) throw new Error("GDELT expanded archive exceeds 64 MiB.");
+    return true;
+  } });
   const first = Object.values(files)[0];
   if (!first) throw new Error("GDELT archive was empty.");
   return new TextDecoder("utf-8").decode(first);
 }
 
-async function getLatestArchiveUrls(): Promise<{ event: string; gkg: string }> {
+async function getLatestArchiveUrls(signal?: AbortSignal): Promise<{ event: string; gkg: string }> {
   const base = (process.env.GDELT_DATA_BASE_URL || DEFAULT_DATA_BASE_URL).replace(/\/$/, "");
-  const response = await fetchRetry(`${base}/lastupdate.txt`);
-  const lines = (await response.text()).trim().split(/\r?\n/);
+  const response = await fetchRetry(`${base}/lastupdate.txt`, 2, signal);
+  const lines = (await readGdeltText(response, 32_000, signal)).trim().split(/\r?\n/);
   // lastupdate.txt still advertises plaintext data.gdeltproject.org links.
   // Resolve only each advertised basename against the configured TLS-backed
   // storage root so archive bytes cannot be modified in transit.
@@ -2920,7 +2944,7 @@ async function getLatestArchiveUrls(): Promise<{ event: string; gkg: string }> {
       const archiveResponse = await fetch(url, {
         method: "HEAD",
         headers: { "user-agent": process.env.GDELT_USER_AGENT || "Claritas/1.0 (https://claritas.info; engineering@claritas.info)" },
-        signal: AbortSignal.timeout(10_000),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
       });
       return archiveResponse.ok;
     } catch {
@@ -2930,6 +2954,7 @@ async function getLatestArchiveUrls(): Promise<{ event: string; gkg: string }> {
   const formatStamp = (date: Date): string =>
     date.toISOString().replace(/[-:T]/g, "").slice(0, 14);
   for (let offset = 0; offset <= 12; offset += 1) {
+    signal?.throwIfAborted();
     const candidateStamp = formatStamp(new Date(stampDate.getTime() - offset * 15 * 60_000));
     const candidateEvent = event.replace(stamp, candidateStamp);
     const candidateGkg = gkg.replace(/\d{14}(?=\.gkg\.csv\.zip$)/, candidateStamp);
@@ -2984,12 +3009,13 @@ function parseLocations(value: string | undefined): Array<Record<string, unknown
   });
 }
 
-async function ingestEventArchive(sourceId: number, archiveUrl: string, maxRows: number): Promise<number> {
-  const response = await fetchRetry(archiveUrl);
-  const text = firstZipText(new Uint8Array(await response.arrayBuffer()));
+async function ingestEventArchive(sourceId: number, archiveUrl: string, maxRows: number, signal?: AbortSignal): Promise<number> {
+  const response = await fetchRetry(archiveUrl, 2, signal);
+  const text = firstZipText(await readGdeltBody(response, 16 * 1024 * 1024, signal));
   let count = 0;
   for (const line of text.split(/\r?\n/)) {
     if (!line || count >= maxRows) break;
+    signal?.throwIfAborted();
     const fields = line.split("\t");
     if (fields.length < 61) continue;
     const actionCountry = gdeltCountryToIso2(fields[53]);
@@ -3129,12 +3155,14 @@ async function ingestGkgLines(
   sourceId: number,
   lines: Iterable<string>,
   maxRows: number,
+  signal?: AbortSignal,
 ): Promise<{ persisted: number; withCountries: number; withCountryUrls: string[] }> {
   let persisted = 0;
   let withCountries = 0;
   const withCountryUrls = new Set<string>();
   for (const line of lines) {
     if (!line || persisted >= maxRows) break;
+    signal?.throwIfAborted();
     const parsed = parseGkgLine(line);
     if (!parsed) continue;
     const { fields, url, rawUrl } = parsed;
@@ -3187,9 +3215,9 @@ async function ingestGkgLines(
   return { persisted, withCountries, withCountryUrls: Array.from(withCountryUrls) };
 }
 
-async function downloadGkgArchiveText(archiveUrl: string): Promise<string> {
-  const response = await fetchRetry(archiveUrl);
-  return firstZipText(new Uint8Array(await response.arrayBuffer()));
+async function downloadGkgArchiveText(archiveUrl: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetchRetry(archiveUrl, 2, signal);
+  return firstZipText(await readGdeltBody(response, 16 * 1024 * 1024, signal));
 }
 
 async function ingestGkgArchiveWindow(
@@ -3197,6 +3225,7 @@ async function ingestGkgArchiveWindow(
   window: GdeltGkgArchiveWindow,
   matchUrls: string[],
   maxRawRows: number,
+  signal?: AbortSignal,
 ): Promise<GdeltGkgArchiveIngest> {
   let sampled = 0;
   let matched = 0;
@@ -3215,14 +3244,15 @@ async function ingestGkgArchiveWindow(
   // never retains four fully decoded archives in the API process.
   for (const [index, archiveUrl] of window.urls.entries()) {
     if (index > 0 && unresolved.size === 0) break;
+    signal?.throwIfAborted();
     try {
-      const text = await downloadGkgArchiveText(archiveUrl);
+      const text = await downloadGkgArchiveText(archiveUrl, signal);
       archivesScanned += 1;
       if (index === 0 && maxRawRows > 0) {
         // Put one country-bearing, canonicalizable row first when the archive
         // has one. The bounded sample then supplies a deterministic parser +
         // persistence probe without depending on random DOC URL coincidence.
-        const sample = await ingestGkgLines(sourceId, gkgLinesWithCountryProbeFirst(text), maxRawRows);
+        const sample = await ingestGkgLines(sourceId, gkgLinesWithCountryProbeFirst(text), maxRawRows, signal);
         sampled += sample.persisted;
         countryRows += sample.withCountries;
         for (const url of sample.withCountryUrls) canonicalCountryUrls.add(url);
@@ -3233,6 +3263,7 @@ async function ingestGkgArchiveWindow(
           sourceId,
           matchedLines,
           Math.max(matchedLines.length, 1),
+          signal,
         );
         matched += matchedResult.persisted;
         matchedCountryRows += matchedResult.withCountries;
@@ -3322,8 +3353,12 @@ async function ingestDocArticles(
   let rawArticleCount = 0;
   // DOC is optional acquisition. Bound all lanes together so an unhealthy
   // endpoint cannot consume the release window before GAL/raw fallbacks run.
-  const discoveryDeadline = AbortSignal.timeout(GDELT_DOC_DISCOVERY_TIMEOUT_MS);
+  const discoveryDeadline = params.signal
+    ? AbortSignal.any([params.signal, AbortSignal.timeout(GDELT_DOC_DISCOVERY_TIMEOUT_MS)])
+    : AbortSignal.timeout(GDELT_DOC_DISCOVERY_TIMEOUT_MS);
   for (const lane of laneBudgets) {
+    params.signal?.throwIfAborted();
+    await params.onProgress?.("doc_discovery", { lane: lane.id });
     try {
       const apiUrl = new URL(process.env.GDELT_DOC_API_URL || DOC_API_URL);
       const laneQuery = validateGdeltDocQuery(lane.query, lane.id);
@@ -3342,7 +3377,7 @@ async function ingestDocArticles(
       // the process-wide limiter. The per-lane catch lets a provider failure
       // in one topic degrade coverage without discarding successful lanes.
       const response = await fetchRetry(apiUrl.toString(), 2, discoveryDeadline);
-      const data = parseGdeltDocApiResponse(await response.text(), {
+      const data = parseGdeltDocApiResponse(await readGdeltText(response, 3_000_000, discoveryDeadline), {
         laneId: lane.id,
         status: response.status,
         contentType: response.headers.get("content-type"),
@@ -3350,9 +3385,10 @@ async function ingestDocArticles(
       });
       const rawArticles = Array.isArray(data.articles) ? data.articles : [];
       rawArticleCount += rawArticles.length;
-      const laneInput = !params.targetedDiscovery && lane.id !== "configured"
-        ? rawArticles.filter((article) => gdeltHeadlineMatchesLane(article.title ?? "", lane.id))
-        : rawArticles;
+      // GDELT searches machine-translated content, but returns the original
+      // publisher headline. An English regex here discarded non-English
+      // reporting even when it matched the provider's topic query.
+      const laneInput = rawArticles;
       const laneCandidates = params.targetedDiscovery
         ? selectTargetedGdeltDocCandidates(laneInput, params.targetedDiscovery, { limit: candidateLimit })
         : selectGdeltDocCandidates(laneInput, { limit: candidateLimit });
@@ -3403,6 +3439,7 @@ async function ingestDocArticles(
         await gkgArchiveWindow,
         urls,
         clampInt(params.maxRawRows ?? process.env.GDELT_MAX_RAW_ROWS, 25, 5000, 750),
+        params.signal,
       )
     : {
         sampled: 0,
@@ -3436,6 +3473,7 @@ async function ingestDocArticles(
     articles,
     GDELT_ARTICLE_VERIFICATION_CONCURRENCY,
     async (discovered) => {
+      params.signal?.throwIfAborted();
       const { article } = discovered;
       const url = nonEmpty(article.url);
       const providerSeenAt = parseGdeltTimestamp(article.seendate);
@@ -3823,7 +3861,7 @@ async function ingestGalFallback(
   // headroom than small metadata requests and retry transient GCS stalls.
   const xml = await fetchGdeltGalText(
     process.env.GDELT_GAL_RSS_URL?.trim() || GAL_RSS_URL,
-    { attempts: 3, timeoutMs: GDELT_GAL_REQUEST_TIMEOUT_MS },
+    { attempts: 2, timeoutMs: GDELT_GAL_REQUEST_TIMEOUT_MS, signal: params.signal },
   );
   const selectedLimit = clampInt(params.maxRecords ?? process.env.GDELT_GAL_MAX_ARTICLES, 1, 250, 25);
   const maxProviderSeenAgeHours = clampHours(process.env.GDELT_GAL_MAX_AGE_HOURS, 3);
@@ -3841,6 +3879,7 @@ async function ingestGalFallback(
     parsed.articles,
     GDELT_ARTICLE_VERIFICATION_CONCURRENCY,
     async (article) => {
+      params.signal?.throwIfAborted();
       const existingAliases = existingByUrl.get(article.url) ?? [];
       const existing = existingAliases[0];
       const preflight = assessGdeltDocArticleQuality({
@@ -3902,6 +3941,7 @@ async function ingestGalFallback(
   let selected = 0;
 
   for (const candidate of verifiedArticles) {
+    params.signal?.throwIfAborted();
     const { article, quality } = candidate;
     if (!quality.accepted || !quality.effectiveTime || !quality.timeBasis) {
       skipped += 1;
@@ -4111,6 +4151,238 @@ async function ingestGalFallback(
 }
 
 /**
+ * Acquire current original-language article metadata without depending on DOC
+ * search capacity. The input corpus is much larger than our storage budget;
+ * omissions are reported as sampling, never as complete global coverage.
+ */
+const gdeltGalMetadataInFlight = new Map<number, Promise<Record<string, unknown>>>();
+
+export async function ingestGdeltGalMetadata(sourceId: number, params: GdeltIngestParams = {}): Promise<Record<string, unknown>> {
+  params.signal?.throwIfAborted();
+  const active = gdeltGalMetadataInFlight.get(sourceId);
+  if (active) return active;
+  const task = (async () => {
+    let result: Record<string, unknown> | undefined;
+    const acquired = await withWorkerLease(`gdelt-gal-metadata:${sourceId}`, 240, async () => {
+      result = await ingestGdeltGalMetadataBatch(sourceId, params);
+    });
+    return acquired ? result! : { health: "busy", selected: 0, no_new_articles: true, reason: "Another replica is acquiring GDELT metadata." };
+  })();
+  gdeltGalMetadataInFlight.set(sourceId, task);
+  try { return await task; }
+  finally { if (gdeltGalMetadataInFlight.get(sourceId) === task) gdeltGalMetadataInFlight.delete(sourceId); }
+}
+
+async function ingestGdeltGalMetadataBatch(
+  sourceId: number,
+  params: GdeltIngestParams,
+): Promise<Record<string, unknown>> {
+  const key = "gal_minute_metadata_v1";
+  const { rows } = await query<{ cursor: (Partial<GdeltGalMetadataCursor> & {
+    latest_event_time?: string; last_successful_minute?: string;
+  }) | null }>(`SELECT cursor FROM source_feed WHERE source_id=$1 AND feed_key=$2`, [sourceId, key]);
+  const cursor = rows[0]?.cursor ?? null;
+  const now = new Date();
+  const plan = planGdeltGalMinutes(cursor, now);
+  const limit = clampInt(params.maxRecords, 1, 250, 120);
+  const records = new Map<string, GdeltGalMetadataRecord>();
+  const attemptedMinutes = new Set(plan.minutes);
+  const retryMinutes: string[] = plan.pendingRetryMinutes.filter((minute) => !attemptedMinutes.has(minute));
+  let lastSuccessfulMinute = cursor?.last_successful_minute ?? null;
+  let feedCandidates = 0;
+  let feedRejected = 0;
+  let minutesScanned = 0;
+  let minutesMissing = 0;
+  const fileErrors: Array<{ minute: string; error: string }> = [];
+  await params.onProgress?.("gal_metadata_discovery", { minutes: plan.minutes.length, article_budget: limit });
+  for (const minute of plan.minutes) {
+    params.signal?.throwIfAborted();
+    try {
+      const text = await fetchGdeltGalMetadataMinute(minute, { signal: params.signal });
+      if (text === null) {
+        minutesMissing += 1;
+        // Newly announced minute objects may arrive after their interval.
+        const missingAt = gdeltMinuteDate(minute)?.getTime() ?? 0;
+        if (now.getTime() - missingAt <= 10 * 60_000) retryMinutes.push(minute);
+        continue;
+      }
+      const parsed = parseGdeltGalMetadata(text, minute);
+      minutesScanned += 1;
+      feedCandidates += parsed.records.length;
+      feedRejected += parsed.rejectedRows;
+      if (!lastSuccessfulMinute || minute > lastSuccessfulMinute) lastSuccessfulMinute = minute;
+      // Bound retained metadata independently of the number/size of files.
+      // Each interval offers a language/publisher-diverse candidate pool.
+      for (const record of selectGdeltGalMetadataSample(parsed.records, 250)) {
+        const url = canonicalGdeltUrl(record.url);
+        if (url && !records.has(url) && records.size < 8_500) records.set(url, { ...record, url });
+      }
+      await params.onProgress?.("gal_metadata_file", { minute, candidates: parsed.records.length, parsed_files: minutesScanned });
+    } catch (error) {
+      if (params.signal?.aborted) throw error;
+      retryMinutes.push(minute);
+      fileErrors.push({ minute, error: error instanceof Error ? error.message.slice(0, 180) : "Metadata file failed." });
+    }
+  }
+  params.signal?.throwIfAborted();
+  const candidatePool = selectGdeltGalMetadataSample([...records.values()], 250);
+  // First offer a broader balanced pool to known-URL filtering, so repetitive
+  // syndication cannot consume all slots intended for newly discovered news.
+  const existingByUrl = new Map<string, ExistingGdeltItem[]>();
+  const allUrls = [...records.keys()];
+  for (let offset = 0; offset < allUrls.length; offset += 500) {
+    params.signal?.throwIfAborted();
+    for (const [url, aliases] of await loadExistingGdeltItems(sourceId, allUrls.slice(offset, offset + 500))) existingByUrl.set(url, aliases);
+  }
+  const unseen = [...records.values()].filter((record) => !(existingByUrl.get(record.url) ?? []).some((item) => item.quality_status === "accepted"));
+  const rejectionCounts: Record<string, number> = {};
+  const qualities = new Map<string, GdeltDocQualityResult & { effectiveTime: string; timeBasis: "publisher_published_verified" | "provider_first_seen" }>();
+  const eligibleRecords = unseen.filter((article) => {
+    const providerTimeMs = Date.parse(article.providerTime ?? "");
+    if (Number.isFinite(providerTimeMs) && (now.getTime() - providerTimeMs > gdeltPublisherMaxAgeHours() * 3_600_000
+        || providerTimeMs > now.getTime() + GDELT_MAX_FUTURE_SKEW_MS)) {
+      const reason = providerTimeMs > now.getTime() ? "provider_seen_at_in_future" : "publisher_published_at_stale";
+      rejectionCounts[reason] = (rejectionCounts[reason] ?? 0) + 1;
+      return false;
+    }
+    const aliases = existingByUrl.get(article.url) ?? [];
+    const continuation = gdeltAliasQualityContinuation(aliases, article.firstSeenAt, { now });
+    const quality = assessGdeltDocArticleQuality({
+      title: article.title, url: article.url,
+      providerSeenAt: continuation.providerFirstSeenAt ?? article.firstSeenAt,
+      publication: publicationTimeFromUrl(article.url), now, allowProviderFirstSeen: continuation.allowProviderFirstSeen,
+    });
+    if (!quality.accepted || !quality.effectiveTime || !quality.timeBasis) {
+      rejectionCounts[quality.reason] = (rejectionCounts[quality.reason] ?? 0) + 1;
+      return false;
+    }
+    qualities.set(article.url, { ...quality, effectiveTime: quality.effectiveTime, timeBasis: quality.timeBasis });
+    return true;
+  });
+  // Cheap URL/time quality gates precede the storage quota, so a stale
+  // multilingual batch cannot crowd usable fresh reporting out of the run.
+  const selectedRecords = selectGdeltGalMetadataSample(eligibleRecords, limit);
+  let inserted = 0;
+  let updated = 0;
+  let unchanged = 0;
+  let accepted = 0;
+  let skipped = feedRejected + unseen.length - eligibleRecords.length;
+  let latestEventTime = cursor?.latest_event_time ?? null;
+  const languageCounts: Record<string, number> = {};
+  const publishers = new Set<string>();
+  await params.onProgress?.("gal_metadata_persistence", { candidates: feedCandidates, selected: selectedRecords.length, known_urls: records.size - unseen.length });
+  for (const article of selectedRecords) {
+    params.signal?.throwIfAborted();
+    const aliases = existingByUrl.get(article.url) ?? [];
+    const aliasHistory = planGdeltAliasPersistence(article.url, aliases);
+    const quality = qualities.get(article.url)!;
+    // GAL's date mixes publication and discovery. Preserve it as unverified
+    // provider metadata; only an independently dated URL can verify publication.
+    const temporal = mergeGdeltAliasTemporalEvidence(aliasHistory, {
+      eventTime: quality.effectiveTime, timeBasis: quality.timeBasis,
+      publication: quality.publication, providerSeenAt: article.firstSeenAt,
+    });
+    const domain = hostnameFromUrl(article.url);
+    const subject = resolveGdeltArticleSubject({
+      title: article.title, url: article.url,
+      // GAL descriptions sometimes contain site-wide publisher boilerplate.
+      // They remain attributed excerpts, not independent subject geography.
+      context: { description: null, keywords: [], structuredCountryIso2s: [] },
+    });
+    const country = subject.countryIso2 ?? aliasHistory.countryIso2;
+    const subjectCountries = [...new Set([...subject.subjectCountryIso2s, ...aliasHistory.subjectCountryIso2s, ...(country ? [country] : [])])].sort();
+    await ensureCountry(country);
+    for (const code of subjectCountries) await ensureCountry(code);
+    const payload = {
+      provider: "gdelt", product: "gal-minute-metadata", attribution: ATTRIBUTION,
+      canonical_url: article.url, canonical_url_algorithm: GDELT_CANONICAL_URL_ALGORITHM,
+      publisher: domain, source: domain, domain, outlet_name: article.outletName,
+      language_code: article.languageCode, image_url: article.image,
+      country_inference: subject.inference, country_attribution: subject.countryAttribution,
+      subject_country_iso2s: subjectCountries,
+      time_basis: temporal.timeBasis, time_precision: temporal.timePrecision,
+      publication_time_source: temporal.publicationTimeSource,
+      provider_time_at: article.providerTime, provider_time_basis: "publisher_or_discovery_unverified",
+      provider_seen_at: article.firstSeenAt, first_provider_seen_at: temporal.firstProviderSeenAt,
+      last_provider_seen_at: article.firstSeenAt, publisher_published_at: temporal.publisherPublishedAt,
+      publication_time_verified: temporal.publicationTimeVerified,
+      provider_discovery_fallback: temporal.timeBasis === "provider_first_seen",
+      quality_status: "accepted", quality_checked_at: now.toISOString(),
+      quality_checks: { article_url_valid: true, provider_seen_at_valid: true, publisher_date_verified: temporal.publicationTimeVerified },
+      coverage_mode: "bounded_multilingual_sample",
+      description_scope: "publisher_metadata_excerpt", gkg: aliasHistory.gkg,
+      license: { data: "GDELT unrestricted use with attribution", article: "Third-party publisher content" },
+    };
+    try {
+      const persisted = await query<{ id: string; inserted: boolean; event_time: string }>(
+        `INSERT INTO item(source_id,external_id,kind,title,summary,url,country_iso2,event_time,payload,dedupe_hash,language_code)
+         VALUES($1,$2,'news_article',$3,$4,$5,$6,$7,$8::jsonb,$9,$10)
+         ON CONFLICT(source_id,external_id) DO UPDATE SET
+           title=COALESCE(item.title,EXCLUDED.title),summary=COALESCE(item.summary,EXCLUDED.summary),
+           url=EXCLUDED.url,country_iso2=${MERGED_GDELT_COUNTRY_SQL},
+           event_time=${MERGED_GDELT_EVENT_TIME_SQL},payload=${MERGED_GDELT_PAYLOAD_SQL},
+           language_code=COALESCE(NULLIF(item.language_code,'und'),EXCLUDED.language_code),
+           dedupe_hash=EXCLUDED.dedupe_hash,updated_at=now()
+         RETURNING id::text,(xmax=0) AS inserted,event_time::text`,
+        [sourceId, aliasHistory.persistenceExternalId, article.title, article.description, article.url, country,
+          temporal.eventTime, JSON.stringify(payload), gdeltArticleDedupeHash(article.url), article.languageCode],
+      );
+      if (!persisted.rows[0]) unchanged += 1;
+      else if (persisted.rows[0].inserted) inserted += 1;
+      else updated += 1;
+      accepted += 1;
+      languageCounts[article.languageCode] = (languageCounts[article.languageCode] ?? 0) + 1;
+      if (domain) publishers.add(domain);
+      const at = persisted.rows[0]?.event_time ?? temporal.eventTime;
+      if (!latestEventTime || at > latestEventTime) latestEventTime = at;
+      await synchronizeAcceptedGdeltAliases(persisted.rows[0]?.id ?? aliasHistory.persistenceItemId, aliases);
+    } catch (error) {
+      if (!canContinueAfterGdeltGalPersistenceFailure(error)) throw error;
+      skipped += 1;
+      const code = classifyGdeltGalPersistenceFailure(error);
+      rejectionCounts[code] = (rejectionCounts[code] ?? 0) + 1;
+    }
+  }
+  params.signal?.throwIfAborted();
+  // Acknowledge the sampled interval only after its selected writes persist.
+  // If persistence fails, all previous writes replay idempotently next time.
+  const retainedRetries = [...new Set(retryMinutes)].sort();
+  const nextCursor = {
+    version: GDELT_GAL_METADATA_VERSION, through_minute: plan.throughMinute,
+    retry_minutes: retainedRetries.slice(-30), latest_event_time: latestEventTime,
+    last_successful_minute: lastSuccessfulMinute,
+  };
+  await query(
+    `INSERT INTO source_feed(source_id,feed_key,params,cursor) VALUES($1,$2,$3::jsonb,$4::jsonb)
+     ON CONFLICT(source_id,feed_key) DO UPDATE SET params=EXCLUDED.params,cursor=EXCLUDED.cursor,updated_at=now()`,
+    [sourceId, key, JSON.stringify({ product: "gal-minute-metadata", coverage_mode: "bounded_multilingual_sample" }), JSON.stringify(nextCursor)],
+  );
+  const latestInterval = lastSuccessfulMinute
+    ? `${lastSuccessfulMinute.slice(0,4)}-${lastSuccessfulMinute.slice(4,6)}-${lastSuccessfulMinute.slice(6,8)}T${lastSuccessfulMinute.slice(8,10)}:${lastSuccessfulMinute.slice(10,12)}:00.000Z` : null;
+  const sourceCurrent = latestInterval !== null && Date.parse(latestInterval) <= now.getTime()
+    && now.getTime() - Date.parse(latestInterval) <= 30 * 60_000;
+  const result = {
+    provider: "gdelt", product: "gal-minute-metadata", coverage_mode: "bounded_multilingual_sample",
+    health: sourceCurrent ? fileErrors.length ? "degraded" : "healthy" : "empty",
+    selected: accepted, inserted, updated, unchanged, skipped,
+    no_new_articles: accepted === 0, feed_candidates: feedCandidates,
+    quota_omitted: Math.max(0, eligibleRecords.length - selectedRecords.length),
+    candidate_pool_omitted: Math.max(0, feedCandidates - records.size),
+    candidate_pool: candidatePool.length, known_urls: records.size - unseen.length,
+    minutes_scanned: minutesScanned, minutes_missing: minutesMissing,
+    retry_minutes: nextCursor.retry_minutes, file_errors: fileErrors,
+    skipped_backlog_minutes: plan.skippedBacklogMinutes,
+    expired_retry_minutes: plan.expiredRetryMinutes,
+    retry_capacity_omitted: Math.max(0, retainedRetries.length - 30),
+    latest_interval_at: latestInterval, latest_event_time: latestEventTime,
+    language_counts: languageCounts, publisher_count: publishers.size,
+    quality_rejections: rejectionCounts,
+  };
+  await params.onProgress?.("gal_metadata_complete", result);
+  return result;
+}
+
+/**
  * Runs one small event-specific DOC search. It deliberately reuses the same
  * publisher-date verification, URL safety, diversity and URL idempotency path
  * as the scheduled global feed, but does not fetch the unrelated Event/GKG
@@ -4161,8 +4433,12 @@ export async function ingestTargetedGdeltNews(
 }
 
 export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Record<string, unknown>> {
+  const deadline = AbortSignal.timeout(240_000);
+  params = { ...params, signal: params.signal ? AbortSignal.any([params.signal, deadline]) : deadline };
+  params.signal?.throwIfAborted();
+  await params.onProgress?.("source_identity");
   const sourceId = await ensureSource();
-  const includeDoc = params.includeDoc !== false;
+  let includeDoc = params.includeDoc !== false;
   const includeEvents = params.includeEvents !== false;
   const includeGkg = params.includeGkg !== false;
   const maxRawRows = clampInt(params.maxRawRows ?? process.env.GDELT_MAX_RAW_ROWS, 25, 5000, 750);
@@ -4181,7 +4457,7 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
   // values immediately so a rejected promise cannot suppress DOC/GAL or become
   // an unhandled rejection while the rate-limited discovery lanes are running.
   const archiveResolution = includeEvents || includeGkg
-    ? getLatestArchiveUrls().then(
+    ? getLatestArchiveUrls(params.signal).then(
         (urls) => ({ urls, error: null as string | null }),
         (error) => ({
           urls: null,
@@ -4196,12 +4472,12 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
           : { urls: [], resolutionError: resolution.error ?? "GDELT archive lookup failed." }
       ))
     : undefined;
-  const eventArchive = includeEvents
+  const eventArchive = async (): Promise<{ count: number; error: string | null }> => includeEvents
     ? archiveResolution.then(async (resolution): Promise<{ count: number; error: string | null }> => {
         if (!resolution.urls) return { count: 0, error: resolution.error ?? "GDELT archive lookup failed." };
         try {
           return {
-            count: await ingestEventArchive(sourceId, resolution.urls.event, maxRawRows),
+            count: await ingestEventArchive(sourceId, resolution.urls.event, maxRawRows, params.signal),
             error: null,
           };
         } catch (error) {
@@ -4210,6 +4486,31 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
       })
     : Promise.resolve({ count: 0, error: null as string | null });
   let gkgHandledByDoc = false;
+  if (includeDoc && !params.query?.trim() && !process.env.GDELT_DOC_QUERY?.trim() && !params.targetedDiscovery) {
+    result.acquisition_strategy = "incremental_gal_metadata";
+    try {
+      await requireGdeltCanonicalItemHistory(sourceId, params.signal);
+      const primary = await ingestGdeltGalMetadata(sourceId, params);
+      result.gal_primary = primary;
+      if (primary.health === "busy") return { ...result, health: "degraded", doc_status: "not_requested", headline_status: "busy" };
+      result.inserted = Number(result.inserted) + Number(primary.inserted ?? 0);
+      result.updated = Number(result.updated) + Number(primary.updated ?? 0);
+      result.skipped = Number(result.skipped) + Number(primary.skipped ?? 0);
+      result.articles_accepted = Number(primary.selected ?? 0);
+      result.latest_event_time = primary.latest_event_time;
+      result.headline_status = primary.health;
+      if (["healthy", "degraded"].includes(String(primary.health))) {
+        // A current metadata feed proves the primary reader stream. DOC stays
+        // available for explicit searches and bounded fallback.
+        includeDoc = false;
+        result.doc_status = "not_requested";
+        result.health = primary.health;
+      }
+    } catch (error) {
+      if (params.signal?.aborted) throw error;
+      result.gal_primary = { health: "failed", selected: 0, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
   if (includeDoc) {
     const headlineBudgets = planGdeltHeadlineBudgets(params.maxRecords ?? process.env.GDELT_DOC_MAX_ARTICLES);
     result.headline_budget = headlineBudgets;
@@ -4319,7 +4620,8 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
   // the raw signal sample available in that case, still without allowing it to
   // alter the headline fallback decision.
   if (includeGkg && !gkgHandledByDoc && gkgArchiveWindow) {
-    const gkg = await ingestGkgArchiveWindow(sourceId, await gkgArchiveWindow, [], maxRawRows);
+    await params.onProgress?.("optional_gkg_enrichment");
+    const gkg = await ingestGkgArchiveWindow(sourceId, await gkgArchiveWindow, [], maxRawRows, params.signal);
     result.signals = gkg.sampled;
     result.gkg_sampled = gkg.sampled;
     result.gkg_matched = gkg.matched;
@@ -4331,7 +4633,8 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
     result.inserted = Number(result.inserted) + gkg.sampled;
   }
 
-  const event = await eventArchive;
+  await params.onProgress?.("optional_event_enrichment");
+  const event = await eventArchive();
   if (includeEvents) {
     result.events = event.count;
     result.inserted = Number(result.inserted) + event.count;
@@ -4350,6 +4653,7 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
   } else if (includeEvents || includeGkg) {
     result.raw_archive_status = "healthy";
   }
+  await params.onProgress?.("complete", { health: result.health, articles_accepted: result.articles_accepted ?? 0, inserted: result.inserted, updated: result.updated });
   return result;
 }
 

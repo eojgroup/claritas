@@ -37,6 +37,8 @@ export type NewsRuntimeHealthRow = {
   release_gdelt_gal_accepted: number | string | null;
   release_gdelt_gal_latest_event_time: string | null;
   release_gdelt_gal_quality_rejections: Record<string, unknown> | null;
+  release_gdelt_gal_latest_interval_at?: string | null;
+  release_gdelt_gal_no_new_articles?: string | boolean | null;
   latest_success_at: string | null;
 };
 
@@ -89,7 +91,7 @@ export type NewsRuntimeHealth = {
     gdelt_diagnostics: {
       doc: GdeltAcquisitionDiagnostics;
       gal: GdeltAcquisitionDiagnostics & {
-        mode: "supplement" | "fallback" | null;
+        mode: "primary" | "supplement" | "fallback" | null;
         status: string | null;
       };
     };
@@ -243,30 +245,38 @@ export function buildNewsRuntimeHealthQuery(): string {
              gdelt_step.step#>>'{result,articles,latest_event_time}' AS release_gdelt_doc_latest_event_time,
              gdelt_step.step#>'{result,articles,quality_rejections}' AS release_gdelt_doc_quality_rejections,
              CASE
+               WHEN gdelt_step.step#>'{result,gal_primary}' IS NOT NULL THEN 'primary'
                WHEN gdelt_step.step#>'{result,gal_fallback}' IS NOT NULL THEN 'fallback'
                WHEN gdelt_step.step#>'{result,gal_supplement}' IS NOT NULL THEN 'supplement'
                ELSE NULL
              END AS release_gdelt_gal_mode,
              COALESCE(
+               gdelt_step.step#>>'{result,gal_primary,health}',
                gdelt_step.step#>>'{result,gal_fallback,health}',
                gdelt_step.step#>>'{result,gal_supplement_status}'
              ) AS release_gdelt_gal_status,
              COALESCE(
+               gdelt_step.step#>>'{result,gal_primary,error}',
                gdelt_step.step#>>'{result,gal_error}',
                gdelt_step.step#>>'{result,gal_supplement_error}'
              ) AS release_gdelt_gal_error,
              COALESCE(
+               gdelt_step.step#>>'{result,gal_primary,selected}',
                gdelt_step.step#>>'{result,gal_fallback,selected}',
                gdelt_step.step#>>'{result,gal_supplement,selected}'
              ) AS release_gdelt_gal_accepted,
              COALESCE(
+               gdelt_step.step#>>'{result,gal_primary,latest_event_time}',
                gdelt_step.step#>>'{result,gal_fallback,latest_event_time}',
                gdelt_step.step#>>'{result,gal_supplement,latest_event_time}'
              ) AS release_gdelt_gal_latest_event_time,
              COALESCE(
+               gdelt_step.step#>'{result,gal_primary,quality_rejections}',
                gdelt_step.step#>'{result,gal_fallback,quality_rejections}',
                gdelt_step.step#>'{result,gal_supplement,quality_rejections}'
-             ) AS release_gdelt_gal_quality_rejections
+             ) AS release_gdelt_gal_quality_rejections,
+             gdelt_step.step#>>'{result,gal_primary,latest_interval_at}' AS release_gdelt_gal_latest_interval_at,
+             gdelt_step.step#>>'{result,gal_primary,no_new_articles}' AS release_gdelt_gal_no_new_articles
       FROM (SELECT 1) anchor
       LEFT JOIN requested_run ON true
       LEFT JOIN LATERAL (
@@ -314,6 +324,8 @@ export function buildNewsRuntimeHealthQuery(): string {
            release_run.release_gdelt_gal_accepted,
            release_run.release_gdelt_gal_latest_event_time,
            release_run.release_gdelt_gal_quality_rejections,
+           release_run.release_gdelt_gal_latest_interval_at,
+           release_run.release_gdelt_gal_no_new_articles,
            CASE WHEN release_run.release_run_status='success'
              THEN release_run.release_run_finished_at::text ELSE NULL END AS latest_success_at
     FROM current_rollup
@@ -432,12 +444,14 @@ export function evaluateNewsRuntimeHealth(
   const releaseGdeltGalRejectionCounts = boundedGdeltRejectionCounts(
     row?.release_gdelt_gal_quality_rejections,
   );
-  const releaseGdeltGalMode = row?.release_gdelt_gal_mode === "fallback"
+  const releaseGdeltGalMode = row?.release_gdelt_gal_mode === "primary"
+    || row?.release_gdelt_gal_mode === "fallback"
     || row?.release_gdelt_gal_mode === "supplement"
     ? row.release_gdelt_gal_mode
     : null;
   const releaseGdeltGalStatus = [
     "healthy",
+    "degraded",
     "empty",
     "failed",
     "degraded_fallback",
@@ -457,6 +471,16 @@ export function evaluateNewsRuntimeHealth(
     && releaseGdeltDocStatus === "degraded"
     && /\bGDELT HTTP 429\b/i.test(row?.release_gdelt_doc_error ?? "")
     && releaseGdeltRawArchiveStatus === "healthy";
+  const primaryGalMs = Date.parse(row?.release_gdelt_gal_latest_event_time ?? "");
+  const primaryIntervalMs = Date.parse(row?.release_gdelt_gal_latest_interval_at ?? "");
+  const provedCurrentNoChange = [true, "true"].includes(row?.release_gdelt_gal_no_new_articles ?? false)
+    && Number.isFinite(primaryIntervalMs) && primaryIntervalMs <= nowMs + 5 * 60_000
+    && nowMs - primaryIntervalMs <= 30 * 60_000;
+  const releaseGdeltPrimaryMetadata = releaseGdeltGalMode === "primary"
+    && ["healthy", "degraded"].includes(releaseGdeltGalStatus ?? "")
+    && (finiteCount(row?.release_gdelt_gal_accepted ?? 0) > 0 || provedCurrentNoChange)
+    && Number.isFinite(primaryGalMs)
+    && primaryGalMs <= nowMs + 5 * 60_000 && nowMs - primaryGalMs <= 4 * 3_600_000;
   const checks = {
     current_volume: currentCount >= 3,
     current_timestamp: Number.isFinite(latestEventMs)
@@ -479,7 +503,8 @@ export function evaluateNewsRuntimeHealth(
       && releaseRunTriggerMode === "release_gate",
     release_gdelt_acquisition: ["success", "degraded"].includes(releaseGdeltStepStatus ?? "")
       && (
-        ["healthy", "healthy_partial", "degraded_fallback"].includes(releaseGdeltDocStatus ?? "")
+        releaseGdeltPrimaryMetadata
+        || ["healthy", "healthy_partial", "degraded_fallback"].includes(releaseGdeltDocStatus ?? "")
         // GDELT explicitly asks throttled clients to wait. Accept that bounded
         // upstream condition only when the exact release also proves the raw
         // archive path; all user-visible freshness and quality checks above
@@ -490,7 +515,10 @@ export function evaluateNewsRuntimeHealth(
     // same publisher URL. Require a deterministic country-bearing GKG row to
     // traverse parsing, WHATWG canonicalization and persistence; keep random
     // DOC/GKG intersections as observability rather than a release condition.
-    release_gdelt_raw_enrichment: releaseGdeltRawEnrichment,
+    // Minute GAL metadata supplies language, publisher and interval provenance
+    // directly. Optional machine archives must not hold up that reader path;
+    // legacy DOC/RSS acquisition still requires its existing raw-path proof.
+    release_gdelt_source_provenance: releaseGdeltPrimaryMetadata || releaseGdeltRawEnrichment,
   };
   const ready = Object.values(checks).every(Boolean);
   return {

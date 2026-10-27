@@ -40,6 +40,20 @@ export const NEWS_ASSESSMENT_QUEUE_PRIORITY_SQL = `CASE
   WHEN assessment.item_id IS NOT NULL THEN 2
   ELSE 3 END`;
 
+/**
+ * Evidence identities are strings shared by several domains. Convert only a
+ * canonical positive bigint item ID, so malformed/overflow IDs remain absent
+ * evidence and the join can use item_pkey instead of scanning item.id::text.
+ */
+export function newsEvidenceItemIdSql(evidenceAlias: string): string {
+  if (!/^[a-z][a-z0-9_]*$/i.test(evidenceAlias)) throw new Error("Invalid evidence SQL alias.");
+  const id = `${evidenceAlias}.source_record_id`;
+  return `CASE
+    WHEN ${id} ~ '^[1-9][0-9]{0,18}$'
+     AND (length(${id}) < 19 OR ${id} COLLATE "C" <= '9223372036854775807' COLLATE "C")
+    THEN ${id}::bigint END`;
+}
+
 export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESSMENT_BATCH_SIZE", 80, 1, 200)) {
   const boundedBatch = Math.max(1, Math.min(Math.trunc(batchSize), 200));
   const { rows } = await query<AssessmentCandidateRow>(
@@ -112,7 +126,7 @@ export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESS
                   FROM intelligence_event_evidence publisher_evidence
                   JOIN item publisher_item
                     ON publisher_evidence.source_record_type='item'
-                   AND publisher_evidence.source_record_id=publisher_item.id::text
+                   AND publisher_item.id=${newsEvidenceItemIdSql("publisher_evidence")}
                   JOIN source publisher_source ON publisher_source.id=publisher_item.source_id
                   WHERE publisher_evidence.event_id=event.id
                     AND publisher_evidence.domain='news'

@@ -341,3 +341,29 @@ test("model output is bounded and unknown or duplicate ids are discarded before 
   assert.ok((storedSummaries[0]?.split(/\s+/).length || 0) <= 55);
   assert.equal(outputCeiling, 768);
 });
+
+test("provider rate limits stop retries and leave later headlines unattempted", async () => {
+  const { processNewsTranslationCandidates } = await translation;
+  const { LlmProviderError } = await llm;
+  let providerCalls = 0;
+  const result = await processNewsTranslationCandidates({
+    candidates,
+    targetLanguage: "en",
+    includeSummary: false,
+    scope: "automatic",
+    llmClient: {
+      async generateStructured<T>() {
+        providerCalls += 1;
+        throw new LlmProviderError("Provider temporarily rate limited", 429);
+      },
+    },
+    runtime: runtime({ chunk_size: 2, max_retries: 2 }),
+  }, {
+    async reserveBudget() { return true; },
+    async store() { throw new Error("Nothing may be stored after rate limiting"); },
+  });
+  assert.equal(providerCalls, 1);
+  assert.equal(result.providerStatus, 429);
+  assert.deepEqual(result.attemptedIds, [1, 2]);
+  assert.deepEqual(result.failedIds, [1, 2, 3]);
+});

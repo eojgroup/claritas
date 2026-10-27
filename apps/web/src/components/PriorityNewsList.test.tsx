@@ -7,6 +7,20 @@ import type { NewsItem } from "../lib/api";
 afterEach(cleanup);
 
 describe("PriorityNewsList", () => {
+  it("shows free translation quota limits without hiding the original report", () => {
+    const item: NewsItem = {
+      id: 55, kind: "news_article", title: "Noticias del puerto", summary: null,
+      url: "https://example.com/noticias", country_iso2: "ES", language_code: "es", event_time: null,
+      translation_availability: { status: "quota_limited", reason: "Free translation quota reached; original reporting remains available." },
+    };
+    render(<PriorityNewsList items={[item]} selectedId={null} emptyState={null}
+      getImageUrl={() => undefined} getSourceLabel={() => "Example"} getCountries={() => ["ES"]}
+      getCountryName={() => "Spain"} onToggle={() => undefined} onSelectCountry={() => undefined} />);
+    expect(screen.getByText("Noticias del puerto")).toBeTruthy();
+    expect(screen.getByText(/ES source · free quota reached/i)).toBeTruthy();
+    expect(screen.queryByText(/English on open/i)).toBeNull();
+  });
+
   it("opens the exact linked investigation and exposes imagery state", () => {
     const onOpenEvent = vi.fn();
     const item: NewsItem = {

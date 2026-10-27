@@ -158,7 +158,7 @@ const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
         institutionalRss: true,
         govUk: true,
       },
-      gdelt: { timespan: "1h", maxRecords: 25, maxRawRows: 190 },
+      gdelt: { timespan: "1h", maxRecords: 120, maxRawRows: 190 },
     },
   },
   weather: {

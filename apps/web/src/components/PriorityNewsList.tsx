@@ -163,6 +163,11 @@ export default function PriorityNewsList({
         const evidenceTags = presentationTags(item.tags);
         const isLeadershipChange = isLeadershipChangeStory(item);
         const translationRequired = isNewsTranslationRequired(item);
+        const availability = item.translation_availability;
+        const availabilityLabel = availability?.status === "quota_limited" ? "free quota reached"
+          : availability?.status === "disabled" ? "translations disabled"
+          : availability?.status === "unavailable" ? "translation unavailable"
+          : availability ? "English queued" : "English on open";
         const translated = Boolean(item.translated_title?.trim());
         const displayTitle = newsDisplayTitle(item);
         const displaySummary = newsDisplaySummary(item);
@@ -255,7 +260,7 @@ export default function PriorityNewsList({
                         ? "English translation is being generated from the stored publisher text"
                         : translationUnavailable
                           ? "The optional English translation could not be generated; the original source remains available"
-                          : "Original publisher language; English translation starts when this story is opened"
+                          : availability?.reason ?? "Original publisher language; English translation starts when this story is opened"
                       : "Original article language"}
                   >
                     {item.language_code.toUpperCase()}{translationRequired
@@ -263,7 +268,7 @@ export default function PriorityNewsList({
                         ? "→EN · translating"
                         : translationUnavailable
                           ? " source · English unavailable"
-                          : " source · English on open"
+                          : ` source · ${availabilityLabel}`
                       : ""}
                   </span>
                 ) : null}

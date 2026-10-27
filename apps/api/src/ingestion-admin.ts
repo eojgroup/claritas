@@ -17,11 +17,8 @@ import {
   ingestSocialProvider,
   type SocialPlatform,
 } from "./connectors/social-media";
-import {
-  configuredNewsTranslationTargets,
-  newsTranslationEnabled,
-  runPendingNewsHeadlineTranslations,
-} from "./news-translation";
+import { queueNewsHeadlineTranslations } from "./news-translation";
+import { createNewsProgressReporter, runIndependentNewsProviders, type NewsIngestionProgress } from "./news-ingestion-runner";
 import { query, withTransaction } from "./db";
 
 export type IngestionPipeline = "news" | "weather" | "market" | "podcasts" | "leadership" | "social";
@@ -872,9 +869,9 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
   }
   const gdelt = {
     timespan: requestedTimespan.toLowerCase(),
-    // Four 15-minute runs remain within the previous 100-headline hourly
-    // ceiling while surfacing developments much sooner.
-    maxRecords: clampInt(gdeltRaw.maxRecords ?? gdeltRaw.max_records, 1, 25, 25),
+    // Incremental metadata acquisition is independent of DOC search limits.
+    // Keep each run bounded while admitting a broader multilingual sample.
+    maxRecords: clampInt(gdeltRaw.maxRecords ?? gdeltRaw.max_records, 1, 250, 120),
     // Event and GKG archives previously processed 750 rows once per hour.
     // Four 190-row polls retain roughly that hourly workload at lower latency.
     maxRawRows: clampInt(gdeltRaw.maxRawRows ?? gdeltRaw.max_raw_rows, 25, 190, 190),
@@ -904,6 +901,16 @@ export function buildNewsRunPlan(rawBody: unknown): NewsRunPlan {
 export function classifyGdeltNewsCoverage(
   result: Record<string, unknown>,
 ): "success" | "degraded" | "failed" {
+  const primary = asRecord(result.gal_primary);
+  if (primary.health === "busy") return "degraded";
+  const intervalMs = Date.parse(asString(primary.latest_interval_at) ?? "");
+  const healthyNoChange = primary.no_new_articles === true && Number.isFinite(intervalMs)
+    && intervalMs <= Date.now() + 5 * 60_000 && Date.now() - intervalMs <= 30 * 60_000;
+  if (["healthy", "degraded"].includes(asString(primary.health) ?? "")
+      && (Number(primary.selected) > 0 || healthyNoChange)
+      && Number.isFinite(Date.parse(asString(primary.latest_event_time) ?? ""))) {
+    return primary.health === "degraded" || result.raw_archive_status === "degraded" ? "degraded" : "success";
+  }
   const docRateLimitedWithRawCoverage = result.doc_status === "degraded"
     && result.raw_archive_status === "healthy"
     && /\bGDELT HTTP 429\b/i.test(asString(result.doc_error) ?? "")
@@ -1179,51 +1186,65 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
       request: plan.requestPayload,
     });
 
+    let currentProgress: NewsIngestionProgress = {};
+    const progressWriter = createNewsProgressReporter(async (progress, step, phase) => {
+      currentProgress = progress;
+      await query(
+        `UPDATE ingestion_run SET stats=$2::jsonb,updated_at=now()
+         WHERE id=$1 AND status='running'`,
+        [runId, JSON.stringify({ pipeline: "news", steps, totals, progress,
+          duration_ms: Date.now() - runStartedAt })],
+      );
+      await safeAppendRunLog(runId, "info", `News acquisition progress: ${step} / ${phase}.`, progress[step]?.details);
+    });
+    const reportProgress = async (step: string, phase: string, details?: Record<string, unknown>) => {
+      try { await progressWriter(step, phase, details); }
+      catch (error) { console.warn("News acquisition progress reporting deferred:", toErrorMessage(error)); }
+    };
+    const providerTasks: Array<() => Promise<unknown>> = [];
     if (plan.providers.gdelt) {
-      await executeProviderStep(
-        runId,
-        steps,
-        totals,
-        "gdelt/doc-event-gkg",
-        async () => ingestGdelt({
+      providerTasks.push(async () => {
+        await executeProviderStep(runId, steps, totals, "gdelt/doc-event-gkg", async () => ingestGdelt({
           timespan: plan.gdelt.timespan,
           maxRecords: plan.gdelt.maxRecords,
           maxRawRows: plan.gdelt.maxRawRows,
-        }),
-        classifyGdeltNewsCoverage,
-      );
+          signal: AbortSignal.timeout(180_000),
+          onProgress: (phase, details) => reportProgress("gdelt", phase, details),
+        }), classifyGdeltNewsCoverage);
+        await reportProgress("gdelt", "finished");
+      });
     }
     if (plan.providers.institutionalRss) {
-      await executeProviderStep(
-        runId,
-        steps,
-        totals,
-        "institutional-rss/primary-source-releases",
-        ingestInstitutionalRss,
-        (result) => result.health === "degraded" ? "degraded" : "success",
-      );
+      providerTasks.push(async () => {
+        await reportProgress("institutional_rss", "acquiring");
+        await executeProviderStep(runId, steps, totals, "institutional-rss/primary-source-releases",
+          ingestInstitutionalRss, (result) => result.health === "degraded" ? "degraded" : "success");
+        await reportProgress("institutional_rss", "finished");
+      });
     }
     if (plan.providers.govUk) {
-      await executeProviderStep(runId, steps, totals, "govuk-search/primary-source-news", ingestGovUkNews);
+      providerTasks.push(async () => {
+        await reportProgress("govuk", "acquiring");
+        await executeProviderStep(runId, steps, totals, "govuk-search/primary-source-news", ingestGovUkNews);
+        await reportProgress("govuk", "finished");
+      });
     }
+    await runIndependentNewsProviders(providerTasks);
 
-    const providerSteps = steps.filter((step) => !step.step.startsWith("news-translation/"));
+    const providerSteps = [...steps];
     const providerSucceeded = providerSteps.filter((step) => step.status !== "failed").length;
     if (providerSucceeded === 0) throw new Error("All selected news providers failed.");
 
-    if (plan.runTranslations && newsTranslationEnabled()) {
-      await executeProviderStep(runId, steps, totals, "news-translation/headlines", async () => {
-        const targets = [];
-        for (const targetLanguage of configuredNewsTranslationTargets()) {
-          targets.push(await runPendingNewsHeadlineTranslations({ targetLanguage }));
-        }
-        return {
-          provider: "claritas_ai_translation",
-          content_scope: "headline_only",
-          article_bodies_used: false,
-          targets,
-        };
-      });
+    // Acquisition is complete once source records persist. Model availability
+    // must not hold up this run or the next source poll; the durable translation
+    // worker can resume unprocessed headlines after a restart or quota reset.
+    const translation = plan.runTranslations
+      ? queueNewsHeadlineTranslations()
+      : { queued: false, reason: "Handled by the independent translation worker." };
+    if (plan.runTranslations) {
+      await safeAppendRunLog(runId, translation.queued ? "info" : "warn",
+        translation.queued ? "Headline translations queued for background processing."
+          : "Headline translations are awaiting background availability.", translation);
     }
 
     const degradedSteps = providerSteps.filter((step) => step.status !== "success").map((step) => step.step);
@@ -1235,6 +1256,8 @@ async function executeNewsRun(runId: number, plan: NewsRunPlan): Promise<void> {
       duration_ms: Date.now() - runStartedAt,
       steps,
       totals,
+      progress: currentProgress,
+      translation,
     };
 
     const completed = await updateRunStatus(runId, "success", {

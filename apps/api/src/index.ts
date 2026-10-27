@@ -94,6 +94,8 @@ import {
 } from "./news-intelligence";
 import { startNewsAssessmentWorker } from "./news-assessment-worker";
 import { buildNewsReaderQuery } from "./news-reader-query";
+import { getNewsTranslationAvailability } from "./news-translation";
+import { attachTranslationAvailability, needsTranslationAvailability, type TranslationAvailability } from "./news-translation-presentation";
 import { SharedReadCache } from "./shared-read-cache";
 import { NewsSearchValidationError } from "./news-search";
 import { buildNewsCountryStatsQuery } from "./news-country-attribution";
@@ -2422,8 +2424,19 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       const { rows } = await pool.query(newsQuery.sql, newsQuery.params);
       return rows[0] ?? {};
     });
+    const items: Record<string, unknown>[] = Array.isArray(result.items) ? result.items : [];
+    let translationAvailability: TranslationAvailability | null = null;
+    if (items.some((item) => needsTranslationAvailability(item, displayLanguage))) {
+      try {
+        translationAvailability = await workspaceReadCache.get(`news-translation:${displayLanguage}`,
+          () => getNewsTranslationAvailability(displayLanguage));
+      } catch {
+        // Optional translation telemetry must not suppress available reporting.
+        translationAvailability = { status: "unavailable", reason: "Translation status is temporarily unavailable." };
+      }
+    }
     res.json({
-      items: Array.isArray(result.items) ? result.items : [],
+      items: attachTranslationAvailability(items, displayLanguage, translationAvailability),
       facets: { categories: Array.isArray(result.category_facets) ? result.category_facets : [] },
       ranking: {
         methodology: NEWS_ASSESSMENT_METHODOLOGY,

@@ -240,13 +240,17 @@ The API requires the database environment variables documented in
   - Example: `Claritas/1.0 (https://claritas.info; engineering@claritas.info)`
   - Structured Wikidata content is consumed under CC0.
 - Open intelligence providers:
-  - GDELT DOC/Event/GKG is keyless. Optional tuning: `GDELT_DOC_QUERY`,
-    `GDELT_MAX_RAW_ROWS`, and an identifying `GDELT_USER_AGENT`. Scheduled
-    ingestion polls every 15 minutes with at most 25 DOC headlines per run; if
-    DOC is rate limited it records degraded coverage and uses a relevance-filtered
-    25-link maximum from the official rolling GDELT Article List RSS feed.
-    Event and GKG parsing is capped at 190 rows each per scheduled run so the
-    15-minute cadence retains approximately the previous hourly raw-row budget.
+  - GDELT acquisition uses its incremental minute Article List metadata feed
+    for global multilingual headlines; DOC search remains a paced supplement.
+    Scheduled ingestion polls every 15 minutes with a publisher/language-balanced
+    sample of at most 120 headlines per run (manual runs cap at 250). Durable
+    interval cursors prevent repeated sampling of the same rolling RSS links.
+    Coverage and omitted candidates are reported explicitly; this is a bounded
+    sample, not a complete mirror. Optional tuning includes `GDELT_DOC_QUERY`,
+    `GDELT_MAX_RAW_ROWS`, and an identifying `GDELT_USER_AGENT`. Event and GKG
+    enrichment retain the 190-row scheduled bounds and run after acquisition.
+    Translation runs independently and stays free-only, with visible pending
+    and quota states. See [news ingestion recovery](docs/operations/2026-10-global-news-recovery.md).
   - GOV.UK Search is keyless and adds OGL-licensed primary-source `news_story`,
     `press_release` and `world_news_story` records. Optional bounded tuning:
     `GOVUK_NEWS_LOOKBACK_HOURS` (default 48) and `GOVUK_NEWS_MAX_RECORDS`

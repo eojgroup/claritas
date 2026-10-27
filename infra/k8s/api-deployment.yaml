@@ -283,6 +283,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_TARGET_LANGUAGES, optional: true } }
             - name: NEWS_TRANSLATION_BATCH_SIZE
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_BATCH_SIZE, optional: true } }
+            - name: NEWS_TRANSLATION_POLL_SECONDS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_POLL_SECONDS, optional: true } }
             - name: NEWS_TRANSLATION_MODEL
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_TRANSLATION_MODEL, optional: true } }
             - name: NEWS_TRANSLATION_CHUNK_SIZE
