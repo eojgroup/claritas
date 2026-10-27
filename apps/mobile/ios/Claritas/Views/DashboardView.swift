@@ -22,20 +22,20 @@ struct DashboardView: View {
         DashboardBackground {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    BriefingOverviewCard(briefing: model.dailyBriefing) {
-                        openCompactDestination("briefing")
-                    }
-
-                    IntelligenceEventPulseView(presentation: .horizontal)
-
-                    mobileNewsPulse
-
                     SignalMapPanel(
-                        height: 292,
+                        height: 260,
                         allowsComparison: false,
                         showsCountryProfile: false,
                         onExpand: { showsExpandedMap = true }
                     )
+
+                    IntelligenceEventPulseView(presentation: .horizontal)
+
+                    BriefingOverviewCard(briefing: model.dailyBriefing) {
+                        openCompactDestination("briefing")
+                    }
+
+                    mobileNewsPulse
 
                     mobileQuickActions
 
@@ -143,7 +143,7 @@ struct DashboardView: View {
                 }
                 .padding(.vertical, 8)
             } else {
-                ForEach(Array(ranked.prefix(3).enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(ranked.prefix(2).enumerated()), id: \.element.id) { index, item in
                     Button {
                         model.selectNewsItem(item)
                         openCompactDestination("news")
@@ -157,13 +157,7 @@ struct DashboardView: View {
                                     .font(.subheadline.weight(index == 0 ? .semibold : .medium))
                                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                     .multilineTextAlignment(.leading)
-                                    .lineLimit(3)
-                                if let summary = item.presentationSummary, !summary.isEmpty {
-                                    Text(summary)
-                                        .font(.subheadline)
-                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                        .lineLimit(2)
-                                }
+                                    .lineLimit(2)
                                 if let event = item.additionalContextEvents.first {
                                     Text(event.additionalContextLabel)
                                         .font(.caption2.weight(.semibold))
@@ -177,14 +171,14 @@ struct DashboardView: View {
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 .padding(.top, 3)
                         }
-                        .padding(.vertical, 14)
+                        .padding(.vertical, 10)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(
                         "Open reporting: \(item.presentationTitle). \(item.priorityAccessibilitySummary)"
                     )
-                    if index < min(ranked.count, 3) - 1 { Divider() }
+                    if index < min(ranked.count, 2) - 1 { Divider() }
                 }
             }
         }
@@ -1573,75 +1567,82 @@ struct NewsWorkspaceView: View {
     }
 
     private var compactNewsContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
+        LazyVStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(loadMode == .recent
-                        ? (sort == .importance ? "Top news" : "Latest news")
-                        : "News archive")
-                        .font(.title2.weight(.bold))
+                    Text(newsScopeTitle)
+                        .font(.subheadline.weight(.semibold))
                     Text("\(rows.count) stories · \(coverageLabel)")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Spacer()
+                Spacer(minLength: 0)
                 Button { showsFilters = true } label: {
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(.title3)
+                    Image(systemName: hasActiveFilters ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                        .frame(width: ClaritasLayout.minimumTouchTarget, height: ClaritasLayout.minimumTouchTarget)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
                 .accessibilityLabel("Filter news")
                 Button { Task { await refreshNewsWorkspace() } } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.title3)
+                        .frame(width: ClaritasLayout.minimumTouchTarget, height: ClaritasLayout.minimumTouchTarget)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
                 .disabled(model.isRefreshingNews)
                 .accessibilityLabel("Refresh news")
             }
 
-            Picker("Load mode", selection: $loadMode) {
-                Text("Recent").tag(AppModel.NewsLoadMode.recent)
-                Text("Archive").tag(AppModel.NewsLoadMode.archive)
+            HStack(spacing: 8) {
+                Picker("Load mode", selection: $loadMode) {
+                    Text("Recent").tag(AppModel.NewsLoadMode.recent)
+                    Text("Archive").tag(AppModel.NewsLoadMode.archive)
+                }
+                .pickerStyle(.segmented)
+                Picker("News category", selection: Binding(get: { model.selectedNewsCategory }, set: { model.setNewsCategory($0) })) {
+                    ForEach(model.newsCategoryOptions(mode: loadMode, country: selectedNewsCountry, query: searchQuery)) { category in
+                        Text(category.label).tag(category.code)
+                    }
+                }
+                .pickerStyle(.menu)
+                .font(.caption.weight(.semibold))
+                .frame(minHeight: ClaritasLayout.minimumTouchTarget)
             }
-            .pickerStyle(.segmented)
 
-            newsCategorySelector
-            topicOverview
-
-            if loadMode == .recent && !hasLocalFilters && searchQuery.isEmpty {
-                IntelligenceEventPulseView(country: selectedNewsCountry)
-            }
-
-            selectedRankedStoryPanel(compact: true)
-
-            if hasActiveFilters {
+            if hasActiveFilters || !selectedTopic.isEmpty {
                 HStack(spacing: 6) {
-                    Image(systemName: "line.3.horizontal.decrease.circle.fill")
                     Text(activeNewsFilterSummary)
+                        .lineLimit(2)
                     Spacer()
                     Button("Clear") { resetFilters() }
+                        .frame(minHeight: ClaritasLayout.minimumTouchTarget)
                 }
-                .font(.caption.weight(.semibold))
+                .font(.caption)
                 .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
             }
 
-            newsScopeBar
-            DisclosureGroup("Explore coverage map") {
+            if recentFeedLooksStale {
+                Label("Latest loaded reporting is over a day old", systemImage: "clock.badge.exclamationmark")
+                    .font(.caption2)
+                    .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+            }
+
+            selectedRankedStoryPanel(compact: true)
+            storyResults(compact: true)
+
+            DisclosureGroup("Coverage map & feed details") {
+                newsScopeBar
                 newsCoverageMapCard(height: 224, compact: true)
             }
-            storyResults(compact: true)
+            .font(.caption)
+            .padding(.vertical, 8)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 110)
+        .padding(.vertical, 8)
     }
 
     private var regularNewsContent: some View {
         VStack(spacing: 16) {
-            if loadMode == .recent && !hasLocalFilters && searchQuery.isEmpty {
-                IntelligenceEventPulseView(country: selectedNewsCountry)
-            }
             BrandCard {
                 VStack(alignment: .leading, spacing: 14) {
                     BrandSectionHeader(
@@ -1689,6 +1690,7 @@ struct NewsWorkspaceView: View {
                 .padding(10)
                 .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1))
+                topicOverview
                 Picker("Source", selection: $sourceFilter) {
                     Text("All sources").tag("all")
                     ForEach(sourceOptions, id: \.self) { source in Text(source).tag(source) }
@@ -1930,6 +1932,26 @@ struct NewsWorkspaceView: View {
         } else {
             NewsListView(items: rows, compact: compact, selectedItemID: model.selectedNewsItemID) { iso in
                 model.selectedCountry = iso.uppercased()
+            }
+            if loadedScopeMatchesSelection && model.newsHasMore {
+                Button {
+                    Task { await model.loadMoreNews() }
+                } label: {
+                    HStack(spacing: 8) {
+                        if model.isLoadingMoreNews { ProgressView().controlSize(.small) }
+                        Text(model.isLoadingMoreNews ? "Loading stories…" : "Load more stories")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget)
+                }
+                .buttonStyle(.plain)
+                .disabled(model.isLoadingMoreNews)
+            }
+            if let error = model.newsLoadMoreError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                    .accessibilityLabel("More stories could not be loaded. \(error)")
             }
         }
     }
@@ -2322,8 +2344,8 @@ struct WeatherWorkspaceView: View {
     var body: some View {
         BrandBackground {
             ScrollView {
-                VStack(spacing: 18) {
-                    IntelligenceEventPulseView(sourceLens: "weather")
+                LazyVStack(spacing: 12) {
+
                     BrandCard {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(
@@ -2332,12 +2354,14 @@ struct WeatherWorkspaceView: View {
                                 detail: "Current conditions, five-day forecast risk, air quality and official alert context from representative country points."
                             )
 
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
-                                BrandMetricCard(title: "Rows", value: "\(rows.count)", detail: "Country snapshots in scope", tone: nil)
-                                BrandMetricCard(title: "Hottest", value: hottestLabel, detail: "Highest observed temperature", tone: ClaritasPalette.brown)
-                                BrandMetricCard(title: "Official alerts", value: "\(officialAlertCount)", detail: "Active mapped notices", tone: officialAlertCount > 0 ? .orange : nil)
-                                BrandMetricCard(title: "Rain risk", value: "\(highRainRiskCount)", detail: "Countries at 70%+ next-day probability", tone: nil)
-                                BrandMetricCard(title: "Air quality", value: "\(elevatedAirCount)", detail: "Countries above operational threshold", tone: elevatedAirCount > 0 ? ClaritasPalette.brown : nil)
+                            PhoneDetailSection("\(officialAlertCount) alerts · \(highRainRiskCount) rain risk · \(elevatedAirCount) air quality") {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+                                    BrandMetricCard(title: "Rows", value: "\(rows.count)", detail: "Country snapshots in scope", tone: nil)
+                                    BrandMetricCard(title: "Hottest", value: hottestLabel, detail: "Highest observed temperature", tone: ClaritasPalette.brown)
+                                    BrandMetricCard(title: "Official alerts", value: "\(officialAlertCount)", detail: "Active mapped notices", tone: officialAlertCount > 0 ? .orange : nil)
+                                    BrandMetricCard(title: "Rain risk", value: "\(highRainRiskCount)", detail: "Countries at 70%+ next-day probability", tone: nil)
+                                    BrandMetricCard(title: "Air quality", value: "\(elevatedAirCount)", detail: "Countries above operational threshold", tone: elevatedAirCount > 0 ? ClaritasPalette.brown : nil)
+                                }
                             }
 
                             Link(destination: URL(string: "https://openweathermap.org/")!) {
@@ -2368,55 +2392,57 @@ struct WeatherWorkspaceView: View {
                         }
                     }
 
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Filters")
-                                .font(.headline)
+                    PhoneDetailSection("Weather filters & sorting") {
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Filters")
+                                    .font(.headline)
 
-                            HStack(spacing: 8) {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundStyle(.secondary)
-                                TextField("Search country, condition, or source", text: $query)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                            }
-                            .padding(10)
-                            .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
-                            )
+                                HStack(spacing: 8) {
+                                    Image(systemName: "magnifyingglass")
+                                        .foregroundStyle(.secondary)
+                                    TextField("Search country, condition, or source", text: $query)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled()
+                                }
+                                .padding(10)
+                                .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
+                                )
 
-                            HStack(spacing: 10) {
-                                Picker("Condition", selection: $conditionFilter) {
-                                    Text("All conditions").tag("all")
-                                    ForEach(conditionOptions, id: \.self) { condition in
-                                        Text(condition).tag(condition)
+                                HStack(spacing: 10) {
+                                    Picker("Condition", selection: $conditionFilter) {
+                                        Text("All conditions").tag("all")
+                                        ForEach(conditionOptions, id: \.self) { condition in
+                                            Text(condition).tag(condition)
+                                        }
+                                    }
+                                    .pickerStyle(.menu)
+
+                                    TextField("Country", text: $countryFilter)
+                                        .textInputAutocapitalization(.characters)
+                                        .autocorrectionDisabled()
+                                        .textFieldStyle(.roundedBorder)
+                                }
+
+                                HStack(spacing: 10) {
+                                    TextField("Min temp °C", text: $minTempText)
+                                        .keyboardType(.numbersAndPunctuation)
+                                        .textFieldStyle(.roundedBorder)
+                                    TextField("Min humidity %", text: $humidityFloorText)
+                                        .keyboardType(.numbersAndPunctuation)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+
+                                Picker("Sort", selection: $sort) {
+                                    ForEach(Sort.allCases) { sort in
+                                        Text(sort.title).tag(sort)
                                     }
                                 }
-                                .pickerStyle(.menu)
-
-                                TextField("Country", text: $countryFilter)
-                                    .textInputAutocapitalization(.characters)
-                                    .autocorrectionDisabled()
-                                    .textFieldStyle(.roundedBorder)
+                                .pickerStyle(.segmented)
                             }
-
-                            HStack(spacing: 10) {
-                                TextField("Min temp °C", text: $minTempText)
-                                    .keyboardType(.numbersAndPunctuation)
-                                    .textFieldStyle(.roundedBorder)
-                                TextField("Min humidity %", text: $humidityFloorText)
-                                    .keyboardType(.numbersAndPunctuation)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-
-                            Picker("Sort", selection: $sort) {
-                                ForEach(Sort.allCases) { sort in
-                                    Text(sort.title).tag(sort)
-                                }
-                            }
-                            .pickerStyle(.segmented)
                         }
                     }
 
@@ -2424,119 +2450,123 @@ struct WeatherWorkspaceView: View {
                         snapshotsPanel
                     }
 
-                    if !operationalRows.isEmpty {
-                        BrandCard {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Global exception ranking")
-                                    .font(.headline)
-                                Text("A transparent operational score combines alerts, temperature, wind, next-day rain probability and air quality.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                ForEach(operationalRows.prefix(12)) { point in
-                                    let index = operationalRows.firstIndex(where: { $0.id == point.id }) ?? 0
-                                    Button {
-                                        model.selectedCountry = point.weather.country.uppercased()
-                                    } label: {
-                                        HStack(alignment: .top, spacing: 10) {
-                                            Text("\(index + 1)")
-                                                .font(.caption.weight(.bold))
-                                                .frame(width: 26, height: 26)
-                                                .background(ClaritasPalette.shellSurface(for: colorScheme), in: Circle())
-                                            VStack(alignment: .leading, spacing: 3) {
-                                                Text("\(point.weather.country.uppercased()) · \(compactNumber(point.weather.temp_c))°C")
-                                                    .font(.subheadline.weight(.semibold))
-                                                Text(point.reasons.isEmpty ? "No material operational threshold" : point.reasons.joined(separator: " · "))
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
+                    PhoneDetailSection("Global exception ranking") {
+                        if !operationalRows.isEmpty {
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Global exception ranking")
+                                        .font(.headline)
+                                    Text("A transparent operational score combines alerts, temperature, wind, next-day rain probability and air quality.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    ForEach(operationalRows.prefix(12)) { point in
+                                        let index = operationalRows.firstIndex(where: { $0.id == point.id }) ?? 0
+                                        Button {
+                                            model.selectedCountry = point.weather.country.uppercased()
+                                        } label: {
+                                            HStack(alignment: .top, spacing: 10) {
+                                                Text("\(index + 1)")
+                                                    .font(.caption.weight(.bold))
+                                                    .frame(width: 26, height: 26)
+                                                    .background(ClaritasPalette.shellSurface(for: colorScheme), in: Circle())
+                                                VStack(alignment: .leading, spacing: 3) {
+                                                    Text("\(point.weather.country.uppercased()) · \(compactNumber(point.weather.temp_c))°C")
+                                                        .font(.subheadline.weight(.semibold))
+                                                    Text(point.reasons.isEmpty ? "No material operational threshold" : point.reasons.joined(separator: " · "))
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                Spacer()
+                                                Text("\(point.score)/100")
+                                                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                                                    .foregroundStyle(point.score >= 50 ? Color.orange : Color.secondary)
                                             }
-                                            Spacer()
-                                            Text("\(point.score)/100")
-                                                .font(.subheadline.weight(.semibold).monospacedDigit())
-                                                .foregroundStyle(point.score >= 50 ? Color.orange : Color.secondary)
+                                            .padding(.vertical, 6)
                                         }
-                                        .padding(.vertical, 6)
+                                        .buttonStyle(.plain)
+                                        if point.id != operationalRows.prefix(12).last?.id { Divider().opacity(0.2) }
                                     }
-                                    .buttonStyle(.plain)
-                                    if point.id != operationalRows.prefix(12).last?.id { Divider().opacity(0.2) }
                                 }
                             }
                         }
                     }
 
-                    if !temperatureLeaders.isEmpty || !scatterRows.isEmpty || !forecastRiskRows.isEmpty {
-                        VStack(spacing: 12) {
-                            BrandCard {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Largest temperature departures")
-                                        .font(.headline)
-                                    Text("Actual and perceived temperature, ranked by distance from a 20°C reference.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Chart(temperatureLeaders) { item in
-                                        BarMark(
-                                            x: .value("Country", item.country),
-                                            y: .value("Temperature", item.actual)
-                                        )
-                                        .foregroundStyle(ClaritasPalette.brown)
-                                        if let apparent = item.apparent {
-                                            PointMark(
+                    PhoneDetailSection("Weather analysis & forecasts") {
+                        if !temperatureLeaders.isEmpty || !scatterRows.isEmpty || !forecastRiskRows.isEmpty {
+                            VStack(spacing: 12) {
+                                BrandCard {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Largest temperature departures")
+                                            .font(.headline)
+                                        Text("Actual and perceived temperature, ranked by distance from a 20°C reference.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Chart(temperatureLeaders) { item in
+                                            BarMark(
                                                 x: .value("Country", item.country),
-                                                y: .value("Feels like", apparent)
+                                                y: .value("Temperature", item.actual)
+                                            )
+                                            .foregroundStyle(ClaritasPalette.brown)
+                                            if let apparent = item.apparent {
+                                                PointMark(
+                                                    x: .value("Country", item.country),
+                                                    y: .value("Feels like", apparent)
+                                                )
+                                                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                            }
+                                        }
+                                        .frame(height: 180)
+                                    }
+                                }
+
+                                BrandCard {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text("Temp vs humidity")
+                                            .font(.headline)
+                                        Text("Each point is a representative country observation, not a national average.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Chart(scatterRows) { item in
+                                            PointMark(
+                                                x: .value("Humidity", item.humidity),
+                                                y: .value("Temperature", item.temp)
                                             )
                                             .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                                         }
+                                        .frame(height: 180)
                                     }
-                                    .frame(height: 180)
                                 }
-                            }
 
-                            BrandCard {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    Text("Temp vs humidity")
-                                        .font(.headline)
-                                    Text("Each point is a representative country observation, not a national average.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Chart(scatterRows) { item in
-                                        PointMark(
-                                            x: .value("Humidity", item.humidity),
-                                            y: .value("Temperature", item.temp)
-                                        )
-                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                    }
-                                    .frame(height: 180)
-                                }
-                            }
-
-                            if !forecastRiskRows.isEmpty {
-                                BrandCard {
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Text("Next-day rain and gust exposure")
-                                            .font(.headline)
-                                        Text("Separate scales keep precipitation probability and forecast maximum wind gust comparable.")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Text("Precipitation probability · %")
-                                            .font(.caption.weight(.semibold))
-                                        Chart(forecastRiskRows) { item in
-                                            BarMark(
-                                                x: .value("Country", item.country),
-                                                y: .value("Rain probability", item.rainProbability)
-                                            )
-                                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme).opacity(0.65))
+                                if !forecastRiskRows.isEmpty {
+                                    BrandCard {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            Text("Next-day rain and gust exposure")
+                                                .font(.headline)
+                                            Text("Separate scales keep precipitation probability and forecast maximum wind gust comparable.")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            Text("Precipitation probability · %")
+                                                .font(.caption.weight(.semibold))
+                                            Chart(forecastRiskRows) { item in
+                                                BarMark(
+                                                    x: .value("Country", item.country),
+                                                    y: .value("Rain probability", item.rainProbability)
+                                                )
+                                                .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme).opacity(0.65))
+                                            }
+                                            .chartYScale(domain: 0...100)
+                                            .frame(height: 130)
+                                            Text("Maximum wind gust · m/s")
+                                                .font(.caption.weight(.semibold))
+                                            Chart(forecastRiskRows) { item in
+                                                BarMark(
+                                                    x: .value("Country", item.country),
+                                                    y: .value("Wind gust", item.windGust)
+                                                )
+                                                .foregroundStyle(Color.orange)
+                                            }
+                                            .frame(height: 130)
                                         }
-                                        .chartYScale(domain: 0...100)
-                                        .frame(height: 130)
-                                        Text("Maximum wind gust · m/s")
-                                            .font(.caption.weight(.semibold))
-                                        Chart(forecastRiskRows) { item in
-                                            BarMark(
-                                                x: .value("Country", item.country),
-                                                y: .value("Wind gust", item.windGust)
-                                            )
-                                            .foregroundStyle(Color.orange)
-                                        }
-                                        .frame(height: 130)
                                     }
                                 }
                             }
@@ -2628,8 +2658,8 @@ struct MarketsWorkspaceView: View {
     var body: some View {
         BrandBackground {
             ScrollView {
-                VStack(spacing: 18) {
-                    IntelligenceEventPulseView(sourceLens: "market")
+                LazyVStack(spacing: 12) {
+
                     BrandCard {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(
@@ -2637,12 +2667,14 @@ struct MarketsWorkspaceView: View {
                                 title: "Global economy and market regimes",
                                 detail: "OECD national benchmarks, ECB daily currency rates, World Bank annual macro context and SEC primary events."
                             )
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
-                                BrandMetricCard(title: "Countries", value: "\(rows.count)", detail: "Mapped regimes", tone: nil)
-                                BrandMetricCard(title: "Benchmarks", value: "\(rows.filter { $0.index_change_percent != nil }.count)", detail: "National index series", tone: ClaritasPalette.darkGreen)
-                                BrandMetricCard(title: "ECB FX", value: "\(rows.filter { $0.fx_change_percent != nil }.count)", detail: "Currencies vs EUR", tone: nil)
-                                BrandMetricCard(title: "Macro", value: "\(rows.filter { $0.gdp_growth != nil || $0.inflation != nil }.count)", detail: "World Bank profiles", tone: nil)
-                                BrandMetricCard(title: "SEC 7d", value: "\(rows.reduce(0) { $0 + $1.filing_count_7d })", detail: "Mapped filings", tone: nil)
+                            PhoneDetailSection("\(rows.count) countries · market coverage details") {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
+                                    BrandMetricCard(title: "Countries", value: "\(rows.count)", detail: "Mapped regimes", tone: nil)
+                                    BrandMetricCard(title: "Benchmarks", value: "\(rows.filter { $0.index_change_percent != nil }.count)", detail: "National index series", tone: ClaritasPalette.darkGreen)
+                                    BrandMetricCard(title: "ECB FX", value: "\(rows.filter { $0.fx_change_percent != nil }.count)", detail: "Currencies vs EUR", tone: nil)
+                                    BrandMetricCard(title: "Macro", value: "\(rows.filter { $0.gdp_growth != nil || $0.inflation != nil }.count)", detail: "World Bank profiles", tone: nil)
+                                    BrandMetricCard(title: "SEC 7d", value: "\(rows.reduce(0) { $0 + $1.filing_count_7d })", detail: "Mapped filings", tone: nil)
+                                }
                             }
                             HStack {
                                 TextField("Search country, currency or index", text: $query)
@@ -2657,109 +2689,111 @@ struct MarketsWorkspaceView: View {
                         }
                     }
 
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Largest national benchmark moves")
-                                .font(.headline)
-                            Chart(indexRows) { row in
-                                BarMark(x: .value("Country", row.country), y: .value("Monthly change", row.index_change_percent ?? 0))
-                                    .foregroundStyle((row.index_change_percent ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
-                            }
-                            .frame(height: 220)
-                            Text("National share-price indices; latest month-over-month change, not a live quote.")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Global real-GDP growth panorama")
-                                .font(.headline)
-                            Chart(macroRows) { row in
-                                BarMark(x: .value("Country", row.country), y: .value("Annual GDP growth", row.gdp_growth ?? 0))
-                                    .foregroundStyle((row.gdp_growth ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
-                            }
-                            .frame(height: 220)
-                            Text("Latest World Development Indicator per country. Observation years can differ and are retained in the country drill-down.")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if !fredCommodityRows.isEmpty {
-                        BrandCard {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Global energy spot monitor")
-                                    .font(.headline)
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
-                                    ForEach(fredCommodityRows) { quote in
-                                        VStack(alignment: .leading, spacing: 5) {
-                                            Text(quote.company_name ?? quote.symbol)
-                                                .font(.subheadline.weight(.semibold))
-                                            Text(quote.price.map { String(format: "%.2f", $0) } ?? "—")
-                                                .font(.title3.weight(.semibold))
-                                                .monospacedDigit()
-                                            Text("\(quote.unit ?? "unit unavailable") · \(quote.period_end ?? "period unavailable")")
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                            Text("Latest change \(mobileSignedPercent(quote.percent_change))")
-                                                .font(.caption)
-                                                .foregroundStyle((quote.percent_change ?? 0) >= 0
-                                                    ? ClaritasPalette.positiveText(for: colorScheme)
-                                                    : ClaritasPalette.negativeText(for: colorScheme))
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(10)
-                                        .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
-                                    }
-                                }
-                                Text("These EIA-origin spot series provide global energy context; their U.S. source jurisdiction is not treated as U.S. economic performance.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Text("This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Link("FRED API Terms of Use", destination: URL(string: "https://fred.stlouisfed.org/docs/api/terms_of_use.html")!)
-                                    .font(.caption.weight(.semibold))
-                            }
-                        }
-                    }
-
-                    BrandCard {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Largest ECB currency moves")
-                                .font(.headline)
-                            Chart(fxRows) { row in
-                                BarMark(x: .value("Currency", row.currency ?? row.country), y: .value("Daily change", row.fx_change_percent ?? 0))
-                                    .foregroundStyle((row.fx_change_percent ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
-                            }
-                            .frame(height: 220)
-                            Text("Daily local-currency performance against EUR; positive means the local currency strengthened.")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if !relationshipRows.isEmpty {
+                    PhoneDetailSection("Charts & market analysis") {
                         BrandCard {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Equity direction vs currency direction")
+                                Text("Largest national benchmark moves")
                                     .font(.headline)
-                                Chart(relationshipRows) { row in
-                                    PointMark(
-                                        x: .value("Benchmark", row.index_change_percent ?? 0),
-                                        y: .value("ECB FX daily", row.fx_change_percent ?? 0)
-                                    )
-                                    .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
-                                    .annotation(position: .top) {
-                                        Text(row.country).font(.caption2).foregroundStyle(.secondary)
-                                    }
+                                Chart(indexRows) { row in
+                                    BarMark(x: .value("Country", row.country), y: .value("Monthly change", row.index_change_percent ?? 0))
+                                        .foregroundStyle((row.index_change_percent ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
                                 }
                                 .frame(height: 220)
-                                Text("The frequencies differ, so quadrant placement is regime context—not correlation or causation.")
+                                Text("National share-price indices; latest month-over-month change, not a live quote.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Global real-GDP growth panorama")
+                                    .font(.headline)
+                                Chart(macroRows) { row in
+                                    BarMark(x: .value("Country", row.country), y: .value("Annual GDP growth", row.gdp_growth ?? 0))
+                                        .foregroundStyle((row.gdp_growth ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
+                                }
+                                .frame(height: 220)
+                                Text("Latest World Development Indicator per country. Observation years can differ and are retained in the country drill-down.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if !fredCommodityRows.isEmpty {
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Global energy spot monitor")
+                                        .font(.headline)
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
+                                        ForEach(fredCommodityRows) { quote in
+                                            VStack(alignment: .leading, spacing: 5) {
+                                                Text(quote.company_name ?? quote.symbol)
+                                                    .font(.subheadline.weight(.semibold))
+                                                Text(quote.price.map { String(format: "%.2f", $0) } ?? "—")
+                                                    .font(.title3.weight(.semibold))
+                                                    .monospacedDigit()
+                                                Text("\(quote.unit ?? "unit unavailable") · \(quote.period_end ?? "period unavailable")")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                                Text("Latest change \(mobileSignedPercent(quote.percent_change))")
+                                                    .font(.caption)
+                                                    .foregroundStyle((quote.percent_change ?? 0) >= 0
+                                                        ? ClaritasPalette.positiveText(for: colorScheme)
+                                                        : ClaritasPalette.negativeText(for: colorScheme))
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(10)
+                                            .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 12))
+                                        }
+                                    }
+                                    Text("These EIA-origin spot series provide global energy context; their U.S. source jurisdiction is not treated as U.S. economic performance.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Text("This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                    Link("FRED API Terms of Use", destination: URL(string: "https://fred.stlouisfed.org/docs/api/terms_of_use.html")!)
+                                        .font(.caption.weight(.semibold))
+                                }
+                            }
+                        }
+
+                        BrandCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Largest ECB currency moves")
+                                    .font(.headline)
+                                Chart(fxRows) { row in
+                                    BarMark(x: .value("Currency", row.currency ?? row.country), y: .value("Daily change", row.fx_change_percent ?? 0))
+                                        .foregroundStyle((row.fx_change_percent ?? 0) >= 0 ? ClaritasPalette.positiveText(for: colorScheme) : ClaritasPalette.negativeText(for: colorScheme))
+                                }
+                                .frame(height: 220)
+                                Text("Daily local-currency performance against EUR; positive means the local currency strengthened.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if !relationshipRows.isEmpty {
+                            BrandCard {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Equity direction vs currency direction")
+                                        .font(.headline)
+                                    Chart(relationshipRows) { row in
+                                        PointMark(
+                                            x: .value("Benchmark", row.index_change_percent ?? 0),
+                                            y: .value("ECB FX daily", row.fx_change_percent ?? 0)
+                                        )
+                                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                                        .annotation(position: .top) {
+                                            Text(row.country).font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .frame(height: 220)
+                                    Text("The frequencies differ, so quadrant placement is regime context—not correlation or causation.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }

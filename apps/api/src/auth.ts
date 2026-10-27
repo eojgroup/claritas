@@ -435,12 +435,14 @@ async function getAuthContext(req: Request): Promise<AuthContext | null> {
     display_name: string | null;
     avatar_url: string | null;
     roles: string[] | null;
+    refresh_activity: boolean;
   }>(
     `SELECT s.id AS session_id,
             u.id AS user_id,
             u.email,
             u.display_name,
             u.avatar_url,
+            (s.last_seen_at IS NULL OR s.last_seen_at <= now() - interval '1 minute') AS refresh_activity,
             ARRAY_REMOVE(ARRAY_AGG(r.key), NULL) AS roles
      FROM auth_session s
      JOIN app_user u ON u.id = s.user_id
@@ -466,7 +468,18 @@ async function getAuthContext(req: Request): Promise<AuthContext | null> {
     roles,
   });
 
-  await query(`UPDATE auth_session SET last_seen_at = now() WHERE id = $1`, [sessionId]);
+  // A screen can make many parallel authenticated reads. Updating the same
+  // session row for every read serializes them and competes with ingestion.
+  // Only activity telemetry is throttled; validity, roles and paid access are
+  // still checked against the database on every request. The predicate also
+  // prevents concurrent refreshes / replicas from repeatedly writing the row.
+  if (row.refresh_activity) {
+    await query(
+      `UPDATE auth_session SET last_seen_at = now()
+       WHERE id = $1 AND (last_seen_at IS NULL OR last_seen_at <= now() - interval '1 minute')`,
+      [sessionId],
+    );
+  }
 
   return {
     sessionId,

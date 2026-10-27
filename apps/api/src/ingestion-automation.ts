@@ -15,7 +15,7 @@ import {
   type IngestionPipeline,
 } from "./ingestion-admin";
 import { query, withWorkerLease } from "./db";
-import { getSocialProviderStatuses, type SocialProviderStatus } from "./connectors/social-media";
+import { getSocialProviderStatuses, pruneExpiredSocialSignals, type SocialProviderStatus } from "./connectors/social-media";
 import { refreshSocialEventContext } from "./intelligence/social-context";
 
 type DbTimestamp = string | Date;
@@ -138,6 +138,7 @@ const STALE_ACTIVE_RUN_MINUTES = clampInt(
   1440,
   180
 );
+const STALE_RUN_HEARTBEAT_SECONDS = clampInt(process.env.INGEST_STALE_HEARTBEAT_SECONDS, 180, 1800, 300);
 
 const RULE_DEFAULTS: Record<IngestionPipeline, RuleDefaults> = {
   news: {
@@ -242,6 +243,7 @@ let automationWorkerTimer: NodeJS.Timeout | null = null;
 let automationWorkerRunning = false;
 let automationRulesEnsured = false;
 let lastOperationalPruneAt = 0;
+let nextSocialPruneAt = 0;
 let lastSocialContextRefreshAt = 0;
 
 function clampInt(raw: unknown, min: number, max: number, fallback: number): number {
@@ -882,7 +884,13 @@ async function triggerAutomationRun(rule: IngestionAutomationRule, reason: AutoT
   const payload = asRecord(rule.default_payload);
 
   if (rule.pipeline === "news") {
-    const plan = buildNewsRunPlan(payload);
+    // The independent translation worker discovers pending durable items.
+    // Routine acquisition should finish once sources are persisted rather
+    // than remain active behind a potentially slow model batch. Explicit
+    // administrator translation settings still take precedence.
+    const hasTranslationSetting = ["runTranslations", "run_translations", "translateHeadlines", "translate_headlines"]
+      .some((key) => payload[key] !== undefined);
+    const plan = buildNewsRunPlan(hasTranslationSetting ? payload : { ...payload, runTranslations: false });
     await triggerNewsRun({ actor, plan });
     return;
   }
@@ -922,13 +930,14 @@ async function failStaleActiveRuns(rule: IngestionAutomationRule): Promise<void>
          finished_at = now(),
          error = COALESCE(
            error,
-           'Marked failed by automation worker after exceeding stale active-run timeout.'
+           'Marked failed by automation worker after exceeding active-run or heartbeat timeout.'
          )
      WHERE pipeline = $1
        AND status IN ('queued', 'running')
-       AND started_at < now() - make_interval(mins => $2::int)
+       AND (started_at < now() - make_interval(mins => $2::int)
+         OR updated_at < now() - make_interval(secs => $3::int))
      RETURNING id`,
-    [rule.pipeline, STALE_ACTIVE_RUN_MINUTES]
+    [rule.pipeline, STALE_ACTIVE_RUN_MINUTES, STALE_RUN_HEARTBEAT_SECONDS]
   );
 
   await Promise.all(
@@ -942,6 +951,7 @@ async function failStaleActiveRuns(rule: IngestionAutomationRule): Promise<void>
           JSON.stringify({
             pipeline: rule.pipeline,
             stale_timeout_minutes: STALE_ACTIVE_RUN_MINUTES,
+            stale_heartbeat_seconds: STALE_RUN_HEARTBEAT_SECONDS,
           }),
         ]
       )
@@ -1011,11 +1021,8 @@ async function evaluateRule(
 }
 
 async function pruneOperationalHistory(): Promise<void> {
-  // Retention must not depend on a social provider being configured, reachable,
-  // or scheduled. Run this from the general worker's leased maintenance cycle
-  // so expired third-party content is physically removed even when social
-  // ingestion remains disabled or an upstream API is failing.
-  await query(`DELETE FROM social_signal WHERE expires_at <= now()`);
+  // Social content has a separate, bounded maintenance cadence below so
+  // slow historical log cleanup cannot prevent its retention work.
   await query(`DELETE FROM ingestion_demand_signal_minute WHERE bucket_minute < now() - interval '7 days'`);
   await query(
     `DELETE FROM ingestion_run
@@ -1050,12 +1057,33 @@ async function runAutomationCycle(): Promise<void> {
       // Events can arrive after posts, including across an application rollout.
       // Reconcile retained claims independently of the hourly provider schedule.
       if (Date.now() - lastSocialContextRefreshAt >= 5 * 60_000) {
-        await refreshSocialEventContext();
         lastSocialContextRefreshAt = Date.now();
+        try {
+          await refreshSocialEventContext();
+        } catch (error) {
+          console.warn("Social event-context maintenance deferred:", error);
+        }
+      }
+      if (Date.now() >= nextSocialPruneAt) {
+        // Retention runs even when every social provider is disabled or down.
+        // Back off failures instead of spending a full statement timeout on
+        // every 30-second automation poll. Drain backlogs in small commits;
+        // expired posts are already excluded by every social read path.
+        nextSocialPruneAt = Date.now() + 5 * 60_000;
+        try {
+          const deleted = await pruneExpiredSocialSignals();
+          nextSocialPruneAt = Date.now() + (deleted === 100 ? 30_000 : 5 * 60_000);
+        } catch (error) {
+          console.warn("Social retention maintenance deferred:", error);
+        }
       }
       if (Date.now() - lastOperationalPruneAt >= 6 * 3_600_000) {
-        await pruneOperationalHistory();
         lastOperationalPruneAt = Date.now();
+        try {
+          await pruneOperationalHistory();
+        } catch (error) {
+          console.warn("Operational retention maintenance deferred:", error);
+        }
       }
     });
   } finally {

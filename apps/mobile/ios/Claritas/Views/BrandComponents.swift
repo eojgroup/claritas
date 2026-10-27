@@ -157,6 +157,7 @@ struct BrandCard<Content: View>: View {
     let icon: String?
     @ViewBuilder var content: Content
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(title: String? = nil, icon: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
@@ -165,7 +166,7 @@ struct BrandCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: horizontalSizeClass == .compact ? 8 : 12) {
             if let title {
                 HStack(spacing: 8) {
                     if let icon {
@@ -179,7 +180,7 @@ struct BrandCard<Content: View>: View {
             }
             content
         }
-        .padding(16)
+        .padding(horizontalSizeClass == .compact ? 12 : 16)
         .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
     }
 }
@@ -189,6 +190,7 @@ struct BrandSectionHeader: View {
     let title: String
     let detail: String?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -200,7 +202,7 @@ struct BrandSectionHeader: View {
                 .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
             if let detail, !detail.isEmpty {
                 Text(detail)
-                    .font(.subheadline)
+                    .font(horizontalSizeClass == .compact ? .caption : .subheadline)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             }
         }
@@ -214,10 +216,11 @@ struct BriefingOverviewCard: View {
     let briefing: DailySignalBriefing?
     let onOpen: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: horizontalSizeClass == .compact ? 5 : 10) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Label("DAILY BRIEFING", systemImage: "doc.text")
                         .font(.caption2.weight(.bold))
@@ -235,23 +238,23 @@ struct BriefingOverviewCard: View {
                 }
 
                 Text(briefing?.title ?? "Today’s global signal picture")
-                    .font(.headline)
+                    .font(horizontalSizeClass == .compact ? .subheadline : .headline)
                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                     .lineLimit(1)
 
-                if let takeaway = briefing?.key_takeaways.first {
+                if horizontalSizeClass != .compact, let takeaway = briefing?.key_takeaways.first {
                     Text(takeaway)
                         .font(.subheadline)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         .lineLimit(2)
-                } else {
+                } else if horizontalSizeClass != .compact {
                     Text("Open the briefing for the latest cross-source synthesis.")
                         .font(.subheadline)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         .lineLimit(2)
                 }
             }
-            .padding(14)
+            .padding(horizontalSizeClass == .compact ? 12 : 14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
         }
@@ -266,9 +269,10 @@ struct BrandMetricCard: View {
     let detail: String?
     let tone: Color?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: horizontalSizeClass == .compact ? 4 : 8) {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -278,13 +282,13 @@ struct BrandMetricCard: View {
                 .foregroundStyle(tone ?? ClaritasPalette.shellInk(for: colorScheme))
             if let detail, !detail.isEmpty {
                 Text(detail)
-                    .font(.caption)
+                    .font(horizontalSizeClass == .compact ? .caption2 : .caption)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                     .lineLimit(2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(horizontalSizeClass == .compact ? 10 : 14)
         .brandGlass(cornerRadius: 16)
     }
 }
@@ -343,5 +347,32 @@ struct BrandGlassModifier: ViewModifier {
 extension View {
     func brandGlass(cornerRadius: CGFloat = 18, elevated: Bool = false) -> some View {
         modifier(BrandGlassModifier(cornerRadius: cornerRadius, elevated: elevated))
+    }
+}
+
+/// Reduces the initial phone page to triage content and defers secondary views.
+struct PhoneDetailSection<Content: View>: View {
+    let title: String
+    let content: Content
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var isExpanded = false
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        if horizontalSizeClass == .compact {
+            DisclosureGroup(isExpanded: $isExpanded) {
+                if isExpanded { content }
+            } label: {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .frame(minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+            }
+        } else {
+            content
+        }
     }
 }

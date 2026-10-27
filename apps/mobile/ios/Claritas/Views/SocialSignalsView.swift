@@ -17,12 +17,11 @@ struct SocialSignalsView: View {
                         detail: "Newest attributed posts with the posting account and responsible party preserved."
                     )
 
-                    IntelligenceEventPulseView(sourceLens: "social")
 
                     trustNotice
-                    filters
+                    PhoneDetailSection("Filter social signals") { filters }
                     coverageStrip
-                    providerFreshness
+                    PhoneDetailSection("Provider status") { providerFreshness }
 
                     if let error = model.socialLoadError, !error.isEmpty {
                         BrandCard(title: "Social signals unavailable", icon: "exclamationmark.triangle.fill") {

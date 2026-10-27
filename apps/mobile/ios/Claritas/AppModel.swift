@@ -95,6 +95,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var signalTransportOverview: TransportOverview? = nil
     @Published private(set) var transportOverviewCountry: String? = nil
     @Published var isRefreshingNews: Bool = false
+    @Published private(set) var isLoadingMoreNews = false
+    @Published private(set) var newsHasMore = false
+    @Published private(set) var newsLoadMoreError: String?
     @Published private(set) var isRefreshingRankedNews: Bool = false
     @Published var isRefreshingPodcasts: Bool = false
     @Published private(set) var isRefreshingSocial: Bool = false
@@ -148,7 +151,7 @@ final class AppModel: ObservableObject {
     private let authCallbackURL: URL
     private let recentNewsLimit = 120
     private let archiveNewsPageSize = 100
-    private let archiveNewsMaxPages = 4
+    private var newsNextOffset = 0
     private var newsRequestID = UUID()
     private var rankedNewsRequestID = UUID()
     private var socialRequestID = UUID()
@@ -156,6 +159,7 @@ final class AppModel: ObservableObject {
     private var transportRefreshTask: Task<Void, Never>?
     private var transportRequestID = UUID()
     private var dataGeneration = UUID()
+    private var initialLoadID: UUID?
     private var widgetFreshness = WidgetSnapshotFreshness.empty
     private var widgetNews: [NewsItem] = []
     private var widgetNewsTotal: Int?
@@ -495,165 +499,128 @@ final class AppModel: ObservableObject {
             clearAppData()
             return
         }
+        guard initialLoadID == nil else { return }
+        let loadID = UUID()
+        initialLoadID = loadID
+        defer { if initialLoadID == loadID { initialLoadID = nil } }
 
         let initialNewsCountry = normalizedCountry(selectedCountry)
         let initialNewsCategory = NewsCategoryCatalog.normalized(selectedNewsCategory)
         let generation = dataGeneration
+        let initialUserID = authUser?.id
+        let initialToken = authToken
         let initialNewsRequestID = UUID()
         newsRequestID = initialNewsRequestID
+        isRefreshingNews = true
+        defer {
+            if newsRequestID == initialNewsRequestID { isRefreshingNews = false }
+        }
 
-        async let statsResult: Result<[CountryStat], Error> = {
-            do { return .success(try await api.fetchCountryStats(days: 30)) }
-            catch { return .failure(error) }
-        }()
-        async let briefingResult: Result<DailySignalBriefing?, Error> = {
-            do { return .success(try await api.fetchLatestDailyBriefing()) }
-            catch { return .failure(error) }
-        }()
-        async let scheduleResult: Result<DailyBriefingSchedule, Error> = {
-            do { return .success(try await api.fetchDailyBriefingSchedule()) }
-            catch { return .failure(error) }
-        }()
-        async let weatherResult: Result<[CountryWeather], Error> = {
-            do { return .success(try await api.fetchCountryWeather()) }
-            catch { return .failure(error) }
-        }()
-        async let leadershipResult: Result<[CountryLeadership], Error> = {
-            do { return .success(try await api.fetchCountryLeadership()) }
-            catch { return .failure(error) }
-        }()
-        async let newsResult: Result<NewsPage, Error> = {
-            do {
-                return .success(try await fetchNewsBatch(
-                    mode: .recent,
-                    country: initialNewsCountry,
-                    category: initialNewsCategory,
-                    sort: .newest
-                ))
-            }
-            catch { return .failure(error) }
-        }()
-        async let podcastResult: Result<[PodcastEpisode], Error> = {
-            do { return .success(try await api.fetchPodcasts(limit: 40)) }
-            catch { return .failure(error) }
-        }()
-        async let marketResult: Result<CountryMarketOverviewResponse, Error> = {
-            do { return .success(try await api.fetchCountryMarkets()) }
-            catch { return .failure(error) }
-        }()
-        async let marketQuoteResult: Result<[MarketQuote], Error> = {
-            do { return .success(try await api.fetchMarketQuotes(refresh: false)) }
-            catch { return .failure(error) }
-        }()
-        let (
-            resolvedStats,
-            resolvedBriefing,
-            resolvedSchedule,
-            resolvedWeather,
-            resolvedLeadership,
-            resolvedNews,
-            resolvedPodcasts,
-            resolvedMarket,
-            resolvedMarketQuotes
-        ) = await (
-            statsResult,
-            briefingResult,
-            scheduleResult,
-            weatherResult,
-            leadershipResult,
-            newsResult,
-            podcastResult,
-            marketResult,
-            marketQuoteResult
-        )
-        guard dataGeneration == generation, authStatus == .authed, hasPaidAccess else { return }
-
-        var paymentRequiredDetected = false
-        if case .failure(let error) = resolvedStats, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedBriefing, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedSchedule, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedWeather, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedLeadership, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedNews, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedPodcasts, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedMarket, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if case .failure(let error) = resolvedMarketQuotes, isPaymentRequired(error) {
-            paymentRequiredDetected = true
-        }
-        if paymentRequiredDetected {
-            clearAppData()
+        // Each request publishes independently: a slow optional resource must
+        // not hold the map, briefing, weather or reporting behind a batch barrier.
+        async let statsError = loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchCountryStats(days: 30)
+        }, apply: { self.countryStats = $0 })
+        async let briefingError = loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchLatestDailyBriefing()
+        }, apply: {
+            self.dailyBriefing = $0
+            self.widgetFreshness.overview = Date()
+        })
+        async let scheduleError = loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchDailyBriefingSchedule()
+        }, apply: {
+            self.dailyBriefingSchedule = $0
+            self.dailyBriefingScheduleError = nil
+        })
+        async let weatherError = loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchCountryWeather()
+        }, apply: {
+            self.weather = $0
+            self.widgetFreshness.weather = Date()
+        })
+        async let leadershipError = loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchCountryLeadership()
+        }, apply: { self.leadership = $0 })
+        async let newsError = loadInitialValue(generation: generation, fetch: {
+            try await self.fetchNewsBatch(
+                mode: .recent,
+                country: initialNewsCountry,
+                category: initialNewsCategory,
+                sort: .newest
+            )
+        }, apply: { newsPage in
+            guard self.newsRequestID == initialNewsRequestID else { return }
+            self.applyNewsPage(newsPage, sort: .newest)
+            self.newsLoadMode = .recent
+            self.newsScopeCountry = initialNewsCountry
+            self.newsScopeCategory = initialNewsCategory
+            self.newsScopeSort = .newest
+            self.newsScopeQuery = ""
+            self.newsLoadError = nil
+            self.isRefreshingNews = false
+            self.captureWidgetNews(newsPage, country: initialNewsCountry, category: initialNewsCategory, mode: .recent, query: "")
+        }, onError: { error in
+            guard self.newsRequestID == initialNewsRequestID else { return }
+            self.newsLoadError = (error as? APIError)?.message ?? error.localizedDescription
+            self.isRefreshingNews = false
+        })
+        async let podcastError = loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchPodcasts(limit: 40)
+        }, apply: {
+            self.podcasts = $0
+            self.podcastLoadError = nil
+        }, onError: { self.podcastLoadError = ($0 as? APIError)?.message ?? $0.localizedDescription })
+        async let marketError = loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchCountryMarkets()
+        }, apply: {
+            self.countryMarkets = $0.countries
+            self.widgetFreshness.markets = Date()
+        })
+        async let quoteError = loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchMarketQuotes(refresh: false)
+        }, apply: {
+            self.marketQuotes = $0
+            self.widgetFreshness.markets = Date()
+        })
+        async let initialTransport: Void = refreshTransport(forceRefresh: false)
+        let errors = await [statsError, briefingError, scheduleError, weatherError,
+                            leadershipError, newsError, podcastError, marketError, quoteError]
+        await initialTransport
+        if errors.compactMap({ $0 }).contains(where: isPaymentRequired),
+           authStatus == .authed, authUser?.id == initialUserID, authToken == initialToken {
             await refreshAccess()
             return
         }
-
-        if case .success(let stats) = resolvedStats {
-            countryStats = stats
-        }
-        if case .success(let briefing) = resolvedBriefing {
-            dailyBriefing = briefing
-            widgetFreshness.overview = Date()
-        }
-        if case .success(let schedule) = resolvedSchedule {
-            dailyBriefingSchedule = schedule
-            dailyBriefingScheduleError = nil
-        }
-        if case .success(let weatherRows) = resolvedWeather {
-            weather = weatherRows
-            widgetFreshness.weather = Date()
-        }
-        if case .success(let leadershipRows) = resolvedLeadership {
-            leadership = leadershipRows
-        }
-        if case .success(let newsPage) = resolvedNews, newsRequestID == initialNewsRequestID {
-            applyNewsPage(newsPage, sort: .newest)
-            newsLoadMode = .recent
-            newsScopeCountry = initialNewsCountry
-            newsScopeCategory = initialNewsCategory
-            newsScopeSort = .newest
-            newsScopeQuery = ""
-            newsLoadError = nil
-            captureWidgetNews(newsPage, country: initialNewsCountry, category: initialNewsCategory, mode: .recent, query: "")
-        }
-        if case .failure(let error) = resolvedNews, newsRequestID == initialNewsRequestID {
-            newsLoadError = (error as? APIError)?.message ?? error.localizedDescription
-        }
-        if case .success(let podcastItems) = resolvedPodcasts {
-            podcasts = podcastItems
-            podcastLoadError = nil
-        }
-        if case .failure(let error) = resolvedPodcasts {
-            podcastLoadError = (error as? APIError)?.message ?? error.localizedDescription
-        }
-        if case .success(let overview) = resolvedMarket {
-            countryMarkets = overview.countries
-            widgetFreshness.markets = Date()
-        }
-        if case .success(let quotes) = resolvedMarketQuotes {
-            marketQuotes = quotes
-            widgetFreshness.markets = Date()
-        }
-        await refreshTransport(forceRefresh: false)
+        guard dataGeneration == generation, authStatus == .authed, hasPaidAccess, !Task.isCancelled else { return }
         updateWidgetSnapshot()
+        // Global transport can render immediately. Once the country relevance
+        // data arrives, fill the newly determined local scope if it changed.
+        if transportOverviewCountry != transportFocusCountry {
+            await refreshTransport(forceRefresh: false)
+        }
+    }
+
+    private func loadInitialValue<Value>(
+        generation: UUID,
+        fetch: @MainActor () async throws -> Value,
+        apply: @MainActor (Value) -> Void,
+        onError: @MainActor (Error) -> Void = { _ in }
+    ) async -> Error? {
+        await ProgressiveResourceLoader.load(fetch: fetch, isCurrent: {
+            self.dataGeneration == generation && self.authStatus == .authed && self.hasPaidAccess
+        }, apply: apply, onError: { error in
+            if self.isPaymentRequired(error) {
+                self.clearAppData()
+            } else {
+                onError(error)
+            }
+        })
     }
 
     func clearAppData() {
         dataGeneration = UUID()
+        initialLoadID = nil
         clearSelection()
         transportRefreshTask?.cancel()
         transportRefreshTask = nil
@@ -688,6 +655,10 @@ final class AppModel: ObservableObject {
         rankedNewsRequestID = UUID()
         socialRequestID = UUID()
         isRefreshingNews = false
+        isLoadingMoreNews = false
+        newsLoadMoreError = nil
+        newsHasMore = false
+        newsNextOffset = 0
         isRefreshingRankedNews = false
         isRefreshingPodcasts = false
         isRefreshingSocial = false
@@ -944,6 +915,8 @@ final class AppModel: ObservableObject {
         let requestedCategory = NewsCategoryCatalog.normalized(category ?? selectedNewsCategory)
         let requestID = UUID()
         newsRequestID = requestID
+        isLoadingMoreNews = false
+        newsLoadMoreError = nil
         isRefreshingNews = true
         newsLoadError = nil
         defer {
@@ -1346,60 +1319,54 @@ final class AppModel: ObservableObject {
         sort: NewsSortMode,
         query: String = ""
     ) async throws -> NewsPage {
-        switch mode {
-        case .recent:
-            return try await api.fetchNews(
-                limit: recentNewsLimit,
-                offset: 0,
-                q: query.isEmpty ? nil : query,
-                country: country,
-                category: category,
+        try await api.fetchNews(
+            limit: mode == .archive ? archiveNewsPageSize : recentNewsLimit,
+            offset: 0,
+            q: query.isEmpty ? nil : query,
+            country: country,
+            category: category,
+            sort: sort.rawValue,
+            archive: mode == .archive,
+            includeMetadata: true
+        )
+    }
+
+    func loadMoreNews() async {
+        guard hasPaidAccess, newsHasMore, !isLoadingMoreNews, !isRefreshingNews else { return }
+        let requestID = newsRequestID
+        let generation = dataGeneration
+        let offset = newsNextOffset
+        let mode = newsLoadMode
+        let sort = newsScopeSort
+        let pageSize = mode == .archive ? archiveNewsPageSize : recentNewsLimit
+        isLoadingMoreNews = true
+        newsLoadMoreError = nil
+        defer { if newsRequestID == requestID { isLoadingMoreNews = false } }
+        do {
+            let page = try await api.fetchNews(
+                limit: pageSize,
+                offset: offset,
+                q: newsScopeQuery.isEmpty ? nil : newsScopeQuery,
+                country: newsScopeCountry,
+                category: newsScopeCategory,
                 sort: sort.rawValue,
-                archive: false,
-                includeMetadata: true
+                archive: mode == .archive,
+                includeMetadata: false
             )
-        case .archive:
-            var combined: [NewsItem] = []
-            var seenIds = Set<Int>()
-            var offset = 0
-            var metadataPage: NewsPage?
-
-            for pageIndex in 0..<archiveNewsMaxPages {
-                try Task.checkCancellation()
-                let batch = try await api.fetchNews(
-                    limit: archiveNewsPageSize,
-                    offset: offset,
-                    q: query.isEmpty ? nil : query,
-                    country: country,
-                    category: category,
-                    sort: sort.rawValue,
-                    archive: true,
-                    includeMetadata: pageIndex == 0
-                )
-                if metadataPage == nil { metadataPage = batch }
-                if batch.items.isEmpty { break }
-
-                for item in batch.items where !seenIds.contains(item.id) {
-                    seenIds.insert(item.id)
-                    combined.append(item)
-                }
-
-                offset += batch.items.count
-                if batch.items.count < archiveNewsPageSize { break }
+            guard dataGeneration == generation, newsRequestID == requestID, !Task.isCancelled else { return }
+            let existing = Set(news.map(\.id))
+            let added = page.items.filter { !existing.contains($0.id) }
+            news = sort == .importance ? news + added : NewsChronology.sorted(news + added, order: .newestFirst)
+            newsNextOffset = offset + page.items.count
+            newsHasMore = !page.items.isEmpty && (newsPageTotal.map { newsNextOffset < $0 } ?? (page.items.count == pageSize))
+        } catch {
+            guard dataGeneration == generation, newsRequestID == requestID, !Task.isCancelled else { return }
+            if isPaymentRequired(error) {
+                clearAppData()
+                await refreshAccess()
+                return
             }
-
-            let metadata = metadataPage ?? NewsPage(items: [])
-            return NewsPage(
-                items: combined,
-                facets: metadata.facets,
-                ranking: metadata.ranking,
-                page: NewsPageMetadata(
-                    limit: combined.count,
-                    offset: 0,
-                    total: metadata.page.total,
-                    metadataIncluded: metadata.page.metadata_included
-                )
-            )
+            newsLoadMoreError = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
@@ -1415,6 +1382,9 @@ final class AppModel: ObservableObject {
         }
         newsCategoryFacets = includesMetadata ? loadedPage.facets.categories : []
         newsPageTotal = includesMetadata ? loadedPage.page.total : nil
+        newsNextOffset = (loadedPage.page.offset ?? 0) + loadedPage.items.count
+        let pageSize = loadedPage.page.limit ?? recentNewsLimit
+        newsHasMore = !loadedPage.items.isEmpty && (newsPageTotal.map { newsNextOffset < $0 } ?? (loadedPage.items.count == pageSize))
         newsUnassessedCount = includesMetadata ? loadedPage.ranking.unassessed_count : nil
         newsMetadataIncluded = includesMetadata
     }

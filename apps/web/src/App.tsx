@@ -1,4 +1,3 @@
-import NewsImageGallery from "./components/NewsImageGallery";
 import { CountryDataContext } from "./components/countryContext";
 import CountryFlag from "./components/CountryFlag";
 import CountryFacts from "./components/CountryFacts";
@@ -8,6 +7,8 @@ import NewsOverview from "./components/NewsOverview";
 import { filterNewsByTopic, type NewsTopic } from "./components/newsWorkspacePresentation";
 import SourceInvestigationLinks from "./components/SourceInvestigationLinks";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -63,6 +64,7 @@ import PriorityNewsList from "./components/PriorityNewsList";
 import NewsCategoryControl from "./components/NewsCategoryControl";
 import ModalSurface from "./components/ModalSurface";
 import useNewsSearch from "./components/useNewsSearch";
+import { NewsFeedPager } from "./components/newsFeedPager";
 import { parseDashboardSearch, stripDashboardSearchTopicTokens, type SearchTopic } from "./components/dashboardSearch";
 import { newsCategoryLabel } from "./components/newsCategoryPresentation";
 import {
@@ -134,9 +136,7 @@ const legalPolicies = [
   },
 ];
 
-const NEWS_FETCH_LIMIT = 200;
-const NEWS_ARCHIVE_PAGE_SIZE = 200;
-const NEWS_ARCHIVE_MAX_PAGES = 150;
+const NEWS_FETCH_LIMIT = 120;
 const NEWS_TREND_WINDOW_DAYS = 30;
 const MAP_WINDOW_MIN = 7;
 const MAP_WINDOW_MAX = 45;
@@ -749,13 +749,8 @@ import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
 import PaywallPage from "./components/PaywallPage";
 import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePreview";
-import TransportWorkspace from "./components/TransportWorkspace";
-import IntelligenceWorkspace from "./components/IntelligenceWorkspace";
-import EarthObservationWorkspace from "./components/EarthObservationWorkspace";
 import IntelligenceEventStrip from "./components/IntelligenceEventStrip";
-import AdminWorkspace from "./components/AdminWorkspace";
 import SatelliteContextPanel from "./components/SatelliteContextPanel";
-import SocialSignalsWorkspace from "./components/SocialSignalsWorkspace";
 import { eventCoordinateContext } from "./components/eventPresentation";
 import {
   fetchAuthMe,
@@ -847,6 +842,13 @@ function formatEvidenceTimestamp(milliseconds: number): string {
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
+
+const NewsImageGallery = lazy(() => import("./components/NewsImageGallery"));
+const TransportWorkspace = lazy(() => import("./components/TransportWorkspace"));
+const IntelligenceWorkspace = lazy(() => import("./components/IntelligenceWorkspace"));
+const EarthObservationWorkspace = lazy(() => import("./components/EarthObservationWorkspace"));
+const AdminWorkspace = lazy(() => import("./components/AdminWorkspace"));
+const SocialSignalsWorkspace = lazy(() => import("./components/SocialSignalsWorkspace"));
 
 export default function ClaritasDashboard() {
   const [query, setQuery] = useState("");
@@ -1027,6 +1029,10 @@ export default function ClaritasDashboard() {
   const feedRef = useRef<HTMLDivElement | null>(null);
   const dashboardFeedPanelRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
+  const newsPagerRef = useRef(new NewsFeedPager(NEWS_FETCH_LIMIT));
+  const newsCountryPagerRef = useRef(new NewsFeedPager(NEWS_FETCH_LIMIT));
+  const [newsPagination, setNewsPagination] = useState({ canLoadMore: false, atLimit: false, loadingMore: false, error: null as string | null });
+  const [newsCountryPagination, setNewsCountryPagination] = useState({ canLoadMore: false, atLimit: false, loadingMore: false, error: null as string | null });
   const newsRequestIdRef = useRef(0);
   const newsDataScopeKeyRef = useRef<string | null>(null);
   const topNewsRequestIdRef = useRef(0);
@@ -1351,49 +1357,18 @@ export default function ClaritasDashboard() {
     setNewsLoadMode(mode);
     setIsLoadingNews(true);
     setNewsLoadError(null);
+    setNewsPagination({ canLoadMore: false, atLimit: false, loadingMore: false, error: null });
     try {
-      if (mode === "recent") {
-        const response = await fetchNews({
-          limit: NEWS_FETCH_LIMIT,
-          category: category === "all" ? undefined : category,
-          sort,
-        });
-        if (newsRequestIdRef.current !== requestId) return;
-        setNews(response.items);
-        setNewsFeedMetadata(metadataFromNewsFeed(response));
-        setNewsLoadMode("recent");
-        return;
-      }
-
-      const items: NewsItem[] = [];
-      const seenIds = new Set<number>();
-      let metadata: NewsFeedMetadata | null = null;
-      let offset = 0;
-      for (let page = 0; page < NEWS_ARCHIVE_MAX_PAGES; page += 1) {
-        const response = await fetchNews({
-          limit: NEWS_ARCHIVE_PAGE_SIZE,
-          offset,
-          category: category === "all" ? undefined : category,
-          sort,
-          archive: true,
-          includeMetadata: offset === 0 ? undefined : false,
-        });
-        if (newsRequestIdRef.current !== requestId) return;
-        if (!metadata) metadata = metadataFromNewsFeed(response);
-        const batch = response.items;
-        if (batch.length === 0) break;
-        batch.forEach((item) => {
-          if (seenIds.has(item.id)) return;
-          seenIds.add(item.id);
-          items.push(item);
-        });
-        offset += batch.length;
-        if (metadata?.page.total != null && offset >= metadata.page.total) break;
-        if (batch.length < NEWS_ARCHIVE_PAGE_SIZE) break;
-      }
-      setNews(items);
-      if (metadata) setNewsFeedMetadata(metadata);
-      setNewsLoadMode("archive");
+      const pager = newsPagerRef.current;
+      const response = await pager.load({
+        category: category === "all" ? undefined : category,
+        sort,
+        archive: mode === "archive",
+      });
+      if (!response || newsRequestIdRef.current !== requestId) return;
+      setNews(response.items);
+      setNewsFeedMetadata(metadataFromNewsFeed(response));
+      setNewsPagination({ canLoadMore: pager.canLoadMore, atLimit: pager.atLimit, loadingMore: false, error: null });
     } catch (err) {
       if (newsRequestIdRef.current !== requestId) return;
       setNewsLoadError(err instanceof Error ? err.message : String(err));
@@ -1448,6 +1423,8 @@ export default function ClaritasDashboard() {
     const requestId = newsCountryRequestIdRef.current + 1;
     newsCountryRequestIdRef.current = requestId;
     if (!country) {
+      newsCountryPagerRef.current.cancel();
+      setNewsCountryPagination({ canLoadMore: false, atLimit: false, loadingMore: false, error: null });
       setNewsMapCountry(null);
       setNewsCountryItems(null);
       setNewsCountryFeedMetadata(null);
@@ -1477,57 +1454,56 @@ export default function ClaritasDashboard() {
     setNewsMapNotice(null);
     setNewsWorkspaceChartRange({});
     setIsLoadingNewsCountry(true);
+    setNewsCountryPagination({ canLoadMore: false, atLimit: false, loadingMore: false, error: null });
     try {
-      if (mode === "recent") {
-        const response = await fetchNews({
-          country: normalizedCountry,
-          limit: NEWS_FETCH_LIMIT,
-          category: category === "all" ? undefined : category,
-          sort,
-        });
-        if (newsCountryRequestIdRef.current !== requestId) return;
-        setNewsCountryItems(response.items);
-        setNewsCountryFeedMetadata(metadataFromNewsFeed(response));
-        setNewsCountryLoadMode("recent");
-        return;
-      }
-
-      const items: NewsItem[] = [];
-      const seenIds = new Set<number>();
-      let metadata: NewsFeedMetadata | null = null;
-      let offset = 0;
-      for (let page = 0; page < NEWS_ARCHIVE_MAX_PAGES; page += 1) {
-        const response = await fetchNews({
-          country: normalizedCountry,
-          limit: NEWS_ARCHIVE_PAGE_SIZE,
-          offset,
-          category: category === "all" ? undefined : category,
-          sort,
-          archive: true,
-          includeMetadata: offset === 0 ? undefined : false,
-        });
-        if (newsCountryRequestIdRef.current !== requestId) return;
-        if (!metadata) metadata = metadataFromNewsFeed(response);
-        const batch = response.items;
-        if (batch.length === 0) break;
-        batch.forEach((item) => {
-          if (seenIds.has(item.id)) return;
-          seenIds.add(item.id);
-          items.push(item);
-        });
-        offset += batch.length;
-        if (metadata?.page.total != null && offset >= metadata.page.total) break;
-        if (batch.length < NEWS_ARCHIVE_PAGE_SIZE) break;
-      }
-      setNewsCountryItems(items);
-      if (metadata) setNewsCountryFeedMetadata(metadata);
-      setNewsCountryLoadMode("archive");
+      const pager = newsCountryPagerRef.current;
+      const response = await pager.load({
+        country: normalizedCountry,
+        category: category === "all" ? undefined : category,
+        sort,
+        archive: mode === "archive",
+      });
+      if (!response || newsCountryRequestIdRef.current !== requestId) return;
+      setNewsCountryItems(response.items);
+      setNewsCountryFeedMetadata(metadataFromNewsFeed(response));
+      setNewsCountryPagination({ canLoadMore: pager.canLoadMore, atLimit: pager.atLimit, loadingMore: false, error: null });
     } catch (err) {
       if (newsCountryRequestIdRef.current !== requestId) return;
       setNewsCountryLoadError(err instanceof Error ? err.message : String(err));
     } finally {
       if (newsCountryRequestIdRef.current === requestId) {
         setIsLoadingNewsCountry(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const globalPager = newsPagerRef.current;
+    const countryPager = newsCountryPagerRef.current;
+    return () => { globalPager.cancel(); countryPager.cancel(); };
+  }, []);
+
+  const loadMoreNewsData = useCallback(async (country: string | null) => {
+    const pager = country ? newsCountryPagerRef.current : newsPagerRef.current;
+    const requestRef = country ? newsCountryRequestIdRef : newsRequestIdRef;
+    const requestId = requestRef.current;
+    const setPagination = country ? setNewsCountryPagination : setNewsPagination;
+    if (!pager.canLoadMore) return;
+    setPagination((current) => ({ ...current, loadingMore: true, error: null }));
+    try {
+      const response = await pager.loadMore();
+      if (!response || requestRef.current !== requestId) return;
+      // Keep translations generated while the next page was in flight.
+      const mergeCurrentTranslations = (current: NewsItem[]) => {
+        const currentById = new Map(current.map((item) => [item.id, item]));
+        return response.items.map((item) => currentById.get(item.id) ?? item);
+      };
+      if (country) setNewsCountryItems((current) => mergeCurrentTranslations(current ?? []));
+      else setNews(mergeCurrentTranslations);
+      setPagination({ canLoadMore: pager.canLoadMore, atLimit: pager.atLimit, loadingMore: false, error: null });
+    } catch (error) {
+      if (requestRef.current === requestId) {
+        setPagination((current) => ({ ...current, loadingMore: false, error: error instanceof Error ? error.message : String(error) }));
       }
     }
   }, []);
@@ -5256,6 +5232,7 @@ export default function ClaritasDashboard() {
             data-view={activeView}
             className="app-workspace app-safe-bottom mx-auto w-full max-w-[1720px] flex-1 min-h-0 flex flex-col px-4 py-4 sm:px-6 xl:px-8 2xl:px-10"
           >
+            <Suspense fallback={<div role="status" className="app-card rounded-xl p-4 text-sm text-[color:var(--shell-muted)]">Loading workspace…</div>}>
             {sessionNotice && (
               <div className="mb-6">
                 <div
@@ -6623,7 +6600,7 @@ export default function ClaritasDashboard() {
                           </div>
                         ) : listMode === "weather" ? (
                           <div className="app-scroll-panel h-full overflow-y-auto p-4 space-y-4">
-                            
+
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <label className="text-[color:var(--shell-muted)]">
                                 Min temp (°C)
@@ -6694,7 +6671,7 @@ export default function ClaritasDashboard() {
                           </div>
                         ) : (
                           <div className="app-scroll-panel h-full overflow-y-auto p-4 space-y-4">
-                            
+
                             <div className="flex flex-wrap items-center gap-3 text-sm">
                               <div className="text-[color:var(--shell-muted)]">
                                 Country regimes from configured benchmarks, ECB and SEC
@@ -6871,7 +6848,7 @@ export default function ClaritasDashboard() {
                   scope={newsMapCountryLabel || regionLabel} selectedTopic={newsTopic}
                   onSelectTopic={setNewsTopic} loading={activeNewsLoading}
                   onOpenInvestigations={() => handleOpenIntelligence()} />
-                <IntelligenceEventStrip country={selectedNewsCountry} onOpen={handleOpenIntelligence} />
+
                 <details className="news-filter-panel"><summary>Search & sources</summary><section
                   className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3"
                 >
@@ -7147,6 +7124,22 @@ export default function ClaritasDashboard() {
                           ) : "1,000 matches loaded. Refine the query, country, category, or language to explore further."}
                         </div>
                       )}
+                      {!newsSearchActive && newsScopeMatchesOverarchingCountry && (() => {
+                        const pagination = selectedNewsCountry ? newsCountryPagination : newsPagination;
+                        if (!pagination.canLoadMore && !pagination.atLimit && !pagination.error) return null;
+                        return <div className="news-pagination border-t border-[color:var(--shell-border)] p-3 text-center text-xs text-[color:var(--shell-muted)]">
+                          {pagination.error && <p role="status" className="mb-2">More reporting could not be loaded. {pagination.error}</p>}
+                          {pagination.canLoadMore && <button type="button"
+                            onClick={() => void loadMoreNewsData(selectedNewsCountry)}
+                            disabled={pagination.loadingMore || activeNewsLoading}
+                            className="min-h-11 rounded-lg border border-[color:var(--shell-border)] px-4 py-2 font-semibold text-[color:var(--shell-ink)] disabled:opacity-60">
+                            {pagination.loadingMore ? "Loading more reporting…" : "Load more reporting"}
+                          </button>}
+                          {pagination.atLimit && <p>1,000 stories loaded. Refine search, country or category to explore further.</p>}
+                          <p className="mt-2">Counts show all matching reporting; charts and exports use loaded stories.</p>
+                        </div>;
+                      })()}
+
                     </div>
                   </div>
                 </section>
@@ -7290,7 +7283,7 @@ export default function ClaritasDashboard() {
                         onClick={handleNewsWorkspaceExportCsv}
                         className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
                       >
-                        Export CSV
+                        Export loaded CSV
                       </button>
                       <button
                         type="button"
@@ -7661,10 +7654,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "podcasts" && (
               <div className="space-y-4">
-                <IntelligenceEventStrip
-                  country={selectedCountry}
-                  onOpen={handleOpenIntelligence}
-                />
+
                 <form
                   onSubmit={(event) => {
                     event.preventDefault();
@@ -8085,7 +8075,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "weather" && (
               <div className="workspace-page weather-workspace space-y-4">
-                <IntelligenceEventStrip country={selectedCountry} onOpen={handleOpenIntelligence} />
+
                 <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
@@ -8612,7 +8602,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "markets" && (
               <div className="workspace-page markets-workspace space-y-4">
-                <IntelligenceEventStrip country={selectedCountry} onOpen={handleOpenIntelligence} />
+
                 <section className="operational-control-bar flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">Market workspace</div>
@@ -9421,10 +9411,7 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "transport" && (
               <div className="space-y-4">
-                <IntelligenceEventStrip
-                  country={selectedCountry}
-                  onOpen={handleOpenIntelligence}
-                />
+
                 <TransportWorkspace initialCountry={transportFocusCountry} />
               </div>
             )}
@@ -9440,12 +9427,6 @@ export default function ClaritasDashboard() {
             )}
             {activeView === "earth-observation" && (
               <div className="space-y-4">
-                {!selectedIntelligenceEventId && (
-                  <IntelligenceEventStrip
-                    country={selectedCountry}
-                    onOpen={handleOpenIntelligence}
-                  />
-                )}
                 <NewsImageGallery eventId={selectedIntelligenceEventId} country={selectedCountry} />
                 <EarthObservationWorkspace
                   eventId={selectedIntelligenceEventId}
@@ -10282,6 +10263,7 @@ export default function ClaritasDashboard() {
                 </div>
               </div>
             )}
+            </Suspense>
           </main>
         </div>
       </div>

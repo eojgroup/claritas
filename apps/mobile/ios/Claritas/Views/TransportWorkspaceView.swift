@@ -75,7 +75,6 @@ struct TransportWorkspaceView: View {
                 detail: "Live tracks, flight numbers, transport corridors, and country relationships."
             )
 
-            IntelligenceEventPulseView(sourceLens: "transport")
 
             if let detailError {
                 BrandCard(title: "Transport data unavailable", icon: "exclamationmark.triangle") {
@@ -143,7 +142,6 @@ struct TransportWorkspaceView: View {
                 detail: "Current aircraft, vessels, routes, and country relationships in the country scope selected from the overview map."
             )
 
-            IntelligenceEventPulseView(sourceLens: "transport")
 
             Picker("Movement layer", selection: $mode) {
                 Text("Combined").tag(Optional<TransportMode>.none)
@@ -220,71 +218,77 @@ struct TransportWorkspaceView: View {
                 }
             }
 
-            metricGrid
-            takeawayStrip
+            PhoneDetailSection("Coverage & movement summary") {
+                metricGrid
+                takeawayStrip
+            }
 
-            BrandCard(title: "Leading countries", icon: "globe.americas.fill") {
-                VStack(spacing: 0) {
-                    ForEach((overview?.countries ?? []).prefix(10)) { country in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(country.country_name)
-                                    .font(.subheadline.weight(.semibold))
-                                Text(country.country)
-                                    .font(.caption2)
+            PhoneDetailSection("Leading countries") {
+                BrandCard(title: "Leading countries", icon: "globe.americas.fill") {
+                    VStack(spacing: 0) {
+                        ForEach((overview?.countries ?? []).prefix(10)) { country in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(country.country_name)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(country.country)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                aggregatePill(
+                                    icon: "airplane",
+                                    value: country.aviation.active,
+                                    tone: ClaritasPalette.dataBlue(for: colorScheme)
+                                )
+                                aggregatePill(
+                                    icon: "ferry.fill",
+                                    value: country.maritime.active,
+                                    tone: ClaritasPalette.shellAccent(for: colorScheme)
+                                )
+                            }
+                            .padding(.vertical, 10)
+                            Divider()
+                        }
+                        if overview?.countries.isEmpty != false {
+                            Text("Country aggregates will appear as the feeds establish coverage.")
+                                .font(.subheadline)
+                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                .padding(.vertical, 18)
+                        }
+                    }
+                }
+            }
+
+            PhoneDetailSection("Leading corridors") {
+                BrandCard(title: "Leading corridors", icon: "point.topleft.down.to.point.bottomright.curvepath") {
+                    VStack(spacing: 10) {
+                        ForEach((overview?.routes ?? []).prefix(8)) { route in
+                            HStack(spacing: 10) {
+                                Image(systemName: route.mode == .aviation ? "airplane" : "ferry.fill")
+                                    .foregroundStyle(
+                                        route.mode == .aviation
+                                            ? ClaritasPalette.dataBlue(for: colorScheme)
+                                            : ClaritasPalette.shellAccent(for: colorScheme)
+                                    )
+                                Text(route.origin_country)
+                                    .font(.subheadline.weight(.bold))
+                                Image(systemName: "arrow.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(route.destination_country)
+                                    .font(.subheadline.weight(.bold))
+                                Spacer()
+                                Text("\(route.active_count)")
+                                    .font(.subheadline.monospacedDigit())
                                     .foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            aggregatePill(
-                                icon: "airplane",
-                                value: country.aviation.active,
-                                tone: ClaritasPalette.dataBlue(for: colorScheme)
-                            )
-                            aggregatePill(
-                                icon: "ferry.fill",
-                                value: country.maritime.active,
-                                tone: ClaritasPalette.shellAccent(for: colorScheme)
-                            )
-                        }
-                        .padding(.vertical, 10)
-                        Divider()
-                    }
-                    if overview?.countries.isEmpty != false {
-                        Text("Country aggregates will appear as the feeds establish coverage.")
-                            .font(.subheadline)
-                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                            .padding(.vertical, 18)
-                    }
-                }
-            }
-
-            BrandCard(title: "Leading corridors", icon: "point.topleft.down.to.point.bottomright.curvepath") {
-                VStack(spacing: 10) {
-                    ForEach((overview?.routes ?? []).prefix(8)) { route in
-                        HStack(spacing: 10) {
-                            Image(systemName: route.mode == .aviation ? "airplane" : "ferry.fill")
-                                .foregroundStyle(
-                                    route.mode == .aviation
-                                        ? ClaritasPalette.dataBlue(for: colorScheme)
-                                        : ClaritasPalette.shellAccent(for: colorScheme)
-                                )
-                            Text(route.origin_country)
-                                .font(.subheadline.weight(.bold))
-                            Image(systemName: "arrow.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(route.destination_country)
-                                .font(.subheadline.weight(.bold))
-                            Spacer()
-                            Text("\(route.active_count)")
-                                .font(.subheadline.monospacedDigit())
-                                .foregroundStyle(.secondary)
                         }
                     }
                 }
             }
 
-            provenance
+            PhoneDetailSection("Sources & coverage") { provenance }
         }
         .padding(16)
     }

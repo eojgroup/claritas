@@ -22,7 +22,7 @@ struct NewsListView: View {
                 .padding()
                 .brandGlass(cornerRadius: 12)
         } else {
-            VStack(spacing: compact ? 0 : 12) {
+            LazyVStack(spacing: compact ? 0 : 12) {
                 ForEach(items) { n in
                     NewsRow(
                         item: n,
@@ -79,6 +79,10 @@ private struct NewsRow: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    @State private var detailExpansion: Bool?
+
+    private var showsDetails: Bool { detailExpansion ?? selected }
+
     private var regularThumbnailSize: CGSize {
         horizontalSizeClass == .regular ? CGSize(width: 176, height: 110) : CGSize(width: 120, height: 75)
     }
@@ -92,52 +96,111 @@ private struct NewsRow: View {
     }
 
     private var compactBody: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("\(sourceLabel ?? "Reporting source") · \(item.chronologyDisplayText)")
-                .font(.caption)
-                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-            if let urlString = item.url, let url = URL(string: urlString) {
-                Link(item.presentationTitle, destination: url)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text(item.presentationTitle)
-                    .font(.subheadline.weight(.semibold))
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(sourceLabel ?? "Reporting source")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                Text(compactTimestamp)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                    .accessibilityLabel(item.chronologyDisplayText)
             }
-            if let disclosure = item.translationDisclosure {
-                Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+            .font(.caption2)
+            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+
+            Button {
+                detailExpansion = !showsDetails
+            } label: {
+                HStack(alignment: .top, spacing: 6) {
+                    Text(item.presentationTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(showsDetails ? nil : 3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: showsDetails ? "chevron.up" : "chevron.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                }
+                .frame(minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            if let summary = item.presentationSummary, !summary.isEmpty {
-                Text(summary)
-                    .font(.subheadline)
-                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    .lineLimit(2)
-            }
-            HStack(spacing: 8) {
-                Text(item.primaryCategoryLabel)
-                    .font(.caption)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .overlay(Capsule().stroke(ClaritasPalette.shellBorder(for: colorScheme)))
-                ForEach(Array(item.subjectCountries.prefix(3)), id: \.self) { iso in
-                    Button(iso) { onSelectCountry(iso) }
+            .buttonStyle(.plain)
+            .accessibilityHint(showsDetails ? "Collapses report details" : "Expands the full headline, summary and original source")
+            .accessibilityValue(showsDetails ? "Expanded" : "Collapsed")
+
+            if showsDetails {
+                if let disclosure = item.translationDisclosure {
+                    Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+                }
+                if let summary = item.presentationSummary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.subheadline)
+                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                }
+                if item.requiresTranslation {
+                    Text("Original: \(item.title ?? item.url ?? "Untitled")")
                         .font(.caption)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                }
+                if let imageURL = proxiedImageURL() {
+                    RemoteImage(url: imageURL)
+                        .frame(height: 140)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                if let urlString = item.url, let url = URL(string: urlString) {
+                    Link(destination: url) {
+                        Label("Read original source", systemImage: "arrow.up.right")
+                            .font(.caption.weight(.semibold))
+                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                    }
                 }
             }
-            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-            SourceInvestigationButton(domain: "news", recordType: "item", recordID: String(item.id), onOpenEvent: onOpenEvent)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    compactCategoryAndPlace
+                    Spacer(minLength: 0)
+                    SourceInvestigationButton(domain: "news", recordType: "item", recordID: String(item.id), onOpenEvent: onOpenEvent)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    compactCategoryAndPlace
+                    SourceInvestigationButton(domain: "news", recordType: "item", recordID: String(item.id), onOpenEvent: onOpenEvent)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 16)
+        .padding(.vertical, 8)
         .padding(.horizontal, selected ? 8 : 0)
         .background(
             selected ? ClaritasPalette.shellHighlight(for: colorScheme).opacity(0.28) : Color.clear,
             in: RoundedRectangle(cornerRadius: 10)
         )
+    }
+
+    private var compactTimestamp: String {
+        guard let date = item.chronologyDate else { return "Time unavailable" }
+        return "\(item.chronologyLabel) \(date.formatted(.dateTime.day().month(.abbreviated).hour().minute()))"
+    }
+
+    private var compactCategoryAndPlace: some View {
+        HStack(spacing: 4) {
+            Text(item.primaryCategoryLabel)
+                .lineLimit(1)
+            ForEach(Array(item.subjectCountries.prefix(2)), id: \.self) { iso in
+                Button(iso) { onSelectCountry(iso) }
+                    .frame(minWidth: ClaritasLayout.minimumTouchTarget, minHeight: ClaritasLayout.minimumTouchTarget)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show \(iso) reporting")
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
     }
 
     private var regularBody: some View {
@@ -353,15 +416,16 @@ struct SourceInvestigationButton: View {
                 HStack(spacing: 8) {
                     if isLoading { ProgressView().controlSize(.small) }
                     else { Image(systemName: "point.3.connected.trianglepath.dotted") }
-                    Text(isLoading ? "Finding related signals…" : "Explore event & related signals")
-                    Spacer(minLength: 0)
+                    Text(isLoading ? "Finding signals…" : "Related signals")
                     Image(systemName: "chevron.right")
                 }
                 .font(.caption.weight(.semibold))
                 .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                .frame(minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Explore event and related signals")
             .disabled(isLoading)
             if let message {
                 Text(message).font(.caption2).foregroundStyle(.secondary)

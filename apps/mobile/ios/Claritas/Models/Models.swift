@@ -1,6 +1,50 @@
 import Foundation
 import CryptoKit
 
+/// Publishes each startup resource as soon as it arrives. The generation check
+/// prevents an old session or a superseded scope from repopulating cleared data.
+@MainActor
+enum ProgressiveResourceLoader {
+    static func load<Value>(
+        fetch: @MainActor () async throws -> Value,
+        isCurrent: @MainActor () -> Bool,
+        apply: @MainActor (Value) -> Void,
+        onError: @MainActor (Error) -> Void = { _ in }
+    ) async -> Error? {
+        do {
+            let value = try await fetch()
+            guard !Task.isCancelled, isCurrent() else { return nil }
+            apply(value)
+            return nil
+        } catch {
+            guard !Task.isCancelled, isCurrent() else { return nil }
+            onError(error)
+            return error
+        }
+    }
+}
+
+/// Shares concurrent identical reads without retaining responses or failures.
+/// A cancelled waiter must not cancel a read still needed by another screen.
+actor AsyncRequestCoalescer<Key: Hashable & Sendable, Value: Sendable> {
+    private struct Pending {
+        let id: UUID
+        let task: Task<Value, Error>
+    }
+    private var pending: [Key: Pending] = [:]
+
+    func value(for key: Key, fetch: @escaping @Sendable () async throws -> Value) async throws -> Value {
+        if let existing = pending[key] { return try await existing.task.value }
+        let id = UUID()
+        let task = Task { try await fetch() }
+        pending[key] = Pending(id: id, task: task)
+        defer {
+            if pending[key]?.id == id { pending[key] = nil }
+        }
+        return try await task.value
+    }
+}
+
 enum AuthProviderId: String, Codable, CaseIterable, Identifiable {
     case google
     case microsoft

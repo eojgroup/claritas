@@ -94,6 +94,7 @@ import {
 } from "./news-intelligence";
 import { startNewsAssessmentWorker } from "./news-assessment-worker";
 import { buildNewsReaderQuery } from "./news-reader-query";
+import { SharedReadCache } from "./shared-read-cache";
 import { NewsSearchValidationError } from "./news-search";
 import { buildNewsCountryStatsQuery } from "./news-country-attribution";
 import {
@@ -154,6 +155,15 @@ import {
 } from "./apns";
 
 const app = express();
+// These caches contain shared provider / event data only. Their routes still
+// execute the session and paid-access middleware for every request. Short TTLs
+// bound ingestion visibility delay; simultaneous clients share one DB read.
+const newsReadCache = new SharedReadCache({ ttlMs: 15_000, maxEntries: 64, maxBytes: 12 * 1024 * 1024 });
+const eventReadCache = new SharedReadCache({ ttlMs: 10_000, maxEntries: 128, maxBytes: 8 * 1024 * 1024 });
+const workspaceReadCache = new SharedReadCache({ ttlMs: 30_000, maxEntries: 128, maxBytes: 8 * 1024 * 1024 });
+const sharedReadKey = (namespace: string, scope: unknown) =>
+  `${namespace}:${createHash("sha256").update(JSON.stringify(scope, (_key, value) =>
+    typeof value === "number" && !Number.isFinite(value) ? String(value) : value)).digest("hex")}`;
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const DAILY_BRIEFING_SCHEDULER_POLL_SECONDS = parseBoundedIntEnv(
   process.env.DAILY_BRIEFING_SCHEDULER_POLL_SECONDS,
@@ -1998,7 +2008,7 @@ app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
     if (severity && !["low", "medium", "high", "critical"].includes(severity)) {
       return res.status(400).json({ error: "Invalid event severity." });
     }
-    const events = await listIntelligenceEvents({
+    const eventOptions = {
       limit: Number(req.query.limit) || 30,
       offset: Number(req.query.offset) || 0,
       status,
@@ -2008,7 +2018,9 @@ app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
       eventType: typeof req.query.event_type === "string" ? req.query.event_type.trim() : undefined,
       since,
       includeExpired: req.query.include_expired === "true",
-    });
+    };
+    const events = await eventReadCache.get(sharedReadKey("events", eventOptions),
+      () => listIntelligenceEvents(eventOptions));
     res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
     return res.json({ events, count: events.length, generated_at: new Date().toISOString() });
   } catch (error) {
@@ -2019,7 +2031,8 @@ app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
 app.get("/api/intelligence/events/:id", requireAuthenticated, async (req, res) => {
   try {
     if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Event id must be a UUID." });
-    const result = await getIntelligenceEvent(req.params.id);
+    const result = await eventReadCache.get(sharedReadKey("event", req.params.id),
+      () => getIntelligenceEvent(req.params.id));
     if (!result) return res.status(404).json({ error: "Intelligence event not found." });
     res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
     return res.json(result);
@@ -2405,8 +2418,10 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       daily: req.query.window === "day",
       includeMetadata,
     });
-    const { rows } = await pool.query(newsQuery.sql, newsQuery.params);
-    const result = rows[0] ?? {};
+    const result = await newsReadCache.get(sharedReadKey("news", newsQuery), async () => {
+      const { rows } = await pool.query(newsQuery.sql, newsQuery.params);
+      return rows[0] ?? {};
+    });
     res.json({
       items: Array.isArray(result.items) ? result.items : [],
       facets: { categories: Array.isArray(result.category_facets) ? result.category_facets : [] },
@@ -2773,20 +2788,23 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
     // to that same bound prevents an authenticated request from repeatedly
     // expanding and de-duplicating a full year of JSON geography evidence.
     const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 45);
-    const result = await pool.query<{
-      stats: Array<{
-        country: string;
-        count: number;
-        verified_count: number;
-        latest_at: string | null;
-        provider_count: number;
-      }>;
-      total: number;
-      mapped: number;
-    }>(buildNewsCountryStatsQuery(), [days, NEWS_ASSESSMENT_METHODOLOGY]);
-    const stats = Array.isArray(result.rows[0]?.stats) ? result.rows[0].stats : [];
-    const total = Number(result.rows[0]?.total ?? 0);
-    const mapped = Number(result.rows[0]?.mapped ?? 0);
+    const result = await workspaceReadCache.get(sharedReadKey("news-country-stats", days), async () => {
+      const result = await pool.query<{
+        stats: Array<{
+          country: string;
+          count: number;
+          verified_count: number;
+          latest_at: string | null;
+          provider_count: number;
+        }>;
+        total: number;
+        mapped: number;
+      }>(buildNewsCountryStatsQuery(), [days, NEWS_ASSESSMENT_METHODOLOGY]);
+      return result.rows[0];
+    });
+    const stats = Array.isArray(result?.stats) ? result.stats : [];
+    const total = Number(result?.total ?? 0);
+    const mapped = Number(result?.mapped ?? 0);
     res.json({
       stats,
       coverage: {
@@ -3537,7 +3555,7 @@ app.post("/api/ingest/oecd", requireIngestionAccess, async (_req, res) => {
 app.get("/api/weather/country-latest", requireAuthenticated, async (_req, res) => {
   try {
     trackDemandSignal("weather");
-    const rows = await getCountryWeatherLatest();
+    const rows = await workspaceReadCache.get("country-weather", getCountryWeatherLatest);
     res.json({ stats: rows });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
@@ -3561,7 +3579,7 @@ app.get("/api/weather/forecast", requireAuthenticated, async (req, res) => {
 app.get("/api/leadership/countries", requireAuthenticated, async (_req, res) => {
   try {
     trackDemandSignal("leadership");
-    const countries = await getCountryLeadershipLatest();
+    const countries = await workspaceReadCache.get("country-leadership", getCountryLeadershipLatest);
     res.json({ countries });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
@@ -3656,7 +3674,8 @@ app.get("/api/market/quotes", requireAuthenticated, async (req, res) => {
     if (symbols.some((symbol) => !/^[A-Z0-9.^:_=-]{1,32}$/.test(symbol)) || symbols.length > 100) {
       return res.status(400).json({ error: "symbols must contain at most 100 valid market identifiers." });
     }
-    const quotes = await getMarketInstrumentSnapshots({ symbols });
+    const quotes = await workspaceReadCache.get(sharedReadKey("market-quotes", symbols),
+      () => getMarketInstrumentSnapshots({ symbols }));
     res.json({ quotes, refreshed: false, count: quotes.length, generated_at: new Date().toISOString() });
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
@@ -3678,11 +3697,13 @@ app.get("/api/market/instruments", requireAuthenticated, async (req, res) => {
     if (instrumentType && !["equity_index", "commodity", "macro"].includes(instrumentType)) {
       return res.status(400).json({ error: "type must be equity_index, commodity, or macro." });
     }
-    const instruments = await getMarketInstrumentSnapshots({
+    const instrumentOptions = {
       symbols, country, instrumentType,
       limit: typeof req.query.limit === "string" ? Number(req.query.limit) : undefined,
-    });
-    const coverage = await getMarketInstrumentCoverage();
+    };
+    const instruments = await workspaceReadCache.get(sharedReadKey("market-instruments", instrumentOptions),
+      () => getMarketInstrumentSnapshots(instrumentOptions));
+    const coverage = await workspaceReadCache.get("market-instrument-coverage", getMarketInstrumentCoverage);
     return res.json({ instruments, count: instruments.length, coverage });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
@@ -3692,7 +3713,7 @@ app.get("/api/market/instruments", requireAuthenticated, async (req, res) => {
 app.get("/api/market/countries", requireAuthenticated, async (_req, res) => {
   try {
     trackDemandSignal("market");
-    return res.json(await getCountryMarketOverview());
+    return res.json(await workspaceReadCache.get("country-markets", getCountryMarketOverview));
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

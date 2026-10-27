@@ -116,7 +116,7 @@ struct IntelligenceWorkspaceView: View {
                 kicker: "Every source · one event stream",
                 title: "Signal desk",
                 detail: horizontalSizeClass == .compact
-                    ? "Open an event, choose a signal type, then inspect the source and its connection."
+                    ? nil
                     : "Open an event, choose a signal type, then inspect the source and its connection."
             )
 
@@ -186,10 +186,6 @@ struct IntelligenceWorkspaceView: View {
     private var eventList: some View {
         BrandCard(title: "Priority events", icon: "dot.radiowaves.left.and.right") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("News, earth observation, imagery, transport, podcasts, socials and weather, ranked together.")
-                    .font(.caption)
-                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-
                 LazyVStack(spacing: 6) {
                     ForEach(events) { event in
                         let isSelected = event.id == selectedID
@@ -215,21 +211,20 @@ struct IntelligenceWorkspaceView: View {
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                         .multilineTextAlignment(.leading)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Label(event.location_name ?? event.primary_country_iso2 ?? "Global", systemImage: "mappin")
-                                        Text("\(event.evidence_count) sources · \(event.signalTypesLabel)")
+                                        .lineLimit(horizontalSizeClass == .compact ? 2 : nil)
+                                    HStack(spacing: 6) {
+                                        Text(event.primary_country_iso2 ?? event.location_name ?? "Global")
+                                        Text("· \(event.evidence_count) sources")
+                                        Spacer(minLength: 0)
+                                        Text(event.last_activity_time, style: .time)
                                     }
                                     .font(.caption2)
                                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Updated \(event.last_activity_time.formatted(date: .abbreviated, time: .standard))")
-                                        if let expiresAt = event.expires_at {
-                                            Text("\(event.freshness_state == "expired" ? "Expired" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .standard))")
-                                                .foregroundStyle(event.freshness_state == "expired" ? ClaritasPalette.negativeText(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
-                                        }
+                                    if event.freshness_state == "expired" {
+                                        Text("Expired")
+                                            .font(.caption2)
+                                            .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
                                     }
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 }
                             }
                             .padding(11)
@@ -1178,7 +1173,6 @@ struct EarthObservationWorkspaceView: View {
                         detail: "Browse governed acquisitions here. Open Signal desk to understand why an image matters to a specific event."
                     )
 
-                    IntelligenceEventPulseView(sourceLens: "imagery")
 
                     if let error {
                         Label(error, systemImage: "exclamationmark.triangle")
@@ -1279,58 +1273,58 @@ struct EarthObservationWorkspaceView: View {
     }
 }
 
+/// Overview-only preview. Full event triage lives in Investigate.
 struct IntelligenceEventPulseView: View {
     enum Presentation: Equatable { case list, horizontal }
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var events: [IntelligenceEvent] = []
     @State private var isLoading = true
     var presentation: Presentation = .list
-    var sourceLens: String? = nil
     var country: String? = nil
     @State private var loadError: String?
 
     private var scopeCountry: String? { country ?? model.selectedCountry }
 
-    private var pulseTitle: String { "Priority events" }
-
     var body: some View {
-        Group {
-            if isLoading {
-                BrandCard(title: pulseTitle, icon: "dot.radiowaves.left.and.right") {
-                    ProgressView("Loading linked events")
-                        .font(.caption)
-                        .frame(maxWidth: .infinity, minHeight: 46)
+        BrandCard {
+            HStack {
+                Label("Priority events", systemImage: "dot.radiowaves.left.and.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                Spacer()
+                Button {
+                    NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: "intelligence")
+                } label: {
+                    Label("Investigate", systemImage: "arrow.right")
+                        .font(.caption.weight(.semibold))
+                        .frame(minHeight: ClaritasLayout.minimumTouchTarget)
                 }
+                .buttonStyle(.plain)
+            }
+
+            if isLoading && events.isEmpty {
+                ProgressView("Loading events")
+                    .font(.caption)
             } else if !events.isEmpty {
-                BrandCard(title: pulseTitle, icon: "dot.radiowaves.left.and.right") {
-                    Text("One stream across news, earth observation, imagery, transport, podcasts, socials and weather.")
-                        .font(.caption2)
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    if let sourceLens {
-                        Text("Current events in this geography. Inspect the source groups to see whether \(SignalDomainPresentation.label(sourceLens).lowercased()) is attached.")
-                            .font(.caption2).foregroundStyle(.secondary)
+                if presentation == .horizontal && horizontalSizeClass == .regular {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 8) {
+                        ForEach(events.prefix(4)) { event in eventButton(event) }
                     }
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 10)], spacing: 10) {
-                        ForEach(events.prefix(6)) { event in
-                            eventButton(event, horizontal: true)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(events.prefix(2)) { event in
+                            eventButton(event)
+                            if event.id != events.prefix(2).last?.id { Divider() }
                         }
                     }
-                    Button {
-                        NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: "intelligence")
-                    } label: {
-                        Label("View all events & related signals", systemImage: "arrow.right")
-                            .font(.caption.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
-                    }
-                    .buttonStyle(.plain)
                 }
             } else {
-                BrandCard(title: pulseTitle, icon: "dot.radiowaves.left.and.right") {
-                    Text(loadError ?? "No current events in this scope. Source reporting remains available below.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                Text(loadError ?? "No current priority events in this scope.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .task(id: scopeCountry) {
@@ -1339,13 +1333,13 @@ struct IntelligenceEventPulseView: View {
             while !Task.isCancelled {
                 isLoading = events.isEmpty
                 do {
-                    let nextEvents = try await model.api.fetchIntelligenceEvents(limit: 6, country: scopeCountry)
+                    let nextEvents = try await model.api.fetchIntelligenceEvents(limit: 4, country: scopeCountry)
                     guard !Task.isCancelled else { return }
                     events = nextEvents
                     loadError = nil
                 } catch {
                     guard !Task.isCancelled else { return }
-                    loadError = "Priority events could not be loaded. Pull to refresh or try again shortly."
+                    loadError = "Events unavailable. Open Investigate to retry."
                 }
                 isLoading = false
                 do { try await Task.sleep(nanoseconds: 300_000_000_000) }
@@ -1354,7 +1348,7 @@ struct IntelligenceEventPulseView: View {
         }
     }
 
-    private func eventButton(_ event: IntelligenceEvent, horizontal: Bool) -> some View {
+    private func eventButton(_ event: IntelligenceEvent) -> some View {
         Button {
             model.selectedIntelligenceEventID = event.id
             NotificationCenter.default.post(
@@ -1363,66 +1357,38 @@ struct IntelligenceEventPulseView: View {
                 userInfo: ["eventID": event.id, "country": event.primary_country_iso2 ?? ""]
             )
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(severityColor(event.severity))
-                        .frame(width: 7, height: 7)
-                    Text("\(event.severity.rawValue.uppercased()) PRIORITY")
-                        .font(.system(size: 9, weight: .bold))
-                        .tracking(0.8)
-                        .foregroundStyle(severityColor(event.severity))
-                    Spacer()
-                    Text(event.last_activity_time.formatted(date: .omitted, time: .shortened))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                }
-                Label(event.originLabel.uppercased(), systemImage: event.originIcon)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
-                Text(event.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                Label(
-                    event.location_name ?? event.primary_country_iso2 ?? "Location unresolved",
-                    systemImage: "mappin"
-                )
-                .font(.caption)
-                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                .lineLimit(1)
-                HStack {
-                    Text("\(event.evidence_count) sources · \(event.signalTypesLabel)")
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: event.originIcon)
+                    .font(.caption)
+                    .foregroundStyle(severityColor(event.severity))
+                    .frame(width: 20)
+                    .padding(.top, 3)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(event.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                    Text("\(event.severity.rawValue.capitalized) · \(event.primary_country_iso2 ?? event.location_name ?? "Global") · \(event.evidence_count) sources")
                         .font(.caption2)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        .lineLimit(1)
                 }
-                if let reason = event.priority_reasons?.first {
-                    Text(reason).font(.caption2).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text("Explore related signals →")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
-                if let expiresAt = event.expires_at {
-                    Text("\(event.freshness_state == "expired" ? "Expired" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .shortened))")
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(event.last_activity_time, style: .time)
                         .font(.caption2.monospacedDigit())
-                        .foregroundStyle(event.freshness_state == "expired" ? ClaritasPalette.negativeText(for: colorScheme) : ClaritasPalette.shellMuted(for: colorScheme))
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
                 }
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             }
-            .padding(horizontal ? 12 : 0)
-            .frame(maxWidth: .infinity, minHeight: horizontal ? 132 : nil, alignment: .topLeading)
-            .background(
-                horizontal ? ClaritasPalette.shellSurfaceMuted(for: colorScheme) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 12)
-            )
+            .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Open \(event.severity.rawValue) priority event: \(event.title), \(event.location_name ?? event.primary_country_iso2 ?? "Global"), \(event.evidence_count) sources")
     }
 
     private func severityColor(_ severity: IntelligenceSeverity) -> Color {

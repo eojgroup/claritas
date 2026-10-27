@@ -873,6 +873,15 @@ export function isPublicGdeltArticleAddress(address: string): boolean {
   return isPublicIpAddress(address);
 }
 
+export function selectPublicGdeltArticleAddress(addresses: Array<{ address: string; family: number }>): { address: string; family: 4 | 6 } {
+  // The production cluster has IPv4 egress. DNS ordering must not select an
+  // unreachable AAAA record ahead of an equally valid public A record.
+  const publicAddresses = addresses.filter((entry) => isPublicIpAddress(entry.address));
+  const publicAddress = publicAddresses.find((entry) => entry.family === 4) ?? publicAddresses[0];
+  if (!publicAddress) throw new Error("GDELT article hostname has no public address.");
+  return { address: publicAddress.address, family: publicAddress.family as 4 | 6 };
+}
+
 async function resolvePublicArticleAddress(url: URL): Promise<{ address: string; family: 4 | 6 }> {
   const hostname = unbracketHostname(url.hostname);
   if (isIP(hostname)) {
@@ -880,9 +889,7 @@ async function resolvePublicArticleAddress(url: URL): Promise<{ address: string;
     return { address: hostname, family: isIP(hostname) as 4 | 6 };
   }
   const addresses = await dnsLookup(hostname, { all: true, verbatim: true });
-  const publicAddress = addresses.find((entry) => isPublicIpAddress(entry.address));
-  if (!publicAddress) throw new Error("GDELT article hostname has no public address.");
-  return { address: publicAddress.address, family: publicAddress.family as 4 | 6 };
+  return selectPublicGdeltArticleAddress(addresses);
 }
 
 type VerifiedPublisherPage = { html: string; finalUrl: string };
@@ -933,7 +940,10 @@ export async function requestVerifiedPublisherPage(
           },
           // Pin the socket to the vetted address, retaining Host/SNI and TLS
           // verification for the original publisher hostname.
-          lookup: (_hostname, _options, callback) => callback(null, address.address, address.family),
+          // Match dns.lookup's asynchronous callback contract. A synchronous
+          // callback can start connecting before ClientRequest has attached
+          // its socket error forwarding listeners.
+          lookup: (_hostname, _options, callback) => queueMicrotask(() => callback(null, address.address, address.family)),
           family: address.family,
           agent: false,
           signal: controller.signal,
@@ -978,6 +988,10 @@ export async function requestVerifiedPublisherPage(
           response.on("end", () => finish({ html: Buffer.concat(chunks).toString("utf8"), finalUrl: url.toString() }));
         });
         request.on("error", () => finish(null));
+        // Keep a listener on the socket through abort/teardown as well. A
+        // publisher connection failure is missing optional evidence, and
+        // must never terminate the API process or orphan ingestion runs.
+        request.on("socket", (socket) => { socket.on("error", () => finish(null)); });
         request.end();
       });
       if (!result || !("redirect" in result)) return result;

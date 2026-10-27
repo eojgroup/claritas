@@ -974,7 +974,7 @@ test("GDELT rejects private article addresses and pins publisher verification to
     source.indexOf("async function resolveGdeltPublisherPublicationTime"),
   );
   assert.match(verifier, /resolvePublicArticleAddress/);
-  assert.match(verifier, /lookup: \(_hostname, _options, callback\) => callback\(null, address\.address, address\.family\)/);
+  assert.match(verifier, /lookup: \(_hostname, _options, callback\) => queueMicrotask\(\(\) => callback\(null, address\.address, address\.family\)\)/);
 });
 
 test("a stale GDELT rediscovery quarantines its prior item without rewriting its publication time", async () => {

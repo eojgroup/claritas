@@ -264,21 +264,33 @@ async function ensureSource(): Promise<number> {
 
 export async function ingestInstitutionalRss(): Promise<Record<string, unknown>> {
   const sourceId = await ensureSource();
+  const { rows: feedStates } = await query<{ feed_key: string; cursor: { etag?: string; last_modified?: string } | null }>(
+    `SELECT feed_key,cursor FROM source_feed WHERE source_id=$1`, [sourceId],
+  );
+  const cursors = new Map(feedStates.map((state) => [state.feed_key, state.cursor]));
   let inserted = 0;
   let updated = 0;
   let unchanged = 0;
   let skipped = 0;
+  let notModified = 0;
   let latestEventTime: string | null = null;
   const failures: Array<{ feed: string; error: string }> = [];
   for (const feed of INSTITUTIONAL_RSS_FEEDS) {
     try {
+      const cursor = cursors.get(feed.id);
       const response = await fetch(feed.url, {
         headers: {
           accept: "application/rss+xml, application/atom+xml, application/xml, text/xml",
           "user-agent": process.env.SEC_EDGAR_USER_AGENT?.trim() || process.env.APP_USER_AGENT?.trim() || "Claritas contact@claritas.info",
+          ...(cursor?.etag ? { "if-none-match": cursor.etag } : {}),
+          ...(cursor?.last_modified ? { "if-modified-since": cursor.last_modified } : {}),
         },
         signal: AbortSignal.timeout(20_000),
       });
+      if (response.status === 304) {
+        notModified += 1;
+        continue;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       for (const block of feedItems(await readInstitutionalFeed(response))) {
         const item = parseInstitutionalFeedItem(block, feed.url);
@@ -331,6 +343,20 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
         else if (result.rows[0].inserted) inserted += 1;
         else updated += 1;
       }
+      // Only acknowledge the provider revision after its items persist. A
+      // failed feed replays on the next poll; unchanged feeds issue no writes
+      // and therefore do not repeatedly wake downstream event consumers.
+      await query(
+        `INSERT INTO source_feed(source_id,feed_key,params,cursor)
+         VALUES ($1,$2,$3::jsonb,$4::jsonb)
+         ON CONFLICT(source_id,feed_key) DO UPDATE SET
+           params=EXCLUDED.params,cursor=EXCLUDED.cursor,updated_at=now()`,
+        [sourceId, feed.id, JSON.stringify({ url: feed.url }), JSON.stringify({
+          etag: response.headers.get("etag"),
+          last_modified: response.headers.get("last-modified"),
+          checked_at: new Date().toISOString(),
+        })],
+      );
     } catch (error) {
       failures.push({ feed: feed.id, error: error instanceof Error ? error.message : String(error) });
     }
@@ -342,6 +368,7 @@ export async function ingestInstitutionalRss(): Promise<Record<string, unknown>>
     inserted,
     updated,
     unchanged,
+    not_modified_feeds: notModified,
     skipped,
     latest_event_time: latestEventTime,
     feeds: INSTITUTIONAL_RSS_FEEDS.length,

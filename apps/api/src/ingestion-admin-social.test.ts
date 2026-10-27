@@ -148,7 +148,7 @@ test("social is wired through automation, admin run metrics, API, and deployment
 
   assert.match(automation, /social:\s*\{[\s\S]*schedule_enabled: false/);
   assert.match(automation, /SELECT 'social', MAX\(posted_at\)/);
-  assert.match(automation, /DELETE FROM social_signal WHERE expires_at <= now\(\)/);
+  assert.match(automation, /await pruneExpiredSocialSignals\(\)/);
   assert.match(automation, /triggerSocialRun/);
   assert.match(admin, /pipeline === "social"/);
   assert.match(admin, /steps\.filter\(\(step\) => step\.status !== "success"\)/);

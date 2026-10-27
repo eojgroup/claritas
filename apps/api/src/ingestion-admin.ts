@@ -1113,7 +1113,7 @@ export function classifySocialProviderResult(
   const persisted = Math.max(0, Number(result.inserted) || 0) + Math.max(0, Number(result.updated) || 0);
   if (expectedQueries > 0 && (successfulQueries === 0 || failedQueries >= expectedQueries)) return "failed";
   if (fetched > 0 && persisted === 0 && dbErrors >= fetched) return "failed";
-  if (failedQueries > 0 || httpFailures > 0 || dbErrors > 0) return "degraded";
+  if (failedQueries > 0 || httpFailures > 0 || dbErrors > 0 || Number(result.deferred_queries) > 0) return "degraded";
   return "success";
 }
 
@@ -1476,7 +1476,16 @@ async function executeSocialRun(runId: number, plan: SocialRunPlan): Promise<voi
       request: plan.requestPayload,
       trust_policy: "All acquired posts remain unverified claims pending independent corroboration.",
     });
-    const eventQueries = await socialEventDiscoveryQueries();
+    // Event discovery enriches acquisition; a correlation query failure must
+    // not prevent an otherwise available provider from fetching new posts.
+    let eventQueries: string[] = [];
+    try {
+      eventQueries = await socialEventDiscoveryQueries();
+    } catch (error) {
+      await safeAppendRunLog(runId, "warn", "Event-specific social discovery deferred; using configured queries.", {
+        error: toErrorMessage(error),
+      });
+    }
     for (const platform of ["x", "reddit", "youtube", "bluesky"] as const) {
       const queries = platform === "bluesky" ? [...new Set([...plan.queries, ...eventQueries])].slice(0, 10) : plan.queries;
       if (!plan.providers[platform]) continue;
@@ -1495,7 +1504,9 @@ async function executeSocialRun(runId: number, plan: SocialRunPlan): Promise<voi
     }
     const succeeded = steps.filter((step) => step.status !== "failed").length;
     if (succeeded === 0) throw new Error("All selected social providers failed.");
-    await refreshSocialEventContext();
+    await executeProviderStep(runId, steps, totals, "social-context/event-linkage", async () => ({
+      linked: await refreshSocialEventContext(),
+    }));
     const degradedSteps = steps.filter((step) => step.status !== "success").map((step) => step.step);
     const stats = {
       pipeline: "social",

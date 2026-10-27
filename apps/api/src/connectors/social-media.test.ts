@@ -306,5 +306,6 @@ test("database and API presentation invariants retain claim labeling and newest-
   assert.match(implementation, /ORDER BY ss\.posted_at DESC,ss\.id DESC/);
   assert.match(implementation, /platform account is responsible for publishing/i);
   const automation = readFileSync(resolve(__dirname, "../ingestion-automation.ts"), "utf8");
-  assert.match(automation, /DELETE FROM social_signal WHERE expires_at <= now\(\)/);
+  assert.match(automation, /await pruneExpiredSocialSignals\(\)/);
+  assert.match(implementation, /LIMIT 100 FOR UPDATE SKIP LOCKED/);
 });

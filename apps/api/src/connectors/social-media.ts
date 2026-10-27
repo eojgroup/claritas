@@ -80,6 +80,8 @@ export type SocialIngestResult = {
   failed_queries: number;
   http_failures: number;
   db_errors: number;
+  deferred_queries: number;
+  failures: Array<{ query: string; error: string }>;
   latest_posted_at: string | null;
   retention_days: number;
   content_classification: "unverified_social_claim";
@@ -413,6 +415,7 @@ export function buildBlueskySearchUrl(
   searchQuery: string,
   maxResults: number,
   origin: string = BLUESKY_APPVIEW_ORIGINS[0],
+  since?: string,
 ): string {
   if (!(BLUESKY_APPVIEW_ORIGINS as readonly string[]).includes(origin)) {
     throw new Error("Unsupported Bluesky AppView origin.");
@@ -421,6 +424,7 @@ export function buildBlueskySearchUrl(
   url.searchParams.set("q", cleanText(searchQuery, 512) || "geopolitics");
   url.searchParams.set("sort", "latest");
   url.searchParams.set("limit", String(boundedInt(maxResults, 1, 100, 25)));
+  if (since) url.searchParams.set("since", since);
   return url.toString();
 }
 
@@ -644,14 +648,29 @@ export function normalizeRedditPost(rawPost: unknown): NormalizedSocialSignal | 
   };
 }
 
-async function fetchJson(url: string, init: RequestInit, provider: string): Promise<Record<string, any>> {
+type SocialRequestBudget = {
+  signal?: AbortSignal;
+  requestTimeoutMs?: number;
+  maxAttempts?: number;
+  onRequest?: () => void;
+};
+
+async function fetchJson(url: string, init: RequestInit, provider: string, budget: SocialRequestBudget = {}): Promise<Record<string, any>> {
   let lastStatus: number | null = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const maxAttempts = budget.maxAttempts ?? 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    budget.signal?.throwIfAborted();
     let response: Response;
+    let body: string;
     try {
-      response = await fetch(url, { ...init, signal: AbortSignal.timeout(20_000) });
+      budget.onRequest?.();
+      const timeout = AbortSignal.timeout(budget.requestTimeoutMs ?? 20_000);
+      response = await fetch(url, { ...init, signal: budget.signal ? AbortSignal.any([budget.signal, timeout]) : timeout });
+      // The same deadline covers the body: an upstream can send headers and
+      // then stall or disconnect while streaming JSON.
+      body = await response.text();
     } catch {
-      if (attempt === 2) {
+      if (budget.signal?.aborted || attempt === maxAttempts - 1) {
         // Do not propagate the request URL: YouTube authenticates with a query
         // parameter, so a raw network error could otherwise disclose its key.
         throw new Error(`${provider} request failed after bounded retries.`);
@@ -659,7 +678,6 @@ async function fetchJson(url: string, init: RequestInit, provider: string): Prom
       await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
       continue;
     }
-    const body = await response.text();
     if (response.ok) {
       try {
         return record(JSON.parse(body));
@@ -668,7 +686,7 @@ async function fetchJson(url: string, init: RequestInit, provider: string): Prom
       }
     }
     lastStatus = response.status;
-    if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break;
+    if (![429, 500, 502, 503, 504].includes(response.status) || attempt === maxAttempts - 1) break;
     const retrySeconds = Number.parseInt(response.headers.get("retry-after") ?? "", 10);
     const waitMs = Number.isFinite(retrySeconds) ? Math.min(retrySeconds * 1_000, 10_000) : 500 * (attempt + 1);
     await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -769,21 +787,24 @@ async function persistSocialSignal(
   return Boolean(rows[0]?.inserted);
 }
 
-async function pruneExpiredSocialSignals(): Promise<number> {
+export async function pruneExpiredSocialSignals(): Promise<number> {
   const { rows } = await query<{ deleted: number }>(
-    `WITH deleted AS (
-       DELETE FROM social_signal WHERE expires_at <= now() RETURNING 1
+    `WITH expired AS (
+       SELECT id FROM social_signal WHERE expires_at <= now()
+       ORDER BY expires_at,id LIMIT 100 FOR UPDATE SKIP LOCKED
+     ), deleted AS (
+       DELETE FROM social_signal WHERE id IN (SELECT id FROM expired) RETURNING 1
      ) SELECT COUNT(*)::int AS deleted FROM deleted`,
   );
   return Number(rows[0]?.deleted ?? 0);
 }
 
-async function xSignals(searchQuery: string, maxResults: number): Promise<NormalizedSocialSignal[]> {
+async function xSignals(searchQuery: string, maxResults: number, budget: SocialRequestBudget): Promise<NormalizedSocialSignal[]> {
   const bearer = process.env.X_BEARER_TOKEN?.trim();
   if (!bearer) throw new Error("X selected but X_BEARER_TOKEN is not configured.");
   const response = await fetchJson(buildXSearchUrl(searchQuery, maxResults), {
     headers: { authorization: `Bearer ${bearer}`, accept: "application/json" },
-  }, "X recent search");
+  }, "X recent search", budget);
   return (Array.isArray(response.data) ? response.data : [])
     .map((post) => normalizeXPost(post, response.includes))
     .filter((post): post is NormalizedSocialSignal => Boolean(post))
@@ -793,15 +814,21 @@ async function xSignals(searchQuery: string, maxResults: number): Promise<Normal
 export async function fetchBlueskySignals(
   searchQuery: string,
   maxResults: number,
+  options: SocialRequestBudget & { since?: string; unavailableOrigins?: Set<string> } = {},
 ): Promise<{ signals: NormalizedSocialSignal[]; requests: number }> {
   let requests = 0;
   let lastError: unknown = null;
   for (const origin of BLUESKY_APPVIEW_ORIGINS) {
+    if (options.unavailableOrigins?.has(origin)) continue;
+    options.signal?.throwIfAborted();
     requests += 1;
     try {
-      const response = await fetchJson(buildBlueskySearchUrl(searchQuery, maxResults, origin), {
+      const response = await fetchJson(buildBlueskySearchUrl(searchQuery, maxResults, origin, options.since), {
         headers: { accept: "application/json", "user-agent": process.env.SOCIAL_USER_AGENT?.trim() || "Claritas/1.0 (+https://app.claritas.info)" },
-      }, `Bluesky AppView (${new URL(origin).hostname})`);
+      }, `Bluesky AppView (${new URL(origin).hostname})`, {
+        ...options, maxAttempts: 1, requestTimeoutMs: 8_000,
+      });
+      if (!Array.isArray(response.posts)) throw new Error("Bluesky AppView returned a response without posts.");
       return {
         signals: (Array.isArray(response.posts) ? response.posts : [])
           .map(normalizeBlueskyPost)
@@ -810,6 +837,11 @@ export async function fetchBlueskySignals(
       };
     } catch (error) {
       lastError = error;
+      // A blocked/throttled AppView cannot serve the next search either. Try
+      // the other reviewed origin, then leave this origin alone for this run.
+      if (/HTTP (?:401|403|429|5\d\d)\b/.test(error instanceof Error ? error.message : "")) {
+        options.unavailableOrigins?.add(origin);
+      }
     }
   }
   throw lastError instanceof Error
@@ -817,10 +849,10 @@ export async function fetchBlueskySignals(
     : new Error("Bluesky AppView request failed through all allowlisted origins.");
 }
 
-async function youtubeSignals(searchQuery: string, maxResults: number, publishedAfter: string): Promise<NormalizedSocialSignal[]> {
+async function youtubeSignals(searchQuery: string, maxResults: number, publishedAfter: string, budget: SocialRequestBudget): Promise<NormalizedSocialSignal[]> {
   const search = await fetchJson(buildYouTubeSearchUrl(searchQuery, maxResults, publishedAfter), {
     headers: { accept: "application/json" },
-  }, "YouTube search");
+  }, "YouTube search", budget);
   const videoIds = records(search.items)
     .map((item) => cleanText(record(item.id).videoId, 128))
     .filter((id): id is string => Boolean(id));
@@ -831,7 +863,7 @@ async function youtubeSignals(searchQuery: string, maxResults: number, published
   detailsUrl.searchParams.set("part", "snippet,statistics,status");
   detailsUrl.searchParams.set("id", videoIds.join(","));
   detailsUrl.searchParams.set("key", apiKey);
-  const details = await fetchJson(detailsUrl.toString(), { headers: { accept: "application/json" } }, "YouTube videos");
+  const details = await fetchJson(detailsUrl.toString(), { headers: { accept: "application/json" } }, "YouTube videos", budget);
   return records(details.items)
     .filter((video) => record(video.status).privacyStatus !== "private")
     .map(normalizeYouTubeVideo)
@@ -840,7 +872,7 @@ async function youtubeSignals(searchQuery: string, maxResults: number, published
 
 let redditTokenCache: { token: string; expiresAt: number } | null = null;
 
-async function redditAccessToken(): Promise<string> {
+async function redditAccessToken(budget: SocialRequestBudget): Promise<string> {
   if (redditTokenCache && redditTokenCache.expiresAt > Date.now() + 60_000) return redditTokenCache.token;
   if (!explicitlyApprovedByEnv("REDDIT_API_APPROVED")) {
     throw new Error("Reddit selected but REDDIT_API_APPROVED=true is not configured; explicit approval is required.");
@@ -859,7 +891,7 @@ async function redditAccessToken(): Promise<string> {
       "user-agent": userAgent,
     },
     body: "grant_type=client_credentials",
-  }, "Reddit OAuth");
+  }, "Reddit OAuth", budget);
   const token = cleanText(response.access_token, 4_000);
   if (!token) throw new Error("Reddit OAuth response did not include an access token.");
   const expiresIn = boundedInt(response.expires_in, 60, 86_400, 3_600);
@@ -867,13 +899,13 @@ async function redditAccessToken(): Promise<string> {
   return token;
 }
 
-async function redditSignals(searchQuery: string, maxResults: number, lookbackHours: number): Promise<NormalizedSocialSignal[]> {
-  const token = await redditAccessToken();
+async function redditSignals(searchQuery: string, maxResults: number, lookbackHours: number, budget: SocialRequestBudget): Promise<NormalizedSocialSignal[]> {
+  const token = await redditAccessToken(budget);
   const userAgent = configuredRedditUserAgent();
   if (!userAgent) throw new Error("Reddit selected but REDDIT_USER_AGENT is not explicitly configured.");
   const response = await fetchJson(buildRedditSearchUrl(searchQuery, maxResults, lookbackHours), {
     headers: { authorization: `Bearer ${token}`, accept: "application/json", "user-agent": userAgent },
-  }, "Reddit search");
+  }, "Reddit search", budget);
   return records(record(response.data).children)
     .map((child) => normalizeRedditPost(child.data))
     .filter((post): post is NormalizedSocialSignal => Boolean(post));
@@ -905,37 +937,48 @@ export async function ingestSocialProvider(
   let failedQueries = 0;
   let httpFailures = 0;
   let dbErrors = 0;
+  let deferredQueries = 0;
+  let consecutiveFailures = 0;
+  const failures: Array<{ query: string; error: string }> = [];
+  const unavailableOrigins = new Set<string>();
+  // The old per-request retry bound multiplied by ten queries and two
+  // AppViews could hold a run open for over twenty minutes during an outage.
+  const deadline = AbortSignal.timeout(120_000);
+  const budget: SocialRequestBudget = { signal: deadline, onRequest: () => { requests += 1; } };
   let latestPostedAt: string | null = null;
 
-  for (const discoveryQuery of queries) {
+  for (const [queryIndex, discoveryQuery] of queries.entries()) {
+    if (deadline.aborted || consecutiveFailures >= 2 || (platform === "bluesky" && unavailableOrigins.size === BLUESKY_APPVIEW_ORIGINS.length)) {
+      deferredQueries += queries.length - queryIndex;
+      break;
+    }
     let signals: NormalizedSocialSignal[];
-    let queryRequests = 0;
     try {
       if (platform === "x") {
-        queryRequests = 1;
-        signals = await xSignals(discoveryQuery, maxResults);
+        signals = await xSignals(discoveryQuery, maxResults, budget);
       } else if (platform === "reddit") {
-        queryRequests = 1;
-        signals = await redditSignals(discoveryQuery, maxResults, lookbackHours);
+        signals = await redditSignals(discoveryQuery, maxResults, lookbackHours, budget);
       } else if (platform === "youtube") {
-        queryRequests = 1;
-        signals = await youtubeSignals(discoveryQuery, maxResults, publishedAfter);
-        queryRequests = signals.length > 0 ? 2 : 1;
+        signals = await youtubeSignals(discoveryQuery, maxResults, publishedAfter, budget);
       } else {
-        const result = await fetchBlueskySignals(discoveryQuery, maxResults);
+        const result = await fetchBlueskySignals(discoveryQuery, maxResults, { ...budget, since: publishedAfter, unavailableOrigins });
         signals = result.signals;
-        queryRequests = result.requests;
       }
-      requests += queryRequests;
       successfulQueries += 1;
-    } catch {
-      requests += queryRequests || (platform === "bluesky" ? BLUESKY_APPVIEW_ORIGINS.length : 1);
+      consecutiveFailures = 0;
+    } catch (error) {
       failedQueries += 1;
       httpFailures += 1;
+      consecutiveFailures += 1;
+      failures.push({ query: discoveryQuery, error: error instanceof Error ? error.message : "Provider request failed." });
       continue;
     }
     fetched += signals.length;
     for (const signal of signals) {
+      if (deadline.aborted) {
+        deferredQueries += 1;
+        break;
+      }
       if (Date.parse(signal.postedAt) < cutoffMs) {
         skipped += 1;
         continue;
@@ -943,15 +986,17 @@ export async function ingestSocialProvider(
       try {
         const wasInserted = await persistSocialSignal(sourceId, signal, discoveryQuery, retrievedAt);
         if (wasInserted) inserted += 1; else updated += 1;
-      } catch {
+      } catch (error) {
         dbErrors += 1;
         skipped += 1;
+        if (failures.length < 10) failures.push({ query: discoveryQuery, error: `Social persistence failed (${String((error as { code?: string })?.code || "database_error")}).` });
         continue;
       }
       if (!latestPostedAt || signal.postedAt > latestPostedAt) latestPostedAt = signal.postedAt;
     }
   }
-  await pruneExpiredSocialSignals();
+  // Retention has an independent leased maintenance cadence. It must not
+  // turn successful acquisition into a failed provider run or hide totals.
   return {
     provider: platform,
     fetched,
@@ -963,6 +1008,8 @@ export async function ingestSocialProvider(
     failed_queries: failedQueries,
     http_failures: httpFailures,
     db_errors: dbErrors,
+    deferred_queries: deferredQueries,
+    failures,
     latest_posted_at: latestPostedAt,
     retention_days: retentionDays(),
     content_classification: "unverified_social_claim",

@@ -833,11 +833,13 @@ struct PodcastWorkspaceView: View {
         BrandBackground {
             ScrollView {
                 LazyVStack(spacing: 16) {
-                    IntelligenceEventPulseView(sourceLens: "podcast")
+
                     controls
-                    metrics
-                    if !model.podcasts.isEmpty {
-                        conclusions
+                    PhoneDetailSection("Podcast coverage & findings") {
+                        metrics
+                        if !model.podcasts.isEmpty {
+                            conclusions
+                        }
                     }
 
                     if let error = model.podcastLoadError {
@@ -1116,86 +1118,88 @@ struct PodcastWorkspaceView: View {
                     }
                 }
 
-                if let summary = episode.summary, !summary.isEmpty {
-                    Text(summary)
-                        .font(.subheadline)
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                        .lineLimit(4)
-                }
-
                 SourceInvestigationButton(domain: "podcast", recordType: "podcast_episode", recordID: String(episode.episode_id))
-                if !episode.external_links.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(episode.external_links) { link in
-                                if let url = link.resolvedURL {
-                                    Link(destination: url) {
-                                        Label(link.label, systemImage: "arrow.up.right")
+                PhoneDetailSection("Summary, \(episode.signals.count) signals & evidence") {
+                    if let summary = episode.summary, !summary.isEmpty {
+                        Text(summary)
+                            .font(.subheadline)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            .lineLimit(4)
+                    }
+
+                    if !episode.external_links.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(episode.external_links) { link in
+                                    if let url = link.resolvedURL {
+                                        Link(destination: url) {
+                                            Label(link.label, systemImage: "arrow.up.right")
+                                                .font(.caption.weight(.semibold))
+                                        }
+                                        .buttonStyle(.bordered)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if !episode.signals.isEmpty {
+                        Divider()
+                        Text("Extracted signals")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        ForEach(episode.signals.prefix(5)) { signal in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 7) {
+                                    Text(signal.type.uppercased())
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(signalTone(signal))
+                                    if let risk = signal.risk_level {
+                                        Text(risk.uppercased())
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                                    }
+                                }
+                                Text(signal.title)
+                                    .font(.subheadline.weight(.semibold))
+                                SourceInvestigationButton(domain: "podcast", recordType: "intelligence_signal", recordID: String(signal.id))
+                                if let summary = signal.summary {
+                                    Text(summary)
+                                        .font(.caption)
+                                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+
+                    if !episode.evidence.isEmpty {
+                        Divider()
+                        Text("Timestamped evidence")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        ForEach(episode.evidence.prefix(4)) { evidence in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(evidence.timestampLabel)
+                                        .font(.caption.monospacedDigit())
+                                    if let speaker = evidence.speaker {
+                                        Text(speaker)
                                             .font(.caption.weight(.semibold))
                                     }
-                                    .buttonStyle(.bordered)
+                                    Spacer()
+                                    if let source = evidence.source_url, let url = URL(string: source) {
+                                        Link(destination: url) {
+                                            Image(systemName: "arrow.up.right")
+                                        }
+                                        .accessibilityLabel("Open transcript source")
+                                    }
                                 }
-                            }
-                        }
-                    }
-                }
-
-                if !episode.signals.isEmpty {
-                    Divider()
-                    Text("Extracted signals")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    ForEach(episode.signals.prefix(5)) { signal in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 7) {
-                                Text(signal.type.uppercased())
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(signalTone(signal))
-                                if let risk = signal.risk_level {
-                                    Text(risk.uppercased())
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
-                                }
-                            }
-                            Text(signal.title)
-                                .font(.subheadline.weight(.semibold))
-                            SourceInvestigationButton(domain: "podcast", recordType: "intelligence_signal", recordID: String(signal.id))
-                            if let summary = signal.summary {
-                                Text(summary)
+                                Text(evidence.text)
                                     .font(.caption)
                                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .lineLimit(4)
                             }
-                        }
-                    }
-                }
-
-                if !episode.evidence.isEmpty {
-                    Divider()
-                    Text("Timestamped evidence")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                    ForEach(episode.evidence.prefix(4)) { evidence in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(evidence.timestampLabel)
-                                    .font(.caption.monospacedDigit())
-                                if let speaker = evidence.speaker {
-                                    Text(speaker)
-                                        .font(.caption.weight(.semibold))
-                                }
-                                Spacer()
-                                if let source = evidence.source_url, let url = URL(string: source) {
-                                    Link(destination: url) {
-                                        Image(systemName: "arrow.up.right")
-                                    }
-                                    .accessibilityLabel("Open transcript source")
-                                }
-                            }
-                            Text(evidence.text)
-                                .font(.caption)
-                                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                                .lineLimit(4)
                         }
                     }
                 }
@@ -1567,6 +1571,8 @@ private struct AdminIngestionPanelView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var runs: [AdminIngestionRun] = []
+    @State private var showsRunDetail = false
+    @State private var showsAllRuns = false
     @State private var selectedRunId: Int?
     @State private var selectedRun: AdminIngestionRun?
     @State private var logs: [AdminIngestionLog] = []
@@ -1716,25 +1722,8 @@ private struct AdminIngestionPanelView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else {
-                AdminCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Status-only mobile controls", systemImage: "lock.shield")
-                            .font(.headline)
-                        Text("Manual triggers, automation rules, and raw payload editing are available on iPad and desktop.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Button {
-                            Task { await refreshOverview(silent: false) }
-                        } label: {
-                            Label("Refresh service health", systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isLoadingOverview)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
             }
+
 
             if horizontalSizeClass == .regular {
                 AdminCard {
@@ -1932,45 +1921,6 @@ private struct AdminIngestionPanelView: View {
 
             AdminCard {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Metrics summary")
-                        .font(.headline)
-                    if totals.isEmpty {
-                        Text("No ingestion metrics available.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(totals) { total in
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text(total.pipeline.label)
-                                        .font(.subheadline.weight(.semibold))
-                                    Spacer()
-                                    Text("\(total.run_count) runs")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Text("Success \(total.success_count) • Failed \(total.failed_count) • Running \(total.running_count) • Queued \(total.queued_count)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("Inserted \(total.inserted) • Updated \(total.updated) • Skipped \(total.skipped)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .padding(10)
-                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-                        }
-                    }
-                    if !points.isEmpty {
-                        Text("\(points.count) metric points loaded.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            AdminCard {
-                VStack(alignment: .leading, spacing: 10) {
                     Text("Recent runs")
                         .font(.headline)
                     if runs.isEmpty {
@@ -1978,114 +1928,104 @@ private struct AdminIngestionPanelView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(runs.prefix(40)) { run in
-                            Button(action: { selectedRunId = run.id }) {
-                                HStack(spacing: 10) {
+                        ForEach(runs.prefix(showsAllRuns || horizontalSizeClass == .regular ? 40 : 10)) { run in
+                            Button {
+                                selectedRun = run
+                                logs = []
+                                if selectedRunId == run.id {
+                                    Task { await refreshRun(run.id, silent: false) }
+                                }
+                                selectedRunId = run.id
+                                if horizontalSizeClass == .compact { showsRunDetail = true }
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
                                     VStack(alignment: .leading, spacing: 4) {
-                                        HStack(spacing: 8) {
-                                            Text("#\(run.id)")
-                                                .font(.subheadline.weight(.semibold))
-                                            Text(run.pipeline.label)
-                                                .font(.caption)
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(Color.primary.opacity(0.08), in: Capsule())
+                                        HStack(spacing: 6) {
+                                            Text("#\(run.id) · \(run.pipeline.label)")
+                                                .font(.caption.weight(.semibold))
                                             Text(runSourceSummary(run))
-                                                .font(.caption2.weight(.semibold))
-                                                .padding(.horizontal, 8)
-                                                .padding(.vertical, 4)
-                                                .background(ClaritasPalette.positiveText(for: colorScheme).opacity(0.16), in: Capsule())
-                                                .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
                                         }
                                         Text(formatDateTime(run.started_at))
-                                            .font(.caption)
+                                            .font(.caption2)
                                             .foregroundStyle(.secondary)
+                                        if let error = run.error, !error.isEmpty {
+                                            Text(error)
+                                                .font(.caption2)
+                                                .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                                                .lineLimit(1)
+                                        }
                                     }
-                                    Spacer()
+                                    Spacer(minLength: 0)
                                     Text(run.status.label)
-                                        .font(.caption.weight(.semibold))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .background(run.status.badgeColor.opacity(0.16), in: Capsule())
+                                        .font(.caption2.weight(.semibold))
                                         .foregroundStyle(run.status.badgeColor)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                 }
-                                .padding(10)
-                                .background(
-                                    (selectedRunId == run.id ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04)),
-                                    in: RoundedRectangle(cornerRadius: 10)
-                                )
+                                .frame(maxWidth: .infinity, minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            Divider()
+                        }
+                        if horizontalSizeClass == .compact && runs.count > 10 {
+                            Button(showsAllRuns ? "Show latest 10 runs" : "Show more runs") { showsAllRuns.toggle() }
+                                .font(.caption.weight(.semibold))
+                                .frame(minHeight: ClaritasLayout.minimumTouchTarget)
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            AdminCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Run detail")
-                        .font(.headline)
-                    if let runError {
-                        AdminErrorText(runError)
-                    }
-                    if let selectedRun {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Run #\(selectedRun.id) • \(selectedRun.pipeline.label)")
-                                .font(.subheadline.weight(.semibold))
-                            Text("Source: \(runSourceSummary(selectedRun))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Status: \(selectedRun.status.label)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Started: \(formatDateTime(selectedRun.started_at))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Finished: \(formatDateTime(selectedRun.finished_at))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("Duration: \(durationLabel(selectedRun))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if let error = selectedRun.error, !error.isEmpty {
-                                Text(error)
-                                    .font(.caption)
-                                    .foregroundStyle(.red)
-                            }
-                        }
-
-                        Divider()
-
-                        if logs.isEmpty {
-                            Text("No logs yet.")
+            PhoneDetailSection("Ingestion metrics") {
+                AdminCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Metrics summary")
+                            .font(.headline)
+                        if totals.isEmpty {
+                            Text("No ingestion metrics available.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(logs.prefix(120)) { log in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(spacing: 8) {
-                                        Text(log.level.rawValue.uppercased())
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(log.level.levelColor)
-                                        Text(formatDateTime(log.logged_at))
-                                            .font(.caption2)
+                            ForEach(totals) { total in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Text(total.pipeline.label)
+                                            .font(.subheadline.weight(.semibold))
+                                        Spacer()
+                                        Text("\(total.run_count) runs")
+                                            .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
-                                    Text(log.message)
-                                        .font(.footnote)
+                                    Text("Success \(total.success_count) • Failed \(total.failed_count) • Running \(total.running_count) • Queued \(total.queued_count)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("Inserted \(total.inserted) • Updated \(total.updated) • Skipped \(total.skipped)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
-                                .padding(.vertical, 4)
+                                .padding(10)
+                                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
                             }
                         }
-                    } else {
-                        Text("Select a run to inspect logs and details.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        if !points.isEmpty {
+                            Text("\(points.count) metric points loaded.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            if horizontalSizeClass == .regular { runDetailCard }
+
         }
         .task {
             await refreshOverview(silent: false)
@@ -2093,6 +2033,88 @@ private struct AdminIngestionPanelView: View {
         .task(id: selectedRunId) {
             guard let selectedRunId else { return }
             await refreshRun(selectedRunId, silent: false)
+        }
+        .sheet(isPresented: $showsRunDetail) {
+            NavigationStack {
+                BrandBackground {
+                    ScrollView { runDetailCard.padding(14) }
+                }
+                .navigationTitle("Ingestion run")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showsRunDetail = false }
+                    }
+                }
+            }
+            .presentationDetents([.medium, .large])
+        }
+    }
+
+    private var runDetailCard: some View {
+        AdminCard {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Run detail")
+                    .font(.headline)
+                if let runError {
+                    AdminErrorText(runError)
+                }
+                if let selectedRun {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Run #\(selectedRun.id) • \(selectedRun.pipeline.label)")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Source: \(runSourceSummary(selectedRun))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Status: \(selectedRun.status.label)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Started: \(formatDateTime(selectedRun.started_at))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Finished: \(formatDateTime(selectedRun.finished_at))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Duration: \(durationLabel(selectedRun))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let error = selectedRun.error, !error.isEmpty {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+
+                    Divider()
+
+                    if logs.isEmpty {
+                        Text("No logs yet.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(logs.prefix(120)) { log in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    Text(log.level.rawValue.uppercased())
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(log.level.levelColor)
+                                    Text(formatDateTime(log.logged_at))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(log.message)
+                                    .font(.footnote)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                } else {
+                    Text("Select a run to inspect logs and details.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

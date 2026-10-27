@@ -10,6 +10,8 @@ final class APIClient {
     private let session: URLSession
     private let baseURL: URL
     private var authToken: String?
+    private var authRequestScope = UUID()
+    private let readRequests = AsyncRequestCoalescer<String, Data>()
 
     var baseURLDescription: String {
         baseURL.absoluteString
@@ -48,6 +50,7 @@ final class APIClient {
     }
 
     func setAuthToken(_ token: String?) {
+        if authToken != token { authRequestScope = UUID() }
         self.authToken = token
     }
 
@@ -851,11 +854,26 @@ final class APIClient {
     // MARK: - Generic request
 
     private func request<T>(_ req: URLRequest, as: T.Type, rootKey: String? = nil) async throws -> T where T: Decodable {
-        let (data, resp) = try await session.data(for: authedRequest(req))
-        guard let http = resp as? HTTPURLResponse else { throw APIError(status: -1, message: "No HTTP response") }
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
+        let authorizedRequest = authedRequest(req)
+        let fetch: @Sendable () async throws -> Data = { [session] in
+            let (data, response) = try await session.data(for: authorizedRequest)
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError(status: -1, message: "No HTTP response")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw APIError(status: http.statusCode, message: Self.responseErrorMessage(data: data, statusCode: http.statusCode))
+            }
+            return data
         }
+        let data: Data
+        if (authorizedRequest.httpMethod ?? "GET") == "GET", authorizedRequest.httpBody == nil {
+            let headers = (authorizedRequest.allHTTPHeaderFields ?? [:]).sorted { $0.key < $1.key }
+            let key = "\(authRequestScope)|\(authorizedRequest.url?.absoluteString ?? "")|\(headers)|\(authorizedRequest.cachePolicy.rawValue)"
+            data = try await readRequests.value(for: key, fetch: fetch)
+        } else {
+            data = try await fetch()
+        }
+        try Task.checkCancellation()
         if let rootKey {
             let container = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
             let value = container?[rootKey]
@@ -866,6 +884,10 @@ final class APIClient {
     }
 
     private func errorMessage(data: Data, statusCode: Int) -> String {
+        Self.responseErrorMessage(data: data, statusCode: statusCode)
+    }
+
+    private static func responseErrorMessage(data: Data, statusCode: Int) -> String {
         if let object = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
            let error = object["error"] as? String,
            !error.isEmpty {
