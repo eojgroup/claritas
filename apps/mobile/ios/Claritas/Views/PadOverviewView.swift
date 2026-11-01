@@ -59,14 +59,6 @@ struct PadOverviewView: View {
                     commandHeader
                     workspaceStrip
 
-                    BriefingOverviewCard(briefing: model.dailyBriefing) {
-                        destination = .briefing
-                    }
-
-                    IntelligenceEventPulseView(presentation: .horizontal)
-
-                    newsPanel
-
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: 16) {
                             SignalMapPanel(
@@ -74,10 +66,10 @@ struct PadOverviewView: View {
                                 allowsComparison: true,
                                 showsCountryProfile: false
                             )
-                            .frame(maxWidth: .infinity, alignment: .top)
+                            .frame(minWidth: 320, maxWidth: .infinity, alignment: .top)
 
-                            OverviewSatelliteContextView(destination: $destination)
-                                .frame(width: 340, alignment: .top)
+                            worldContext
+                                .frame(width: 380, alignment: .top)
                         }
 
                         VStack(spacing: 16) {
@@ -86,9 +78,17 @@ struct PadOverviewView: View {
                                 allowsComparison: true,
                                 showsCountryProfile: false
                             )
-                            OverviewSatelliteContextView(destination: $destination)
+                            worldContext
                         }
                     }
+
+                    IntelligenceEventPulseView(presentation: .horizontal)
+
+                    BriefingOverviewCard(briefing: model.dailyBriefing) {
+                        destination = .briefing
+                    }
+
+                    newsPanel
 
                     metrics
 
@@ -113,16 +113,41 @@ struct PadOverviewView: View {
         }
     }
 
+    @ViewBuilder
+    private var worldContext: some View {
+        if let eventID = model.selectedIntelligenceEventID {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Event context", systemImage: "link")
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        model.selectedIntelligenceEventID = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .accessibilityLabel("Close event context")
+                }
+                IntelligenceWorkspaceView(contextualEventID: eventID)
+                    .frame(height: 620)
+                    .clipShape(RoundedRectangle(cornerRadius: ClaritasLayout.panelRadius))
+            }
+        } else {
+            OverviewSatelliteContextView(destination: $destination)
+        }
+    }
+
     private var commandHeader: some View {
         HStack(alignment: .center, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("LIVE INTELLIGENCE WORKSPACE")
+                Text("WHAT’S HAPPENING · WHERE")
                     .font(.caption.weight(.semibold))
                     .tracking(1.4)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
-                Text("Signal desk")
+                Text("World overview")
                     .font(.largeTitle.weight(.semibold))
-                Text("Cross-source relevance, evidence, and operational context in a touch-first review surface.")
+                Text("Explore a place, follow a developing event, and see its evidence in context.")
                     .font(.subheadline)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             }
@@ -145,7 +170,6 @@ struct PadOverviewView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 workspaceButton(.briefing, label: "Daily briefing")
-                workspaceButton(.intelligence, label: "Investigate events")
                 workspaceButton(.transport, label: "Transport context")
                 workspaceButton(.news, label: "Source reporting")
             }

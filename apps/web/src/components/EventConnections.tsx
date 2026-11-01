@@ -15,8 +15,9 @@ const summary = (item: IntelligenceEvidence) => item.summary || item.source_summ
 const sourceUrl = (item: IntelligenceEvidence) => item.source_url || recordString(item.provenance, "url");
 const relationshipLabel = (relationship: string) => ({ reported: "Reported", observed: "Observed", context: "Context", derived: "Derived", corroborates: "Corroborates", contradicts: "Contradicts", model_interpretation: "Model interpretation", assessment: "Coverage assessment" }[relationship.trim().toLowerCase()] || "Context");
 
-export default function EventConnections({ detail, onOpenImagery }: { detail: IntelligenceEventDetail; onOpenImagery?: (id?: string) => void }) {
-  const [selected, setSelected] = useState("all");
+export default function EventConnections({ detail, onOpenImagery, selectedFamily, onSelectFamily }: { detail: IntelligenceEventDetail; onOpenImagery?: (id?: string) => void; selectedFamily?: string; onSelectFamily?: (family: string) => void }) {
+  const [localSelected, setSelected] = useState("all");
+  const selected = selectedFamily ?? localSelected;
   const [showAll, setShowAll] = useState(false);
   const assessments = detail.evidence.filter(isCoverageAssessment);
   const records = useMemo(() => {
@@ -53,7 +54,7 @@ export default function EventConnections({ detail, onOpenImagery }: { detail: In
   const displayedRecords = showAll ? visibleRecords : visibleRecords.slice(0, 6);
   const count = groups.filter((group) => group.count > 0).length;
   const origin = eventOrigin(detail.event);
-  const choose = (domain: string) => { setSelected(domain); setShowAll(false); };
+  const choose = (domain: string) => { setSelected(domain); onSelectFamily?.(domain); setShowAll(false); };
 
   return <section className="event-connections" aria-labelledby="event-connections-heading">
     <div className="event-connections-heading">

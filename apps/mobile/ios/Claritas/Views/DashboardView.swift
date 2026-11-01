@@ -55,6 +55,9 @@ struct DashboardView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: eventContextPresented(inExpandedMap: false)) {
+            eventContextSheet
+        }
         .fullScreenCover(isPresented: $showsExpandedMap) {
             NavigationStack {
                 BrandBackground {
@@ -75,6 +78,14 @@ struct DashboardView: View {
                     }
                 }
             }
+            .sheet(isPresented: eventContextPresented(inExpandedMap: true)) {
+                eventContextSheet
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
+            guard let destination = note.object as? String, destination != "intelligence" else { return }
+            showsExpandedMap = false
+            showsCountryFocus = false
         }
         .task(id: mobileNewsRequestKey) {
             guard model.authStatus == .authed, model.hasPaidAccess else { return }
@@ -87,6 +98,30 @@ struct DashboardView: View {
                 category: model.selectedNewsCategory
             )
         }
+    }
+
+    private func eventContextPresented(inExpandedMap: Bool) -> Binding<Bool> {
+        Binding(
+            get: { model.selectedIntelligenceEventID != nil && showsExpandedMap == inExpandedMap },
+            set: { if !$0 { model.selectedIntelligenceEventID = nil } }
+        )
+    }
+
+    private var eventContextSheet: some View {
+        NavigationStack {
+            if let eventID = model.selectedIntelligenceEventID {
+                IntelligenceWorkspaceView(contextualEventID: eventID)
+                    .navigationTitle("Event context")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Back to world") { model.selectedIntelligenceEventID = nil }
+                        }
+                    }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
     }
 
     private var mobileNewsPulse: some View {
@@ -258,10 +293,10 @@ struct DashboardView: View {
     private var mobileQuickActions: some View {
         HStack(spacing: 10) {
             mobileAction(
-                title: "Investigate",
-                detail: "Evidence thread",
-                icon: "scope"
-            ) { openCompactDestination("intelligence") }
+                title: "Country",
+                detail: "Local context",
+                icon: "globe.europe.africa"
+            ) { showsCountryFocus = true }
             mobileAction(
                 title: "News",
                 detail: "Source reporting",
@@ -4341,6 +4376,7 @@ struct SignalMapPanel: View {
     @State private var resetToken = 0
     @State private var events: [IntelligenceEvent] = []
     @State private var eventLoadError: String?
+    @State private var eventLoading = false
     @State private var profileCountry: String?
     @State private var showsCountryProfileSheet = false
 
@@ -4351,6 +4387,12 @@ struct SignalMapPanel: View {
 
     private var compactLayout: Bool { horizontalSizeClass == .compact }
 
+    private var contextEvents: [IntelligenceEvent] {
+        guard let selected = model.selectedIntelligenceEvent,
+              selected.id == model.selectedIntelligenceEventID else { return events }
+        return [selected] + events.filter { $0.id != selected.id }
+    }
+
     private var points: [CountryBubblePoint] {
         SignalMapDataBuilder.points(
             for: mode,
@@ -4359,7 +4401,7 @@ struct SignalMapPanel: View {
             podcasts: model.podcasts,
             weather: model.weather,
             countryMarkets: model.countryMarkets,
-            events: events,
+            events: contextEvents,
             leadership: model.leadership,
             transport: model.signalTransportOverview
         )
@@ -4373,7 +4415,7 @@ struct SignalMapPanel: View {
 
     private var locatedEvents: [IntelligenceEvent] {
         let bounds = region.geographicBounds
-        return events
+        return contextEvents
             .filter { event in
                 guard let latitude = event.latitude,
                       let longitude = event.longitude,
@@ -4393,6 +4435,9 @@ struct SignalMapPanel: View {
                     latitude >= bounds.minLat && latitude <= bounds.maxLat
             }
             .sorted {
+                if ($0.id == model.selectedIntelligenceEventID) != ($1.id == model.selectedIntelligenceEventID) {
+                    return $0.id == model.selectedIntelligenceEventID
+                }
                 if severityRank($0.severity) != severityRank($1.severity) {
                     return severityRank($0.severity) > severityRank($1.severity)
                 }
@@ -4471,12 +4516,30 @@ struct SignalMapPanel: View {
                     }
                     Spacer()
                     if eventLoadError != nil {
-                        Text("Event layer retrying")
+                        Button("Retry events") { Task { await loadEvents() } }
+                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                            .disabled(eventLoading)
                             .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
                     }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                if mode != .transport, model.isRefreshingCountryStats && model.countryStats.isEmpty {
+                    ProgressView("Loading country coverage")
+                        .font(.caption)
+                } else if mode != .transport, model.countryStatsLoadError != nil {
+                    HStack(alignment: .center, spacing: 8) {
+                        Label(model.countryStats.isEmpty ? "News coverage unavailable" : "Showing earlier news coverage", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                        Spacer()
+                        Button("Retry") { Task { await model.refreshCountryStats() } }
+                            .font(.caption.weight(.semibold))
+                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                            .disabled(model.isRefreshingCountryStats)
+                    }
+                }
 
                 if !compactLayout, mode == .signals {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -4528,11 +4591,22 @@ struct SignalMapPanel: View {
         }
         .onAppear {
             let resolved = SignalMapMode(rawValue: storedMode) ?? .signals
-            mode = resolved
+            mode = model.selectedIntelligenceEventID == nil ? resolved : .signals
             storedMode = resolved.rawValue
         }
         .task {
             await loadEvents()
+        }
+        .onChange(of: model.selectedIntelligenceEvent) { event in
+            guard let event else { return }
+            if mode == .transport { mode = .signals }
+            let bounds = region.geographicBounds
+            if let country = event.primary_country_iso2, !region.contains(country) {
+                region = .global
+            } else if let longitude = event.longitude, let latitude = event.latitude,
+                      longitude < bounds.minLon || longitude > bounds.maxLon || latitude < bounds.minLat || latitude > bounds.maxLat {
+                region = .global
+            }
         }
         .sheet(isPresented: $showsCountryProfileSheet) {
             NavigationStack {
@@ -4847,6 +4921,7 @@ struct SignalMapPanel: View {
 
     private func resetMapState() {
         model.selectedCountry = nil
+        model.selectedIntelligenceEventID = nil
         comparisonCountry = nil
         pinnedCountry = nil
         compareMode = false
@@ -4866,6 +4941,9 @@ struct SignalMapPanel: View {
            primary != normalized {
             comparisonCountry = normalized
             return
+        }
+        if model.selectedCountry?.uppercased() != normalized {
+            model.selectedIntelligenceEventID = nil
         }
         model.selectedCountry = normalized
         profileCountry = normalized
@@ -4888,8 +4966,7 @@ struct SignalMapPanel: View {
     }
 
     private func selectEvent(_ event: IntelligenceEvent) {
-        model.selectedCountry = event.primary_country_iso2?.uppercased()
-        model.selectedIntelligenceEventID = event.id
+        model.selectIntelligenceEvent(event)
         NotificationCenter.default.post(
             name: .claritasWatchOpenDestination,
             object: "intelligence",
@@ -4899,10 +4976,16 @@ struct SignalMapPanel: View {
 
     @MainActor
     private func loadEvents() async {
+        guard !eventLoading else { return }
+        eventLoading = true
+        defer { eventLoading = false }
         do {
-            events = try await model.api.fetchIntelligenceEvents(limit: 100, country: nil)
+            let loaded = try await model.api.fetchIntelligenceEvents(limit: 100, country: nil)
+            guard !Task.isCancelled else { return }
+            events = loaded
             eventLoadError = nil
         } catch {
+            guard !Task.isCancelled else { return }
             eventLoadError = error.localizedDescription
         }
     }
@@ -5363,6 +5446,7 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
 
             let nextOverlaySignature = [
                 next.mode.rawValue,
+                String(map.traitCollection.userInterfaceStyle.rawValue),
                 next.selectedCountry?.uppercased() ?? "",
                 next.comparisonCountry?.uppercased() ?? "",
                 next.pinnedCountry?.uppercased() ?? "",
@@ -5370,7 +5454,19 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
             ].joined(separator: "|")
             if force || nextOverlaySignature != overlaySignature {
                 overlaySignature = nextOverlaySignature
-                installCountryOverlays(on: map)
+                if force || overlayCountries.isEmpty {
+                    installCountryOverlays(on: map)
+                } else {
+                    // Geometry is static. Progressive resource loads and country
+                    // selections only change its paint; replacing every polygon
+                    // repeatedly makes the map stall while new layers arrive.
+                    for overlay in map.overlays {
+                        guard let polygon = overlay as? MKPolygon,
+                              let renderer = map.renderer(for: polygon) as? MKPolygonRenderer else { continue }
+                        configureCountryRenderer(renderer, polygon: polygon, map: map)
+                        renderer.setNeedsDisplay()
+                    }
+                }
             }
 
             let pointSignature = next.points.map { point in
@@ -5472,10 +5568,15 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
                 return MKOverlayRenderer(overlay: overlay)
             }
             let renderer = MKPolygonRenderer(polygon: polygon)
+            configureCountryRenderer(renderer, polygon: polygon, map: mapView)
+            return renderer
+        }
+
+        private func configureCountryRenderer(_ renderer: MKPolygonRenderer, polygon: MKPolygon, map: MKMapView) {
             guard let iso = overlayCountries[ObjectIdentifier(polygon)] else {
                 renderer.fillColor = .clear
                 renderer.strokeColor = .clear
-                return renderer
+                return
             }
 
             let selected = iso == parent.selectedCountry?.uppercased()
@@ -5486,10 +5587,10 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
                     for: point,
                     mode: parent.mode,
                     points: parent.points,
-                    dark: mapView.traitCollection.userInterfaceStyle == .dark
+                    dark: map.traitCollection.userInterfaceStyle == .dark
                 ).withAlphaComponent(selected ? 0.72 : 0.48)
             } else {
-                let dark = mapView.traitCollection.userInterfaceStyle == .dark
+                let dark = map.traitCollection.userInterfaceStyle == .dark
                 renderer.fillColor = dark
                     ? UIColor(red: 0.06, green: 0.13, blue: 0.19, alpha: selected ? 0.68 : 0.20)
                     : UIColor(red: 0.58, green: 0.66, blue: 0.71, alpha: selected ? 0.58 : 0.16)
@@ -5501,7 +5602,6 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
                     : UIColor.white.withAlphaComponent(0.30)
             renderer.lineWidth = selected || compared || pinned ? 2.2 : 0.7
             renderer.lineDashPattern = pinned ? [NSNumber(value: 4), NSNumber(value: 3)] : nil
-            return renderer
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {

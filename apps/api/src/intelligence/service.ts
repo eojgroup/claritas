@@ -335,7 +335,17 @@ export async function listIntelligenceEvents(options: {
   const offsetRef = add(offset);
   const { rows } = await query<EventRow>(
     `WITH eligible AS MATERIALIZED (
-       SELECT event.* FROM intelligence_event event
+       -- Rank lightweight rows. Full metadata, summaries and geometry can be
+       -- large; carrying them through every CTE spills even a small live feed
+       -- to disk before its page limit is applied.
+       SELECT event.id,event.event_type,event.severity,event.source_diversity,
+              event.relevance_score,event.urgency_score,event.materiality_score,
+              event.last_activity_time,
+              jsonb_build_object(
+                'origin_domain',event.metadata->>'origin_domain',
+                'canonical_evidence_key',event.metadata->>'canonical_evidence_key'
+              ) AS metadata
+       FROM intelligence_event event
        WHERE ${where.join(" AND ")}
      ), candidates AS MATERIALIZED (
        SELECT event.*,
@@ -356,7 +366,10 @@ export async function listIntelligenceEvents(options: {
        ORDER BY feed_order_score DESC,last_activity_time DESC,id
        LIMIT ${limitRef} OFFSET ${offsetRef}
      )
-     SELECT event.*,location.canonical_name AS location_name,
+     SELECT event.*,selection.origin_domain,selection.news_priority,
+            selection.raw_priority,selection.origin_topic_rank,
+            selection.priority_score,selection.feed_order_score,
+            location.canonical_name AS location_name,
             ${eventSignalDomainsSql()} AS signal_domains,
             location.location_type,
             COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,location.latitude) AS latitude,
@@ -375,9 +388,10 @@ export async function listIntelligenceEvents(options: {
                    END))) AS evidence_count,
             ${intelligenceEventExpiresAtSql("event")} AS expires_at,
             (${intelligenceEventEarthObservationStateSql()}) AS earth_observation_state
-     FROM selected event
+     FROM selected selection
+     JOIN intelligence_event event ON event.id=selection.id
      LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
-     ORDER BY event.feed_order_score DESC,event.last_activity_time DESC,event.id`,
+     ORDER BY selection.feed_order_score DESC,event.last_activity_time DESC,event.id`,
     params,
   );
   const social = await getSocialEventContexts(rows.map((row) => row.id));

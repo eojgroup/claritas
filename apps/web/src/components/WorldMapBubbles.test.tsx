@@ -123,6 +123,36 @@ describe("WorldMapBubbles interaction", () => {
     vi.unstubAllGlobals();
   });
 
+  it("renders and remains interactive when the event layer is omitted", () => {
+    // News, weather and market maps provide countries only. This path used to
+    // repeatedly refit a fresh default points array until React locked up.
+    const onSelect = vi.fn();
+    render(<WorldMapBubbles data={[
+      { country: "DE", count: 8 },
+      { country: "BR", count: 5 },
+    ]} onSelect={onSelect} />);
+    expect(screen.getByRole("application").getAttribute("viewBox")).toBe("0 0 960 480");
+    fireEvent.click(screen.getAllByRole("button", { name: /Germany: 8/i })[0]);
+    expect(onSelect).toHaveBeenCalledWith("DE");
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(screen.getByRole("application").querySelector("g[transform]")?.getAttribute("transform"))
+      .not.toContain("NaN");
+  });
+
+  it("preserves the map viewport when an event is selected or country counts refresh", () => {
+    const data = [{ country: "DE", count: 8 }, { country: "BR", count: 5 }];
+    const points = [{ id: "event-1", latitude: -15.7, longitude: -47.9, title: "Fire" }];
+    const { rerender } = render(<WorldMapBubbles data={data} points={points} />);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    const viewport = () => screen.getByRole("application").querySelector("g[transform]")?.getAttribute("transform");
+    const zoomed = viewport();
+    rerender(<WorldMapBubbles
+      data={[{ country: "DE", count: 9 }, { country: "BR", count: 10 }]}
+      points={[{ ...points[0], selected: true }]}
+    />);
+    expect(viewport()).toBe(zoomed);
+  });
+
   it("keeps ordinary wheel scrolling inert on hover until the map is activated", () => {
     const { mapLayer, svg } = renderMap();
     const eventMarker = screen.getByRole("button", { name: /Observed fire signal/i });

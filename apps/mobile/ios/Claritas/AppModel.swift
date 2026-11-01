@@ -76,7 +76,14 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var selectedNewsItem: NewsItem? = nil
-    @Published var selectedIntelligenceEventID: String? = nil
+    @Published var selectedIntelligenceEventID: String? = nil {
+        didSet {
+            if selectedIntelligenceEvent?.id != selectedIntelligenceEventID {
+                selectedIntelligenceEvent = nil
+            }
+        }
+    }
+    @Published private(set) var selectedIntelligenceEvent: IntelligenceEvent?
     @Published var dailyBriefing: DailySignalBriefing? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
     @Published var news: [NewsItem] = []
@@ -87,6 +94,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var socialSignals: [SocialSignal] = []
     @Published private(set) var socialCoverage: SocialCoverageResponse? = nil
     @Published var countryStats: [CountryStat] = []
+    @Published private(set) var countryStatsLoadError: String?
+    @Published private(set) var isRefreshingCountryStats = false
+    private var countryStatsRequestID = UUID()
     @Published var weather: [CountryWeather] = []
     @Published var leadership: [CountryLeadership] = []
     @Published var marketQuotes: [MarketQuote] = []
@@ -518,9 +528,7 @@ final class AppModel: ObservableObject {
 
         // Each request publishes independently: a slow optional resource must
         // not hold the map, briefing, weather or reporting behind a batch barrier.
-        async let statsError = loadInitialValue(generation: generation, fetch: {
-            try await self.api.fetchCountryStats(days: 30)
-        }, apply: { self.countryStats = $0 })
+        async let statsError = refreshCountryStats()
         async let briefingError = loadInitialValue(generation: generation, fetch: {
             try await self.api.fetchLatestDailyBriefing()
         }, apply: {
@@ -618,6 +626,26 @@ final class AppModel: ObservableObject {
         })
     }
 
+    @discardableResult
+    func refreshCountryStats() async -> Error? {
+        guard hasPaidAccess, !isRefreshingCountryStats else { return nil }
+        let requestID = UUID()
+        countryStatsRequestID = requestID
+        let generation = dataGeneration
+        isRefreshingCountryStats = true
+        defer {
+            if countryStatsRequestID == requestID { isRefreshingCountryStats = false }
+        }
+        return await loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchCountryStats(days: 30)
+        }, apply: {
+            self.countryStats = $0
+            self.countryStatsLoadError = nil
+        }, onError: {
+            self.countryStatsLoadError = ($0 as? APIError)?.message ?? $0.localizedDescription
+        })
+    }
+
     func clearAppData() {
         dataGeneration = UUID()
         initialLoadID = nil
@@ -630,6 +658,9 @@ final class AppModel: ObservableObject {
         dailyBriefingScheduleError = nil
         dailyBriefingScheduleNotice = nil
         countryStats = []
+        countryStatsRequestID = UUID()
+        countryStatsLoadError = nil
+        isRefreshingCountryStats = false
         weather = []
         leadership = []
         news = []
@@ -695,6 +726,12 @@ final class AppModel: ObservableObject {
     func selectNewsItem(_ item: NewsItem?) {
         selectedNewsItem = item
         selectedNewsItemID = item?.id
+    }
+
+    func selectIntelligenceEvent(_ event: IntelligenceEvent) {
+        selectedIntelligenceEventID = event.id
+        selectedIntelligenceEvent = event
+        selectedCountry = event.primary_country_iso2?.uppercased()
     }
 
     func configurePushNotifications() async {

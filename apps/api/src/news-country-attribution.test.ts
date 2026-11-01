@@ -35,7 +35,12 @@ test("current assessment SQL rejects item and linked-event changes after the wor
 test("country stats use reader-compatible multi-country evidence and story semantics", () => {
   const sql = buildNewsCountryStatsQuery();
   assert.match(sql, /subject_country_iso2s/);
-  assert.match(sql, /jsonb_array_elements[\s\S]*gkg,locations/);
+  assert.match(sql, /i\.payload#>'\{gkg,locations\}'/);
+  assert.match(sql, /jsonb_array_elements\(\s*eligible.gkg_locations/);
+  assert.match(sql, /jsonb_array_elements_text\(\s*eligible.subject_country_iso2s/);
+  assert.doesNotMatch(sql, /i\.event_time,i\.payload|eligible\.payload/);
+  assert.match(sql, /WITH eligible_ids AS MATERIALIZED \(\s*SELECT i.id,s.name AS source_name/);
+  assert.match(sql, /FROM eligible_ids\s*JOIN item i ON i.id=eligible_ids.id/);
   assert.match(sql, /correlation_factors->>'decision'='attached'/);
   assert.match(sql, /count\(DISTINCT story_key\)::int AS count/);
   assert.match(sql, /verified_count/);

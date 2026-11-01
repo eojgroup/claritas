@@ -69,7 +69,7 @@ function classifyError(value) {
 function counters(value = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const output = {};
-  for (const key of ["fetched", "accepted", "selected", "inserted", "updated", "unchanged", "skipped", "candidates", "budget", "gkg_sampled", "gkg_archives_scanned", "gkg_canonical_country_url_probes", "persistence_failures", "alias_synchronization_failures", "duration_ms", "assessed"]) {
+  for (const key of ["fetched", "accepted", "selected", "inserted", "updated", "unchanged", "skipped", "candidates", "budget", "gkg_sampled", "gkg_archives_scanned", "gkg_canonical_country_url_probes", "persistence_failures", "alias_synchronization_failures", "duration_ms", "assessed", "feed_candidates", "minutes_scanned", "minutes_missing", "known_urls", "quota_omitted", "skipped_backlog_minutes", "expired_retry_minutes"]) {
     if (typeof value[key] === "number" && Number.isFinite(value[key])) output[key] = value[key];
   }
   for (const key of ["quality_rejections", "persistence_failure_classes"]) {
@@ -84,11 +84,21 @@ function summarizeRun(run) {
   const steps = Array.isArray(run.stats?.steps) ? run.stats.steps : [];
   const step = steps.find((candidate) => candidate?.step === "gdelt/doc-event-gkg");
   const result = step?.result || {};
+  const primary = result.gal_primary || {};
   const lanes = Array.isArray(result.articles?.discovery_lanes) ? result.articles.discovery_lanes : [];
   return {
     run_id: Number(run.id), status: run.status, trigger_mode: run.trigger_mode,
     started_at: run.started_at, finished_at: run.finished_at,
     gdelt_step_status: step?.status, counters: counters(result),
+    acquisition_strategy: result.acquisition_strategy,
+    headline_status: result.headline_status,
+    primary: { ...counters(primary), health: primary.health,
+      latest_interval_at: primary.latest_interval_at, latest_event_time: primary.latest_event_time,
+      error: classifyError(primary.error),
+      file_errors: Array.isArray(primary.file_errors) ? primary.file_errors.slice(0, 34).map((file) => ({
+        minute: /^\d{14}$/.test(file?.minute || "") ? file.minute : undefined,
+        error: classifyError(file?.error),
+      })) : [] },
     step_error: classifyError(step?.error), doc_error: classifyError(result.doc_error),
     gal_error: classifyError(result.gal_error || result.gal_supplement_error),
     doc: counters(result.articles), gal: counters(result.gal_fallback || result.gal_supplement),
@@ -111,7 +121,8 @@ async function main() {
     }
     return;
   }
-  const runID = process.argv[2] || "";
+  const latest = process.argv[2] === "--latest";
+  const runID = latest ? "" : process.argv[2] || "";
   if (runID && !/^[1-9][0-9]{0,14}$/.test(runID)) throw new Error("Invalid run identifier");
   // Exercise the same stored-data reads as the dashboard without user data,
   // tokens, titles or URLs in the diagnostic output.
@@ -201,9 +212,9 @@ async function main() {
       console.log(JSON.stringify({ social_provider_probe: { provider: "bluesky", error: classifyError(error) } }));
     }
     const result = await client.query(`SELECT id,status,trigger_mode,started_at,finished_at,stats
-      FROM ingestion_run WHERE pipeline='news' AND trigger_mode='release_gate'
-        AND ($1::bigint IS NULL OR id=$1::bigint) ORDER BY id DESC LIMIT 1`, [runID || null]);
-    if (!result.rows.length) throw new Error("Requested release run was not found");
+      FROM ingestion_run WHERE pipeline='news' AND ($2::boolean OR trigger_mode='release_gate')
+        AND ($1::bigint IS NULL OR id=$1::bigint) ORDER BY id DESC LIMIT 1`, [runID || null, latest]);
+    if (!result.rows.length) throw new Error("Requested news run was not found");
     console.log(JSON.stringify(summarizeRun(result.rows[0])));
   } finally { await client.end(); }
 }

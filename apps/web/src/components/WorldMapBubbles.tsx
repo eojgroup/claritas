@@ -129,6 +129,9 @@ type PinchGesture = {
 
 const INITIAL_SIZE = { width: 960, height: 480 };
 const GESTURE_CLICK_SUPPRESSION_MS = 900;
+// A fresh default array would retrigger the fitting effect after every setView,
+// locking country-only maps into a render loop before they can be used.
+const NO_EVENT_POINTS: WorldMapPoint[] = [];
 
 const WORLD_GEOMETRY = (() => {
   const references = worldCountries as WorldCountryReference[];
@@ -347,13 +350,14 @@ export default memo(function WorldMapBubbles({
   valueDomain,
   valueUnit = "",
   showBubbles = true,
-  points = [],
+  points = NO_EVENT_POINTS,
   onSelectPoint,
 }: WorldMapBubblesProps) {
   const countryContexts = useCountryContexts();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const viewRef = useRef<ViewTransform>({ scale: 1, x: 0, y: 0 });
+  const fittedFootprintRef = useRef("");
   const activePointersRef = useRef(new globalThis.Map<number, ActivePointer>());
   const pinchRef = useRef<PinchGesture | null>(null);
   const gestureMovedRef = useRef(false);
@@ -518,7 +522,13 @@ export default memo(function WorldMapBubbles({
       ...eventPoints.map((point): [number, number] => [point.longitude, point.latitude]),
     ]
       .map((coordinate) => projection(coordinate))
-      .filter((point): point is [number, number] => Boolean(point));
+      .filter((point): point is [number, number] => Boolean(point))
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    // Counts, selected markers and evidence metadata can refresh without a new
+    // footprint. Preserve the reader's pan/zoom while they inspect a story.
+    const footprint = JSON.stringify([size.width, size.height, isCompact, projectedPoints]);
+    if (fittedFootprintRef.current === footprint) return;
+    fittedFootprintRef.current = footprint;
     if (projectedPoints.length < 2) {
       setView({ scale: 1, x: 0, y: 0 });
       return;

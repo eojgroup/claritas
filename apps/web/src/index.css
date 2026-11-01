@@ -703,7 +703,8 @@ a {
 }
 
 .app-map-frame {
-  height: 100%;
+  /* A layered default lets explicit Tailwind viewport heights win. The old
+     unlayered height:100% overrode them and collapsed auto-sized map panels. */
   overflow: hidden;
   border: 1px solid var(--shell-border);
   border-radius: 0.9rem;
@@ -712,6 +713,12 @@ a {
     color-mix(in srgb, var(--shell-bg-elevated) 78%, transparent),
     color-mix(in srgb, var(--shell-surface) 94%, transparent)
   );
+}
+
+@layer components {
+  .app-map-frame {
+    height: 100%;
+  }
 }
 
 .app-scroll-panel {
@@ -5274,6 +5281,52 @@ body {
 .event-preview-provenance { display: flex; flex-wrap: wrap; gap: 2px 8px; color: var(--shell-muted); font-size: 10px; }
 .event-preview-row:focus-visible { outline: 2px solid var(--shell-accent); outline-offset: 3px; }
 .source-investigate-action > button { min-height: 44px; border: 0; border-radius: 6px; padding: 4px 0; color: var(--shell-accent); }
+
+/* World overview: the selected event remains beside its geography. */
+.world-event-context { min-width: 0; scroll-margin-top: 6rem; }
+.world-event-context-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--shell-border); font-size: 11px; color: var(--shell-muted); }
+.world-event-context-heading button { min-height: 44px; color: var(--shell-accent); font-weight: 600; }
+.world-event-context-body { min-height: 0; }
+.event-context-embedded #selected-event-investigation { border: 0; border-radius: 0; box-shadow: none; }
+.event-context-embedded h2 { font-size: 1.25rem; line-height: 1.4; }
+.event-context-embedded .event-visual-grid { grid-template-columns: 1fr; }
+.event-context-embedded .event-location-map { display: none; }
+.event-context-embedded .event-correlation-graphic svg { max-height: 230px; }
+.event-context-embedded .event-connection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.world-event-stream { border: 1px solid var(--shell-border); border-radius: 12px; background: var(--shell-surface); padding: 16px; }
+.world-event-stream > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.world-event-stream h2 { font-size: 15px; font-weight: 650; }
+.world-event-stream p { font-size: 12px; line-height: 1.6; color: var(--shell-muted); }
+.world-event-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; font-size: 12px; }
+.world-event-controls select { min-height: 44px; padding: 8px; border: 1px solid var(--shell-border); border-radius: 8px; background: var(--shell-bg); color: var(--shell-ink); }
+.world-event-controls button, .world-event-more { min-height: 44px; font-size: 12px; font-weight: 600; color: var(--shell-accent); }
+.world-event-row { display: grid; width: 100%; grid-template-columns: 60px minmax(0, 1fr) minmax(130px, .45fr) 140px; align-items: center; gap: 16px; border-top: 1px solid var(--shell-border); padding: 14px 10px; text-align: left; }
+.world-event-row:hover, .world-event-row.is-selected { background: var(--shell-bg); }
+.world-event-row.is-selected { box-shadow: inset 3px 0 var(--shell-accent); }
+.world-event-row:focus-visible, .event-visual-context g[role="button"]:focus-visible { outline: 2px solid var(--shell-accent); outline-offset: 2px; }
+.world-event-priority { width: fit-content; font-size: 10px; text-transform: uppercase; font-weight: 650; padding: 3px 5px; border-radius: 4px; }
+.world-event-story { min-width: 0; }
+.world-event-story strong { display: block; font-size: 13px; line-height: 1.5; font-weight: 600; }
+.world-event-story > span, .world-event-sources small { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 4px; color: var(--shell-muted); font-size: 11px; }
+.world-event-sources, .world-event-time { font-size: 11px; color: var(--shell-muted); line-height: 1.5; }
+.world-event-time { text-align: right; }
+.world-event-time small { display: block; margin-top: 4px; color: var(--shell-accent); }
+#world-event-stream { scroll-margin-top: 6rem; }
+@media (min-width: 1280px) {
+  .analytics-workspace-grid .geo-panel.has-event-context, .analytics-workspace-grid .world-event-context { grid-column: span 6 / span 6; }
+  .world-event-context { max-height: min(78vh, 66rem); }
+  .world-event-context-body { overflow-y: auto; overscroll-behavior: contain; }
+}
+@media (max-width: 767px) {
+  .world-event-stream { padding: 12px; }
+  .world-event-row { grid-template-columns: 60px minmax(0, 1fr); gap: 6px 10px; padding: 12px 6px; }
+  .world-event-story { grid-column: 1 / -1; grid-row: 2; }
+  .world-event-time { grid-column: 2; grid-row: 1; }
+  .world-event-time small { display: none; }
+  .world-event-sources { grid-column: 1 / -1; }
+  .world-event-sources small { display: inline-flex; margin: 0 0 0 8px; }
+  .event-context-embedded .event-connection-node { min-width: 0; }
+}
 .dashboard-news-summary { min-height: 44px; padding-top: .4rem; padding-bottom: .4rem; }
 .dashboard-news-item:not(.is-selected) .dashboard-news-headline > small,
 .dashboard-news-item:not(.is-selected) .news-event-link-summary { display: none; }

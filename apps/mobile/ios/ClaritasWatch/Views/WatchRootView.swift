@@ -36,14 +36,13 @@ struct WatchRootView: View {
         case briefing
         case news
         case social
-        case intelligence
         case pulse
         case map
         case transport
     }
 
     @EnvironmentObject private var model: WatchAppModel
-    @State private var page: Page = .briefing
+    @State private var page: Page = .map
     @State private var pulseFocus: WatchPulseFocus = .overview
 
     var body: some View {
@@ -52,14 +51,13 @@ struct WatchRootView: View {
                 WatchPairingView()
             } else {
                 TabView(selection: $page) {
+                    WatchSignalGlanceView().tag(Page.map)
                     WatchBriefingView().tag(Page.briefing)
                     WatchNewsView().tag(Page.news)
                     WatchSocialSignalsView().tag(Page.social)
-                    WatchIntelligencePulseView().tag(Page.intelligence)
                     WatchPulseView(focus: pulseFocus)
                         .id(pulseFocus)
                         .tag(Page.pulse)
-                    WatchSignalGlanceView().tag(Page.map)
                     WatchTransportPulseView().tag(Page.transport)
                 }
                 .tabViewStyle(.verticalPage)
@@ -113,7 +111,7 @@ struct WatchRootView: View {
         case "transport": page = .transport
         default:
             pulseFocus = .overview
-            page = .pulse
+            page = .map
         }
 
         Task {
@@ -122,74 +120,69 @@ struct WatchRootView: View {
     }
 }
 
-private struct WatchIntelligencePulseView: View {
+/// Evidence stays attached to the place being explored on the Watch map.
+private struct WatchEventContextView: View {
     @EnvironmentObject private var model: WatchAppModel
+    var country: String?
+    var region: WatchMapRegion
+
+    private var events: [IntelligenceEvent] {
+        model.intelligenceEvents.filter { event in
+            if let country { return event.primary_country_iso2?.uppercased() == country.uppercased() }
+            if region == .global { return true }
+            if let longitude = event.longitude, let latitude = event.latitude {
+                return region.contains(longitude: longitude, latitude: latitude)
+            }
+            if let iso = event.primary_country_iso2?.uppercased(), let coordinate = WatchCountryCentroids.values[iso] {
+                return region.contains(longitude: coordinate.longitude, latitude: coordinate.latitude)
+            }
+            return false
+        }
+    }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        WatchSectionLabel(title: "Event pulse", icon: "dot.radiowaves.left.and.right")
-                        Spacer()
-                        WatchRefreshStatus()
-                    }
-
-                    if model.intelligenceEvents.isEmpty {
-                        WatchCard {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("No material correlated events")
-                                    .font(.caption.weight(.semibold))
-                                Text("Source signals remain available on iPhone.")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            WatchSectionLabel(title: "What’s happening", icon: "dot.radiowaves.left.and.right")
+            if events.isEmpty {
+                Text(country.map { "No current events loaded for \($0)." } ?? "No current events loaded.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(events.prefix(2)) { event in
+                    WatchCard {
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Circle()
+                                    .fill(event.severity == .critical ? WatchPalette.negative : event.severity == .high ? WatchPalette.orange : WatchPalette.sage)
+                                    .frame(width: 7, height: 7)
+                                Text(event.severity.rawValue.uppercased())
+                                    .font(.system(size: 8, weight: .bold))
+                                Spacer()
+                                Text(event.last_activity_time.formatted(date: .omitted, time: .shortened))
+                                    .font(.caption2.monospacedDigit())
                             }
-                        }
-                    } else {
-                        ForEach(model.intelligenceEvents.prefix(2)) { event in
-                            WatchCard {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack {
-                                        Circle()
-                                            .fill(event.severity == .critical ? WatchPalette.negative : event.severity == .high ? WatchPalette.orange : WatchPalette.sage)
-                                            .frame(width: 7, height: 7)
-                                        Text(event.severity.rawValue.uppercased())
-                                            .font(.system(size: 8, weight: .bold))
-                                        Spacer()
-                                        Text(event.last_activity_time.formatted(date: .omitted, time: .shortened))
-                                            .font(.caption2.monospacedDigit())
-                                    }
-                                    Text(event.title)
-                                        .font(.caption.weight(.semibold))
-                                        .lineLimit(3)
-                                    Text("\(event.location_name ?? event.primary_country_iso2 ?? "Unresolved") · \(event.evidence_count) evidence · \(Int(event.confidence * 100))%")
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.secondary)
-                                    if let expiresAt = event.expires_at {
-                                        Text("Current until \(expiresAt.formatted(date: .omitted, time: .shortened))")
-                                            .font(.system(size: 9).monospacedDigit())
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Button {
-                                        model.openOnPhone(
-                                            "intelligence",
-                                            country: event.primary_country_iso2,
-                                            eventID: event.id
-                                        )
-                                    } label: {
-                                        Label("Open on iPhone", systemImage: "iphone")
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .font(.caption2)
-                                }
+                            Text(event.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(3)
+                            Text("\(event.location_name ?? event.primary_country_iso2 ?? "Location unresolved") · \(event.evidence_count) linked records")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                            if event.earth_observation_available {
+                                Label("Event imagery available", systemImage: "sensor.tag.radiowaves.forward")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(WatchPalette.sage)
                             }
+                            Button {
+                                model.openOnPhone("intelligence", country: event.primary_country_iso2, eventID: event.id)
+                            } label: {
+                                Label("See evidence on iPhone", systemImage: "iphone")
+                            }
+                            .buttonStyle(.bordered)
+                            .font(.caption2)
                         }
                     }
                 }
-                .padding(.horizontal, 3)
             }
-            .navigationTitle("Intelligence")
-            .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
     }
 }
@@ -415,7 +408,7 @@ private struct WatchSignalGlanceView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        WatchSectionLabel(title: "Geospatial pulse", icon: "globe.europe.africa.fill")
+                        WatchSectionLabel(title: "World overview", icon: "globe.europe.africa.fill")
                         Spacer()
                         WatchRefreshStatus()
                     }
@@ -478,6 +471,8 @@ private struct WatchSignalGlanceView: View {
                             }
                         }
                     }
+
+                    WatchEventContextView(country: selectedCountry, region: region)
 
                     WatchCard {
                         VStack(alignment: .leading, spacing: 5) {

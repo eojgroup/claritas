@@ -29,7 +29,7 @@ flowchart LR
   Event --> EO[Exact-AOI Copernicus evidence]
   EO --> Event
   Event -. date/AOI context .-> GIBS[NASA GIBS browse layers]
-  Event --> Desk[Signal Desk investigation]
+  Event --> Desk[World overview + event context]
   Event --> Brief[Daily briefing synthesis]
   Leadership[Country leadership] --> Profile[Selected country profile]
   Desk --> Web[Desktop workspace]
@@ -42,7 +42,7 @@ Each domain has a distinct analytical responsibility:
 
 | Domain | Primary question | Primary representation |
 | --- | --- | --- |
-| Signal Desk | What is the canonical event, which evidence supports it, and what remains uncertain? | Prioritized event queue, chronological labelled evidence, original sources and event-specific EO |
+| World overview and event context | What is happening, where, which evidence supports it, and what remains uncertain? | World map, scoped event stream and selected event context with labelled evidence, original sources and event-specific EO |
 | Daily briefing | What is the cross-domain situation? | Newsletter synthesis plus a compact, read-only Watch glance |
 | News | Which publishers report a development, and which canonical event does each story support? | Dense story stream, source mix, country coverage and linked-event action |
 | Social signals | Which account made a public claim, when, and with what explicit responsibility? | Newest-first attributed posts, original links, account identity and a persistent unverified boundary |
@@ -70,7 +70,7 @@ flowchart LR
   Gate -->|location · distance · shared entity| Event[Canonical event]
   Gate --> Audit[Correlation decision audit]
   Event --> Score[Post-aggregation relevance]
-  Score --> Queue[Signal Desk queue]
+  Score --> Queue[World event stream]
   Score -->|supported type + exact coordinates| Satellite[EO discovery]
   Event --> Brief[Daily briefing]
   Event --> Country[Overview country context]
@@ -92,8 +92,7 @@ flowchart LR
 ```text
 Claritas
 ├── Workspace
-│   ├── Overview
-│   ├── Signal Desk / event investigations
+│   ├── World overview / map + event context + current/archive event stream
 │   └── Daily briefing
 ├── Source lenses
 │   ├── News
@@ -114,7 +113,7 @@ Claritas uses four page archetypes:
 
 ### Analytics workspace
 
-Overview and the source lenses use a compact page header, a control bar, a KPI strip, one dominant analytical surface, and explicitly secondary context. The Signal Desk instead uses a master/detail investigation archetype: prioritized events on one side and the selected evidence/imagery thread on the other. Desktop may show both; tablet and phone progressively stack the same contract.
+World overview keeps geography, event selection and evidence in one place. Selecting a marker, source link or alert opens that exact event in context. Desktop web and wide iPad show the map beside the event; narrower web stacks them and iPhone presents a sheet above the map. The current/archive event browser remains available from the event stream. Source lenses retain compact headers, controls and one dominant analytical surface.
 
 ### Control room
 
@@ -134,18 +133,18 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 
 ### Web
 
-- A persistent left navigation puts Overview first, then exposes News, Social, Podcast and Transport explorers directly. Weather, Market and governed imagery remain available from the overview drill-down; operations and account destinations stay separate.
+- A persistent left navigation puts World overview first, then exposes News, Social, Podcast and Transport explorers directly. Weather, Market and governed imagery remain available from the overview drill-down; operations and account destinations stay separate.
 - A sticky top bar always shows page title, scope summary, live/freshness state, search, notifications, theme, and account state.
 - The active page owns filtering and comparison controls.
-- At mobile width, the same destinations remain available through the navigation drawer; the Signal Desk is not hidden behind the imagery catalogue.
-- The Imagery library opens from an event investigation and remains a global acquisition/provenance catalogue. Event meaning stays in the Signal Desk.
+- At mobile width, the same destinations remain available through the navigation drawer. Selecting an event keeps the map and evidence within World overview.
+- The Imagery library opens from event context and remains a global acquisition/provenance catalogue. Event-linked imagery also appears inline with its evidence. The web connection graphic opens the matching source records using pointer or keyboard input.
 - Search is global and keyboard accessible with `Command/Ctrl+K` and `/`.
 
 ### iPhone
 
 - `TabView` and `NavigationStack` preserve platform-native navigation.
-- Four stable destinations keep the bottom bar predictable: Overview, News, Investigate, and More. Daily briefing, Social, podcasts, weather, markets, transport, the Imagery library, account, policy and eligible admin routes live in More.
-- The Dashboard is map-first; the Signal Desk is the canonical event investigation and is reachable directly from a linked News card or push alert.
+- Three stable destinations keep the bottom bar predictable: World, News, and More. Daily briefing, Social, podcasts, weather, markets, transport, the Imagery library, account, policy and eligible admin routes live in More.
+- World is map-first. A marker, linked source or push alert opens exact-event context in a sheet with medium and large detents. Dismissal returns to the map; following a source destination dismisses context before navigating.
 - Region scope, ranked bubbles, highest-relevance guidance, country selection, zoom/pan, and reset are touch-sized. Compare and pin remain tablet/desktop tools.
 - The Dashboard contains the map, a compact posture strip, the active country profile, and only the most actionable current signals. Full source-lens workspaces remain available from their destinations.
 - Profile uses native settings controls and Policies uses a reading layout.
@@ -153,7 +152,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 ### iPad
 
 - `NavigationSplitView` groups Workspace, Source lenses, Operations and Account.
-- Workspace puts the Signal Desk and Daily briefing before the individual source lenses. The selected event preserves the same labelled evidence and imagery contract as web.
+- Workspace puts World and Daily briefing before the individual source lenses. The selected event appears beside the map when space permits and preserves the same labelled evidence and imagery contract as web.
 - News, Social and Transport are explicit source lenses in the sidebar. The Social lens uses the same account/responsible-party contract as web and never promotes a platform badge into factual confidence.
 - The overview uses the map as its dominant surface, with region scope, country selection, compare, pin, and cross-domain drill-in.
 - The dedicated Transport workspace exposes live aircraft and vessel markers, route curves, sampled tracks, flight numbers/MMSIs, country linkage, corridor flows, and activity/country charts.
@@ -163,6 +162,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 ### Apple Watch
 
 - The first page remains the compact map-led signal glance.
+- The map page includes events scoped to the selected country or region, their evidence counts and imagery availability. Each event hands its exact identity to iPhone; there is no separate investigation page.
 - The second page is a read-only Daily Brief tab with the published situation summary, two takeaways, cross-domain counts, freshness, and iPhone handoff.
 - The watch map preserves the same three layers, regional scope, ranking, highest-relevance explanation, country selection, and reset behavior in a glanceable form.
 - A single Pulse page replaces separate domain deep dives and limits itself to the most relevant headline, weather exception, and market mover.
@@ -174,7 +174,7 @@ Watch is a fifth, companion-only archetype: the signal map, a compact published-
 ### APNs alert handoff
 
 - The iPhone app registers a topic- and environment-bound device token after user authorization. Debug uses APNs development; Release uses production.
-- A push carries the exact event ID and opens the Signal Desk selection, with optional country context.
+- A push carries the exact event ID and opens World with that event selected, with optional country context.
 - Provider `accepted` means APNs accepted the request. It never means displayed, seen or acknowledged; in-app acknowledgement is the separate user-confirmation state.
 
 ## Visual System and Tokens
@@ -392,7 +392,7 @@ Shared tokens and component contracts create one product identity. Shared geomet
 | Shell/navigation | `apps/web/src/App.tsx`, `index.css` | `RootView.swift` | `WatchRootView.swift` |
 | Tokens/surfaces | `index.css` | `BrandComponents.swift` | `WatchBrand.swift` |
 | Dashboard | `App.tsx` | `DashboardView.swift`, `PadOverviewView.swift` | `WatchSignalGlanceView`, `WatchBriefingView`, `WatchPulseView` |
-| Signal Desk | `IntelligenceWorkspace.tsx` | `IntelligenceWorkspaceView.swift` | event pulse and exact-event phone handoff in `WatchRootView.swift` |
+| World event context | `WorldEventStream.tsx`, embedded `IntelligenceWorkspace.tsx` in `App.tsx` | contextual `IntelligenceWorkspaceView.swift` in World; all-events browser from the stream | scoped event context and exact-event phone handoff in `WatchRootView.swift` |
 | EO context/library | `IntelligenceWorkspace.tsx`, `EarthObservationWorkspace.tsx` | `IntelligenceWorkspaceView.swift` | event phone handoff only |
 | Maps | `WorldMapBubbles.tsx` | `SignalMapPanel`, `InteractiveCountryBubbleMap` | `WatchSignalMap` |
 | Transport | `TransportWorkspace.tsx` | `TransportWorkspaceView.swift`, `CountryProfileView.swift` | `WatchTransportPulseView` |
@@ -424,7 +424,7 @@ The current system:
 - treats mobile as map-led triage and drill-in;
 - treats watch as a map-led companion with a briefing glance, a one-page urgent pulse, and phone handoff;
 - carries social claims across web, iPhone/iPad and Watch with identical attribution and non-fact semantics;
-- puts one canonical-event Signal Desk ahead of the source lenses and links News cards back to the event/evidence thread;
+- integrates canonical events into World overview and links source cards and alerts back to the map and event/evidence thread;
 - adds a shared event workspace on web/iPad, focused event triage on iPhone, authenticated persisted EO previews and before/after comparison, and a concise Watch event pulse that hands off to the exact iPhone event;
 - shows bounded NASA GIBS browse context directly on web while keeping it distinct from persisted observations and model interpretation; and
 - routes eligible APNs alerts to the exact iPhone/iPad event without treating provider acceptance as user acknowledgement.

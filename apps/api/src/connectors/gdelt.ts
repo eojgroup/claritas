@@ -12,7 +12,7 @@ import { inferNewsCountry, trustedSubjectCountryIso2 } from "./country-inference
 import { awaitGdeltOperation, readGdeltBody, readGdeltText } from "./gdelt-io";
 import {
   fetchGdeltGalMetadataMinute, parseGdeltGalMetadata, planGdeltGalMinutes,
-  selectGdeltGalMetadataSample, gdeltMinuteDate, GDELT_GAL_METADATA_VERSION,
+  selectGdeltGalMetadataSample, gdeltMinuteDate, gdeltMinuteStamp, GDELT_GAL_METADATA_VERSION,
   type GdeltGalMetadataCursor, type GdeltGalMetadataRecord,
 } from "./gdelt-gal-metadata";
 
@@ -1878,9 +1878,10 @@ async function loadExistingGdeltItems(
   sourceId: number,
   canonicalUrls: string[],
   rawAliases: string[] = [],
+  historyReconciled = false,
 ): Promise<Map<string, ExistingGdeltItem[]>> {
   if (canonicalUrls.length === 0) return new Map();
-  await requireGdeltCanonicalItemHistory(sourceId);
+  if (!historyReconciled) await requireGdeltCanonicalItemHistory(sourceId);
   const aliases = Array.from(new Set([...canonicalUrls, ...rawAliases].filter(Boolean)));
   const existing = await query<ExistingGdeltItem>(
     `SELECT id::text,external_id,url,dedupe_hash,
@@ -4177,6 +4178,9 @@ async function ingestGdeltGalMetadataBatch(
   sourceId: number,
   params: GdeltIngestParams,
 ): Promise<Record<string, unknown>> {
+  // Validate historical identity once for this acquisition, rather than
+  // repairing/scanning the legacy corpus for every 500-URL lookup below.
+  await requireGdeltCanonicalItemHistory(sourceId, params.signal);
   const key = "gal_minute_metadata_v1";
   const { rows } = await query<{ cursor: (Partial<GdeltGalMetadataCursor> & {
     latest_event_time?: string; last_successful_minute?: string;
@@ -4195,7 +4199,10 @@ async function ingestGdeltGalMetadataBatch(
   let minutesMissing = 0;
   const fileErrors: Array<{ minute: string; error: string }> = [];
   await params.onProgress?.("gal_metadata_discovery", { minutes: plan.minutes.length, article_budget: limit });
-  for (const minute of plan.minutes) {
+  // A catch-up can contain 34 minute objects. Serial 8-second IO timeouts
+  // can exceed the 180-second scheduled run before any story persists.
+  // Three bounded readers leave room for identity lookup and persistence.
+  await mapWithConcurrency(plan.minutes, 3, async (minute) => {
     params.signal?.throwIfAborted();
     try {
       const text = await fetchGdeltGalMetadataMinute(minute, { signal: params.signal });
@@ -4204,7 +4211,7 @@ async function ingestGdeltGalMetadataBatch(
         // Newly announced minute objects may arrive after their interval.
         const missingAt = gdeltMinuteDate(minute)?.getTime() ?? 0;
         if (now.getTime() - missingAt <= 10 * 60_000) retryMinutes.push(minute);
-        continue;
+        return;
       }
       const parsed = parseGdeltGalMetadata(text, minute);
       minutesScanned += 1;
@@ -4215,7 +4222,13 @@ async function ingestGdeltGalMetadataBatch(
       // Each interval offers a language/publisher-diverse candidate pool.
       for (const record of selectGdeltGalMetadataSample(parsed.records, 250)) {
         const url = canonicalGdeltUrl(record.url);
-        if (url && !records.has(url) && records.size < 8_500) records.set(url, { ...record, url });
+        if (!url) continue;
+        const previous = records.get(url);
+        // Parallel completion order cannot move a URL's first observation
+        // forward when the provider repeats it in several minute objects.
+        if (previous ? record.firstSeenAt < previous.firstSeenAt : records.size < 8_500) {
+          records.set(url, { ...record, url });
+        }
       }
       await params.onProgress?.("gal_metadata_file", { minute, candidates: parsed.records.length, parsed_files: minutesScanned });
     } catch (error) {
@@ -4223,7 +4236,7 @@ async function ingestGdeltGalMetadataBatch(
       retryMinutes.push(minute);
       fileErrors.push({ minute, error: error instanceof Error ? error.message.slice(0, 180) : "Metadata file failed." });
     }
-  }
+  });
   params.signal?.throwIfAborted();
   const candidatePool = selectGdeltGalMetadataSample([...records.values()], 250);
   // First offer a broader balanced pool to known-URL filtering, so repetitive
@@ -4232,7 +4245,7 @@ async function ingestGdeltGalMetadataBatch(
   const allUrls = [...records.keys()];
   for (let offset = 0; offset < allUrls.length; offset += 500) {
     params.signal?.throwIfAborted();
-    for (const [url, aliases] of await loadExistingGdeltItems(sourceId, allUrls.slice(offset, offset + 500))) existingByUrl.set(url, aliases);
+    for (const [url, aliases] of await loadExistingGdeltItems(sourceId, allUrls.slice(offset, offset + 500), [], true)) existingByUrl.set(url, aliases);
   }
   const unseen = [...records.values()].filter((record) => !(existingByUrl.get(record.url) ?? []).some((item) => item.quality_status === "accepted"));
   const rejectionCounts: Record<string, number> = {};
@@ -4267,6 +4280,7 @@ async function ingestGdeltGalMetadataBatch(
   let unchanged = 0;
   let accepted = 0;
   let skipped = feedRejected + unseen.length - eligibleRecords.length;
+  let persistenceFailures = 0;
   let latestEventTime = cursor?.latest_event_time ?? null;
   const languageCounts: Record<string, number> = {};
   const publishers = new Set<string>();
@@ -4339,6 +4353,10 @@ async function ingestGdeltGalMetadataBatch(
     } catch (error) {
       if (!canContinueAfterGdeltGalPersistenceFailure(error)) throw error;
       skipped += 1;
+      persistenceFailures += 1;
+      // A record-level failure must replay its interval instead of being
+      // acknowledged permanently while the provider is reported healthy.
+      retryMinutes.push(gdeltMinuteStamp(new Date(article.firstSeenAt)));
       const code = classifyGdeltGalPersistenceFailure(error);
       rejectionCounts[code] = (rejectionCounts[code] ?? 0) + 1;
     }
@@ -4363,7 +4381,7 @@ async function ingestGdeltGalMetadataBatch(
     && now.getTime() - Date.parse(latestInterval) <= 30 * 60_000;
   const result = {
     provider: "gdelt", product: "gal-minute-metadata", coverage_mode: "bounded_multilingual_sample",
-    health: sourceCurrent ? fileErrors.length ? "degraded" : "healthy" : "empty",
+    health: sourceCurrent ? fileErrors.length || persistenceFailures ? "degraded" : "healthy" : "empty",
     selected: accepted, inserted, updated, unchanged, skipped,
     no_new_articles: accepted === 0, feed_candidates: feedCandidates,
     quota_omitted: Math.max(0, eligibleRecords.length - selectedRecords.length),
@@ -4377,6 +4395,7 @@ async function ingestGdeltGalMetadataBatch(
     latest_interval_at: latestInterval, latest_event_time: latestEventTime,
     language_counts: languageCounts, publisher_count: publishers.size,
     quality_rejections: rejectionCounts,
+    persistence_failures: persistenceFailures,
   };
   await params.onProgress?.("gal_metadata_complete", result);
   return result;
@@ -4486,10 +4505,12 @@ export async function ingestGdelt(params: GdeltIngestParams = {}): Promise<Recor
       })
     : Promise.resolve({ count: 0, error: null as string | null });
   let gkgHandledByDoc = false;
-  if (includeDoc && !params.query?.trim() && !process.env.GDELT_DOC_QUERY?.trim() && !params.targetedDiscovery) {
+  // Legacy deployment query defaults configure DOC when it is needed; they
+  // must not silently opt scheduled acquisition out of the metadata stream.
+  // Explicit per-request searches retain their targeted DOC behavior.
+  if (includeDoc && !params.query?.trim() && !params.targetedDiscovery) {
     result.acquisition_strategy = "incremental_gal_metadata";
     try {
-      await requireGdeltCanonicalItemHistory(sourceId, params.signal);
       const primary = await ingestGdeltGalMetadata(sourceId, params);
       result.gal_primary = primary;
       if (primary.health === "busy") return { ...result, health: "degraded", doc_status: "not_requested", headline_status: "busy" };

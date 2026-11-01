@@ -8,10 +8,12 @@ process.env.DB_USER ||= "claritas_test";
 process.env.DB_PASSWORD ||= "claritas_test";
 
 const subject = import("./news-translation");
-const db = import("./db");
+// Match the CommonJS API's database instance across Node 20 and newer runtimes.
+// A dynamic ESM import under tsx can otherwise stub a different Pool instance.
+const db = require("./db") as typeof import("./db");
 
 async function withMockQueries<T>(query: (sql: string, values: unknown[]) => unknown[], action: () => Promise<T>): Promise<T> {
-  const { pool } = await db;
+  const { pool } = db;
   const original = pool.connect;
   pool.connect = (async () => ({
     query: async (sql: string, values: unknown[] = []) => ({ rows: query(sql, values) }),

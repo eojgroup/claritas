@@ -749,7 +749,7 @@ import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
 import PaywallPage from "./components/PaywallPage";
 import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePreview";
-import IntelligenceEventStrip from "./components/IntelligenceEventStrip";
+import WorldEventStream from "./components/WorldEventStream";
 import SatelliteContextPanel from "./components/SatelliteContextPanel";
 import { eventCoordinateContext } from "./components/eventPresentation";
 import {
@@ -868,6 +868,10 @@ export default function ClaritasDashboard() {
   const [intelligenceAlerts, setIntelligenceAlerts] = useState<IntelligenceAlert[]>([]);
   const [overviewEvents, setOverviewEvents] = useState<IntelligenceEvent[]>([]);
   const [overviewEventsError, setOverviewEventsError] = useState<string | null>(null);
+  const [overviewEventsLoading, setOverviewEventsLoading] = useState(true);
+  const [overviewIncludeExpired, setOverviewIncludeExpired] = useState(false);
+  const [overviewEventRefresh, setOverviewEventRefresh] = useState(0);
+  const [selectedOverviewEvent, setSelectedOverviewEvent] = useState<IntelligenceEvent | null>(null);
   const [authStatus, setAuthStatus] = useState<
     "checking" | "authed" | "unauthed"
   >("checking");
@@ -1124,7 +1128,7 @@ export default function ClaritasDashboard() {
     const applyEventDeepLink = () => {
       const eventId = new URLSearchParams(window.location.search).get("event");
       setSelectedIntelligenceEventId(eventId);
-      if (eventId) setActiveView("intelligence");
+      if (eventId) setActiveView("dashboard");
     };
     applyEventDeepLink();
     window.addEventListener("popstate", applyEventDeepLink);
@@ -1226,12 +1230,14 @@ export default function ClaritasDashboard() {
   useEffect(() => {
     if (authStatus !== "authed" || !hasPaidAccess) {
       setOverviewEvents([]);
+      setSelectedOverviewEvent(null);
       setOverviewEventsError(null);
       return;
     }
     let active = true;
     const refresh = () => {
-      void fetchIntelligenceEvents({ limit: 120 })
+      setOverviewEventsLoading(true);
+      void fetchIntelligenceEvents({ limit: 100, includeExpired: overviewIncludeExpired })
         .then((events) => {
           if (!active) return;
           setOverviewEvents(events);
@@ -1240,7 +1246,8 @@ export default function ClaritasDashboard() {
         .catch((error) => {
           if (!active) return;
           setOverviewEventsError(error instanceof Error ? error.message : String(error));
-        });
+        })
+        .finally(() => { if (active) setOverviewEventsLoading(false); });
     };
     refresh();
     const timer = window.setInterval(refresh, 60_000);
@@ -1248,7 +1255,7 @@ export default function ClaritasDashboard() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [authStatus, hasPaidAccess]);
+  }, [authStatus, hasPaidAccess, overviewIncludeExpired, overviewEventRefresh]);
 
   const overviewEventPoints = useMemo(() => {
     const severityRank: Record<IntelligenceEvent["severity"], number> = {
@@ -1257,7 +1264,10 @@ export default function ClaritasDashboard() {
       medium: 2,
       low: 1,
     };
-    return overviewEvents
+    const mappedEvents = selectedOverviewEvent?.id === selectedIntelligenceEventId
+      ? [...overviewEvents.filter((event) => event.id !== selectedOverviewEvent.id), selectedOverviewEvent]
+      : overviewEvents;
+    return mappedEvents
       // Country reference points support choropleth context but are not event
       // locations. Dots require defensible source or mapped event geography.
       .filter((event) => Boolean(eventCoordinateContext(event)))
@@ -1292,7 +1302,7 @@ export default function ClaritasDashboard() {
             event.id === satelliteContextEventId,
         };
       });
-  }, [overviewEvents, satelliteContextEventId, selectedIntelligenceEventId]);
+  }, [overviewEvents, satelliteContextEventId, selectedIntelligenceEventId, selectedOverviewEvent]);
 
   useEffect(() => {
     if (!isAdmin && activeView === "admin") {
@@ -4219,7 +4229,13 @@ export default function ClaritasDashboard() {
         window.history.replaceState(null, "", nextUrl);
       }
     }
-    setActiveView("intelligence");
+    setActiveView("dashboard");
+    setMapExpanded(false);
+    window.setTimeout(() => {
+      const context = document.getElementById(eventId ? "overview-event-context" : "world-event-stream");
+      context?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+      context?.focus?.({ preventScroll: true });
+    }, 0);
   }, []);
 
   const handleOpenImagery = useCallback((eventId?: string) => {
@@ -4403,7 +4419,7 @@ export default function ClaritasDashboard() {
   const navItems = [
     {
       id: "dashboard",
-      label: "Overview",
+      label: "World overview",
       view: "dashboard" as const,
       icon: LayoutGrid,
       group: "core",
@@ -4422,8 +4438,8 @@ export default function ClaritasDashboard() {
   const viewMeta = {
     dashboard: {
       kicker: "Global operating picture",
-      title: "Overview",
-      summary: "Start with material events, then trace each source and observation",
+      title: "What’s happening in the world",
+      summary: "Explore the map, follow an event, and see its sources and imagery in context",
     },
     news: {
       kicker: "Source explorer",
@@ -5307,10 +5323,10 @@ export default function ClaritasDashboard() {
                 {activeView === "earth-observation" && selectedIntelligenceEventId && (
                   <button
                     type="button"
-                    onClick={() => setActiveView("intelligence")}
+                    onClick={() => handleOpenIntelligence(selectedIntelligenceEventId)}
                     className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm font-semibold text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
                   >
-                    Back to event investigation
+                    Back to event on the map
                     <ArrowUpRight className="h-4 w-4" />
                   </button>
                 )}
@@ -5571,16 +5587,15 @@ export default function ClaritasDashboard() {
                   >
                     <div
                       id="signal-map-feed"
-                      className={`${dashboardPanelClass} geo-panel dashboard-map-panel xl:col-span-8`}
+                      className={`${dashboardPanelClass} geo-panel dashboard-map-panel ${selectedIntelligenceEventId ? "has-event-context" : ""} xl:col-span-8`}
                       style={{
                         animationDelay: "0ms",
-                        gridColumn: splitViewEnabled ? "span 8 / span 8" : undefined,
                       }}
                     >
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
                         <div>
                           <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Global signal picture
+                            Where it’s happening
                           </div>
                           <div className="text-sm font-semibold">
                             Map:{" "}
@@ -5935,13 +5950,24 @@ export default function ClaritasDashboard() {
                     </div>
 
                     <section
-                      className={`${dashboardPanelClass} context-intelligence-band max-h-[clamp(28rem,62vh,46rem)] xl:col-span-4`}
+                      id="overview-event-context"
+                      tabIndex={-1}
+                      aria-label={selectedIntelligenceEventId ? "Selected event in the world overview" : "Regional context"}
+                      className={`${dashboardPanelClass} context-intelligence-band ${selectedIntelligenceEventId ? "world-event-context" : "max-h-[clamp(28rem,62vh,46rem)]"} xl:col-span-4`}
                       style={{
                         animationDelay: "40ms",
-                        gridColumn: splitViewEnabled ? "span 4 / span 4" : undefined,
                       }}
                     >
-                      {selectedCountryContext ? (
+                      {selectedIntelligenceEventId ? (
+                        <>
+                          <div className="world-event-context-heading"><span>Event context · sources & imagery</span><button type="button" onClick={() => handleOpenIntelligence(null)}>Close event</button></div>
+                          <div className="world-event-context-body">
+                            <Suspense fallback={<div role="status" className="p-4">Loading event context…</div>}>
+                              <IntelligenceWorkspace embedded initialEventId={selectedIntelligenceEventId} refreshVersion={`${overviewEventRefresh}:${overviewEvents.find((event) => event.id === selectedIntelligenceEventId)?.last_activity_time ?? ""}`} onEventLoaded={setSelectedOverviewEvent} onSelectEvent={handleOpenIntelligence} onOpenImagery={handleOpenImagery} />
+                            </Suspense>
+                          </div>
+                        </>
+                      ) : selectedCountryContext ? (
                         <>
                           <div className="flex items-start gap-3 border-b border-[color:var(--shell-border)] px-4 py-3">
                             <div className="min-w-0 flex-1">
@@ -6434,12 +6460,21 @@ export default function ClaritasDashboard() {
                     </section>
 
                     <div
+                      id="world-event-stream"
+                      tabIndex={-1}
                       className="order-[3] xl:col-span-12"
                       style={{ gridColumn: "1 / -1" }}
                     >
-                      <IntelligenceEventStrip
+                      <WorldEventStream
+                        events={overviewEvents}
                         country={selectedCountry}
-                        onOpen={handleOpenIntelligence}
+                        selectedId={selectedIntelligenceEventId}
+                        includeExpired={overviewIncludeExpired}
+                        loading={overviewEventsLoading}
+                        error={overviewEventsError}
+                        onSelect={handleOpenIntelligence}
+                        onArchiveChange={setOverviewIncludeExpired}
+                        onRefresh={() => setOverviewEventRefresh((value) => value + 1)}
                       />
                     </div>
 

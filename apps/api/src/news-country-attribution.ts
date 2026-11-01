@@ -58,17 +58,12 @@ export function currentNewsAssessmentSql(itemAlias: string, assessmentAlias: str
 }
 
 export function buildNewsCountryStatsQuery(): string {
-  const trustedDirect = trustedNewsDirectCountrySql("eligible");
-  return `WITH eligible_news AS MATERIALIZED (
-      SELECT i.id,i.title,i.url,i.country_iso2,i.event_time,i.payload,
-             CASE
-               WHEN i.payload->>'time_basis' LIKE 'publisher_published%'
-                 OR i.payload->>'publication_time_verified'='true'
-               THEN i.event_time
-               ELSE NULL
-             END AS publisher_event_time,
-             canonical_news_publisher_key(i.url,i.payload,s.name) AS publisher_key,
-             ${newsStoryKeySql("i")} AS story_key
+  const trustedDirect = trustedNewsDirectCountrySql("i");
+  // Resolve eligibility using narrow identities before loading provider JSON.
+  // Carrying payloads through the assessment hash join spills wide rows to
+  // temporary storage even when the final geographic projection is narrow.
+  return `WITH eligible_ids AS MATERIALIZED (
+      SELECT i.id,s.name AS source_name
       FROM item i
       JOIN source s ON s.id=i.source_id
       JOIN news_item_assessment assessment
@@ -81,18 +76,35 @@ export function buildNewsCountryStatsQuery(): string {
               NOT IN ('true','t','1','yes','y','on')
         AND i.event_time>=now()-($1 || ' days')::interval
         AND i.event_time<=now()+interval '5 minutes'
+    ), eligible_news AS MATERIALIZED (
+      SELECT i.id,i.event_time,
+             CASE WHEN ${trustedDirect}
+               THEN upper(BTRIM(i.country_iso2::text)) END AS direct_country,
+             CASE WHEN jsonb_typeof(i.payload->'subject_country_iso2s')='array'
+               THEN i.payload->'subject_country_iso2s' ELSE '[]'::jsonb END AS subject_country_iso2s,
+             CASE WHEN jsonb_typeof(i.payload#>'{gkg,locations}')='array'
+               THEN i.payload#>'{gkg,locations}' ELSE '[]'::jsonb END AS gkg_locations,
+             CASE
+               WHEN i.payload->>'time_basis' LIKE 'publisher_published%'
+                 OR i.payload->>'publication_time_verified'='true'
+               THEN i.event_time
+               ELSE NULL
+             END AS publisher_event_time,
+             canonical_news_publisher_key(i.url,i.payload,eligible_ids.source_name) AS publisher_key,
+             ${newsStoryKeySql("i")} AS story_key
+      FROM eligible_ids
+      JOIN item i ON i.id=eligible_ids.id
     ), subject_countries AS MATERIALIZED (
       SELECT eligible.id,eligible.story_key,eligible.publisher_key,eligible.event_time,eligible.publisher_event_time,
-             upper(BTRIM(eligible.country_iso2::text)) AS country
+             eligible.direct_country AS country
       FROM eligible_news eligible
-      WHERE ${trustedDirect}
+      WHERE eligible.direct_country IS NOT NULL
       UNION ALL
       SELECT eligible.id,eligible.story_key,eligible.publisher_key,eligible.event_time,eligible.publisher_event_time,
              upper(structured_country) AS country
       FROM eligible_news eligible
       CROSS JOIN LATERAL jsonb_array_elements_text(
-        CASE WHEN jsonb_typeof(eligible.payload->'subject_country_iso2s')='array'
-          THEN eligible.payload->'subject_country_iso2s' ELSE '[]'::jsonb END
+        eligible.subject_country_iso2s
       ) structured_country
       WHERE structured_country ~ '^[A-Za-z]{2}$'
       UNION ALL
@@ -100,8 +112,7 @@ export function buildNewsCountryStatsQuery(): string {
              upper(location->>'country_iso2') AS country
       FROM eligible_news eligible
       CROSS JOIN LATERAL jsonb_array_elements(
-        CASE WHEN jsonb_typeof(eligible.payload#>'{gkg,locations}')='array'
-          THEN eligible.payload#>'{gkg,locations}' ELSE '[]'::jsonb END
+        eligible.gkg_locations
       ) location
       WHERE location->>'country_iso2' ~ '^[A-Za-z]{2}$'
       UNION ALL

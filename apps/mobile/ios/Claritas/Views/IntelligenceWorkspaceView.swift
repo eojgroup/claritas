@@ -2,6 +2,9 @@ import SwiftUI
 import UIKit
 
 struct IntelligenceWorkspaceView: View {
+    /// A selected story stays beside the world map instead of opening another workspace.
+    var contextualEventID: String? = nil
+    var onOpenEvent: ((IntelligenceEvent) -> Void)? = nil
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -25,13 +28,27 @@ struct IntelligenceWorkspaceView: View {
 
     var body: some View {
         BrandBackground {
-            if horizontalSizeClass == .regular {
+            if contextualEventID != nil {
+                detailScrollView
+                    .refreshable {
+                        await loadDetail()
+                        await loadGibsContext()
+                    }
+            } else if horizontalSizeClass == .regular && onOpenEvent == nil {
                 regularWorkspace
             } else {
                 compactWorkspace
             }
         }
-        .task(id: "\(includeExpired)|\(model.selectedCountry ?? "global")") { await load() }
+        .task(id: "\(includeExpired)|\(model.selectedCountry ?? "global")") {
+            guard contextualEventID == nil else { return }
+            await load()
+        }
+        .task(id: contextualEventID) {
+            guard let contextualEventID else { return }
+            selectEvent(contextualEventID, revealDetail: false)
+            if let nextWatches = try? await model.api.fetchIntelligenceWatchlist(), !Task.isCancelled { watches = nextWatches }
+        }
         .task(id: selectedID) { await loadDetail() }
         .task(id: selectedID) { await loadGibsContext() }
         .navigationDestination(isPresented: $showsCompactDetail) {
@@ -46,11 +63,13 @@ struct IntelligenceWorkspaceView: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .onChange(of: model.selectedIntelligenceEventID) { requested in
+            guard contextualEventID == nil, onOpenEvent == nil else { return }
             guard let requested, !requested.isEmpty else { return }
             selectEvent(requested, revealDetail: true)
             model.selectedIntelligenceEventID = nil
         }
         .onChange(of: horizontalSizeClass) { next in
+            guard contextualEventID == nil, onOpenEvent == nil else { return }
             if next == .regular {
                 showsCompactDetail = false
                 if selectedID == nil { selectedID = events.first?.id }
@@ -76,7 +95,7 @@ struct IntelligenceWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 workspaceHeader
-                alertsCard
+                if onOpenEvent == nil { alertsCard }
                 eventCollection
             }
             .padding(14)
@@ -114,10 +133,10 @@ struct IntelligenceWorkspaceView: View {
         VStack(alignment: .leading, spacing: 14) {
             BrandSectionHeader(
                 kicker: "Every source · one event stream",
-                title: "Signal desk",
+                title: "What’s happening",
                 detail: horizontalSizeClass == .compact
                     ? nil
-                    : "Open an event, choose a signal type, then inspect the source and its connection."
+                    : "Follow a developing event from its location to the reporting, observations and imagery behind it."
             )
 
             Picker("Event visibility", selection: $includeExpired) {
@@ -190,7 +209,8 @@ struct IntelligenceWorkspaceView: View {
                     ForEach(events) { event in
                         let isSelected = event.id == selectedID
                         Button {
-                            selectEvent(event.id, revealDetail: true)
+                            if let onOpenEvent { onOpenEvent(event) }
+                            else { selectEvent(event.id, revealDetail: true) }
                         } label: {
                             HStack(alignment: .top, spacing: 10) {
                                 RoundedRectangle(cornerRadius: 2)
@@ -214,7 +234,7 @@ struct IntelligenceWorkspaceView: View {
                                         .lineLimit(horizontalSizeClass == .compact ? 2 : nil)
                                     HStack(spacing: 6) {
                                         Text(event.primary_country_iso2 ?? event.location_name ?? "Global")
-                                        Text("· \(event.evidence_count) sources")
+                                        Text("· \(event.evidence_count) linked records")
                                         Spacer(minLength: 0)
                                         Text(event.last_activity_time, style: .time)
                                     }
@@ -270,7 +290,7 @@ struct IntelligenceWorkspaceView: View {
         } else if let detail, detail.event.id == selectedID {
             VStack(alignment: .leading, spacing: 14) {
                 Color.clear.frame(height: 0).id("investigation-overview")
-                BrandCard(title: "Event overview", icon: "scope") {
+                BrandCard(title: "What’s happening", icon: "scope") {
                     Label("STARTED FROM \(detail.event.originLabel.uppercased())", systemImage: detail.event.originIcon)
                         .font(.caption2.weight(.bold))
                         .tracking(0.9)
@@ -351,12 +371,9 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
-                signalExplorer(detail)
-                signalReader(detail)
-
                 if !detail.earth_observations.isEmpty || gibsTrueColorLayer != nil {
                     BrandCard(title: "Event imagery", icon: "sensor.tag.radiowaves.forward") {
-                        Text("Visual context for the active investigation: \(detail.event.title)")
+                        Text("Visual context for this event: \(detail.event.title)")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                         Text("Images stay with the selected event so their location and evidence status remain clear. They provide context, not automatic proof of a report or its cause.")
@@ -369,7 +386,7 @@ struct IntelligenceWorkspaceView: View {
                                 Label("EVENT-SPECIFIC OBSERVATION", systemImage: "checkmark.seal")
                                     .font(.caption2.weight(.bold))
                                     .foregroundStyle(ClaritasPalette.positiveText(for: colorScheme))
-                                Text("Linked to this investigation and its mapped area · \(observation.displayProductName) captured \(observation.capture_start.formatted(date: .abbreviated, time: .shortened)).")
+                                Text("Linked to this event and its mapped area · \(observation.displayProductName) captured \(observation.capture_start.formatted(date: .abbreviated, time: .shortened)).")
                                     .font(.caption)
                                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                                 if let interpretation = observation.model_interpretation?.summary, !interpretation.isEmpty {
@@ -438,6 +455,9 @@ struct IntelligenceWorkspaceView: View {
                     }
 
                 }
+
+                signalExplorer(detail)
+                signalReader(detail)
 
                 let contextAssessments = detail.evidence.filter(isContextAssessment)
                 if !contextAssessments.isEmpty {
@@ -844,19 +864,26 @@ struct IntelligenceWorkspaceView: View {
     private func load() async {
         isLoading = true
         defer { isLoading = false }
-        let watchTask = Task { try? await model.api.fetchIntelligenceWatchlist() }
-        let alertTask = Task { try? await model.api.fetchIntelligenceAlerts() }
+        let watchTask = Task { () -> [IntelligenceWatch]? in
+            guard onOpenEvent == nil else { return nil }
+            return try? await model.api.fetchIntelligenceWatchlist()
+        }
+        let alertTask = Task { () -> [IntelligenceAlert]? in
+            guard onOpenEvent == nil else { return nil }
+            return try? await model.api.fetchIntelligenceAlerts()
+        }
         do {
             let rows = try await model.api.fetchIntelligenceEvents(
                 limit: 60,
                 country: model.selectedCountry,
                 includeExpired: includeExpired
             )
+            guard !Task.isCancelled else { return }
             events = rows
-            if let requested = model.selectedIntelligenceEventID {
+            if onOpenEvent == nil, let requested = model.selectedIntelligenceEventID {
                 selectEvent(requested, revealDetail: true)
                 model.selectedIntelligenceEventID = nil
-            } else if selectedID == nil || !rows.contains(where: { $0.id == selectedID }) {
+            } else if onOpenEvent == nil && (selectedID == nil || !rows.contains(where: { $0.id == selectedID })) {
                 selectedID = rows.first?.id
             }
             error = nil
@@ -882,13 +909,16 @@ struct IntelligenceWorkspaceView: View {
         }
         do {
             let loaded = try await model.api.fetchIntelligenceEvent(id: selectedID)
-            guard self.selectedID == selectedID else { return }
+            guard !Task.isCancelled, self.selectedID == selectedID else { return }
             detail = loaded
+            if contextualEventID != nil, model.selectedIntelligenceEventID == loaded.event.id {
+                model.selectIntelligenceEvent(loaded.event)
+            }
             if !events.contains(where: { $0.id == loaded.event.id }) {
                 events.insert(loaded.event, at: 0)
             }
         } catch {
-            guard self.selectedID == selectedID else { return }
+            guard !Task.isCancelled, self.selectedID == selectedID else { return }
             detail = nil
             detailError = error.localizedDescription
         }
@@ -901,7 +931,7 @@ struct IntelligenceWorkspaceView: View {
         }
         gibsContext = nil
         let loaded = try? await model.api.fetchEventGibsContext(id: selectedID)
-        guard self.selectedID == selectedID else { return }
+        guard !Task.isCancelled, self.selectedID == selectedID else { return }
         gibsContext = loaded
     }
 
@@ -1170,7 +1200,7 @@ struct EarthObservationWorkspaceView: View {
                     BrandSectionHeader(
                         kicker: "Source lens · global catalogue",
                         title: "Imagery library",
-                        detail: "Browse governed acquisitions here. Open Signal desk to understand why an image matters to a specific event."
+                        detail: "Browse governed acquisitions here. Open an event on the world overview to see its imagery beside the reporting and observations."
                     )
 
 
@@ -1273,7 +1303,7 @@ struct EarthObservationWorkspaceView: View {
     }
 }
 
-/// Overview-only preview. Full event triage lives in Investigate.
+/// The current event stream follows the map's country selection.
 struct IntelligenceEventPulseView: View {
     enum Presentation: Equatable { case list, horizontal }
 
@@ -1282,6 +1312,8 @@ struct IntelligenceEventPulseView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var events: [IntelligenceEvent] = []
     @State private var isLoading = true
+    @State private var showsAllEvents = false
+    @State private var pendingEvent: IntelligenceEvent?
     var presentation: Presentation = .list
     var country: String? = nil
     @State private var loadError: String?
@@ -1291,14 +1323,14 @@ struct IntelligenceEventPulseView: View {
     var body: some View {
         BrandCard {
             HStack {
-                Label("Priority events", systemImage: "dot.radiowaves.left.and.right")
+                Label(scopeCountry.map { "What’s happening in \($0)" } ?? "What’s happening", systemImage: "dot.radiowaves.left.and.right")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 Spacer()
                 Button {
-                    NotificationCenter.default.post(name: .claritasWatchOpenDestination, object: "intelligence")
+                    showsAllEvents = true
                 } label: {
-                    Label("Investigate", systemImage: "arrow.right")
+                    Label("All events", systemImage: "line.3.horizontal.decrease")
                         .font(.caption.weight(.semibold))
                         .frame(minHeight: ClaritasLayout.minimumTouchTarget)
                 }
@@ -1311,13 +1343,13 @@ struct IntelligenceEventPulseView: View {
             } else if !events.isEmpty {
                 if presentation == .horizontal && horizontalSizeClass == .regular {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 8) {
-                        ForEach(events.prefix(4)) { event in eventButton(event) }
+                        ForEach(events.prefix(6)) { event in eventButton(event) }
                     }
                 } else {
                     VStack(spacing: 0) {
-                        ForEach(events.prefix(2)) { event in
+                        ForEach(events.prefix(4)) { event in
                             eventButton(event)
-                            if event.id != events.prefix(2).last?.id { Divider() }
+                            if event.id != events.prefix(4).last?.id { Divider() }
                         }
                     }
                 }
@@ -1327,19 +1359,39 @@ struct IntelligenceEventPulseView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .sheet(isPresented: $showsAllEvents, onDismiss: {
+            if let event = pendingEvent {
+                pendingEvent = nil
+                openEvent(event)
+            }
+        }) {
+            NavigationStack {
+                IntelligenceWorkspaceView(onOpenEvent: { event in
+                    pendingEvent = event
+                    showsAllEvents = false
+                })
+                    .navigationTitle("Events")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showsAllEvents = false }
+                        }
+                    }
+            }
+            .presentationDragIndicator(.visible)
+        }
         .task(id: scopeCountry) {
             events = []
             loadError = nil
             while !Task.isCancelled {
                 isLoading = events.isEmpty
                 do {
-                    let nextEvents = try await model.api.fetchIntelligenceEvents(limit: 4, country: scopeCountry)
+                    let nextEvents = try await model.api.fetchIntelligenceEvents(limit: 6, country: scopeCountry)
                     guard !Task.isCancelled else { return }
                     events = nextEvents
                     loadError = nil
                 } catch {
                     guard !Task.isCancelled else { return }
-                    loadError = "Events unavailable. Open Investigate to retry."
+                    loadError = "Events unavailable. Open All events to retry."
                 }
                 isLoading = false
                 do { try await Task.sleep(nanoseconds: 300_000_000_000) }
@@ -1350,12 +1402,7 @@ struct IntelligenceEventPulseView: View {
 
     private func eventButton(_ event: IntelligenceEvent) -> some View {
         Button {
-            model.selectedIntelligenceEventID = event.id
-            NotificationCenter.default.post(
-                name: .claritasWatchOpenDestination,
-                object: "intelligence",
-                userInfo: ["eventID": event.id, "country": event.primary_country_iso2 ?? ""]
-            )
+            openEvent(event)
         } label: {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: event.originIcon)
@@ -1369,10 +1416,15 @@ struct IntelligenceEventPulseView: View {
                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
-                    Text("\(event.severity.rawValue.capitalized) · \(event.primary_country_iso2 ?? event.location_name ?? "Global") · \(event.evidence_count) sources")
+                    Text("\(event.severity.rawValue.capitalized) · \(event.primary_country_iso2 ?? event.location_name ?? "Global") · \(event.evidence_count) linked records")
                         .font(.caption2)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         .lineLimit(1)
+                    if event.earth_observation_available {
+                        Label("Imagery linked to this event", systemImage: "sensor.tag.radiowaves.forward")
+                            .font(.caption2)
+                            .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                    }
                 }
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 6) {
@@ -1388,7 +1440,16 @@ struct IntelligenceEventPulseView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Open \(event.severity.rawValue) priority event: \(event.title), \(event.location_name ?? event.primary_country_iso2 ?? "Global"), \(event.evidence_count) sources")
+        .accessibilityLabel("Open \(event.severity.rawValue) priority event: \(event.title), \(event.location_name ?? event.primary_country_iso2 ?? "Global"), \(event.evidence_count) linked records")
+    }
+
+    private func openEvent(_ event: IntelligenceEvent) {
+        model.selectIntelligenceEvent(event)
+        NotificationCenter.default.post(
+            name: .claritasWatchOpenDestination,
+            object: "intelligence",
+            userInfo: ["eventID": event.id, "country": event.primary_country_iso2 ?? ""]
+        )
     }
 
     private func severityColor(_ severity: IntelligenceSeverity) -> Color {

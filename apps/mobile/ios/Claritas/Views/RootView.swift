@@ -21,15 +21,15 @@ struct RootView: View {
 
         var title: String {
             switch self {
-            case .overview: return "Overview"
-            case .dashboard: return "Overview"
+            case .overview: return "World"
+            case .dashboard: return "World"
             case .news: return "News"
             case .social: return "Social signals"
             case .podcasts: return "Podcasts"
             case .weather: return "Weather"
             case .markets: return "Markets"
             case .transport: return "Transport"
-            case .intelligence: return "Investigate"
+            case .intelligence: return "Events"
             case .earthObservation: return "Imagery evidence"
             case .admin: return "Admin"
             case .profile: return "Profile"
@@ -41,8 +41,8 @@ struct RootView: View {
 
         var icon: String {
             switch self {
-            case .overview: return "rectangle.3.group.fill"
-            case .dashboard: return "square.grid.2x2"
+            case .overview: return "globe.europe.africa.fill"
+            case .dashboard: return "globe.europe.africa.fill"
             case .news: return "newspaper"
             case .social: return "dot.radiowaves.left.and.right"
             case .podcasts: return "mic.fill"
@@ -97,6 +97,10 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             guard let destination = note.object as? String else { return }
+            // A source opened from event context must dismiss the context first.
+            if destination != "intelligence" {
+                model.selectedIntelligenceEventID = nil
+            }
             if let rawCountry = note.userInfo?["country"] as? String {
                 let country = rawCountry.trimmingCharacters(in: .whitespacesAndNewlines)
                 if country.isEmpty {
@@ -105,7 +109,7 @@ struct RootView: View {
                     model.selectedCountry = country.uppercased()
                 }
             }
-            if let eventID = note.userInfo?["eventID"] as? String, !eventID.isEmpty {
+            if destination == "intelligence", let eventID = note.userInfo?["eventID"] as? String, !eventID.isEmpty {
                 model.selectedIntelligenceEventID = eventID
             }
             if let category = note.userInfo?["category"] as? String, !category.isEmpty {
@@ -140,7 +144,7 @@ struct RootView: View {
                 next = .more
                 compactMorePath = [.transport]
             case "intelligence":
-                next = .intelligence
+                next = .dashboard
             case "earth-observation":
                 next = .more
                 compactMorePath = [.earthObservation]
@@ -157,7 +161,7 @@ struct RootView: View {
                 case "weather": sidebarSelection = .weather
                 case "markets": sidebarSelection = .markets
                 case "transport": sidebarSelection = .transport
-                case "intelligence": sidebarSelection = .intelligence
+                case "intelligence": sidebarSelection = .overview
                 case "earth-observation": sidebarSelection = .earthObservation
                 case "briefing": sidebarSelection = .briefing
                 default: sidebarSelection = .overview
@@ -179,7 +183,6 @@ struct RootView: View {
         TabView(selection: $tab) {
             compactTab(.dashboard)
             compactTab(.news)
-            compactTab(.intelligence)
             compactTab(.more)
         }
         .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
@@ -245,8 +248,8 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .briefing, .intelligence, .transport, .admin, .profile, .policies]
-            : [.overview, .briefing, .intelligence, .transport, .profile, .policies]
+            ? [.overview, .briefing, .transport, .admin, .profile, .policies]
+            : [.overview, .briefing, .transport, .profile, .policies]
     }
 
     private var sidebar: some View {
@@ -254,7 +257,6 @@ struct RootView: View {
             Section("Workspace") {
                 sidebarLink(.overview)
                 sidebarLink(.briefing)
-                sidebarLink(.intelligence)
             }
             Section("Source lenses") {
                 sidebarLink(.news)
@@ -332,7 +334,11 @@ struct RootView: View {
         case .transport:
             TransportWorkspaceView()
         case .intelligence:
-            IntelligenceWorkspaceView()
+            if horizontalSizeClass == .regular {
+                PadOverviewView(destination: $sidebarSelection)
+            } else {
+                DashboardView()
+            }
         case .earthObservation:
             EarthObservationWorkspaceView()
         case .admin:
@@ -361,6 +367,8 @@ struct RootView: View {
                 .value?
                 .lowercased()
         else { return }
+
+        model.selectedIntelligenceEventID = nil
 
         if let rawCountry = components.queryItems?
             .first(where: { $0.name == "country" })?

@@ -16,6 +16,18 @@ aps*.cer
 *.p12
 *.mobileprovision
 
+# Local credentials must never enter a release commit.
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.template
+*.pem
+*.key
+*.pfx
+*.jks
+**/application_default_credentials.json
+**/service-account*.json
+
 # JavaScript dependencies and build caches
 **/node_modules/
 **/dist/

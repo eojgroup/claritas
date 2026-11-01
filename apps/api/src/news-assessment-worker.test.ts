@@ -15,7 +15,9 @@ test("assessment publisher lookup refuses unsafe SQL aliases", async () => {
 });
 
 test("assessment persistence keeps the database read watermark so concurrent source updates remain eligible", async () => {
-  const { pool } = await import("./db");
+  // The API is CommonJS. Use its loader so Node 20 + tsx cannot create a
+  // separate ESM database instance that escapes this connection stub.
+  const { pool } = require("./db") as typeof import("./db");
   const { assessPendingNewsItems } = await import("./news-assessment-worker");
   const originalConnect = pool.connect;
   const readWatermark = new Date("2026-10-27T10:00:00.000Z");

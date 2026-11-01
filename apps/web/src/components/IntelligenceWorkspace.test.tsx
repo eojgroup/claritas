@@ -148,6 +148,28 @@ describe("IntelligenceWorkspace", () => {
   });
   afterEach(cleanup);
 
+  it("opens exact event context without fetching a second event queue and follows the visual source connection", async () => {
+    vi.mocked(fetchIntelligenceEvents).mockClear();
+    vi.mocked(fetchIntelligenceEvent).mockClear();
+    vi.mocked(fetchIntelligenceAlerts).mockClear();
+    const onEventLoaded = vi.fn();
+    const { rerender } = render(<IntelligenceWorkspace embedded initialEventId={event.id} onEventLoaded={onEventLoaded} />);
+    expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+    expect(fetchIntelligenceEvents).not.toHaveBeenCalled();
+    expect(fetchIntelligenceAlerts).not.toHaveBeenCalled();
+    expect(onEventLoaded).toHaveBeenCalledWith(event);
+    expect(screen.queryByRole("region", { name: "Prioritized event investigations" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Read Earth observation connections" }), { key: "Enter" });
+    expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("1 record");
+    expect(screen.getByRole("heading", { name: "Active fire hotspot" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Port operator responds to reported fire" })).toBeNull();
+    rerender(<IntelligenceWorkspace embedded initialEventId={event.id} onEventLoaded={onEventLoaded} refreshVersion={1} />);
+    await waitFor(() => expect(fetchIntelligenceEvent).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+    rerender(<IntelligenceWorkspace embedded initialEventId={null} />);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: event.title })).toBeNull());
+  });
+
   it("renders event detail, satellite context, evidence labels, provenance, and uncertainty", async () => {
     render(<IntelligenceWorkspace initialCountry="AE" />);
     expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();

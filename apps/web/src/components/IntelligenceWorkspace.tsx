@@ -44,6 +44,9 @@ import { presentEvent } from "./eventPresentation";
 const severities: Array<IntelligenceSeverity | "all"> = ["all", "critical", "high", "medium", "low"];
 
 type Props = {
+  embedded?: boolean;
+  refreshVersion?: string | number;
+  onEventLoaded?: (event: IntelligenceEvent) => void;
   initialCountry?: string | null;
   initialEventId?: string | null;
   onSelectEvent?: (eventId: string | null) => void;
@@ -136,6 +139,9 @@ function severityClass(severity: IntelligenceSeverity) {
 }
 
 export default function IntelligenceWorkspace({
+  embedded = false,
+  refreshVersion,
+  onEventLoaded,
   initialCountry,
   initialEventId,
   onSelectEvent,
@@ -152,6 +158,7 @@ export default function IntelligenceWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailRetry, setDetailRetry] = useState(0);
+  const [selectedFamily, setSelectedFamily] = useState("all");
   const [watches, setWatches] = useState<IntelligenceWatch[]>([]);
   const [alerts, setAlerts] = useState<IntelligenceAlert[]>([]);
   const [watchPending, setWatchPending] = useState(false);
@@ -235,9 +242,21 @@ export default function IntelligenceWorkspace({
     if (alertResult.status === "fulfilled") setAlerts(alertResult.value);
   }, [includeExpired, initialCountry, initialEventId, onSelectEvent, severity]);
 
-  useEffect(() => { void loadEvents(); }, [loadEvents]);
+  useEffect(() => {
+    if (!embedded) void loadEvents();
+  }, [embedded, loadEvents]);
 
   useEffect(() => {
+    if (!embedded) return;
+    let active = true;
+    void fetchIntelligenceWatchlist().then((rows) => {
+      if (active) setWatches(rows);
+    }).catch(() => { /* Following an event remains optional. */ });
+    return () => { active = false; };
+  }, [embedded]);
+
+  useEffect(() => {
+    setSelectedFamily("all");
     if (!selectedId) {
       setDetail(null);
       setDetailError(null);
@@ -252,6 +271,7 @@ export default function IntelligenceWorkspace({
       .then((value) => {
         if (!active) return;
         setDetail(value);
+        onEventLoaded?.(value.event);
         setEvents((current) => current.some((event) => event.id === value.event.id)
           ? current
           : [value.event, ...current]);
@@ -263,7 +283,7 @@ export default function IntelligenceWorkspace({
       })
       .finally(() => { if (active) setDetailLoading(false); });
     return () => { active = false; };
-  }, [detailRetry, selectedId]);
+  }, [detailRetry, selectedId, refreshVersion, onEventLoaded]);
 
   useEffect(() => {
     let active = true;
@@ -273,7 +293,7 @@ export default function IntelligenceWorkspace({
       .then((value) => { if (active) setGibsContext(value); })
       .catch(() => { if (active) setGibsContext(null); });
     return () => { active = false; };
-  }, [selectedId]);
+  }, [selectedId, refreshVersion]);
 
   const evidenceThread = useMemo(
     () => [...(detail?.evidence ?? [])].sort((left, right) => (
@@ -390,8 +410,8 @@ export default function IntelligenceWorkspace({
   };
 
   return (
-    <div className="workspace-page min-w-0 space-y-4">
-      <section className="app-card-hero rounded-xl p-4 sm:p-5">
+    <div className={`workspace-page min-w-0 space-y-4 ${embedded ? "event-context-embedded" : ""}`}>
+      {!embedded && <section className="app-card-hero rounded-xl p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">One event · every source</div>
@@ -426,11 +446,11 @@ export default function IntelligenceWorkspace({
             {includeExpired ? "Archive included" : "Current only"}
           </button>
         </div>
-      </section>
+      </section>}
 
       {error && <div role="alert" className="event-error rounded-xl border p-4 text-sm">{error}</div>}
 
-      {alerts.length > 0 && (
+      {!embedded && alerts.length > 0 && (
         <section aria-label="Watchlist alerts" className="app-card rounded-xl p-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Bell className="h-3.5 w-3.5" />Watchlist alerts · {alerts.length}</div>
           <div className="mt-3 grid gap-2 lg:grid-cols-2">
@@ -445,7 +465,7 @@ export default function IntelligenceWorkspace({
         </section>
       )}
 
-      <section className="event-mobile-picker app-card rounded-xl xl:hidden" aria-label="Choose an event investigation">
+      {!embedded && <section className="event-mobile-picker app-card rounded-xl xl:hidden" aria-label="Choose an event investigation">
         <div className="border-b border-[color:var(--shell-border)] p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -494,10 +514,10 @@ export default function IntelligenceWorkspace({
             <div className="mt-3 text-xs font-semibold text-[color:var(--signal-sky)]">Jump to the selected evidence thread ↓</div>
           </button>
         )}
-      </section>
+      </section>}
 
-      <div className="grid min-h-[34rem] gap-4 xl:grid-cols-[minmax(19rem,0.68fr)_minmax(0,1.32fr)]">
-        <section className="app-card hidden self-start overflow-hidden rounded-xl xl:sticky xl:top-24 xl:block" aria-label="Prioritized event investigations">
+      <div className={embedded ? "min-w-0" : "grid min-h-[34rem] gap-4 xl:grid-cols-[minmax(19rem,0.68fr)_minmax(0,1.32fr)]"}>
+        {!embedded && <section className="app-card hidden self-start overflow-hidden rounded-xl xl:sticky xl:top-24 xl:block" aria-label="Prioritized event investigations">
           <div className="flex items-center justify-between gap-3 border-b border-[color:var(--shell-border)] px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-muted)]">
             <span>Prioritized investigations · {events.length}</span>
             <span className="event-list-selection-status">{selectedId ? "1 viewing" : "Choose one"}</span>
@@ -545,7 +565,7 @@ export default function IntelligenceWorkspace({
               );
             })}
           </div>
-        </section>
+        </section>}
 
         <section ref={detailPanelRef} id="selected-event-investigation" className="app-card rounded-xl p-4 sm:p-5" aria-label="Selected event investigation" tabIndex={-1}>
           {detailLoading && <div role="status" className="flex h-48 items-center justify-center text-sm text-[color:var(--shell-muted)]"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Loading the selected investigation</div>}
@@ -608,8 +628,11 @@ export default function IntelligenceWorkspace({
                 </div>
               </section>
 
-              <EventVisualContext key={detail.event.id} detail={detail} />
-              <EventConnections key={detail.event.id} detail={detail} onOpenImagery={onOpenImagery} />
+              <EventVisualContext key={`visual-${detail.event.id}`} detail={detail} onSelectFamily={(family) => {
+                setSelectedFamily(family);
+                document.getElementById("event-connection-records")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+              }} />
+              <EventConnections key={`connections-${detail.event.id}`} detail={detail} selectedFamily={selectedFamily} onSelectFamily={setSelectedFamily} onOpenImagery={onOpenImagery} />
 
               <details open={Boolean(gibsTrueColor || displayedEarthObservations.length)} id="event-imagery-assessment" className="event-imagery-disclosure rounded-xl border border-[color:var(--shell-border)] p-4">
                 <summary>Imagery assessment · {satelliteAssessment}</summary>
