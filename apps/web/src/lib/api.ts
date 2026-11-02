@@ -1278,6 +1278,27 @@ export type NewsImage = {
   captured_at: null; capture_verified: false; notice: string; analysis_status: "available" | "pending" | "unavailable";
 };
 
+export type ContextImage = {
+  id: string;
+  kind: "satellite" | "news";
+  preview_url: string;
+  thumbnail_url: string | null;
+  width: number;
+  height: number;
+  captured_at: string | null;
+  published_at: string | null;
+  collected_at: string | null;
+  source_event_id: string | null;
+  source_event_title: string | null;
+  source_url: string | null;
+  title: string;
+  attribution: string;
+  license: string;
+  location_name: string | null;
+  match_reason: "rendered_area_contains_location" | "same_specific_location";
+  notice: string;
+};
+
 export type EarthObservationAsset = {
   id: string;
   asset_type: string;
@@ -1424,6 +1445,7 @@ export type RegionalReporting = {
 };
 
 export type IntelligenceEventDetail = {
+  context_images?: ContextImage[];
   news_images?: NewsImage[];
   signal_coverage?: Array<{ domain: string; label: string; count: number; state: "linked" | "context" | "none" }>;
   context_signals?: Array<{
@@ -2434,7 +2456,7 @@ export async function fetchIntelligenceEvents(params?: {
   eventType?: string;
   since?: string;
   includeExpired?: boolean;
-}): Promise<IntelligenceEvent[]> {
+}, signal?: AbortSignal): Promise<IntelligenceEvent[]> {
   const sp = new URLSearchParams();
   if (params?.limit) sp.set("limit", String(params.limit));
   if (params?.status) sp.set("status", params.status);
@@ -2446,6 +2468,7 @@ export async function fetchIntelligenceEvents(params?: {
   if (params?.includeExpired) sp.set("include_expired", "true");
   const resp = await fetch(`${API_BASE}/api/intelligence/events?${sp.toString()}`, {
     credentials: "include",
+    signal,
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence events"));
   const data = await resp.json();
@@ -2525,8 +2548,8 @@ export async function deleteIntelligenceWatch(id: string): Promise<void> {
   if (!resp.ok && resp.status !== 404) throw new Error(await readError(resp, "Failed to remove intelligence watch"));
 }
 
-export async function fetchIntelligenceAlerts(): Promise<IntelligenceAlert[]> {
-  const resp = await fetch(`${API_BASE}/api/intelligence/alerts`, { credentials: "include" });
+export async function fetchIntelligenceAlerts(signal?: AbortSignal): Promise<IntelligenceAlert[]> {
+  const resp = await fetch(`${API_BASE}/api/intelligence/alerts`, { credentials: "include", signal });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence alerts"));
   const data = await resp.json();
   return (data.alerts ?? []) as IntelligenceAlert[];

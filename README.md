@@ -441,6 +441,7 @@ The daily briefing generator can use OpenCode as an internal LLM service:
 - **Explainable news categories and priority**: [`docs/news-priority.md`](./docs/news-priority.md)
 - **Cost-optimized production baseline**: [`docs/operations/cost-baseline.md`](./docs/operations/cost-baseline.md)
 - **World overview and reliability changes**: [`docs/operations/2026-11-world-overview-reliability.md`](./docs/operations/2026-11-world-overview-reliability.md)
+- **Performance and imagery reuse**: [`docs/operations/2026-11-performance-and-imagery-reuse.md`](./docs/operations/2026-11-performance-and-imagery-reuse.md)
 - **Event intelligence and Earth Observation**: [`docs/architecture/event-earth-observation.md`](./docs/architecture/event-earth-observation.md)
 - **Earth Observation administrator setup**: [`docs/operations/earth-observation-admin-setup.md`](./docs/operations/earth-observation-admin-setup.md)
 

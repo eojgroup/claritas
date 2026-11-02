@@ -82,7 +82,8 @@ embedded WidgetKit extension targets:
 
 - The source lenses explain where a signal came from. The Signal Desk explains the event assembled from those sources.
 - Selecting an event loads its grouped evidence, original news/official URLs, correlation labels, locations and available EO observations as one thread.
-- Satellite imagery is event-specific. When no defensible observation is available, the app says so and leaves the reported/official evidence intact; it does not substitute a generic country image.
+- Event observations retain their event-specific evidence status. Previously collected satellite and article images may also appear as labelled location context when the API establishes the rendered area or the same specific location. These cards retain original dates, attribution, licence, uncertainty notices and source-investigation links; they never count as evidence of the new event.
+- Authenticated images share concurrent downloads and use a memory-only 16 MB cache for five minutes, recreated when the auth token changes. Display decoding runs off the main actor and downsamples to 1536 pixels. Event refreshes retain the loaded evidence while refreshing or displaying a recoverable refresh error.
 - Model-written imagery text is displayed as interpretation, not as an observation or fact. Provider/prompt provenance and limitations remain part of the API model.
 - The Imagery library is useful for provenance and asset review but is not a second Earth Observation investigation workflow.
 

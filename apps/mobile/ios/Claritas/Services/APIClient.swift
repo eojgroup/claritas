@@ -12,6 +12,7 @@ final class APIClient {
     private var authToken: String?
     private var authRequestScope = UUID()
     private let readRequests = AsyncRequestCoalescer<String, Data>()
+    private var imageCache = ImageDataCache()
 
     var baseURLDescription: String {
         baseURL.absoluteString
@@ -50,7 +51,10 @@ final class APIClient {
     }
 
     func setAuthToken(_ token: String?) {
-        if authToken != token { authRequestScope = UUID() }
+        if authToken != token {
+            authRequestScope = UUID()
+            imageCache = ImageDataCache()
+        }
         self.authToken = token
     }
 
@@ -798,20 +802,21 @@ final class APIClient {
     }
 
     func fetchEarthAsset(path: String) async throws -> Data {
-        guard path.hasPrefix("/api/earth-observation/assets/"),
-              let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
-              url.scheme == baseURL.scheme,
-              url.host == baseURL.host else {
+        guard path.hasPrefix("/api/earth-observation/assets/") else {
             throw APIError(status: 400, message: "Invalid Earth observation asset path")
         }
-        let (data, response) = try await session.data(for: authedRequest(URLRequest(url: url)))
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError(status: -1, message: "No HTTP response")
+        return try await fetchStoredImage(path: path)
+    }
+
+    func fetchStoredImage(path: String) async throws -> Data {
+        guard StoredImagePath.isValid(path),
+              let url = URL(string: path, relativeTo: baseURL)?.absoluteURL,
+              url.scheme == baseURL.scheme,
+              url.host == baseURL.host,
+              url.port == baseURL.port else {
+            throw APIError(status: 400, message: "Invalid stored image path")
         }
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
-        }
-        return data
+        return try await cachedImageData(url: url)
     }
 
     func fetchProxiedImage(url original: String) async throws -> Data {
@@ -821,13 +826,26 @@ final class APIClient {
         guard let proxyURL = imageProxyURL(for: remoteURL) else {
             throw APIError(status: 400, message: "Unable to build image proxy URL")
         }
-        let (data, response) = try await session.data(for: authedRequest(URLRequest(url: proxyURL)))
-        guard let http = response as? HTTPURLResponse else {
-            throw APIError(status: -1, message: "No HTTP response")
+        return try await cachedImageData(url: proxyURL)
+    }
+
+    private func cachedImageData(url: URL) async throws -> Data {
+        let request = authedRequest(URLRequest(url: url))
+        let cache = imageCache
+        let data = try await cache.data(for: url.absoluteString) { [session] in
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw APIError(status: -1, message: "No HTTP response")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw APIError(status: http.statusCode, message: Self.responseErrorMessage(data: data, statusCode: http.statusCode))
+            }
+            guard http.mimeType?.hasPrefix("image/") == true else {
+                throw APIError(status: 502, message: "The returned asset is not a supported image.")
+            }
+            return data
         }
-        guard (200..<300).contains(http.statusCode) else {
-            throw APIError(status: http.statusCode, message: errorMessage(data: data, statusCode: http.statusCode))
-        }
+        try Task.checkCancellation()
         return data
     }
 

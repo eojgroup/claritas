@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { query, withTransaction, withWorkerLease } from "../db";
+import { newsImageRetentionDays } from "./news-image-policy";
 import { fetchPublicHtml, fetchPublicImage } from "../image-proxy";
 import { OpenRouterVisionClient, EO_VISION_PROMPT_VERSION } from "../earth-observation/openrouter-vision";
 import { recomputeIntelligenceEventAggregateTx } from "../intelligence/service";
@@ -47,8 +48,9 @@ export async function collectNewsImages(batchSize = 3) {
         if (normalized.info.width < 160 || normalized.info.height < 120 || normalized.data.length > 1_000_000) continue;
         const hash = createHash("sha256").update(normalized.data).digest("hex");
         await withTransaction(async (client) => {
-          await client.query(`INSERT INTO news_image_asset(content_hash,preview,width,height) VALUES ($1,$2,$3,$4) ON CONFLICT (content_hash) DO NOTHING`,
-            [hash, normalized.data, normalized.info.width, normalized.info.height]);
+          await client.query(`INSERT INTO news_image_asset(content_hash,preview,width,height,expires_at)
+            VALUES ($1,$2,$3,$4,now()+make_interval(days=>$5::int)) ON CONFLICT (content_hash) DO NOTHING`,
+            [hash, normalized.data, normalized.info.width, normalized.info.height, newsImageRetentionDays()]);
           await client.query(`INSERT INTO news_article_image(item_id,content_hash,image_url,caption,discovery,publisher,article_url)
             VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (item_id,content_hash) DO NOTHING`,
             [article.id,hash,image.url,image.caption,image.discovery,article.publisher,article.url]);

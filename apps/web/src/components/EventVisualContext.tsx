@@ -2,7 +2,7 @@ import { NewsImageCards } from "./NewsImageGallery";
 import CountryFlag from "./CountryFlag";
 import { useCountryContext } from "./countryContext";
 import { countryReferencePoint } from "./countryPresentation";
-import { useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { geoMercator, geoPath } from "d3-geo";
 import { feature } from "topojson-client";
 import worldAtlas from "world-atlas/countries-50m.json";
@@ -16,7 +16,7 @@ const topology = worldAtlas as unknown as Topology<{ countries: GeometryCollecti
 const land = feature(topology, topology.objects.countries) as FeatureCollection<Geometry, Properties>;
 const validPoint = (lat: unknown, lon: unknown): lat is number => typeof lat === "number" && typeof lon === "number" && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
 
-export default function EventVisualContext({ detail, onSelectFamily }: { detail: IntelligenceEventDetail; onSelectFamily?: (family: string) => void }) {
+const EventLocationMap = memo(function EventLocationMap({ detail }: { detail: IntelligenceEventDetail }) {
   const [zoom, setZoom] = useState(1);
   const located = detail.locations.filter((location) => validPoint(location.latitude, location.longitude));
   const coordinates = detail.understanding?.coordinates;
@@ -24,9 +24,31 @@ export default function EventVisualContext({ detail, onSelectFamily }: { detail:
   const countryContext = useCountryContext(detail.event.primary_country_iso2);
   const referencePoint = countryReferencePoint(countryContext);
   const center = primary ?? located[0] ?? (referencePoint ? { longitude: referencePoint[0], latitude: referencePoint[1] } : null);
-  const projection = geoMercator().center(center ? [center.longitude!, Math.max(-75, Math.min(75, center.latitude!))] : [0, 15]).scale(95 * zoom).translate([320, 150]);
-  const path = geoPath(projection);
+  const longitude = center?.longitude ?? 0;
+  const latitude = center?.latitude ?? 15;
+  const projection = useMemo(() => geoMercator().center([longitude, Math.max(-75, Math.min(75, latitude))]).scale(95 * zoom).translate([320, 150]), [longitude, latitude, zoom]);
+  const countryPaths = useMemo(() => {
+    const path = geoPath(projection);
+    return land.features.map((country, index) => <path key={`${country.id ?? "country"}-${index}`} d={path(country) ?? undefined} />);
+  }, [projection]);
   const points = [...(primary ? [{ id: "event", latitude: primary.latitude, longitude: primary.longitude, canonical_name: primary.label, relationship: primary.basis === "estimated_mapped" ? "Estimated event location" : "Source-observed event location" }] : []), ...located];
+  return <figure className="event-location-map">
+        <figcaption><strong><CountryFlag country={detail.event.primary_country_iso2} />Geographic context</strong><span>{center ? detail.event.location_name || "Event area" : "Location not resolved · world overview"}</span></figcaption>
+        <svg viewBox="0 0 640 300" role="img" aria-label="Map of event and linked locations">
+          <rect width="640" height="300" fill="var(--shell-bg)" />
+          <g fill="var(--shell-sidebar)" stroke="var(--shell-border)" strokeWidth="0.6">{countryPaths}</g>
+          {points.map((point) => {
+            const pixel = projection([point.longitude!, point.latitude!]);
+            if (!pixel || pixel[0] < 8 || pixel[0] > 632 || pixel[1] < 8 || pixel[1] > 292) return null;
+            return <g key={point.id} transform={`translate(${pixel[0]},${pixel[1]})`}><title>{point.canonical_name} · {point.relationship}</title><circle r="12" fill="var(--shell-accent)" opacity="0.2" /><circle r="4" fill="var(--shell-accent)" stroke="var(--shell-ink)" /></g>;
+          })}
+        </svg>
+        <label className="event-map-zoom">Zoom <input aria-label="Event map zoom" type="range" min="1" max="12" step="0.5" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>
+        <p>{primary?.basis === "estimated_mapped" ? "Estimated geography; pin is not a verified incident position." : primary ? "Source-observed geography." : located.length ? "Linked places; no precise incident position is available." : "No coordinates available; no incident pin is inferred."} {!primary && !located.length && referencePoint && " View centered on Wikidata’s country reference point."} Map: Natural Earth.</p>
+      </figure>;
+});
+
+export default function EventVisualContext({ detail, onSelectFamily, showLocationMap = true }: { detail: IntelligenceEventDetail; onSelectFamily?: (family: string) => void; showLocationMap?: boolean }) {
   const records = detail.evidence.filter((item) => !isCoverageAssessment(item));
   const groups = [...new Set(records.map(evidenceFamily))].map((domain) => ({
     domain, items: records.filter((item) => evidenceFamily(item) === domain),
@@ -36,20 +58,7 @@ export default function EventVisualContext({ detail, onSelectFamily }: { detail:
 
   return <section className="event-visual-context" aria-label="Event visual context">
     <div className="event-visual-grid">
-      <figure className="event-location-map">
-        <figcaption><strong><CountryFlag country={detail.event.primary_country_iso2} />Geographic context</strong><span>{center ? detail.event.location_name || "Event area" : "Location not resolved · world overview"}</span></figcaption>
-        <svg viewBox="0 0 640 300" role="img" aria-label="Map of event and linked locations">
-          <rect width="640" height="300" fill="var(--shell-bg)" />
-          <g fill="var(--shell-sidebar)" stroke="var(--shell-border)" strokeWidth="0.6">{land.features.map((country, index) => <path key={`${country.id ?? "country"}-${index}`} d={path(country) ?? undefined} />)}</g>
-          {points.map((point) => {
-            const pixel = projection([point.longitude!, point.latitude!]);
-            if (!pixel || pixel[0] < 8 || pixel[0] > 632 || pixel[1] < 8 || pixel[1] > 292) return null;
-            return <g key={point.id} transform={`translate(${pixel[0]},${pixel[1]})`}><title>{point.canonical_name} · {point.relationship}</title><circle r="12" fill="var(--shell-accent)" opacity="0.2" /><circle r="4" fill="var(--shell-accent)" stroke="var(--shell-ink)" /></g>;
-          })}
-        </svg>
-        <label className="event-map-zoom">Zoom <input aria-label="Event map zoom" type="range" min="1" max="12" step="0.5" value={zoom} onChange={(event) => setZoom(Number(event.target.value))} /></label>
-        <p>{primary?.basis === "estimated_mapped" ? "Estimated geography; pin is not a verified incident position." : primary ? "Source-observed geography." : located.length ? "Linked places; no precise incident position is available." : "No coordinates available; no incident pin is inferred."} {!primary && !located.length && referencePoint && " View centered on Wikidata’s country reference point."} Map: Natural Earth.</p>
-      </figure>
+      {showLocationMap && <EventLocationMap detail={detail} />}
       <figure className="event-correlation-graphic">
         <figcaption><strong>Evidence connections</strong><span>{records.length} records · {groups.length} source types</span></figcaption>
         {groups.length ? <svg viewBox="0 0 440 300" role={onSelectFamily ? "group" : "img"} aria-label="Correlation network between this event and its evidence sources">

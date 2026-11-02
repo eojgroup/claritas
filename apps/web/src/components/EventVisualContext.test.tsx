@@ -7,6 +7,11 @@ import EventVisualContext from "./EventVisualContext";
 import type { IntelligenceEventDetail } from "../lib/api";
 afterEach(cleanup);
 const base = { event: { id: "example", location_name: "Example region" }, evidence: [], locations: [], earth_observations: [] } as unknown as IntelligenceEventDetail;
+it("omits the duplicate location map when the World map already supplies context", () => {
+  const { container } = render(<EventVisualContext detail={base} showLocationMap={false} />);
+  expect(screen.queryByRole("img", { name: "Map of event and linked locations" })).toBeNull();
+  expect(container.querySelectorAll("path")).toHaveLength(0);
+});
 it("does not invent incident coordinates or connections when evidence is missing", () => {
   const { container } = render(<EventVisualContext detail={base} />);
   expect(screen.getByText(/No coordinates available/)).toBeTruthy();

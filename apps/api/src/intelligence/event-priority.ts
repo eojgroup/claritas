@@ -1,3 +1,4 @@
+import { sourceRecordBigintSql } from "./source-record";
 /** One priority model for investigations from every source family. */
 const sqlAlias = (value: string) => {
   if (!/^[a-z_][a-z0-9_]*$/i.test(value)) throw new Error("Invalid SQL alias");
@@ -7,8 +8,7 @@ const sqlAlias = (value: string) => {
 export function activeSocialEvidenceSql(alias = "evidence") {
   const evidence = sqlAlias(alias);
   return `(${evidence}.domain<>'social' OR EXISTS (SELECT 1 FROM social_signal retained
-    WHERE retained.id=CASE WHEN ${evidence}.source_record_id ~ '^[0-9]{1,18}$'
-      THEN ${evidence}.source_record_id::bigint END AND retained.expires_at>now()))`;
+    WHERE retained.id=${sourceRecordBigintSql(evidence)} AND retained.expires_at>now()))`;
 }
 
 export function eventOriginDomainSql(alias = "event") {
@@ -38,8 +38,7 @@ export function eventNewsPrioritySql(alias = "event") {
   const event = sqlAlias(alias);
   return `COALESCE((SELECT max(assessment.score)/100
     FROM intelligence_event_evidence report
-    JOIN item article ON article.id=CASE WHEN report.source_record_type='item'
-      AND report.source_record_id ~ '^[0-9]{1,18}$' THEN report.source_record_id::bigint END
+    JOIN item article ON article.id=${sourceRecordBigintSql("report", "item")}
     JOIN news_item_assessment assessment ON assessment.item_id=article.id AND assessment.assessed_at>=article.updated_at
     WHERE report.event_id=${event}.id AND report.domain='news'
       AND COALESCE(article.payload->>'quality_status','accepted')='accepted'),0)`;

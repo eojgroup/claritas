@@ -45,6 +45,68 @@ actor AsyncRequestCoalescer<Key: Hashable & Sendable, Value: Sendable> {
     }
 }
 
+/// Small, memory-only cache for authenticated images. Concurrent views share
+/// one download, and old entries yield to a fixed byte budget. Each API auth
+/// session owns its own instance so images cannot cross account boundaries.
+actor ImageDataCache {
+    private struct Entry {
+        let data: Data
+        let expiresAt: Date
+        var lastRead: UInt64
+    }
+    private let requests = AsyncRequestCoalescer<String, Data>()
+    private let maximumBytes: Int
+    private let lifetime: TimeInterval
+    private var entries: [String: Entry] = [:]
+    private var totalBytes = 0
+    private var sequence: UInt64 = 0
+
+    init(maximumBytes: Int = 16 * 1_024 * 1_024, lifetime: TimeInterval = 300) {
+        self.maximumBytes = max(0, maximumBytes)
+        self.lifetime = max(0, lifetime)
+    }
+
+    func data(for key: String, fetch: @escaping @Sendable () async throws -> Data) async throws -> Data {
+        sequence &+= 1
+        if var entry = entries[key], entry.expiresAt > Date() {
+            entry.lastRead = sequence
+            entries[key] = entry
+            return entry.data
+        }
+        remove(key)
+        let data = try await requests.value(for: key, fetch: fetch)
+        // Failed, oversized and empty responses are never retained. A later
+        // read can retry without an error or oversized item occupying memory.
+        guard !data.isEmpty, data.count <= maximumBytes, lifetime > 0 else { return data }
+        remove(key)
+        for key in entries.compactMap({ $0.value.expiresAt <= Date() ? $0.key : nil }) { remove(key) }
+        while totalBytes + data.count > maximumBytes,
+              let oldest = entries.min(by: { $0.value.lastRead < $1.value.lastRead })?.key {
+            remove(oldest)
+        }
+        sequence &+= 1
+        entries[key] = Entry(data: data, expiresAt: Date().addingTimeInterval(lifetime), lastRead: sequence)
+        totalBytes += data.count
+        return data
+    }
+
+    private func remove(_ key: String) {
+        if let entry = entries.removeValue(forKey: key) { totalBytes -= entry.data.count }
+    }
+}
+
+enum StoredImagePath {
+    static func isValid(_ path: String) -> Bool {
+        guard path.hasPrefix("/"), !path.hasPrefix("//"),
+              let parts = URLComponents(string: path), parts.scheme == nil, parts.host == nil,
+              parts.fragment == nil,
+              parts.path.range(of: "^/api/(earth-observation/assets/[A-Za-z0-9-]+|news-images/[A-Za-z0-9-]+/preview)$", options: .regularExpression) != nil else { return false }
+        let query = parts.queryItems ?? []
+        return query.isEmpty || (query.count == 1 && query[0].name == "v"
+            && query[0].value?.range(of: "^[a-fA-F0-9]{8,64}$", options: .regularExpression) != nil)
+    }
+}
+
 enum AuthProviderId: String, Codable, CaseIterable, Identifiable {
     case google
     case microsoft
@@ -3231,6 +3293,7 @@ struct IntelligenceEventDetail: Codable {
     let linked_news: [IntelligenceLinkedNews]
     let locations: [IntelligenceEventLocation]
     let earth_observations: [EarthObservation]
+    let context_images: [IntelligenceContextImage]
     let related_events: [IntelligenceRelatedEvent]
     let epistemic_notice: String
 
@@ -3240,7 +3303,7 @@ struct IntelligenceEventDetail: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case event, understanding, evidence, linked_news, locations, earth_observations, related_events, epistemic_notice, social_context, regional_reporting, signal_coverage, context_signals
+        case event, understanding, evidence, linked_news, locations, earth_observations, context_images, related_events, epistemic_notice, social_context, regional_reporting, signal_coverage, context_signals
     }
 
     init(from decoder: Decoder) throws {
@@ -3255,10 +3318,41 @@ struct IntelligenceEventDetail: Codable {
         linked_news = try container.decodeIfPresent([IntelligenceLinkedNews].self, forKey: .linked_news) ?? []
         locations = try container.decodeIfPresent([IntelligenceEventLocation].self, forKey: .locations) ?? []
         earth_observations = try container.decodeIfPresent([EarthObservation].self, forKey: .earth_observations) ?? []
+        context_images = try container.decodeIfPresent([IntelligenceContextImage].self, forKey: .context_images) ?? []
         related_events = try container.decodeIfPresent([IntelligenceRelatedEvent].self, forKey: .related_events) ?? []
         epistemic_notice = try container.decodeIfPresent(String.self, forKey: .epistemic_notice)
             ?? "Evidence relationships are qualified. Correlation does not establish causation."
     }
+}
+
+struct IntelligenceContextImage: Codable, Identifiable {
+    let id: String
+    let kind: String
+    let preview_url: String
+    let thumbnail_url: String?
+    let width: Int
+    let height: Int
+    let captured_at: Date?
+    let published_at: Date?
+    let collected_at: Date?
+    let source_event_id: String?
+    let source_event_title: String?
+    let source_url: String?
+    let title: String
+    let attribution: String
+    let license: String
+    let location_name: String?
+    let match_reason: String
+    let notice: String
+
+    var displayDate: Date? { captured_at ?? published_at ?? collected_at }
+    var dateLabel: String {
+        if captured_at != nil { return "Captured" }
+        if published_at != nil { return "Published" }
+        return "Collected"
+    }
+    var displayURL: String { thumbnail_url ?? preview_url }
+    var isStoredAsset: Bool { StoredImagePath.isValid(displayURL) }
 }
 
 struct IntelligenceWatchMetadata: Codable {

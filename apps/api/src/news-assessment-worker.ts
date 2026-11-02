@@ -15,6 +15,7 @@ type AssessmentCandidateRow = {
   source_name: string;
   linked_events: NewsAssessmentLinkedEvent[] | null;
   assessment_watermark: string | Date;
+  queue_revision: number | string;
 };
 
 let workerTimer: NodeJS.Timeout | null = null;
@@ -54,57 +55,109 @@ export function newsEvidenceItemIdSql(evidenceAlias: string): string {
     THEN ${id}::bigint END`;
 }
 
-export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESSMENT_BATCH_SIZE", 80, 1, 200)) {
-  const boundedBatch = Math.max(1, Math.min(Math.trunc(batchSize), 200));
-  const { rows } = await query<AssessmentCandidateRow>(
-    `WITH candidates AS MATERIALIZED (
-       SELECT item.id
-       FROM item
-       JOIN source ON source.id=item.source_id
-       LEFT JOIN news_item_assessment assessment ON assessment.item_id=item.id
+/** Advance only a fixed item-ID slice, even when that slice is ineligible. */
+export async function seedNewsAssessmentQueue(scanSize = 500): Promise<void> {
+  await query(
+    `INSERT INTO news_assessment_queue_state(singleton,methodology_version)
+     VALUES(true,$1)
+     ON CONFLICT(singleton) DO UPDATE SET methodology_version=EXCLUDED.methodology_version,
+       backfill_before_item_id=9223372036854775807
+     WHERE news_assessment_queue_state.methodology_version<>EXCLUDED.methodology_version`,
+    [NEWS_ASSESSMENT_METHODOLOGY],
+  );
+  await query(
+    `WITH state AS MATERIALIZED (
+       SELECT backfill_before_item_id FROM news_assessment_queue_state
+       WHERE singleton AND methodology_version=$1 AND backfill_before_item_id>0 FOR UPDATE
+     ), scanned AS MATERIALIZED (
+       SELECT item.id FROM state JOIN item ON item.id<=state.backfill_before_item_id
+       ORDER BY item.id DESC LIMIT $2
+     ), seeded AS (
+       INSERT INTO news_assessment_queue(item_id,due_at,priority)
+       SELECT item.id,statement_timestamp(),news_assessment_priority(item.event_time)
+       FROM scanned JOIN item ON item.id=scanned.id JOIN source ON source.id=item.source_id
        WHERE item.kind='news_article'
          AND (lower(source.name)<>'gdelt' OR item.payload->>'quality_status'='accepted')
-         AND (
-           assessment.item_id IS NULL
-           OR assessment.methodology_version<>$1
-           OR assessment.assessed_at<item.updated_at
-           OR (
-             item.event_time>=now()-interval '8 days'
-             AND (
-               (now()>item.event_time+interval '1 hour'
-                AND assessment.assessed_at<=item.event_time+interval '1 hour')
-               OR (now()>item.event_time+interval '6 hours'
-                   AND assessment.assessed_at<=item.event_time+interval '6 hours')
-               OR (now()>item.event_time+interval '24 hours'
-                   AND assessment.assessed_at<=item.event_time+interval '24 hours')
-               OR (now()>item.event_time+interval '72 hours'
-                   AND assessment.assessed_at<=item.event_time+interval '72 hours')
-               OR (now()>item.event_time+interval '168 hours'
-                   AND assessment.assessed_at<=item.event_time+interval '168 hours')
-             )
-           )
-           OR EXISTS (
-             SELECT 1
-             FROM intelligence_event_evidence changed_evidence
-             JOIN intelligence_event changed_event ON changed_event.id=changed_evidence.event_id
-             WHERE changed_evidence.domain='news'
-               AND changed_evidence.source_record_type='item'
-               AND changed_evidence.source_record_id=item.id::text
-               AND GREATEST(changed_event.updated_at,changed_evidence.created_at)>assessment.assessed_at
-           )
-         )
-       ORDER BY ${NEWS_ASSESSMENT_QUEUE_PRIORITY_SQL},
-                assessment.assessed_at ASC NULLS FIRST,
-                COALESCE(item.event_time,item.created_at) DESC NULLS LAST,
-                item.id DESC
-       LIMIT $2
+       ORDER BY item.id
+       ON CONFLICT(item_id) DO UPDATE SET
+         due_at=LEAST(news_assessment_queue.due_at,EXCLUDED.due_at),
+         priority=EXCLUDED.priority,revision=news_assessment_queue.revision+1
+       RETURNING item_id
+     )
+     UPDATE news_assessment_queue_state SET
+       backfill_before_item_id=COALESCE((SELECT min(id)-1 FROM scanned),0)
+     WHERE singleton AND methodology_version=$1 AND EXISTS(SELECT 1 FROM state)
+     RETURNING (SELECT count(*)::int FROM seeded) AS seeded`,
+    [NEWS_ASSESSMENT_METHODOLOGY, Math.min(2_000, Math.max(1, Math.trunc(scanSize)))],
+  );
+}
+
+/** Fan out event invalidations outside source/event writer transactions. */
+export async function expandNewsAssessmentEvents(batchSize = 20): Promise<void> {
+  await query(
+    `WITH events AS MATERIALIZED (
+       SELECT event_id,revision FROM news_assessment_event_queue ORDER BY enqueued_at,event_id LIMIT $1
+     ), items AS MATERIALIZED (
+       SELECT DISTINCT item.id,item.event_time
+       FROM events JOIN intelligence_event_evidence evidence ON evidence.event_id=events.event_id
+       JOIN item ON item.id=${newsEvidenceItemIdSql("evidence")}
+       JOIN source ON source.id=item.source_id
+       WHERE evidence.domain='news' AND evidence.source_record_type='item' AND item.kind='news_article'
+         AND (lower(source.name)<>'gdelt' OR item.payload->>'quality_status'='accepted')
+     ), queued AS (
+       INSERT INTO news_assessment_queue(item_id,due_at,priority)
+       SELECT id,statement_timestamp(),news_assessment_priority(event_time) FROM items ORDER BY id
+       ON CONFLICT(item_id) DO UPDATE SET
+         due_at=LEAST(news_assessment_queue.due_at,EXCLUDED.due_at),
+         priority=EXCLUDED.priority,revision=news_assessment_queue.revision+1
+       RETURNING item_id
+     )
+     DELETE FROM news_assessment_event_queue pending USING events
+     WHERE pending.event_id=events.event_id AND pending.revision=events.revision
+       AND (SELECT count(*) FROM queued)>=0`,
+    [Math.min(100, Math.max(1, Math.trunc(batchSize)))],
+  );
+}
+
+/** Wake at the governed age boundaries, just after their inclusive cutoff. */
+export function nextNewsAssessmentRefresh(eventTime: string | Date | null, assessedAt: Date): string | null {
+  if (!eventTime) return null;
+  const publishedAt = new Date(eventTime).getTime();
+  if (!Number.isFinite(publishedAt)) return null;
+  const boundaries = [-5 / 60, 1, 6, 24, 72, 168];
+  const next = boundaries.map((hours) => publishedAt + hours * 3_600_000 + 1)
+    .find((time) => time > assessedAt.getTime());
+  return next === undefined ? null : new Date(next).toISOString();
+}
+
+export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESSMENT_BATCH_SIZE", 80, 1, 200)) {
+  const boundedBatch = Math.max(1, Math.min(Math.trunc(batchSize), 200));
+  await seedNewsAssessmentQueue();
+  await expandNewsAssessmentEvents();
+  const { rows } = await query<AssessmentCandidateRow>(
+    `WITH candidates AS MATERIALIZED (
+       SELECT due.item_id,due.revision,due.priority,due.due_at
+       FROM (VALUES(0),(1),(2)) AS priority(value)
+       CROSS JOIN LATERAL (
+         SELECT pending.item_id,pending.revision,pending.priority,pending.due_at
+         FROM news_assessment_queue pending
+         WHERE pending.priority=priority.value AND pending.due_at<=statement_timestamp()
+         ORDER BY pending.due_at,pending.item_id LIMIT $1
+       ) due
+       ORDER BY due.priority,due.due_at,due.item_id LIMIT $1
+     ), discarded AS (
+       DELETE FROM news_assessment_queue pending USING candidates,item,source
+       WHERE pending.item_id=candidates.item_id AND pending.revision=candidates.revision
+         AND item.id=candidates.item_id AND source.id=item.source_id
+         AND (item.kind IS DISTINCT FROM 'news_article'
+              OR (lower(source.name)='gdelt' AND item.payload->>'quality_status' IS DISTINCT FROM 'accepted'))
      )
      SELECT item.id,item.title,item.summary,item.event_time,item.created_at,item.payload,
             source.name AS source_name,
             COALESCE(linked.linked_events,'[]'::jsonb) AS linked_events,
-            statement_timestamp() AS assessment_watermark
+            statement_timestamp() AS assessment_watermark,candidates.revision AS queue_revision
      FROM candidates
-     JOIN item ON item.id=candidates.id
+     JOIN item ON item.id=candidates.item_id
      JOIN source ON source.id=item.source_id
      LEFT JOIN LATERAL (
        SELECT jsonb_agg(to_jsonb(event_link) ORDER BY
@@ -141,8 +194,10 @@ export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESS
            AND event.status<>'dismissed'
        ) event_link
      ) linked ON true
+     WHERE item.kind='news_article'
+       AND (lower(source.name)<>'gdelt' OR item.payload->>'quality_status'='accepted')
      ORDER BY COALESCE(item.event_time,item.created_at) DESC NULLS LAST,item.id DESC`,
-    [NEWS_ASSESSMENT_METHODOLOGY, boundedBatch],
+    [boundedBatch],
   );
   if (!rows.length) return { selected: 0, assessed: 0 };
 
@@ -162,7 +217,7 @@ export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESS
     linkedEvents: Array.isArray(row.linked_events) ? row.linked_events : [],
   }, assessedAt));
   const values: unknown[] = [];
-  const valueSql = assessments.map((assessment) => {
+  const valueSql = assessments.map((assessment, index) => {
     const first = values.length + 1;
     values.push(
       assessment.itemId,
@@ -177,14 +232,19 @@ export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESS
       assessment.confidence,
       assessment.assessedAt,
       assessment.inputsHash,
+      rows[index].queue_revision,
+      nextNewsAssessmentRefresh(rows[index].event_time, assessedAt),
     );
-    return `($${first},$${first + 1},$${first + 2},$${first + 3}::jsonb,$${first + 4}::jsonb,$${first + 5}::jsonb,$${first + 6}::jsonb,$${first + 7},$${first + 8},$${first + 9},$${first + 10}::timestamptz,$${first + 11})`;
+    return `($${first}::bigint,$${first + 1}::text,$${first + 2}::text,$${first + 3}::jsonb,$${first + 4}::jsonb,$${first + 5}::jsonb,$${first + 6}::jsonb,$${first + 7}::double precision,$${first + 8}::text,$${first + 9}::double precision,$${first + 10}::timestamptz,$${first + 11}::text,$${first + 12}::bigint,$${first + 13}::timestamptz)`;
   });
   const result = await query<{ item_id: number }>(
-    `INSERT INTO news_item_assessment (
+    `WITH inputs(item_id,methodology_version,primary_category,categories,tags,reasons,components,score,tier,confidence,assessed_at,inputs_hash,queue_revision,next_due_at) AS (
+       VALUES ${valueSql.join(",")}
+     ), persisted AS (
+     INSERT INTO news_item_assessment (
        item_id,methodology_version,primary_category,categories,tags,reasons,
        components,score,tier,confidence,assessed_at,inputs_hash
-     ) VALUES ${valueSql.join(",")}
+     ) SELECT item_id,methodology_version,primary_category,categories,tags,reasons,components,score,tier,confidence,assessed_at,inputs_hash FROM inputs
      ON CONFLICT (item_id) DO UPDATE SET
        methodology_version=EXCLUDED.methodology_version,
        primary_category=EXCLUDED.primary_category,
@@ -198,7 +258,19 @@ export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESS
        assessed_at=EXCLUDED.assessed_at,
        inputs_hash=EXCLUDED.inputs_hash,
        updated_at=now()
-     RETURNING item_id`,
+     WHERE news_item_assessment.assessed_at<=EXCLUDED.assessed_at
+     RETURNING item_id
+     ), rescheduled AS (
+       UPDATE news_assessment_queue pending SET due_at=inputs.next_due_at,
+         priority=news_assessment_priority(item.event_time)
+       FROM inputs JOIN persisted USING(item_id) JOIN item ON item.id=inputs.item_id
+       WHERE pending.item_id=inputs.item_id AND pending.revision=inputs.queue_revision
+         AND inputs.next_due_at IS NOT NULL
+     ), completed AS (
+       DELETE FROM news_assessment_queue pending USING inputs,persisted
+       WHERE pending.item_id=inputs.item_id AND persisted.item_id=inputs.item_id
+         AND pending.revision=inputs.queue_revision AND inputs.next_due_at IS NULL
+     ) SELECT item_id FROM persisted`,
     values,
   );
   return { selected: rows.length, assessed: result.rows.length };

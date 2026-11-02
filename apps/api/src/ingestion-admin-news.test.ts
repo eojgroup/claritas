@@ -264,25 +264,19 @@ test("news assessment migration is separate, bounded, and indexed", () => {
   assert.doesNotMatch(migration, /ALTER TABLE item/);
 });
 
-test("bounded assessment worker refreshes item and event changes without treating domains as publishers", () => {
+test("assessment worker retains publisher identity and database watermark semantics", () => {
   const worker = readFileSync(resolve(__dirname, "news-assessment-worker.ts"), "utf8");
   const api = readFileSync(resolve(__dirname, "index.ts"), "utf8");
   const reader = readFileSync(resolve(__dirname, "news-reader-query.ts"), "utf8");
 
-  assert.match(worker, /LIMIT \$2/);
-  assert.match(worker, /changed_event\.updated_at/);
-  assert.match(worker, /changed_evidence\.created_at/);
+  // Input invalidation, age scheduling and races are exercised against the
+  // durable queue in news-assessment-queue.integration.ts.
   assert.match(worker, /count\(DISTINCT canonical_news_publisher_key\(/);
   assert.match(reader, /canonical_news_publisher_key\(i\.url,i\.payload,s\.name\)/);
   assert.match(worker, /event\.source_diversity,event\.domain_count/);
   assert.doesNotMatch(worker, /count\(DISTINCT domain\)/);
   assert.match(worker, /withWorkerLease\("news-item-assessment"/);
   assert.match(worker, /statement_timestamp\(\) AS assessment_watermark/);
-  assert.match(worker, /WHEN item\.event_time>=now\(\)-interval '4 hours'\s+AND item\.event_time<=now\(\)\+interval '5 minutes' THEN 0/);
-  assert.match(worker, /WHEN item\.event_time>=now\(\)-interval '8 days'\s+AND item\.event_time<=now\(\)\+interval '5 minutes' THEN 1/);
-  assert.match(worker, /WHEN assessment\.item_id IS NOT NULL THEN 2\s+ELSE 3/);
-  assert.match(worker, /assessment\.assessed_at ASC NULLS FIRST/);
-  assert.match(worker, /item\.event_time\+interval '168 hours'/);
   assert.doesNotMatch(worker, /date_trunc\('hour',now\(\)\)/);
   assert.match(worker, /assessed_at=EXCLUDED\.assessed_at/);
   assert.doesNotMatch(worker, /WHERE news_item_assessment\.inputs_hash IS DISTINCT/);

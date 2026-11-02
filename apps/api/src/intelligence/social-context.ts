@@ -65,3 +65,15 @@ export async function getSocialEventContexts(eventIds: string[]): Promise<Social
   );
   return rows.map((row) => ({ ...row, text: row.text.slice(0, 1200), classification: "unverified_social_claim", assessment_boundary: NOTICE }));
 }
+
+/** Feed rows need a count, not the full post bodies/author metadata. */
+export async function getSocialEventContextCounts(eventIds: string[]): Promise<Map<string, number>> {
+  if (!eventIds.length) return new Map();
+  const { rows } = await query<{ event_id: string; count: number }>(
+    `SELECT link.event_id,LEAST(count(*),5)::int AS count
+     FROM social_event_context link JOIN social_signal retained ON retained.id=link.signal_id
+     WHERE link.event_id=ANY($1::uuid[]) AND retained.expires_at>now()
+     GROUP BY link.event_id`, [eventIds],
+  );
+  return new Map(rows.map((row) => [row.event_id, row.count]));
+}

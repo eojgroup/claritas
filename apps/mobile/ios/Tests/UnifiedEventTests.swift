@@ -33,7 +33,31 @@ final class UnifiedEventTests: XCTestCase {
         XCTAssertEqual(detail.event.signalTypesLabel, "1 signal types")
         XCTAssertTrue(detail.signal_coverage.isEmpty)
         XCTAssertTrue(detail.context_signals.isEmpty)
+        XCTAssertTrue(detail.context_images.isEmpty)
         XCTAssertNil(detail.regional_reporting)
+    }
+
+    func testReusedImageryRetainsOriginalDatesAndSourceWithoutBecomingEvidence() throws {
+        let detail = try decode(IntelligenceEventDetail.self, [
+            "event": eventPayload,
+            "context_images": [[
+                "id": "saved-image", "kind": "news", "preview_url": "/api/news-images/image-1/preview",
+                "width": 1024, "height": 768, "published_at": "2026-09-20T12:00:00Z",
+                "collected_at": "2026-09-21T12:00:00Z", "source_event_id": "older-event",
+                "source_event_title": "Earlier report", "source_url": "https://example.com/report",
+                "title": "Previously collected port image", "attribution": "Publisher",
+                "license": "Publisher rights retained", "location_name": "Port",
+                "match_reason": "same_specific_location", "notice": "Capture time is unverified; context only.",
+            ]],
+        ])
+        let image = try XCTUnwrap(detail.context_images.first)
+        XCTAssertTrue(image.isStoredAsset)
+        XCTAssertNil(image.captured_at)
+        XCTAssertEqual(image.displayDate, image.published_at)
+        XCTAssertEqual(image.dateLabel, "Published")
+        XCTAssertEqual(image.source_event_id, "older-event")
+        XCTAssertTrue(detail.evidence.isEmpty)
+        XCTAssertTrue(detail.earth_observations.isEmpty)
     }
 
     func testRegionalTransportMetricsStayOutsideAttachedEvidence() throws {

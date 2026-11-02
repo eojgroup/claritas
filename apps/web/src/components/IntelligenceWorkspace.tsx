@@ -1,5 +1,6 @@
 import CountryFlag from "./CountryFlag";
 import EventVisualContext from "./EventVisualContext";
+import ContextImageGallery from "./ContextImageGallery";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -255,8 +256,9 @@ export default function IntelligenceWorkspace({
     return () => { active = false; };
   }, [embedded]);
 
+  useEffect(() => { setSelectedFamily("all"); }, [selectedId]);
+
   useEffect(() => {
-    setSelectedFamily("all");
     if (!selectedId) {
       setDetail(null);
       setDetailError(null);
@@ -264,7 +266,9 @@ export default function IntelligenceWorkspace({
       return;
     }
     let active = true;
-    setDetail(null);
+    // Keep the same investigation mounted during background updates. This
+    // preserves scroll position and decoded images through a slow refresh.
+    setDetail((current) => current?.event.id === selectedId ? current : null);
     setDetailError(null);
     setDetailLoading(true);
     fetchIntelligenceEvent(selectedId)
@@ -278,7 +282,7 @@ export default function IntelligenceWorkspace({
       })
       .catch((reason: unknown) => {
         if (!active) return;
-        setDetail(null);
+        setDetail((current) => current?.event.id === selectedId ? current : null);
         setDetailError(reason instanceof Error ? reason.message : String(reason));
       })
       .finally(() => { if (active) setDetailLoading(false); });
@@ -287,7 +291,7 @@ export default function IntelligenceWorkspace({
 
   useEffect(() => {
     let active = true;
-    setGibsContext(null);
+    setGibsContext((current) => current?.event_id === selectedId ? current : null);
     if (!selectedId) return () => { active = false; };
     fetchEventGibsContext(selectedId)
       .then((value) => { if (active) setGibsContext(value); })
@@ -568,11 +572,13 @@ export default function IntelligenceWorkspace({
         </section>}
 
         <section ref={detailPanelRef} id="selected-event-investigation" className="app-card rounded-xl p-4 sm:p-5" aria-label="Selected event investigation" tabIndex={-1}>
-          {detailLoading && <div role="status" className="flex h-48 items-center justify-center text-sm text-[color:var(--shell-muted)]"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Loading the selected investigation</div>}
-          {!detailLoading && detailError && <div role="alert" className="event-error flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border p-5 text-center text-sm"><span>Unable to load this event’s evidence thread: {detailError}</span><button type="button" onClick={() => setDetailRetry((value) => value + 1)} className="rounded-full border border-current px-3 py-1.5 text-xs font-semibold">Retry event</button></div>}
+          {detailLoading && detail?.event.id !== selectedId && <div role="status" className="flex h-48 items-center justify-center text-sm text-[color:var(--shell-muted)]"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Loading the selected investigation</div>}
+          {!detailLoading && detailError && detail?.event.id !== selectedId && <div role="alert" className="event-error flex min-h-48 flex-col items-center justify-center gap-3 rounded-lg border p-5 text-center text-sm"><span>Unable to load this event’s evidence thread: {detailError}</span><button type="button" onClick={() => setDetailRetry((value) => value + 1)} className="rounded-full border border-current px-3 py-1.5 text-xs font-semibold">Retry event</button></div>}
           {!detailLoading && !detailError && (!detail || detail.event.id !== selectedId) && <div className="flex h-48 items-center justify-center text-sm text-[color:var(--shell-muted)]">Select an event to inspect its evidence thread.</div>}
-          {!detailLoading && detail?.event.id === selectedId && (
+          {detail?.event.id === selectedId && (
             <div className="space-y-6">
+              {detailLoading && <p role="status" className="text-xs text-[color:var(--shell-muted)]">Refreshing this investigation…</p>}
+              {!detailLoading && detailError && <div role="alert" className="event-error rounded-lg border p-3 text-xs"><p>Could not refresh this investigation. Showing the last loaded evidence. {detailError}</p><button type="button" onClick={() => setDetailRetry((value) => value + 1)} className="mt-2 rounded-full border border-current px-3 py-1.5 font-semibold">Retry event</button></div>}
               <header>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
                   <span className={`rounded-full px-2 py-1 font-semibold uppercase ${severityClass(detail.event.severity)}`}>{detail.event.severity}</span>
@@ -628,10 +634,11 @@ export default function IntelligenceWorkspace({
                 </div>
               </section>
 
-              <EventVisualContext key={`visual-${detail.event.id}`} detail={detail} onSelectFamily={(family) => {
+              <EventVisualContext key={`visual-${detail.event.id}`} detail={detail} showLocationMap={!embedded} onSelectFamily={(family) => {
                 setSelectedFamily(family);
                 document.getElementById("event-connection-records")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
               }} />
+              <ContextImageGallery images={detail.context_images ?? []} onOpenEvent={selectEvent} />
               <EventConnections key={`connections-${detail.event.id}`} detail={detail} selectedFamily={selectedFamily} onSelectFamily={setSelectedFamily} onOpenImagery={onOpenImagery} />
 
               <details open={Boolean(gibsTrueColor || displayedEarthObservations.length)} id="event-imagery-assessment" className="event-imagery-disclosure rounded-xl border border-[color:var(--shell-border)] p-4">

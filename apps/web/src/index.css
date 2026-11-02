@@ -5268,6 +5268,19 @@ body {
 .news-image-analysis-text { margin-top: .5rem; font-size: .75rem; line-height: 1.5; }
 .news-image-detection-toggle { font-size: .75rem; padding: .35rem .6rem; border: 1px solid var(--shell-border); border-radius: .5rem; }
 
+.context-image-gallery { margin-top: 1rem; }
+.context-image-gallery h3 { font-size: .9rem; font-weight: 650; }
+.context-image-gallery > p { margin-top: .35rem; font-size: .75rem; line-height: 1.6; color: var(--shell-muted); }
+.context-image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 1rem; margin-top: .75rem; }
+.context-image-card { min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 400px; }
+.context-image-frame { width: 100%; max-height: 18rem; overflow: hidden; background: var(--shell-sidebar); }
+.context-image-card figcaption > strong { display: block; margin-top: .35rem; }
+.context-image-card figcaption > span { display: block; margin-top: .3rem; color: var(--shell-muted); font-size: .7rem; line-height: 1.5; overflow-wrap: anywhere; }
+.context-image-card figcaption > .context-image-label { font-size: .65rem; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--shell-accent-2); }
+.context-image-card figcaption > p { padding: 0; margin-top: .65rem; font-size: .7rem; line-height: 1.6; color: var(--shell-muted); }
+.context-image-card a:hover, .context-image-card button:hover { text-decoration: underline; }
+.context-image-card button { min-height: 44px; text-align: left; font-size: .75rem; color: var(--shell-accent-2); overflow-wrap: anywhere; }
+
 /* Overview previews stay bounded; source lenses lead with their own reporting. */
 .event-preview { padding: 0 12px 10px; border-radius: 12px; }
 .event-preview-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

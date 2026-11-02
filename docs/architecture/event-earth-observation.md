@@ -90,3 +90,36 @@ The native push payload carries the exact `event_id`, event type, severity and o
 Outbox, correlation decisions, evidence and job/delivery state remain auditable. Event expiry removes a record from current reader surfaces; it does not delete its evidence or audit history. The EO bucket lifecycle is 60 days and `EO_ASSET_RETENTION_DAYS` may shorten—but never extend—that lifetime. Reused immutable objects preserve their original lifecycle deadline in database expiry. Raw transport retention remains defined by the transport architecture. Event records and evidence remain in Cloud SQL until an explicit storage-retention policy supersedes this foundation.
 
 `GET /api/admin/intelligence/status` is the operational source of truth for backbone state, rapid sources, EO provider readiness/usage/queue/assets and APNs readiness/devices/delivery states. A flag value alone is never a readiness assertion.
+
+## Reusing retained imagery as location context
+
+Event detail includes an additive `context_images` collection, separate from
+`earth_observations`, `news_images` and the evidence graph. It contains at most
+three natural-colour satellite previews and three publisher previews retained
+for other investigations. Reuse performs no provider calls, copies no bytes,
+does not extend asset expiry, and never changes event scores, source counts,
+alerts, physical-observation availability or model interpretation.
+
+Satellite candidates use the existing scene spatial index, but must also contain
+the target point inside the **actual rendered AOI** recorded in the observation's
+render context. A large scene footprint alone is insufficient. Legacy renders
+without that footprint, expired previews and dismissed source events are
+excluded. The original acquisition date, provider attribution, licence and
+source investigation remain visible; acquisition at another time cannot
+establish the target event's conditions.
+
+Publisher previews can be reused only from another investigation with the same
+specific canonical location. Country, region and generalized area matches do
+not qualify. This is an association with reporting about that place; a headline
+or image model does not verify the photograph's capture location or time. The
+interface explicitly identifies that uncertainty, preserves the original article
+and publisher, and never claims the photograph depicts the selected event.
+
+Article previews already use content-addressed, authenticated storage. The
+`NEWS_IMAGE_RETENTION_DAYS` setting controls newly collected previews (default
+14 days, hard maximum 30). Reuse and rediscovery retain the original immutable
+expiry; existing assets are not extended. The default remains short because
+these previews are stored in PostgreSQL and share the application's database
+capacity. Satellite reuse retains the existing private GCS object lifecycle
+(maximum 60 days). Image metadata reads exclude image bytes and model-analysis
+JSON; bytes are requested lazily through existing authenticated image routes.

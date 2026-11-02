@@ -85,6 +85,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_IMAGE_COLLECTION_ENABLED, optional: true } }
             - name: NEWS_IMAGE_ANALYSIS_ENABLED
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_IMAGE_ANALYSIS_ENABLED, optional: true } }
+            - name: NEWS_IMAGE_RETENTION_DAYS
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_IMAGE_RETENTION_DAYS, optional: true } }
             - name: NEWS_IMAGE_MAX_DAILY_ARTICLES
               valueFrom: { configMapKeyRef: { name: claritas-config, key: NEWS_IMAGE_MAX_DAILY_ARTICLES, optional: true } }
             - name: EO_VISION_MODEL

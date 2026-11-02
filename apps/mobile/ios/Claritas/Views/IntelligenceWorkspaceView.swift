@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import ImageIO
 
 struct IntelligenceWorkspaceView: View {
     /// A selected story stays beside the world map instead of opening another workspace.
@@ -274,12 +275,12 @@ struct IntelligenceWorkspaceView: View {
 
     @ViewBuilder
     private var eventDetail: some View {
-        if detailLoading {
+        if detailLoading && detail?.event.id != selectedID {
             BrandCard(title: "Event detail", icon: "scope") {
                 ProgressView("Loading evidence thread")
                     .frame(maxWidth: .infinity, minHeight: 130)
             }
-        } else if let detailError {
+        } else if let detailError, detail?.event.id != selectedID {
             BrandCard(title: "Event detail unavailable", icon: "exclamationmark.triangle") {
                 Text(detailError)
                     .font(.caption)
@@ -290,6 +291,16 @@ struct IntelligenceWorkspaceView: View {
         } else if let detail, detail.event.id == selectedID {
             VStack(alignment: .leading, spacing: 14) {
                 Color.clear.frame(height: 0).id("investigation-overview")
+                if detailLoading {
+                    ProgressView("Refreshing evidence")
+                        .font(.caption)
+                } else if let detailError {
+                    Label("Could not refresh: \(detailError)", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Retry refresh") { Task { await loadDetail() } }
+                        .buttonStyle(.bordered)
+                }
                 BrandCard(title: "What’s happening", icon: "scope") {
                     Label("STARTED FROM \(detail.event.originLabel.uppercased())", systemImage: detail.event.originIcon)
                         .font(.caption2.weight(.bold))
@@ -376,7 +387,7 @@ struct IntelligenceWorkspaceView: View {
                         Text("Visual context for this event: \(detail.event.title)")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
-                        Text("Images stay with the selected event so their location and evidence status remain clear. They provide context, not automatic proof of a report or its cause.")
+                        Text("Event observations and regional browse imagery retain their acquisition dates and sources. They provide context, not automatic proof of a report or its cause.")
                             .font(.caption)
                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
 
@@ -454,6 +465,29 @@ struct IntelligenceWorkspaceView: View {
                         }
                     }
 
+                }
+
+                if !detail.context_images.isEmpty {
+                    BrandCard(title: "Previously collected location imagery", icon: "photo.on.rectangle.angled") {
+                        Text("Images from other investigations at this location provide visual context. Their original dates and sources remain visible.")
+                            .font(.caption)
+                            .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(alignment: .top, spacing: 12) {
+                                ForEach(Array(detail.context_images.prefix(6))) { image in
+                                    ReusedContextImageCard(image: image) { eventID in
+                                        if contextualEventID != nil {
+                                            model.selectedIntelligenceEventID = eventID
+                                        } else {
+                                            selectEvent(eventID, revealDetail: true)
+                                        }
+                                    }
+                                        .frame(width: horizontalSizeClass == .compact ? 270 : 320)
+                                }
+                            }
+                            .padding(.vertical, 1)
+                        }
+                    }
                 }
 
                 signalExplorer(detail)
@@ -888,9 +922,12 @@ struct IntelligenceWorkspaceView: View {
             }
             error = nil
         } catch {
+            guard !Task.isCancelled else { return }
             self.error = error.localizedDescription
         }
+        guard !Task.isCancelled else { return }
         if let nextWatches = await watchTask.value { watches = nextWatches }
+        guard !Task.isCancelled else { return }
         if let nextAlerts = await alertTask.value { alerts = nextAlerts }
     }
 
@@ -901,7 +938,7 @@ struct IntelligenceWorkspaceView: View {
             detailLoading = false
             return
         }
-        detail = nil
+        if detail?.event.id != selectedID { detail = nil }
         detailError = nil
         detailLoading = true
         defer {
@@ -919,7 +956,6 @@ struct IntelligenceWorkspaceView: View {
             }
         } catch {
             guard !Task.isCancelled, self.selectedID == selectedID else { return }
-            detail = nil
             detailError = error.localizedDescription
         }
     }
@@ -1462,6 +1498,52 @@ struct IntelligenceEventPulseView: View {
     }
 }
 
+private struct ReusedContextImageCard: View {
+    let image: IntelligenceContextImage
+    let onOpenInvestigation: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Group {
+                if image.isStoredAsset {
+                    AuthenticatedEarthImage(path: image.displayURL, contentMode: .fit, unavailableLabel: "Location image unavailable")
+                } else {
+                    AuthenticatedRemoteImage(url: image.displayURL, unavailableLabel: "Location image unavailable", contentMode: .fit)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            Label(image.kind == "satellite" ? "PREVIOUS SATELLITE CONTEXT" : "PREVIOUS ARTICLE IMAGE", systemImage: image.kind == "satellite" ? "globe" : "newspaper")
+                .font(.caption2.weight(.bold))
+            Text(image.title).font(.subheadline.weight(.semibold)).lineLimit(3)
+            if let location = image.location_name { Text(location).font(.caption) }
+            if let date = image.displayDate {
+                Text("\(image.dateLabel) \(date.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption.monospacedDigit())
+            }
+            Text(image.notice).font(.caption2).foregroundStyle(.secondary)
+            Text(image.attribution).font(.caption2).foregroundStyle(.secondary)
+            Text(image.license).font(.caption2).foregroundStyle(.secondary)
+            if let source = image.source_url, let url = URL(string: source), ["https", "http"].contains(url.scheme?.lowercased() ?? "") {
+                Link("Original source", destination: url).font(.caption.weight(.semibold))
+            }
+            if let eventID = image.source_event_id {
+                Button { onOpenInvestigation(eventID) } label: {
+                    Text(image.source_event_title ?? "Original investigation")
+                        .font(.caption.weight(.semibold))
+                        .multilineTextAlignment(.leading)
+                        .frame(minHeight: ClaritasLayout.minimumTouchTarget, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open original investigation: \(image.source_event_title ?? eventID)")
+            }
+        }
+        .padding(10)
+        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
 private struct EventImageryHero: View {
     @Environment(\.colorScheme) private var colorScheme
     let observation: EarthObservation?
@@ -1641,6 +1723,7 @@ struct AuthenticatedEarthImage: View {
     @EnvironmentObject private var model: AppModel
     let path: String
     var contentMode: ContentMode = .fill
+    var unavailableLabel = "Observation image unavailable"
     @State private var image: UIImage?
     @State private var loadError: String?
     @State private var retryID = 0
@@ -1651,7 +1734,7 @@ struct AuthenticatedEarthImage: View {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else if let loadError {
                 VStack(spacing: 8) {
-                    Label("Observation image unavailable", systemImage: "photo.badge.exclamationmark")
+                    Label(unavailableLabel, systemImage: "photo.badge.exclamationmark")
                         .font(.caption.weight(.semibold))
                     Text(loadError)
                         .font(.caption2)
@@ -1674,13 +1757,12 @@ struct AuthenticatedEarthImage: View {
             image = nil
             loadError = nil
             do {
-                let data = try await model.api.fetchEarthAsset(path: path)
-                guard let decoded = UIImage(data: data) else {
-                    loadError = "The returned asset is not a supported image."
-                    return
-                }
+                let data = try await model.api.fetchStoredImage(path: path)
+                let decoded = try await NativeImageDecoder.decode(data)
+                try Task.checkCancellation()
                 image = decoded
             } catch {
+                guard !Task.isCancelled else { return }
                 loadError = error.localizedDescription
             }
         }
@@ -1726,14 +1808,40 @@ struct AuthenticatedRemoteImage: View {
             loadError = nil
             do {
                 let data = try await model.api.fetchProxiedImage(url: url)
-                guard let decoded = UIImage(data: data) else {
-                    loadError = "The returned context is not a supported image."
-                    return
-                }
+                let decoded = try await NativeImageDecoder.decode(data)
+                try Task.checkCancellation()
                 image = decoded
             } catch {
+                guard !Task.isCancelled else { return }
                 loadError = error.localizedDescription
             }
+        }
+    }
+}
+
+private enum NativeImageDecoder {
+    /// Decode a display-sized bitmap off the main actor. Source images can be
+    /// much larger than their card; ImageIO avoids allocating their full raster.
+    static func decode(_ data: Data) async throws -> UIImage {
+        try Task.checkCancellation()
+        let decoding = Task.detached(priority: .utility) {
+            try Task.checkCancellation()
+            guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+                  let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 1_536,
+                    kCGImageSourceShouldCacheImmediately: true,
+                  ] as CFDictionary) else {
+                throw APIError(status: 502, message: "The returned asset is not a supported image.")
+            }
+            try Task.checkCancellation()
+            return UIImage(cgImage: thumbnail)
+        }
+        return try await withTaskCancellationHandler {
+            try await decoding.value
+        } onCancel: {
+            decoding.cancel()
         }
     }
 }

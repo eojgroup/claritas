@@ -38,6 +38,7 @@ test("assessment persistence keeps the database read watermark so concurrent sou
         source_name: "institutional_rss",
         linked_events: null,
         assessment_watermark: readWatermark,
+        queue_revision: "7",
       }] };
     },
     release() {},
@@ -50,8 +51,24 @@ test("assessment persistence keeps the database read watermark so concurrent sou
     assert.equal(storedWatermark.toISOString(), readWatermark.toISOString());
     const concurrentUpdate = new Date("2026-10-27T10:00:00.001Z");
     assert.ok(concurrentUpdate > storedWatermark, "a later source update must not be hidden behind a worker-clock timestamp");
+    assert.equal(persisted[12], "7", "queue acknowledgement uses the selected revision");
     assert.ok(Number.isFinite(persisted[7]), "the assessment remains usable for ranking");
   } finally {
     pool.connect = originalConnect;
   }
+});
+
+
+test("assessment refresh schedules every age boundary and eventually retires stable history", async () => {
+  const { nextNewsAssessmentRefresh } = await import("./news-assessment-worker");
+  const publishedAt = "2026-11-01T10:00:00.000Z";
+  const time = new Date(publishedAt).getTime();
+  for (const hours of [1, 6, 24, 72, 168]) {
+    const cutoff = time + hours * 3_600_000;
+    assert.equal(nextNewsAssessmentRefresh(publishedAt, new Date(cutoff)), new Date(cutoff + 1).toISOString());
+  }
+  assert.equal(nextNewsAssessmentRefresh(publishedAt, new Date(time + 168 * 3_600_000 + 1)), null);
+  assert.equal(nextNewsAssessmentRefresh(null, new Date()), null);
+  assert.equal(nextNewsAssessmentRefresh("invalid", new Date()), null);
+  assert.equal(nextNewsAssessmentRefresh(publishedAt, new Date(time - 10 * 60_000)), new Date(time - 5 * 60_000 + 1).toISOString());
 });

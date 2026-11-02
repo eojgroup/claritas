@@ -2,6 +2,7 @@ import { CountryDataContext } from "./components/countryContext";
 import CountryFlag from "./components/CountryFlag";
 import CountryFacts from "./components/CountryFacts";
 import { useDailyBriefing } from "./components/useDailyBriefing";
+import { useVisiblePolling } from "./components/useVisiblePolling";
 import CountryElections from "./components/CountryElections";
 import NewsOverview from "./components/NewsOverview";
 import { filterNewsByTopic, type NewsTopic } from "./components/newsWorkspacePresentation";
@@ -997,6 +998,7 @@ export default function ClaritasDashboard() {
     "overview" | "identity" | "preferences" | "security" | "policies"
   >("overview");
   const [dailyBriefingSchedule, setDailyBriefingSchedule] = useState<DailyBriefingSchedule | null>(null);
+  const [profileDataRequested, setProfileDataRequested] = useState(false);
   const [dailyBriefingScheduleDraft, setDailyBriefingScheduleDraft] = useState<{
     enabled: boolean;
     email_enabled: boolean;
@@ -1209,53 +1211,33 @@ export default function ClaritasDashboard() {
   const { updateItems: updateSearchNewsItems, retry: retryNewsSearch } = serverNewsSearch;
 
   useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) {
-      setIntelligenceAlerts([]);
-      return;
-    }
-    let active = true;
-    const refresh = () => {
-      void fetchIntelligenceAlerts()
-        .then((alerts) => { if (active) setIntelligenceAlerts(alerts); })
-        .catch(() => { /* Signal Desk keeps its own visible error state. */ });
-    };
-    refresh();
-    const timer = window.setInterval(refresh, 60_000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [authStatus, hasPaidAccess]);
+    setIntelligenceAlerts([]);
+  }, [authStatus, hasPaidAccess, authUser?.id]);
+  useVisiblePolling(authStatus === "authed" && hasPaidAccess, 60_000, `${authUser?.id ?? ""}:alerts`, async (signal) => {
+    try {
+      const alerts = await fetchIntelligenceAlerts(signal);
+      if (!signal.aborted) setIntelligenceAlerts(alerts);
+    } catch { /* Signal Desk keeps its own visible error state. */ }
+  });
 
   useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) {
-      setOverviewEvents([]);
-      setSelectedOverviewEvent(null);
+    setOverviewEvents([]);
+    setSelectedOverviewEvent(null);
+    setOverviewEventsError(null);
+  }, [authStatus, hasPaidAccess, authUser?.id]);
+  useVisiblePolling(authStatus === "authed" && hasPaidAccess, 60_000, `${authUser?.id ?? ""}:${overviewIncludeExpired}:${overviewEventRefresh}`, async (signal) => {
+    setOverviewEventsLoading(true);
+    try {
+      const events = await fetchIntelligenceEvents({ limit: 100, includeExpired: overviewIncludeExpired }, signal);
+      if (signal.aborted) return;
+      setOverviewEvents(events);
       setOverviewEventsError(null);
-      return;
+    } catch (error) {
+      if (!signal.aborted) setOverviewEventsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (!signal.aborted) setOverviewEventsLoading(false);
     }
-    let active = true;
-    const refresh = () => {
-      setOverviewEventsLoading(true);
-      void fetchIntelligenceEvents({ limit: 100, includeExpired: overviewIncludeExpired })
-        .then((events) => {
-          if (!active) return;
-          setOverviewEvents(events);
-          setOverviewEventsError(null);
-        })
-        .catch((error) => {
-          if (!active) return;
-          setOverviewEventsError(error instanceof Error ? error.message : String(error));
-        })
-        .finally(() => { if (active) setOverviewEventsLoading(false); });
-    };
-    refresh();
-    const timer = window.setInterval(refresh, 60_000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [authStatus, hasPaidAccess, overviewIncludeExpired, overviewEventRefresh]);
+  });
 
   const overviewEventPoints = useMemo(() => {
     const severityRank: Record<IntelligenceEvent["severity"], number> = {
@@ -1643,20 +1625,36 @@ export default function ClaritasDashboard() {
         setCountryMarkets([]);
         setCountryMarketMethodology(null);
       });
-    fetchMarketFilings({ limit: 80 }).then(setMarketFilings).catch(() => setMarketFilings([]));
-    fetchMarketIndicators({ category: "company_fact", limit: 200 }).then(setMarketIndicators).catch(() => setMarketIndicators([]));
     fetchMarketQuotes().then((rows) => {
       setMarketQuotes(rows);
       setSelectedSymbol((current) => current && rows.some((row) => row.symbol === current) ? current : null);
     }).catch(() => setMarketQuotes([]));
-    fetchFxRates().then(setFxRates).catch(() => setFxRates([]));
-    fetchPolicyRates().then(setPolicyRates).catch(() => setPolicyRates([]));
     void loadNewsData("recent", "all", "newest");
     void loadPodcastData();
   }, [authStatus, hasPaidAccess, loadNewsData, loadPodcastData]);
 
   useEffect(() => {
-    if (authStatus !== "authed") return;
+    if (authStatus !== "authed" || !hasPaidAccess || (activeView !== "markets" && activeView !== "news")) return;
+    let cancelled = false;
+    // These drill-down feeds are not used by the World overview. Leave its
+    // initial request budget to the map, events and cross-source aggregates.
+    void fetchMarketFilings({ limit: 80 }).then((rows) => { if (!cancelled) setMarketFilings(rows); }).catch(() => {});
+    if (activeView !== "markets") return () => { cancelled = true; };
+    void fetchMarketIndicators({ category: "company_fact", limit: 200 }).then((rows) => { if (!cancelled) setMarketIndicators(rows); }).catch(() => {});
+    void fetchFxRates().then((rows) => { if (!cancelled) setFxRates(rows); }).catch(() => {});
+    void fetchPolicyRates().then((rows) => { if (!cancelled) setPolicyRates(rows); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [authStatus, hasPaidAccess, activeView]);
+
+  useEffect(() => {
+    if (authStatus !== "authed") setProfileDataRequested(false);
+    else if (activeView === "profile") setProfileDataRequested(true);
+  }, [authStatus, activeView]);
+
+  useEffect(() => {
+    // Continue the first profile load across navigation, then reuse it for
+    // this session so returning to Profile cannot overwrite unsaved edits.
+    if (authStatus !== "authed" || !profileDataRequested) return;
     let cancelled = false;
     setIsLoadingDailyBriefingSchedule(true);
     setDailyBriefingScheduleError(null);
@@ -1705,7 +1703,7 @@ export default function ClaritasDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [authStatus]);
+  }, [authStatus, authUser?.id, profileDataRequested]);
 
   useEffect(() => {
     if (authStatus !== "authed" || !hasPaidAccess) return;
@@ -5848,8 +5846,9 @@ export default function ClaritasDashboard() {
                             </div>
                           )}
                         {overviewEventsError && (
-                          <div className="absolute bottom-4 left-4 rounded border border-rose-400/40 bg-[color:var(--shell-surface)] px-2 py-1 text-xs text-rose-600">
-                            {friendlyWorkspaceError(overviewEventsError)}
+                          <div role="status" className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center gap-2 rounded border border-rose-400/40 bg-[color:var(--shell-surface)] px-3 py-2 text-xs text-rose-600">
+                            <span>{friendlyWorkspaceError(overviewEventsError)}{overviewEvents.length > 0 ? " Showing the last loaded events." : ""}</span>
+                            <button type="button" disabled={overviewEventsLoading} onClick={() => setOverviewEventRefresh((version) => version + 1)} className="min-h-11 rounded-full border border-current px-3 font-semibold disabled:opacity-50">{overviewEventsLoading ? "Retrying…" : "Retry events"}</button>
                           </div>
                         )}
                         {mapMode === "news" &&

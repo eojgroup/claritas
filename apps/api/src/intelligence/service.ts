@@ -1,8 +1,10 @@
 import { listNewsImages } from "../image-analysis/news-image-store";
+import { getEventContextImages } from "./context-images";
+import { sourceRecordBigintSql, canonicalSocialSignalBigintSql } from "./source-record";
 import { getRegionalContext } from "./regional-context";
 import { activeSocialEvidenceSql, buildSignalCoverage, eventOriginDomainSql, eventSignalDomainsSql, eventNewsPrioritySql, eventPriorityScoreSql, eventPriorityReasons } from "./event-priority";
 import { getRegionalReporting } from "./regional-reporting";
-import { getSocialEventContexts } from "./social-context";
+import { getSocialEventContexts, getSocialEventContextCounts } from "./social-context";
 import type { PoolClient } from "pg";
 import {
   buildEventUnderstanding,
@@ -261,18 +263,19 @@ export function intelligenceEventEarthObservationStateSql() {
  */
 // OFFSET 0 keeps this existence check correlated: a pulled-up semi-join can
 // scan every historical evidence row before selecting the current events.
-function intelligenceEventHasDisplayableEvidenceSql(eventAlias = "event") {
+function intelligenceEventHasRetainedOriginSql(eventAlias = "event") {
   return `(COALESCE(${eventAlias}.metadata->>'canonical_evidence_key','') NOT LIKE 'social:social_signal:%'
     OR EXISTS (SELECT 1 FROM social_signal retained_origin
-      WHERE retained_origin.id=CASE WHEN ${eventAlias}.metadata->>'canonical_evidence_key' ~ '^social:social_signal:[0-9]{1,18}$'
-        THEN split_part(${eventAlias}.metadata->>'canonical_evidence_key',':',3)::bigint END
-        AND retained_origin.expires_at>now())) AND EXISTS (
+      WHERE retained_origin.id=${canonicalSocialSignalBigintSql(eventAlias)}
+        AND retained_origin.expires_at>now() LIMIT 1 OFFSET 0))`;
+}
+
+function intelligenceEventHasDisplayableEvidenceSql(eventAlias = "event") {
+  return `${intelligenceEventHasRetainedOriginSql(eventAlias)} AND EXISTS (
     SELECT 1
     FROM intelligence_event_evidence evidence
     LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
-    LEFT JOIN item source_item ON source_item.id=CASE
-      WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
-        THEN evidence.source_record_id::bigint END
+    LEFT JOIN item source_item ON source_item.id=${sourceRecordBigintSql("evidence", "item")}
     WHERE evidence.event_id=${eventAlias}.id
       AND ${activeSocialEvidenceSql()}
       AND (
@@ -345,14 +348,34 @@ export async function listIntelligenceEvents(options: {
                 'origin_domain',event.metadata->>'origin_domain',
                 'canonical_evidence_key',event.metadata->>'canonical_evidence_key'
               ) AS metadata
-       FROM intelligence_event event
+       FROM intelligence_event_feed event
        WHERE ${where.join(" AND ")}
      ), candidates AS MATERIALIZED (
        SELECT event.*,
               ${eventOriginDomainSql()} AS origin_domain,
-              ${eventNewsPrioritySql()} AS news_priority
+              COALESCE(feed_evidence.news_priority,0) AS news_priority
        FROM eligible event
-       WHERE ${intelligenceEventHasDisplayableEvidenceSql("event")}
+       CROSS JOIN LATERAL (
+         -- One indexed evidence pass supplies both quality eligibility and
+         -- publisher priority. Keep it correlated to the narrow live set.
+         SELECT bool_or(${activeSocialEvidenceSql()} AND (
+                  evidence.source_record_type<>'item' OR
+                  CASE WHEN lower(COALESCE(evidence_source.name,''))='gdelt'
+                    THEN article.payload->>'quality_status'='accepted'
+                    ELSE COALESCE(article.payload->>'quality_status','accepted')='accepted' END
+                )) AS displayable,
+                max(CASE WHEN evidence.domain='news'
+                  AND evidence.source_record_type='item'
+                  AND COALESCE(article.payload->>'quality_status','accepted')='accepted'
+                  AND assessment.assessed_at>=article.updated_at
+                  THEN assessment.score/100 END) AS news_priority
+         FROM intelligence_event_evidence evidence
+         LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
+         LEFT JOIN item article ON article.id=${sourceRecordBigintSql("evidence", "item")}
+         LEFT JOIN news_item_assessment assessment ON assessment.item_id=article.id AND evidence.domain='news'
+         WHERE evidence.event_id=event.id
+       ) feed_evidence
+       WHERE ${intelligenceEventHasRetainedOriginSql("event")} AND feed_evidence.displayable
      ), scored AS (
        SELECT candidates.*,${eventPriorityScoreSql("candidates", true)} AS raw_priority
        FROM candidates
@@ -377,9 +400,7 @@ export async function listIntelligenceEvents(options: {
             location.monitoring_tier,
             (SELECT count(*)::int FROM intelligence_event_evidence evidence
              LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
-             LEFT JOIN item source_item ON source_item.id=CASE
-               WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
-                 THEN evidence.source_record_id::bigint END
+             LEFT JOIN item source_item ON source_item.id=${sourceRecordBigintSql("evidence", "item")}
              WHERE evidence.event_id = event.id AND ${activeSocialEvidenceSql()}
                AND (evidence.source_record_type <> 'item'
                  OR (CASE WHEN lower(COALESCE(evidence_source.name, '')) = 'gdelt'
@@ -394,8 +415,8 @@ export async function listIntelligenceEvents(options: {
      ORDER BY selection.feed_order_score DESC,event.last_activity_time DESC,event.id`,
     params,
   );
-  const social = await getSocialEventContexts(rows.map((row) => row.id));
-  return rows.map((row) => ({ ...eventToApi(row), social_context_count: social.filter((post) => post.event_id === row.id).length }));
+  const social = await getSocialEventContextCounts(rows.map((row) => row.id));
+  return rows.map((row) => ({ ...eventToApi(row), social_context_count: social.get(row.id) ?? 0 }));
 }
 
 export async function getIntelligenceEvent(eventId: string) {
@@ -412,9 +433,7 @@ export async function getIntelligenceEvent(eventId: string) {
               location.monitoring_tier,
               (SELECT count(*)::int FROM intelligence_event_evidence evidence
                LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
-               LEFT JOIN item source_item ON source_item.id=CASE
-                 WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
-                   THEN evidence.source_record_id::bigint END
+               LEFT JOIN item source_item ON source_item.id=${sourceRecordBigintSql("evidence", "item")}
                WHERE evidence.event_id = event.id AND ${activeSocialEvidenceSql()}
                  AND (evidence.source_record_type <> 'item'
                    OR (CASE WHEN lower(COALESCE(evidence_source.name, '')) = 'gdelt'
@@ -455,12 +474,8 @@ export async function getIntelligenceEvent(eventId: string) {
        FROM intelligence_event_evidence evidence
        LEFT JOIN source ON source.id = evidence.source_id
        LEFT JOIN intelligence_location location ON location.id = evidence.location_id
-       LEFT JOIN item source_item ON source_item.id=CASE
-         WHEN evidence.source_record_type='item' AND evidence.source_record_id ~ '^[0-9]+$'
-           THEN evidence.source_record_id::bigint END
-       LEFT JOIN global_event global_source ON global_source.id=CASE
-         WHEN evidence.source_record_type='global_event' AND evidence.source_record_id ~ '^[0-9]+$'
-           THEN evidence.source_record_id::bigint END
+       LEFT JOIN item source_item ON source_item.id=${sourceRecordBigintSql("evidence", "item")}
+       LEFT JOIN global_event global_source ON global_source.id=${sourceRecordBigintSql("evidence", "global_event")}
        LEFT JOIN intelligence_signal podcast_signal
          ON evidence.source_record_type='intelligence_signal'
         AND evidence.source_record_id=concat(
@@ -560,8 +575,12 @@ export async function getIntelligenceEvent(eventId: string) {
   const linkedNews = evidence.filter((row: any) => (
     row.domain === "news" && row.source_record_type === "item"
   )).map((row: any) => buildLinkedNewsPresentation(row));
-  const [socialContext, regionalReporting, contextSignals, newsImages] = await Promise.all([
+  const [socialContext, regionalReporting, contextSignals, newsImages, contextImages] = await Promise.all([
     getSocialEventContexts([eventId]), getRegionalReporting(normalizedEvent), getRegionalContext(normalizedEvent), listNewsImages({ eventId, limit: 20 }),
+    getEventContextImages(normalizedEvent).catch((error) => {
+      console.warn(JSON.stringify({ event: "event_context_images_unavailable", event_id: eventId, message: error instanceof Error ? error.message : String(error) }));
+      return [];
+    }),
   ]);
   return {
     event: normalizedEvent,
@@ -573,6 +592,7 @@ export async function getIntelligenceEvent(eventId: string) {
     evidence,
     linked_news: linkedNews,
     news_images: newsImages,
+    context_images: contextImages,
     locations: locationsResult.rows.map((row: any) => ({
       ...row,
       distance_km: row.distance_km == null ? null : Number(row.distance_km),

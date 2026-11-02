@@ -572,6 +572,20 @@ describe("IntelligenceWorkspace", () => {
     expect(screen.getByText(event.title)).toBeTruthy();
   });
 
+  it("keeps loaded evidence and decoded images mounted during a failed background refresh", async () => {
+    const view = render(<IntelligenceWorkspace embedded initialEventId={event.id} />);
+    const heading = await screen.findByRole("heading", { name: event.title });
+    let fail!: (reason: Error) => void;
+    vi.mocked(fetchIntelligenceEvent).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    view.rerender(<IntelligenceWorkspace embedded initialEventId={event.id} refreshVersion={1} />);
+    expect(await screen.findByText("Refreshing this investigation…")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: event.title })).toBe(heading);
+    await act(async () => { fail(new Error("temporary outage")); });
+    expect((await screen.findByRole("alert")).textContent).toContain("Showing the last loaded evidence");
+    expect(screen.getByRole("heading", { name: event.title })).toBe(heading);
+    expect(screen.getByRole("button", { name: "Retry event" })).toBeTruthy();
+  });
+
   it("opens imagery with the selected event id", async () => {
     const onOpenImagery = vi.fn();
     render(<IntelligenceWorkspace initialEventId={event.id} onOpenImagery={onOpenImagery} />);
