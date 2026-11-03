@@ -80,6 +80,8 @@ embedded WidgetKit extension targets:
 
 ## Unified Signal Desk contract
 
+- World overview shares one bounded `/api/intelligence/overview` read between its event map, activity chart and investigation timeline. The 24-hour, three-day and seven-day controls combine with topic and country focus. Counts describe investigations by their latest recorded update; they are not totals of new incidents or articles. Capped samples display lower bounds and suppress momentum comparisons. Priority explanations remain available beside the timeline and in the measurement disclosure.
+- iPad uses the retained preview already included in that response for its imagery card. If none exists, it inspects one event with suitable geography instead of probing eight events serially. Watch presents the same scoped pulse with two exact-event handoffs to iPhone; briefing, news and overview results appear independently while optional resources continue loading. Identical simultaneous Watch refreshes share the active refresh.
 - The source lenses explain where a signal came from. The Signal Desk explains the event assembled from those sources.
 - Selecting an event loads its grouped evidence, original news/official URLs, correlation labels, locations and available EO observations as one thread.
 - Event observations retain their event-specific evidence status. Previously collected satellite and article images may also appear as labelled location context when the API establishes the rendered area or the same specific location. These cards retain original dates, attribution, licence, uncertainty notices and source-investigation links; they never count as evidence of the new event.

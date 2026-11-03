@@ -13,6 +13,11 @@ const providers: AuthProvider[] = [
 afterEach(cleanup);
 
 describe("LoginPage", () => {
+  it("keeps provider discovery visibly pending when there is no existing session", () => {
+    render(<LoginPage providers={[]} providersLoading status="unauthed" onSignIn={vi.fn()} />);
+    expect(screen.getByText("Connecting to your workspace…")).toBeTruthy();
+    expect(screen.queryByText(/No sign-in providers/)).toBeNull();
+  });
   it("presents the intelligence workspace and only configured identity providers", () => {
     render(<LoginPage providers={providers} status="unauthed" onSignIn={vi.fn()} />);
 
@@ -26,17 +31,21 @@ describe("LoginPage", () => {
 
   it("starts the selected provider and exposes failures as an alert", () => {
     const onSignIn = vi.fn();
+    const onRetry = vi.fn();
     render(
       <LoginPage
         providers={providers}
         status="unauthed"
         error="Identity service is unavailable"
         onSignIn={onSignIn}
+        onRetry={onRetry}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Continue with Microsoft/i }));
     expect(onSignIn).toHaveBeenCalledWith("microsoft");
     expect(screen.getByRole("alert").textContent).toContain("Identity service is unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Retry connection" }));
+    expect(onRetry).toHaveBeenCalledOnce();
   });
 });

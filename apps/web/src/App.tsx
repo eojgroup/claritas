@@ -750,9 +750,9 @@ import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
 import PaywallPage from "./components/PaywallPage";
 import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePreview";
-import WorldEventStream from "./components/WorldEventStream";
+import SituationOverview from "./components/SituationOverview";
 import SatelliteContextPanel from "./components/SatelliteContextPanel";
-import { eventCoordinateContext } from "./components/eventPresentation";
+import { eventCoordinateContext, isHistoricalEvent } from "./components/eventPresentation";
 import {
   fetchAuthMe,
   fetchAuthProviders,
@@ -767,7 +767,7 @@ import {
   fetchCountryMarketDetail,
   fetchFxRates,
   fetchIntelligenceAlerts,
-  fetchIntelligenceEvents,
+  fetchIntelligenceOverview,
   fetchMarketFilings,
   fetchMarketIndicators,
   fetchMarketQuotes,
@@ -811,6 +811,8 @@ import {
   type NewsSort,
   type IntelligenceAlert,
   type IntelligenceEvent,
+  type IntelligenceOverview,
+  type OverviewTopic,
   type PodcastEpisode,
   type PodcastExternalLink,
   type PodcastSignal,
@@ -870,7 +872,9 @@ export default function ClaritasDashboard() {
   const [overviewEvents, setOverviewEvents] = useState<IntelligenceEvent[]>([]);
   const [overviewEventsError, setOverviewEventsError] = useState<string | null>(null);
   const [overviewEventsLoading, setOverviewEventsLoading] = useState(true);
-  const [overviewIncludeExpired, setOverviewIncludeExpired] = useState(false);
+  const [overview, setOverview] = useState<IntelligenceOverview | null>(null);
+  const [overviewHours, setOverviewHours] = useState<24 | 72 | 168>(24);
+  const [overviewTopic, setOverviewTopic] = useState<OverviewTopic | null>(null);
   const [overviewEventRefresh, setOverviewEventRefresh] = useState(0);
   const [selectedOverviewEvent, setSelectedOverviewEvent] = useState<IntelligenceEvent | null>(null);
   const [authStatus, setAuthStatus] = useState<
@@ -878,7 +882,9 @@ export default function ClaritasDashboard() {
   >("checking");
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
+  const [authProvidersLoading, setAuthProvidersLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authRetry, setAuthRetry] = useState(0);
   const [activeView, setActiveView] = useState<AppView>("dashboard");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -1224,13 +1230,20 @@ export default function ClaritasDashboard() {
     setOverviewEvents([]);
     setSelectedOverviewEvent(null);
     setOverviewEventsError(null);
+    setOverview(null);
   }, [authStatus, hasPaidAccess, authUser?.id]);
-  useVisiblePolling(authStatus === "authed" && hasPaidAccess, 60_000, `${authUser?.id ?? ""}:${overviewIncludeExpired}:${overviewEventRefresh}`, async (signal) => {
+  useEffect(() => {
+    setOverview(null);
+    setOverviewEvents([]);
+    setOverviewEventsError(null);
+  }, [overviewHours, overviewTopic, selectedCountry]);
+  useVisiblePolling(authStatus === "authed" && hasPaidAccess && activeView === "dashboard", 60_000, `${authUser?.id ?? ""}:${overviewHours}:${overviewTopic ?? ""}:${selectedCountry ?? ""}:${overviewEventRefresh}`, async (signal) => {
     setOverviewEventsLoading(true);
     try {
-      const events = await fetchIntelligenceEvents({ limit: 100, includeExpired: overviewIncludeExpired }, signal);
+      const result = await fetchIntelligenceOverview({ hours: overviewHours, topic: overviewTopic ?? undefined, country: selectedCountry ?? undefined }, signal);
       if (signal.aborted) return;
-      setOverviewEvents(events);
+      setOverview(result);
+      setOverviewEvents(result.events);
       setOverviewEventsError(null);
     } catch (error) {
       if (!signal.aborted) setOverviewEventsError(error instanceof Error ? error.message : String(error));
@@ -1253,13 +1266,15 @@ export default function ClaritasDashboard() {
       // Country reference points support choropleth context but are not event
       // locations. Dots require defensible source or mapped event geography.
       .filter((event) => Boolean(eventCoordinateContext(event)))
+      .filter((event) => !isHistoricalEvent(event) || event.id === selectedIntelligenceEventId || event.id === satelliteContextEventId)
       .sort((left, right) =>
         severityRank[right.severity] - severityRank[left.severity] ||
         Number(right.relevance_score) - Number(left.relevance_score),
       )
       .map((event) => {
+        const historical = isHistoricalEvent(event);
         const normalizedType = event.event_type.toLowerCase();
-        const label = normalizedType.includes("earthquake")
+        const label = historical ? "PAST" : normalizedType.includes("earthquake")
           ? "QUAKE"
           : normalizedType.includes("fire")
             ? "FIRE"
@@ -1274,8 +1289,8 @@ export default function ClaritasDashboard() {
           id: event.id,
           latitude: Number(event.latitude),
           longitude: Number(event.longitude),
-          title: event.title,
-          subtitle: `${event.location_name || event.primary_country_iso2 || "Estimated event location"} · updated ${formatExactTimestamp(event.last_activity_time)}${event.expires_at ? ` · current until ${formatExactTimestamp(event.expires_at)}` : ""} · ${event.domain_count} domain${event.domain_count === 1 ? "" : "s"}`,
+          title: historical ? `Archived · ${event.title}` : event.title,
+          subtitle: `${historical ? "Archived investigation · " : ""}${event.location_name || event.primary_country_iso2 || "Estimated event location"} · updated ${formatExactTimestamp(event.last_activity_time)}${!historical && event.expires_at ? ` · current until ${formatExactTimestamp(event.expires_at)}` : ""} · ${event.domain_count} domain${event.domain_count === 1 ? "" : "s"}`,
           label,
           severity: event.severity,
           hasImagery: event.earth_observation_available,
@@ -1296,42 +1311,38 @@ export default function ClaritasDashboard() {
     let active = true;
     setAuthStatus("checking");
     setAuthError(null);
+    setAuthProvidersLoading(true);
 
-    Promise.allSettled([fetchAuthMe(), fetchAuthProviders()]).then(
-      ([userRes, providersRes]) => {
-        if (!active) return;
-
-        const user = userRes.status === "fulfilled" ? userRes.value : null;
-        const providers =
-          providersRes.status === "fulfilled" ? providersRes.value : [];
-        const errors: string[] = [];
-
-        if (userRes.status === "rejected") {
-          errors.push(
-            userRes.reason instanceof Error
-              ? userRes.reason.message
-              : String(userRes.reason),
-          );
-        }
-        if (providersRes.status === "rejected") {
-          errors.push(
-            providersRes.reason instanceof Error
-              ? providersRes.reason.message
-              : String(providersRes.reason),
-          );
-        }
-
-        setAuthUser(user);
-        setAuthProviders(providers);
-        setAuthError(errors.length > 0 ? errors.join(" | ") : null);
-        setAuthStatus(user ? "authed" : "unauthed");
-      },
-    );
+    let sessionError: string | null = null;
+    let providerError: string | null = null;
+    const reportErrors = () => { if (active) setAuthError([sessionError, providerError].filter(Boolean).join(" | ") || null); };
+    // Provider discovery is optional for an existing session. A slow identity
+    // provider must not hold an authenticated workspace behind the login page.
+    void fetchAuthMe().then((user) => {
+      if (!active) return;
+      setAuthUser(user);
+      setAuthStatus(user ? "authed" : "unauthed");
+    }).catch((reason) => {
+      if (!active) return;
+      sessionError = reason instanceof Error ? reason.message : String(reason);
+      setAuthUser(null);
+      setAuthStatus("unauthed");
+      reportErrors();
+    });
+    void fetchAuthProviders().then((providers) => {
+      if (active) setAuthProviders(providers);
+    }).catch((reason) => {
+      if (!active) return;
+      providerError = reason instanceof Error ? reason.message : String(reason);
+      reportErrors();
+    }).finally(() => {
+      if (active) setAuthProvidersLoading(false);
+    });
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [authRetry]);
 
   const loadNewsData = useCallback(async (
     mode: "recent" | "archive",
@@ -2408,7 +2419,7 @@ export default function ClaritasDashboard() {
     const eventsByIso = new Map<string, { count: number; maxRelevance: number }>();
     for (const event of overviewEvents) {
       const iso = normalizeIso2(event.primary_country_iso2);
-      if (!iso || event.status === "dismissed") continue;
+      if (!iso || isHistoricalEvent(event)) continue;
       const current = eventsByIso.get(iso) ?? { count: 0, maxRelevance: 0 };
       current.count += 1;
       current.maxRelevance = Math.max(current.maxRelevance, Number(event.relevance_score) || 0);
@@ -3627,27 +3638,6 @@ export default function ClaritasDashboard() {
     };
   }, [weatherConditionChartData, weatherPageRows]);
 
-  const marketSummary = useMemo(() => {
-    const directional = marketCountryRows.filter((row) => row.composite_change_percent != null);
-    const gainers = directional.filter((row) => (row.composite_change_percent ?? 0) > 0).length;
-    const losers = directional.filter((row) => (row.composite_change_percent ?? 0) < 0).length;
-    const avgAbsMove =
-      directional.length > 0
-        ? directional.reduce(
-            (sum, row) => sum + Math.abs(row.composite_change_percent ?? 0),
-            0,
-          ) / directional.length
-        : null;
-    return {
-      countries: marketCountryRows.length,
-      gainers,
-      losers,
-      avgAbsMove,
-      topMover: marketCountryRows[0] ?? null,
-      filings: marketCountryRows.reduce((sum, row) => sum + row.filing_count_7d, 0),
-    };
-  }, [marketCountryRows]);
-
   const podcastSummary = useMemo(() => {
     const signalRows = podcasts.flatMap((episode) =>
       episode.signals.map((signal) => ({ episode, signal })),
@@ -4700,9 +4690,11 @@ export default function ClaritasDashboard() {
     return (
       <LoginPage
         providers={authProviders}
+        providersLoading={authProvidersLoading}
         status={authStatus}
         error={authError}
         onSignIn={handleSignIn}
+        onRetry={() => setAuthRetry((value) => value + 1)}
       />
     );
   }
@@ -5334,69 +5326,23 @@ export default function ClaritasDashboard() {
             {activeView === "dashboard" && (
               <div className="workspace-page dashboard-workspace relative flex flex-col gap-4">
                 <div className="relative flex flex-col gap-4">
-                  <div
-                    className="kpi-strip dashboard-kpis app-card-hero dashboard-panel order-[3] rounded-xl px-4 py-3"
-                    style={{ animationDelay: "0ms" }}
-                  >
-                    <div className="grid gap-3 lg:grid-cols-[minmax(18rem,1fr)_repeat(4,minmax(7.25rem,0.5fr))] lg:items-center">
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-semibold text-[color:var(--shell-muted)]">
-                          Global operations · {regionLabel}
-                        </div>
-                        <div
-                          className="mt-1 text-base font-semibold text-[color:var(--shell-ink)]"
-                        >
-                          {signalNotifications.length} current signals need attention
-                        </div>
-                        <p className="mt-1 max-w-2xl text-xs text-[color:var(--shell-muted)] sm:text-sm">
-                          {activeRangeLabel} · Latest source update {latestEventLabel}
-                        </p>
-                      </div>
-                      <div className="app-stat-card rounded-lg px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
-                          News pace
-                        </div>
-                        <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
-                          {formatMetricNumber(newsSummary.avgPerDay)}
-                        </div>
-                        <div className="text-[11px] text-[color:var(--shell-muted)]">
-                          Stories/day
-                        </div>
-                      </div>
-                      <div className="app-stat-card rounded-lg px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
-                          Weather mean
-                        </div>
-                        <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
-                          {formatMetricNumber(weatherSummary.avgTemp)}°C
-                        </div>
-                        <div className="text-[11px] text-[color:var(--shell-muted)]">
-                          Current scope
-                        </div>
-                      </div>
-                      <div className="app-stat-card rounded-lg px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
-                          Market breadth
-                        </div>
-                        <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
-                          {marketSummary.gainers}/{marketSummary.losers}
-                        </div>
-                        <div className="text-[11px] text-[color:var(--shell-muted)]">
-                          Gainers/losers
-                        </div>
-                      </div>
-                      <div className="app-stat-card rounded-lg px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">
-                          Podcast evidence
-                        </div>
-                        <div className="metric-value mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">
-                          {podcastSummary.signals}
-                        </div>
-                        <div className="text-[11px] text-[color:var(--shell-muted)]">
-                          Across {podcastSummary.episodes} episodes
-                        </div>
-                      </div>
-                    </div>
+                  <div id="world-event-stream" tabIndex={-1} className="order-[-1]">
+                    <SituationOverview
+                      variant="summary"
+                      overview={overview}
+                      loading={overviewEventsLoading}
+                      error={overviewEventsError}
+                      hours={overviewHours}
+                      topic={overviewTopic}
+                      country={selectedCountry}
+                      selectedId={selectedIntelligenceEventId}
+                      onHoursChange={setOverviewHours}
+                      onTopicChange={setOverviewTopic}
+                      onCountryChange={setSelectedCountry}
+                      onSelect={handleOpenIntelligence}
+                      onOpenImagery={handleOpenImagery}
+                      onRefresh={() => setOverviewEventRefresh((value) => value + 1)}
+                    />
                   </div>
 
                   <div
@@ -6458,21 +6404,22 @@ export default function ClaritasDashboard() {
                       )}
                     </section>
 
-                    <div
-                      id="world-event-stream"
-                      tabIndex={-1}
-                      className="order-[3] xl:col-span-12"
-                      style={{ gridColumn: "1 / -1" }}
-                    >
-                      <WorldEventStream
-                        events={overviewEvents}
-                        country={selectedCountry}
-                        selectedId={selectedIntelligenceEventId}
-                        includeExpired={overviewIncludeExpired}
+                    <div className="order-[3] xl:col-span-12" style={{ gridColumn: "1 / -1" }}>
+                      <SituationOverview
+                        key={`${overviewHours}:${overviewTopic ?? ""}:${selectedCountry ?? ""}`}
+                        variant="timeline"
+                        overview={overview}
                         loading={overviewEventsLoading}
                         error={overviewEventsError}
+                        hours={overviewHours}
+                        topic={overviewTopic}
+                        country={selectedCountry}
+                        selectedId={selectedIntelligenceEventId}
+                        onHoursChange={setOverviewHours}
+                        onTopicChange={setOverviewTopic}
+                        onCountryChange={setSelectedCountry}
                         onSelect={handleOpenIntelligence}
-                        onArchiveChange={setOverviewIncludeExpired}
+                        onOpenImagery={handleOpenImagery}
                         onRefresh={() => setOverviewEventRefresh((value) => value + 1)}
                       />
                     </div>

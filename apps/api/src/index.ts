@@ -97,6 +97,9 @@ import { buildNewsReaderQuery } from "./news-reader-query";
 import { getNewsTranslationAvailability } from "./news-translation";
 import { attachTranslationAvailability, needsTranslationAvailability, type TranslationAvailability } from "./news-translation-presentation";
 import { SharedReadCache } from "./shared-read-cache";
+import { runsBackgroundWorkers, runtimeRole } from "./runtime-role";
+import { DailyBriefingDispatcher } from "./daily-briefing-dispatch";
+import { getIntelligenceOverview, normalizeOverviewOptions } from "./intelligence/overview";
 import { NewsSearchValidationError } from "./news-search";
 import { buildNewsCountryStatsQuery } from "./news-country-attribution";
 import {
@@ -1027,9 +1030,24 @@ async function runDailyBriefingGenerationJob(jobId: string): Promise<void> {
 }
 
 function startDailyBriefingGenerationJob(jobId: string): void {
-  void runDailyBriefingGenerationJob(jobId).catch((error) => {
+  if (!runsBackgroundWorkers) return;
+  void dailyBriefingDispatcher.run(jobId).catch((error) => {
     console.error(`[daily-briefing-generation] job ${jobId} crashed:`, error);
   });
+}
+
+const dailyBriefingDispatcher = new DailyBriefingDispatcher({
+  read: (sql) => query<{ id: string }>(sql),
+  lease: withWorkerLease,
+  process: runDailyBriefingGenerationJob,
+});
+
+function startDailyBriefingDispatchWorker(): void {
+  const dispatch = () => void dailyBriefingDispatcher.run().catch((error) => {
+    console.error(JSON.stringify({ event: "daily_briefing_dispatch_failed", message: describeGenerationError(error) }));
+  });
+  setInterval(dispatch, 15_000).unref();
+  setTimeout(dispatch, 1_000).unref();
 }
 
 function normalizeBriefingScheduleTime(value: unknown): string {
@@ -1433,8 +1451,7 @@ async function recoverStaleDailyBriefingGenerationJobs(): Promise<void> {
          error = COALESCE(error, 'Recovered abandoned generation job after worker timeout.'),
          finished_at = COALESCE(finished_at, now()),
          updated_at = now()
-     WHERE (status = 'queued' AND updated_at < now() - interval '5 minutes')
-        OR (status = 'running' AND updated_at < now() - interval '30 minutes')`,
+     WHERE status = 'running' AND updated_at < now() - interval '30 minutes'`,
   );
 }
 
@@ -1991,6 +2008,24 @@ app.post("/api/intelligence/resolve-source", requireAuthenticated, async (req, r
     return res.json(await resolveInvestigationSource(source));
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/intelligence/overview", requireAuthenticated, async (req, res) => {
+  let options;
+  try {
+    options = normalizeOverviewOptions({ hours: req.query.hours, country: req.query.country, topic: req.query.topic });
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+  try {
+    const result = await getIntelligenceOverview(options);
+    res.setHeader("Cache-Control", "private, max-age=30");
+    return res.json(result);
+  } catch (error) {
+    console.error(JSON.stringify({ event: "overview_read_failed", message: describeGenerationError(error), pool: getDatabasePoolStats() }));
+    res.setHeader("Retry-After", "5");
+    return res.status(503).json({ error: "The overview is temporarily unavailable. Please retry shortly." });
   }
 });
 
@@ -3815,19 +3850,22 @@ app.get("/api/proxy-image", requireAuthenticated, async (req, res) => {
 });
 
 startDatabasePoolMonitoring();
-startIngestionAutomationWorker();
-startNewsAssessmentWorker();
-startNewsImageWorker();
-startNewsTranslationWorker();
-startDailyBriefingSchedulerWorker();
-startPersonalBriefingWorker();
-startImportantEventEmailWorker();
-startTransportIngestionWorkers();
-startEventBackbone();
-startRapidSourceWorker();
-startEarthObservationWorker();
-startApnsDeliveryWorker();
+if (runsBackgroundWorkers) {
+  startIngestionAutomationWorker();
+  startNewsAssessmentWorker();
+  startNewsImageWorker();
+  startNewsTranslationWorker();
+  startDailyBriefingSchedulerWorker();
+  startDailyBriefingDispatchWorker();
+  startPersonalBriefingWorker();
+  startImportantEventEmailWorker();
+  startTransportIngestionWorkers();
+  startEventBackbone();
+  startRapidSourceWorker();
+  startEarthObservationWorker();
+  startApnsDeliveryWorker();
+}
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`API listening on http://0.0.0.0:${PORT}`);
+  console.log(`Claritas ${runtimeRole} listening on http://0.0.0.0:${PORT}`);
 });

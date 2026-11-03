@@ -1,3 +1,5 @@
+import { readWithDeadline } from "./readDeadline";
+
 export const NEWS_CATEGORIES = [
   "markets",
   "economy",
@@ -1655,18 +1657,22 @@ async function readError(resp: Response, fallback: string): Promise<string> {
 }
 
 export async function fetchAuthProviders(): Promise<AuthProvider[]> {
-  const resp = await fetch(`${API_BASE}/api/auth/providers`, { credentials: "include" });
-  if (!resp.ok) throw new Error(`Failed to fetch auth providers: ${resp.status}`);
-  const data = await resp.json();
-  return (data.providers ?? []) as AuthProvider[];
+  return readWithDeadline(async (signal) => {
+    const resp = await fetch(`${API_BASE}/api/auth/providers`, { credentials: "include", signal });
+    if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch sign-in providers"));
+    const data = await resp.json();
+    return (data.providers ?? []) as AuthProvider[];
+  });
 }
 
 export async function fetchAuthMe(): Promise<AuthUser | null> {
-  const resp = await fetch(`${API_BASE}/api/auth/me`, { credentials: "include" });
-  if (resp.status === 401) return null;
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch auth session"));
-  const data = await resp.json();
-  return (data.user ?? null) as AuthUser | null;
+  return readWithDeadline(async (signal) => {
+    const resp = await fetch(`${API_BASE}/api/auth/me`, { credentials: "include", signal });
+    if (resp.status === 401) return null;
+    if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch auth session"));
+    const data = await resp.json();
+    return (data.user ?? null) as AuthUser | null;
+  });
 }
 
 export async function fetchBillingMe(): Promise<BillingAccessState> {
@@ -1872,59 +1878,61 @@ export async function fetchNews(params?: {
   if (params?.daily) sp.set("window", "day");
   if (params?.archive) sp.set("archive", "true");
   if (params?.includeMetadata === false) sp.set("include_metadata", "false");
-  const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`, { credentials: "include", signal });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch news"));
-  const data = await resp.json() as Partial<NewsFeedResponse>;
-  const items = Array.isArray(data.items) ? data.items : [];
-  const categoryFacets = Array.isArray(data.facets?.categories)
-    ? data.facets.categories.filter((facet): facet is NewsCategoryFacet => (
-      Boolean(facet)
-      && NEWS_CATEGORIES.some((category) => category === facet.category)
-      && Number.isFinite(Number(facet.count))
-    )).map((facet) => ({
-      category: facet.category,
-      count: Math.max(0, Math.trunc(Number(facet.count))),
-    }))
-    : [];
-  const rankingCategory = data.ranking?.category;
-  const rankingSort = data.ranking?.sort;
-  const nullableNonNegativeInteger = (value: unknown): number | null => {
-    if (value == null) return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
-  };
-  return {
-    items,
-    facets: { categories: categoryFacets },
-    ranking: {
-      methodology: typeof data.ranking?.methodology === "string"
-        ? data.ranking.methodology
-        : "unavailable",
-      sort: rankingSort === "newest" || rankingSort === "importance"
-        ? rankingSort
-        : requestedSort,
-      category: rankingCategory && NEWS_CATEGORIES.some((category) => category === rankingCategory)
-        ? rankingCategory
-        : null,
-      archive: typeof data.ranking?.archive === "boolean"
-        ? data.ranking.archive
-        : params?.archive === true,
-      assessed_at: typeof data.ranking?.assessed_at === "string" ? data.ranking.assessed_at : null,
-      unassessed_count: nullableNonNegativeInteger(data.ranking?.unassessed_count),
-      selected_unassessed_count: nullableNonNegativeInteger(data.ranking?.selected_unassessed_count),
-      diversification: typeof data.ranking?.diversification === "string"
-        ? data.ranking.diversification
-        : null,
-    },
-    page: {
-      limit: Math.max(0, Math.trunc(Number(data.page?.limit) || params?.limit || items.length)),
-      offset: Math.max(0, Math.trunc(Number(data.page?.offset) || params?.offset || 0)),
-      total: nullableNonNegativeInteger(data.page?.total),
-      metadata_included: typeof data.page?.metadata_included === "boolean"
-        ? data.page.metadata_included
-        : false,
-    },
-  };
+  return readWithDeadline(async (requestSignal) => {
+    const resp = await fetch(`${API_BASE}/api/news?${sp.toString()}`, { credentials: "include", signal: requestSignal });
+    if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch news"));
+    const data = await resp.json() as Partial<NewsFeedResponse>;
+    const items = Array.isArray(data.items) ? data.items : [];
+    const categoryFacets = Array.isArray(data.facets?.categories)
+      ? data.facets.categories.filter((facet): facet is NewsCategoryFacet => (
+        Boolean(facet)
+        && NEWS_CATEGORIES.some((category) => category === facet.category)
+        && Number.isFinite(Number(facet.count))
+      )).map((facet) => ({
+        category: facet.category,
+        count: Math.max(0, Math.trunc(Number(facet.count))),
+      }))
+      : [];
+    const rankingCategory = data.ranking?.category;
+    const rankingSort = data.ranking?.sort;
+    const nullableNonNegativeInteger = (value: unknown): number | null => {
+      if (value == null) return null;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
+    };
+    return {
+      items,
+      facets: { categories: categoryFacets },
+      ranking: {
+        methodology: typeof data.ranking?.methodology === "string"
+          ? data.ranking.methodology
+          : "unavailable",
+        sort: rankingSort === "newest" || rankingSort === "importance"
+          ? rankingSort
+          : requestedSort,
+        category: rankingCategory && NEWS_CATEGORIES.some((category) => category === rankingCategory)
+          ? rankingCategory
+          : null,
+        archive: typeof data.ranking?.archive === "boolean"
+          ? data.ranking.archive
+          : params?.archive === true,
+        assessed_at: typeof data.ranking?.assessed_at === "string" ? data.ranking.assessed_at : null,
+        unassessed_count: nullableNonNegativeInteger(data.ranking?.unassessed_count),
+        selected_unassessed_count: nullableNonNegativeInteger(data.ranking?.selected_unassessed_count),
+        diversification: typeof data.ranking?.diversification === "string"
+          ? data.ranking.diversification
+          : null,
+      },
+      page: {
+        limit: Math.max(0, Math.trunc(Number(data.page?.limit) || params?.limit || items.length)),
+        offset: Math.max(0, Math.trunc(Number(data.page?.offset) || params?.offset || 0)),
+        total: nullableNonNegativeInteger(data.page?.total),
+        metadata_included: typeof data.page?.metadata_included === "boolean"
+          ? data.page.metadata_included
+          : false,
+      },
+    };
+  }, signal);
 }
 
 export async function ensureNewsTranslationSummary(
@@ -2466,13 +2474,47 @@ export async function fetchIntelligenceEvents(params?: {
   if (params?.eventType) sp.set("event_type", params.eventType);
   if (params?.since) sp.set("since", params.since);
   if (params?.includeExpired) sp.set("include_expired", "true");
-  const resp = await fetch(`${API_BASE}/api/intelligence/events?${sp.toString()}`, {
-    credentials: "include",
-    signal,
-  });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence events"));
-  const data = await resp.json();
-  return (data.events ?? []) as IntelligenceEvent[];
+  return readWithDeadline(async (requestSignal) => {
+    const resp = await fetch(`${API_BASE}/api/intelligence/events?${sp.toString()}`, {
+      credentials: "include",
+      signal: requestSignal,
+    });
+    if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence events"));
+    const data = await resp.json();
+    return (data.events ?? []) as IntelligenceEvent[];
+  }, signal);
+}
+
+export type OverviewTopic = "security" | "disasters" | "weather" | "transport" | "markets" | "agriculture" | "developments";
+export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet" | "unavailable";
+export type IntelligenceOverview = {
+  generated_at: string;
+  window: { hours: number; start: string; end: string; previous_start: string; previous_end: string; bucket_hours: number };
+  filters: { country: string | null; topic: OverviewTopic | null };
+  summary: { event_count: number; previous_event_count: number; change: number; change_percent: number | null; direction: OverviewDirection; high_priority_count: number; location_count: number };
+  topics: Array<{ key: OverviewTopic; label: string; event_count: number; previous_event_count: number; change: number; direction: OverviewDirection; priority_score: number; event_ids: string[] }>;
+  locations: Array<{ key: string; name: string; country_iso2: string | null; event_count: number; previous_event_count: number; change: number; direction: OverviewDirection; priority_score: number; event_ids: string[] }>;
+  buckets: Array<{ start: string; end: string; event_count: number; previous_event_count: number; high_priority_count: number }>;
+  events: IntelligenceEvent[];
+  timeline: Array<{
+    event_id: string; occurred_at: string; title: string; topic: OverviewTopic; topic_label: string;
+    location_name: string | null; country_iso2: string | null; severity: IntelligenceSeverity;
+    priority_score: number; priority_reasons: string[];
+    source_refs: Array<{ label: string; url: string | null; domain: string }>;
+    imagery: { preview_url: string; captured_at: string | null; attribution: string } | null;
+  }>;
+  coverage: { sample_limit: number; sampled_events: number; truncated: boolean; comparison_available: boolean; notice: string; comparison_notice: string; priority_notice: string };
+};
+
+export async function fetchIntelligenceOverview(params: { hours: 24 | 72 | 168; country?: string; topic?: OverviewTopic }, signal?: AbortSignal): Promise<IntelligenceOverview> {
+  const search = new URLSearchParams({ hours: String(params.hours) });
+  if (params.country) search.set("country", params.country);
+  if (params.topic) search.set("topic", params.topic);
+  return readWithDeadline(async (requestSignal) => {
+    const response = await fetch(`${API_BASE}/api/intelligence/overview?${search}`, { credentials: "include", signal: requestSignal });
+    if (!response.ok) throw new Error(await readError(response, "Unable to refresh the situation overview"));
+    return await response.json() as IntelligenceOverview;
+  }, signal);
 }
 
 export async function resolveSourceInvestigation(source: {
@@ -2487,11 +2529,13 @@ export async function resolveSourceInvestigation(source: {
 }
 
 export async function fetchIntelligenceEvent(id: string): Promise<IntelligenceEventDetail> {
-  const resp = await fetch(`${API_BASE}/api/intelligence/events/${encodeURIComponent(id)}`, {
-    credentials: "include",
+  return readWithDeadline(async (requestSignal) => {
+    const resp = await fetch(`${API_BASE}/api/intelligence/events/${encodeURIComponent(id)}`, {
+      credentials: "include", signal: requestSignal,
+    });
+    if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence event"));
+    return (await resp.json()) as IntelligenceEventDetail;
   });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence event"));
-  return (await resp.json()) as IntelligenceEventDetail;
 }
 
 export async function fetchIntelligenceLocations(params?: {
@@ -2549,10 +2593,12 @@ export async function deleteIntelligenceWatch(id: string): Promise<void> {
 }
 
 export async function fetchIntelligenceAlerts(signal?: AbortSignal): Promise<IntelligenceAlert[]> {
-  const resp = await fetch(`${API_BASE}/api/intelligence/alerts`, { credentials: "include", signal });
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence alerts"));
-  const data = await resp.json();
-  return (data.alerts ?? []) as IntelligenceAlert[];
+  return readWithDeadline(async (requestSignal) => {
+    const resp = await fetch(`${API_BASE}/api/intelligence/alerts`, { credentials: "include", signal: requestSignal });
+    if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence alerts"));
+    const data = await resp.json();
+    return (data.alerts ?? []) as IntelligenceAlert[];
+  }, signal);
 }
 
 export async function acknowledgeIntelligenceAlert(id: string): Promise<void> {
@@ -2604,20 +2650,22 @@ export async function fetchEarthObservations(params?: {
 }
 
 export async function fetchEventGibsContext(eventId: string): Promise<GibsEventContext | null> {
-  const resp = await fetch(
-    `${API_BASE}/api/earth-observation/events/${encodeURIComponent(eventId)}/gibs`,
-    { credentials: "include" },
-  );
-  if (resp.status === 404 || resp.status === 503) return null;
-  if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch NASA GIBS event context"));
-  const data = await resp.json();
-  return {
-    ...data,
-    layers: Array.isArray(data.layers) ? data.layers : [],
-    notice: typeof data.notice === "string"
-      ? data.notice
-      : "NASA GIBS browse imagery is contextual and is not proof of physical change or causation.",
-  } as GibsEventContext;
+  return readWithDeadline(async (requestSignal) => {
+    const resp = await fetch(
+      `${API_BASE}/api/earth-observation/events/${encodeURIComponent(eventId)}/gibs`,
+      { credentials: "include", signal: requestSignal },
+    );
+    if (resp.status === 404 || resp.status === 503) return null;
+    if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch NASA GIBS event context"));
+    const data = await resp.json();
+    return {
+      ...data,
+      layers: Array.isArray(data.layers) ? data.layers : [],
+      notice: typeof data.notice === "string"
+        ? data.notice
+        : "NASA GIBS browse imagery is contextual and is not proof of physical change or causation.",
+    } as GibsEventContext;
+  });
 }
 
 export async function requestEarthObservationComparison(observationId: string): Promise<Record<string, unknown>> {

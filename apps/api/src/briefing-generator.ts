@@ -1,4 +1,5 @@
 import { generateBriefingWithFallback } from "./briefing-fallback";
+import { boundedSourceReads } from "./bounded-source-reads";
 import { query } from "./db";
 import { createLlmClientFromEnv, getLlmRuntimeConfig, type LlmClient } from "./llm";
 import { getCountryLeadershipLatest } from "./connectors/wikidata-leadership";
@@ -246,7 +247,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
   const podcastLimit = clampInteger(options.maxPodcastItems, 12, 1, 40);
   const marketLimit = clampInteger(options.maxMarketItems, 16, 5, 60);
   const weatherLimit = clampInteger(options.maxWeatherItems, 16, 5, 80);
-  const leadershipLimit = clampInteger(options.maxLeadershipItems, 200, 1, 250);
+  const leadershipLimit = clampInteger(options.maxLeadershipItems, 20, 1, 250);
 
   const [
     newsResult,
@@ -260,8 +261,8 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
     leadershipResult,
     transportResult,
     intelligenceEventResult,
-  ] = await Promise.all([
-    query<NewsContextRow>(
+  ] = await boundedSourceReads([
+    () => query<NewsContextRow>(
       `WITH base_candidates AS MATERIALIZED (
          SELECT
            i.id,
@@ -351,7 +352,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        LIMIT $3`,
       [start, end, newsLimit, BRIEFING_OUTPUT_LANGUAGE]
     ),
-    query<GdeltEventContextRow>(
+    () => query<GdeltEventContextRow>(
       `SELECT event_code, quad_class, goldstein_scale, avg_tone,
               actor1_name, actor2_name, upper(action_country_iso2::text) AS country,
               action_geo_name AS location, mention_count, source_count, article_count,
@@ -362,7 +363,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        LIMIT $3`,
       [start, end, Math.min(newsLimit, 24)]
     ),
-    query<GdeltSignalContextRow>(
+    () => query<GdeltSignalContextRow>(
       `SELECT domain, language_code, upper(source_country_iso2::text) AS source_country,
               tone, themes, persons, organizations, locations, event_time, url
        FROM news_signal
@@ -371,7 +372,7 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        LIMIT $3`,
       [start, end, Math.min(newsLimit, 24)]
     ),
-    query<PodcastContextRow>(
+    () => query<PodcastContextRow>(
       `SELECT
          i.id,
          i.title,
@@ -421,9 +422,9 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        LIMIT $3`,
       [start, end, podcastLimit]
     ),
-    getCountryMarketOverview(),
-    getMarketInstrumentSnapshots({ limit: Math.min(marketLimit * 3, 120) }),
-    query<MarketEventContextRow>(
+    () => getCountryMarketOverview(),
+    () => getMarketInstrumentSnapshots({ limit: Math.min(marketLimit * 3, 120) }),
+    () => query<MarketEventContextRow>(
       `SELECT
          me.event_type,
          me.symbol,
@@ -442,10 +443,10 @@ async function collectBriefingContext(options: Required<Pick<DailyBriefingGenera
        LIMIT $3`,
       [start, end, marketLimit]
     ),
-    getCountryWeatherLatest(),
-    getCountryLeadershipLatest(),
-    getTransportOverviewForBriefing(),
-    getBriefingIntelligenceEvents(start, end, 24),
+    () => getCountryWeatherLatest(),
+    () => getCountryLeadershipLatest(),
+    () => getTransportOverviewForBriefing(),
+    () => getBriefingIntelligenceEvents(start, end, 24),
   ]);
 
   const intelligenceEvents = projectBriefingPriorityEvents(intelligenceEventResult);

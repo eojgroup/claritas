@@ -22,6 +22,17 @@ final class WatchAppModel: ObservableObject {
     @Published private(set) var markets: [MarketQuote] = []
     @Published private(set) var transport: TransportOverview?
     @Published private(set) var intelligenceEvents: [IntelligenceEvent] = []
+    @Published private(set) var intelligenceOverview: IntelligenceOverview?
+    @Published private(set) var overviewError: String?
+    @Published private(set) var isRefreshingOverview = false
+    @Published var overviewHours = 24
+    @Published var overviewTopic: String? = nil
+    private var overviewRequestID = UUID()
+    private var overviewPendingScope: IntelligenceOverviewScope?
+
+    var overviewScope: IntelligenceOverviewScope {
+        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic)
+    }
     @Published private(set) var briefingSchedule: DailyBriefingSchedule?
     @Published private(set) var isSavingBriefingSchedule: Bool = false
     @Published private(set) var briefingScheduleError: String?
@@ -42,6 +53,7 @@ final class WatchAppModel: ObservableObject {
     private var api = APIClient()
     private let cacheKey = "CLARITAS_WATCH_SNAPSHOT"
     private var refreshRequestID = UUID()
+    private var pendingRefreshKey: String?
     private var widgetFreshness = WatchWidgetFreshness.empty
 
     var hasSession: Bool {
@@ -75,7 +87,9 @@ final class WatchAppModel: ObservableObject {
     }
 
     var criticalSignalCount: Int {
-        intelligenceEvents.filter { $0.severity == .critical || $0.severity == .high }.count +
+        intelligenceEvents.filter {
+            !$0.isArchived && ($0.severity == .critical || $0.severity == .high)
+        }.count +
             weatherAlerts.count + marketBreaches.count + (transport?.summary.alerts ?? 0)
     }
 
@@ -107,16 +121,21 @@ final class WatchAppModel: ObservableObject {
             return
         }
 
+        let refreshKey = "\(token)|\(api.baseURLDescription)|\(selectedCountry ?? "global")|\(selectedNewsCategory)|\(overviewScope.requestKey)"
+        guard pendingRefreshKey != refreshKey else { return }
+        pendingRefreshKey = refreshKey
         let requestID = UUID()
         refreshRequestID = requestID
         let requestedCountry = selectedCountry
         let requestedNewsCategory = selectedNewsCategory
+        let requestedOverviewScope = overviewScope
         isRefreshingNews = true
         newsLoadError = nil
         socialLoadError = nil
         defer {
             if refreshRequestID == requestID {
                 isRefreshingNews = false
+                pendingRefreshKey = nil
             }
         }
         connectionState = .refreshing
@@ -124,8 +143,10 @@ final class WatchAppModel: ObservableObject {
         requestAPI.setAuthToken(token)
         api = requestAPI
 
-        async let briefingResult = result { try await requestAPI.fetchLatestDailyBriefing() }
-        async let newsResult: Result<NewsPage, Error> = result {
+        async let briefingResult = progressiveResult(requestID: requestID, fetch: {
+            try await requestAPI.fetchLatestDailyBriefing()
+        }, apply: { self.briefing = $0; self.widgetFreshness.overview = Date() })
+        async let newsResult: Result<NewsPage, Error> = progressiveResult(requestID: requestID, fetch: {
             try await requestAPI.fetchNews(
                 limit: 12,
                 country: requestedCountry,
@@ -134,7 +155,26 @@ final class WatchAppModel: ObservableObject {
                 archive: false,
                 includeMetadata: true
             )
-        }
+        }, apply: { page in
+            self.news = Array(NewsChronology.sorted(page.items, order: .newestFirst).prefix(12))
+            self.applyNewsMetadata(page)
+            if requestedNewsCategory == NewsCategoryCatalog.allCode { self.selectedCategoryNews = self.news }
+            self.isRefreshingNews = false
+            self.widgetFreshness.news = Date()
+        })
+        async let intelligenceResult = progressiveResult(requestID: requestID, fetch: {
+            try await requestAPI.fetchIntelligenceOverview(scope: requestedOverviewScope)
+        }, apply: { overview in
+            guard self.overviewScope == requestedOverviewScope else { return }
+            self.intelligenceOverview = overview
+            self.intelligenceEvents = Array(overview.currentEvents.prefix(8))
+            self.overviewError = nil
+        })
+
+        // Load the three useful glances first; optional lenses must not add a
+        // ten-request startup burst to the shared reader connection pool.
+        let core = await (briefingResult, newsResult, intelligenceResult)
+        guard refreshRequestID == requestID, !Task.isCancelled else { return }
         async let categoryNewsResult: Result<NewsPage?, Error> = result {
             guard requestedNewsCategory != NewsCategoryCatalog.allCode else { return nil }
             return try await requestAPI.fetchNews(
@@ -146,28 +186,37 @@ final class WatchAppModel: ObservableObject {
                 includeMetadata: false
             )
         }
+        async let weatherResult = progressiveResult(requestID: requestID, fetch: {
+            try await requestAPI.fetchCountryWeather()
+        }, apply: { rows in
+            self.weather = Array((requestedCountry.map { country in rows.filter { self.normalizedCountry($0.country) == country } } ?? rows).prefix(20))
+            self.widgetFreshness.weather = Date()
+        })
+        async let marketResult = progressiveResult(requestID: requestID, fetch: {
+            try await requestAPI.fetchMarketQuotes(refresh: false)
+        }, apply: { rows in
+            self.markets = Array((requestedCountry.map { country in rows.filter { self.normalizedCountry($0.country) == country } } ?? rows).prefix(20))
+            self.widgetFreshness.markets = Date()
+        })
+        let secondary = await (categoryNewsResult, weatherResult, marketResult)
+        guard refreshRequestID == requestID, !Task.isCancelled else { return }
         async let podcastResult = result { try await requestAPI.fetchPodcasts(limit: 8) }
-        async let weatherResult = result { try await requestAPI.fetchCountryWeather() }
         async let leadershipResult = result { try await requestAPI.fetchCountryLeadership() }
-        async let marketResult = result { try await requestAPI.fetchMarketQuotes(refresh: false) }
         async let scheduleResult = result { try await requestAPI.fetchDailyBriefingSchedule() }
-        async let intelligenceResult = result {
-            try await requestAPI.fetchIntelligenceEvents(limit: 8, country: requestedCountry)
-        }
         async let socialResult = result {
             try await requestAPI.fetchSocialSignals(limit: 8, country: requestedCountry)
         }
 
         let results = await (
-            briefingResult,
-            newsResult,
-            categoryNewsResult,
+            core.0,
+            core.1,
+            secondary.0,
             podcastResult,
-            weatherResult,
+            secondary.1,
             leadershipResult,
-            marketResult,
+            secondary.2,
             scheduleResult,
-            intelligenceResult,
+            core.2,
             socialResult
         )
         guard refreshRequestID == requestID else { return }
@@ -248,11 +297,14 @@ final class WatchAppModel: ObservableObject {
         }
         switch results.8 {
             case .success(let value):
-                let scoped = requestedCountry.map { country in
-                    value.filter { normalizedCountry($0.primary_country_iso2) == country }
-                } ?? value
-                intelligenceEvents = Array(scoped.prefix(8))
-            case .failure(let error): errors.append(error)
+                if overviewScope == requestedOverviewScope {
+                    intelligenceOverview = value
+                    intelligenceEvents = Array(value.currentEvents.prefix(8))
+                    overviewError = nil
+                }
+            case .failure(let error):
+                if overviewScope == requestedOverviewScope { overviewError = error.localizedDescription }
+                errors.append(error)
         }
         switch results.9 {
         case .success(let value):
@@ -376,6 +428,11 @@ final class WatchAppModel: ObservableObject {
         markets = []
         transport = nil
         intelligenceEvents = []
+        intelligenceOverview = nil
+        overviewError = nil
+        overviewRequestID = UUID()
+        overviewPendingScope = nil
+        isRefreshingOverview = false
         widgetFreshness = .empty
         await refresh()
     }
@@ -458,6 +515,11 @@ final class WatchAppModel: ObservableObject {
             markets = []
             transport = nil
             intelligenceEvents = []
+            intelligenceOverview = nil
+            overviewError = nil
+            overviewRequestID = UUID()
+            overviewPendingScope = nil
+            isRefreshingOverview = false
             widgetFreshness = .empty
         }
         api = APIClient()
@@ -475,6 +537,46 @@ final class WatchAppModel: ObservableObject {
             return nil
         }
         return normalized == "UK" ? "GB" : normalized
+    }
+
+    /// Publish each useful glance as it arrives instead of waiting for the
+    /// slowest optional resource in the ten-request refresh batch.
+    private func progressiveResult<Value>(requestID: UUID, fetch: () async throws -> Value, apply: (Value) -> Void) async -> Result<Value, Error> {
+        let response = await result(fetch)
+        if refreshRequestID == requestID, !Task.isCancelled, case .success(let value) = response { apply(value) }
+        return response
+    }
+
+    func refreshOverview() async {
+        guard let token = WatchKeychain.authToken else { return }
+        let scope = overviewScope
+        guard overviewPendingScope != scope else { return }
+        let requestID = UUID()
+        overviewRequestID = requestID
+        overviewPendingScope = scope
+        isRefreshingOverview = true
+        overviewError = nil
+        if intelligenceOverview?.filters.country != scope.country || intelligenceOverview?.filters.topic != scope.topic
+            || intelligenceOverview?.window.hours != scope.hours {
+            intelligenceOverview = nil
+            intelligenceEvents = []
+        }
+        api.setAuthToken(token)
+        defer {
+            if overviewRequestID == requestID { overviewPendingScope = nil; isRefreshingOverview = false }
+        }
+        do {
+            let overview = try await api.fetchIntelligenceOverview(scope: scope)
+            guard !Task.isCancelled, overviewRequestID == requestID, overviewScope == scope,
+                  WatchKeychain.authToken == token else { return }
+            intelligenceOverview = overview
+            intelligenceEvents = Array(overview.currentEvents.prefix(8))
+            saveCache()
+        } catch {
+            guard !Task.isCancelled, overviewRequestID == requestID, overviewScope == scope,
+                  WatchKeychain.authToken == token else { return }
+            overviewError = error.localizedDescription
+        }
     }
 
     private func result<T>(_ operation: () async throws -> T) async -> Result<T, Error> {
@@ -510,7 +612,8 @@ final class WatchAppModel: ObservableObject {
             selectedCountry: selectedCountry,
             selectedNewsCategory: selectedNewsCategory,
             lastUpdated: lastUpdated,
-            widgetFreshness: widgetFreshness
+            widgetFreshness: widgetFreshness,
+            intelligenceOverview: intelligenceOverview
         )
         let encoder = JSONEncoder()
         // `JSONDecoder.api` treats numeric dates as Unix seconds, so the cache
@@ -560,7 +663,10 @@ final class WatchAppModel: ObservableObject {
         leadership = snapshot.leadership
         markets = snapshot.markets
         transport = snapshot.transport
-        intelligenceEvents = snapshot.intelligenceEvents
+        intelligenceEvents = snapshot.intelligenceEvents.filter { !$0.isArchived }
+        intelligenceOverview = snapshot.intelligenceOverview
+        overviewHours = snapshot.intelligenceOverview?.window.hours ?? 24
+        overviewTopic = snapshot.intelligenceOverview?.filters.topic
         briefingSchedule = snapshot.briefingSchedule
         lastUpdated = snapshot.lastUpdated
         widgetFreshness = snapshot.widgetFreshness ?? .empty
@@ -568,6 +674,9 @@ final class WatchAppModel: ObservableObject {
 
     private func clearProtectedData() {
         refreshRequestID = UUID()
+        pendingRefreshKey = nil
+        overviewHours = 24
+        overviewTopic = nil
         isRefreshingNews = false
         briefing = nil
         news = []
@@ -579,6 +688,11 @@ final class WatchAppModel: ObservableObject {
         markets = []
         transport = nil
         intelligenceEvents = []
+        intelligenceOverview = nil
+        overviewError = nil
+        overviewRequestID = UUID()
+        overviewPendingScope = nil
+        isRefreshingOverview = false
         briefingSchedule = nil
         isSavingBriefingSchedule = false
         briefingScheduleError = nil
@@ -623,4 +737,5 @@ private struct WatchSnapshot: Codable {
     let selectedNewsCategory: String?
     let lastUpdated: Date?
     let widgetFreshness: WatchWidgetFreshness?
+    let intelligenceOverview: IntelligenceOverview?
 }

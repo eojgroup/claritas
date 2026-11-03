@@ -641,6 +641,12 @@ final class APIClient {
         return comps.url
     }
 
+    func fetchIntelligenceOverview(scope: IntelligenceOverviewScope = IntelligenceOverviewScope()) async throws -> IntelligenceOverview {
+        var components = URLComponents(url: baseURL.appendingPathComponent("/api/intelligence/overview"), resolvingAgainstBaseURL: false)!
+        components.queryItems = scope.queryItems
+        return try await request(URLRequest(url: components.url!), as: IntelligenceOverview.self)
+    }
+
     func fetchIntelligenceEvents(limit: Int = 40, country: String? = nil, includeExpired: Bool = false) async throws -> [IntelligenceEvent] {
         var comps = URLComponents(
             url: baseURL.appendingPathComponent("/api/intelligence/events"),

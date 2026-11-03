@@ -2872,6 +2872,10 @@ struct IntelligenceEvent: Codable, Identifiable, Hashable {
     var priority_score: Double? = nil
     var priority_reasons: [String]? = nil
 
+    var isArchived: Bool {
+        ["resolved", "dismissed"].contains(status.lowercased()) || freshness_state == "expired"
+    }
+
     var originLabel: String { SignalDomainPresentation.label(origin_domain ?? "signal") }
     var originIcon: String { SignalDomainPresentation.icon(origin_domain ?? "signal") }
     var signalTypesLabel: String {
@@ -3601,4 +3605,139 @@ struct SocialCoverageResponse: Codable {
     let coverage: [SocialCoverageRow]
     let providers: [SocialProviderStatus]
     let classification: SocialClassification
+}
+
+/// One bounded overview read shared by native charts, map events and timeline.
+struct IntelligenceOverviewScope: Hashable, Sendable {
+    static let windows = [24, 72, 168]
+    static let topics: [(key: String, label: String)] = [
+        ("security", "Security"), ("disasters", "Disasters"), ("weather", "Weather"),
+        ("transport", "Transport"), ("markets", "Markets"), ("agriculture", "Agriculture"),
+        ("developments", "Developments"),
+    ]
+    let hours: Int
+    let country: String?
+    let topic: String?
+
+    init(hours: Int = 24, country: String? = nil, topic: String? = nil) {
+        self.hours = Self.windows.contains(hours) ? hours : 24
+        let code = country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        self.country = code?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil ? (code == "UK" ? "GB" : code) : nil
+        self.topic = Self.topics.contains(where: { $0.key == topic }) ? topic : nil
+    }
+
+    var requestKey: String { "\(hours)|\(country ?? "global")|\(topic ?? "all")" }
+    var windowLabel: String { hours == 24 ? "24 hours" : hours == 72 ? "3 days" : "7 days" }
+    var queryItems: [URLQueryItem] {
+        [URLQueryItem(name: "hours", value: String(hours))]
+            + (country.map { [URLQueryItem(name: "country", value: $0)] } ?? [])
+            + (topic.map { [URLQueryItem(name: "topic", value: $0)] } ?? [])
+    }
+}
+
+struct IntelligenceOverview: Codable {
+    struct Window: Codable {
+        let hours: Int
+        let start: Date
+        let end: Date
+        let previous_start: Date
+        let previous_end: Date
+        let bucket_hours: Int
+    }
+    struct Filters: Codable { let country: String?; let topic: String? }
+    struct Summary: Codable {
+        let event_count: Int
+        let previous_event_count: Int
+        let change: Int
+        let change_percent: Double?
+        let direction: String
+        let high_priority_count: Int
+        let location_count: Int
+
+        var momentumLabel: String {
+            switch direction {
+            case "rising": return "\(change) more than the previous window"
+            case "falling": return "\(abs(change)) fewer than the previous window"
+            case "new": return "Activity after a quiet previous window"
+            case "quiet": return "No recorded updates in either window"
+            case "unavailable": return "Sample capped · comparison unavailable"
+            default: return "Same volume as the previous window"
+            }
+        }
+        var momentumIcon: String {
+            switch direction {
+            case "rising", "new": return "arrow.up.right"
+            case "falling": return "arrow.down.right"
+            default: return "arrow.right"
+            }
+        }
+    }
+    struct Topic: Codable, Identifiable {
+        var id: String { key }
+        let key: String
+        let label: String
+        let event_count: Int
+        let previous_event_count: Int
+        let change: Int
+        let direction: String
+        let priority_score: Double
+        let event_ids: [String]
+    }
+    struct Location: Codable, Identifiable {
+        var id: String { key }
+        let key: String
+        let name: String
+        let country_iso2: String?
+        let event_count: Int
+        let previous_event_count: Int
+        let change: Int
+        let direction: String
+        let priority_score: Double
+        let event_ids: [String]
+    }
+    struct Bucket: Codable, Identifiable {
+        var id: Date { start }
+        let start: Date
+        let end: Date
+        let event_count: Int
+        let previous_event_count: Int
+        let high_priority_count: Int
+    }
+    struct TimelineEntry: Codable, Identifiable {
+        struct Source: Codable { let label: String; let url: String?; let domain: String }
+        struct Imagery: Codable { let preview_url: String; let captured_at: Date?; let attribution: String }
+        var id: String { event_id }
+        let event_id: String
+        let occurred_at: Date
+        let title: String
+        let topic: String
+        let topic_label: String
+        let location_name: String?
+        let country_iso2: String?
+        let severity: String
+        let priority_score: Double
+        let priority_reasons: [String]
+        let source_refs: [Source]
+        let imagery: Imagery?
+    }
+    struct Coverage: Codable {
+        let sample_limit: Int
+        let sampled_events: Int
+        let truncated: Bool
+        let comparison_available: Bool
+        let notice: String
+        let comparison_notice: String
+        let priority_notice: String
+    }
+    let generated_at: Date
+    let window: Window
+    let filters: Filters
+    let summary: Summary
+    let topics: [Topic]
+    let locations: [Location]
+    let buckets: [Bucket]
+    let events: [IntelligenceEvent]
+    let timeline: [TimelineEntry]
+    let coverage: Coverage
+    var currentEvents: [IntelligenceEvent] { events.filter { !$0.isArchived } }
 }

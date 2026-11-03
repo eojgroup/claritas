@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IntelligenceEvent } from "../lib/api";
-import { presentEvent } from "./eventPresentation";
+import { isHistoricalEvent, presentEvent } from "./eventPresentation";
 
 const baseEvent: IntelligenceEvent = {
   id: "event",
@@ -23,6 +23,15 @@ const baseEvent: IntelligenceEvent = {
   evidence_count: 3,
   earth_observation_available: false,
 };
+
+it.each([
+  { status: "resolved", freshness_state: "current" as const },
+  { status: "dismissed", freshness_state: "current" as const },
+  { status: "active", freshness_state: "expired" as const },
+])("keeps historical investigations out of current map relevance: %j", (event) => {
+  expect(isHistoricalEvent({ ...baseEvent, ...event })).toBe(true);
+  expect(isHistoricalEvent({ ...baseEvent, status: "active", freshness_state: "current" })).toBe(false);
+});
 
 describe("presentEvent", () => {
   it("keeps an informative headline and makes prioritization explicit", () => {

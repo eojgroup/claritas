@@ -961,6 +961,17 @@ jobs:
             local pods_json="$RUNNER_TEMP/claritas-current-${deployment}-pods.json"
             local snapshot="$RUNNER_TEMP/claritas-rollback-${deployment}.json"
 
+            # The first reader/worker release introduces this deployment.
+            # Preserve its absence so rollback resumes the old combined API.
+            if [ "$deployment" = "claritas-worker" ]; then
+              local existing_worker
+              existing_worker="$(kubectl -n "$ns" get deployment "$deployment" --ignore-not-found=true -o json)"
+              if [ -z "$existing_worker" ]; then
+                printf '{"absent":true}\n' > "$snapshot"
+                return
+              fi
+            fi
+
             # Capture what is actually serving before the first workload
             # manifest is applied. Every regular container (including database
             # sidecar) is pinned to its runtime digest in the saved full spec.
@@ -1038,14 +1049,14 @@ jobs:
           # Keycloak 26.7.3 performs an irreversible database-schema upgrade.
           # Never automatically restore the pre-upgrade server binary against
           # that newer schema; application workloads remain safely reversible.
-          for deployment in claritas-web claritas-api opencode; do
+          for deployment in claritas-web claritas-api claritas-worker opencode; do
             snapshot_deployment "$deployment"
           done
           {
             echo "APPLICATION_ROLLBACK_ARMED=true"
             echo "RELEASE_GATE_ID=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
           } >> "$GITHUB_ENV"
-          echo "Captured three complete application workload specs with every container image pinned by digest."
+          echo "Captured complete application workload specs and worker presence with immutable images."
 
       - name: 🛠️ Apply identity deployment
         run: |
@@ -1169,6 +1180,12 @@ jobs:
           # an old schema, so application rollout is deliberately post-migrate.
           kubectl apply -f ./infra/k8s/web-deployment.yaml
           kubectl apply -f ./infra/k8s/api-deployment.yaml
+          # On the first split, the old combined API has a larger memory
+          # reservation. Finish replacing it before creating the worker; the
+          # single small egress node cannot schedule all three simultaneously.
+          kubectl -n "${NAMESPACE}" rollout status deployment/claritas-api --timeout=600s
+          kubectl set image -f ./infra/k8s/worker-deployment.yaml \
+            claritas-worker="${IMAGE_URI_API}:${{ github.sha }}" --local -o yaml | kubectl apply -f -
           kubectl apply -f ./infra/k8s/opencode-deployment.yaml
 
       - name: 📤 Set image and rollout (with diagnostics)
@@ -1179,8 +1196,8 @@ jobs:
           # Update images to this commit
           kubectl -n "$ns" set image deployment/claritas-web claritas-web="${IMAGE_URI_WEB}:${{ github.sha }}"
           kubectl -n "$ns" set image deployment/claritas-api claritas-api="${IMAGE_URI_API}:${{ github.sha }}"
+          kubectl -n "$ns" set image deployment/claritas-worker claritas-worker="${IMAGE_URI_API}:${{ github.sha }}"
           kubectl -n "$ns" set image deployment/opencode opencode="${IMAGE_URI_OPENCODE}:${{ github.sha }}"
-          kubectl -n "$ns" rollout restart deployment/claritas-api
           kubectl -n "$ns" rollout restart deployment/opencode
 
           wait_rollout () {
@@ -1211,6 +1228,7 @@ jobs:
 
           wait_rollout claritas-web
           wait_rollout claritas-api
+          wait_rollout claritas-worker
           wait_rollout opencode
           wait_rollout keycloak
 
@@ -1220,8 +1238,9 @@ jobs:
           # The single quotes intentionally protect JavaScript template literals from Bash.
           # shellcheck disable=SC2016
           timeout --signal=TERM --kill-after=5s 30s \
-            kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
+            kubectl -n "${NAMESPACE}" exec deployment/claritas-worker -c claritas-worker -- node -e '
             const missing = [];
+            if (process.env.CLARITAS_RUNTIME_ROLE !== "worker") missing.push("CLARITAS_RUNTIME_ROLE=worker");
             if (!process.env.FRED_API_KEY?.trim()) missing.push("FRED_API_KEY");
             const disabled = (value) => ["0", "false", "no", "off"].includes((value || "true").trim().toLowerCase());
             const primaryConfigured = !disabled(process.env.AISSTREAM_ENABLED) && Boolean(process.env.AISSTREAM_API_KEY?.trim());
@@ -1271,7 +1290,7 @@ jobs:
             echo "Post-rollout news refresh request ${attempt}/20"
             refresh_body="$(
               timeout --signal=TERM --kill-after=5s 20s \
-                kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- \
+                kubectl -n "${NAMESPACE}" exec deployment/claritas-worker -c claritas-worker -- \
                 env RELEASE_GATE_ID="$RELEASE_GATE_ID" node -e '
                   const url = new URL("http://127.0.0.1:8080/internal/news/refresh");
                   url.searchParams.set("releaseId", process.env.RELEASE_GATE_ID);
@@ -1320,7 +1339,7 @@ jobs:
             echo "News runtime verification attempt ${attempt}/40"
             news_body="$(
               timeout --signal=TERM --kill-after=5s 30s \
-                kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- \
+                kubectl -n "${NAMESPACE}" exec deployment/claritas-worker -c claritas-worker -- \
                 env RELEASE_NEWS_RUN_ID="$release_news_run_id" node -e '
                 const url = new URL("http://127.0.0.1:8080/internal/news/runtime-health");
                 url.searchParams.set("runId", process.env.RELEASE_NEWS_RUN_ID);
@@ -1356,7 +1375,7 @@ jobs:
           if [ "$news_ready" -ne 1 ]; then
             echo "::error::News runtime did not prove fresh markets, assessed publisher diversity, and non-GB subject geography." >&2
             printf '%s\n' "$news_body"
-            kubectl -n "${NAMESPACE}" logs -l app=claritas-api -c claritas-api \
+            kubectl -n "${NAMESPACE}" logs -l app=claritas-worker -c claritas-worker \
               --since=20m --tail=2000 --prefix=true --max-log-requests=10 | \
               grep -E "(news_assessment|news_runtime_health_failed|database_pool_pressure|News ingestion|gdelt|GDELT|ingestion_automation)" || true
             exit 1
@@ -1387,14 +1406,14 @@ jobs:
             echo "Transport runtime verification attempt ${attempt}/24"
             mapfile -t pods < <(
               kubectl -n "${NAMESPACE}" get pods \
-                -l app=claritas-api \
+                -l app=claritas-worker \
                 --field-selector=status.phase=Running \
                 -o name
             )
             for pod in "${pods[@]}"; do
               body="$(
                 timeout --signal=TERM --kill-after=5s 15s \
-                  kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- node -e '
+                  kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-worker -- node -e '
                   fetch("http://127.0.0.1:8080/internal/transport/runtime-health", { signal: AbortSignal.timeout(5_000) })
                     .then((response) => response.text())
                     .then((value) => process.stdout.write(value))
@@ -1437,7 +1456,7 @@ jobs:
           done
           if [ "$transport_ready" -ne 1 ]; then
             echo "::error::No transport leader reported a current AISstream primary or an explicit current regional fallback." >&2
-            kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
+            kubectl -n "${NAMESPACE}" logs deployment/claritas-worker -c claritas-worker --since=10m | \
               grep -E "(AISstream|aisstream_|digitraffic_maritime_refresh|barentswatch_maritime_refresh|mpa_oceans_x_maritime_refresh|Transport ingestion worker)" || true
             exit 1
           fi
@@ -1478,7 +1497,7 @@ jobs:
           # coverage. Keep this visible as a release warning for operator action.
           singapore_transport_body="$(
             timeout --signal=TERM --kill-after=5s 15s \
-              kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
+              kubectl -n "${NAMESPACE}" exec deployment/claritas-worker -c claritas-worker -- node -e '
                 fetch("http://127.0.0.1:8080/internal/transport/singapore-health", { signal: AbortSignal.timeout(5_000) })
                   .then((response) => response.text())
                   .then((value) => process.stdout.write(value))
@@ -1510,7 +1529,7 @@ jobs:
               }
             });
           '
-          kubectl -n "${NAMESPACE}" logs deployment/claritas-api -c claritas-api --since=10m | \
+          kubectl -n "${NAMESPACE}" logs deployment/claritas-worker -c claritas-worker --since=10m | \
             grep -E "(Ingestion automation worker started|Daily briefing scheduler started|Transport ingestion worker|AISstream transport subscription connected|aisstream_subscription_started|aisstream_ingestion_progress|aisstream_idle_reconnect|digitraffic_maritime_refresh|barentswatch_maritime_refresh|mpa_oceans_x_maritime_refresh|BarentsWatch|MPA OCEANS-X)" || true
 
       - name: 🌐 Verify API pods use the reserved egress IP
@@ -1519,7 +1538,7 @@ jobs:
           expected="$(terraform -chdir=infra/gcp/terraform output -raw api_egress_ip)"
           mapfile -t pods < <(
             kubectl -n "${NAMESPACE}" get pods \
-              -l app=claritas-api \
+              -l 'app in (claritas-api,claritas-worker)' \
               --field-selector=status.phase=Running \
               -o name
           )
@@ -1528,11 +1547,12 @@ jobs:
             exit 1
           fi
           for pod in "${pods[@]}"; do
+            container="$(kubectl -n "${NAMESPACE}" get "$pod" -o jsonpath='{.metadata.labels.app}')"
             actual=""
             for attempt in 1 2 3; do
               actual="$(
                 timeout --signal=TERM --kill-after=5s 20s \
-                  kubectl -n "${NAMESPACE}" exec "$pod" -c claritas-api -- \
+                  kubectl -n "${NAMESPACE}" exec "$pod" -c "$container" -- \
                   node -e 'fetch("https://api.ipify.org", { signal: AbortSignal.timeout(10_000) }).then((response)=>response.text()).then((ip)=>process.stdout.write(ip.trim()))' \
                   2>/dev/null || true
               )"
@@ -1674,6 +1694,10 @@ jobs:
               echo "::error::Missing pre-apply workload snapshot for ${deployment}." >&2
               return 1
             fi
+            if node -e 'process.exit(require(process.argv[1]).absent === true ? 0 : 1)' "$snapshot"; then
+              kubectl -n "${NAMESPACE}" delete "deployment/${deployment}" --ignore-not-found=true --wait=false
+              return
+            fi
             patch="$(node -e '
               const snapshot = require(process.argv[1]);
               process.stdout.write(JSON.stringify([
@@ -1682,12 +1706,15 @@ jobs:
             ' "$snapshot")"
             kubectl -n "${NAMESPACE}" patch "deployment/${deployment}" --type=json -p "$patch"
           }
-          for deployment in claritas-web claritas-api opencode; do
+          for deployment in claritas-web claritas-api claritas-worker opencode; do
             if ! restore_deployment_spec "$deployment"; then
               rollback_failed=1
             fi
           done
-          for deployment in claritas-web claritas-api opencode; do
+          for deployment in claritas-web claritas-api claritas-worker opencode; do
+            if node -e 'process.exit(require(process.argv[1]).absent === true ? 0 : 1)' "$RUNNER_TEMP/claritas-rollback-${deployment}.json"; then
+              continue
+            fi
             if ! kubectl -n "${NAMESPACE}" rollout status "deployment/${deployment}" --timeout=600s; then
               echo "::error::Rollback rollout failed for ${deployment}." >&2
               kubectl -n "${NAMESPACE}" describe "deployment/${deployment}" | sed -n '1,160p' || true
@@ -1698,4 +1725,4 @@ jobs:
             echo "::error::Application rollback was incomplete; manual intervention is required." >&2
             exit 1
           fi
-          echo "::notice title=Application rollback complete::Restored all three application workload specs with every container image digest-pinned; retained the forward-only Keycloak upgrade."
+          echo "::notice title=Application rollback complete::Restored application workload specs and previous worker presence with digest-pinned images; retained the forward-only Keycloak upgrade."

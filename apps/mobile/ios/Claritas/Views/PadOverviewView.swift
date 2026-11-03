@@ -82,7 +82,7 @@ struct PadOverviewView: View {
                         }
                     }
 
-                    IntelligenceEventPulseView(presentation: .horizontal)
+                    IntelligenceOverviewPanel()
 
                     BriefingOverviewCard(briefing: model.dailyBriefing) {
                         destination = .briefing
@@ -509,6 +509,7 @@ struct OverviewSatelliteContextView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Binding var destination: RootView.Tab?
     @State private var selectedEvent: IntelligenceEvent?
+    @State private var overviewImage: IntelligenceOverview.TimelineEntry.Imagery?
     @State private var observation: EarthObservation?
     @State private var gibsContext: GibsEventContext?
     @State private var isLoading = false
@@ -527,7 +528,9 @@ struct OverviewSatelliteContextView: View {
             } else if let selectedEvent {
                 VStack(alignment: .leading, spacing: 12) {
                     ZStack(alignment: .topLeading) {
-                        if let asset = observation?.preferredDisplayAsset {
+                        if let overviewImage {
+                            AuthenticatedEarthImage(path: overviewImage.preview_url, contentMode: .fit)
+                        } else if let asset = observation?.preferredDisplayAsset {
                             AuthenticatedEarthImage(path: asset.url, contentMode: .fit)
                         } else if let layer = gibsLayer {
                             AuthenticatedRemoteImage(
@@ -539,7 +542,7 @@ struct OverviewSatelliteContextView: View {
                             satellitePlaceholder
                         }
                         HStack(spacing: 6) {
-                            Text(observation == nil ? "BROWSE CONTEXT · NOT PROOF" : "PROCESSED OBSERVATION")
+                            Text(observation == nil && overviewImage == nil ? "BROWSE CONTEXT · NOT PROOF" : "SATELLITE OBSERVATION")
                                 .font(.caption2.weight(.bold))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 5)
@@ -580,11 +583,16 @@ struct OverviewSatelliteContextView: View {
                                 .font(.caption)
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                             if let expiresAt = selectedEvent.expires_at {
-                                Text("Updated \(selectedEvent.last_activity_time.formatted(date: .abbreviated, time: .standard)) · current until \(expiresAt.formatted(date: .abbreviated, time: .standard))")
+                                Text("Updated \(selectedEvent.last_activity_time.formatted(date: .abbreviated, time: .standard)) · \(selectedEvent.isArchived ? "Archived; visibility ended" : "Current until") \(expiresAt.formatted(date: .abbreviated, time: .standard))")
                                     .font(.caption2.monospacedDigit())
                                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                             }
-                            Text(observation?.attribution ?? gibsLayer?.provenance.attribution ?? "Satellite context")
+                            if let capturedAt = overviewImage?.captured_at {
+                                Text("Captured \(capturedAt.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
+                            }
+                            Text(overviewImage?.attribution ?? observation?.attribution ?? gibsLayer?.provenance.attribution ?? "Satellite context")
                                 .font(.caption2)
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                         }
@@ -614,7 +622,7 @@ struct OverviewSatelliteContextView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .task(id: "\(model.selectedCountry ?? "global")-\(retryID)") { await load() }
+        .task(id: "\(model.overviewScope.requestKey)-\(model.intelligenceOverview?.generated_at.timeIntervalSince1970 ?? 0)-\(retryID)") { await load() }
     }
 
     private var satellitePlaceholder: some View {
@@ -634,43 +642,54 @@ struct OverviewSatelliteContextView: View {
         isLoading = true
         error = nil
         selectedEvent = nil
+        overviewImage = nil
         observation = nil
         gibsContext = nil
         defer { isLoading = false }
-
-        do {
-            let events = try await model.api.fetchIntelligenceEvents(limit: 10, country: model.selectedCountry)
-                .sorted {
-                    if $0.earth_observation_available != $1.earth_observation_available {
-                        return $0.earth_observation_available
-                    }
-                    if $0.relevance_score != $1.relevance_score { return $0.relevance_score > $1.relevance_score }
-                    return $0.last_activity_time > $1.last_activity_time
-                }
-
-            for event in events.prefix(8) {
-                var eventObservations: [EarthObservation] = []
-                if event.earth_observation_available,
-                   let detail = try? await model.api.fetchIntelligenceEvent(id: event.id) {
-                    eventObservations = detail.earth_observations.sortedForDisplay
-                        .filter { $0.preferredDisplayAsset != nil }
-                }
-                let eventGibs = try? await model.api.fetchEventGibsContext(id: event.id)
-                let hasTrueColorBrowse = eventGibs?.layers.contains { $0.category == "true_color" } ?? false
-                let eventObservation = eventObservations.first { $0.product_type == "true_color" }
-                    ?? (hasTrueColorBrowse ? nil : eventObservations.first {
-                        ["false_color", "sar"].contains($0.product_type)
-                    })
-                if eventObservation != nil || hasTrueColorBrowse {
-                    selectedEvent = event
-                    observation = eventObservation
-                    gibsContext = eventGibs
-                    return
-                }
+        if model.intelligenceOverview == nil { await model.refreshIntelligenceOverview() }
+        guard !Task.isCancelled else { return }
+        guard let overview = model.intelligenceOverview else {
+            error = model.intelligenceOverviewError ?? "Load the event picture to explore its imagery."
+            return
+        }
+        // Reuse the preview already included in the overview before asking for
+        // any optional detail. It retains the observation's acquisition date.
+        if let entry = overview.timeline.first(where: { $0.imagery != nil }),
+           let event = overview.events.first(where: { $0.id == entry.event_id }) {
+            selectedEvent = event
+            overviewImage = entry.imagery
+            observation = nil
+            gibsContext = nil
+            return
+        }
+        selectedEvent = nil
+        overviewImage = nil
+        observation = nil
+        gibsContext = nil
+        let candidates = overview.events.filter { event in
+            event.latitude?.isFinite == true && event.longitude?.isFinite == true
+                && !["country", "region", "country_centroid"].contains(event.location_type ?? "")
+        }.sorted { $0.earth_observation_available && !$1.earth_observation_available }
+        guard let event = candidates.first else {
+            error = "No event in this view has image-ready geography yet."
+            return
+        }
+        // One selected event, rather than eight sequential provider lookups.
+        if event.earth_observation_available,
+           let detail = try? await model.api.fetchIntelligenceEvent(id: event.id) {
+            guard !Task.isCancelled else { return }
+            observation = detail.earth_observations.sortedForDisplay.first {
+                $0.product_type == "true_color" && $0.preferredDisplayAsset != nil
             }
-            error = "No recent event has image-ready geography yet. The feed will update as new scenes are found."
-        } catch {
-            self.error = error.localizedDescription
+        }
+        if observation == nil {
+            gibsContext = try? await model.api.fetchEventGibsContext(id: event.id)
+            guard !Task.isCancelled else { return }
+        }
+        if observation != nil || gibsLayer != nil {
+            selectedEvent = event
+        } else {
+            error = "No preview is available for this event yet. Its evidence remains available in the timeline."
         }
     }
 }

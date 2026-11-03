@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import ImageIO
+import Charts
 
 struct IntelligenceWorkspaceView: View {
     /// A selected story stays beside the world map instead of opening another workspace.
@@ -1960,5 +1961,292 @@ struct AdminIntelligenceOperationsView: View {
         defer { runningProvider = nil }
         do { try await model.api.runIntelligenceProvider(provider); await load() }
         catch { self.error = error.localizedDescription }
+    }
+}
+
+/// A single scoped read drives the chart, topic pulse and event timeline.
+struct IntelligenceOverviewPanel: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var showsExplanation = false
+    @State private var showsMore = false
+
+    private var scope: IntelligenceOverviewScope { model.overviewScope }
+    private var countries: [String] {
+        Array(Set(model.countryStats.map(\.country)
+            + (model.intelligenceOverview?.locations.compactMap(\.country_iso2) ?? [])
+            + (model.selectedCountry.map { [$0] } ?? []))).sorted {
+                countryName($0).localizedStandardCompare(countryName($1)) == .orderedAscending
+            }
+    }
+
+    var body: some View {
+        BrandCard {
+            header
+            controls
+            if let overview = model.intelligenceOverview {
+                summary(overview)
+                activityChart(overview)
+                topics(overview)
+                timeline(overview)
+                DisclosureGroup(isExpanded: $showsExplanation) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(overview.coverage.comparison_notice)
+                        Text(overview.coverage.priority_notice)
+                        Text(overview.coverage.notice)
+                        Text("Updated \(overview.generated_at.formatted(date: .abbreviated, time: .shortened))")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                } label: {
+                    Text("How this view is measured").font(.caption.weight(.semibold))
+                }
+                if overview.coverage.truncated {
+                    Label("Bounded sample · some investigations are outside this view", systemImage: "info.circle")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let error = model.intelligenceOverviewError {
+                    refreshFailure(error)
+                }
+            } else if model.isRefreshingIntelligenceOverview {
+                ProgressView("Loading the event picture")
+                    .frame(maxWidth: .infinity, minHeight: 96)
+            } else {
+                refreshFailure(model.intelligenceOverviewError ?? "The event picture is not available yet.")
+            }
+        }
+        .task(id: "\(scope.requestKey)|\(scenePhase == .active)") {
+            guard scenePhase == .active else { return }
+            showsMore = false
+            while !Task.isCancelled {
+                await model.refreshIntelligenceOverview()
+                do { try await Task.sleep(nanoseconds: 120_000_000_000) }
+                catch { return }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("THE EVENT PICTURE")
+                    .font(.caption2.weight(.bold)).tracking(1.2)
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                Text("What changed")
+                    .font(.title3.weight(.semibold))
+                Text("Follow activity, compare the previous window, then open the evidence.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button {
+                Task { await model.refreshIntelligenceOverview(force: true) }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .disabled(model.isRefreshingIntelligenceOverview)
+            .accessibilityLabel("Refresh event picture")
+        }
+    }
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Time window", selection: $model.overviewHours) {
+                Text("24 hours").tag(24)
+                Text("3 days").tag(72)
+                Text("7 days").tag(168)
+            }
+            .pickerStyle(.segmented)
+            HStack {
+                Picker("Topic", selection: $model.overviewTopic) {
+                    Text("All topics").tag(Optional<String>.none)
+                    ForEach(IntelligenceOverviewScope.topics, id: \.key) { topic in
+                        Text(topic.label).tag(Optional(topic.key))
+                    }
+                }
+                .pickerStyle(.menu)
+                Spacer()
+                Picker("Location", selection: $model.selectedCountry) {
+                    Text("Worldwide").tag(Optional<String>.none)
+                    ForEach(countries, id: \.self) { country in
+                        Text(countryName(country)).tag(Optional(country))
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+            .font(.caption.weight(.semibold))
+        }
+    }
+
+    private func summary(_ overview: IntelligenceOverview) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(overview.summary.event_count)\(overview.coverage.truncated ? "+" : "")")
+                    .font(.system(.largeTitle, design: .rounded).weight(.semibold))
+                    .monospacedDigit()
+                Text("updated investigations").font(.subheadline)
+            }
+            Label(overview.coverage.comparison_available ? overview.summary.momentumLabel : "Sample capped · comparison unavailable",
+                  systemImage: overview.coverage.comparison_available ? overview.summary.momentumIcon : "info.circle")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+            HStack(spacing: 18) {
+                Label("\(overview.summary.high_priority_count) high priority", systemImage: "bolt")
+                Label("\(overview.summary.location_count) locations", systemImage: "mappin.and.ellipse")
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func activityChart(_ overview: IntelligenceOverview) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Activity through time").font(.caption.weight(.semibold))
+                Spacer()
+                Text("Recorded updates").font(.caption2).foregroundStyle(.secondary)
+            }
+            Chart(overview.buckets) { bucket in
+                if overview.coverage.comparison_available {
+                    BarMark(x: .value("Time", bucket.start), y: .value("Previous", bucket.previous_event_count))
+                        .foregroundStyle(.secondary.opacity(0.23))
+                        .position(by: .value("Window", "Previous"))
+                }
+                BarMark(x: .value("Time", bucket.start), y: .value("Current", bucket.event_count))
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                    .position(by: .value("Window", "Current"))
+            }
+            .chartLegend(.hidden)
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                    AxisGridLine()
+                    AxisValueLabel(format: overview.window.bucket_hours < 24 ? .dateTime.hour() : .dateTime.month().day())
+                }
+            }
+            .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) }
+            .frame(height: 130)
+            .accessibilityLabel(overview.coverage.comparison_available
+                ? "Investigation activity: \(overview.summary.event_count) in the selected window; \(overview.summary.previous_event_count) in the previous window."
+                : "At least \(overview.summary.event_count) sampled investigation updates. Comparison unavailable because the sample is capped.")
+            HStack(spacing: 12) {
+                Label("Selected window", systemImage: "square.fill")
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                if overview.coverage.comparison_available {
+                    Label("Previous window", systemImage: "square.fill").foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption2)
+        }
+    }
+
+    @ViewBuilder
+    private func topics(_ overview: IntelligenceOverview) -> some View {
+        if !overview.topics.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 8) {
+                    ForEach(overview.topics.prefix(7)) { topic in
+                        Button {
+                            model.overviewTopic = model.overviewTopic == topic.key ? nil : topic.key
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(topic.label).font(.caption.weight(.semibold))
+                                Text(overview.coverage.comparison_available
+                                     ? "\(topic.event_count) updates · \(topic.change > 0 ? "+" : "")\(topic.change) vs before"
+                                     : "\(topic.event_count)+ sampled updates")
+                                    .font(.caption2.monospacedDigit())
+                            }
+                            .padding(10)
+                            .frame(minHeight: 44, alignment: .leading)
+                            .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Filter \(topic.label), \(topic.event_count) updated investigations")
+                    }
+                }
+            }
+        }
+    }
+
+    private func timeline(_ overview: IntelligenceOverview) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Latest developments").font(.subheadline.weight(.semibold))
+            if overview.timeline.isEmpty {
+                Text("No investigation updates in this time and location. Try a wider window or another topic.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(Array(overview.timeline.prefix(showsMore ? 24 : 5))) { entry in
+                timelineRow(entry, overview: overview)
+            }
+            if overview.timeline.count > 5 {
+                Button(showsMore ? "Show fewer developments" : "Show more developments") { showsMore.toggle() }
+                    .font(.caption.weight(.semibold))
+                    .frame(minHeight: 44)
+            }
+        }
+    }
+
+    private func timelineRow(_ entry: IntelligenceOverview.TimelineEntry, overview: IntelligenceOverview) -> some View {
+        Button {
+            if let event = overview.events.first(where: { $0.id == entry.event_id }) {
+                model.selectIntelligenceEvent(event)
+            } else {
+                model.selectedIntelligenceEventID = entry.event_id
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(spacing: 4) {
+                    Circle().fill(ClaritasPalette.shellAccent(for: colorScheme)).frame(width: 8, height: 8)
+                    Rectangle().fill(.secondary.opacity(0.2)).frame(width: 1)
+                }
+                .frame(width: 10)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text("Updated \(entry.occurred_at.formatted(date: .abbreviated, time: .shortened))")
+                        Spacer()
+                        Text(entry.severity.capitalized)
+                    }
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    if overview.events.first(where: { $0.id == entry.event_id })?.isArchived == true {
+                        Label("Archived investigation", systemImage: "clock.arrow.circlepath")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    Text(entry.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(3)
+                    Text("\(entry.topic_label) · \(entry.location_name ?? entry.country_iso2.map(countryName) ?? "Location unresolved")")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let reason = entry.priority_reasons.first {
+                        Text(reason).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    HStack(spacing: 8) {
+                        if let source = entry.source_refs.first {
+                            Label(source.label, systemImage: "link").lineLimit(1)
+                        }
+                        if entry.imagery != nil { Label("Imagery", systemImage: "photo") }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.caption2).foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                }
+            }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open investigation: \(entry.title), \(entry.severity) reported severity")
+    }
+
+    private func refreshFailure(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(message).font(.caption).foregroundStyle(.secondary)
+            Button("Retry event picture") { Task { await model.refreshIntelligenceOverview(force: true) } }
+                .font(.caption.weight(.semibold)).frame(minHeight: 44)
+                .disabled(model.isRefreshingIntelligenceOverview)
+        }
+    }
+
+    private func countryName(_ code: String) -> String {
+        Locale.current.localizedString(forRegionCode: code) ?? code
     }
 }

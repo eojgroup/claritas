@@ -15,7 +15,18 @@ describe("fetchNews", () => {
     expect(url.searchParams.get("offset")).toBe("200");
     expect(url.searchParams.get("include_metadata")).toBe("false");
     expect(url.searchParams.has("signal")).toBe(false);
-    expect(fetchMock.mock.calls[0][1]).toEqual({ credentials: "include", signal: controller.signal });
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ credentials: "include", signal: expect.any(AbortSignal) });
+  });
+
+  it("cancels an obsolete news scope while retaining the read deadline", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => new Promise(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const result = fetchNews({ country: "SE" }, controller.signal);
+    const cancelled = expect(result).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await cancelled;
+    expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
   });
 
   it("requests server-ranked category results and preserves ranking evidence", async () => {

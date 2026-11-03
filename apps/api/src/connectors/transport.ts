@@ -6,6 +6,7 @@ import WebSocket from "ws";
 import { createConnection, type Socket } from "node:net";
 import { getCountryFromMMSI } from "mmsi-country-lookup";
 import { pool, query } from "../db";
+import { buildTransportRetentionBatchQuery } from "./transport-retention-query";
 import {
   prioritizeAdsbRouteLookups,
   type AdsbRouteLookup,
@@ -4334,35 +4335,7 @@ async function pruneTransportTableBatch(
     deleted: string | number;
     oldest_expired_at: string | Date | null;
   }>(
-    `WITH candidates AS MATERIALIZED (
-       SELECT ctid, ${target.timestampColumn} AS expired_at
-       FROM ${target.table}
-       WHERE ${target.timestampColumn} < now() - ($1 * interval '1 day')
-       ORDER BY ${target.timestampColumn}, ctid
-       LIMIT ($2 + 1)
-       FOR UPDATE SKIP LOCKED
-     ),
-     doomed AS (
-       SELECT ctid
-       FROM candidates
-       ORDER BY expired_at, ctid
-       LIMIT $2
-     ),
-     removed AS (
-       DELETE FROM ${target.table} target
-       USING doomed
-       WHERE target.ctid = doomed.ctid
-       RETURNING 1
-     )
-     SELECT
-       COUNT(*) AS deleted,
-       (
-         SELECT MIN(candidate.expired_at)
-         FROM candidates candidate
-         LEFT JOIN doomed USING (ctid)
-         WHERE doomed.ctid IS NULL
-       ) AS oldest_expired_at
-     FROM removed`,
+    buildTransportRetentionBatchQuery(target.table, target.timestampColumn),
     [target.retentionDays, batchSize],
   );
   const oldest = result.rows[0]?.oldest_expired_at;
@@ -4378,20 +4351,20 @@ async function pruneTransportHistory(): Promise<void> {
     startedAt +
     boundedIntegerFromEnv(
       "TRANSPORT_RETENTION_BUDGET_SECONDS",
-      30,
+      10,
       5,
       120,
     ) *
       1_000;
   const batchSize = boundedIntegerFromEnv(
     "TRANSPORT_RETENTION_BATCH_SIZE",
-    5_000,
+    2_000,
     500,
     20_000,
   );
   const maximumBatches = boundedIntegerFromEnv(
     "TRANSPORT_RETENTION_MAX_BATCHES",
-    10,
+    20,
     1,
     100,
   );
@@ -4576,8 +4549,8 @@ function startTransportRetentionWorker(): void {
   if (transportRetentionTimer) return;
   const minutes = boundedIntegerFromEnv(
     "TRANSPORT_RETENTION_INTERVAL_MINUTES",
-    180,
-    15,
+    5,
+    1,
     1_440,
   );
   void runTransportRetentionPass().catch((error) => {

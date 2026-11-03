@@ -4,8 +4,8 @@ metadata:
   name: claritas-api
   namespace: claritas
 spec:
-  # Cost baseline: one API replica on the single private static-egress node.
-  # Scale replicas and api_egress_node_locations together when HA is required.
+  # Reader process only; scheduled ingestion runs in claritas-worker with its
+  # own event loop and connection pool. Add a second egress node before HA scale.
   replicas: 1
   revisionHistoryLimit: 2
   progressDeadlineSeconds: 600
@@ -39,6 +39,8 @@ spec:
         - name: claritas-api
           image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api:latest
           env:
+            - name: CLARITAS_RUNTIME_ROLE
+              value: api
             - name: OPENWEATHER_API_KEY
               valueFrom: { secretKeyRef: { name: claritas-openweather, key: OPENWEATHER_API_KEY, optional: true } }
             - name: COPERNICUS_CLIENT_ID
@@ -410,7 +412,7 @@ spec:
             - name: DB_SLOW_QUERY_MS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: DB_SLOW_QUERY_MS, optional: true } }
             - name: CLARITAS_DB_APPLICATION_NAME
-              valueFrom: { configMapKeyRef: { name: claritas-config, key: CLARITAS_DB_APPLICATION_NAME, optional: true } }
+              value: claritas-reader
             - name: TRANSPORT_TRACK_SAMPLE_SECONDS
               valueFrom: { configMapKeyRef: { name: claritas-config, key: TRANSPORT_TRACK_SAMPLE_SECONDS, optional: true } }
             - name: TRANSPORT_OVERVIEW_CACHE_SECONDS
@@ -483,8 +485,8 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           resources:
-            requests: { cpu: "150m", memory: "256Mi" }
-            limits: { cpu: "750m", memory: "768Mi" }
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "384Mi" }
         - name: cloud-sql-proxy
           image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
           args:
@@ -499,7 +501,7 @@ spec:
                   name: claritas-config
                   key: INSTANCE_CONNECTION_NAME
           resources:
-            requests: { cpu: "50m", memory: "64Mi" }
+            requests: { cpu: "25m", memory: "32Mi" }
             limits:   { cpu: "200m", memory: "256Mi" }
           securityContext:
             runAsNonRoot: true

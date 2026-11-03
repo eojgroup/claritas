@@ -84,6 +84,20 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var selectedIntelligenceEvent: IntelligenceEvent?
+    @Published private(set) var intelligenceOverview: IntelligenceOverview?
+    @Published private(set) var intelligenceOverviewError: String?
+    @Published private(set) var isRefreshingIntelligenceOverview = false
+    @Published var overviewHours = 24
+    @Published var overviewTopic: String? = nil
+    private var overviewRequestID = UUID()
+    private var overviewLoadedScope: IntelligenceOverviewScope?
+    private var overviewPendingScope: IntelligenceOverviewScope?
+    private var overviewLoadedAt: Date?
+
+    var overviewScope: IntelligenceOverviewScope {
+        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic)
+    }
+
     @Published var dailyBriefing: DailySignalBriefing? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
     @Published var news: [NewsItem] = []
@@ -609,6 +623,39 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func refreshIntelligenceOverview(force: Bool = false) async {
+        guard authStatus == .authed, hasPaidAccess else { return }
+        let scope = overviewScope
+        if overviewPendingScope == scope { return }
+        if !force, intelligenceOverview != nil, overviewLoadedScope == scope, let loadedAt = overviewLoadedAt,
+           Date().timeIntervalSince(loadedAt) < 60 { return }
+        let requestID = UUID()
+        let generation = dataGeneration
+        overviewRequestID = requestID
+        overviewPendingScope = scope
+        if overviewLoadedScope != scope { intelligenceOverview = nil }
+        isRefreshingIntelligenceOverview = true
+        intelligenceOverviewError = nil
+        defer {
+            if overviewRequestID == requestID {
+                overviewPendingScope = nil
+                isRefreshingIntelligenceOverview = false
+            }
+        }
+        do {
+            let overview = try await api.fetchIntelligenceOverview(scope: scope)
+            guard !Task.isCancelled, dataGeneration == generation, overviewRequestID == requestID,
+                  overviewScope == scope else { return }
+            intelligenceOverview = overview
+            overviewLoadedScope = scope
+            overviewLoadedAt = Date()
+        } catch {
+            guard !Task.isCancelled, dataGeneration == generation, overviewRequestID == requestID,
+                  overviewScope == scope else { return }
+            intelligenceOverviewError = error.localizedDescription
+        }
+    }
+
     private func loadInitialValue<Value>(
         generation: UUID,
         fetch: @MainActor () async throws -> Value,
@@ -653,6 +700,15 @@ final class AppModel: ObservableObject {
         transportRefreshTask?.cancel()
         transportRefreshTask = nil
         transportRequestID = UUID()
+        intelligenceOverview = nil
+        intelligenceOverviewError = nil
+        overviewRequestID = UUID()
+        overviewLoadedScope = nil
+        overviewPendingScope = nil
+        overviewLoadedAt = nil
+        isRefreshingIntelligenceOverview = false
+        overviewHours = 24
+        overviewTopic = nil
         dailyBriefing = nil
         dailyBriefingSchedule = nil
         dailyBriefingScheduleError = nil

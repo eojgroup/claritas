@@ -7,9 +7,11 @@ import appleIcon from "../assets/provider-icons/apple.svg";
 
 type LoginPageProps = {
   providers: AuthProvider[];
+  providersLoading?: boolean;
   status: "checking" | "unauthed";
   error?: string | null;
   onSignIn: (provider: AuthProviderId) => void;
+  onRetry?: () => void;
 };
 
 type ProviderMeta = {
@@ -85,14 +87,14 @@ function ProviderButton({
   );
 }
 
-export default function LoginPage({ providers, status, error, onSignIn }: LoginPageProps) {
+export default function LoginPage({ providers, providersLoading = false, status, error, onSignIn, onRetry }: LoginPageProps) {
   const enabledProviders = useMemo(() => {
     const enabled = new Set(
       providers.filter((provider) => provider.enabled).map((provider) => provider.id),
     );
     return providerMeta.filter((provider) => enabled.has(provider.id));
   }, [providers]);
-  const isChecking = status === "checking";
+  const isChecking = status === "checking" || (providersLoading && !enabledProviders.length);
 
   return (
     <main className="min-h-[100dvh] bg-[#071725] p-3 text-white sm:p-5 lg:p-7">
@@ -176,13 +178,14 @@ export default function LoginPage({ providers, status, error, onSignIn }: LoginP
             {error ? (
               <div role="alert" className="mt-6 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-5 text-rose-800">
                 {error}
+                {onRetry && <button type="button" className="mt-3 block min-h-11 rounded-lg border border-current px-3 font-semibold" onClick={onRetry} disabled={isChecking}>Retry connection</button>}
               </div>
             ) : null}
 
             <div className="mt-7 space-y-3">
               {isChecking ? (
                 <div className="rounded-xl border border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">
-                  Verifying secure sign-in options…
+                  Connecting to your workspace…
                 </div>
               ) : enabledProviders.length > 0 ? (
                 enabledProviders.map((provider) => (

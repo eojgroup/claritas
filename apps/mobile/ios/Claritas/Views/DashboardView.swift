@@ -29,7 +29,7 @@ struct DashboardView: View {
                         onExpand: { showsExpandedMap = true }
                     )
 
-                    IntelligenceEventPulseView(presentation: .horizontal)
+                    IntelligenceOverviewPanel()
 
                     BriefingOverviewCard(briefing: model.dailyBriefing) {
                         openCompactDestination("briefing")
@@ -4374,9 +4374,9 @@ struct SignalMapPanel: View {
     @State private var comparisonCountry: String?
     @State private var pinnedCountry: String?
     @State private var resetToken = 0
-    @State private var events: [IntelligenceEvent] = []
-    @State private var eventLoadError: String?
-    @State private var eventLoading = false
+    private var events: [IntelligenceEvent] { model.intelligenceOverview?.events ?? [] }
+    private var eventLoadError: String? { model.intelligenceOverviewError }
+    private var eventLoading: Bool { model.isRefreshingIntelligenceOverview }
     @State private var profileCountry: String?
     @State private var showsCountryProfileSheet = false
 
@@ -4388,9 +4388,10 @@ struct SignalMapPanel: View {
     private var compactLayout: Bool { horizontalSizeClass == .compact }
 
     private var contextEvents: [IntelligenceEvent] {
+        let current = events.filter { !$0.isArchived }
         guard let selected = model.selectedIntelligenceEvent,
-              selected.id == model.selectedIntelligenceEventID else { return events }
-        return [selected] + events.filter { $0.id != selected.id }
+              selected.id == model.selectedIntelligenceEventID else { return current }
+        return [selected] + current.filter { $0.id != selected.id }
     }
 
     private var points: [CountryBubblePoint] {
@@ -4595,7 +4596,7 @@ struct SignalMapPanel: View {
             storedMode = resolved.rawValue
         }
         .task {
-            await loadEvents()
+            await model.refreshIntelligenceOverview()
         }
         .onChange(of: model.selectedIntelligenceEvent) { event in
             guard let event else { return }
@@ -4976,18 +4977,7 @@ struct SignalMapPanel: View {
 
     @MainActor
     private func loadEvents() async {
-        guard !eventLoading else { return }
-        eventLoading = true
-        defer { eventLoading = false }
-        do {
-            let loaded = try await model.api.fetchIntelligenceEvents(limit: 100, country: nil)
-            guard !Task.isCancelled else { return }
-            events = loaded
-            eventLoadError = nil
-        } catch {
-            guard !Task.isCancelled else { return }
-            eventLoadError = error.localizedDescription
-        }
+        await model.refreshIntelligenceOverview(force: true)
     }
 }
 
@@ -5112,7 +5102,7 @@ private enum SignalMapDataBuilder {
         }
         let marketByCountry = Dictionary(uniqueKeysWithValues: countryMarkets.map { ($0.country.uppercased(), $0) })
         var eventsByCountry: [String: (count: Int, relevance: Double)] = [:]
-        for event in events where event.status.lowercased() != "dismissed" {
+        for event in events where !event.isArchived {
             guard let iso = event.primary_country_iso2?.uppercased(), iso.count == 2 else { continue }
             let current = eventsByCountry[iso] ?? (0, 0)
             eventsByCountry[iso] = (current.count + 1, max(current.relevance, event.relevance_score))
@@ -5476,7 +5466,7 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
             let eventSignature = visibleEvents.map { event in
                 let latitude = event.latitude.map { String($0) } ?? "missing"
                 let longitude = event.longitude.map { String($0) } ?? "missing"
-                return "\(event.id):\(latitude):\(longitude):\(event.severity.rawValue):\(event.earth_observation_available)"
+                return "\(event.id):\(latitude):\(longitude):\(event.severity.rawValue):\(event.earth_observation_available):\(event.isArchived)"
             }.joined(separator: ",")
             let transportLimit = next.compactPresentation ? 200 : 320
             let transportSignature = next.transportEntities.prefix(transportLimit).map { entity in
@@ -5642,7 +5632,7 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
                     : event.event.severity == .medium ? .defaultHigh : .defaultLow
                 view.collisionMode = .circle
                 view.canShowCallout = false
-                view.accessibilityLabel = "\(event.event.severity.rawValue) event, \(event.event.title)"
+                view.accessibilityLabel = "\(event.event.isArchived ? "Archived investigation" : "\(event.event.severity.rawValue) event"), \(event.event.title)"
                 return view
             }
 
@@ -5753,7 +5743,7 @@ private struct MapKitSignalDensityView: UIViewRepresentable {
                     width: dotDiameter,
                     height: dotDiameter
                 )
-                context.setFillColor(eventColor(event.severity).cgColor)
+                context.setFillColor((event.isArchived ? UIColor.systemGray : eventColor(event.severity)).cgColor)
                 context.fillEllipse(in: dotRect)
                 context.setStrokeColor(UIColor.white.withAlphaComponent(0.9).cgColor)
                 context.setLineWidth(1)
@@ -6039,11 +6029,15 @@ private struct InteractiveCountryBubbleMap: View {
 
     private func eventView(for event: IntelligenceEvent) -> some View {
         let color: Color
-        switch event.severity {
-        case .critical: color = Color(hex: "#C77A72")
-        case .high: color = Color(hex: "#D3C3A5")
-        case .medium: color = Color(hex: "#91ADBA")
-        case .low: color = Color(hex: "#718794")
+        if event.isArchived {
+            color = .gray
+        } else {
+            switch event.severity {
+            case .critical: color = Color(hex: "#C77A72")
+            case .high: color = Color(hex: "#D3C3A5")
+            case .medium: color = Color(hex: "#91ADBA")
+            case .low: color = Color(hex: "#718794")
+            }
         }
         let size: CGFloat = event.severity == .critical ? 18 : event.severity == .high ? 16 : 14
         return Button(action: { onSelectEvent(event) }) {
@@ -6068,7 +6062,7 @@ private struct InteractiveCountryBubbleMap: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(event.severity.rawValue) event, \(event.title), \(event.location_name ?? event.primary_country_iso2 ?? "mapped location")")
+        .accessibilityLabel("\(event.isArchived ? "Archived investigation" : "\(event.severity.rawValue) event"), \(event.title), \(event.location_name ?? event.primary_country_iso2 ?? "mapped location")")
         .accessibilityHint("Open the evidence thread")
     }
 

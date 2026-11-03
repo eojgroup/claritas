@@ -442,6 +442,12 @@ private struct WatchSignalGlanceView: View {
                         selectedCountry: $selectedCountry
                     )
                     .frame(height: 118)
+                    .onChange(of: selectedCountry) { country in
+                        guard country != model.selectedCountry else { return }
+                        Task { await model.selectCountry(country ?? "GLOBAL") }
+                    }
+                    .onChange(of: model.selectedCountry) { selectedCountry = $0 }
+                    .onAppear { selectedCountry = model.selectedCountry }
 
                     if let selected = points.first(where: { $0.iso == selectedCountry }) ?? points.first {
                         WatchCard {
@@ -472,7 +478,7 @@ private struct WatchSignalGlanceView: View {
                         }
                     }
 
-                    WatchEventContextView(country: selectedCountry, region: region)
+                    WatchOverviewPulseCard()
 
                     WatchCard {
                         VStack(alignment: .leading, spacing: 5) {
@@ -1824,5 +1830,126 @@ private struct WatchLeadershipView: View {
 
     private func freshness(_ date: Date?) -> String {
         date?.formatted(date: .abbreviated, time: .omitted) ?? "not provided"
+    }
+}
+
+
+private struct WatchOverviewPulseCard: View {
+    @EnvironmentObject private var model: WatchAppModel
+
+    var body: some View {
+        WatchCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    WatchSectionLabel(title: "What changed", icon: "chart.bar.xaxis")
+                    Spacer()
+                    NavigationLink { WatchOverviewFilters() } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .accessibilityLabel("Filter event picture")
+                }
+                Text("\(model.selectedCountry ?? "Worldwide") · \(model.overviewScope.windowLabel)")
+                    .font(.caption2).foregroundStyle(.secondary)
+                if let overview = model.intelligenceOverview {
+                    Text("\(overview.summary.event_count)\(overview.coverage.truncated ? "+" : "") updated investigations")
+                        .font(.caption.weight(.semibold)).monospacedDigit()
+                    Text(overview.coverage.comparison_available ? overview.summary.momentumLabel : "Sample capped · comparison unavailable")
+                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                    sparkline(overview)
+                    Text("\(overview.summary.high_priority_count) high priority · \(overview.summary.location_count) locations")
+                        .font(.system(size: 9)).foregroundStyle(WatchPalette.orange)
+                    ForEach(overview.timeline.prefix(2)) { entry in
+                        Divider()
+                        Button {
+                            model.openOnPhone("intelligence", country: entry.country_iso2, eventID: entry.event_id)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Updated \(entry.occurred_at.formatted(date: .omitted, time: .shortened)) · \(entry.severity.capitalized)")
+                                    .font(.system(size: 8)).foregroundStyle(.secondary)
+                                if overview.events.first(where: { $0.id == entry.event_id })?.isArchived == true {
+                                    Label("Archived investigation", systemImage: "clock.arrow.circlepath")
+                                        .font(.system(size: 8)).foregroundStyle(.secondary)
+                                }
+                                Text(entry.title).font(.caption.weight(.semibold)).lineLimit(3)
+                                Text(entry.location_name ?? entry.country_iso2 ?? "Location unresolved")
+                                    .font(.system(size: 9)).foregroundStyle(.secondary)
+                                Label("Evidence on iPhone", systemImage: "iphone").font(.system(size: 9))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if overview.timeline.isEmpty {
+                        Text("No updates in this scope. Try a wider window.").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    NavigationLink("How it’s measured") {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(overview.coverage.notice)
+                                Text(overview.coverage.comparison_notice)
+                                Text(overview.coverage.priority_notice)
+                            }
+                            .font(.caption2).padding()
+                        }
+                    }
+                    .font(.system(size: 9))
+                } else if let error = model.overviewError {
+                    Text(error).font(.caption2).foregroundStyle(.secondary)
+                    Button("Retry event picture") { Task { await model.refreshOverview() } }
+                        .font(.caption2)
+                } else {
+                    ProgressView("Loading event picture").font(.caption2)
+                }
+            }
+        }
+    }
+
+    private func sparkline(_ overview: IntelligenceOverview) -> some View {
+        let maximum = max(overview.buckets.map(\.event_count).max() ?? 0, 1)
+        return HStack(alignment: .bottom, spacing: 2) {
+            ForEach(overview.buckets) { bucket in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(WatchPalette.orange.opacity(bucket.event_count == 0 ? 0.12 : 0.85))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: max(2, 28 * CGFloat(bucket.event_count) / CGFloat(maximum)))
+            }
+        }
+        .frame(height: 28, alignment: .bottom)
+        .accessibilityLabel("Updated investigations across the selected time window")
+    }
+}
+
+private struct WatchOverviewFilters: View {
+    @EnvironmentObject private var model: WatchAppModel
+    private var countries: [String] {
+        Array(Set((model.intelligenceOverview?.locations.compactMap(\.country_iso2) ?? [])
+            + (model.selectedCountry.map { [$0] } ?? []))).sorted()
+    }
+    var body: some View {
+        Form {
+            Picker("Time window", selection: $model.overviewHours) {
+                Text("24 hours").tag(24)
+                Text("3 days").tag(72)
+                Text("7 days").tag(168)
+            }
+            Picker("Topic", selection: $model.overviewTopic) {
+                Text("All topics").tag(Optional<String>.none)
+                ForEach(IntelligenceOverviewScope.topics, id: \.key) { topic in
+                    Text(topic.label).tag(Optional(topic.key))
+                }
+            }
+            Picker("Location", selection: Binding(
+                get: { model.selectedCountry },
+                set: { country in Task { await model.selectCountry(country ?? "GLOBAL") } }
+            )) {
+                Text("Worldwide").tag(Optional<String>.none)
+                ForEach(countries, id: \.self) { country in
+                    Text(Locale.current.localizedString(forRegionCode: country) ?? country).tag(Optional(country))
+                }
+            }
+        }
+        .navigationTitle("Event picture")
+        .onChange(of: model.overviewHours) { _ in Task { await model.refreshOverview() } }
+        .onChange(of: model.overviewTopic) { _ in Task { await model.refreshOverview() } }
     }
 }

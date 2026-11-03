@@ -16,6 +16,10 @@ function clean(value: string | null | undefined) {
   return value?.replace(/\s+/g, " ").trim() ?? "";
 }
 
+export function isHistoricalEvent(event: Pick<IntelligenceEvent, "status" | "freshness_state">) {
+  return event.status === "resolved" || event.status === "dismissed" || event.freshness_state === "expired";
+}
+
 const GENERIC_LOCATIONS = new Set([
   "global",
   "international",

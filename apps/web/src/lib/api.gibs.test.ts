@@ -11,7 +11,7 @@ describe("fetchEventGibsContext", () => {
     await expect(fetchEventGibsContext("event/with spaces")).resolves.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/earth-observation/events/event%2Fwith%20spaces/gibs",
-      { credentials: "include" },
+      { credentials: "include", signal: expect.any(AbortSignal) },
     );
   });
 

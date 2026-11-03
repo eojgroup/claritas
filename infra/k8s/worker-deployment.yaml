@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claritas-worker
+  namespace: claritas
+spec:
+  replicas: 1
+  revisionHistoryLimit: 2
+  progressDeadlineSeconds: 600
+  # Finish replacing a worker before starting another to keep the small
+  # egress node's resource budget bounded. Durable jobs survive interruption.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: claritas-worker }
+  template:
+    metadata:
+      labels: { app: claritas-worker }
+    spec:
+      serviceAccountName: api-sa
+      nodeSelector:
+        claritas-egress: static
+      tolerations:
+        - key: dedicated
+          operator: Equal
+          value: claritas-api
+          effect: NoSchedule
+      containers:
+        - name: claritas-worker
+          image: europe-west2-docker.pkg.dev/claritas-457808/claritas-app/claritas-api:latest
+          # Same reviewed source configuration and credentials as the API.
+          # This label is excluded from the public API Service's selector.
+          envFrom:
+            - configMapRef: { name: claritas-config }
+            - configMapRef: { name: claritas-smtp, optional: true }
+            - secretRef: { name: claritas-db }
+            - secretRef: { name: claritas-auth, optional: true }
+            - secretRef: { name: claritas-openweather, optional: true }
+            - secretRef: { name: claritas-opencode, optional: true }
+            - secretRef: { name: claritas-earth-observation, optional: true }
+            - secretRef: { name: claritas-apns, optional: true }
+            - secretRef: { name: claritas-fred, optional: true }
+            - secretRef: { name: claritas-podcastindex, optional: true }
+            - secretRef: { name: claritas-aisstream, optional: true }
+            - secretRef: { name: claritas-barentswatch-ais, optional: true }
+            - secretRef: { name: claritas-mpa-oceans-x, optional: true }
+            - secretRef: { name: claritas-x-social, optional: true }
+            - secretRef: { name: claritas-reddit, optional: true }
+            - secretRef: { name: claritas-youtube, optional: true }
+            - secretRef: { name: claritas-smtp, optional: true }
+          env:
+            - name: CLARITAS_RUNTIME_ROLE
+              value: worker
+            - name: CLARITAS_DB_APPLICATION_NAME
+              value: claritas-worker
+            - name: DB_HOST
+              value: "127.0.0.1"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_POOL_MAX
+              value: "5"
+          ports: [{ name: http, containerPort: 8080 }]
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 4
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { cpu: "750m", memory: "768Mi" }
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.18.2
+          args: ["--structured-logs", "--private-ip", "--port=5432", "$(INSTANCE_CONNECTION_NAME)"]
+          env:
+            - name: INSTANCE_CONNECTION_NAME
+              valueFrom: { configMapKeyRef: { name: claritas-config, key: INSTANCE_CONNECTION_NAME } }
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits: { cpu: "200m", memory: "256Mi" }
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false

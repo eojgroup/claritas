@@ -172,7 +172,7 @@ enum WatchWidgetSnapshotStore {
         let weatherAlertCount = scopedWeather.filter(isWeatherAlert).count
         let marketBreachCount = scopedMarkets.filter { abs($0.percent_change ?? 0) >= 2 }.count
         let priorityEventCount = scopedEvents.filter {
-            $0.severity == .critical || $0.severity == .high
+            !$0.isArchived && ($0.severity == .critical || $0.severity == .high)
         }.count
         let transportAlertCount: Int
         if let country {
