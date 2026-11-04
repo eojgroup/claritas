@@ -88,7 +88,7 @@ test("GKE release gates provider liveness without gating instantaneous Singapore
 
 test("identity deploys use an immutable image and preserve omitted live auth keys", () => {
   assert.match(workflow, /keycloak_image: \$\{\{ steps\.resolve_keycloak_image\.outputs\.image \}\}/);
-  assert.match(workflow, /docker buildx imagetools inspect "\$ref"/);
+  assert.match(workflow, /bash infra\/scripts\/resolve-image-digest\.sh "\$ref"/);
   assert.match(workflow, /image="\$\{IMAGE_URI_KEYCLOAK\}@\$\{digest\}"/);
   assert.match(workflow, /KEYCLOAK_IMAGE: \$\{\{ needs\.build\.outputs\.keycloak_image \}\}/);
   assert.match(

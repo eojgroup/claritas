@@ -15,6 +15,7 @@ on:
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
       - 'infra/scripts/wait-for-api-readiness.cjs'
+      - 'infra/scripts/resolve-image-digest.sh'
       - 'infra/scripts/reconcile-cloud-sql-password.sh'
       - '.github/workflows/gke-deploy.yml'
   pull_request:
@@ -30,6 +31,7 @@ on:
       - 'infra/scripts/check-flyway-migrations.py'
       - 'infra/scripts/wait-for-k8s-job.sh'
       - 'infra/scripts/wait-for-api-readiness.cjs'
+      - 'infra/scripts/resolve-image-digest.sh'
       - 'infra/scripts/reconcile-cloud-sql-password.sh'
   workflow_dispatch:
 
@@ -126,6 +128,7 @@ jobs:
         run: |
           bash -n infra/scripts/wait-for-k8s-job.sh
           bash -n infra/scripts/reconcile-cloud-sql-password.sh
+          bash -n infra/scripts/resolve-image-digest.sh
 
   build:
     name: Build Docker Image and Push to Artifact Registry
@@ -257,21 +260,7 @@ jobs:
         run: |
           set -euo pipefail
           ref="${IMAGE_URI_KEYCLOAK}:${GITHUB_SHA}"
-          digest=""
-          for attempt in 1 2 3; do
-            digest="$(docker buildx imagetools inspect "$ref" 2>/dev/null | awk '$1 == "Digest:" { print $2; exit }')"
-            if [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-              break
-            fi
-            digest=""
-            if [ "$attempt" -lt 3 ]; then
-              sleep $((attempt * 5))
-            fi
-          done
-          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-            echo "Failed to resolve an immutable digest for ${ref}." >&2
-            exit 1
-          fi
+          digest="$(bash infra/scripts/resolve-image-digest.sh "$ref")"
           image="${IMAGE_URI_KEYCLOAK}@${digest}"
           echo "image=${image}" >> "$GITHUB_OUTPUT"
           echo "Resolved Keycloak image ${image}."
@@ -1178,7 +1167,6 @@ jobs:
           # These manifests reference :latest, which already points at this
           # commit. Applying them before Flyway could start new API code against
           # an old schema, so application rollout is deliberately post-migrate.
-          kubectl apply -f ./infra/k8s/web-deployment.yaml
           kubectl apply -f ./infra/k8s/api-deployment.yaml
           # On the first split, the old combined API has a larger memory
           # reservation. Finish replacing it before creating the worker; the
@@ -1186,6 +1174,8 @@ jobs:
           kubectl -n "${NAMESPACE}" rollout status deployment/claritas-api --timeout=600s
           kubectl set image -f ./infra/k8s/worker-deployment.yaml \
             claritas-worker="${IMAGE_URI_API}:${{ github.sha }}" --local -o yaml | kubectl apply -f -
+          # Publish the new client only after its overview route is available.
+          kubectl apply -f ./infra/k8s/web-deployment.yaml
           kubectl apply -f ./infra/k8s/opencode-deployment.yaml
 
       - name: 📤 Set image and rollout (with diagnostics)
