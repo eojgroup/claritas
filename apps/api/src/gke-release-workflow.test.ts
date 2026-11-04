@@ -67,10 +67,14 @@ test("GKE release gates provider liveness without gating instantaneous Singapore
     workflow.indexOf("# Query every pod over its loopback interface"),
     workflow.indexOf("# Report the Singapore regression"),
   );
-  const singaporeDiagnostic = workflow.slice(
-    workflow.indexOf("# Report the Singapore regression"),
-    workflow.indexOf("kubectl -n \"${NAMESPACE}\" logs deployment/claritas-api", workflow.indexOf("# Report the Singapore regression")),
-  );
+  const singaporeStart = workflow.indexOf("# Report the Singapore regression");
+  const singaporeEnd = workflow.indexOf("\n      - name:", singaporeStart);
+  assert.ok(singaporeStart >= 0 && singaporeEnd > singaporeStart,
+    "Singapore diagnostics must be bounded by their containing workflow step");
+  // The diagnostic is now executed on the ingestion worker. A container name
+  // is not a reliable boundary: a missing match used to include every later
+  // release gate and incorrectly reject its required `exit 1` statements.
+  const singaporeDiagnostic = workflow.slice(singaporeStart, singaporeEnd);
 
   assert.match(transportGate, /No transport leader reported a current AISstream primary or an explicit current regional fallback/);
   assert.match(transportGate, /exit 1/);

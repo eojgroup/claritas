@@ -1,24 +1,30 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import test from "node:test";
 import { fetchWithTimeout } from "./llm";
 
 test("LLM deadline includes a stalled response body after successful headers", async () => {
-  let headersSent = false;
-  const server = createServer((_request, response) => {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.write('{"partial":');
-    headersSent = true;
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const originalFetch = globalThis.fetch;
+  let bodyReadStarted = false;
+  // Deliver headers immediately. A real loopback server can fail to accept
+  // the connection before the deadline on a busy host, testing the connection
+  // timeout instead of the stalled-body regression this case must cover.
+  globalThis.fetch = async (_url, init) => {
+    const response = new Response(null, { headers: { "content-type": "application/json" } });
+    response.text = () => {
+      bodyReadStarted = true;
+      return new Promise((_resolve, reject) => {
+        const abort = () => reject(new DOMException("The operation was aborted", "AbortError"));
+        if (init?.signal?.aborted) abort();
+        else init?.signal?.addEventListener("abort", abort, { once: true });
+      });
+    };
+    return response;
+  };
   try {
-    const address = server.address();
-    assert.ok(address && typeof address !== "string");
-    await assert.rejects(fetchWithTimeout(`http://127.0.0.1:${address.port}`, {}, 150), /abort/i);
-    assert.equal(headersSent, true);
+    await assert.rejects(fetchWithTimeout("https://provider.example/response", {}, 25), /abort/i);
+    assert.equal(bodyReadStarted, true);
   } finally {
-    server.closeAllConnections();
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    globalThis.fetch = originalFetch;
   }
 });
 

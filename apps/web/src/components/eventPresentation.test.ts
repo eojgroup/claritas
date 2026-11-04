@@ -24,13 +24,13 @@ const baseEvent: IntelligenceEvent = {
   earth_observation_available: false,
 };
 
-it.each([
-  { status: "resolved", freshness_state: "current" as const },
-  { status: "dismissed", freshness_state: "current" as const },
-  { status: "active", freshness_state: "expired" as const },
+it.each<Pick<IntelligenceEvent, "status" | "freshness_state">>([
+  { status: "resolved", freshness_state: "active" },
+  { status: "dismissed", freshness_state: "active" },
+  { status: "active", freshness_state: "expired" },
 ])("keeps historical investigations out of current map relevance: %j", (event) => {
   expect(isHistoricalEvent({ ...baseEvent, ...event })).toBe(true);
-  expect(isHistoricalEvent({ ...baseEvent, status: "active", freshness_state: "current" })).toBe(false);
+  expect(isHistoricalEvent({ ...baseEvent, status: "active", freshness_state: "active" })).toBe(false);
 });
 
 describe("presentEvent", () => {

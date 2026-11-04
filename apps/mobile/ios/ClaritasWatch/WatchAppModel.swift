@@ -541,7 +541,11 @@ final class WatchAppModel: ObservableObject {
 
     /// Publish each useful glance as it arrives instead of waiting for the
     /// slowest optional resource in the ten-request refresh batch.
-    private func progressiveResult<Value>(requestID: UUID, fetch: () async throws -> Value, apply: (Value) -> Void) async -> Result<Value, Error> {
+    private func progressiveResult<Value>(
+        requestID: UUID,
+        fetch: @MainActor () async throws -> Value,
+        apply: @MainActor (Value) -> Void
+    ) async -> Result<Value, Error> {
         let response = await result(fetch)
         if refreshRequestID == requestID, !Task.isCancelled, case .success(let value) = response { apply(value) }
         return response
@@ -579,7 +583,7 @@ final class WatchAppModel: ObservableObject {
         }
     }
 
-    private func result<T>(_ operation: () async throws -> T) async -> Result<T, Error> {
+    private func result<T>(_ operation: @MainActor () async throws -> T) async -> Result<T, Error> {
         do { return .success(try await operation()) }
         catch { return .failure(error) }
     }
