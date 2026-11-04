@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { query, withWorkerLease } from "./db";
+import { intelligenceEventExpiresAtSql } from "./intelligence/freshness";
 import {
   createFreeOpenRouterLlmClientFromEnv,
   isFreeOpenRouterModel,
@@ -105,6 +106,7 @@ type TranslationProcessResult = {
   errors: string[];
   attemptedIds: number[];
   providerStatus: number | null;
+  providerFailure: string | null;
 };
 
 type TranslationStoreResult = {
@@ -204,21 +206,23 @@ async function refreshFreeProviderQuota(): Promise<ProviderQuota> {
   return request;
 }
 
-export async function getNewsTranslationAvailability(targetLanguage = "en"): Promise<NewsTranslationAvailability> {
+const SHARED_QUOTA_RECHECK_MS = 5 * 60_000;
+
+async function getNewsTranslationSchedulingState(targetLanguage = "en"): Promise<NewsTranslationAvailability & { local_budget_reached: boolean }> {
   const target = normalizeNewsLanguageCode(targetLanguage);
   if (!target) throw new Error("target_language must be a valid BCP 47 language code.");
   const runtime = getNewsTranslationRuntimeConfig();
-  if (!runtime.enabled) return { status: "disabled", reason: "Translations are disabled. Original publisher text remains available.", retry_after: null };
-  if (!runtime.available) return { status: "unavailable", reason: "Free translation is temporarily unavailable. Original publisher text remains available.", retry_after: null };
+  if (!runtime.enabled) return { status: "disabled", reason: "Translations are disabled. Original publisher text remains available.", retry_after: null, local_budget_reached: false };
+  if (!runtime.available) return { status: "unavailable", reason: "Free translation is temporarily unavailable. Original publisher text remains available.", retry_after: null, local_budget_reached: false };
   const { rows } = await query<{
     request_count: number; automatic_request_count: number; input_characters: number; token_units_reserved: number;
-    next_attempt_at: string | Date | null; last_status: string | null;
+    next_attempt_at: string | Date | null; last_status: string | null; dispatch_updated_at: string | Date | null;
   }>(
     `SELECT COALESCE(usage.request_count,0)::int AS request_count,
             COALESCE(usage.automatic_request_count,0)::int AS automatic_request_count,
             COALESCE(usage.input_characters,0)::bigint AS input_characters,
             COALESCE(usage.token_units_reserved,0)::bigint AS token_units_reserved,
-            dispatch.next_attempt_at,dispatch.last_status
+            dispatch.next_attempt_at,dispatch.last_status,dispatch.updated_at AS dispatch_updated_at
      FROM (SELECT 1) anchor
      LEFT JOIN news_translation_usage usage ON usage.usage_date=(now() AT TIME ZONE 'UTC')::date
      LEFT JOIN news_translation_dispatch dispatch ON dispatch.target_language_code=$1`, [target],
@@ -230,18 +234,36 @@ export async function getNewsTranslationAvailability(targetLanguage = "en"): Pro
     || Number(row?.token_units_reserved ?? 0) >= runtime.daily_token_unit_limit;
   const onDemandReserve = Math.max(0, runtime.daily_request_limit - runtime.automatic_daily_request_limit);
   const currentQuota = currentFreeProviderQuota();
-  if (budgetReached || (currentQuota?.available && currentQuota.remaining != null && currentQuota.remaining <= onDemandReserve)) {
-    return { status: "quota_limited", reason: "Automatic translation has reached the free daily allowance. Original publisher text remains available.", retry_after: nextUtcDay().toISOString() };
+  if (budgetReached) {
+    return { status: "quota_limited", reason: "Automatic translation has reached its daily processing budget. Original publisher text remains available.", retry_after: nextUtcDay().toISOString(), local_budget_reached: true };
   }
-  const retryAfter = toIso(row?.next_attempt_at ?? null);
-  if (retryAfter && Date.parse(retryAfter) > Date.now()) {
+  if (currentQuota?.available && currentQuota.remaining != null && currentQuota.remaining <= onDemandReserve) {
+    return { status: "quota_limited", reason: "The shared free provider allowance is reserved or exhausted. Original publisher text remains available.", retry_after: new Date(currentQuota.expiresAt).toISOString(), local_budget_reached: false };
+  }
+  let retryAfter = toIso(row?.next_attempt_at ?? null);
+  if (row?.last_status === "quota_limited" && retryAfter) {
+    // Shared capacity can recover within the day. Upgrade legacy midnight
+    // pauses to a five-minute metadata recheck, without changing local budgets
+    // or sending a completion while the provider allowance is exhausted.
+    const checkedAt = toIso(row.dispatch_updated_at);
+    const recheckAt = checkedAt ? Date.parse(checkedAt) + SHARED_QUOTA_RECHECK_MS : Date.now();
+    retryAfter = new Date(Math.min(Date.parse(retryAfter), recheckAt)).toISOString();
+  }
+  if (retryAfter && (Date.parse(retryAfter) > Date.now() || row?.last_status === "quota_limited")) {
     const status = row?.last_status === "quota_limited" ? "quota_limited"
       : row?.last_status === "unavailable" ? "unavailable" : "pending";
     return { status, reason: status === "pending"
       ? "Translation is queued within the free allowance. Original publisher text remains available."
-      : "Free translation is temporarily unavailable. Original publisher text remains available.", retry_after: retryAfter };
+      : status === "quota_limited"
+        ? "The shared free provider allowance is reserved or exhausted. Original publisher text remains available."
+        : "Free translation is temporarily unavailable. Original publisher text remains available.", retry_after: retryAfter, local_budget_reached: false };
   }
-  return { status: "available", reason: "Free translation is available; untranslated stories are queued automatically.", retry_after: null };
+  return { status: "available", reason: "Free translation is available; untranslated stories are queued automatically.", retry_after: null, local_budget_reached: false };
+}
+
+export async function getNewsTranslationAvailability(targetLanguage = "en"): Promise<NewsTranslationAvailability> {
+  const { local_budget_reached: _localBudgetReached, ...availability } = await getNewsTranslationSchedulingState(targetLanguage);
+  return availability;
 }
 
 function boolFromEnv(name: string, fallback: boolean): boolean {
@@ -380,7 +402,7 @@ export function newsTranslationQualityIssue(candidate: NewsTranslationCandidate,
   const target = targetLanguage.split("-")[0];
   if (["en", "fr", "es", "de", "it", "pt", "nl", "sv", "da", "no", "fi", "pl", "tr"].includes(target)) {
     const latin = translatedTitle.match(/\p{Script=Latin}/gu)?.length ?? 0;
-    const other = translatedTitle.match(/[\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/gu)?.length ?? 0;
+    const other = (translatedTitle.match(/\p{Letter}/gu)?.length ?? 0) - latin;
     if (other >= 4 && latin < other / 3) return "wrong_target_script";
   }
   // Punctuation/grouping may change between locales. Do not require numeric
@@ -419,11 +441,11 @@ function toNewsTranslation(row: StoredNewsTranslationRow): NewsTranslation {
   };
 }
 
-async function loadPendingCandidates(
+export function buildNewsTranslationCandidateQuery(
   targetLanguage: string,
   limit: number,
   itemIds?: number[],
-): Promise<NewsTranslationCandidate[]> {
+): { sql: string; params: unknown[] } {
   const ids = itemIds?.filter((value) => Number.isSafeInteger(value) && value > 0).slice(0, 50) ?? [];
   const params: unknown[] = [targetLanguage, limit];
   const idFilter = ids.length > 0 ? `AND i.id = ANY($3::bigint[])` : "";
@@ -436,12 +458,26 @@ async function loadPendingCandidates(
     AND COALESCE(i.event_time, i.created_at) >= now() - interval '48 hours'
     AND COALESCE(i.event_time, i.created_at) <= now() + interval '5 minutes'`;
   if (ids.length > 0) params.push(ids);
-  const { rows } = await query<NewsTranslationCandidate>(
-    `WITH pending AS (SELECT i.id, i.title, i.summary, COALESCE(NULLIF(lower(i.language_code), ''), 'und') AS language_code,
+  return { sql: `WITH priority_heads AS MATERIALIZED (
+       SELECT DISTINCT ON (recent_heads.canonical_key) recent_heads.canonical_key,canonical.title
+       FROM (SELECT event.id,event.metadata->>'canonical_evidence_key' AS canonical_key,event.last_activity_time
+         FROM intelligence_event_feed event
+         WHERE event.status IN ('emerging','active','monitoring')
+           AND event.last_activity_time >= now()-interval '48 hours'
+           AND ${intelligenceEventExpiresAtSql("event")} > now()
+           AND event.metadata->>'canonical_evidence_key' LIKE 'news:item:%'
+         ORDER BY event.last_activity_time DESC,event.id LIMIT 200) recent_heads
+       JOIN intelligence_event canonical ON canonical.id=recent_heads.id
+       ORDER BY recent_heads.canonical_key,recent_heads.last_activity_time DESC
+     ), pending AS (SELECT i.id, i.title, i.summary, COALESCE(NULLIF(lower(i.language_code), ''), 'und') AS language_code,
        COALESCE(i.event_time, i.created_at) AS news_time,
-       row_number() OVER (PARTITION BY COALESCE(NULLIF(lower(i.language_code), ''), 'und')
+       CASE WHEN priority.canonical_key IS NULL THEN 1 ELSE 0 END AS attention_priority,
+       row_number() OVER (PARTITION BY CASE WHEN priority.canonical_key IS NULL THEN 1 ELSE 0 END,
+         COALESCE(NULLIF(lower(i.language_code), ''), 'und')
          ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC) AS language_position
      FROM item i
+     LEFT JOIN priority_heads priority ON priority.canonical_key='news:item:'||i.id::text
+       AND btrim(priority.title)=btrim(i.title)
      LEFT JOIN item_translation translation
        ON translation.item_id = i.id
       AND translation.target_language_code = $1
@@ -460,13 +496,34 @@ async function loadPendingCandidates(
        ${aliasFilter}
        ${idFilter}
      ) SELECT id,title,summary,language_code FROM pending
-     -- Interleave source languages so one high-volume region cannot consume
-     -- every free slot. Within each language, current reporting comes first.
-     ORDER BY language_position ASC, news_time DESC, id DESC
-     LIMIT $2`,
-    params,
-  );
+     -- Recent visible investigations lead the queue. Languages remain
+     -- interleaved within each tier; source evidence and the free budget stay
+     -- unchanged, and general reporting still fills unused batch capacity.
+     ORDER BY attention_priority ASC, language_position ASC, news_time DESC, id DESC
+     LIMIT $2`, params };
+}
+
+async function loadPendingCandidates(targetLanguage: string, limit: number, itemIds?: number[]): Promise<NewsTranslationCandidate[]> {
+  const statement = buildNewsTranslationCandidateQuery(targetLanguage, limit, itemIds);
+  const { rows } = await query<NewsTranslationCandidate>(statement.sql, statement.params);
   return rows;
+}
+
+/** Controlled categories only: provider payloads can echo source text or keys. */
+export function newsTranslationProviderFailure(error: unknown): string {
+  const record = typeof error === "object" && error !== null ? error as { message?: unknown; status?: unknown } : null;
+  const message = typeof record?.message === "string" ? record.message : "";
+  const status = Number(record?.status);
+  if (/usage\.cost|cost.policy|non.zero.*cost/i.test(message)) return "Free-only cost accounting was rejected; original source retained.";
+  if (/unreachable|timed? ?out|abort/i.test(message)) return "Free provider transport failed or timed out; original source retained.";
+  if (/no message content/i.test(message)) return "Free provider returned no message content; original source retained.";
+  if (/non-JSON|parseable JSON|parse JSON|JSON.*pars/i.test(message)) return "Free provider returned invalid JSON output; original source retained.";
+  if (/no endpoints|no providers available/i.test(message)) return "No free provider route was available; original source retained.";
+  if ([401, 403].includes(status)) return "Free provider authentication or access was rejected; original source retained.";
+  if (status === 402) return "Free provider account or cost policy was rejected; original source retained.";
+  if (status === 429) return "Free provider rate limit was reached; original source retained.";
+  if (Number.isInteger(status) && status >= 400 && status <= 599) return `Free provider returned HTTP ${status}; original source retained.`;
+  return "Free provider request failed; original source retained.";
 }
 
 async function loadSummaryCandidate(
@@ -805,7 +862,7 @@ async function recordTranslationAttempts(candidates: NewsTranslationCandidate[],
          source_title_hash=EXCLUDED.source_title_hash,source_summary_hash=EXCLUDED.source_summary_hash,
          last_error=EXCLUDED.last_error,provider_status=EXCLUDED.provider_status,updated_at=now()`,
       [candidate.id, targetLanguage, md5(candidate.title), md5(candidate.summary),
-        "The free provider did not return a usable translation; original source retained.", processed.providerStatus],
+        processed.providerFailure ?? "The provider response omitted or failed validation for this translation; original source retained.", processed.providerStatus],
     );
   }
 }
@@ -854,6 +911,7 @@ export async function processNewsTranslationCandidates(options: {
     errors: [],
     attemptedIds: [],
     providerStatus: null,
+    providerFailure: null,
   };
   const failedIds = new Set<number>();
   const attemptedIds = new Set<number>();
@@ -911,7 +969,8 @@ export async function processNewsTranslationCandidates(options: {
           `Translation response omitted ${pending.length} item(s) from chunk ${chunkIndex + 1}.`,
         );
       } catch (error) {
-        result.errors.push(error instanceof Error ? error.message : String(error));
+        result.providerFailure = newsTranslationProviderFailure(error);
+        result.errors.push(result.providerFailure);
         const providerStatus =
           typeof error === "object" && error !== null && "status" in error
             ? Number((error as { status?: unknown }).status)
@@ -1002,13 +1061,13 @@ async function runPendingNewsHeadlineTranslationsInternal(options: {
     };
   }
   if (!options.llmClient) {
-    const availability = await getNewsTranslationAvailability(targetLanguage);
-    if (availability.status === "quota_limited") {
+    const availability = await getNewsTranslationSchedulingState(targetLanguage);
+    if (availability.local_budget_reached) {
       await updateTranslationDispatch(targetLanguage, "quota_limited", nextUtcDay(), availability.reason);
       return emptyTranslationBatch(targetLanguage, "budget_exhausted", availability.reason, candidates.length);
     }
     if (availability.retry_after && Date.parse(availability.retry_after) > Date.now()) {
-      return emptyTranslationBatch(targetLanguage, "partial", availability.reason, candidates.length);
+      return emptyTranslationBatch(targetLanguage, availability.status === "quota_limited" ? "budget_exhausted" : "partial", availability.reason, candidates.length);
     }
     const quota = await refreshFreeProviderQuota();
     const reserve = Math.max(0, runtime.daily_request_limit - runtime.automatic_daily_request_limit);
@@ -1019,7 +1078,7 @@ async function runPendingNewsHeadlineTranslationsInternal(options: {
     }
     if (quota.remaining <= reserve) {
       const reason = "The shared free translation allowance is reserved or exhausted; original publisher text remains available.";
-      await updateTranslationDispatch(targetLanguage, "quota_limited", nextUtcDay(), reason);
+      await updateTranslationDispatch(targetLanguage, "quota_limited", new Date(Date.now() + SHARED_QUOTA_RECHECK_MS), reason);
       return emptyTranslationBatch(targetLanguage, "budget_exhausted", reason, candidates.length);
     }
   }

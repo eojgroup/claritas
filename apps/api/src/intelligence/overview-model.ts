@@ -1,3 +1,4 @@
+import { normalizeIntelligenceDisplayLanguage } from "./display-language";
 export const OVERVIEW_TOPICS = [
   { key: "security", label: "Security & geopolitics", pattern: "(security|conflict|military|protest|politic|diploma)" },
   { key: "disasters", label: "Disasters & hazards", pattern: "(earthquake|seismic|wildfire|flood|fire|volcan|disaster)" },
@@ -8,7 +9,7 @@ export const OVERVIEW_TOPICS = [
   { key: "developments", label: "Other developments", pattern: "" },
 ] as const;
 export type OverviewTopic = typeof OVERVIEW_TOPICS[number]["key"];
-export type OverviewOptions = { hours?: 24 | 72 | 168; country?: string; topic?: OverviewTopic };
+export type OverviewOptions = { hours?: 24 | 72 | 168; country?: string; topic?: OverviewTopic; displayLanguage?: string };
 export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet" | "unavailable";
 export type OverviewSample = {
   id: string; event_type: string; status: string; severity: string;
@@ -23,14 +24,14 @@ export const OVERVIEW_SAMPLE_LIMIT = 300;
 export const OVERVIEW_EVENT_LIMIT = 40;
 export const OVERVIEW_TIMELINE_LIMIT = 24;
 
-export function normalizeOverviewOptions(input: { hours?: unknown; country?: unknown; topic?: unknown } = {}): Required<OverviewOptions> {
+export function normalizeOverviewOptions(input: { hours?: unknown; country?: unknown; topic?: unknown; displayLanguage?: unknown } = {}): Required<OverviewOptions> {
   const hours = Number(input.hours ?? 24);
   if (![24, 72, 168].includes(hours)) throw new Error("Overview hours must be 24, 72 or 168.");
   const country = typeof input.country === "string" ? input.country.trim().toUpperCase() : "";
   if (country && !/^[A-Z]{2}$/.test(country)) throw new Error("Overview country must be an ISO2 code.");
   const topic = typeof input.topic === "string" ? input.topic.trim().toLowerCase() : "";
   if (topic && !OVERVIEW_TOPICS.some((candidate) => candidate.key === topic)) throw new Error("Unknown overview topic.");
-  return { hours: hours as 24 | 72 | 168, country, topic: topic as OverviewTopic };
+  return { hours: hours as 24 | 72 | 168, country, topic: topic as OverviewTopic, displayLanguage: normalizeIntelligenceDisplayLanguage(input.displayLanguage ?? "en") };
 }
 
 export function overviewTopic(eventType: string) {

@@ -100,6 +100,7 @@ import { SharedReadCache } from "./shared-read-cache";
 import { runsBackgroundWorkers, runtimeRole } from "./runtime-role";
 import { DailyBriefingDispatcher } from "./daily-briefing-dispatch";
 import { getIntelligenceOverview, normalizeOverviewOptions } from "./intelligence/overview";
+import { normalizeIntelligenceDisplayLanguage } from "./intelligence/display-language";
 import { NewsSearchValidationError } from "./news-search";
 import { buildNewsCountryStatsQuery } from "./news-country-attribution";
 import {
@@ -2014,7 +2015,8 @@ app.post("/api/intelligence/resolve-source", requireAuthenticated, async (req, r
 app.get("/api/intelligence/overview", requireAuthenticated, async (req, res) => {
   let options;
   try {
-    options = normalizeOverviewOptions({ hours: req.query.hours, country: req.query.country, topic: req.query.topic });
+    options = normalizeOverviewOptions({ hours: req.query.hours, country: req.query.country, topic: req.query.topic,
+      displayLanguage: req.query.display_language });
   } catch (error) {
     return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -2030,6 +2032,9 @@ app.get("/api/intelligence/overview", requireAuthenticated, async (req, res) => 
 });
 
 app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
+  let displayLanguage: string;
+  try { displayLanguage = normalizeIntelligenceDisplayLanguage(req.query.display_language); }
+  catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); }
   try {
     const since = typeof req.query.since === "string" && !Number.isNaN(Date.parse(req.query.since))
       ? new Date(req.query.since) : undefined;
@@ -2055,6 +2060,7 @@ app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
       eventType: typeof req.query.event_type === "string" ? req.query.event_type.trim() : undefined,
       since,
       includeExpired: req.query.include_expired === "true",
+      displayLanguage,
     };
     const events = await eventReadCache.get(sharedReadKey("events", eventOptions),
       () => listIntelligenceEvents(eventOptions));
@@ -2066,10 +2072,13 @@ app.get("/api/intelligence/events", requireAuthenticated, async (req, res) => {
 });
 
 app.get("/api/intelligence/events/:id", requireAuthenticated, async (req, res) => {
+  let displayLanguage: string;
+  try { displayLanguage = normalizeIntelligenceDisplayLanguage(req.query.display_language); }
+  catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); }
   try {
     if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Event id must be a UUID." });
-    const result = await eventReadCache.get(sharedReadKey("event", req.params.id),
-      () => getIntelligenceEvent(req.params.id));
+    const result = await eventReadCache.get(sharedReadKey("event", { id: req.params.id, displayLanguage }),
+      () => getIntelligenceEvent(req.params.id, { displayLanguage }));
     if (!result) return res.status(404).json({ error: "Intelligence event not found." });
     res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
     return res.json(result);

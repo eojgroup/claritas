@@ -1,4 +1,5 @@
 import type { IntelligenceEvent } from "../lib/api";
+import { displayHeadline } from "../lib/headlineTranslation";
 
 const GENERIC_SIGNAL_TITLES = new Set([
   "civilian",
@@ -125,7 +126,7 @@ export function presentEvent(event: IntelligenceEvent): EventPresentation {
   const typeLabel = eventTypeLabel(event.event_type);
   const locationLabel = eventLocationLabel(event);
   const coordinate = eventCoordinateContext(event);
-  const sourceTitle = clean(event.title);
+  const sourceTitle = clean(displayHeadline(event, event.title));
   const weakTitle = !sourceTitle || looksLikeRawTopic(event, sourceTitle);
   const headline = weakTitle
     ? `${typeLabel}${locationLabel === "Global" ? " under assessment" : ` in ${locationLabel}`}`

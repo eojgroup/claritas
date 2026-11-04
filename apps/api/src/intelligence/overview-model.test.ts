@@ -12,9 +12,12 @@ const event = (id: string, hoursAgo: number, overrides: Partial<OverviewSample> 
 });
 
 test("overview filters reject unbounded windows and unknown topic input", () => {
-  assert.deepEqual(normalizeOverviewOptions({ hours: "72", country: " se ", topic: "TRANSPORT" }), { hours: 72, country: "SE", topic: "transport" });
-  assert.deepEqual(normalizeOverviewOptions(), { hours: 24, country: "", topic: "" });
+  assert.deepEqual(normalizeOverviewOptions({ hours: "72", country: " se ", topic: "TRANSPORT" }), { hours: 72, country: "SE", topic: "transport", displayLanguage: "en" });
+  assert.deepEqual(normalizeOverviewOptions(), { hours: 24, country: "", topic: "", displayLanguage: "en" });
   for (const hours of [0, 1, 1000, Infinity, "forever"]) assert.throws(() => normalizeOverviewOptions({ hours }), /hours/);
+  assert.equal(normalizeOverviewOptions({ displayLanguage: "fr_FR" }).displayLanguage, "fr-fr");
+  assert.notEqual(JSON.stringify(normalizeOverviewOptions({ displayLanguage: "fr" })), JSON.stringify(normalizeOverviewOptions()));
+  for (const displayLanguage of ["", "not a code", ["en"], ["en", "fr"], 12]) assert.throws(() => normalizeOverviewOptions({ displayLanguage }), /display_language/);
   assert.throws(() => normalizeOverviewOptions({ country: "Sweden" }), /ISO2/);
   assert.throws(() => normalizeOverviewOptions({ topic: "anything' OR true" }), /topic/);
 });

@@ -3,6 +3,8 @@ import { ArrowDown, ArrowUpRight, CloudSun, ExternalLink, Globe2, Image, Link2, 
 import type { IntelligenceEventDetail, IntelligenceEvidence } from "../lib/api";
 import { connectionDimensions, presentEventLinkage } from "./eventLinkagePresentation";
 import { eventOrigin, evidenceFamily, isCoverageAssessment, sourceFamilies, sourceFamily, sourceFamilyLabel } from "./eventSourcePresentation";
+import HeadlineTranslation from "./HeadlineTranslation";
+import { displayHeadline } from "../lib/headlineTranslation";
 
 const familyIcons = { news: Newspaper, earth_observation: Globe2, imagery: Image, transport: Truck, podcast: Mic, social: MessageCircle, weather: CloudSun, market: TrendingUp, official: RadioTower, model_interpretation: Sparkles };
 const dateLabel = (value: string) => {
@@ -10,7 +12,7 @@ const dateLabel = (value: string) => {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short" }).format(date);
 };
 const recordString = (record: Record<string, unknown> | undefined, key: string) => typeof record?.[key] === "string" ? String(record[key]) : null;
-const title = (item: IntelligenceEvidence) => item.title || item.source_title || recordString(item.metadata, "original_title") || item.evidence_type.replace(/_/g, " ");
+const title = (item: IntelligenceEvidence) => displayHeadline(item, item.source_title || item.title || recordString(item.metadata, "original_title") || item.evidence_type.replace(/_/g, " "));
 const summary = (item: IntelligenceEvidence) => item.summary || item.source_summary || recordString(item.metadata, "description");
 const sourceUrl = (item: IntelligenceEvidence) => item.source_url || recordString(item.provenance, "url");
 const relationshipLabel = (relationship: string) => ({ reported: "Reported", observed: "Observed", context: "Context", derived: "Derived", corroborates: "Corroborates", contradicts: "Contradicts", model_interpretation: "Model interpretation", assessment: "Coverage assessment" }[relationship.trim().toLowerCase()] || "Context");
@@ -86,7 +88,8 @@ export default function EventConnections({ detail, onOpenImagery, selectedFamily
           const matchedEntities = Array.isArray(item.correlation_factors?.matched_entities) ? item.correlation_factors.matched_entities.filter((value): value is string => typeof value === "string") : [];
           return <li key={item.id} id={`event-evidence-${item.id}`} className="event-connected-record">
             <div className="event-record-meta"><span>{sourceFamilyLabel(evidenceFamily(item))}</span><span className={`evidence-relationship-${item.relationship}`}>{evidenceFamily(item) === "social" ? "Unverified claim" : relationshipLabel(item.relationship)}</span><time dateTime={item.observed_at}>{dateLabel(item.observed_at)}</time></div>
-            <h5>{title(item)}</h5>
+            <h5 dir="auto">{title(item)}</h5>
+            <HeadlineTranslation value={item} showSummaryNotice />
             {summary(item) && <p className="event-record-summary">{summary(item)}</p>}
             <div className="event-record-connection"><span className="event-link-chip">{evidenceFamily(item) === "social" && item.correlation_factors?.decision !== "created" ? "Context match" : linkage.label}</span>{dimensions.map((dimension) => <span className="event-dimension-chip" key={dimension}>{dimension}</span>)}</div>
             {(matchedEntities.length > 0 || item.location_name) && <p className="event-matched-values">{item.location_name && <span>Place: {item.location_name}</span>}{matchedEntities.length > 0 && <span>Shared mentions: {matchedEntities.map((value) => value.replace(/^instrument:/, "$").replace(/^[a-z_]+:/, "")).join(", ")}</span>}</p>}

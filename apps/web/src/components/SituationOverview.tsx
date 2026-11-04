@@ -4,6 +4,8 @@ import type { IntelligenceOverview, OverviewTopic } from "../lib/api";
 import SatelliteImage from "./SatelliteImage";
 import CountryFlag from "./CountryFlag";
 import { isHistoricalEvent } from "./eventPresentation";
+import HeadlineTranslation from "./HeadlineTranslation";
+import { displayHeadline } from "../lib/headlineTranslation";
 
 const OVERVIEW_TOPICS: Array<{ key: OverviewTopic; label: string }> = [
   { key: "security", label: "Security" }, { key: "disasters", label: "Disasters" },
@@ -84,9 +86,10 @@ export default function SituationOverview({ variant = "all", overview, loading, 
           <time dateTime={item.occurred_at}>Updated {timeLabel(item.occurred_at)}</time>
           <div className="situation-event">
             <div className="situation-event-tags"><span className={`event-severity-${item.severity}`}>{item.severity}</span><span>{item.topic_label}</span>{archived && <span>Archived</span>}</div>
-            <button type="button" className="situation-event-title" onClick={() => onSelect(item.event_id)} aria-pressed={selectedId === item.event_id}>{item.title}<ArrowUpRight size={15} /></button>
+            <button type="button" className="situation-event-title" dir="auto" onClick={() => onSelect(item.event_id)} aria-pressed={selectedId === item.event_id}>{displayHeadline(item, item.title)}<ArrowUpRight size={15} /></button>
+            <HeadlineTranslation value={item} />
             <p className="situation-event-place"><MapPin size={13} /><CountryFlag country={item.country_iso2} />{item.location_name || item.country_iso2 || "Location unresolved"}</p>
-            {item.source_refs.length > 0 && <div className="situation-event-sources">{item.source_refs.slice(0, 3).map((source, index) => source.url && /^https?:\/\//i.test(source.url) ? <a key={`${source.domain}-${index}`} href={source.url} target="_blank" rel="noreferrer">{source.label}</a> : <span key={`${source.domain}-${index}`}>{source.label}</span>)}</div>}
+            {item.source_refs.length > 0 && <div className="situation-event-sources">{item.source_refs.slice(0, 3).map((source, index) => <div key={`${source.domain}-${index}`}>{source.url && /^https?:\/\//i.test(source.url) ? <a dir="auto" href={source.url} target="_blank" rel="noreferrer">{displayHeadline(source, source.label)}</a> : <span dir="auto">{displayHeadline(source, source.label)}</span>}<HeadlineTranslation value={source} /></div>)}</div>}
             {item.priority_reasons.length > 0 && <details><summary>Why this needs attention</summary><ul>{item.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details>}
           </div>
           {item.imagery && <button type="button" className="situation-event-image" onClick={() => onOpenImagery(item.event_id)} aria-label={`Inspect imagery for ${item.title}`}><SatelliteImage sources={[item.imagery.preview_url]} alt={`Location context for ${item.title}`} className="h-full w-full object-cover" /><span>{item.imagery.captured_at ? `Captured ${new Date(item.imagery.captured_at).toLocaleDateString()}` : "Location imagery"}<small>{item.imagery.attribution}</small></span></button>}

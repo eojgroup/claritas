@@ -76,3 +76,16 @@ it("includes an update exactly at the final timeline boundary", () => {
   fireEvent.click(screen.getByRole("button", { name: /: 4 updates; previous period 4/ }));
   expect(screen.getByRole("button", { name: "Port development 0" })).toBeTruthy();
 });
+it("uses cached timeline and source headlines while preserving untranslated rows and explicit quota state", () => {
+  const translated = { original_title: "דיווח חדש", language_code: "he", display_language: "en", translated_title: "New translated development", translation_status: "translated" as const };
+  const pending = { translation_status: "pending" as const, translation_availability: { status: "quota_limited" as const, reason: "Free allowance exhausted" } };
+  render(<SituationOverview {...props} overview={{ ...overview, timeline: [
+    { ...overview.timeline[0], ...translated, source_refs: [{ ...overview.timeline[0].source_refs[0], ...translated, translated_title: "Translated source headline" }] },
+    { ...overview.timeline[1], ...pending, title: "Informe original en español" },
+  ] }} />);
+  expect(screen.getByRole("button", { name: "New translated development" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Translated source headline" })).toBeTruthy();
+  expect(screen.getAllByText("Original headline")).toHaveLength(2);
+  expect(screen.getByRole("button", { name: "Informe original en español" })).toBeTruthy();
+  expect(screen.getByText("Translation allowance reached")).toBeTruthy();
+});

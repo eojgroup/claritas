@@ -41,6 +41,8 @@ import {
 import EventConnections from "./EventConnections";
 import { eventOrigin, sourceFamilyLabel } from "./eventSourcePresentation";
 import { presentEvent } from "./eventPresentation";
+import HeadlineTranslation from "./HeadlineTranslation";
+import { displayHeadline, translationStatusLabel } from "../lib/headlineTranslation";
 
 const severities: Array<IntelligenceSeverity | "all"> = ["all", "critical", "high", "medium", "low"];
 
@@ -78,11 +80,11 @@ function recordString(record: Record<string, unknown> | undefined, key: string) 
 }
 
 function evidenceTitle(item: IntelligenceEvidence) {
-  return item.title
-    || item.source_title
+  return displayHeadline(item, item.source_title
+    || item.title
     || recordString(item.metadata, "original_title")
     || recordString(item.metadata, "headline")
-    || item.evidence_type.replace(/_/g, " ");
+    || item.evidence_type.replace(/_/g, " "));
 }
 
 function evidenceSummary(item: IntelligenceEvidence) {
@@ -589,7 +591,8 @@ export default function IntelligenceWorkspace({
                 <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-accent)]">{detailPresentation?.typeLabel}</div>
-                    <h2 className="mt-1 text-2xl font-semibold text-[color:var(--shell-ink)]">{detailPresentation?.headline}</h2>
+                    <h2 dir="auto" className="mt-1 text-2xl font-semibold text-[color:var(--shell-ink)]">{detailPresentation?.headline}</h2>
+                    <HeadlineTranslation value={detail.event} showSummaryNotice />
                     {detailPresentation?.focus && <div className="mt-1 text-xs text-[color:var(--shell-muted)]">Signal focus · {detailPresentation.focus}</div>}
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[color:var(--shell-muted)]"><span className="inline-flex items-center gap-2"><MapPin className="h-3.5 w-3.5" /><CountryFlag country={detail.event.primary_country_iso2} />{detailPresentation?.locationLabel}</span><span>Started {dateLabel(detail.event.start_time)}</span><span>Updated {dateLabel(detail.event.last_activity_time)}</span>{detail.event.expires_at && <span className={detail.event.freshness_state === "expired" ? "text-[color:var(--signal-coral)]" : ""}>{detail.event.freshness_state === "expired" ? "Expired" : "Current until"} {dateLabel(detail.event.expires_at)}</span>}</div>
                   </div>
@@ -703,6 +706,7 @@ export default function IntelligenceWorkspace({
                       <button key={`${event.id}-${event.relationship}`} type="button" onClick={() => selectEvent(event.id)} aria-label={`Open likely related investigation: ${event.title}`} className="event-link-card rounded-lg border border-[color:var(--shell-border)] p-3 text-left">
                         <div className="flex items-center justify-between gap-2"><span className="event-link-chip">Likely linked investigation</span><span className="text-[10px] uppercase text-[color:var(--shell-muted)]">{event.severity}</span></div>
                         <div className="mt-2 text-sm font-semibold text-[color:var(--shell-ink)]">{event.title}</div>
+                        {translationStatusLabel(event) && <div className="mt-1 text-xs text-[color:var(--shell-muted)]">{translationStatusLabel(event)}</div>}
                         <div className="mt-1 text-[10px] uppercase tracking-[0.1em] text-[color:var(--shell-muted)]">{event.relationship.replace(/_/g, " ")}</div>
                         {event.rationale && <div className="mt-2 text-xs leading-5 text-[color:var(--shell-muted)]"><strong className="font-semibold text-[color:var(--shell-ink)]">Why shown:</strong> {event.rationale}</div>}
                       </button>

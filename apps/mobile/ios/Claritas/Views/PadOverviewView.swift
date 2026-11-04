@@ -579,6 +579,9 @@ struct OverviewSatelliteContextView: View {
                                     .font(.caption2.weight(.bold))
                                     .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
                             }
+                            if let disclosure = selectedEvent.headlineTranslationDisclosure {
+                                Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+                            }
                             Text(selectedEvent.location_name ?? selectedEvent.primary_country_iso2 ?? "Global")
                                 .font(.caption)
                                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))

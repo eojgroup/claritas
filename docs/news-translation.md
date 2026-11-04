@@ -13,8 +13,10 @@ interface language can be added without rewriting source records.
    and a one-minute recovery worker select canonical reporting from the last
    48 hours whose language differs from the target language. Unknown source
    language remains `und`; the model may infer it from the supplied text but
-   cannot rewrite the source language metadata. Headlines are interleaved by
-   source language, with current reporting first, and sent in bounded chunks
+   cannot rewrite the source language metadata. Exact publisher headlines for
+   up to 200 recently updated current investigations lead the queue, followed
+   by other reporting. Source languages are interleaved within each tier so
+   a high-volume publisher language does not occupy the whole batch. Headlines are sent in bounded chunks
    to the dedicated free-only OpenRouter client.
 3. `item_translation` stores the translated headline, source hashes and model
    provenance. A source change invalidates the cached presentation text.
@@ -44,6 +46,12 @@ Daily and personalised briefings prefer the valid cached English translation
 and still receive the original publisher headline as auditable evidence. Their
 prompts remain able to translate uncached evidence so briefing generation does
 not depend on complete cache coverage.
+
+The investigation feed, overview timeline, linked reporting and source links
+also use valid cached headlines. They retain the original headline behind an
+explicit disclosure and distinguish pending translation, an exhausted allowance
+and temporary unavailability. A translated headline does not imply its source
+excerpt has also been translated; original-language excerpts are labelled.
 
 ## Free-only and budget guarantees
 
@@ -80,6 +88,10 @@ work actually exists, the worker checks the account-wide free allowance using
 a UTC-day reset. It reserves the on-demand portion of that allowance and pauses
 when the counter cannot be checked. Reader requests consult only local durable
 state and the cached counter; they do not make provider quota requests.
+An exhausted shared allowance is rechecked after at most five minutes when
+pending work exists, so newly available free capacity can recover a pause
+within the day. Local daily processing caps remain in force until their UTC
+reset; a provider quota recheck never resets usage or raises those caps.
 OpenRouter currently documents 50 daily free-model requests for accounts below
 its credit-purchase threshold. The limit is shared, so 24 automatic requests
 with up to 25 headlines is a theoretical ceiling, not guaranteed throughput.
@@ -93,6 +105,9 @@ wake-ups and the recovery timer. Failed stories therefore cannot continuously
 consume the front of the free queue. Basic output checks reject malformed
 responses, refusal text, clearly wrong target scripts and lost numeric evidence.
 These checks do not constitute a claim that model output is semantically verified.
+Retry records keep a bounded failure category (transport, HTTP status, empty
+content, invalid JSON or cost-policy rejection) instead of raw provider payloads,
+which may contain source text or account details.
 
 ## Configuration
 

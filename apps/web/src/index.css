@@ -5332,6 +5332,12 @@ body {
 .situation-event-place { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem; font-size: .7rem; color: var(--shell-muted); }
 .situation-event-sources { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .4rem; font-size: .65rem; color: var(--shell-muted); }
 .situation-event-sources a { text-decoration: underline; text-underline-offset: 2px; }
+.headline-translation { display: flex; align-items: baseline; flex-wrap: wrap; gap: .15rem .65rem; margin-top: .3rem; color: var(--shell-muted); font-size: .65rem; line-height: 1.5; overflow-wrap: anywhere; }
+.headline-translation > details { min-width: 0; margin: 0; }
+.headline-translation summary { cursor: pointer; padding: .2rem 0; }
+.headline-translation details p { margin: .25rem 0; color: var(--shell-ink); font-size: .75rem; }
+.headline-translation small { font-size: .62rem; }
+.situation-event .headline-translation details { margin-top: 0; }
 .situation-event details { margin-top: .5rem; font-size: .65rem; color: var(--shell-muted); }
 .situation-event details summary, .situation-overview footer summary { cursor: pointer; padding: .2rem 0; }
 .situation-event details ul { margin: .35rem 0 0 1rem; list-style: disc; line-height: 1.6; }

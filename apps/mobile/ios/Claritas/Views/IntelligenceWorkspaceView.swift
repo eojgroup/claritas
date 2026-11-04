@@ -234,6 +234,9 @@ struct IntelligenceWorkspaceView: View {
                                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                                         .multilineTextAlignment(.leading)
                                         .lineLimit(horizontalSizeClass == .compact ? 2 : nil)
+                                    if let disclosure = event.headlineTranslationDisclosure {
+                                        Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+                                    }
                                     HStack(spacing: 6) {
                                         Text(event.primary_country_iso2 ?? event.location_name ?? "Global")
                                         Text("· \(event.evidence_count) linked records")
@@ -318,6 +321,14 @@ struct IntelligenceWorkspaceView: View {
                     }
                     Text(detail.event.title)
                         .font(.title3.weight(.semibold))
+                    IntelligenceHeadlineNotice(
+                        disclosure: detail.event.headlineTranslationDisclosure,
+                        original: IntelligenceTranslationPresentation.original(detail.event.original_title, display: detail.event.title),
+                        originalSummary: IntelligenceTranslationPresentation.original(detail.event.original_summary, display: detail.event.summary),
+                        summaryTranslated: detail.event.summary_translation_status == "translated",
+                        translation: detail.event.translation,
+                        availability: detail.event.translation_availability
+                    )
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Started \(detail.event.start_time.formatted(date: .abbreviated, time: .standard))")
                         Text("Updated \(detail.event.last_activity_time.formatted(date: .abbreviated, time: .standard))")
@@ -330,7 +341,10 @@ struct IntelligenceWorkspaceView: View {
                     .foregroundStyle(.secondary)
                     VStack(alignment: .leading, spacing: 10) {
                         eventUnderstandingRow(
-                            label: "What happened",
+                            label: detail.event.summary_translation_status == "translated"
+                                ? "What happened · AI-generated summary"
+                                : ["pending", "unavailable"].contains(detail.event.summary_translation_status ?? "")
+                                    ? "What happened · original source excerpt" : "What happened",
                             icon: "text.alignleft",
                             text: detail.understanding?.what_happened ?? detail.event.summary
                         )
@@ -550,6 +564,9 @@ struct IntelligenceWorkspaceView: View {
                                         Text(event.title)
                                             .font(.subheadline.weight(.semibold))
                                             .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                                        if let disclosure = event.headlineTranslationDisclosure {
+                                            Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+                                        }
                                         Text("\(Int(event.confidence * 100))% relationship confidence · \(Int(event.relevance_score * 100))% relevance")
                                             .font(.caption2)
                                             .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -755,7 +772,24 @@ struct IntelligenceWorkspaceView: View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 9) {
                 if let summary = item.source_summary, !summary.isEmpty {
+                    if item.summary_translation_status == "translated" {
+                        Text("AI-generated English summary · source headline/excerpt only")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    } else if item.translation_status == "translated" {
+                        Text("Original source excerpt").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
                     Text(summary).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                }
+                if let originalSummary = IntelligenceTranslationPresentation.original(item.original_summary, display: item.source_summary) {
+                    Text("Original source excerpt: \(originalSummary)").font(.caption).foregroundStyle(.secondary)
+                }
+                if let original = IntelligenceTranslationPresentation.original(item.original_title, display: item.source_title) {
+                    Text("Original headline: \(original)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let translation = item.translation {
+                    Text("Headline translation: \(translation.provider)\(translation.model.map { " · \($0)" } ?? "")")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
                 Text(IntelligenceLinkagePresentation.explanation(for: item.correlation_factors))
                     .font(.caption).foregroundStyle(.secondary)
@@ -790,6 +824,9 @@ struct IntelligenceWorkspaceView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                         .fixedSize(horizontal: false, vertical: true)
+                    if let disclosure = item.headlineTranslationDisclosure {
+                        Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+                    }
                     Text("\(item.source_name ?? "Source record") · \(item.observed_at.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption2).foregroundStyle(.secondary)
                     Text(IntelligenceLinkagePresentation.label(for: item.correlation_factors))
@@ -1453,6 +1490,9 @@ struct IntelligenceEventPulseView: View {
                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
+                    if let disclosure = event.headlineTranslationDisclosure {
+                        Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+                    }
                     Text("\(event.severity.rawValue.capitalized) · \(event.primary_country_iso2 ?? event.location_name ?? "Global") · \(event.evidence_count) linked records")
                         .font(.caption2)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -2213,6 +2253,9 @@ struct IntelligenceOverviewPanel: View {
                             .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     }
                     Text(entry.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(3)
+                    if let disclosure = entry.headlineTranslationDisclosure {
+                        Text(disclosure).font(.caption2).foregroundStyle(.secondary)
+                    }
                     Text("\(entry.topic_label) · \(entry.location_name ?? entry.country_iso2.map(countryName) ?? "Location unresolved")")
                         .font(.caption).foregroundStyle(.secondary)
                     if let reason = entry.priority_reasons.first {
@@ -2248,5 +2291,42 @@ struct IntelligenceOverviewPanel: View {
 
     private func countryName(_ code: String) -> String {
         Locale.current.localizedString(forRegionCode: code) ?? code
+    }
+}
+
+
+/// Cached headline provenance is inspectable without another API/model read.
+private struct IntelligenceHeadlineNotice: View {
+    let disclosure: String?
+    let original: String?
+    let originalSummary: String?
+    let summaryTranslated: Bool
+    let translation: IntelligenceHeadlineTranslation?
+    let availability: NewsTranslationAvailability?
+
+    var body: some View {
+        if let disclosure {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 5) {
+                    if let original { Text("Original headline: \(original)") }
+                    if let originalSummary { Text("Original source excerpt: \(originalSummary)") }
+                    if let translation {
+                        Text("\(translation.provider)\(translation.model.map { " · \($0)" } ?? "")")
+                        if let date = translation.title_generated_at.flatMap(APIDateParser.parse) {
+                            Text("Translated \(date.formatted(date: .abbreviated, time: .shortened))")
+                        }
+                        Text(summaryTranslated
+                             ? "The headline is translated and the English summary is generated from the publisher headline/excerpt. Original reporting and source links are preserved."
+                             : "Only the headline is translated. The source excerpt remains in its original language; original reporting and links are preserved.")
+                    } else if let reason = availability?.reason {
+                        Text(reason)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            } label: {
+                Text(disclosure).font(.caption2)
+            }
+        }
     }
 }

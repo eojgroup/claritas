@@ -17,8 +17,13 @@ export function sourceRecordBigintSql(alias: string, recordType?: string) {
   return safeBigintTextSql(`${record}.source_record_id`, condition);
 }
 
-export function canonicalSocialSignalBigintSql(alias: string) {
+export function canonicalSourceRecordBigintSql(alias: string, domain: string, recordType: string) {
   const event = identifier(alias);
+  const prefix = `${identifier(domain)}:${identifier(recordType)}`;
   const key = `${event}.metadata->>'canonical_evidence_key'`;
-  return safeBigintTextSql(`split_part(${key},':',3)`, `${key} ~ '^social:social_signal:[0-9]{1,19}$'`);
+  return safeBigintTextSql(`split_part(${key},':',3)`, `${key} ~ '^${prefix}:[0-9]{1,19}$'`);
+}
+
+export function canonicalSocialSignalBigintSql(alias: string) {
+  return canonicalSourceRecordBigintSql(alias, "social", "social_signal");
 }

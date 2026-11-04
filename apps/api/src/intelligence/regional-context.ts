@@ -45,7 +45,8 @@ export async function getRegionalContext(input: { primary_country_iso2?: string 
     query<{ mode: string; entities: number; providers: number; observed_at: Date }>(
       `SELECT mode,count(DISTINCT entity_id)::int AS entities,count(DISTINCT source_name)::int AS providers,
         max(last_observed_at) AS observed_at FROM transport_entity_activity_hour
-       WHERE country_iso2=$1 AND bucket BETWEEN $2::timestamptz AND $3::timestamptz
+       WHERE mode IN ('maritime','aviation') AND country_iso2=$1
+         AND bucket BETWEEN $2::timestamptz AND $3::timestamptz
        GROUP BY mode`, [country, window.start, window.end]),
     query<{ departures: number; arrivals: number; ports: number }>(
       `SELECT sum(departures)::int AS departures,sum(arrivals)::int AS arrivals,

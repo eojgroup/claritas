@@ -146,6 +146,20 @@ export type NewsTranslation = {
   generation_metadata?: Record<string, unknown>;
 };
 
+/** Cached presentation only; source text remains available for inspection. */
+export type HeadlineTranslationPresentation = {
+  original_title?: string | null;
+  original_summary?: string | null;
+  language_code?: string | null;
+  display_language?: string;
+  translated_title?: string | null;
+  translation_status?: "translated" | "pending" | "not_required" | "unavailable";
+  summary_translation_status?: "translated" | "pending" | "not_required" | "unavailable";
+  translation?: NewsTranslation | null;
+  translation_availability?: NewsItem["translation_availability"];
+  translation_notice?: string | null;
+};
+
 export const CURRENT_INTERFACE_LANGUAGE = "en";
 
 function baseLanguage(value: string | null | undefined) {
@@ -1198,7 +1212,7 @@ export type AdminIngestionProviderCapabilities = {
 
 export type IntelligenceSeverity = "low" | "medium" | "high" | "critical";
 
-export type IntelligenceEvent = {
+export type IntelligenceEvent = HeadlineTranslationPresentation & {
   origin_domain?: string;
   signal_domains?: string[];
   priority_score?: number;
@@ -1232,7 +1246,7 @@ export type IntelligenceEvent = {
   metadata?: Record<string, unknown>;
 };
 
-export type IntelligenceEvidence = {
+export type IntelligenceEvidence = HeadlineTranslationPresentation & {
   image_url?: string | null;
   id: string;
   domain: string;
@@ -1474,7 +1488,7 @@ export type IntelligenceEventDetail = {
       basis: "source_observed" | "estimated_mapped";
     } | null;
   };
-  linked_news?: Array<{
+  linked_news?: Array<HeadlineTranslationPresentation & {
     id: string;
     evidence_type: string;
     relationship: string;
@@ -1499,7 +1513,7 @@ export type IntelligenceEventDetail = {
     license?: string | null;
   }>;
   earth_observations: EarthObservation[];
-  related_events: Array<{
+  related_events: Array<HeadlineTranslationPresentation & {
     id: string;
     event_type: string;
     title: string;
@@ -2496,11 +2510,11 @@ export type IntelligenceOverview = {
   locations: Array<{ key: string; name: string; country_iso2: string | null; event_count: number; previous_event_count: number; change: number; direction: OverviewDirection; priority_score: number; event_ids: string[] }>;
   buckets: Array<{ start: string; end: string; event_count: number; previous_event_count: number; high_priority_count: number }>;
   events: IntelligenceEvent[];
-  timeline: Array<{
+  timeline: Array<HeadlineTranslationPresentation & {
     event_id: string; occurred_at: string; title: string; topic: OverviewTopic; topic_label: string;
     location_name: string | null; country_iso2: string | null; severity: IntelligenceSeverity;
     priority_score: number; priority_reasons: string[];
-    source_refs: Array<{ label: string; url: string | null; domain: string }>;
+    source_refs: Array<HeadlineTranslationPresentation & { label: string; url: string | null; domain: string }>;
     imagery: { preview_url: string; captured_at: string | null; attribution: string } | null;
   }>;
   coverage: { sample_limit: number; sampled_events: number; truncated: boolean; comparison_available: boolean; notice: string; comparison_notice: string; priority_notice: string };

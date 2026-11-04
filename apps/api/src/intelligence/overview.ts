@@ -1,5 +1,6 @@
 import { query } from "../db";
 import { SharedReadCache } from "../shared-read-cache";
+import { loadTranslationContext, translateEventPresentation, presentTranslatedSource, headlineTranslationFields, unavailableTranslationFields, type HeadlineTranslationPresentation } from "./translation-presentation";
 import { sourceRecordBigintSql, canonicalSocialSignalBigintSql } from "./source-record";
 import { activeSocialEvidenceSql } from "./event-priority";
 import { intelligenceEventExpiresAtSql, intelligenceEventFreshness } from "./freshness";
@@ -49,9 +50,9 @@ export function buildOverviewSampleQuery(options: Required<OverviewOptions>, now
     params: [window.start, window.end, window.previous_start, options.country || null, options.topic || null, OVERVIEW_SAMPLE_LIMIT + 1] };
 }
 
-export type OverviewSourceRef = { label: string; url: string; domain: string };
+export type OverviewSourceRef = Partial<HeadlineTranslationPresentation> & { label: string; url: string; domain: string; item_id?: string | null };
 export type OverviewImageryRef = { preview_url: string; captured_at: string; attribution: string };
-type HydratedOverviewRow = {
+type HydratedOverviewRow = Partial<HeadlineTranslationPresentation> & {
   id: string; event_type: string; title: string; summary: string; status: string; severity: string; confidence: number;
   start_time: string | Date; last_activity_time: string | Date; expires_at: string | Date;
   primary_location_id: string | null; primary_country_iso2: string | null;
@@ -102,9 +103,9 @@ export function buildOverviewEventQuery(ids: string[]) {
       ORDER BY observation.captured_at DESC,observation.id LIMIT 1
     ) imagery ON true
     LEFT JOIN LATERAL (
-      SELECT jsonb_agg(jsonb_build_object('label',record.label,'url',record.url,'domain',record.domain)
+      SELECT jsonb_agg(jsonb_build_object('label',record.label,'url',record.url,'domain',record.domain,'item_id',record.item_id)
         ORDER BY record.observed_at DESC,record.id) AS records FROM (
-        SELECT evidence.id,evidence.observed_at,evidence.domain,
+        SELECT evidence.id,evidence.observed_at,evidence.domain,article.id::text AS item_id,
           COALESCE(NULLIF(article.title,''),NULLIF(evidence.attribution,''),NULLIF(evidence_source.name,''),'Source record') AS label,
           COALESCE(article.url,NULLIF(evidence.provenance->>'url','')) AS url
         FROM intelligence_event_evidence evidence
@@ -141,7 +142,7 @@ export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRow
   const timeline = events.slice(0, OVERVIEW_TIMELINE_LIMIT).map((event) => {
     const row = byId.get(event.id)!;
     const topic = overviewTopic(event.event_type);
-    return { event_id: event.id, occurred_at: event.last_activity_time, title: event.title, topic: topic.key, topic_label: topic.label,
+    return { ...headlineTranslationFields(event), event_id: event.id, occurred_at: event.last_activity_time, title: event.title, topic: topic.key, topic_label: topic.label,
       location_name: event.location_name, country_iso2: event.primary_country_iso2, severity: event.severity,
       priority_score: Math.round(event.priority_score * 100), priority_reasons: event.priority_reasons,
       source_refs: safeSourceRefs(row.source_refs), imagery: row.imagery ? { ...row.imagery, captured_at: iso(row.imagery.captured_at) } : null };
@@ -160,6 +161,18 @@ export async function getIntelligenceOverview(input: OverviewOptions = {}) {
     const ids = analytics.current.slice(0, OVERVIEW_EVENT_LIMIT).map((row) => row.id);
     const eventStatement = buildOverviewEventQuery(ids);
     const eventRows = ids.length ? (await query<HydratedOverviewRow>(eventStatement.sql, eventStatement.params)).rows : [];
-    return assembleIntelligenceOverview(rows, eventRows, options, now);
+    const translations = await loadTranslationContext(ids,
+      eventRows.flatMap((row) => row.source_refs.map((ref) => ref.item_id).filter((id): id is string => Boolean(id))), options.displayLanguage);
+    const presented = eventRows.map((row) => ({ ...translateEventPresentation(row, translations),
+      source_refs: row.source_refs.map((ref) => {
+        const source = ref.item_id ? translations.items.get(ref.item_id) : null;
+        if (!source) return translations.unavailable ? { ...ref, ...unavailableTranslationFields(ref.label, null, translations) } : ref;
+        const display = presentTranslatedSource(source, translations.targetLanguage, translations.availability);
+        const fields = headlineTranslationFields(display);
+        delete fields.original_summary;
+        return { ...ref, ...fields, label: display.title ?? ref.label };
+      }),
+    }));
+    return assembleIntelligenceOverview(rows, presented, options, now);
   });
 }

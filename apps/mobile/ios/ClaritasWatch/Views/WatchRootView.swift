@@ -164,6 +164,9 @@ private struct WatchEventContextView: View {
                             Text(event.title)
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(3)
+                            if let disclosure = event.headlineTranslationDisclosure {
+                                Text(disclosure).font(.system(size: 8)).foregroundStyle(.secondary)
+                            }
                             Text("\(event.location_name ?? event.primary_country_iso2 ?? "Location unresolved") · \(event.evidence_count) linked records")
                                 .font(.system(size: 9))
                                 .foregroundStyle(.secondary)
@@ -1871,6 +1874,9 @@ private struct WatchOverviewPulseCard: View {
                                         .font(.system(size: 8)).foregroundStyle(.secondary)
                                 }
                                 Text(entry.title).font(.caption.weight(.semibold)).lineLimit(3)
+                                if let disclosure = entry.headlineTranslationDisclosure {
+                                    Text(disclosure).font(.system(size: 8)).foregroundStyle(.secondary)
+                                }
                                 Text(entry.location_name ?? entry.country_iso2 ?? "Location unresolved")
                                     .font(.system(size: 9)).foregroundStyle(.secondary)
                                 Label("Evidence on iPhone", systemImage: "iphone").font(.system(size: 9))

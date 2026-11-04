@@ -318,7 +318,7 @@ enum ClaritasInterfaceLanguage {
     static let current = "en"
 }
 
-struct NewsTranslationAvailability: Codable {
+struct NewsTranslationAvailability: Codable, Hashable {
     let status: String
     let reason: String?
     let retry_after: String?
@@ -335,6 +335,45 @@ struct NewsTranslation: Codable {
     let summary_generated_at: String?
     let source_content_preserved: Bool?
     let article_body_used: Bool?
+}
+
+/// Provenance for a cached headline translation. Summaries retain their own
+/// source/interpretation labels and are never implied to be translated here.
+struct IntelligenceHeadlineTranslation: Codable, Hashable {
+    let target_language_code: String
+    let headline_kind: String?
+    var summary_kind: String? = nil
+    var summary_status: String? = nil
+    var summary_generated_at: String? = nil
+    let provider: String
+    let model: String?
+    let title_generated_at: String?
+    let source_content_preserved: Bool?
+    let article_body_used: Bool?
+}
+
+enum IntelligenceTranslationPresentation {
+    static func disclosure(status: String?, language: String?, target: String?,
+                           translation: IntelligenceHeadlineTranslation?, availability: NewsTranslationAvailability?) -> String? {
+        if status == "translated" {
+            let source = language?.uppercased() ?? "SOURCE"
+            let destination = (translation?.target_language_code ?? target ?? "en").uppercased()
+            return "AI translated headline · \(source)→\(destination)"
+        }
+        guard let status, status != "not_required" else { return nil }
+        switch availability?.status {
+        case "quota_limited": return "Original language · translation allowance reached"
+        case "disabled": return "Original language · translations disabled"
+        case "unavailable": return "Original language · translation unavailable"
+        default: return status == "unavailable" ? "Original language · translation unavailable" : "Original language · translation pending"
+        }
+    }
+
+    static func original(_ original: String?, display: String?) -> String? {
+        guard let value = original?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty,
+              value != display?.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+        return value
+    }
 }
 
 struct NewsLinkedEvent: Codable, Identifiable {
@@ -2872,6 +2911,22 @@ struct IntelligenceEvent: Codable, Identifiable, Hashable {
     var priority_score: Double? = nil
     var priority_reasons: [String]? = nil
 
+    var original_title: String? = nil
+    var original_summary: String? = nil
+    var language_code: String? = nil
+    var display_language: String? = nil
+    var translated_title: String? = nil
+    var translation_status: String? = nil
+    var summary_translation_status: String? = nil
+    var translation_notice: String? = nil
+    var translation: IntelligenceHeadlineTranslation? = nil
+    var translation_availability: NewsTranslationAvailability? = nil
+
+    var headlineTranslationDisclosure: String? {
+        IntelligenceTranslationPresentation.disclosure(status: translation_status, language: language_code,
+            target: display_language, translation: translation, availability: translation_availability)
+    }
+
     var isArchived: Bool {
         ["resolved", "dismissed"].contains(status.lowercased()) || freshness_state == "expired"
     }
@@ -2945,6 +3000,22 @@ struct IntelligenceEvidence: Codable, Identifiable {
     let correlation_factors: JSONValue?
     let provenance: JSONValue?
     let metadata: JSONValue?
+    var original_title: String? = nil
+    var original_summary: String? = nil
+    var language_code: String? = nil
+    var display_language: String? = nil
+    var translated_title: String? = nil
+    var translation_status: String? = nil
+    var summary_translation_status: String? = nil
+    var translation_notice: String? = nil
+    var translation: IntelligenceHeadlineTranslation? = nil
+    var translation_availability: NewsTranslationAvailability? = nil
+
+    var headlineTranslationDisclosure: String? {
+        IntelligenceTranslationPresentation.disclosure(status: translation_status, language: language_code,
+            target: display_language, translation: translation, availability: translation_availability)
+    }
+
 }
 
 struct PushDeviceRegistration: Codable, Identifiable {
@@ -3108,12 +3179,39 @@ struct IntelligenceRelatedEvent: Codable, Identifiable {
     let confidence: Double
     let rationale: String?
 
+    var original_title: String? = nil
+    var original_summary: String? = nil
+    var language_code: String? = nil
+    var display_language: String? = nil
+    var translated_title: String? = nil
+    var translation_status: String? = nil
+    var summary_translation_status: String? = nil
+    var translation_notice: String? = nil
+    var translation: IntelligenceHeadlineTranslation? = nil
+    var translation_availability: NewsTranslationAvailability? = nil
+
+    var headlineTranslationDisclosure: String? {
+        IntelligenceTranslationPresentation.disclosure(status: translation_status, language: language_code,
+            target: display_language, translation: translation, availability: translation_availability)
+    }
+
     enum CodingKeys: String, CodingKey {
+        case original_title, original_summary, language_code, display_language, translated_title, translation_status, summary_translation_status, translation_notice, translation, translation_availability
         case id, event_type, title, status, severity, last_activity_time, relevance_score, relationship, confidence, rationale
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        original_title = try container.decodeIfPresent(String.self, forKey: .original_title)
+        original_summary = try container.decodeIfPresent(String.self, forKey: .original_summary)
+        language_code = try container.decodeIfPresent(String.self, forKey: .language_code)
+        display_language = try container.decodeIfPresent(String.self, forKey: .display_language)
+        translated_title = try container.decodeIfPresent(String.self, forKey: .translated_title)
+        translation_status = try container.decodeIfPresent(String.self, forKey: .translation_status)
+        summary_translation_status = try container.decodeIfPresent(String.self, forKey: .summary_translation_status)
+        translation_notice = try container.decodeIfPresent(String.self, forKey: .translation_notice)
+        translation = try container.decodeIfPresent(IntelligenceHeadlineTranslation.self, forKey: .translation)
+        translation_availability = try container.decodeIfPresent(NewsTranslationAvailability.self, forKey: .translation_availability)
         id = try container.decode(String.self, forKey: .id)
         event_type = try container.decode(String.self, forKey: .event_type)
         title = try container.decode(String.self, forKey: .title)
@@ -3193,12 +3291,39 @@ struct IntelligenceLinkedNews: Codable, Identifiable {
     let observed_at: Date
     let confidence: Double
 
+    var original_title: String? = nil
+    var original_summary: String? = nil
+    var language_code: String? = nil
+    var display_language: String? = nil
+    var translated_title: String? = nil
+    var translation_status: String? = nil
+    var summary_translation_status: String? = nil
+    var translation_notice: String? = nil
+    var translation: IntelligenceHeadlineTranslation? = nil
+    var translation_availability: NewsTranslationAvailability? = nil
+
+    var headlineTranslationDisclosure: String? {
+        IntelligenceTranslationPresentation.disclosure(status: translation_status, language: language_code,
+            target: display_language, translation: translation, availability: translation_availability)
+    }
+
     enum CodingKeys: String, CodingKey {
+        case original_title, original_summary, language_code, display_language, translated_title, translation_status, summary_translation_status, translation_notice, translation, translation_availability
         case id, evidence_type, relationship, title, summary, url, publisher, observed_at, confidence
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        original_title = try container.decodeIfPresent(String.self, forKey: .original_title)
+        original_summary = try container.decodeIfPresent(String.self, forKey: .original_summary)
+        language_code = try container.decodeIfPresent(String.self, forKey: .language_code)
+        display_language = try container.decodeIfPresent(String.self, forKey: .display_language)
+        translated_title = try container.decodeIfPresent(String.self, forKey: .translated_title)
+        translation_status = try container.decodeIfPresent(String.self, forKey: .translation_status)
+        summary_translation_status = try container.decodeIfPresent(String.self, forKey: .summary_translation_status)
+        translation_notice = try container.decodeIfPresent(String.self, forKey: .translation_notice)
+        translation = try container.decodeIfPresent(IntelligenceHeadlineTranslation.self, forKey: .translation)
+        translation_availability = try container.decodeIfPresent(NewsTranslationAvailability.self, forKey: .translation_availability)
         id = try container.decode(String.self, forKey: .id)
         evidence_type = try container.decode(String.self, forKey: .evidence_type)
         relationship = try container.decode(String.self, forKey: .relationship)
@@ -3704,7 +3829,20 @@ struct IntelligenceOverview: Codable {
         let high_priority_count: Int
     }
     struct TimelineEntry: Codable, Identifiable {
-        struct Source: Codable { let label: String; let url: String?; let domain: String }
+        struct Source: Codable {
+            let label: String
+            let url: String?
+            let domain: String
+            var original_title: String? = nil
+            var language_code: String? = nil
+            var display_language: String? = nil
+            var translated_title: String? = nil
+            var translation_status: String? = nil
+            var summary_translation_status: String? = nil
+            var translation_notice: String? = nil
+            var translation: IntelligenceHeadlineTranslation? = nil
+            var translation_availability: NewsTranslationAvailability? = nil
+        }
         struct Imagery: Codable { let preview_url: String; let captured_at: Date?; let attribution: String }
         var id: String { event_id }
         let event_id: String
@@ -3719,6 +3857,22 @@ struct IntelligenceOverview: Codable {
         let priority_reasons: [String]
         let source_refs: [Source]
         let imagery: Imagery?
+        var original_title: String? = nil
+        var original_summary: String? = nil
+        var language_code: String? = nil
+        var display_language: String? = nil
+        var translated_title: String? = nil
+        var translation_status: String? = nil
+        var summary_translation_status: String? = nil
+        var translation_notice: String? = nil
+        var translation: IntelligenceHeadlineTranslation? = nil
+        var translation_availability: NewsTranslationAvailability? = nil
+
+        var headlineTranslationDisclosure: String? {
+            IntelligenceTranslationPresentation.disclosure(status: translation_status, language: language_code,
+                target: display_language, translation: translation, availability: translation_availability)
+        }
+
     }
     struct Coverage: Codable {
         let sample_limit: Int

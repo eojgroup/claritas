@@ -1,5 +1,6 @@
 import { listNewsImages } from "../image-analysis/news-image-store";
 import { getEventContextImages } from "./context-images";
+import { loadTranslationContext, translateEventPresentation, translateEvidencePresentation, normalizeIntelligenceDisplayLanguage } from "./translation-presentation";
 import { sourceRecordBigintSql, canonicalSocialSignalBigintSql } from "./source-record";
 import { getRegionalContext } from "./regional-context";
 import { activeSocialEvidenceSql, buildSignalCoverage, eventOriginDomainSql, eventSignalDomainsSql, eventNewsPrioritySql, eventPriorityScoreSql, eventPriorityReasons } from "./event-priority";
@@ -301,7 +302,9 @@ export async function listIntelligenceEvents(options: {
   eventType?: string;
   since?: Date;
   includeExpired?: boolean;
+  displayLanguage?: string;
 } = {}) {
+  const displayLanguage = normalizeIntelligenceDisplayLanguage(options.displayLanguage ?? "en");
   const params: unknown[] = [];
   const where: string[] = [
     `NOT (
@@ -415,11 +418,15 @@ export async function listIntelligenceEvents(options: {
      ORDER BY selection.feed_order_score DESC,event.last_activity_time DESC,event.id`,
     params,
   );
-  const social = await getSocialEventContextCounts(rows.map((row) => row.id));
-  return rows.map((row) => ({ ...eventToApi(row), social_context_count: social.get(row.id) ?? 0 }));
+  const eventIds = rows.map((row) => row.id);
+  const [social, translations] = await Promise.all([
+    getSocialEventContextCounts(eventIds), loadTranslationContext(eventIds, [], displayLanguage),
+  ]);
+  return rows.map((row) => translateEventPresentation({ ...eventToApi(row), social_context_count: social.get(row.id) ?? 0 }, translations));
 }
 
-export async function getIntelligenceEvent(eventId: string) {
+export async function getIntelligenceEvent(eventId: string, options: { displayLanguage?: string } = {}) {
+  const displayLanguage = normalizeIntelligenceDisplayLanguage(options.displayLanguage ?? "en");
   const [eventResult, evidenceResult, locationsResult, observationsResult, relatedResult] = await Promise.all([
     query<EventRow>(
       `SELECT event.*, location.canonical_name AS location_name,
@@ -547,7 +554,10 @@ export async function getIntelligenceEvent(eventId: string) {
   ]);
   const event = eventResult.rows[0];
   if (!event) return null;
-  const normalizedEvent = eventToApi(event);
+  const translations = await loadTranslationContext([eventId, ...relatedResult.rows.map((row: any) => row.id)],
+    evidenceResult.rows.filter((row: any) => row.domain === "news" && row.source_record_type === "item")
+      .map((row: any) => String(row.source_record_id)), displayLanguage);
+  const normalizedEvent = translateEventPresentation(eventToApi(event), translations);
   const evidence = evidenceResult.rows.map((row: any) => {
     const gdeltPresentation = row.source_record_type === "global_event"
       ? buildGdeltEventPresentation({
@@ -562,7 +572,7 @@ export async function getIntelligenceEvent(eventId: string) {
           articleCount: row.gdelt_article_count,
         })
       : null;
-    return {
+    return translateEvidencePresentation({
       ...row,
       source_title: gdeltPresentation?.title ?? row.source_title,
       source_summary: gdeltPresentation?.summary ?? row.source_summary,
@@ -570,7 +580,7 @@ export async function getIntelligenceEvent(eventId: string) {
       correlation_score: row.correlation_score == null ? null : Number(row.correlation_score),
       observed_at: iso(row.observed_at),
       published_at: iso(row.published_at),
-    };
+    }, translations);
   });
   const linkedNews = evidence.filter((row: any) => (
     row.domain === "news" && row.source_record_type === "item"
@@ -624,12 +634,12 @@ export async function getIntelligenceEvent(eventId: string) {
       linked_news_count: linkedNews.length,
       linked_news: linkedNews,
     })),
-    related_events: relatedResult.rows.map((row: any) => ({
+    related_events: relatedResult.rows.map((row: any) => translateEventPresentation({
       ...row,
       confidence: Number(row.confidence),
       relevance_score: Number(row.relevance_score),
       last_activity_time: iso(row.last_activity_time),
-    })),
+    }, translations)),
     epistemic_notice: "Reported events, observed signals, derived metrics, model interpretations and Claritas assessments are labelled separately. Correlation does not establish causation.",
   };
 }

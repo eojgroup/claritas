@@ -1,3 +1,4 @@
+import { headlineTranslationFields } from "./translation-presentation-model";
 type GdeltPresentationInput = {
   eventCode?: unknown;
   eventRootCode?: unknown;
@@ -179,6 +180,7 @@ export function buildEventUnderstanding(event: Record<string, unknown>, evidence
 
 export function buildLinkedNewsPresentation(row: Record<string, unknown>) {
   return {
+    ...headlineTranslationFields(row),
     id: row.id,
     evidence_type: row.evidence_type,
     relationship: row.relationship,

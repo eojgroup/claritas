@@ -643,7 +643,7 @@ final class APIClient {
 
     func fetchIntelligenceOverview(scope: IntelligenceOverviewScope = IntelligenceOverviewScope()) async throws -> IntelligenceOverview {
         var components = URLComponents(url: baseURL.appendingPathComponent("/api/intelligence/overview"), resolvingAgainstBaseURL: false)!
-        components.queryItems = scope.queryItems
+        components.queryItems = scope.queryItems + [URLQueryItem(name: "display_language", value: ClaritasInterfaceLanguage.current)]
         return try await request(URLRequest(url: components.url!), as: IntelligenceOverview.self)
     }
 
@@ -652,7 +652,8 @@ final class APIClient {
             url: baseURL.appendingPathComponent("/api/intelligence/events"),
             resolvingAgainstBaseURL: false
         )!
-        var items = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 100)))]
+        var items = [URLQueryItem(name: "limit", value: String(min(max(limit, 1), 100))),
+                     URLQueryItem(name: "display_language", value: ClaritasInterfaceLanguage.current)]
         if let country, country.range(of: "^[A-Za-z]{2}$", options: .regularExpression) != nil {
             items.append(URLQueryItem(name: "country", value: country.uppercased()))
         }
@@ -675,8 +676,9 @@ final class APIClient {
 
     func fetchIntelligenceEvent(id: String) async throws -> IntelligenceEventDetail {
         let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
-        let url = baseURL.appendingPathComponent("/api/intelligence/events/\(encoded)")
-        return try await request(URLRequest(url: url), as: IntelligenceEventDetail.self)
+        var components = URLComponents(url: baseURL.appendingPathComponent("/api/intelligence/events/\(encoded)"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "display_language", value: ClaritasInterfaceLanguage.current)]
+        return try await request(URLRequest(url: components.url!), as: IntelligenceEventDetail.self)
     }
 
     func fetchEventGibsContext(id: String) async throws -> GibsEventContext? {
