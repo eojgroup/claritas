@@ -162,3 +162,11 @@ Read-only production verification confirmed the connection startup policy with
 `SHOW jit`. A database integration test covers that policy, and an additional
 fixture covers assessment freshness, rejected sources, social expiry and
 critical-event ranking. No schema change or historical data mutation is needed.
+
+Final [GKE release](https://github.com/eojgroup/claritas/actions/runs/41996732601)
+succeeded for `05b99d2`; API, web and worker are ready on that revision. Live
+reader connections report `jit=off`. Verification returned 100 events in
+1.946 seconds, 30 events in 1.709 seconds, overview in 371 ms, current event
+detail in 229 ms and a cached translated headline with its original/provenance
+in 64 ms. Health and readiness both returned 200. The pipeline's database,
+ingestion, authentication, static-egress and briefing runtime checks passed.
