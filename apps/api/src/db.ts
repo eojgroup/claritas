@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { randomUUID } from "crypto";
+import { runtimeRole } from "./runtime-role";
 
 const required = (name: string): string => {
   const v = process.env[name];
@@ -53,6 +54,10 @@ export const pool = new Pool({
   user,
   password,
   ssl: false,
+  // Reader queries need a fast first response. LLVM compilation of large
+  // evidence expressions can exceed their execution time and request deadline.
+  // Keep long-running worker sessions on the database's existing policy.
+  options: runtimeRole === "api" ? "-c jit=off" : undefined,
   application_name:
     process.env.CLARITAS_DB_APPLICATION_NAME?.trim() || "claritas-api",
   max: poolMax,

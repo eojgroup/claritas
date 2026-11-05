@@ -132,3 +132,33 @@ Queue priority now favours recent visible canonical headlines, retaining
 language fairness and existing spending controls. A legacy midnight pause no
 longer prevents a bounded five-minute capacity recheck when shared capacity
 recovers. Reads never initiate model generation or provider quota requests.
+
+## 5 November verification and reader follow-up
+
+Release `080af11` successfully deployed the translation, image-context and
+overview improvements to API, web and worker. The Apple run initially failed
+because GitHub could not allocate a hosted macOS runner; its second attempt
+passed all 50 shared Swift tests, iPhone/iPad and Watch compilation, signing,
+upload and TestFlight processing. Build **1.0 (1000.0.54)** is available to
+Claritas Test Group. See [GKE release](https://github.com/eojgroup/claritas/actions/runs/41864118804)
+and [Apple release](https://github.com/eojgroup/claritas/actions/runs/41864118771).
+
+Live API health/readiness returned 200 and the overview returned in 1.26 seconds.
+An existing Galician publisher report rendered its cached English headline,
+original headline and provenance in event detail in 612 ms. The 5 November
+daily briefing published at 05:33 UTC using a free OpenRouter model with
+recorded cost zero. New headline generation remained limited: six local
+reservations produced timeout/empty-response failures, and the shared key
+reported 52 of 50 free requests used with zero remaining. The user's confirmed
+policy is strictly free, accepting reduced coverage when provider quota ends.
+No paid route or quota reset was enabled.
+
+A live 100-event feed still exceeded its 15-second statement deadline. The
+same complete ranking query with JIT disabled completed in 3.07 seconds with
+cold reads and 1.40 seconds warm. API PostgreSQL connections now start with
+`jit=off`; worker connections retain the database default. Feed selection,
+source-quality checks, freshness, ranking and pagination remain unchanged.
+Read-only production verification confirmed the connection startup policy with
+`SHOW jit`. A database integration test covers that policy, and an additional
+fixture covers assessment freshness, rejected sources, social expiry and
+critical-event ranking. No schema change or historical data mutation is needed.
