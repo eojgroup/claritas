@@ -34,3 +34,10 @@ the durable singleton/queue run serially to isolate their transaction fixtures.
 Validation before the recovery release: 455 API unit tests passed; the corrected
 PostGIS overview regression passed. The release pipeline runs the full database
 and web suites again before building or deploying application images.
+
+The next run passed validation and image builds but stopped while packaging
+migrations: the client-side apply annotation exceeded Kubernetes' 262,144-byte
+metadata limit. The run-scoped scripts ConfigMap now uses server-side apply,
+avoiding an annotation that duplicated the complete SQL payload. The ConfigMap
+data remains below its separate one-MiB limit. No application rollout or V71
+execution occurred before this packaging failure.

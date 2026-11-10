@@ -18,6 +18,14 @@ const terraformAuthSecret = readFileSync(resolve(
   "../../../infra/gcp/terraform/k8s-secrets.tf",
 ), "utf8");
 
+test("migration scripts avoid duplicating their SQL in a client-side apply annotation", () => {
+  const start = workflow.indexOf('scripts="flyway-scripts-${GITHUB_RUN_ID}"');
+  const config = workflow.slice(start, workflow.indexOf("# Use a unique Job name", start));
+  assert.ok(start >= 0);
+  assert.match(config, /--from-file=infra\/gcp\/sql\//);
+  assert.match(config, /kubectl apply --server-side --field-manager=claritas-release -f -/);
+});
+
 test("Cloud SQL reconciliation retries busy operations without hiding permanent failures", () => {
   const directory = mkdtempSync(join(tmpdir(), "claritas-cloud-sql-"));
   try {

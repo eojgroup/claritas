@@ -1114,7 +1114,7 @@ jobs:
           scripts="flyway-scripts-${GITHUB_RUN_ID}"
           kubectl -n "$NS" create configmap "$scripts" \
             --from-file=infra/gcp/sql/ \
-            --dry-run=client -o yaml | kubectl apply -f -
+            --dry-run=client -o yaml | kubectl apply --server-side --field-manager=claritas-release -f -
 
           # Use a unique Job name to avoid collisions across runs
           job="flyway-migrate-${GITHUB_RUN_ID}"
