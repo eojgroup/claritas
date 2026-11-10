@@ -1,16 +1,13 @@
-import { query } from "../db";
-import { SharedReadCache } from "../shared-read-cache";
-import { loadTranslationContext, translateEventPresentation, presentTranslatedSource, headlineTranslationFields, unavailableTranslationFields, type HeadlineTranslationPresentation } from "./translation-presentation";
+import { headlineTranslationFields, type HeadlineTranslationPresentation } from "./translation-presentation";
 import { sourceRecordBigintSql, canonicalSocialSignalBigintSql } from "./source-record";
 import { activeSocialEvidenceSql } from "./event-priority";
 import { intelligenceEventExpiresAtSql, intelligenceEventFreshness } from "./freshness";
-import { OVERVIEW_TOPICS, OVERVIEW_SAMPLE_LIMIT, OVERVIEW_EVENT_LIMIT, OVERVIEW_TIMELINE_LIMIT,
+import { OVERVIEW_TOPICS, OVERVIEW_EVENT_LIMIT, OVERVIEW_TIMELINE_LIMIT,
   normalizeOverviewOptions, overviewWindow, buildOverviewAnalytics, overviewTopic, overviewPriority,
   overviewPriorityReasons, type OverviewOptions, type OverviewSample } from "./overview-model";
 export { normalizeOverviewOptions, OVERVIEW_TOPICS } from "./overview-model";
 export type { OverviewOptions, OverviewTopic } from "./overview-model";
 
-const cache = new SharedReadCache({ ttlMs: 60_000, maxEntries: 40, maxBytes: 4 * 1024 * 1024 });
 const topicSql = `CASE ${OVERVIEW_TOPICS.filter((topic) => topic.pattern).map((topic) =>
   `WHEN lower(feed.event_type) ~ '${topic.pattern}' THEN '${topic.key}'`).join(" ")} ELSE 'developments' END`;
 const acceptedEvidenceSql = (itemAlias: string, sourceAlias: string) => `(${activeSocialEvidenceSql()} AND
@@ -32,7 +29,7 @@ export function buildOverviewSampleQuery(options: Required<OverviewOptions>, now
       AND ($5::text IS NULL OR ${topicSql}=$5)
       AND NOT (COALESCE(feed.metadata->>'canonical_evidence_key','') LIKE 'news:global_event:%'
         AND feed.domain_count<=1 AND feed.source_diversity<=1 AND feed.relevance_score<0.65)
-    ORDER BY feed.last_activity_time DESC,feed.id LIMIT $6
+    ORDER BY feed.last_activity_time DESC,feed.id
   )`;
   return { sql: `WITH sampled AS MATERIALIZED (${periodQuery("current")} UNION ALL ${periodQuery("previous")})
     SELECT sampled.*,location.canonical_name AS location_name,country.name AS country_name,
@@ -47,12 +44,12 @@ export function buildOverviewSampleQuery(options: Required<OverviewOptions>, now
     FROM sampled LEFT JOIN intelligence_location location ON location.id=sampled.primary_location_id
     LEFT JOIN country ON country.iso2=sampled.primary_country_iso2
     ORDER BY sampled.period,sampled.last_activity_time DESC,sampled.id`,
-    params: [window.start, window.end, window.previous_start, options.country || null, options.topic || null, OVERVIEW_SAMPLE_LIMIT + 1] };
+    params: [window.start, window.end, window.previous_start, options.country || null, options.topic || null] };
 }
 
 export type OverviewSourceRef = Partial<HeadlineTranslationPresentation> & { label: string; url: string; domain: string; item_id?: string | null };
 export type OverviewImageryRef = { preview_url: string; captured_at: string; attribution: string };
-type HydratedOverviewRow = Partial<HeadlineTranslationPresentation> & {
+export type HydratedOverviewRow = Partial<HeadlineTranslationPresentation> & {
   id: string; event_type: string; title: string; summary: string; status: string; severity: string; confidence: number;
   start_time: string | Date; last_activity_time: string | Date; expires_at: string | Date;
   primary_location_id: string | null; primary_country_iso2: string | null;
@@ -120,6 +117,52 @@ export function buildOverviewEventQuery(ids: string[]) {
     WHERE event.id=ANY($1::uuid[]) AND event.status<>'dismissed'`, params: [ids.slice(0, OVERVIEW_EVENT_LIMIT)] };
 }
 
+/** Background-only scan. Reader requests never inspect canonical evidence. */
+export function buildOverviewProjectionQuery(now: Date, cursor?: { time: string; id: string }, limit = 500) {
+  const window = overviewWindow(168, now);
+  return { sql: `WITH projection AS MATERIALIZED (
+      SELECT feed.* FROM intelligence_event_feed feed
+      WHERE feed.last_activity_time >= $1::timestamptz AND feed.last_activity_time <= $2::timestamptz
+        AND ($3::timestamptz IS NULL OR (feed.last_activity_time,feed.id)<($3::timestamptz,$4::uuid))
+      ORDER BY feed.last_activity_time DESC,feed.id DESC LIMIT $5
+    ) SELECT projection.*,location.canonical_name AS location_name,country.name AS country_name,
+      (projection.status<>'dismissed'
+        AND NOT (COALESCE(projection.metadata->>'canonical_evidence_key','') LIKE 'news:global_event:%'
+          AND projection.domain_count<=1 AND projection.source_diversity<=1 AND projection.relevance_score<0.65)
+        AND (COALESCE(projection.metadata->>'canonical_evidence_key','') NOT LIKE 'social:social_signal:%'
+          OR EXISTS(SELECT 1 FROM social_signal retained WHERE retained.id=${canonicalSocialSignalBigintSql("projection")} AND retained.expires_at>now()))
+        AND coverage.evidence_count>0) AS displayable,
+      coverage.evidence_count,coverage.signal_domains,coverage.source_refs,
+      event.title,left(event.summary,500) AS summary,event.confidence,event.start_time,
+      ${intelligenceEventExpiresAtSql("event")} AS expires_at,
+      location.location_type,location.monitoring_tier,
+      COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,location.latitude) AS latitude,
+      COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude
+    FROM projection JOIN intelligence_event event ON event.id=projection.id
+    LEFT JOIN intelligence_location location ON location.id=projection.primary_location_id
+    LEFT JOIN country ON country.iso2=projection.primary_country_iso2
+    CROSS JOIN LATERAL (
+      SELECT count(*)::int AS evidence_count,
+        COALESCE(array_agg(DISTINCT CASE
+          WHEN evidence.relationship='model_interpretation' AND evidence.domain<>'podcast' THEN 'model_interpretation'
+          WHEN evidence.domain='disaster' THEN 'earth_observation'
+          WHEN evidence.domain='earth_observation' AND evidence.source_record_type IN ('earth_observation','earth_scene') THEN 'imagery'
+          ELSE evidence.domain END) FILTER (WHERE evidence.relationship<>'assessment'),ARRAY[]::text[]) AS signal_domains,
+        COALESCE(to_jsonb((array_agg(jsonb_build_object('label',
+          COALESCE(NULLIF(article.title,''),NULLIF(evidence.attribution,''),NULLIF(evidence_source.name,''),'Source record'),
+          'url',COALESCE(article.url,NULLIF(evidence.provenance->>'url','')),'domain',evidence.domain,'item_id',article.id::text)
+          ORDER BY evidence.observed_at DESC,evidence.id) FILTER (
+            WHERE COALESCE(article.url,NULLIF(evidence.provenance->>'url','')) ~ '^https?://'
+              AND evidence.relationship<>'model_interpretation'))[1:2]),'[]'::jsonb) AS source_refs
+      FROM intelligence_event_evidence evidence
+      LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
+      LEFT JOIN item article ON article.id=${sourceRecordBigintSql("evidence", "item")}
+      WHERE evidence.event_id=projection.id AND ${acceptedEvidenceSql("article", "evidence_source")}
+    ) coverage
+    ORDER BY projection.last_activity_time DESC,projection.id DESC`,
+    params: [window.previous_start, window.end, cursor?.time ?? null, cursor?.id ?? null, Math.max(1, Math.min(limit, 1000))] };
+}
+
 const iso = (value: Date | string) => new Date(value).toISOString();
 const safeSourceRefs = (refs: OverviewSourceRef[]) => (Array.isArray(refs) ? refs : []).filter((ref) => {
   try { const url = new URL(ref.url); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password; } catch { return false; }
@@ -150,29 +193,11 @@ export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRow
   return { ...analytics, events, timeline };
 }
 
-/** Called after auth only; shared data cache never contains account state. */
-export async function getIntelligenceOverview(input: OverviewOptions = {}) {
-  const options = normalizeOverviewOptions(input);
-  return cache.get(JSON.stringify(options), async () => {
-    const now = new Date();
-    const sampleStatement = buildOverviewSampleQuery(options, now);
-    const { rows } = await query<OverviewSample>(sampleStatement.sql, sampleStatement.params);
-    const analytics = buildOverviewAnalytics(rows, options, now);
-    const ids = analytics.current.slice(0, OVERVIEW_EVENT_LIMIT).map((row) => row.id);
-    const eventStatement = buildOverviewEventQuery(ids);
-    const eventRows = ids.length ? (await query<HydratedOverviewRow>(eventStatement.sql, eventStatement.params)).rows : [];
-    const translations = await loadTranslationContext(ids,
-      eventRows.flatMap((row) => row.source_refs.map((ref) => ref.item_id).filter((id): id is string => Boolean(id))), options.displayLanguage);
-    const presented = eventRows.map((row) => ({ ...translateEventPresentation(row, translations),
-      source_refs: row.source_refs.map((ref) => {
-        const source = ref.item_id ? translations.items.get(ref.item_id) : null;
-        if (!source) return translations.unavailable ? { ...ref, ...unavailableTranslationFields(ref.label, null, translations) } : ref;
-        const display = presentTranslatedSource(source, translations.targetLanguage, translations.availability);
-        const fields = headlineTranslationFields(display);
-        delete fields.original_summary;
-        return { ...ref, ...fields, label: display.title ?? ref.label };
-      }),
-    }));
-    return assembleIntelligenceOverview(rows, presented, options, now);
-  });
+export type IntelligenceOverview = ReturnType<typeof assembleIntelligenceOverview>;
+export type OverviewSnapshot = { status: "fresh" | "stale" | "warming"; generated_at: string | null; age_seconds: number | null; pending_events?: number };
+
+/** Called after auth only; this reads saved shared data, never account state. */
+export async function getIntelligenceOverview(input: OverviewOptions = {}): Promise<IntelligenceOverview & { snapshot: OverviewSnapshot }> {
+  const { readIntelligenceOverviewSnapshot } = await import("./overview-snapshot");
+  return readIntelligenceOverviewSnapshot(normalizeOverviewOptions(input));
 }

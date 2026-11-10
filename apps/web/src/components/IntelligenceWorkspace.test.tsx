@@ -159,7 +159,7 @@ describe("IntelligenceWorkspace", () => {
     expect(fetchIntelligenceAlerts).not.toHaveBeenCalled();
     expect(onEventLoaded).toHaveBeenCalledWith(event);
     expect(screen.queryByRole("region", { name: "Prioritized event investigations" })).toBeNull();
-    fireEvent.keyDown(screen.getByRole("button", { name: "Read Earth observation connections" }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Read Earth observation connections" }));
     expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("1 record");
     expect(screen.getByRole("heading", { name: "Active fire hotspot" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Port operator responds to reported fire" })).toBeNull();
@@ -186,6 +186,7 @@ describe("IntelligenceWorkspace", () => {
     expect(screen.getByRole("link", { name: /NASA GIBS provenance/i }).getAttribute("href")).toBe("https://gibs.earthdata.nasa.gov/wms/example.jpg");
     expect(screen.getByText("Observed")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Active fire hotspot" })).toBeTruthy();
+    screen.getAllByText("Connection & provenance").forEach((summary) => fireEvent.click(summary));
     expect(screen.getAllByRole("link", { name: /Open source/i }).some((link) => link.getAttribute("href") === "https://firms.modaps.eosdis.nasa.gov/")).toBe(true);
     expect(screen.getByText("Attribution: NASA FIRMS")).toBeTruthy();
     expect(screen.getByText(/Correlation does not establish causation/i)).toBeTruthy();
@@ -425,7 +426,7 @@ describe("IntelligenceWorkspace", () => {
       element.textContent?.includes("Why shown: Shown as a likely connection because of")
     ))).toBe(true);
     expect(screen.getAllByText("Context").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /1 Transport Context \/ interpretation/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Read Transport connections" }));
     expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("1 record · Transport");
     expect(document.querySelector("#event-evidence-transport-evidence")).toBeTruthy();
     expect(document.querySelector("#event-evidence-weather-evidence")).toBeNull();
@@ -503,16 +504,17 @@ describe("IntelligenceWorkspace", () => {
 
     render(<IntelligenceWorkspace initialEventId={event.id} />);
 
-    expect(await screen.findByRole("heading", { name: "Related signals" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Around this event" })).toBeTruthy();
-    expect(screen.getAllByText("Coverage limited").length).toBe(2);
-    expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("0 records");
+    expect(await screen.findByText("What happened")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Related signals" })).toBeNull();
+    fireEvent.click(screen.getByText("Explore surrounding context"));
+    expect(await screen.findByRole("heading", { name: "Around this event" })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "Evidence filter results" })).toBeNull();
     expect(screen.getByText(/0 linked reports/i)).toBeTruthy();
     expect(screen.queryByText("Automated reporting coverage assessment")).toBeNull();
+    fireEvent.click(screen.getByText(/Data coverage and comparison limits/));
     expect(screen.getByRole("heading", { name: "No local weather sample available" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Nearby transport comparison pending" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Weather Coverage limited/ }));
-    expect(screen.getByText("No linked weather records")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Read Weather connections" })).toBeNull();
 
   });
 
@@ -591,7 +593,7 @@ describe("IntelligenceWorkspace", () => {
     render(<IntelligenceWorkspace initialEventId={event.id} onOpenImagery={onOpenImagery} />);
     await screen.findByRole("heading", { name: event.title });
     fireEvent.click(screen.getByText(/Imagery assessment ·/));
-    fireEvent.click(screen.getByRole("button", { name: "Inspect event imagery" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Inspect event imagery" }));
     expect(onOpenImagery).toHaveBeenCalledWith(event.id);
   });
 
@@ -617,6 +619,7 @@ describe("IntelligenceWorkspace", () => {
       updated_at: "2026-08-11T09:00:00Z",
     });
     render(<IntelligenceWorkspace initialEventId={event.id} />);
+    fireEvent.click(await screen.findByText("Follow updates"));
     const emailToggle = await screen.findByRole("button", { name: /Email important events · Off/i });
     expect(emailToggle.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(emailToggle);
@@ -634,6 +637,9 @@ describe("IntelligenceWorkspace", () => {
       items: [{ id: "regional", title: "Other regional development", url: "https://example.test/regional", publisher: "Regional Wire", observed_at: "2026-08-11T08:00:00Z", published_at: null, scope_label: "Same country · AE" }],
     } });
     render(<IntelligenceWorkspace initialEventId={event.id} />);
+    expect(await screen.findByText("Explore surrounding context")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Nearby reporting" })).toBeNull();
+    fireEvent.click(screen.getByText("Explore surrounding context"));
     expect(await screen.findByRole("heading", { name: "Nearby reporting" })).toBeTruthy();
     expect(screen.getByText("Same country · AE · context only")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Other regional development" }).closest(".regional-reporting")).toBeTruthy();

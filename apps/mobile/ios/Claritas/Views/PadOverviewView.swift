@@ -57,60 +57,41 @@ struct PadOverviewView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     commandHeader
-                    workspaceStrip
 
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: 16) {
                             SignalMapPanel(
                                 height: 500,
-                                allowsComparison: true,
-                                showsCountryProfile: false
+                                allowsComparison: false,
+                                showsCountryProfile: false,
+                                overviewOnly: true
                             )
                             .frame(minWidth: 320, maxWidth: .infinity, alignment: .top)
 
                             worldContext
-                                .frame(width: 380, alignment: .top)
+                                .frame(width: 420, alignment: .top)
                         }
 
                         VStack(spacing: 16) {
                             SignalMapPanel(
                                 height: 460,
-                                allowsComparison: true,
-                                showsCountryProfile: false
+                                allowsComparison: false,
+                                showsCountryProfile: false,
+                                overviewOnly: true
                             )
                             worldContext
                         }
                     }
 
-                    IntelligenceOverviewPanel()
-
                     BriefingOverviewCard(briefing: model.dailyBriefing) {
                         destination = .briefing
                     }
 
-                    newsPanel
-
-                    metrics
-
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 16)], alignment: .leading, spacing: 16) {
-                        focusPanel
-                        marketPanel
-                        weatherPanel
-                    }
                 }
                 .padding(22)
             }
         }
-        .task(id: padNewsRequestKey) {
-            guard model.authStatus == .authed, model.hasPaidAccess else { return }
-            guard model.rankedNewsScopeCountry != selectedNewsCountry
-                    || model.rankedNewsScopeCategory != model.selectedNewsCategory
-                    || !model.rankedNewsMetadataIncluded else { return }
-            await model.refreshRankedNews(
-                country: selectedNewsCountry,
-                category: model.selectedNewsCategory
-            )
-        }
+
     }
 
     @ViewBuilder
@@ -118,14 +99,14 @@ struct PadOverviewView: View {
         if let eventID = model.selectedIntelligenceEventID {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Label("Event context", systemImage: "link")
-                        .font(.headline)
+                    Text("Event").font(.headline)
                     Spacer()
                     Button {
                         model.selectedIntelligenceEventID = nil
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .frame(minWidth: 44, minHeight: 44)
+                        Label("Developments", systemImage: "chevron.left")
+                            .font(.caption.weight(.semibold))
+                            .frame(minHeight: 44)
                     }
                     .accessibilityLabel("Close event context")
                 }
@@ -134,20 +115,16 @@ struct PadOverviewView: View {
                     .clipShape(RoundedRectangle(cornerRadius: ClaritasLayout.panelRadius))
             }
         } else {
-            OverviewSatelliteContextView(destination: $destination)
+            IntelligenceOverviewPanel()
         }
     }
 
     private var commandHeader: some View {
         HStack(alignment: .center, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("WHAT’S HAPPENING · WHERE")
-                    .font(.caption.weight(.semibold))
-                    .tracking(1.4)
-                    .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 Text("World overview")
                     .font(.largeTitle.weight(.semibold))
-                Text("Explore a place, follow a developing event, and see its evidence in context.")
+                Text("\(model.selectedCountry.flatMap { Locale.current.localizedString(forRegionCode: $0) } ?? "Worldwide") · \(model.overviewScope.windowLabel)")
                     .font(.subheadline)
                     .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
             }
@@ -162,8 +139,7 @@ struct PadOverviewView: View {
                 .controlSize(.large)
             }
         }
-        .padding(20)
-        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
+        .padding(.vertical, 6)
     }
 
     private var workspaceStrip: some View {

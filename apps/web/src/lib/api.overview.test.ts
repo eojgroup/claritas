@@ -11,7 +11,7 @@ it("requests one bounded overview with the selected topic, place and period", as
   const [address, init] = fetch.mock.calls[0];
   const url = new URL(address, "https://claritas.test");
   expect(url.pathname).toBe("/api/intelligence/overview");
-  expect(Object.fromEntries(url.searchParams)).toEqual({ hours: "72", country: "SE", topic: "transport" });
+  expect(Object.fromEntries(url.searchParams)).toEqual({ hours: "72", country: "SE", topic: "transport", priority: "high" });
   expect(init.credentials).toBe("include");
   expect(init.signal).toBeInstanceOf(AbortSignal);
 });

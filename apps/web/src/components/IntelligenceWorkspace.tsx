@@ -1,6 +1,6 @@
 import CountryFlag from "./CountryFlag";
 import EventVisualContext from "./EventVisualContext";
-import ContextImageGallery from "./ContextImageGallery";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -153,6 +153,10 @@ export default function IntelligenceWorkspace({
   const [events, setEvents] = useState<IntelligenceEvent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(initialEventId ?? null);
   const [detail, setDetail] = useState<IntelligenceEventDetail | null>(null);
+  const [imageryExpanded, setImageryExpanded] = useState(false);
+  const [contextExpanded, setContextExpanded] = useState(false);
+  const [contextLoading, setContextLoading] = useState(false);
+  const [contextError, setContextError] = useState<string | null>(null);
   const [gibsContext, setGibsContext] = useState<GibsEventContext | null>(null);
   const [severity, setSeverity] = useState<IntelligenceSeverity | "all">("all");
   const [includeExpired, setIncludeExpired] = useState(false);
@@ -164,6 +168,8 @@ export default function IntelligenceWorkspace({
   const [selectedFamily, setSelectedFamily] = useState("all");
   const [watches, setWatches] = useState<IntelligenceWatch[]>([]);
   const [alerts, setAlerts] = useState<IntelligenceAlert[]>([]);
+  const [watchControlsExpanded, setWatchControlsExpanded] = useState(false);
+  const [watchLoading, setWatchLoading] = useState(false);
   const [watchPending, setWatchPending] = useState(false);
   const detailPanelRef = useRef<HTMLElement | null>(null);
   const eventScopeRef = useRef<string | null>(null);
@@ -250,15 +256,29 @@ export default function IntelligenceWorkspace({
   }, [embedded, loadEvents]);
 
   useEffect(() => {
-    if (!embedded) return;
-    let active = true;
-    void fetchIntelligenceWatchlist().then((rows) => {
-      if (active) setWatches(rows);
-    }).catch(() => { /* Following an event remains optional. */ });
-    return () => { active = false; };
-  }, [embedded]);
+    setSelectedFamily("all"); setImageryExpanded(false); setContextExpanded(false); setContextError(null); setWatchControlsExpanded(false);
+  }, [selectedId]);
 
-  useEffect(() => { setSelectedFamily("all"); }, [selectedId]);
+  useEffect(() => {
+    if (!embedded || !watchControlsExpanded) return;
+    let active = true;
+    setWatchLoading(true);
+    void fetchIntelligenceWatchlist().then((rows) => { if (active) setWatches(rows); })
+      .catch(() => { if (active) setError("Could not load followed updates."); })
+      .finally(() => { if (active) setWatchLoading(false); });
+    return () => { active = false; };
+  }, [embedded, watchControlsExpanded]);
+
+  useEffect(() => {
+    if (!selectedId || !contextExpanded) return;
+    let active = true;
+    setContextLoading(true); setContextError(null);
+    void fetchIntelligenceEvent(selectedId, { includeContext: true }).then((value) => {
+      if (active) setDetail(value);
+    }).catch(() => { if (active) setContextError("Surrounding context could not be loaded."); })
+      .finally(() => { if (active) setContextLoading(false); });
+    return () => { active = false; };
+  }, [selectedId, contextExpanded]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -294,12 +314,12 @@ export default function IntelligenceWorkspace({
   useEffect(() => {
     let active = true;
     setGibsContext((current) => current?.event_id === selectedId ? current : null);
-    if (!selectedId) return () => { active = false; };
+    if (!selectedId || !imageryExpanded) return () => { active = false; };
     fetchEventGibsContext(selectedId)
       .then((value) => { if (active) setGibsContext(value); })
       .catch(() => { if (active) setGibsContext(null); });
     return () => { active = false; };
-  }, [selectedId, refreshVersion]);
+  }, [selectedId, refreshVersion, imageryExpanded]);
 
   const evidenceThread = useMemo(
     () => [...(detail?.evidence ?? [])].sort((left, right) => (
@@ -333,6 +353,9 @@ export default function IntelligenceWorkspace({
       confidence: item.confidence,
     }));
   }, [detail?.linked_news, linkedReporting]);
+  const leadImage = detail?.news_images?.[0];
+  const leadEvidenceImage = detail?.evidence.find((item) => item.domain === "news" && /^https?:\/\//i.test(item.image_url ?? ""));
+  const leadImageUrl = leadImage?.preview_url || leadEvidenceImage?.image_url;
   const detailPresentation = useMemo(
     () => detail ? presentEvent(detail.event) : null,
     [detail],
@@ -421,7 +444,7 @@ export default function IntelligenceWorkspace({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[color:var(--shell-muted)]">One event · every source</div>
-            <h1 className="mt-1 text-2xl font-semibold text-[color:var(--shell-ink)]">Follow the event across sources</h1>
+            <h1 className="mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">Follow the event across sources</h1>
             <p className="mt-2 max-w-3xl text-sm text-[color:var(--shell-muted)]">
               Start with what happened, explore the connected sources, then review the surrounding region. Events can begin with news, earth observation, imagery, transport, podcasts, socials or weather.
             </p>
@@ -590,63 +613,39 @@ export default function IntelligenceWorkspace({
                 </div>
                 <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-accent)]">{detailPresentation?.typeLabel}</div>
-                    <h2 dir="auto" className="mt-1 text-2xl font-semibold text-[color:var(--shell-ink)]">{detailPresentation?.headline}</h2>
+
+                    <h2 dir="auto" className="mt-1 text-xl font-semibold text-[color:var(--shell-ink)]">{detailPresentation?.headline}</h2>
                     <HeadlineTranslation value={detail.event} showSummaryNotice />
-                    {detailPresentation?.focus && <div className="mt-1 text-xs text-[color:var(--shell-muted)]">Signal focus · {detailPresentation.focus}</div>}
+
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[color:var(--shell-muted)]"><span className="inline-flex items-center gap-2"><MapPin className="h-3.5 w-3.5" /><CountryFlag country={detail.event.primary_country_iso2} />{detailPresentation?.locationLabel}</span><span>Started {dateLabel(detail.event.start_time)}</span><span>Updated {dateLabel(detail.event.last_activity_time)}</span>{detail.event.expires_at && <span className={detail.event.freshness_state === "expired" ? "text-[color:var(--signal-coral)]" : ""}>{detail.event.freshness_state === "expired" ? "Expired" : "Current until"} {dateLabel(detail.event.expires_at)}</span>}</div>
                   </div>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    {watchTarget && <button type="button" disabled={watchPending} onClick={() => void toggleWatch()} className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] px-3 py-2 text-xs font-semibold text-[color:var(--shell-ink)] disabled:opacity-50">{activeWatch ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}{activeWatch ? "Stop watching" : `Watch ${watchTarget.key}`}</button>}
-                    {activeWatch && <button type="button" disabled={watchPending} onClick={() => void toggleWatchEmail()} aria-pressed={watchEmailEnabled} title="Requires a verified account email and email delivery enabled in your briefing profile." className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${watchEmailEnabled ? "border-[color:var(--shell-accent-2)] bg-[color:var(--signal-emerald-soft)] text-[color:var(--shell-ink)]" : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"}`}><Mail className="h-3.5 w-3.5" />Email important events · {watchEmailEnabled ? "On" : "Off"}</button>}
-                  </div>
+                  <details className="event-follow-controls" open={watchControlsExpanded} onToggle={(event) => setWatchControlsExpanded(event.currentTarget.open)}><summary>Follow updates</summary>
+                    {watchLoading && <p role="status">Loading followed updates…</p>}
+                    {watchTarget && <button type="button" disabled={watchPending || watchLoading} onClick={() => void toggleWatch()} className="inline-flex items-center gap-2 rounded-full border border-[color:var(--shell-border)] px-3 py-2 text-xs font-semibold text-[color:var(--shell-ink)] disabled:opacity-50">{activeWatch ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}{activeWatch ? "Stop watching" : `Watch ${watchTarget.key}`}</button>}
+                    {activeWatch && <button type="button" disabled={watchPending || watchLoading} onClick={() => void toggleWatchEmail()} aria-pressed={watchEmailEnabled} title="Requires a verified account email and email delivery enabled in your briefing profile." className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${watchEmailEnabled ? "border-[color:var(--shell-accent-2)] bg-[color:var(--signal-emerald-soft)] text-[color:var(--shell-ink)]" : "border-[color:var(--shell-border)] text-[color:var(--shell-muted)]"}`}><Mail className="h-3.5 w-3.5" />Email important events · {watchEmailEnabled ? "On" : "Off"}</button>}
+                  </details>
                 </div>
               </header>
 
-              <section className="event-situation-brief rounded-xl border border-[color:var(--shell-border)] p-4" aria-labelledby="situation-brief-heading">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Sparkles className="h-3.5 w-3.5 text-[color:var(--shell-accent)]" /><span id="situation-brief-heading">1 · Understand the event</span></div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <article className="event-answer-card">
-                    <div className="event-answer-label">What happened</div>
-                    <p>{detail.understanding?.what_happened || detailPresentation?.summary}</p>
-                  </article>
-                  <article className="event-answer-card">
-                    <div className="event-answer-label">Where</div>
-                    <p className="inline-flex items-start gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--shell-accent-2)]" /><span>{detail.understanding?.where || detailPresentation?.locationLabel}{detail.event.primary_country_iso2 && !detail.understanding?.where && detailPresentation?.locationLabel !== detail.event.primary_country_iso2 ? ` · ${detail.event.primary_country_iso2}` : ""}{detail.locations.length ? ` · ${detail.locations.length} linked ${detail.locations.length === 1 ? "location" : "locations"}` : ""}</span></p>
-                    {detail.understanding?.coordinates && (
-                      <p className="mt-2 text-xs text-[color:var(--shell-muted)]">
-                        {detail.understanding.coordinates.label} · {detail.understanding.coordinates.basis === "source_observed" ? "source-observed geography" : "estimated mapped geography"}
-                      </p>
-                    )}
-                    {!detail.understanding?.coordinates && detail.understanding?.location_basis === "unresolved" && (
-                      <p className="mt-2 text-xs text-[color:var(--shell-muted)]">No defensible event coordinate is available yet.</p>
-                    )}
-                  </article>
-                  <article className="event-answer-card">
-                    <div className="event-answer-label">Why it matters</div>
-                    <p>{detail.understanding?.why_interesting || detailPresentation?.why}</p>
-                  </article>
-                  <article className="event-answer-card">
-                    <div className="event-answer-label">Evidence state</div>
-                    <p>{linkedNews.length} linked {linkedNews.length === 1 ? "report" : "reports"} · {detail.understanding?.physical_observation_count ?? displayedEarthObservations.length} physical {(detail.understanding?.physical_observation_count ?? displayedEarthObservations.length) === 1 ? "observation" : "observations"}.</p>
-                  </article>
-                </div>
-                {detail.event.priority_reasons?.length ? <div className="event-priority-reasons"><strong>Why this event is prioritised</strong><ul>{detail.event.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul><p>Priority describes attention and potential impact. Confidence describes the evidence; related background and unverified claims do not establish confirmation.</p></div> : null}
-                <div className="mt-3 grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-border)]">
-                  {[["Relevance", detail.event.relevance_score], ["Urgency", detail.event.urgency_score], ["Materiality", detail.event.materiality_score]].map(([label, value]) => <div key={String(label)} className="bg-[color:var(--shell-surface)] p-3"><div className="text-[9px] uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">{label}</div><div className="mt-1 text-base font-semibold text-[color:var(--shell-ink)]">{confidenceLabel(Number(value))}</div></div>)}
-                </div>
+              <section className={`event-essential-brief ${leadImageUrl ? "has-image" : ""}`} aria-label="Event essentials">
+                {leadImageUrl && <figure className="event-lead-image"><SatelliteImage sources={[leadImageUrl]} alt={leadImage?.caption || leadImage?.article_title || leadEvidenceImage?.source_title || "Image from linked reporting"} className="h-full w-full object-cover" /><figcaption>Publisher context · {leadImage?.publisher || leadEvidenceImage?.source_name || "Linked reporting"}</figcaption></figure>}
+                <article><h3>What happened</h3><p>{detail.understanding?.what_happened || detailPresentation?.summary}</p></article>
+                {(detail.understanding?.why_interesting || detailPresentation?.why) && <article><h3>Why it matters</h3><p>{detail.understanding?.why_interesting || detailPresentation?.why}</p></article>}
+                <div className="event-essential-facts"><span><MapPin size={13} />{detail.understanding?.where || detailPresentation?.locationLabel}</span><span>{linkedNews.length} linked {linkedNews.length === 1 ? "report" : "reports"}</span>{displayedEarthObservations.length > 0 && <span>{displayedEarthObservations.length} satellite {displayedEarthObservations.length === 1 ? "scene" : "scenes"}</span>}</div>
+                {detail.event.priority_reasons?.length ? <details><summary>Why prioritised</summary><ul>{detail.event.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details> : null}
               </section>
-
-              <EventVisualContext key={`visual-${detail.event.id}`} detail={detail} showLocationMap={!embedded} onSelectFamily={(family) => {
-                setSelectedFamily(family);
-                document.getElementById("event-connection-records")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
-              }} />
-              <ContextImageGallery images={detail.context_images ?? []} onOpenEvent={selectEvent} />
               <EventConnections key={`connections-${detail.event.id}`} detail={detail} selectedFamily={selectedFamily} onSelectFamily={setSelectedFamily} onOpenImagery={onOpenImagery} />
-
-              <details open={Boolean(gibsTrueColor || displayedEarthObservations.length)} id="event-imagery-assessment" className="event-imagery-disclosure rounded-xl border border-[color:var(--shell-border)] p-4">
+              <details className="event-optional-context" open={contextExpanded} onToggle={(event) => setContextExpanded(event.currentTarget.open)}>
+                <summary>Explore surrounding context</summary>
+                {contextLoading && <p role="status">Loading surrounding context…</p>}
+                {contextError && <p role="alert">{contextError}</p>}
+                {contextExpanded && !contextLoading && !contextError && !(detail.context_signals?.length || detail.regional_reporting?.items.length || detail.evidence.some(isContextAssessment)) && <p>No additional surrounding context is available.</p>}
+                {contextExpanded && !contextLoading && <EventConnections detail={detail} contextOnly showRegionalContext />}
+                {contextExpanded && !embedded && <EventVisualContext detail={detail} />}
+              </details>
+              {(detail.event.earth_observation_available || displayedEarthObservations.length > 0) && <details open={imageryExpanded} onToggle={(event) => setImageryExpanded(event.currentTarget.open)} id="event-imagery-assessment" className="event-imagery-disclosure rounded-xl border border-[color:var(--shell-border)] p-4">
                 <summary>Imagery assessment · {satelliteAssessment}</summary>
-                <div className="mt-4">
+                {imageryExpanded && <div className="mt-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Satellite className="h-3.5 w-3.5" /><span id="satellite-context-heading">Satellite assessment</span></div><div className="mt-2 inline-flex rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--shell-ink)]">{satelliteAssessment}</div><p className="mt-2 max-w-2xl text-xs leading-5 text-[color:var(--shell-muted)]">Event-linked scenes may help assess visible conditions or change at the stated location. Browse layers provide regional context only; neither establishes cause by itself.</p></div>
                   {onOpenImagery && <button type="button" onClick={() => onOpenImagery(detail.event.id)} className="rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]">Inspect event imagery</button>}
@@ -690,16 +689,15 @@ export default function IntelligenceWorkspace({
                 ) : (
                   <div className="mt-3 flex items-start gap-3 rounded-lg bg-[color:var(--shell-bg)] p-3 text-xs text-[color:var(--shell-muted)]"><ImageOff className="mt-0.5 h-4 w-4 shrink-0" /><span>{detail.event.earth_observation_available ? "Satellite metadata exists, but no usable asset is currently available in this response." : "No defensible event-specific satellite observation is available yet. The investigation remains supported by the labelled evidence above."}</span></div>
                 )}
-                </div>
-              </details>
+                </div>}
+              </details>}
 
               {detail.locations.length > 0 && (
-                <section aria-labelledby="affected-locations-heading"><h3 id="affected-locations-heading" className="text-sm font-semibold text-[color:var(--shell-ink)]">Affected and exposed locations</h3><div className="mt-2 grid gap-2 sm:grid-cols-2">{detail.locations.map((location) => <div key={`${location.id}-${location.relationship}`} className="rounded-lg border border-[color:var(--shell-border)] p-3"><div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--shell-ink)]"><MapPin className="h-3.5 w-3.5" />{location.canonical_name}</div><div className="mt-1 text-xs capitalize text-[color:var(--shell-muted)]">{location.relationship.replace(/_/g, " ")} · {confidenceLabel(location.confidence)} confidence · {location.location_type.replace(/_/g, " ")}</div></div>)}</div></section>
+                <details><summary>Affected and exposed locations · {detail.locations.length}</summary><div className="mt-2 grid gap-2 sm:grid-cols-2">{detail.locations.map((location) => <div key={`${location.id}-${location.relationship}`} className="rounded-lg border border-[color:var(--shell-border)] p-3"><div className="flex items-center gap-2 text-sm font-semibold text-[color:var(--shell-ink)]"><MapPin className="h-3.5 w-3.5" />{location.canonical_name}</div><div className="mt-1 text-xs capitalize text-[color:var(--shell-muted)]">{location.relationship.replace(/_/g, " ")} · {confidenceLabel(location.confidence)} confidence · {location.location_type.replace(/_/g, " ")}</div></div>)}</div></details>
               )}
 
               {detail.related_events.length > 0 && (
-                <section aria-labelledby="related-events-heading">
-                  <h3 id="related-events-heading" className="text-sm font-semibold text-[color:var(--shell-ink)]">Likely related investigations</h3>
+                <details><summary>Related developments · {detail.related_events.length}</summary>
                   <p className="mt-1 text-xs text-[color:var(--shell-muted)]">These are qualified context links, not assertions that one event caused another. Open a card to inspect its own evidence and rationale.</p>
                   <div className="mt-2 grid gap-2 sm:grid-cols-2">
                     {detail.related_events.map((event) => (
@@ -712,10 +710,10 @@ export default function IntelligenceWorkspace({
                       </button>
                     ))}
                   </div>
-                </section>
+                </details>
               )}
 
-              <div className="event-caution flex gap-2 rounded-lg border p-3 text-xs leading-5"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{detail.epistemic_notice}</span></div>
+              <details className="event-interpretation-notice"><summary>Evidence and interpretation limits</summary><div className="event-caution flex gap-2 rounded-lg border p-3 text-xs leading-5"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span>{detail.epistemic_notice}</span></div></details>
               <div className="flex items-center gap-2 text-xs text-[color:var(--shell-muted)]"><Eye className="h-3.5 w-3.5" />Last activity {dateLabel(detail.event.last_activity_time)}</div>
             </div>
           )}

@@ -2504,7 +2504,8 @@ export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet
 export type IntelligenceOverview = {
   generated_at: string;
   window: { hours: number; start: string; end: string; previous_start: string; previous_end: string; bucket_hours: number };
-  filters: { country: string | null; topic: OverviewTopic | null };
+  filters: { country: string | null; topic: OverviewTopic | null; priority?: "high" | "all" };
+  snapshot?: { status: "fresh" | "stale" | "warming"; generated_at: string | null; age_seconds: number | null };
   summary: { event_count: number; previous_event_count: number; change: number; change_percent: number | null; direction: OverviewDirection; high_priority_count: number; location_count: number };
   topics: Array<{ key: OverviewTopic; label: string; event_count: number; previous_event_count: number; change: number; direction: OverviewDirection; priority_score: number; event_ids: string[] }>;
   locations: Array<{ key: string; name: string; country_iso2: string | null; event_count: number; previous_event_count: number; change: number; direction: OverviewDirection; priority_score: number; event_ids: string[] }>;
@@ -2517,13 +2518,14 @@ export type IntelligenceOverview = {
     source_refs: Array<HeadlineTranslationPresentation & { label: string; url: string | null; domain: string }>;
     imagery: { preview_url: string; captured_at: string | null; attribution: string } | null;
   }>;
-  coverage: { sample_limit: number; sampled_events: number; truncated: boolean; comparison_available: boolean; notice: string; comparison_notice: string; priority_notice: string };
+  coverage: { sample_limit: number | null; sampled_events: number; truncated: boolean; comparison_available: boolean; notice: string; comparison_notice: string; priority_notice: string };
 };
 
-export async function fetchIntelligenceOverview(params: { hours: 24 | 72 | 168; country?: string; topic?: OverviewTopic }, signal?: AbortSignal): Promise<IntelligenceOverview> {
+export async function fetchIntelligenceOverview(params: { hours: 24 | 72 | 168; country?: string; topic?: OverviewTopic; priority?: "high" | "all" }, signal?: AbortSignal): Promise<IntelligenceOverview> {
   const search = new URLSearchParams({ hours: String(params.hours) });
   if (params.country) search.set("country", params.country);
   if (params.topic) search.set("topic", params.topic);
+  search.set("priority", params.priority ?? "high");
   return readWithDeadline(async (requestSignal) => {
     const response = await fetch(`${API_BASE}/api/intelligence/overview?${search}`, { credentials: "include", signal: requestSignal });
     if (!response.ok) throw new Error(await readError(response, "Unable to refresh the situation overview"));
@@ -2542,9 +2544,9 @@ export async function resolveSourceInvestigation(source: {
   return await resp.json();
 }
 
-export async function fetchIntelligenceEvent(id: string): Promise<IntelligenceEventDetail> {
+export async function fetchIntelligenceEvent(id: string, options?: { includeContext?: boolean }): Promise<IntelligenceEventDetail> {
   return readWithDeadline(async (requestSignal) => {
-    const resp = await fetch(`${API_BASE}/api/intelligence/events/${encodeURIComponent(id)}`, {
+    const resp = await fetch(`${API_BASE}/api/intelligence/events/${encodeURIComponent(id)}${options?.includeContext ? "?include_context=true" : ""}`, {
       credentials: "include", signal: requestSignal,
     });
     if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch intelligence event"));

@@ -9,7 +9,8 @@ final class OverviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(scope.country, "GB")
         XCTAssertEqual(scope.topic, "security")
         XCTAssertEqual(scope.queryItems, [
-            URLQueryItem(name: "hours", value: "72"), URLQueryItem(name: "country", value: "GB"),
+            URLQueryItem(name: "hours", value: "72"), URLQueryItem(name: "priority", value: "high"),
+            URLQueryItem(name: "country", value: "GB"),
             URLQueryItem(name: "topic", value: "security"),
         ])
         XCTAssertNotEqual(scope.requestKey, IntelligenceOverviewScope(hours: 24, country: "GB", topic: "security").requestKey)
@@ -53,6 +54,75 @@ final class OverviewAnalyticsTests: XCTestCase {
         let quiet = IntelligenceOverview.Summary(event_count: 0, previous_event_count: 0, change: 0,
                                                   change_percent: nil, direction: "quiet", high_priority_count: 0, location_count: 0)
         XCTAssertEqual(quiet.momentumLabel, "No recorded updates in either window")
+    }
+
+    func testPriorityDefaultsAndScopeCoordinationRejectDifferentCohorts() throws {
+        let high = IntelligenceOverviewScope()
+        let all = IntelligenceOverviewScope(priority: "all")
+        XCTAssertEqual(high.priority, "high")
+        XCTAssertEqual(IntelligenceOverviewScope(priority: "unknown").priority, "high")
+        XCTAssertNotEqual(high.requestKey, all.requestKey)
+        XCTAssertTrue(all.queryItems.contains(URLQueryItem(name: "priority", value: "all")))
+
+        var raw = payload()
+        raw["filters"] = ["country": NSNull(), "topic": NSNull(), "priority": "high"]
+        let overview = try decode(raw)
+        XCTAssertTrue(overview.matches(scope: high))
+        XCTAssertFalse(overview.matches(scope: all))
+        XCTAssertFalse(overview.matches(scope: IntelligenceOverviewScope(country: "GB")))
+        XCTAssertFalse(overview.matches(scope: IntelligenceOverviewScope(topic: "security")))
+        XCTAssertFalse(overview.matches(scope: IntelligenceOverviewScope(hours: 168)))
+        let legacy = try decode(payload())
+        XCTAssertNil(legacy.snapshot)
+        XCTAssertEqual(legacy.coverage.sample_limit, 300)
+        XCTAssertTrue(legacy.hasUsableData)
+        XCTAssertNil(legacy.filters.priority)
+        XCTAssertTrue(legacy.matches(scope: high))
+    }
+
+    func testEntireWindowCountsDoNotDependOnCardLimitAndSavedSnapshotRemainsVisible() throws {
+        var raw = payload()
+        raw["summary"] = ["event_count": 1250, "previous_event_count": 1000, "change": 250,
+                          "change_percent": 25, "direction": "rising", "high_priority_count": 1250, "location_count": 80]
+        raw["buckets"] = [["start": "2026-11-02T12:00:00Z", "end": "2026-11-03T12:00:00Z",
+                           "event_count": 1250, "previous_event_count": 1000, "high_priority_count": 1250]]
+        raw["coverage"] = ["sample_limit": NSNull(), "sampled_events": 2250, "truncated": false,
+                           "comparison_available": true, "notice": "Entire selected window", "comparison_notice": "Recorded updates",
+                           "priority_notice": "Navigation aid"]
+        raw["snapshot"] = ["status": "stale", "generated_at": "2026-11-03T12:00:00Z", "age_seconds": 150]
+        let overview = try decode(raw)
+        XCTAssertNil(overview.coverage.sample_limit)
+        XCTAssertTrue(overview.hasUsableData)
+        XCTAssertEqual(overview.events.count, 1)
+        XCTAssertEqual(overview.timeline.count, 1)
+        XCTAssertEqual(overview.summary.event_count, 1250)
+        XCTAssertEqual(overview.buckets.reduce(0) { $0 + $1.event_count }, 1250)
+        XCTAssertTrue(overview.coverage.comparison_available)
+        XCTAssertFalse(overview.coverage.truncated)
+        XCTAssertEqual(overview.snapshot?.age_seconds, 150)
+        XCTAssertTrue(overview.snapshot?.isStale == true)
+        XCTAssertEqual(overview.summary.momentumLabel, "250 more than the previous window")
+
+        raw["snapshot"] = ["status": "warming", "generated_at": NSNull(), "age_seconds": NSNull()]
+        let warming = try decode(raw)
+        XCTAssertTrue(warming.snapshot?.isWarming == true)
+        XCTAssertFalse(warming.hasUsableData, "a warming snapshot cannot be presented as zero recorded activity")
+        XCTAssertNil(warming.snapshot?.generated_at)
+        XCTAssertNil(warming.snapshot?.age_seconds)
+    }
+
+    func testMapCandidatesContainOnlyTheListedDevelopments() throws {
+        var raw = payload()
+        let listed = try XCTUnwrap((raw["events"] as? [[String: Any]])?.first)
+        var unlisted = listed
+        unlisted["id"] = "event-outside-timeline"
+        raw["events"] = [listed, unlisted]
+        let overview = try decode(raw)
+        XCTAssertEqual(overview.events.count, 2)
+        XCTAssertEqual(overview.timelineEvents.map(\.id), overview.timeline.map(\.event_id))
+        XCTAssertFalse(overview.timelineEvents.contains { $0.id == "event-outside-timeline" })
+        raw["timeline"] = []
+        XCTAssertTrue(try decode(raw).timelineEvents.isEmpty)
     }
 
     private func decode(_ raw: [String: Any]) throws -> IntelligenceOverview {

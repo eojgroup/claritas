@@ -56,20 +56,21 @@ it("follows a Colombian news report into an event with related sources and separ
   expect(resolveSourceInvestigation).toHaveBeenCalledWith({ domain: "news", source_record_type: "item", source_record_id: "82" });
   expect(screen.getByRole("heading", { name: "Related signals" })).toBeTruthy();
   expect(screen.getAllByText("Started from News").length).toBeGreaterThan(0);
-  fireEvent.click(screen.getByRole("button", { name: /1 Podcasts Context \/ interpretation/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Read Podcasts connections" }));
   expect(screen.getByRole("heading", { name: "DHL’s Colombian logistics expansion" })).toBeTruthy();
+  fireEvent.click(screen.getByText("Connection & provenance"));
   expect(screen.getByText("Shared mentions: dhl")).toBeTruthy();
   expect(screen.getByText("Shared entity")).toBeTruthy();
   expect(screen.queryByRole("heading", { name: story.title!, level: 5 })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /Transport Nearby data · context/ }));
-  expect(screen.getByText("No linked transport records")).toBeTruthy();
-  const context = screen.getByRole("region", { name: "Around this event" });
+  expect(screen.queryByRole("button", { name: "Read Transport connections" })).toBeNull();
+  fireEvent.click(screen.getByText("Explore surrounding context"));
+  const context = await screen.findByRole("region", { name: "Around this event" });
   expect(within(context).getByText("Aircraft observed")).toBeTruthy();
   expect(within(context).getByText("aircraft").parentElement?.textContent).toBe("24 aircraft");
   expect(within(context).getByText(/These counts do not prove disruption/)).toBeTruthy();
   expect(within(context).getByRole("link", { name: /Colombia announces a regional investment programme/ })).toBeTruthy();
-  expect(screen.getByRole("button", { name: /News Linked records/ })).toBeTruthy();
-  expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("0 records");
+  expect(screen.getByRole("button", { name: "Read News connections" })).toBeTruthy();
+  expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("1 record");
 });
 
 it("keeps a pending assessment in the source reader without claiming an event exists", async () => {

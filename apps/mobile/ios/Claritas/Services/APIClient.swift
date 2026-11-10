@@ -674,10 +674,11 @@ final class APIClient {
         return try await request(req, as: IntelligenceSourceResolution.self)
     }
 
-    func fetchIntelligenceEvent(id: String) async throws -> IntelligenceEventDetail {
+    func fetchIntelligenceEvent(id: String, includeContext: Bool = false) async throws -> IntelligenceEventDetail {
         let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
         var components = URLComponents(url: baseURL.appendingPathComponent("/api/intelligence/events/\(encoded)"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "display_language", value: ClaritasInterfaceLanguage.current)]
+        components.queryItems = [URLQueryItem(name: "display_language", value: ClaritasInterfaceLanguage.current),
+                                 URLQueryItem(name: "include_context", value: includeContext ? "true" : "false")]
         return try await request(URLRequest(url: components.url!), as: IntelligenceEventDetail.self)
     }
 

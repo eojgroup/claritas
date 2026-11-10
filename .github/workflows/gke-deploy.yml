@@ -16,6 +16,7 @@ on:
       - 'infra/scripts/wait-for-k8s-job.sh'
       - 'infra/scripts/wait-for-api-readiness.cjs'
       - 'infra/scripts/resolve-image-digest.sh'
+      - 'infra/scripts/wait-for-overview-snapshot.cjs'
       - 'infra/scripts/reconcile-cloud-sql-password.sh'
       - '.github/workflows/gke-deploy.yml'
   pull_request:
@@ -32,6 +33,7 @@ on:
       - 'infra/scripts/wait-for-k8s-job.sh'
       - 'infra/scripts/wait-for-api-readiness.cjs'
       - 'infra/scripts/resolve-image-digest.sh'
+      - 'infra/scripts/wait-for-overview-snapshot.cjs'
       - 'infra/scripts/reconcile-cloud-sql-password.sh'
   workflow_dispatch:
 
@@ -129,6 +131,7 @@ jobs:
           bash -n infra/scripts/wait-for-k8s-job.sh
           bash -n infra/scripts/reconcile-cloud-sql-password.sh
           bash -n infra/scripts/resolve-image-digest.sh
+          node --check infra/scripts/wait-for-overview-snapshot.cjs
 
   build:
     name: Build Docker Image and Push to Artifact Registry
@@ -1164,19 +1167,26 @@ jobs:
       - name: 🛠️ Apply application workload deployments
         run: |
           set -euo pipefail
-          # These manifests reference :latest, which already points at this
-          # commit. Applying them before Flyway could start new API code against
-          # an old schema, so application rollout is deliberately post-migrate.
-          kubectl apply -f ./infra/k8s/api-deployment.yaml
-          # On the first split, the old combined API has a larger memory
-          # reservation. Finish replacing it before creating the worker; the
-          # single small egress node cannot schedule all three simultaneously.
-          kubectl -n "${NAMESPACE}" rollout status deployment/claritas-api --timeout=600s
+          # An existing isolated worker prepares the new durable reader data
+          # before either client or reader starts depending on that projection.
+          # Older combined deployments first need the smaller isolated API to
+          # release enough node capacity for their first worker.
+          if ! kubectl -n "$NAMESPACE" get deployment/claritas-worker >/dev/null 2>&1; then
+            kubectl set image -f ./infra/k8s/api-deployment.yaml \
+              claritas-api="${IMAGE_URI_API}:${{ github.sha }}" --local -o yaml | kubectl apply -f -
+            kubectl -n "$NAMESPACE" rollout status deployment/claritas-api --timeout=600s
+          fi
           kubectl set image -f ./infra/k8s/worker-deployment.yaml \
             claritas-worker="${IMAGE_URI_API}:${{ github.sha }}" --local -o yaml | kubectl apply -f -
-          # Publish the new client only after its overview route is available.
-          kubectl apply -f ./infra/k8s/web-deployment.yaml
-          kubectl apply -f ./infra/k8s/opencode-deployment.yaml
+          kubectl -n "$NAMESPACE" rollout status deployment/claritas-worker --timeout=600s
+          kubectl -n "$NAMESPACE" exec -i deployment/claritas-worker -c claritas-worker -- node - < infra/scripts/wait-for-overview-snapshot.cjs
+          kubectl set image -f ./infra/k8s/api-deployment.yaml \
+            claritas-api="${IMAGE_URI_API}:${{ github.sha }}" --local -o yaml | kubectl apply -f -
+          kubectl -n "$NAMESPACE" rollout status deployment/claritas-api --timeout=600s
+          kubectl set image -f ./infra/k8s/web-deployment.yaml \
+            claritas-web="${IMAGE_URI_WEB}:${{ github.sha }}" --local -o yaml | kubectl apply -f -
+          kubectl set image -f ./infra/k8s/opencode-deployment.yaml \
+            opencode="${IMAGE_URI_OPENCODE}:${{ github.sha }}" --local -o yaml | kubectl apply -f -
 
       - name: 📤 Set image and rollout (with diagnostics)
         run: |

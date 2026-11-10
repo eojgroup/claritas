@@ -87,14 +87,6 @@ struct RootView: View {
         .task {
             await model.bootstrap()
         }
-        .task(id: marketRefreshTaskKey) {
-            guard model.authStatus == .authed, model.hasPaidAccess else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 60_000_000_000)
-                guard !Task.isCancelled else { return }
-                await model.refreshMarketQuotes(forceRefresh: true)
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             guard let destination = note.object as? String else { return }
             // A source opened from event context must dismiss the context first.

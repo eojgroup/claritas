@@ -425,7 +425,7 @@ export async function listIntelligenceEvents(options: {
   return rows.map((row) => translateEventPresentation({ ...eventToApi(row), social_context_count: social.get(row.id) ?? 0 }, translations));
 }
 
-export async function getIntelligenceEvent(eventId: string, options: { displayLanguage?: string } = {}) {
+export async function getIntelligenceEvent(eventId: string, options: { displayLanguage?: string; includeContext?: boolean } = {}) {
   const displayLanguage = normalizeIntelligenceDisplayLanguage(options.displayLanguage ?? "en");
   const [eventResult, evidenceResult, locationsResult, observationsResult, relatedResult] = await Promise.all([
     query<EventRow>(
@@ -586,7 +586,9 @@ export async function getIntelligenceEvent(eventId: string, options: { displayLa
     row.domain === "news" && row.source_record_type === "item"
   )).map((row: any) => buildLinkedNewsPresentation(row));
   const [socialContext, regionalReporting, contextSignals, newsImages, contextImages] = await Promise.all([
-    getSocialEventContexts([eventId]), getRegionalReporting(normalizedEvent), getRegionalContext(normalizedEvent), listNewsImages({ eventId, limit: 20 }),
+    options.includeContext ? getSocialEventContexts([eventId]) : Promise.resolve([]),
+    options.includeContext ? getRegionalReporting(normalizedEvent) : Promise.resolve([]),
+    options.includeContext ? getRegionalContext(normalizedEvent) : Promise.resolve([]), listNewsImages({ eventId, limit: 6 }),
     getEventContextImages(normalizedEvent).catch((error) => {
       console.warn(JSON.stringify({ event: "event_context_images_unavailable", event_id: eventId, message: error instanceof Error ? error.message : String(error) }));
       return [];
@@ -594,6 +596,7 @@ export async function getIntelligenceEvent(eventId: string, options: { displayLa
   ]);
   return {
     event: normalizedEvent,
+    context_included: options.includeContext === true,
     social_context: socialContext,
     regional_reporting: regionalReporting,
     signal_coverage: buildSignalCoverage(evidence, socialContext),

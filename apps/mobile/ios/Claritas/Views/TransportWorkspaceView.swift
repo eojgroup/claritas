@@ -63,6 +63,8 @@ struct TransportWorkspaceView: View {
         .task(id: "\(isPad)-\(model.transportFocusCountry ?? "")-\(mode?.rawValue ?? "all")") {
             if isPad {
                 await loadDetails(forceRefresh: false)
+            } else {
+                await model.refreshTransport(forceRefresh: false)
             }
         }
     }

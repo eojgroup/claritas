@@ -26,6 +26,7 @@ struct DashboardView: View {
                         height: 260,
                         allowsComparison: false,
                         showsCountryProfile: false,
+                        overviewOnly: true,
                         onExpand: { showsExpandedMap = true }
                     )
 
@@ -35,13 +36,6 @@ struct DashboardView: View {
                         openCompactDestination("briefing")
                     }
 
-                    mobileNewsPulse
-
-                    mobileQuickActions
-
-                    if model.selectedCountry != nil {
-                        mobileSelectionBar
-                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 16)
@@ -65,7 +59,8 @@ struct DashboardView: View {
                         SignalMapPanel(
                             height: max(300, proxy.size.height - 132),
                             allowsComparison: false,
-                            showsCountryProfile: false
+                            showsCountryProfile: false,
+                            overviewOnly: true
                         )
                         .padding(14)
                     }
@@ -87,17 +82,7 @@ struct DashboardView: View {
             showsExpandedMap = false
             showsCountryFocus = false
         }
-        .task(id: mobileNewsRequestKey) {
-            guard model.authStatus == .authed, model.hasPaidAccess else { return }
-            let country = mobileNewsCountry
-            guard model.rankedNewsScopeCountry != country
-                    || model.rankedNewsScopeCategory != model.selectedNewsCategory
-                    || !model.rankedNewsMetadataIncluded else { return }
-            await model.refreshRankedNews(
-                country: country,
-                category: model.selectedNewsCategory
-            )
-        }
+
     }
 
     private func eventContextPresented(inExpandedMap: Bool) -> Binding<Bool> {
@@ -111,11 +96,11 @@ struct DashboardView: View {
         NavigationStack {
             if let eventID = model.selectedIntelligenceEventID {
                 IntelligenceWorkspaceView(contextualEventID: eventID)
-                    .navigationTitle("Event context")
+                    .navigationTitle("Event")
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
-                            Button("Back to world") { model.selectedIntelligenceEventID = nil }
+                            Button("Done") { model.selectedIntelligenceEventID = nil }
                         }
                     }
             }
@@ -473,7 +458,8 @@ struct DashboardView: View {
                         SignalMapPanel(
                             height: 350,
                             allowsComparison: true,
-                            showsCountryProfile: false
+                            showsCountryProfile: false,
+                            overviewOnly: true
                         )
                         overviewMetricsCard
                     }
@@ -2616,6 +2602,7 @@ struct WeatherWorkspaceView: View {
                 .padding(.vertical, 24)
             }
         }
+        .task { await model.loadOptionalContext("weather") }
     }
 
     private var snapshotsPanel: some View {
@@ -2886,6 +2873,7 @@ struct MarketsWorkspaceView: View {
                 .padding(.vertical, 24)
             }
         }
+        .task { await model.loadOptionalContext("markets") }
     }
 
     private func mobileSignedPercent(_ value: Double?) -> String {
@@ -4374,7 +4362,10 @@ struct SignalMapPanel: View {
     @State private var comparisonCountry: String?
     @State private var pinnedCountry: String?
     @State private var resetToken = 0
-    private var events: [IntelligenceEvent] { model.intelligenceOverview?.events ?? [] }
+    private var events: [IntelligenceEvent] {
+        guard let overview = model.intelligenceOverview else { return [] }
+        return overviewOnly ? overview.timelineEvents : overview.events
+    }
     private var eventLoadError: String? { model.intelligenceOverviewError }
     private var eventLoading: Bool { model.isRefreshingIntelligenceOverview }
     @State private var profileCountry: String?
@@ -4383,11 +4374,13 @@ struct SignalMapPanel: View {
     let height: CGFloat
     let allowsComparison: Bool
     let showsCountryProfile: Bool
+    var overviewOnly = false
     var onExpand: (() -> Void)? = nil
 
     private var compactLayout: Bool { horizontalSizeClass == .compact }
 
     private var contextEvents: [IntelligenceEvent] {
+        if overviewOnly { return events }
         let current = events.filter { !$0.isArchived }
         guard let selected = model.selectedIntelligenceEvent,
               selected.id == model.selectedIntelligenceEventID else { return current }
@@ -4395,16 +4388,25 @@ struct SignalMapPanel: View {
     }
 
     private var points: [CountryBubblePoint] {
-        SignalMapDataBuilder.points(
-            for: mode,
-            region: region,
-            countryStats: model.countryStats,
-            podcasts: model.podcasts,
-            weather: model.weather,
-            countryMarkets: model.countryMarkets,
+        if overviewOnly {
+            let countries = Set(events.compactMap { $0.primary_country_iso2?.uppercased() })
+            return countries.sorted().compactMap { country in
+                guard let coordinate = CountryCentroidLookup.coordinate(for: country) else { return nil }
+                let count = events.filter { $0.primary_country_iso2?.uppercased() == country }.count
+                return CountryBubblePoint(id: "overview-\(country)", iso: country,
+                    valueLabel: "\(count) events", detail: "In the selected development list",
+                    magnitude: Double(count), colorValue: Double(count), rank: 0, coordinate: coordinate)
+            }
+        }
+        return SignalMapDataBuilder.points(
+            for: mode, region: region,
+            countryStats: overviewOnly ? [] : model.countryStats,
+            podcasts: overviewOnly ? [] : model.podcasts,
+            weather: overviewOnly ? [] : model.weather,
+            countryMarkets: overviewOnly ? [] : model.countryMarkets,
             events: contextEvents,
-            leadership: model.leadership,
-            transport: model.signalTransportOverview
+            leadership: overviewOnly ? [] : model.leadership,
+            transport: overviewOnly ? nil : model.signalTransportOverview
         )
     }
 
@@ -4450,8 +4452,10 @@ struct SignalMapPanel: View {
         DashboardCard {
             VStack(alignment: .leading, spacing: 12) {
                 mapHeader
-                mapControls
-                scopeIndicator
+                if !overviewOnly {
+                    mapControls
+                    scopeIndicator
+                }
 
                 ZStack(alignment: .topLeading) {
                     NativeSignalMap(
@@ -4476,7 +4480,7 @@ struct SignalMapPanel: View {
                             .stroke(ClaritasPalette.shellBorderStrong(for: colorScheme), lineWidth: 1)
                     )
 
-                    if !compactLayout, mode == .signals, let highest {
+                    if !overviewOnly, !compactLayout, mode == .signals, let highest {
                         Button {
                             selectCountry(highest.iso)
                         } label: {
@@ -4507,29 +4511,30 @@ struct SignalMapPanel: View {
                     }
                 }
 
-                HStack(spacing: 10) {
-                    if mode == .transport {
-                        Label("\(model.transportOverview?.entities.count ?? 0) scoped movements", systemImage: "location.north.line")
-                        Label("\(points.count) country links", systemImage: "link")
-                    } else {
-                        Label("\(mappedEvents.count) events", systemImage: "dot.radiowaves.left.and.right")
-                        Label("\(mappedEvents.filter(\.earth_observation_available).count) satellite-backed", systemImage: "sensor.tag.radiowaves.forward")
+                if !overviewOnly {
+                    HStack(spacing: 10) {
+                        if mode == .transport {
+                            Label("\(model.transportOverview?.entities.count ?? 0) scoped movements", systemImage: "location.north.line")
+                            Label("\(points.count) country links", systemImage: "link")
+                        } else {
+                            Label("\(mappedEvents.count) events", systemImage: "dot.radiowaves.left.and.right")
+                            Label("\(mappedEvents.filter(\.earth_observation_available).count) satellite-backed", systemImage: "sensor.tag.radiowaves.forward")
+                        }
+                        Spacer()
+                        if eventLoadError != nil {
+                            Button("Retry events") { Task { await loadEvents() } }
+                                .frame(minHeight: ClaritasLayout.minimumTouchTarget)
+                                .disabled(eventLoading)
+                                .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
+                        }
                     }
-                    Spacer()
-                    if eventLoadError != nil {
-                        Button("Retry events") { Task { await loadEvents() } }
-                            .frame(minHeight: ClaritasLayout.minimumTouchTarget)
-                            .disabled(eventLoading)
-                            .foregroundStyle(ClaritasPalette.negativeText(for: colorScheme))
-                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                if mode != .transport, model.isRefreshingCountryStats && model.countryStats.isEmpty {
+                if !overviewOnly, mode != .transport, model.isRefreshingCountryStats && model.countryStats.isEmpty {
                     ProgressView("Loading country coverage")
                         .font(.caption)
-                } else if mode != .transport, model.countryStatsLoadError != nil {
+                } else if !overviewOnly, mode != .transport, model.countryStatsLoadError != nil {
                     HStack(alignment: .center, spacing: 8) {
                         Label(model.countryStats.isEmpty ? "News coverage unavailable" : "Showing earlier news coverage", systemImage: "exclamationmark.triangle")
                             .font(.caption)
@@ -4542,7 +4547,7 @@ struct SignalMapPanel: View {
                     }
                 }
 
-                if !compactLayout, mode == .signals {
+                if !overviewOnly, !compactLayout, mode == .signals {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Relevance model")
                             .font(.caption.weight(.semibold))
@@ -4592,11 +4597,13 @@ struct SignalMapPanel: View {
         }
         .onAppear {
             let resolved = SignalMapMode(rawValue: storedMode) ?? .signals
-            mode = model.selectedIntelligenceEventID == nil ? resolved : .signals
+            mode = overviewOnly || model.selectedIntelligenceEventID != nil ? .signals : resolved
             storedMode = resolved.rawValue
         }
-        .task {
-            await model.refreshIntelligenceOverview()
+        .task(id: "\(mode.rawValue)|\(model.authStatus.rawValue)|\(model.selectedCountry ?? "global")") {
+            guard !overviewOnly else { return }
+            if mode == .signals { await model.refreshIntelligenceOverview() }
+            else { await model.loadOptionalContext(mode.rawValue) }
         }
         .onChange(of: model.selectedIntelligenceEvent) { event in
             guard let event else { return }
@@ -4773,10 +4780,28 @@ struct SignalMapPanel: View {
 
     @ViewBuilder
     private var mapHeader: some View {
-        if compactLayout {
+        if overviewOnly {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("World map").font(.headline)
+                    Text(model.intelligenceOverview?.snapshot?.isWarming == true ? "Preparing map…"
+                         : "\(mappedEvents.count) located developments · \(model.overviewScope.windowLabel)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                if let onExpand {
+                    Button(action: onExpand) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .frame(minWidth: 44, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Expand map")
+                }
+            }
+        } else if compactLayout {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("GLOBAL SIGNAL MAP")
+                    Text(overviewOnly ? "WORLD · \(model.overviewScope.windowLabel.uppercased())" : "GLOBAL SIGNAL MAP")
                         .font(.caption2.weight(.bold))
                         .tracking(1.2)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
@@ -4803,11 +4828,11 @@ struct SignalMapPanel: View {
             }
         } else {
             BrandSectionHeader(
-                kicker: "Global signal picture",
-                title: mode == .transport
+                kicker: overviewOnly ? "Same scope as latest developments" : "Global signal picture",
+                title: overviewOnly ? "World events" : mode == .transport
                     ? "\(model.transportOverview?.entities.count ?? 0) movements · \(mode.title)"
                     : "\(mappedEvents.count) located events · \(mode.title)",
-                detail: mode == .transport
+                detail: overviewOnly ? nil : mode == .transport
                     ? "Aircraft and vessel positions are limited to the selected country relationship scope and current provider coverage."
                     : "Country colour combines news, events, markets, weather, transport and podcast prevalence; dots open canonical event evidence."
             )
@@ -4947,6 +4972,7 @@ struct SignalMapPanel: View {
             model.selectedIntelligenceEventID = nil
         }
         model.selectedCountry = normalized
+        if overviewOnly { return }
         profileCountry = normalized
         showsCountryProfileSheet = true
         comparisonCountry = nil
@@ -4971,7 +4997,7 @@ struct SignalMapPanel: View {
         NotificationCenter.default.post(
             name: .claritasWatchOpenDestination,
             object: "intelligence",
-            userInfo: ["eventID": event.id, "country": event.primary_country_iso2 ?? ""]
+            userInfo: ["eventID": event.id]
         )
     }
 

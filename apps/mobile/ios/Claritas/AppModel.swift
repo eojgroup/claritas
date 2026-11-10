@@ -62,7 +62,6 @@ final class AppModel: ObservableObject {
         didSet {
             guard normalizedCountry(selectedCountry) != normalizedCountry(oldValue) else { return }
             selectedNewsItemID = nil
-            scheduleTransportRefresh()
             synchronizeWatchContext()
             updateWidgetSnapshot()
         }
@@ -89,13 +88,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshingIntelligenceOverview = false
     @Published var overviewHours = 24
     @Published var overviewTopic: String? = nil
+    @Published var overviewPriority = "high"
     private var overviewRequestID = UUID()
     private var overviewLoadedScope: IntelligenceOverviewScope?
     private var overviewPendingScope: IntelligenceOverviewScope?
     private var overviewLoadedAt: Date?
 
     var overviewScope: IntelligenceOverviewScope {
-        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic)
+        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic, priority: overviewPriority)
     }
 
     @Published var dailyBriefing: DailySignalBriefing? = nil
@@ -528,106 +528,62 @@ final class AppModel: ObservableObject {
         initialLoadID = loadID
         defer { if initialLoadID == loadID { initialLoadID = nil } }
 
-        let initialNewsCountry = normalizedCountry(selectedCountry)
-        let initialNewsCategory = NewsCategoryCatalog.normalized(selectedNewsCategory)
+        // Publish the shared map/list/chart snapshot before any optional lens.
+        // Weather, markets, transport and source feeds load when opened.
+        await refreshIntelligenceOverview(force: true)
+        guard !Task.isCancelled, authStatus == .authed, hasPaidAccess else { return }
         let generation = dataGeneration
-        let initialUserID = authUser?.id
-        let initialToken = authToken
-        let initialNewsRequestID = UUID()
-        newsRequestID = initialNewsRequestID
-        isRefreshingNews = true
-        defer {
-            if newsRequestID == initialNewsRequestID { isRefreshingNews = false }
-        }
-
-        // Each request publishes independently: a slow optional resource must
-        // not hold the map, briefing, weather or reporting behind a batch barrier.
-        async let statsError = refreshCountryStats()
-        async let briefingError = loadInitialValue(generation: generation, fetch: {
+        let error = await loadInitialValue(generation: generation, fetch: {
             try await self.api.fetchLatestDailyBriefing()
         }, apply: {
             self.dailyBriefing = $0
             self.widgetFreshness.overview = Date()
         })
-        async let scheduleError = loadInitialValue(generation: generation, fetch: {
-            try await self.api.fetchDailyBriefingSchedule()
-        }, apply: {
-            self.dailyBriefingSchedule = $0
-            self.dailyBriefingScheduleError = nil
-        })
-        async let weatherError = loadInitialValue(generation: generation, fetch: {
-            try await self.api.fetchCountryWeather()
-        }, apply: {
-            self.weather = $0
-            self.widgetFreshness.weather = Date()
-        })
-        async let leadershipError = loadInitialValue(generation: generation, fetch: {
-            try await self.api.fetchCountryLeadership()
-        }, apply: { self.leadership = $0 })
-        async let newsError = loadInitialValue(generation: generation, fetch: {
-            try await self.fetchNewsBatch(
-                mode: .recent,
-                country: initialNewsCountry,
-                category: initialNewsCategory,
-                sort: .newest
-            )
-        }, apply: { newsPage in
-            guard self.newsRequestID == initialNewsRequestID else { return }
-            self.applyNewsPage(newsPage, sort: .newest)
-            self.newsLoadMode = .recent
-            self.newsScopeCountry = initialNewsCountry
-            self.newsScopeCategory = initialNewsCategory
-            self.newsScopeSort = .newest
-            self.newsScopeQuery = ""
-            self.newsLoadError = nil
-            self.isRefreshingNews = false
-            self.captureWidgetNews(newsPage, country: initialNewsCountry, category: initialNewsCategory, mode: .recent, query: "")
-        }, onError: { error in
-            guard self.newsRequestID == initialNewsRequestID else { return }
-            self.newsLoadError = (error as? APIError)?.message ?? error.localizedDescription
-            self.isRefreshingNews = false
-        })
-        async let podcastError = loadInitialValue(generation: generation, fetch: {
-            try await self.api.fetchPodcasts(limit: 40)
-        }, apply: {
-            self.podcasts = $0
-            self.podcastLoadError = nil
-        }, onError: { self.podcastLoadError = ($0 as? APIError)?.message ?? $0.localizedDescription })
-        async let marketError = loadInitialValue(generation: generation, fetch: {
-            try await self.api.fetchCountryMarkets()
-        }, apply: {
-            self.countryMarkets = $0.countries
-            self.widgetFreshness.markets = Date()
-        })
-        async let quoteError = loadInitialValue(generation: generation, fetch: {
-            try await self.api.fetchMarketQuotes(refresh: false)
-        }, apply: {
-            self.marketQuotes = $0
-            self.widgetFreshness.markets = Date()
-        })
-        async let initialTransport: Void = refreshTransport(forceRefresh: false)
-        let errors = await [statsError, briefingError, scheduleError, weatherError,
-                            leadershipError, newsError, podcastError, marketError, quoteError]
-        await initialTransport
-        if errors.compactMap({ $0 }).contains(where: isPaymentRequired),
-           authStatus == .authed, authUser?.id == initialUserID, authToken == initialToken {
+        if let error, isPaymentRequired(error) {
             await refreshAccess()
             return
         }
-        guard dataGeneration == generation, authStatus == .authed, hasPaidAccess, !Task.isCancelled else { return }
         updateWidgetSnapshot()
-        // Global transport can render immediately. Once the country relevance
-        // data arrives, fill the newly determined local scope if it changed.
-        if transportOverviewCountry != transportFocusCountry {
+    }
+
+    /// Read existing optional data only when its workspace or layer is visible.
+    func loadOptionalContext(_ context: String) async {
+        guard authStatus == .authed, hasPaidAccess else { return }
+        let generation = dataGeneration
+        switch context {
+        case "weather":
+            guard weather.isEmpty, !isRefreshingWeather else { return }
+            isRefreshingWeather = true
+            defer { isRefreshingWeather = false }
+            _ = await loadInitialValue(generation: generation, fetch: {
+                try await self.api.fetchCountryWeather()
+            }, apply: { self.weather = $0; self.widgetFreshness.weather = Date() })
+        case "leadership":
+            guard leadership.isEmpty else { return }
+            _ = await loadInitialValue(generation: generation, fetch: {
+                try await self.api.fetchCountryLeadership()
+            }, apply: { self.leadership = $0 })
+        case "markets":
+            guard countryMarkets.isEmpty else { return }
+            await refreshMarketQuotes(forceRefresh: false)
+        case "news":
+            guard countryStats.isEmpty else { return }
+            await refreshCountryStats()
+        case "transport":
             await refreshTransport(forceRefresh: false)
+        case "podcasts":
+            guard podcasts.isEmpty else { return }
+            await refreshPodcasts()
+        default: break
         }
+        updateWidgetSnapshot()
     }
 
     func refreshIntelligenceOverview(force: Bool = false) async {
         guard authStatus == .authed, hasPaidAccess else { return }
         let scope = overviewScope
         if overviewPendingScope == scope { return }
-        if !force, intelligenceOverview != nil, overviewLoadedScope == scope, let loadedAt = overviewLoadedAt,
+        if !force, intelligenceOverview?.hasUsableData == true, overviewLoadedScope == scope, let loadedAt = overviewLoadedAt,
            Date().timeIntervalSince(loadedAt) < 60 { return }
         let requestID = UUID()
         let generation = dataGeneration
@@ -646,6 +602,10 @@ final class AppModel: ObservableObject {
             let overview = try await api.fetchIntelligenceOverview(scope: scope)
             guard !Task.isCancelled, dataGeneration == generation, overviewRequestID == requestID,
                   overviewScope == scope else { return }
+            guard overview.matches(scope: scope) else {
+                intelligenceOverviewError = "The overview scope changed. Refresh to try again."
+                return
+            }
             intelligenceOverview = overview
             overviewLoadedScope = scope
             overviewLoadedAt = Date()
@@ -709,6 +669,7 @@ final class AppModel: ObservableObject {
         isRefreshingIntelligenceOverview = false
         overviewHours = 24
         overviewTopic = nil
+        overviewPriority = "high"
         dailyBriefing = nil
         dailyBriefingSchedule = nil
         dailyBriefingScheduleError = nil
@@ -787,7 +748,6 @@ final class AppModel: ObservableObject {
     func selectIntelligenceEvent(_ event: IntelligenceEvent) {
         selectedIntelligenceEventID = event.id
         selectedIntelligenceEvent = event
-        selectedCountry = event.primary_country_iso2?.uppercased()
     }
 
     func configurePushNotifications() async {

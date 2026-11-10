@@ -67,6 +67,17 @@ struct WatchRootView: View {
         .task {
             await model.bootstrap()
         }
+        .task(id: "\(page)|\(pulseFocus)|\(model.selectedCountry ?? "global")|\(model.hasSession)") {
+            guard model.hasSession else { return }
+            switch page {
+            case .social: await model.loadOptionalContext("social")
+            case .transport: await model.loadOptionalContext("transport")
+            case .pulse:
+                if pulseFocus == .weather { await model.loadOptionalContext("weather") }
+                if pulseFocus == .markets { await model.loadOptionalContext("markets") }
+            default: break
+            }
+        }
         .onOpenURL { url in
             openWidgetURL(url)
         }
@@ -354,7 +365,7 @@ private struct WatchTransportPulseView: View {
                             Label("iPhone", systemImage: "iphone")
                         }
                         Button {
-                            Task { await model.refresh() }
+                            Task { await model.loadOptionalContext("transport") }
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
@@ -1316,6 +1327,7 @@ private struct WatchBriefingScheduleContent: View {
         .navigationTitle("Schedule")
         .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         .task {
+            await model.loadOptionalContext("schedule")
             apply(model.briefingSchedule)
         }
         .onChange(of: model.briefingSchedule?.updated_at) {
@@ -1849,63 +1861,82 @@ private struct WatchOverviewPulseCard: View {
                     NavigationLink { WatchOverviewFilters() } label: {
                         Image(systemName: "slider.horizontal.3")
                     }
-                    .accessibilityLabel("Filter event picture")
+                    .accessibilityLabel("Filter overview")
                 }
                 Text("\(model.selectedCountry ?? "Worldwide") · \(model.overviewScope.windowLabel)")
                     .font(.caption2).foregroundStyle(.secondary)
                 if let overview = model.intelligenceOverview {
-                    Text("\(overview.summary.event_count)\(overview.coverage.truncated ? "+" : "") updated investigations")
-                        .font(.caption.weight(.semibold)).monospacedDigit()
-                    Text(overview.coverage.comparison_available ? overview.summary.momentumLabel : "Sample capped · comparison unavailable")
-                        .font(.system(size: 9)).foregroundStyle(.secondary)
-                    sparkline(overview)
-                    Text("\(overview.summary.high_priority_count) high priority · \(overview.summary.location_count) locations")
-                        .font(.system(size: 9)).foregroundStyle(WatchPalette.orange)
-                    ForEach(overview.timeline.prefix(2)) { entry in
-                        Divider()
-                        Button {
-                            model.openOnPhone("intelligence", country: entry.country_iso2, eventID: entry.event_id)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Updated \(entry.occurred_at.formatted(date: .omitted, time: .shortened)) · \(entry.severity.capitalized)")
-                                    .font(.system(size: 8)).foregroundStyle(.secondary)
-                                if overview.events.first(where: { $0.id == entry.event_id })?.isArchived == true {
-                                    Label("Archived investigation", systemImage: "clock.arrow.circlepath")
+                    if !overview.hasUsableData {
+                        ProgressView("Preparing overview").font(.caption2)
+                    } else {
+                        if overview.snapshot?.isStale == true {
+                            Label("Last saved overview", systemImage: "clock.arrow.circlepath").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Text("\(overview.summary.event_count)\(overview.coverage.truncated ? "+" : "") updated investigations")
+                            .font(.caption.weight(.semibold)).monospacedDigit()
+                        Text(overview.coverage.comparison_available ? overview.summary.momentumLabel : "Sample capped · comparison unavailable")
+                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                        sparkline(overview)
+                        Text(model.overviewPriority == "all"
+                             ? "\(overview.summary.high_priority_count) high priority · \(overview.summary.location_count) locations"
+                             : "\(overview.summary.location_count) locations")
+                            .font(.system(size: 9)).foregroundStyle(.secondary)
+                        ForEach(overview.timeline.prefix(2)) { entry in
+                            Divider()
+                            Button {
+                                model.openOnPhone("intelligence", country: entry.country_iso2, eventID: entry.event_id)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Updated \(entry.occurred_at.formatted(date: .omitted, time: .shortened)) · \(entry.severity.capitalized)")
                                         .font(.system(size: 8)).foregroundStyle(.secondary)
+                                    if overview.events.first(where: { $0.id == entry.event_id })?.isArchived == true {
+                                        Label("Archived investigation", systemImage: "clock.arrow.circlepath")
+                                            .font(.system(size: 8)).foregroundStyle(.secondary)
+                                    }
+                                    Text(entry.title).font(.caption.weight(.semibold)).lineLimit(3)
+                                    if let disclosure = entry.headlineTranslationDisclosure {
+                                        Text(disclosure).font(.system(size: 8)).foregroundStyle(.secondary)
+                                    }
+                                    if let location = entry.location_name ?? entry.country_iso2 {
+                                        Text(location).font(.system(size: 9)).foregroundStyle(.secondary)
+                                    }
+                                    Label("Evidence on iPhone", systemImage: "iphone").font(.system(size: 9))
                                 }
-                                Text(entry.title).font(.caption.weight(.semibold)).lineLimit(3)
-                                if let disclosure = entry.headlineTranslationDisclosure {
-                                    Text(disclosure).font(.system(size: 8)).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if overview.timeline.isEmpty {
+                            Text("No updates in this scope. Try a wider window.").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        NavigationLink("How it’s measured") {
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text(overview.coverage.notice)
+                                    Text(overview.coverage.comparison_notice)
+                                    Text(overview.coverage.priority_notice)
                                 }
-                                Text(entry.location_name ?? entry.country_iso2 ?? "Location unresolved")
-                                    .font(.system(size: 9)).foregroundStyle(.secondary)
-                                Label("Evidence on iPhone", systemImage: "iphone").font(.system(size: 9))
+                                .font(.caption2).padding()
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .buttonStyle(.plain)
+                        .font(.system(size: 9))
                     }
-                    if overview.timeline.isEmpty {
-                        Text("No updates in this scope. Try a wider window.").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    NavigationLink("How it’s measured") {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(overview.coverage.notice)
-                                Text(overview.coverage.comparison_notice)
-                                Text(overview.coverage.priority_notice)
-                            }
-                            .font(.caption2).padding()
-                        }
-                    }
-                    .font(.system(size: 9))
                 } else if let error = model.overviewError {
                     Text(error).font(.caption2).foregroundStyle(.secondary)
-                    Button("Retry event picture") { Task { await model.refreshOverview() } }
+                    Button("Retry overview") { Task { await model.refreshOverview() } }
                         .font(.caption2)
                 } else {
-                    ProgressView("Loading event picture").font(.caption2)
+                    ProgressView("Loading overview").font(.caption2)
                 }
+            }
+        }
+        .task(id: "\(model.overviewScope.requestKey)|\(model.intelligenceOverview?.snapshot?.isWarming == true)") {
+            guard model.intelligenceOverview?.snapshot?.isWarming == true else { return }
+            while !Task.isCancelled, model.intelligenceOverview?.snapshot?.isWarming == true {
+                do { try await Task.sleep(nanoseconds: 15_000_000_000) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+                await model.refreshOverview()
             }
         }
     }
@@ -1933,6 +1964,10 @@ private struct WatchOverviewFilters: View {
     }
     var body: some View {
         Form {
+            Picker("Priority", selection: $model.overviewPriority) {
+                Text("High priority").tag("high")
+                Text("All events").tag("all")
+            }
             Picker("Time window", selection: $model.overviewHours) {
                 Text("24 hours").tag(24)
                 Text("3 days").tag(72)
@@ -1954,8 +1989,9 @@ private struct WatchOverviewFilters: View {
                 }
             }
         }
-        .navigationTitle("Event picture")
+        .navigationTitle("Overview filters")
         .onChange(of: model.overviewHours) { _ in Task { await model.refreshOverview() } }
         .onChange(of: model.overviewTopic) { _ in Task { await model.refreshOverview() } }
+        .onChange(of: model.overviewPriority) { _ in Task { await model.refreshOverview() } }
     }
 }

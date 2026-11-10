@@ -12,8 +12,8 @@ const event = (id: string, hoursAgo: number, overrides: Partial<OverviewSample> 
 });
 
 test("overview filters reject unbounded windows and unknown topic input", () => {
-  assert.deepEqual(normalizeOverviewOptions({ hours: "72", country: " se ", topic: "TRANSPORT" }), { hours: 72, country: "SE", topic: "transport", displayLanguage: "en" });
-  assert.deepEqual(normalizeOverviewOptions(), { hours: 24, country: "", topic: "", displayLanguage: "en" });
+  assert.deepEqual(normalizeOverviewOptions({ hours: "72", country: " se ", topic: "TRANSPORT" }), { hours: 72, country: "SE", topic: "transport", priority: "high", displayLanguage: "en" });
+  assert.deepEqual(normalizeOverviewOptions(), { hours: 24, country: "", topic: "", priority: "high", displayLanguage: "en" });
   for (const hours of [0, 1, 1000, Infinity, "forever"]) assert.throws(() => normalizeOverviewOptions({ hours }), /hours/);
   assert.equal(normalizeOverviewOptions({ displayLanguage: "fr_FR" }).displayLanguage, "fr-fr");
   assert.notEqual(JSON.stringify(normalizeOverviewOptions({ displayLanguage: "fr" })), JSON.stringify(normalizeOverviewOptions()));
@@ -38,7 +38,7 @@ test("pulse compares investigation updates in equal disjoint windows with truthf
   const rows = [event("current", 1), event("current2", 23), event("previous", 25), event("boundary", 24),
     event("hidden", 2, { displayable: false }), event("dismissed", 1, { status: "dismissed" }), event("too-old", 49),
     event("future", -1), event("duplicate", 3), event("duplicate", 4)];
-  const overview = buildOverviewAnalytics(rows, normalizeOverviewOptions(), now);
+  const overview = buildOverviewAnalytics(rows, normalizeOverviewOptions({ priority: "all" }), now);
   assert.equal(overview.summary.event_count, 4);
   assert.equal(overview.summary.previous_event_count, 1);
   assert.equal(overview.summary.change, 3);
@@ -56,21 +56,23 @@ test("pulse compares investigation updates in equal disjoint windows with truthf
   assert.equal(overviewChange(1, 2).direction, "falling");
 });
 
-test("topic and country scopes are respected and limits remain explicit", () => {
-  const rows = Array.from({ length: 301 }, (_, index) => event(`${index}`, 1));
-  const overview = buildOverviewAnalytics(rows, normalizeOverviewOptions(), now);
-  assert.equal(overview.summary.event_count, 300);
-  assert.equal(overview.coverage.truncated, true);
-  assert.equal(overview.coverage.comparison_available, false);
-  assert.equal(overview.summary.direction, "unavailable");
-  assert.equal(overview.summary.change_percent, null);
-  assert.ok(overview.topics.every((topic) => topic.direction === "unavailable" && topic.change_percent == null));
-  assert.ok(overview.locations.every((location) => location.direction === "unavailable" && location.change_percent == null));
-  assert.match(overview.coverage.notice, /lower bounds/);
+test("full windows keep older buckets after more than 300 recent updates", () => {
+  const rows = [...Array.from({ length: 301 }, (_, index) => event(`${index}`, 1)),
+    event("old-current", 23), event("previous-old", 47), event("previous-recent", 25)];
+  const overview = buildOverviewAnalytics(rows, normalizeOverviewOptions({ priority: "all" }), now);
+  assert.equal(overview.summary.event_count, 302);
+  assert.equal(overview.summary.previous_event_count, 2);
+  assert.equal(overview.coverage.truncated, false);
+  assert.equal(overview.coverage.comparison_available, true);
+  assert.equal(overview.summary.direction, "rising");
+  assert.equal(overview.buckets[0].event_count, 1);
+  assert.equal(overview.buckets[0].previous_event_count, 1);
+  assert.equal(overview.buckets.at(-1)?.event_count, 301);
+  assert.match(overview.coverage.notice, /chart counts are not limited/);
   assert.match(overview.coverage.comparison_notice, /latest recorded update/);
   assert.equal(buildOverviewAnalytics(rows, normalizeOverviewOptions({ country: "NO" }), now).summary.event_count, 0);
   assert.equal(buildOverviewAnalytics(rows, normalizeOverviewOptions({ topic: "transport" }), now).summary.event_count, 0);
-  const empty = buildOverviewAnalytics([], normalizeOverviewOptions(), now);
+  const empty = buildOverviewAnalytics([], normalizeOverviewOptions({ priority: "all" }), now);
   assert.equal(empty.buckets.length, 12);
   assert.equal(empty.summary.direction, "quiet");
 });
@@ -82,4 +84,17 @@ test("bucket sizes adapt to longer windows without inventing historical snapshot
     assert.equal(overview.buckets[0].start, overview.window.start);
     assert.equal(overview.buckets.at(-1)?.end, overview.window.end);
   }
+});
+
+test("high priority is the default and filters the same map, cards and chart cohort", () => {
+  const rows = [event("routine", 1, { relevance_score: .1 }), event("high-severity", 23, { relevance_score: .1, severity: "high" }),
+    event("high-score", 2, { relevance_score: .95, urgency_score: .9 }), event("previous-priority", 25, { severity: "critical" })];
+  const high = buildOverviewAnalytics(rows, normalizeOverviewOptions(), now);
+  assert.equal(high.filters.priority, "high");
+  assert.equal(high.summary.event_count, 2);
+  assert.equal(high.summary.previous_event_count, 1);
+  assert.equal(high.current.length, 2);
+  assert.equal(high.buckets.reduce((total, bucket) => total + bucket.event_count, 0), 2);
+  assert.equal(buildOverviewAnalytics(rows, normalizeOverviewOptions({ priority: "all" }), now).summary.event_count, 3);
+  assert.throws(() => normalizeOverviewOptions({ priority: "urgent" }), /priority/);
 });

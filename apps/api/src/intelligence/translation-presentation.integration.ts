@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test, { after } from "node:test";
 import { pool } from "../db";
-import { getIntelligenceOverview } from "./overview";
+import { buildOverviewProjectionQuery, getIntelligenceOverview } from "./overview";
+import { saveOverviewProjectionBatch, publishOverviewSnapshots, type OverviewQuery } from "./overview-snapshot";
 import { getIntelligenceEvent, listIntelligenceEvents } from "./service";
 import { loadTranslationContext, translateEventPresentation } from "./translation-presentation";
 after(() => pool.end());
@@ -61,6 +62,13 @@ test("overview, feed and detail reuse source-valid cached translations, preserve
         'openrouter','free-fixture-model',jsonb_build_object('source_language_code',language_code) FROM item WHERE id=$1`, [hebrew.itemId]);
     await client.query(`INSERT INTO intelligence_event_relationship(from_event_id,to_event_id,relationship,confidence,rationale)
       VALUES($1,$2,'related',0.7,'Same named port')`, [spanish.id, arabic.id]);
+    const snapshotTime = new Date();
+    const projection = buildOverviewProjectionQuery(snapshotTime);
+    const projectionRows = (await client.query(projection.sql, projection.params)).rows.filter((row) => created.some((event) => event.id === row.id));
+    const saved: OverviewQuery = async (sql, params) => ({ rows: (await client.query(sql, params)).rows });
+    const generation = randomUUID();
+    await saveOverviewProjectionBatch(projectionRows, generation, saved);
+    await publishOverviewSnapshots({ generation_id: generation, generated_at: snapshotTime }, saved);
     const overview = await getIntelligenceOverview({ country: "SE", topic: "security", displayLanguage: "en" });
     const spanishTimeline = overview.timeline.find((entry) => entry.event_id === spanish.id)!;
     assert.equal(spanishTimeline.title, spanish.title);
@@ -75,6 +83,9 @@ test("overview, feed and detail reuse source-valid cached translations, preserve
     const french = await getIntelligenceOverview({ country: "SE", topic: "security", displayLanguage: "fr" });
     assert.equal(french.timeline.find((entry) => entry.event_id === hebrew.id)?.title, "Le port ferme à cause de la tempête");
     assert.equal((await getIntelligenceOverview({ country: "SE", topic: "security", displayLanguage: "en" })).timeline.find((entry) => entry.event_id === hebrew.id)?.title, hebrew.original);
+    assert.equal((await getIntelligenceOverview()).timeline.find((entry) => entry.event_id === spanish.id)?.title, spanish.title);
+    assert.equal((await getIntelligenceOverview({ displayLanguage: "fr" })).timeline.find((entry) => entry.event_id === hebrew.id)?.title, "Le port ferme à cause de la tempête");
+    assert.equal((await getIntelligenceOverview()).timeline.find((entry) => entry.event_id === spanish.id)?.title, spanish.title);
     const feed = await listIntelligenceEvents({ eventType, limit: 20 });
     assert.equal(feed.find((event) => event.id === spanish.id)?.title, spanish.title);
     const detail = await getIntelligenceEvent(spanish.id);

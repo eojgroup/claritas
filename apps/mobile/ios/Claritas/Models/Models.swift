@@ -3732,7 +3732,7 @@ struct SocialCoverageResponse: Codable {
     let classification: SocialClassification
 }
 
-/// One bounded overview read shared by native charts, map events and timeline.
+/// One scoped overview read shared by native charts, map events and timeline.
 struct IntelligenceOverviewScope: Hashable, Sendable {
     static let windows = [24, 72, 168]
     static let topics: [(key: String, label: String)] = [
@@ -3743,18 +3743,20 @@ struct IntelligenceOverviewScope: Hashable, Sendable {
     let hours: Int
     let country: String?
     let topic: String?
+    let priority: String
 
-    init(hours: Int = 24, country: String? = nil, topic: String? = nil) {
+    init(hours: Int = 24, country: String? = nil, topic: String? = nil, priority: String = "high") {
         self.hours = Self.windows.contains(hours) ? hours : 24
         let code = country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         self.country = code?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil ? (code == "UK" ? "GB" : code) : nil
         self.topic = Self.topics.contains(where: { $0.key == topic }) ? topic : nil
+        self.priority = priority == "all" ? "all" : "high"
     }
 
-    var requestKey: String { "\(hours)|\(country ?? "global")|\(topic ?? "all")" }
+    var requestKey: String { "\(hours)|\(country ?? "global")|\(topic ?? "all")|\(priority)" }
     var windowLabel: String { hours == 24 ? "24 hours" : hours == 72 ? "3 days" : "7 days" }
     var queryItems: [URLQueryItem] {
-        [URLQueryItem(name: "hours", value: String(hours))]
+        [URLQueryItem(name: "hours", value: String(hours)), URLQueryItem(name: "priority", value: priority)]
             + (country.map { [URLQueryItem(name: "country", value: $0)] } ?? [])
             + (topic.map { [URLQueryItem(name: "topic", value: $0)] } ?? [])
     }
@@ -3769,7 +3771,14 @@ struct IntelligenceOverview: Codable {
         let previous_end: Date
         let bucket_hours: Int
     }
-    struct Filters: Codable { let country: String?; let topic: String? }
+    struct Filters: Codable { let country: String?; let topic: String?; var priority: String? = nil }
+    struct Snapshot: Codable {
+        let status: String
+        let generated_at: Date?
+        let age_seconds: Double?
+        var isStale: Bool { status == "stale" }
+        var isWarming: Bool { status == "warming" }
+    }
     struct Summary: Codable {
         let event_count: Int
         let previous_event_count: Int
@@ -3875,7 +3884,7 @@ struct IntelligenceOverview: Codable {
 
     }
     struct Coverage: Codable {
-        let sample_limit: Int
+        let sample_limit: Int?
         let sampled_events: Int
         let truncated: Bool
         let comparison_available: Bool
@@ -3893,5 +3902,20 @@ struct IntelligenceOverview: Codable {
     let events: [IntelligenceEvent]
     let timeline: [TimelineEntry]
     let coverage: Coverage
+    var snapshot: Snapshot? = nil
     var currentEvents: [IntelligenceEvent] { events.filter { !$0.isArchived } }
+    /// Map candidates are the developments available in the timeline, even
+    /// when the response includes additional event cards for other summaries.
+    var timelineEvents: [IntelligenceEvent] {
+        let listedIDs = Set(timeline.map(\.event_id))
+        return events.filter { listedIDs.contains($0.id) }
+    }
+    var hasUsableData: Bool { snapshot?.isWarming != true }
+
+    /// A late response for another scope cannot replace the visible map/list/chart.
+    /// Missing priority metadata remains compatible with older servers/caches.
+    func matches(scope: IntelligenceOverviewScope) -> Bool {
+        window.hours == scope.hours && filters.country == scope.country && filters.topic == scope.topic
+            && (filters.priority == nil || filters.priority == scope.priority)
+    }
 }

@@ -25,27 +25,30 @@ const overview: IntelligenceOverview = {
   })),
   coverage: { sample_limit: 300, sampled_events: 8, truncated: false, comparison_available: true, notice: "Counts cover sampled investigations, not all reporting.", comparison_notice: "Comparison uses latest recorded updates in adjacent periods.", priority_notice: "Attention priority is not a probability or confirmation." },
 };
-const props = { overview, loading: false, error: null, hours: 24 as const, topic: null, onHoursChange: vi.fn(), onTopicChange: vi.fn(), onCountryChange: vi.fn(), onSelect: vi.fn(), onOpenImagery: vi.fn(), onRefresh: vi.fn() };
+const props = { overview, loading: false, error: null, hours: 24 as const, topic: null, priority: "all" as const, onHoursChange: vi.fn(), onTopicChange: vi.fn(), onCountryChange: vi.fn(), onSelect: vi.fn(), onOpenImagery: vi.fn(), onRefresh: vi.fn() };
 
 it("explains changes as investigation updates and opens exact evidence and imagery", () => {
   render(<SituationOverview {...props} />);
-  expect(screen.getByText(/8 investigations updated/)).toBeTruthy();
+  expect(screen.getByText(/8 developments updated/)).toBeTruthy();
   expect(screen.getByText(/2 more than the previous 24 hours/)).toBeTruthy();
   expect(screen.getByText(/3 high-priority · 4 places/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Port development 0" }));
   expect(props.onSelect).toHaveBeenCalledWith("event-0");
   fireEvent.click(screen.getByRole("button", { name: "Inspect imagery for Port development 0" }));
   expect(props.onOpenImagery).toHaveBeenCalledWith("event-0");
+  fireEvent.click(screen.getAllByText("1 source")[0]);
   expect(screen.getAllByRole("link", { name: "Port authority" })[0].getAttribute("href")).toBe("https://example.test/report");
+  fireEvent.click(screen.getByText("Coverage and how to read this"));
   expect(screen.getByText(overview.coverage.priority_notice)).toBeTruthy();
 });
-it("narrows the timeline to a selected interval and restores the full period", () => {
+it("shows the full activity history without implying that clicking a bar can load interval developments", () => {
   render(<SituationOverview {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: /: 4 updates; previous period 2/ }));
-  expect(screen.queryByRole("button", { name: "Port development 0" })).toBeNull();
-  expect(screen.getByRole("button", { name: "Port development 4" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Show the full period" }));
+  fireEvent.click(screen.getByText("Activity over time · 8 updates"));
+  const bar = screen.getByRole("img", { name: /: 4 updates; previous period 2/ });
+  fireEvent.click(bar);
   expect(screen.getByRole("button", { name: "Port development 0" })).toBeTruthy();
+  expect(screen.queryByText("Select an interval to explore")).toBeNull();
+  expect(screen.queryByRole("button", { name: /: 4 updates/ })).toBeNull();
 });
 it("changes server scope explicitly and never labels a previous scope as current", () => {
   const view = render(<SituationOverview {...props} />);
@@ -54,7 +57,7 @@ it("changes server scope explicitly and never labels a previous scope as current
   fireEvent.change(screen.getByRole("combobox", { name: "Period" }), { target: { value: "72" } });
   expect(props.onHoursChange).toHaveBeenCalledWith(72);
   view.rerender(<SituationOverview {...props} country="TN" loading />);
-  expect(screen.queryByText(/8 investigations updated/)).toBeNull();
+  expect(screen.queryByText(/8 developments updated/)).toBeNull();
   expect(screen.getByRole("status").textContent).toContain("Loading the situation overview");
 });
 it("keeps loaded context through a refresh failure and provides retry", () => {
@@ -66,14 +69,14 @@ it("keeps loaded context through a refresh failure and provides retry", () => {
 });
 it("shows capped counts as lower bounds and removes unsupported period comparisons", () => {
   const { container } = render(<SituationOverview {...props} overview={{ ...overview, coverage: { ...overview.coverage, truncated: true, comparison_available: false } }} />);
-  expect(screen.getByText(/At least 8 investigations updated/)).toBeTruthy();
-  expect(screen.getByText(/Sample capped; period comparison is unavailable/)).toBeTruthy();
+  expect(screen.getByText(/At least 8 developments updated/)).toBeTruthy();
+  expect(screen.getByText(/Period comparison unavailable/)).toBeTruthy();
   expect(screen.queryByText(/2 more than/)).toBeNull();
   expect(container.querySelectorAll(".situation-bar-previous")).toHaveLength(0);
 });
 it("includes an update exactly at the final timeline boundary", () => {
   render(<SituationOverview {...props} overview={{ ...overview, timeline: [{ ...overview.timeline[0], occurred_at: overview.window.end }] }} />);
-  fireEvent.click(screen.getByRole("button", { name: /: 4 updates; previous period 4/ }));
+
   expect(screen.getByRole("button", { name: "Port development 0" })).toBeTruthy();
 });
 it("uses cached timeline and source headlines while preserving untranslated rows and explicit quota state", () => {
@@ -84,8 +87,20 @@ it("uses cached timeline and source headlines while preserving untranslated rows
     { ...overview.timeline[1], ...pending, title: "Informe original en español" },
   ] }} />);
   expect(screen.getByRole("button", { name: "New translated development" })).toBeTruthy();
+  fireEvent.click(screen.getAllByText("1 source")[0]);
   expect(screen.getByRole("link", { name: "Translated source headline" })).toBeTruthy();
   expect(screen.getAllByText("Original headline")).toHaveLength(2);
   expect(screen.getByRole("button", { name: "Informe original en español" })).toBeTruthy();
   expect(screen.getByText("Translation allowance reached")).toBeTruthy();
+});
+
+it("shows warming as preparation, without zero activity or repeated absence rows", () => {
+  const warming = { ...overview, snapshot: { status: "warming" as const, generated_at: null, age_seconds: null }, timeline: [], events: [], buckets: [], summary: { ...overview.summary, event_count: 0, high_priority_count: 0, location_count: 0 } };
+  const view = render(<SituationOverview {...props} overview={warming} />);
+  expect(screen.getByRole("status").textContent).toContain("Preparing the first overview");
+  expect(screen.queryByText(/0 developments updated/)).toBeNull();
+  expect(screen.queryByText(/Activity over time · 0/)).toBeNull();
+  view.rerender(<SituationOverview {...props} priority="high" overview={{ ...overview, timeline: [{ ...overview.timeline[0], country_iso2: null, location_name: null }] }} />);
+  expect(screen.queryByText(/high-priority ·/)).toBeNull();
+  expect(screen.queryByText("Location unresolved")).toBeNull();
 });

@@ -1,9 +1,5 @@
-import { CountryDataContext } from "./components/countryContext";
-import CountryFlag from "./components/CountryFlag";
-import CountryFacts from "./components/CountryFacts";
 import { useDailyBriefing } from "./components/useDailyBriefing";
 import { useVisiblePolling } from "./components/useVisiblePolling";
-import CountryElections from "./components/CountryElections";
 import NewsOverview from "./components/NewsOverview";
 import { filterNewsByTopic, type NewsTopic } from "./components/newsWorkspacePresentation";
 import SourceInvestigationLinks from "./components/SourceInvestigationLinks";
@@ -21,18 +17,14 @@ import {
   Bell,
   Settings,
   User,
-  CloudSun,
   Newspaper,
-  ChartNoAxesCombined,
   Moon,
   Sun,
   LogOut,
   ChevronLeft,
-  ChevronDown,
   Menu,
   LayoutGrid,
   FileText,
-  Maximize2,
   X,
   ArrowUpRight,
   CheckCheck,
@@ -141,8 +133,6 @@ const NEWS_FETCH_LIMIT = 120;
 const NEWS_TREND_WINDOW_DAYS = 30;
 const MAP_WINDOW_MIN = 7;
 const MAP_WINDOW_MAX = 45;
-const SPLIT_VIEW_MIN_WIDTH = 700;
-const SPLIT_VIEW_MIN_HEIGHT = 620;
 
 function metadataFromNewsFeed(response: NewsFeedResponse): NewsFeedMetadata {
   return {
@@ -286,8 +276,6 @@ const includesLinkageTerm = (haystack: string, value: string): boolean => {
   return normalized.length >= 3 && haystack.includes(` ${normalized} `);
 };
 
-const getLeadershipDisplayName = (value: string | null | undefined): string =>
-  value && !/^Q\d+$/i.test(value.trim()) ? value.trim() : "Name unavailable";
 
 const prettySourceName = (value: string): string => {
   const normalized = value.trim().toLowerCase();
@@ -750,13 +738,11 @@ import WorldMapBubbles from "./components/WorldMapBubbles";
 import LoginPage from "./components/LoginPage";
 import PaywallPage from "./components/PaywallPage";
 import WebsiteColourPalettePreview from "./components/WebsiteColourPalettePreview";
-import SituationOverview from "./components/SituationOverview";
-import SatelliteContextPanel from "./components/SatelliteContextPanel";
-import { eventCoordinateContext, isHistoricalEvent } from "./components/eventPresentation";
+import SituationDashboard from "./components/SituationDashboard";
+import { isHistoricalEvent } from "./components/eventPresentation";
 import {
   fetchAuthMe,
   fetchAuthProviders,
-  fetchCountryLeadership,
   fetchCountryStats,
   fetchCountryWeather,
   fetchCountryWeatherForecast,
@@ -771,7 +757,6 @@ import {
   fetchMarketFilings,
   fetchMarketIndicators,
   fetchMarketQuotes,
-  fetchNews,
   ensureNewsTranslationSummary,
   fetchPodcasts,
   fetchPolicyRates,
@@ -788,7 +773,6 @@ import {
   type AuthProvider,
   type AuthProviderId,
   type AuthUser,
-  type CountryLeadership,
   type CountryMarketOverview,
   type CountryMarketOverviewResponse,
   type CountryMarketDetail,
@@ -874,9 +858,9 @@ export default function ClaritasDashboard() {
   const [overviewEventsLoading, setOverviewEventsLoading] = useState(true);
   const [overview, setOverview] = useState<IntelligenceOverview | null>(null);
   const [overviewHours, setOverviewHours] = useState<24 | 72 | 168>(24);
+  const [overviewPriority, setOverviewPriority] = useState<"high" | "all">("high");
   const [overviewTopic, setOverviewTopic] = useState<OverviewTopic | null>(null);
   const [overviewEventRefresh, setOverviewEventRefresh] = useState(0);
-  const [selectedOverviewEvent, setSelectedOverviewEvent] = useState<IntelligenceEvent | null>(null);
   const [authStatus, setAuthStatus] = useState<
     "checking" | "authed" | "unauthed"
   >("checking");
@@ -911,11 +895,9 @@ export default function ClaritasDashboard() {
       return null;
     }
   });
-  const [satelliteContextEventId, setSatelliteContextEventId] = useState<string | null>(null);
   const [comparisonCountry, setComparisonCountry] = useState<string | null>(
     null,
   );
-  const [compareMode, setCompareMode] = useState(false);
   const [pinnedCountry, setPinnedCountry] = useState<string | null>(null);
   const [regionFilter, setRegionFilter] =
     useState<(typeof REGION_OPTIONS)[number]["id"]>("global");
@@ -924,8 +906,6 @@ export default function ClaritasDashboard() {
   const [weatherStats, setWeatherStats] = useState<CountryWeather[]>([]);
   const [weatherForecastDetail, setWeatherForecastDetail] = useState<CountryWeatherForecastDetail | null>(null);
   const [weatherForecastLoading, setWeatherForecastLoading] = useState(false);
-  const [leadershipStats, setLeadershipStats] = useState<CountryLeadership[]>([]);
-  const countryContexts = useMemo(() => Object.fromEntries(leadershipStats.flatMap((country) => country.country_context ? [[country.country, country.country_context]] : [])), [leadershipStats]);
   const [marketQuotes, setMarketQuotes] = useState<MarketQuote[]>([]);
   const [countryMarkets, setCountryMarkets] = useState<CountryMarketOverview[]>([]);
   const [countryMarketDetail, setCountryMarketDetail] = useState<CountryMarketDetail | null>(null);
@@ -935,14 +915,10 @@ export default function ClaritasDashboard() {
   const [marketIndicators, setMarketIndicators] = useState<MarketIndicator[]>([]);
   const [fxRates, setFxRates] = useState<FxRate[]>([]);
   const [policyRates, setPolicyRates] = useState<PolicyRate[]>([]);
-  const [transportOverview, setTransportOverview] = useState<TransportOverview | null>(null);
   const [globalTransportOverview, setGlobalTransportOverview] = useState<TransportOverview | null>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [news, setNews] = useState<NewsItem[]>([]);
-  const [topNews, setTopNews] = useState<NewsItem[]>([]);
   const [newsFeedMetadata, setNewsFeedMetadata] = useState<NewsFeedMetadata | null>(null);
-  const [topNewsFeedMetadata, setTopNewsFeedMetadata] = useState<NewsFeedMetadata | null>(null);
-  const [topNewsScopeKey, setTopNewsScopeKey] = useState<string | null>(null);
   const [selectedDashboardNewsId, setSelectedDashboardNewsId] = useState<
     number | null
   >(null);
@@ -956,8 +932,6 @@ export default function ClaritasDashboard() {
   );
   const [isLoadingNews, setIsLoadingNews] = useState(false);
   const [newsLoadError, setNewsLoadError] = useState<string | null>(null);
-  const [isLoadingTopNews, setIsLoadingTopNews] = useState(false);
-  const [topNewsLoadError, setTopNewsLoadError] = useState<string | null>(null);
   const [newsMapCountry, setNewsMapCountry] = useState<string | null>(null);
   const [newsCountryItems, setNewsCountryItems] = useState<NewsItem[] | null>(null);
   const [newsCountryFeedMetadata, setNewsCountryFeedMetadata] = useState<NewsFeedMetadata | null>(null);
@@ -974,8 +948,7 @@ export default function ClaritasDashboard() {
   const [dataWindowPreset, setDataWindowPreset] =
     useState<DataWindowPreset>("30d");
   const [mapMode, setMapMode] = useState<MapMode>("signals");
-  const [listMode, setListMode] = useState<"news" | "weather" | "market">("news");
-  const [mapWindowDays, setMapWindowDays] = useState(NEWS_TREND_WINDOW_DAYS);
+  const [mapWindowDays] = useState(NEWS_TREND_WINDOW_DAYS);
   const [mapExpanded, setMapExpanded] = useState(false);
   const [chartView, setChartView] = useState<"daily" | "rolling">("daily");
   const [chartRange, setChartRange] = useState<{
@@ -1039,7 +1012,6 @@ export default function ClaritasDashboard() {
   const [dailyBriefingScheduleNotice, setDailyBriefingScheduleNotice] = useState<string | null>(null);
   const profileSections = PROFILE_SECTIONS;
   const feedRef = useRef<HTMLDivElement | null>(null);
-  const dashboardFeedPanelRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<HTMLDivElement | null>(null);
   const newsPagerRef = useRef(new NewsFeedPager(NEWS_FETCH_LIMIT));
   const newsCountryPagerRef = useRef(new NewsFeedPager(NEWS_FETCH_LIMIT));
@@ -1047,17 +1019,10 @@ export default function ClaritasDashboard() {
   const [newsCountryPagination, setNewsCountryPagination] = useState({ canLoadMore: false, atLimit: false, loadingMore: false, error: null as string | null });
   const newsRequestIdRef = useRef(0);
   const newsDataScopeKeyRef = useRef<string | null>(null);
-  const topNewsRequestIdRef = useRef(0);
-  const topNewsScopeKeyRef = useRef<string | null>(null);
   const newsCountryRequestIdRef = useRef(0);
   const newsCountryDataScopeKeyRef = useRef<string | null>(null);
   const podcastRequestIdRef = useRef(0);
   const selectedNewsCountry = normalizeIso2(selectedCountry) ?? null;
-  const requestedTopNewsScopeKey = `${selectedNewsCountry ?? "global"}|${newsCategory}`;
-  const [viewportSize, setViewportSize] = useState(() => ({
-    width: typeof window !== "undefined" ? window.innerWidth : 1280,
-    height: typeof window !== "undefined" ? window.innerHeight : 800,
-  }));
   const authProviderMap = useMemo(
     () => new Map(authProviders.map((p) => [p.id, p])),
     [authProviders],
@@ -1188,7 +1153,7 @@ export default function ClaritasDashboard() {
 
   const isAdmin = (authUser?.roles ?? []).includes("admin");
   const hasPaidAccess = authUser?.billing?.has_access ?? true;
-  const { briefing: dailyBriefing, error: dailyBriefingError, refresh: refreshDailyBriefing } = useDailyBriefing(authStatus === "authed" && hasPaidAccess);
+  const { briefing: dailyBriefing, error: dailyBriefingError, refresh: refreshDailyBriefing } = useDailyBriefing(authStatus === "authed" && hasPaidAccess && activeView === "dashboard");
 
   const parsedSearch = useMemo(
     () => parseDashboardSearch(query, searchTopic),
@@ -1219,7 +1184,7 @@ export default function ClaritasDashboard() {
   useEffect(() => {
     setIntelligenceAlerts([]);
   }, [authStatus, hasPaidAccess, authUser?.id]);
-  useVisiblePolling(authStatus === "authed" && hasPaidAccess, 60_000, `${authUser?.id ?? ""}:alerts`, async (signal) => {
+  useVisiblePolling(authStatus === "authed" && hasPaidAccess && notificationsOpen, 60_000, `${authUser?.id ?? ""}:alerts`, async (signal) => {
     try {
       const alerts = await fetchIntelligenceAlerts(signal);
       if (!signal.aborted) setIntelligenceAlerts(alerts);
@@ -1228,7 +1193,6 @@ export default function ClaritasDashboard() {
 
   useEffect(() => {
     setOverviewEvents([]);
-    setSelectedOverviewEvent(null);
     setOverviewEventsError(null);
     setOverview(null);
   }, [authStatus, hasPaidAccess, authUser?.id]);
@@ -1236,11 +1200,11 @@ export default function ClaritasDashboard() {
     setOverview(null);
     setOverviewEvents([]);
     setOverviewEventsError(null);
-  }, [overviewHours, overviewTopic, selectedCountry]);
-  useVisiblePolling(authStatus === "authed" && hasPaidAccess && activeView === "dashboard", 60_000, `${authUser?.id ?? ""}:${overviewHours}:${overviewTopic ?? ""}:${selectedCountry ?? ""}:${overviewEventRefresh}`, async (signal) => {
+  }, [overviewHours, overviewTopic, overviewPriority, selectedCountry]);
+  useVisiblePolling(authStatus === "authed" && hasPaidAccess && activeView === "dashboard", 60_000, `${authUser?.id ?? ""}:${overviewHours}:${overviewTopic ?? ""}:${overviewPriority}:${selectedCountry ?? ""}:${overviewEventRefresh}`, async (signal) => {
     setOverviewEventsLoading(true);
     try {
-      const result = await fetchIntelligenceOverview({ hours: overviewHours, topic: overviewTopic ?? undefined, country: selectedCountry ?? undefined }, signal);
+      const result = await fetchIntelligenceOverview({ hours: overviewHours, topic: overviewTopic ?? undefined, country: selectedCountry ?? undefined, priority: overviewPriority }, signal);
       if (signal.aborted) return;
       setOverview(result);
       setOverviewEvents(result.events);
@@ -1252,54 +1216,6 @@ export default function ClaritasDashboard() {
     }
   });
 
-  const overviewEventPoints = useMemo(() => {
-    const severityRank: Record<IntelligenceEvent["severity"], number> = {
-      critical: 4,
-      high: 3,
-      medium: 2,
-      low: 1,
-    };
-    const mappedEvents = selectedOverviewEvent?.id === selectedIntelligenceEventId
-      ? [...overviewEvents.filter((event) => event.id !== selectedOverviewEvent.id), selectedOverviewEvent]
-      : overviewEvents;
-    return mappedEvents
-      // Country reference points support choropleth context but are not event
-      // locations. Dots require defensible source or mapped event geography.
-      .filter((event) => Boolean(eventCoordinateContext(event)))
-      .filter((event) => !isHistoricalEvent(event) || event.id === selectedIntelligenceEventId || event.id === satelliteContextEventId)
-      .sort((left, right) =>
-        severityRank[right.severity] - severityRank[left.severity] ||
-        Number(right.relevance_score) - Number(left.relevance_score),
-      )
-      .map((event) => {
-        const historical = isHistoricalEvent(event);
-        const normalizedType = event.event_type.toLowerCase();
-        const label = historical ? "PAST" : normalizedType.includes("earthquake")
-          ? "QUAKE"
-          : normalizedType.includes("fire")
-            ? "FIRE"
-            : normalizedType.includes("transport") || normalizedType.includes("maritime")
-              ? "MOVE"
-              : normalizedType.includes("weather")
-                ? "WX"
-                : normalizedType.includes("market")
-                  ? "MKT"
-                  : "EVENT";
-        return {
-          id: event.id,
-          latitude: Number(event.latitude),
-          longitude: Number(event.longitude),
-          title: historical ? `Archived · ${event.title}` : event.title,
-          subtitle: `${historical ? "Archived investigation · " : ""}${event.location_name || event.primary_country_iso2 || "Estimated event location"} · updated ${formatExactTimestamp(event.last_activity_time)}${!historical && event.expires_at ? ` · current until ${formatExactTimestamp(event.expires_at)}` : ""} · ${event.domain_count} domain${event.domain_count === 1 ? "" : "s"}`,
-          label,
-          severity: event.severity,
-          hasImagery: event.earth_observation_available,
-          selected:
-            event.id === selectedIntelligenceEventId ||
-            event.id === satelliteContextEventId,
-        };
-      });
-  }, [overviewEvents, satelliteContextEventId, selectedIntelligenceEventId, selectedOverviewEvent]);
 
   useEffect(() => {
     if (!isAdmin && activeView === "admin") {
@@ -1379,41 +1295,6 @@ export default function ClaritasDashboard() {
       if (newsRequestIdRef.current === requestId) {
         setIsLoadingNews(false);
       }
-    }
-  }, []);
-
-  const loadTopNewsData = useCallback(async (
-    category: NewsCategoryFilter = "all",
-    country: string | null = null,
-  ) => {
-    const requestId = topNewsRequestIdRef.current + 1;
-    topNewsRequestIdRef.current = requestId;
-    const normalizedCountry = normalizeIso2(country) ?? null;
-    const scopeKey = `${normalizedCountry ?? "global"}|${category}`;
-    if (topNewsScopeKeyRef.current !== scopeKey) {
-      topNewsScopeKeyRef.current = scopeKey;
-      setTopNews([]);
-      setTopNewsFeedMetadata(null);
-    }
-    setTopNewsScopeKey(scopeKey);
-    setIsLoadingTopNews(true);
-    setTopNewsLoadError(null);
-    try {
-      const response = await fetchNews({
-        limit: 3,
-        country: normalizedCountry ?? undefined,
-        category: category === "all" ? undefined : category,
-        sort: "newest",
-      });
-      if (topNewsRequestIdRef.current !== requestId) return;
-      setTopNews(newestNewsFirst(response.items).slice(0, 3));
-      setTopNewsFeedMetadata(metadataFromNewsFeed(response));
-      setTopNewsScopeKey(scopeKey);
-    } catch (err) {
-      if (topNewsRequestIdRef.current !== requestId) return;
-      setTopNewsLoadError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (topNewsRequestIdRef.current === requestId) setIsLoadingTopNews(false);
     }
   }, []);
 
@@ -1529,19 +1410,9 @@ export default function ClaritasDashboard() {
   ]);
 
 
-  useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) return;
-    void loadTopNewsData(newsCategory, selectedNewsCountry);
-  }, [
-    authStatus,
-    hasPaidAccess,
-    loadTopNewsData,
-    newsCategory,
-    selectedNewsCountry,
-  ]);
 
   useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) return;
+    if (authStatus !== "authed" || !hasPaidAccess || activeView !== "news") return;
     if (selectedNewsCountry === newsMapCountry) return;
     if (selectedNewsCountry) {
       void loadNewsCountryData(
@@ -1557,6 +1428,7 @@ export default function ClaritasDashboard() {
     authStatus,
     hasPaidAccess,
     loadNewsCountryData,
+    activeView,
     newsCategory,
     newsMapCountry,
     newsSortBy,
@@ -1581,7 +1453,6 @@ export default function ClaritasDashboard() {
     try {
       const translation = await ensureNewsTranslationSummary(item.id);
       setNews((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
-      setTopNews((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
       updateSearchNewsItems((current) => mergeNewsTranslationIntoItems(current, item.id, translation));
       setNewsCountryItems((current) => current
         ? mergeNewsTranslationIntoItems(current, item.id, translation)
@@ -1619,30 +1490,21 @@ export default function ClaritasDashboard() {
   }, []);
 
   useEffect(() => {
-    // Load initial data
     if (authStatus !== "authed" || !hasPaidAccess) return;
-    fetchCountryWeather()
-      .then(setWeatherStats)
-      .catch(() => setWeatherStats([]));
-    fetchCountryLeadership()
-      .then(setLeadershipStats)
-      .catch(() => setLeadershipStats([]));
-    fetchCountryMarketOverview()
-      .then((overview) => {
-        setCountryMarkets(overview.countries);
-        setCountryMarketMethodology(overview.methodology);
-      })
-      .catch(() => {
-        setCountryMarkets([]);
-        setCountryMarketMethodology(null);
-      });
-    fetchMarketQuotes().then((rows) => {
-      setMarketQuotes(rows);
-      setSelectedSymbol((current) => current && rows.some((row) => row.symbol === current) ? current : null);
-    }).catch(() => setMarketQuotes([]));
-    void loadNewsData("recent", "all", "newest");
-    void loadPodcastData();
-  }, [authStatus, hasPaidAccess, loadNewsData, loadPodcastData]);
+    let cancelled = false;
+    if (activeView === "weather") {
+      void fetchCountryWeather().then((rows) => { if (!cancelled) setWeatherStats(rows); }).catch(() => {});
+    }
+    if (activeView === "markets") {
+      void fetchCountryMarketOverview().then((value) => {
+        if (!cancelled) { setCountryMarkets(value.countries); setCountryMarketMethodology(value.methodology); }
+      }).catch(() => {});
+      void fetchMarketQuotes().then((rows) => { if (!cancelled) setMarketQuotes(rows); }).catch(() => {});
+    }
+    if (activeView === "news") void loadNewsData("recent", "all", "newest");
+    if (activeView === "podcasts") void loadPodcastData();
+    return () => { cancelled = true; };
+  }, [activeView, authStatus, hasPaidAccess, loadNewsData, loadPodcastData]);
 
   useEffect(() => {
     if (authStatus !== "authed" || !hasPaidAccess || (activeView !== "markets" && activeView !== "news")) return;
@@ -1717,7 +1579,7 @@ export default function ClaritasDashboard() {
   }, [authStatus, authUser?.id, profileDataRequested]);
 
   useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) return;
+    if (authStatus !== "authed" || !hasPaidAccess || activeView !== "news") return;
     let cancelled = false;
     fetchCountryStats({ days: mapWindowDays })
       .then((result) => {
@@ -1735,7 +1597,7 @@ export default function ClaritasDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [authStatus, hasPaidAccess, mapWindowDays]);
+  }, [authStatus, hasPaidAccess, activeView, mapWindowDays]);
 
   const cardBase = "app-card operational-panel rounded-xl";
   const chartGridColor = "var(--viz-grid)";
@@ -1750,15 +1612,6 @@ export default function ClaritasDashboard() {
     [],
   );
 
-  const dailyBriefingDateLabel = useMemo(() => {
-    if (!dailyBriefing?.briefing_date) return todayLabel;
-    return new Intl.DateTimeFormat("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      timeZone: "UTC",
-    }).format(new Date(`${dailyBriefing.briefing_date}T00:00:00Z`));
-  }, [dailyBriefing?.briefing_date, todayLabel]);
 
   const countryMeta = useMemo(() => {
     const map = new Map<
@@ -1949,7 +1802,6 @@ export default function ClaritasDashboard() {
   );
 
   const selectedWindowDays = selectedWindowOption.days;
-  const selectedWindowLabel = selectedWindowOption.label;
 
   const newsTrendPrimaryScope = useMemo(() => {
     if (!selectedCountry) return newsSearchScope;
@@ -1971,16 +1823,6 @@ export default function ClaritasDashboard() {
     return { start: keys[0], end: keys[keys.length - 1] };
   }, [newsTrendPrimaryScope]);
 
-  const newsCoverageLabel = useMemo(() => {
-    if (!newsDateBounds) return "No dated articles loaded";
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: "UTC",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-    return `${formatter.format(new Date(newsDateBounds.start))} – ${formatter.format(new Date(newsDateBounds.end))}`;
-  }, [newsDateBounds]);
 
   const defaultRange = useMemo(() => {
     if (!newsDateBounds) return null;
@@ -2101,25 +1943,6 @@ export default function ClaritasDashboard() {
     return start <= end ? { start, end } : { start: end, end: start };
   }, [chartRange, newsTrend]);
 
-  const activeRangeLabel = useMemo(() => {
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: "UTC",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-    if (!activeRange) {
-      if (!defaultRange) return selectedWindowLabel;
-      return `${formatter.format(new Date(defaultRange.start))} – ${formatter.format(new Date(defaultRange.end))}`;
-    }
-    const startLabel =
-      newsTrend.find((d) => d.dateKey === activeRange.start)?.label ??
-      formatter.format(new Date(activeRange.start));
-    const endLabel =
-      newsTrend.find((d) => d.dateKey === activeRange.end)?.label ??
-      formatter.format(new Date(activeRange.end));
-    return `${startLabel} – ${endLabel}`;
-  }, [activeRange, defaultRange, newsTrend, selectedWindowLabel]);
 
   const effectiveRange = activeRange ?? defaultRange;
 
@@ -2158,17 +1981,6 @@ export default function ClaritasDashboard() {
     return { start, end };
   }, [activeRange, mapWindowDays, newsDateBounds?.end]);
 
-  const mapRangeLabel = useMemo(() => {
-    if (!mapRange) return "No range";
-    const formatter = new Intl.DateTimeFormat("en-US", {
-      timeZone: "UTC",
-      month: "short",
-      day: "numeric",
-    });
-    const startLabel = formatter.format(new Date(mapRange.start));
-    const endLabel = formatter.format(new Date(mapRange.end));
-    return `${startLabel} – ${endLabel}`;
-  }, [mapRange]);
 
   const mapNews = useMemo(() => {
     let items = newsSearchScope;
@@ -2391,7 +2203,7 @@ export default function ClaritasDashboard() {
   }, [countryMeta, podcasts]);
 
   useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess) {
+    if (authStatus !== "authed" || !hasPaidAccess || activeView !== "transport") {
       setGlobalTransportOverview(null);
       return;
     }
@@ -2406,7 +2218,7 @@ export default function ClaritasDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [authStatus, hasPaidAccess]);
+  }, [authStatus, hasPaidAccess, activeView]);
 
   const crossSourceMapData = useMemo(() => {
     const newsByCountry = new Map(
@@ -2566,95 +2378,11 @@ export default function ClaritasDashboard() {
   const transportFocusCountry =
     normalizeIso2(selectedCountry) ?? normalizeIso2(highestSignalCountry?.country);
 
-  useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess || !transportFocusCountry) {
-      setTransportOverview(null);
-      return;
-    }
-    let cancelled = false;
-    setTransportOverview(null);
-    fetchTransportOverview({
-      country: transportFocusCountry,
-      detail: "aggregate",
-    })
-      .then((overview) => {
-        if (!cancelled) setTransportOverview(overview);
-      })
-      .catch(() => {
-        if (!cancelled) setTransportOverview(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [authStatus, hasPaidAccess, transportFocusCountry]);
-  const highestMapNewsCountry = useMemo(
-    () => [...mapBubbleData].sort((left, right) => right.count - left.count)[0] ?? null,
-    [mapBubbleData],
-  );
-  const mostExtremeWeatherCountry = useMemo(
-    () =>
-      [...mapWeatherData].sort(
-        (left, right) => Math.abs((right.value ?? 20) - 20) - Math.abs((left.value ?? 20) - 20),
-      )[0] ?? null,
-    [mapWeatherData],
-  );
-
-  const activeMapData =
-    mapMode === "signals"
-      ? crossSourceMapData
-      : mapMode === "news"
-        ? mapBubbleData
-        : mapWeatherData;
-  const activeMapLegendLabel =
-    mapMode === "signals"
-      ? "Signal relevance"
-      : mapMode === "news"
-        ? "Story concentration"
-        : "Relative temperature";
-
-  const pinnedSignalSummary = useMemo(() => {
-    if (!pinnedCountry) return null;
-    return (
-      crossSourceMapData.find(
-        (row) => row.country === pinnedCountry.toUpperCase(),
-      ) ?? null
-    );
-  }, [crossSourceMapData, pinnedCountry]);
-
-  const pinnedNewsSummary = useMemo(() => {
-    if (!pinnedCountry) return null;
-    return mapCountryStats.get(pinnedCountry.toUpperCase()) ?? null;
-  }, [pinnedCountry, mapCountryStats]);
-
-  const pinnedTopSource = useMemo(() => {
-    if (!pinnedNewsSummary || pinnedNewsSummary.sources.size === 0) return null;
-    return Array.from(pinnedNewsSummary.sources.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([name]) => name)[0];
-  }, [pinnedNewsSummary]);
-
-  const pinnedWeatherSummary = useMemo(() => {
-    if (!pinnedCountry) return null;
-    return (
-      mapWeatherScope.find(
-        (w) => (w.country || "").toUpperCase() === pinnedCountry.toUpperCase(),
-      ) ?? null
-    );
-  }, [pinnedCountry, mapWeatherScope]);
-
-  const pinnedMeta = useMemo(() => {
-    if (!pinnedCountry) return null;
-    return countryMeta.get(pinnedCountry.toUpperCase()) ?? null;
-  }, [pinnedCountry, countryMeta]);
 
   const filteredWeather = useMemo(() => {
-    let w = weatherSearchScope;
-    if (selectedCountries.size > 0) {
-      w = w.filter(
-        (x) => x.country && selectedCountries.has(x.country.toUpperCase()),
-      );
-    }
-    return w;
+    let rows = weatherSearchScope;
+    if (selectedCountries.size > 0) rows = rows.filter((row) => row.country && selectedCountries.has(row.country.toUpperCase()));
+    return rows;
   }, [weatherSearchScope, selectedCountries]);
 
   const filteredMarket = useMemo(() => {
@@ -3209,7 +2937,7 @@ export default function ClaritasDashboard() {
   }, [countryMarkets, pinnedCountry, selectedCountry]);
 
   useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess || !selectedCountryMarket) {
+    if (authStatus !== "authed" || !hasPaidAccess || activeView !== "markets" || !selectedCountryMarket) {
       setCountryMarketDetail(null);
       return;
     }
@@ -3224,7 +2952,7 @@ export default function ClaritasDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [authStatus, hasPaidAccess, selectedCountryMarket]);
+  }, [authStatus, hasPaidAccess, activeView, selectedCountryMarket]);
 
   const weatherFocusCountry = useMemo(() => {
     const selected = normalizeIso2(selectedCountry ?? pinnedCountry);
@@ -3240,7 +2968,7 @@ export default function ClaritasDashboard() {
   }, [pinnedCountry, selectedCountry, weatherStats]);
 
   useEffect(() => {
-    if (authStatus !== "authed" || !hasPaidAccess || !weatherFocusCountry) {
+    if (authStatus !== "authed" || !hasPaidAccess || activeView !== "weather" || !weatherFocusCountry) {
       setWeatherForecastDetail(null);
       return;
     }
@@ -3259,7 +2987,7 @@ export default function ClaritasDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [authStatus, hasPaidAccess, weatherFocusCountry]);
+  }, [authStatus, hasPaidAccess, activeView, weatherFocusCountry]);
 
   const countryMarketCoverage = useMemo(() => ({
     countries: countryMarkets.length,
@@ -3351,47 +3079,8 @@ export default function ClaritasDashboard() {
     return (marketByCountry.get(relationCountry) ?? []).slice(0, 6);
   }, [marketByCountry, relationCountry]);
 
-  const relatedMarketCountry = useMemo(() => {
-    if (!relationCountry) return null;
-    return countryMarkets.find((row) => row.country.toUpperCase() === relationCountry) ?? null;
-  }, [countryMarkets, relationCountry]);
 
-  const relatedTransport = useMemo(() => {
-    if (!relationCountry) return null;
-    return (
-      transportOverview?.countries.find(
-        (country) => country.country.toUpperCase() === relationCountry,
-      ) ?? null
-    );
-  }, [relationCountry, transportOverview]);
 
-  const relatedTransportHistory = useMemo(() => {
-    const history = transportOverview?.history;
-    if (
-      !relationCountry ||
-      !history ||
-      history.scope !== "country" ||
-      history.country.toUpperCase() !== relationCountry
-    ) {
-      return null;
-    }
-    const summary = history.windows.find((window) => window.days === 30) ?? null;
-    const series = history.series.slice(-30).map((point) => {
-      const observedCounts = [point.maritime_entities, point.aviation_entities]
-        .filter((value): value is number => value != null);
-      return {
-        day: new Date(point.bucket).toLocaleDateString([], {
-          month: "short",
-          day: "numeric",
-          timeZone: "UTC",
-        }),
-        vehicles: point.observed_hours > 0 && observedCounts.length > 0
-          ? observedCounts.reduce((total, value) => total + value, 0)
-          : null,
-      };
-    });
-    return { history, summary, series };
-  }, [relationCountry, transportOverview]);
 
   const relatedNews = useMemo(() => {
     if (!relationCountry) return [];
@@ -3401,10 +3090,6 @@ export default function ClaritasDashboard() {
       .slice(0, 6);
   }, [news, relationCountry]);
 
-  const relatedPodcastLink = useMemo(() => {
-    if (!relationCountry) return null;
-    return podcastCountryLinks.get(relationCountry) ?? null;
-  }, [podcastCountryLinks, relationCountry]);
 
   const newsSummary = useMemo(() => {
     const timelineDays = newsPageTrendData.length;
@@ -3460,27 +3145,6 @@ export default function ClaritasDashboard() {
     }
     return `${loaded} in ${categoryLabel}`;
   }, [activeNewsAppliedCategory, activeNewsRawCount, activeNewsTotal, newsPageItems.length]);
-  const topNewsScopeMatchesSelection = topNewsScopeKey === requestedTopNewsScopeKey;
-  const isTopNewsScopeLoading = isLoadingTopNews || !topNewsScopeMatchesSelection;
-  const activeTopNewsMetadata = topNewsScopeMatchesSelection ? topNewsFeedMetadata : null;
-  const visibleTopNews = useMemo(
-    () => topNewsScopeMatchesSelection ? topNews.slice(0, 3) : [],
-    [topNews, topNewsScopeMatchesSelection],
-  );
-  const topNewsAppliedCategory: NewsCategoryFilter = activeTopNewsMetadata
-    ? activeTopNewsMetadata.ranking.category ?? "all"
-    : newsCategory;
-  const topNewsCategoryCounts = useMemo(
-    () => newsCategoryCounts(activeTopNewsMetadata),
-    [activeTopNewsMetadata],
-  );
-  const topNewsTotal = Math.max(visibleTopNews.length, activeTopNewsMetadata?.page.total ?? 0);
-  const topNewsCountryLabel = selectedNewsCountry
-    ? countryMeta.get(selectedNewsCountry)?.name ?? selectedNewsCountry
-    : "Global";
-  const topNewsResultSummary = topNewsLoadError && visibleTopNews.length > 0
-    ? `Update failed · showing ${visibleTopNews.length} previous ${visibleTopNews.length === 1 ? "story" : "stories"}`
-    : `${visibleTopNews.length} ${visibleTopNews.length === 1 ? "story" : "stories"} shown${topNewsTotal > visibleTopNews.length ? ` · ${topNewsTotal} available` : ""} in ${newsCategoryLabel(topNewsAppliedCategory).toLocaleLowerCase()}`;
   const newsHasWorkspaceFilters = Boolean(
     newsTopic ||
     newsSourceFilter !== "all"
@@ -3748,72 +3412,7 @@ export default function ClaritasDashboard() {
     };
   }, [countryMeta, podcastCountryLinks, podcasts]);
 
-  const selectedLeadershipProfile = useMemo(() => {
-    if (!selectedCountry) return null;
-    return (
-      leadershipStats.find(
-        (country) =>
-          country.country.toUpperCase() === selectedCountry.toUpperCase(),
-      ) ?? null
-    );
-  }, [leadershipStats, selectedCountry]);
 
-  const selectedCountryContext = useMemo(() => {
-    if (!selectedCountry) return null;
-    const iso = selectedCountry.toUpperCase();
-    const newsRow = mapBubbleData.find(
-      (row) => row.country.toUpperCase() === iso,
-    );
-    const mappedNews = mapCountryStats.get(iso);
-    const maxNews = Math.max(
-      1,
-      ...mapBubbleData.map((row) => Number(row.count) || 0),
-    );
-    const temperature =
-      typeof relatedWeather?.temp_c === "number"
-        ? relatedWeather.temp_c
-        : null;
-    const relevance = crossSourceMapData.find((row) => row.country === iso);
-
-    return {
-      iso,
-      meta: countryMeta.get(iso),
-      newsCount: newsRow?.count ?? mappedNews?.count ?? relatedNews.length,
-      newsIntensity:
-        ((newsRow?.count ?? mappedNews?.count ?? 0) / maxNews) * 100,
-      topSource:
-        mappedNews && mappedNews.sources.size > 0
-          ? [...mappedNews.sources.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
-          : null,
-      temperature,
-      temperaturePosition:
-        temperature == null
-          ? 0
-          : Math.max(0, Math.min(100, ((temperature + 30) / 80) * 100)),
-      humidity:
-        typeof relatedWeather?.humidity === "number"
-          ? relatedWeather.humidity
-          : null,
-      relevanceScore: relevance?.count ?? 0,
-      relevanceDrivers: [
-        ...(relevance?.meta?.lines ?? []),
-        ...(relatedTransport && relatedTransport.active_count > 0
-          ? [
-              `Transport: ${relatedTransport.active_count} active links · ${relatedTransport.trend.ship_departures.current} ship departures · ${relatedTransport.trend.tracked_flights.current} tracked flights`,
-            ]
-          : []),
-      ],
-    };
-  }, [
-    countryMeta,
-    crossSourceMapData,
-    mapBubbleData,
-    mapCountryStats,
-    relatedNews.length,
-    relatedTransport,
-    relatedWeather,
-    selectedCountry,
-  ]);
 
   const latestEventLabel = useMemo(() => {
     const times: number[] = [];
@@ -3848,9 +3447,6 @@ export default function ClaritasDashboard() {
     return regionFilter === "global" ? "Global" : regionLabel;
   }, [selectedCountry, comparisonCountry, regionFilter, regionLabel]);
 
-  const activeSearchTopicLabel =
-    SEARCH_TOPIC_OPTIONS.find((option) => option.id === effectiveSearchTopic)
-      ?.label ?? "All";
 
   const aiSearchPreview = useMemo(() => {
     const news = newsSearchScope.slice(0, 8).map((item) => {
@@ -4086,26 +3682,13 @@ export default function ClaritasDashboard() {
   ]);
 
   const unreadNotificationCount = useMemo(
-    () =>
-      signalNotifications.filter(
-        (notification) => !readNotificationIds.includes(notification.id),
-      ).length,
+    () => signalNotifications.filter((notification) => !readNotificationIds.includes(notification.id)).length,
     [readNotificationIds, signalNotifications],
   );
-
-  const splitViewEnabled = useMemo(
-    () =>
-      viewportSize.width >= SPLIT_VIEW_MIN_WIDTH &&
-      viewportSize.height >= SPLIT_VIEW_MIN_HEIGHT,
-    [viewportSize.height, viewportSize.width],
-  );
-
-  const dashboardPanelClass = `${cardBase} dashboard-panel flex min-h-0 flex-col overflow-hidden`;
 
   useEffect(() => {
     if (!selectedCountry) {
       setComparisonCountry(null);
-      setCompareMode(false);
     }
   }, [selectedCountry]);
 
@@ -4147,13 +3730,6 @@ export default function ClaritasDashboard() {
     return () => media.removeEventListener("change", closeDesktopDrawer);
   }, [mobileNavOpen]);
 
-  useEffect(() => {
-    const update = () =>
-      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
 
   useEffect(() => {
     if (
@@ -4185,21 +3761,6 @@ export default function ClaritasDashboard() {
     newsWorkspaceChartRange.startIndex,
   ]);
 
-  const handleMapSelect = (iso: string) => {
-    const key = iso.toUpperCase();
-    if (compareMode && selectedCountry) {
-      if (selectedCountry.toUpperCase() !== key) {
-        setComparisonCountry(key);
-        setCompareMode(false);
-      }
-      return;
-    }
-    if (selectedCountry && selectedCountry.toUpperCase() === key) {
-      setSelectedCountry(null);
-      return;
-    }
-    setSelectedCountry(key);
-  };
 
   const handleOpenIntelligence = useCallback((eventId?: string | null) => {
     if (eventId) {
@@ -4244,7 +3805,6 @@ export default function ClaritasDashboard() {
     setPinnedCountry(null);
     setSelectedSymbol(null);
     setSelectedIntelligenceEventId(null);
-    setCompareMode(false);
     const nextUrl = new URL(window.location.href);
     if (nextUrl.searchParams.has("event")) {
       nextUrl.searchParams.delete("event");
@@ -4287,8 +3847,7 @@ export default function ClaritasDashboard() {
     const index = newsTrend.findIndex((d) => d.dateKey === dateKey);
     if (index >= 0) {
       setChartRange({ startIndex: index, endIndex: index });
-      setListMode("news");
-      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
         feedRef.current?.scrollTo({ top: 0, behavior: "smooth" });
       });
     }
@@ -4713,7 +4272,6 @@ export default function ClaritasDashboard() {
   }
 
   return (
-    <CountryDataContext.Provider value={countryContexts}>
     <div className="app-shell app-safe-x min-h-[100dvh] w-full bg-[color:var(--shell-bg)] text-[color:var(--shell-ink)]">
       {mobileNavOpen && (
         <ModalSurface
@@ -4878,7 +4436,7 @@ export default function ClaritasDashboard() {
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col min-h-0">
-          <header className="app-safe-top app-topbar sticky top-0 z-20 border-b border-[color:var(--shell-border)]">
+          <header className={`${activeView === "dashboard" ? "situation-topbar " : ""}app-safe-top app-topbar sticky top-0 z-20 border-b border-[color:var(--shell-border)]`}>
             <div className="mx-auto flex w-full max-w-[1720px] flex-wrap items-center gap-4 gap-y-2 px-4 py-4 sm:px-6 xl:px-8 2xl:px-10">
               <button
                 type="button"
@@ -4920,9 +4478,9 @@ export default function ClaritasDashboard() {
                 <div className="live-state hidden lg:flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
                   <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
                   <span className="font-semibold text-[color:var(--shell-ink)]">
-                    Live
+                    {activeView === "dashboard" ? "Overview" : "Sources"}
                   </span>
-                  <span>Updated {latestEventLabel}</span>
+                  <span>{activeView === "dashboard" ? overview?.generated_at ? `Updated ${formatExactTimestamp(overview.generated_at)}` : "Loading…" : `Updated ${latestEventLabel}`}</span>
                 </div>
                 <button
                   type="button"
@@ -5255,7 +4813,7 @@ export default function ClaritasDashboard() {
               </div>
             )}
 
-            {hasActiveSelection && (
+            {hasActiveSelection && activeView !== "dashboard" && (
               <div className="mb-4">
                 <div className="selection-bar flex flex-wrap items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
                   <span className="uppercase tracking-[0.3em]">Selection</span>
@@ -5324,1501 +4882,15 @@ export default function ClaritasDashboard() {
             )}
 
             {activeView === "dashboard" && (
-              <div className="workspace-page dashboard-workspace relative flex flex-col gap-4">
-                <div className="relative flex flex-col gap-4">
-                  <div id="world-event-stream" tabIndex={-1} className="order-[-1]">
-                    <SituationOverview
-                      variant="summary"
-                      overview={overview}
-                      loading={overviewEventsLoading}
-                      error={overviewEventsError}
-                      hours={overviewHours}
-                      topic={overviewTopic}
-                      country={selectedCountry}
-                      selectedId={selectedIntelligenceEventId}
-                      onHoursChange={setOverviewHours}
-                      onTopicChange={setOverviewTopic}
-                      onCountryChange={setSelectedCountry}
-                      onSelect={handleOpenIntelligence}
-                      onOpenImagery={handleOpenImagery}
-                      onRefresh={() => setOverviewEventRefresh((value) => value + 1)}
-                    />
-                  </div>
-
-                  <div
-                    className="operational-control-bar dashboard-panel order-[4] rounded-xl px-4 py-3"
-                    style={{ animationDelay: "40ms" }}
-                  >
-                    <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                      <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          Window
-                        </span>
-                        {DATA_WINDOW_OPTIONS.map((option) => {
-                          const active = dataWindowPreset === option.id;
-                          return (
-                            <button
-                              key={option.id}
-                              onClick={() => {
-                                setDataWindowPreset(option.id);
-                                setChartRange({});
-                              }}
-                              className={`rounded-full border px-3 py-1 transition ${
-                                active
-                                  ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                  : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
-                        <span>Coverage: {newsCoverageLabel}</span>
-                        <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-ink)]">
-                          {newsLoadMode === "archive"
-                            ? `Archive (${news.length})`
-                            : `Recent (${news.length})`}
-                        </span>
-                        <button
-                          onClick={() =>
-                            void loadNewsData(
-                              newsLoadMode === "archive" ? "recent" : "archive",
-                              newsCategory,
-                              newsSortBy,
-                            )
-                          }
-                          disabled={isLoadingNews}
-                          className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-60"
-                        >
-                          {isLoadingNews
-                            ? "Loading…"
-                            : newsLoadMode === "archive"
-                              ? "Use recent"
-                              : "Load archive"}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="mt-3 grid gap-3 md:hidden">
-                      <div className="flex items-center gap-2 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-2 text-sm text-[color:var(--shell-muted)]">
-                        <Search className="h-4 w-4" />
-                        <input
-                          className="w-full bg-transparent text-sm outline-none placeholder:text-[color:var(--shell-muted)]"
-                          placeholder={searchInputPlaceholder}
-                          value={query}
-                          onChange={(e) => setQuery(e.target.value)}
-                        />
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-1 text-xs">
-                        {SEARCH_TOPIC_OPTIONS.map((option) => {
-                          const active = effectiveSearchTopic === option.id;
-                          return (
-                            <button
-                              key={`mobile-${option.id}`}
-                              type="button"
-                              onClick={() => handleSearchTopicChange(option.id)}
-                              className={`rounded-lg px-2.5 py-1 transition ${
-                                active
-                                  ? "bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                  : "text-[color:var(--shell-muted)]"
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    {newsLoadError && (
-                      <div className="mt-3 w-full text-xs text-[color:var(--viz-negative)]">
-                        {friendlyWorkspaceError(newsLoadError)}
-                      </div>
-                    )}
-                  </div>
-
-                  <section
-                    className={`${cardBase} briefing-rail dashboard-panel order-[0] border-l-4 border-l-[color:var(--shell-accent)] p-3 sm:p-4`}
-                    style={{ animationDelay: "0ms" }}
-                  >
-                    <details className="group">
-                      <summary className="cursor-pointer list-none">
-                        <div className="grid gap-3 lg:grid-cols-[minmax(14rem,0.5fr)_minmax(20rem,1fr)_auto] lg:items-center">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              <FileText className="h-3.5 w-3.5" />
-                              Daily briefing · global map context
-                            </div>
-                            <div className="mt-1 truncate text-base font-semibold text-[color:var(--shell-ink)]">
-                              {dailyBriefing?.title ?? "Daily signal brief"}
-                            </div>
-                          </div>
-                          <div className="min-w-0 text-xs text-[color:var(--shell-ink)]">
-                            {dailyBriefing?.key_takeaways?.length ? (
-                              <div className="grid gap-1 sm:grid-cols-2">
-                                {dailyBriefing.key_takeaways.slice(0, 2).map((item, index) => (
-                                  <span key={`${dailyBriefing.id}-summary-${index}`} className="line-clamp-2 border-l border-[color:var(--shell-border)] pl-3 leading-5">{item}</span>
-                                ))}
-                              </div>
-                            ) : (
-                              <span>{dailyBriefingError ? "Briefing unavailable." : "Takeaways pending."}</span>
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-1 text-xs text-[color:var(--shell-muted)] lg:items-end">
-                            <time dateTime={dailyBriefing?.published_at || undefined}>
-                              {dailyBriefing?.published_at
-                                ? `Published ${formatExactTimestamp(dailyBriefing.published_at)}`
-                                : "No published briefing"}
-                            </time>
-                            <span className="inline-flex items-center gap-1 self-start font-semibold text-[color:var(--shell-accent-2)] lg:self-auto">
-                              Open full briefing
-                              <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
-                            </span>
-                          </div>
-                        </div>
-                      </summary>
-                      <div className="mt-4 grid gap-4 border-t border-[color:var(--shell-border)] pt-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.55fr)]">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--shell-muted)]">
-                            <span>{dailyBriefing ? dailyBriefingDateLabel : "No published briefing"}</span>
-                            {dailyBriefing?.generated_by && <span>{dailyBriefing.generated_by}</span>}
-                          </div>
-                          <p className="mt-3 text-sm leading-6 text-[color:var(--shell-muted)]">
-                            {dailyBriefing?.update_text ||
-                              (dailyBriefingError ? "Briefing unavailable." : "Awaiting briefing.")}
-                          </p>
-                          {dailyBriefingError && <p role="status" className="mt-2 text-xs">Could not refresh the briefing. {dailyBriefing ? "Showing the last loaded edition." : "Please retry."}</p>}
-                          <button type="button" onClick={() => void refreshDailyBriefing()} className="mt-2 text-xs font-semibold text-[color:var(--shell-accent-2)]">Refresh briefing</button>
-                          <div className="briefing-source-links mt-3">
-                            <span>Linked evidence</span>
-                            <button type="button" onClick={() => setActiveView("podcasts")}>
-                              <Podcast className="h-3.5 w-3.5" />
-                              <strong>Podcast</strong>
-                              <small>{podcastSummary.signals} signals · {podcastSummary.evidence} excerpts</small>
-                            </button>
-                            <button type="button" onClick={() => setActiveView("social")}>
-                              <Radio className="h-3.5 w-3.5" />
-                              <strong>Social</strong>
-                              <small>Attributed posts · unverified claims</small>
-                            </button>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3">
-                          <div className="text-[11px] uppercase tracking-[0.25em] text-[color:var(--shell-muted)]">Key takeaways</div>
-                          {dailyBriefing?.key_takeaways?.length ? (
-                            <ul className="mt-2 space-y-2 text-sm text-[color:var(--shell-ink)]">
-                              {dailyBriefing.key_takeaways.map((item, idx) => (
-                                <li key={`${dailyBriefing.id}-takeaway-${idx}`} className="flex gap-2">
-                                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[color:var(--signal-amber)]" />
-                                  <span>{item}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <div className="mt-2 text-sm text-[color:var(--shell-muted)]">Takeaways pending.</div>
-                          )}
-                        </div>
-                      </div>
-                    </details>
-                  </section>
-
-                  <section
-                    className={`analytics-workspace-grid relative order-[1] grid gap-4 ${
-                      splitViewEnabled
-                        ? "xl:grid-cols-12 xl:items-stretch"
-                        : "grid-cols-1"
-                    }`}
-                  >
-                    <div
-                      id="signal-map-feed"
-                      className={`${dashboardPanelClass} geo-panel dashboard-map-panel ${selectedIntelligenceEventId ? "has-event-context" : ""} xl:col-span-8`}
-                      style={{
-                        animationDelay: "0ms",
-                      }}
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Where it’s happening
-                          </div>
-                          <div className="text-sm font-semibold">
-                            Map:{" "}
-                            {mapMode === "signals"
-                              ? `${crossSourceMapData.length} countries ranked · ${overviewEventPoints.length} located events`
-                              : mapMode === "news"
-                                ? "#News per country"
-                                : "Weather (temperature) per country"}
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">
-                            <span>Country fill = combined signal prevalence</span>
-                            <span>News · events · markets · weather · transport · podcasts</span>
-                            <span>Dots = canonical events · rings = imagery</span>
-                          </div>
-                        </div>
-                        <div className="map-mode-tabs flex flex-wrap items-center gap-2 text-xs">
-                          <button
-                            className={`rounded-full border px-3 py-1 transition ${
-                              mapMode === "signals"
-                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                            onClick={() => setMapMode("signals")}
-                          >
-                            Signals
-                          </button>
-                          <button
-                            className={`rounded-full border px-3 py-1 transition ${
-                              mapMode === "news"
-                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                            onClick={() => {
-                              setMapMode("news");
-                              setListMode("news");
-                            }}
-                          >
-                            News
-                          </button>
-                          <button
-                            className={`rounded-full border px-3 py-1 transition ${
-                              mapMode === "weather"
-                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                            onClick={() => {
-                              setMapMode("weather");
-                              setListMode("weather");
-                            }}
-                          >
-                            Weather
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setMapExpanded(true)}
-                            className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] transition hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
-                          >
-                            <Maximize2 className="h-3.5 w-3.5" />
-                            Expand
-                          </button>
-                        </div>
-                      </div>
-                      <div className="map-analysis-controls flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-3 py-2 text-xs">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {REGION_OPTIONS.map((region) => {
-                            const active = regionFilter === region.id;
-                            return (
-                              <button
-                                key={region.id}
-                                onClick={() => setRegionFilter(region.id)}
-                                className={`rounded-full border px-2.5 py-1 transition ${
-                                  active
-                                    ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                    : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                                }`}
-                              >
-                                {region.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                        <div className="ml-auto flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => setCompareMode((v) => !v)}
-                            className={`rounded-full border px-3 py-1 transition ${
-                              compareMode
-                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                          >
-                            {compareMode ? "Compare: On" : "Compare"}
-                          </button>
-                          <button
-                            onClick={() =>
-                              setPinnedCountry(
-                                selectedCountry
-                                  ? selectedCountry.toUpperCase()
-                                  : pinnedCountry,
-                              )
-                            }
-                            className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] disabled:opacity-50"
-                            disabled={!selectedCountry}
-                          >
-                            Pin selection
-                          </button>
-                          {pinnedCountry && (
-                            <button
-                              onClick={() => setPinnedCountry(null)}
-                              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            >
-                              Unpin
-                            </button>
-                          )}
-                          {hasActiveSelection && (
-                            <button
-                              onClick={handleClearSelection}
-                              className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            >
-                              Reset
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {compareMode && (
-                        <div className="px-4 py-2 text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                          Compare mode: click a second country
-                        </div>
-                      )}
-                      <div className="relative flex-1 min-h-0 p-3">
-                        <div
-                          className={`app-map-frame relative min-h-0 ${
-                            splitViewEnabled
-                              ? "h-[clamp(24rem,50vh,36rem)]"
-                              : "h-[58vh] max-h-[30rem] min-h-[20rem]"
-                          }`}
-                        >
-                          <WorldMapBubbles
-                            variant="compact"
-                            data={activeMapData}
-                            onSelect={handleMapSelect}
-                            points={overviewEventPoints}
-                            onSelectPoint={(point) => handleOpenIntelligence(point.id)}
-                            dark={dark}
-                            primaryCountry={selectedCountry}
-                            secondaryCountry={comparisonCountry}
-                            pinnedCountry={pinnedCountry}
-                            featuredCountry={
-                              mapMode === "signals"
-                                ? highestSignalCountry?.country
-                                : mapMode === "news"
-                                  ? highestMapNewsCountry?.country
-                                  : mostExtremeWeatherCountry?.country
-                            }
-                            featuredLabel={
-                              mapMode === "signals"
-                                ? "Highest signal relevance"
-                                : mapMode === "news"
-                                  ? "Highest story concentration"
-                                  : "Most extreme temperature"
-                            }
-                            scale={
-                              mapMode === "news" || mapMode === "signals"
-                                ? "log"
-                                : "linear"
-                            }
-                            fillMode={
-                              mapMode === "weather" ? "temperature" : "relevance"
-                            }
-                            valueDomain={
-                              mapMode === "signals"
-                                ? [0, 100]
-                                : mapMode === "news"
-                                  ? [0, Math.max(1, ...mapBubbleData.map((row) => row.count))]
-                                  : [-30, 45]
-                            }
-                            valueUnit={mapMode === "signals" ? "/100" : mapMode === "weather" ? "°C" : ""}
-                            showBubbles={false}
-                            showLabels
-                            legendLabel={activeMapLegendLabel}
-                          />
-                        </div>
-                        {pinnedCountry && (
-                          <div className="app-card-muted absolute bottom-3 right-3 w-56 rounded-lg p-3 text-xs">
-                            <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Pinned
-                            </div>
-                            <div className="mt-1 text-sm font-semibold text-[color:var(--shell-ink)]">
-                              {pinnedMeta?.name
-                                ? `${pinnedMeta.name} (${pinnedCountry.toUpperCase()})`
-                                : pinnedCountry.toUpperCase()}
-                            </div>
-                            {mapMode === "signals" ? (
-                              <>
-                                <div className="mt-2 text-[color:var(--shell-muted)]">
-                                  Relevance: {pinnedSignalSummary?.count ?? 0}/100
-                                </div>
-                                {pinnedSignalSummary?.meta?.lines?.map((line) => (
-                                  <div
-                                    key={`pinned-signal-${line}`}
-                                    className="text-[color:var(--shell-muted)]"
-                                  >
-                                    {line}
-                                  </div>
-                                ))}
-                              </>
-                            ) : mapMode === "news" ? (
-                              <>
-                                <div className="mt-2 text-[color:var(--shell-muted)]">
-                                  {pinnedNewsSummary
-                                    ? `${pinnedNewsSummary.count} stories`
-                                    : "No stories in range"}
-                                </div>
-                                <div className="text-[color:var(--shell-muted)]">
-                                  Last:{" "}
-                                  {pinnedNewsSummary?.lastEvent
-                                    ? new Date(
-                                        pinnedNewsSummary.lastEvent,
-                                      ).toLocaleString()
-                                    : "—"}
-                                </div>
-                                <div className="text-[color:var(--shell-muted)]">
-                                  Top source: {pinnedTopSource ?? "—"}
-                                </div>
-                              </>
-                            ) : (
-                              <>
-                                <div className="mt-2 text-[color:var(--shell-muted)]">
-                                  Temp: {pinnedWeatherSummary?.temp_c ?? "—"}°C
-                                </div>
-                                <div className="text-[color:var(--shell-muted)]">
-                                  Humidity:{" "}
-                                  {pinnedWeatherSummary?.humidity ?? "—"}%
-                                </div>
-                                <div className="text-[color:var(--shell-muted)]">
-                                  Observed:{" "}
-                                  {pinnedWeatherSummary?.observed_at
-                                    ? new Date(
-                                        pinnedWeatherSummary.observed_at,
-                                      ).toLocaleString()
-                                    : "—"}
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        )}
-                        {mapMode === "signals" &&
-                          crossSourceMapData.length === 0 && (
-                            <div className="absolute bottom-4 right-4 rounded border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1 text-xs text-[color:var(--shell-muted)]">
-                              No linked cross-source signals in this scope.
-                            </div>
-                          )}
-                        {overviewEventsError && (
-                          <div role="status" className="absolute bottom-4 left-4 right-4 flex flex-wrap items-center gap-2 rounded border border-rose-400/40 bg-[color:var(--shell-surface)] px-3 py-2 text-xs text-rose-600">
-                            <span>{friendlyWorkspaceError(overviewEventsError)}{overviewEvents.length > 0 ? " Showing the last loaded events." : ""}</span>
-                            <button type="button" disabled={overviewEventsLoading} onClick={() => setOverviewEventRefresh((version) => version + 1)} className="min-h-11 rounded-full border border-current px-3 font-semibold disabled:opacity-50">{overviewEventsLoading ? "Retrying…" : "Retry events"}</button>
-                          </div>
-                        )}
-                        {mapMode === "news" &&
-                          mapBubbleData.length === 0 && (
-                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-[color:var(--shell-surface)] px-2 py-1 rounded border border-[color:var(--shell-border)]">
-                              {useDatabaseCountryStats && countryStatsCoverage?.total
-                                ? "No country-tagged news in the selected window."
-                                : "No news data in the selected window."}
-                            </div>
-                          )}
-                        {mapMode === "weather" &&
-                          mapWeatherScope.length === 0 && (
-                            <div className="absolute bottom-4 right-4 text-xs text-[color:var(--shell-muted)] bg-[color:var(--shell-surface)] px-2 py-1 rounded border border-[color:var(--shell-border)] flex items-center gap-2">
-                              <span>No weather stats yet.</span>
-                              {isAdmin ? (
-                                <button
-                                  onClick={() => setActiveView("admin")}
-                                  className="px-2 py-0.5 rounded border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] hover:bg-[color:var(--signal-sky-soft)]"
-                                >
-                                  Open admin ingest
-                                </button>
-                              ) : (
-                                <span>Admin ingestion required.</span>
-                              )}
-                            </div>
-                          )}
-                      </div>
-                      <div className="dashboard-map-footer border-t border-[color:var(--shell-border)] px-3 py-2 text-xs">
-                        {mapMode === "signals" ? (
-                          <div className="flex flex-wrap items-center gap-2 text-[color:var(--shell-muted)]">
-                            <span className="font-semibold text-[color:var(--shell-ink)]">
-                              Signal prevalence model
-                            </span>
-                            <span>
-                              Country colour combines reporting prevalence, current events,
-                              market movement, weather severity, live transport and podcast evidence.
-                            </span>
-                            {highestSignalCountry && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setSelectedCountry(highestSignalCountry.country)
-                                }
-                                className="ml-auto font-semibold text-[color:var(--shell-accent-2)]"
-                              >
-                                Explore #1 {highestSignalCountry.country} ·{" "}
-                                {highestSignalCountry.count}/100
-                              </button>
-                            )}
-                          </div>
-                        ) : mapMode === "news" ? (
-                          <div className="flex flex-wrap items-center gap-3">
-                            <span className="uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                              Coverage window
-                            </span>
-                            {!activeRange && (
-                              <>
-                                <span className="text-[color:var(--shell-muted)]">
-                                  {mapWindowDays}d
-                                </span>
-                                <input
-                                  type="range"
-                                  min={MAP_WINDOW_MIN}
-                                  max={MAP_WINDOW_MAX}
-                                  value={mapWindowDays}
-                                  aria-label="News map coverage window in days"
-                                  onChange={(e) =>
-                                    setMapWindowDays(
-                                      Number(e.currentTarget.value),
-                                    )
-                                  }
-                                  className="w-32"
-                                />
-                              </>
-                            )}
-                            {activeRange && (
-                              <span className="text-[color:var(--shell-muted)]">
-                                Using graph range ({activeRangeLabel})
-                              </span>
-                            )}
-                            <span className="ml-auto text-[color:var(--shell-muted)]">
-                              {mapRangeLabel}
-                            </span>
-                            {useDatabaseCountryStats && countryStatsCoverage && (
-                              <span className="text-[color:var(--shell-muted)]">
-                                {countryStatsCoverage.mapped.toLocaleString()} /{" "}
-                                {countryStatsCoverage.total.toLocaleString()} stories mapped
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="text-[color:var(--shell-muted)]">
-                            Coverage windows apply to the news layer. Weather uses
-                            the latest observation for each country.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <section
-                      id="overview-event-context"
-                      tabIndex={-1}
-                      aria-label={selectedIntelligenceEventId ? "Selected event in the world overview" : "Regional context"}
-                      className={`${dashboardPanelClass} context-intelligence-band ${selectedIntelligenceEventId ? "world-event-context" : "max-h-[clamp(28rem,62vh,46rem)]"} xl:col-span-4`}
-                      style={{
-                        animationDelay: "40ms",
-                      }}
-                    >
-                      {selectedIntelligenceEventId ? (
-                        <>
-                          <div className="world-event-context-heading"><span>Event context · sources & imagery</span><button type="button" onClick={() => handleOpenIntelligence(null)}>Close event</button></div>
-                          <div className="world-event-context-body">
-                            <Suspense fallback={<div role="status" className="p-4">Loading event context…</div>}>
-                              <IntelligenceWorkspace embedded initialEventId={selectedIntelligenceEventId} refreshVersion={`${overviewEventRefresh}:${overviewEvents.find((event) => event.id === selectedIntelligenceEventId)?.last_activity_time ?? ""}`} onEventLoaded={setSelectedOverviewEvent} onSelectEvent={handleOpenIntelligence} onOpenImagery={handleOpenImagery} />
-                            </Suspense>
-                          </div>
-                        </>
-                      ) : selectedCountryContext ? (
-                        <>
-                          <div className="flex items-start gap-3 border-b border-[color:var(--shell-border)] px-4 py-3">
-                            <div className="min-w-0 flex-1">
-                              <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                                Country profile · {selectedCountryContext.iso}
-                              </div>
-                              <div className="mt-0.5 text-lg font-semibold text-[color:var(--shell-ink)]">
-                                <CountryFlag country={selectedCountryContext.iso} />
-                                {selectedCountryContext.meta?.name ??
-                                  selectedCountryContext.iso}
-                              </div>
-                              <div className="text-xs text-[color:var(--shell-muted)]">
-                                {[
-                                  selectedCountryContext.meta?.region,
-                                  selectedCountryContext.meta?.subregion,
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ") || "Global country context"}
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedCountry(null)}
-                              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
-                              aria-label="Close country profile"
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </div>
-
-                          <div className="country-profile-scroll app-scroll-panel min-h-0 flex-1 overflow-y-auto">
-                            <CountryFacts context={selectedLeadershipProfile?.country_context} country={selectedCountryContext.iso} name={selectedLeadershipProfile?.country_name ?? selectedCountryContext.iso} />
-                            <SatelliteContextPanel
-                              country={selectedCountryContext.iso}
-                              compact
-                              onOpenEvent={handleOpenIntelligence}
-                              onOpenImagery={(eventId) => handleOpenImagery(eventId)}
-                              onContextEventChange={setSatelliteContextEventId}
-                            />
-                            <div
-                              className="country-profile-metrics"
-                              style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
-                            >
-                              <div>
-                                <span>Relevance</span>
-                                <strong>
-                                  {selectedCountryContext.relevanceScore}/100
-                                </strong>
-                                <small>cross-source rank</small>
-                              </div>
-                              <div>
-                                <span>News</span>
-                                <strong>{selectedCountryContext.newsCount}</strong>
-                                <small>mapped stories</small>
-                              </div>
-                              <div>
-                                <span>Weather</span>
-                                <strong>
-                                  {selectedCountryContext.temperature == null
-                                    ? "—"
-                                    : `${formatMetricNumber(
-                                        selectedCountryContext.temperature,
-                                      )}°`}
-                                </strong>
-                                <small>
-                                  {relatedWeather?.weather_main ??
-                                    "No observation"}
-                                </small>
-                              </div>
-                              <div>
-                                <span>Podcast</span>
-                                <strong>
-                                  {relatedPodcastLink?.signalCount ?? 0}
-                                </strong>
-                                <small>attributed signals</small>
-                              </div>
-                              <div>
-                                <span>Leadership</span>
-                                <strong>
-                                  {selectedLeadershipProfile?.roles.length ?? 0}
-                                </strong>
-                                <small>current officeholders</small>
-                              </div>
-                              <div>
-                                <span>Markets</span>
-                                <strong>{formatSignedMetric(relatedMarketCountry?.composite_change_percent, 1, "%")}</strong>
-                                <small>{relatedMarketCountry ? `${relatedMarketCountry.composite_basis.length} regime inputs` : "No country regime"}</small>
-                              </div>
-                              <div>
-                                <span>Transport</span>
-                                <strong>{relatedTransport?.active_count ?? 0}</strong>
-                                <small>
-                                  {(relatedTransport?.trend.ship_departures.current ?? 0) +
-                                    (relatedTransport?.trend.tracked_flights.current ?? 0)}{" "}
-                                  24h movements
-                                </small>
-                              </div>
-                            </div>
-
-                            <section className="country-profile-section">
-                              <div className="country-profile-section-heading">
-                                <ChartNoAxesCombined className="h-4 w-4" />
-                                <span>Why this country is relevant</span>
-                                <small>
-                                  {selectedCountryContext.relevanceScore > 0
-                                    ? "weighted cross-source evidence"
-                                    : "no active linked drivers"}
-                                </small>
-                              </div>
-                              <div className="country-relevance-drivers">
-                                {selectedCountryContext.relevanceDrivers.map(
-                                  (driver) => (
-                                    <span key={`country-driver-${driver}`}>
-                                      {driver}
-                                    </span>
-                                  ),
-                                )}
-                                {selectedCountryContext.relevanceDrivers.length ===
-                                  0 && (
-                                  <div className="product-state">
-                                    No active cross-source drivers for this
-                                    country in the selected scope.
-                                  </div>
-                                )}
-                              </div>
-                            </section>
-
-                            <section className="country-profile-section">
-                              <div className="country-profile-section-heading">
-                                <Newspaper className="h-4 w-4" />
-                                <span>News concentration</span>
-                                <small>
-                                  {selectedCountryContext.topSource ??
-                                    "Source mix unavailable"}
-                                </small>
-                              </div>
-                              <div className="country-profile-bar">
-                                <span
-                                  style={{
-                                    width: `${Math.max(
-                                      2,
-                                      selectedCountryContext.newsIntensity,
-                                    )}%`,
-                                  }}
-                                />
-                              </div>
-                              <div className="country-profile-scale">
-                                <span>Relative to highest-volume country</span>
-                                <strong>
-                                  {formatMetricNumber(
-                                    selectedCountryContext.newsIntensity,
-                                  )}
-                                  %
-                                </strong>
-                              </div>
-                            </section>
-
-                            {relatedPodcastLink && (
-                              <section className="country-profile-section">
-                                <div className="country-profile-section-heading">
-                                  <Podcast className="h-4 w-4" />
-                                  <span>Podcast evidence</span>
-                                  <small>
-                                    {relatedPodcastLink.episodeIds.size}{" "}
-                                    {relatedPodcastLink.episodeIds.size === 1
-                                      ? "episode"
-                                      : "episodes"}{" "}
-                                    · {relatedPodcastLink.evidenceIds.size} evidence
-                                  </small>
-                                </div>
-                                <button
-                                  type="button"
-                                  className="country-podcast-link"
-                                  onClick={() => setActiveView("podcasts")}
-                                >
-                                  <span>
-                                    <strong>
-                                      {relatedPodcastLink.topSignal?.title ??
-                                        "Linked podcast finding"}
-                                    </strong>
-                                    <small>
-                                      Attributed to{" "}
-                                      {relatedPodcastLink.topEpisode?.feed_title ??
-                                        "podcast source"}
-                                      . Review the transcript evidence before
-                                      treating a claim as verified.
-                                    </small>
-                                  </span>
-                                  <ArrowUpRight className="h-4 w-4" />
-                                </button>
-                              </section>
-                            )}
-
-                            <section className="country-profile-section">
-                              <div className="country-profile-section-heading">
-                                <CloudSun className="h-4 w-4" />
-                                <span>Weather now</span>
-                                <small>
-                                  {relatedWeather?.observed_at
-                                    ? new Date(
-                                        relatedWeather.observed_at,
-                                      ).toLocaleString()
-                                    : "No current observation"}
-                                </small>
-                              </div>
-                              <div className="country-weather-visual">
-                                <div>
-                                  <span>Temperature</span>
-                                  <div className="temperature-track">
-                                    <span
-                                      style={{
-                                        left: `${selectedCountryContext.temperaturePosition}%`,
-                                      }}
-                                    />
-                                  </div>
-                                  <small>−30°C</small>
-                                  <small>50°C</small>
-                                </div>
-                                <div>
-                                  <span>Humidity</span>
-                                  <div className="humidity-track">
-                                    <span
-                                      style={{
-                                        width: `${
-                                          selectedCountryContext.humidity ?? 0
-                                        }%`,
-                                      }}
-                                    />
-                                  </div>
-                                  <strong>
-                                    {selectedCountryContext.humidity == null
-                                      ? "—"
-                                      : `${formatMetricNumber(
-                                          selectedCountryContext.humidity,
-                                        )}%`}
-                                  </strong>
-                                </div>
-                              </div>
-                              {relatedWeather && (
-                                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
-                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Feels like</span><strong className="mt-1 block">{formatMetricNumber(relatedWeather.apparent_temp_c)}°C</strong></div>
-                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Wind / gust</span><strong className="mt-1 block">{formatMetricNumber(relatedWeather.wind_speed)} / {formatMetricNumber(relatedWeather.wind_gust)} m/s</strong></div>
-                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Air quality</span><strong className="mt-1 block">{relatedWeather.air_quality?.label ?? "—"}</strong></div>
-                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Next-day range</span><strong className="mt-1 block">{relatedWeather.forecast?.[0] ? `${formatMetricNumber(relatedWeather.forecast[0].temp_min_c)}–${formatMetricNumber(relatedWeather.forecast[0].temp_max_c)}°C` : "—"}</strong></div>
-                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Rain risk</span><strong className="mt-1 block">{relatedWeather.forecast?.[0]?.precipitation_probability ?? "—"}%</strong></div>
-                                  <div className="rounded-lg border border-[color:var(--shell-border)] p-2"><span className="text-[color:var(--shell-muted)]">Official alerts</span><strong className="mt-1 block">{relatedWeather.alert_count ?? relatedWeather.alerts?.length ?? 0}</strong></div>
-                                </div>
-                              )}
-                            </section>
-
-                            <section className="country-profile-section">
-                              <div className="country-profile-section-heading">
-                                <ChartNoAxesCombined className="h-4 w-4" />
-                                <span>Market regime</span>
-                                <small>{relatedMarketCountry?.freshness ?? "unavailable"} · market + macro context</small>
-                              </div>
-                              {relatedMarketCountry ? (
-                                <>
-                                  <div className="country-transport-grid">
-                                    <div><span>{relatedMarketCountry.index_source ?? "National benchmark"}</span><strong>{formatSignedMetric(relatedMarketCountry.index_change_percent, 2, "%")}</strong><small>{relatedMarketCountry.index_frequency ?? "unknown frequency"} · {relatedMarketCountry.index_period_end ?? "No period"}</small></div>
-                                    <div><span>{relatedMarketCountry.currency ?? "FX"} vs EUR</span><strong>{formatSignedMetric(relatedMarketCountry.fx_change_percent, 2, "%")}</strong><small>{relatedMarketCountry.fx_period_end ?? "No period"}</small></div>
-                                    <div><span>SEC activity</span><strong>{relatedMarketCountry.filing_count_7d}</strong><small>filings · trailing 7d</small></div>
-                                    <div><span>GDP growth</span><strong>{formatSignedMetric(relatedMarketCountry.gdp_growth, 1, "%")}</strong><small>World Bank · {relatedMarketCountry.macro_latest_year ?? "year unavailable"}</small></div>
-                                    <div><span>Inflation</span><strong>{relatedMarketCountry.inflation == null ? "—" : `${formatMetricNumber(relatedMarketCountry.inflation, { maximumFractionDigits: 1 })}%`}</strong><small>annual consumer prices</small></div>
-                                    <div><span>Current account</span><strong>{formatSignedMetric(relatedMarketCountry.current_account, 1, "% GDP")}</strong><small>external-balance context</small></div>
-                                  </div>
-                                  <p className="country-transport-note">OECD and ECB form the directional regime; annual World Bank indicators remain a separate macro layer so unlike frequencies are never silently blended.</p>
-                                  <button type="button" className="country-transport-open" onClick={() => setActiveView("markets")}>Open market analysis <ArrowUpRight className="h-3.5 w-3.5" /></button>
-                                </>
-                              ) : (
-                                <div className="product-state">No configured benchmark, ECB currency or SEC country event is mapped for this country yet.</div>
-                              )}
-                            </section>
-
-                            {(relatedTransport || relatedTransportHistory) && (
-                              <section className="country-profile-section">
-                                <div className="country-profile-section-heading">
-                                  <Route className="h-4 w-4" />
-                                  <span>Transport movement</span>
-                                  <small>
-                                    {relatedTransport
-                                      ? "24h compared with previous 24h"
-                                      : "current provider sample unavailable · retained history shown below"}
-                                  </small>
-                                </div>
-                                {relatedTransport ? (
-                                  <div className="country-transport-grid">
-                                    {[
-                                      {
-                                        label: "Ship departures",
-                                        metric: relatedTransport.trend.ship_departures,
-                                      },
-                                      {
-                                        label: "Cargo vessels",
-                                        metric:
-                                          relatedTransport.trend
-                                            .cargo_vessel_departures,
-                                      },
-                                      {
-                                        label: "Tracked flights",
-                                        metric: relatedTransport.trend.tracked_flights,
-                                      },
-                                    ].map(({ label, metric }) => (
-                                      <div key={label}>
-                                        <span>{label}</span>
-                                        <strong>{metric.current}</strong>
-                                        <small data-direction={metric.direction}>
-                                          {metric.direction === "new"
-                                            ? "New baseline"
-                                            : metric.change_pct == null
-                                              ? "No comparison"
-                                              : formatSignedMetric(
-                                                  metric.change_pct,
-                                                  1,
-                                                  "%",
-                                                )}
-                                        </small>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <div className="product-state">
-                                    No fresh transport sample is available for this country. Retained observations remain visible; a coverage gap does not mean zero traffic.
-                                  </div>
-                                )}
-                                {relatedTransportHistory?.summary && (
-                                  <div className="mt-3 rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] p-3">
-                                    <div className="flex flex-wrap items-end justify-between gap-2">
-                                      <div>
-                                        <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[color:var(--shell-muted)]">
-                                          30-day sampled activity
-                                        </span>
-                                        <div className="mt-1 text-xs text-[color:var(--shell-ink)]">
-                                          {relatedTransportHistory.summary.observed_days}/30 observed days · {relatedTransportHistory.summary.average_daily_entities == null
-                                            ? "average unavailable"
-                                            : `${relatedTransportHistory.summary.average_daily_entities.toLocaleString()} average daily peak sample`}
-                                        </div>
-                                      </div>
-                                      <small className="text-[10px] text-[color:var(--shell-muted)]">
-                                        {relatedTransportHistory.history.available_from
-                                          ? `Available from ${new Date(relatedTransportHistory.history.available_from).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} UTC`
-                                          : "History starts with the first persisted observation"}
-                                      </small>
-                                    </div>
-                                    <div className="mt-2 h-24" aria-label="Thirty-day sampled transport activity chart">
-                                      {relatedTransportHistory.summary.observed_days > 0 ? (
-                                        <ResponsiveContainer width="100%" height="100%">
-                                          <AreaChart data={relatedTransportHistory.series} margin={{ top: 4, right: 2, bottom: 0, left: -30 }}>
-                                            <defs>
-                                              <linearGradient id="country-transport-history-fill" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stopColor="var(--signal-sky)" stopOpacity={0.42} />
-                                                <stop offset="100%" stopColor="var(--signal-sky)" stopOpacity={0.03} />
-                                              </linearGradient>
-                                            </defs>
-                                            <XAxis dataKey="day" hide />
-                                            <YAxis allowDecimals={false} tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
-                                            <Tooltip
-                                              contentStyle={{
-                                                background: "var(--shell-surface-strong)",
-                                                border: "1px solid var(--shell-border)",
-                                                borderRadius: 8,
-                                                fontSize: 10,
-                                              }}
-                                            />
-                                            <Area
-                                              type="monotone"
-                                              dataKey="vehicles"
-                                              name="Tracked vehicles"
-                                              stroke="var(--signal-sky)"
-                                              fill="url(#country-transport-history-fill)"
-                                              connectNulls={false}
-                                            />
-                                          </AreaChart>
-                                        </ResponsiveContainer>
-                                      ) : (
-                                        <div className="flex h-full items-center justify-center text-[10px] text-[color:var(--shell-muted)]">
-                                          No persisted observations in this window; missing coverage is not zero traffic.
-                                        </div>
-                                      )}
-                                    </div>
-                                    <p className="mt-1 text-[9px] leading-4 text-[color:var(--shell-muted)]">
-                                      Daily peak sampled vehicles within Claritas provider coverage, not daily-unique traffic. Gaps mean no retained sample, not no traffic.
-                                    </p>
-                                  </div>
-                                )}
-                                {relatedTransport && (
-                                  <p className="country-transport-note">
-                                    Cargo-vessel departures are an AIS movement
-                                    proxy, not measured cargo tonnage.
-                                  </p>
-                                )}
-                                <button
-                                  type="button"
-                                  className="country-transport-open"
-                                  onClick={() => setActiveView("transport")}
-                                >
-                                  Open live transport detail
-                                  <ArrowUpRight className="h-3.5 w-3.5" />
-                                </button>
-                              </section>
-                            )}
-
-                            <section className="country-profile-section">
-                              <div className="country-profile-section-heading">
-                                <User className="h-4 w-4" />
-                                <span>Current leadership</span>
-                                <small>
-                                  {selectedLeadershipProfile?.government_type ??
-                                    "Government type unavailable"}
-                                </small>
-                              </div>
-                              <div className="country-leadership-list">
-                                {selectedLeadershipProfile?.roles.map((role) => (
-                                  <div
-                                    key={`${role.role_type}-${role.person_wikidata_id}`}
-                                  >
-                                    <span>
-                                      {role.role_type === "head_of_state"
-                                        ? "Head of state"
-                                        : "Head of government"}
-                                    </span>
-                                    <strong>
-                                      {getLeadershipDisplayName(role.person_name)}
-                                    </strong>
-                                    <small>
-                                      {role.started_at
-                                        ? `In office since ${new Date(
-                                            role.started_at,
-                                          ).toLocaleDateString()}`
-                                        : "Term start unavailable"}
-                                    </small>
-                                  </div>
-                                ))}
-                                {!selectedLeadershipProfile?.roles.length && (
-                                  <div className="product-state">
-                                    Current leadership has not been retrieved for
-                                    this country.
-                                  </div>
-                                )}
-                              </div>
-                              <CountryElections profile={selectedLeadershipProfile} />
-                            </section>
-
-                          </div>
-
-                          <div className="country-profile-actions">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setListMode("news");
-                                requestAnimationFrame(() => {
-                                  dashboardFeedPanelRef.current?.scrollIntoView({
-                                    behavior: "smooth",
-                                    block: "start",
-                                  });
-                                });
-                              }}
-                            >
-                              View country news below
-                              <Newspaper className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setActiveView("transport")}
-                            >
-                              Open scoped transport
-                              <Route className="h-3.5 w-3.5" />
-                            </button>
-                            {relatedPodcastLink && (
-                              <button
-                                type="button"
-                                onClick={() => setActiveView("podcasts")}
-                              >
-                                Open podcast evidence
-                              </button>
-                            )}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="app-scroll-panel min-h-0 flex-1 overflow-y-auto">
-                          <SatelliteContextPanel
-                            country={selectedCountry}
-                            compact
-                            onOpenEvent={handleOpenIntelligence}
-                            onOpenImagery={(eventId) => handleOpenImagery(eventId)}
-                            onContextEventChange={setSatelliteContextEventId}
-                          />
-                        </div>
-                      )}
-                    </section>
-
-                    <div className="order-[3] xl:col-span-12" style={{ gridColumn: "1 / -1" }}>
-                      <SituationOverview
-                        key={`${overviewHours}:${overviewTopic ?? ""}:${selectedCountry ?? ""}`}
-                        variant="timeline"
-                        overview={overview}
-                        loading={overviewEventsLoading}
-                        error={overviewEventsError}
-                        hours={overviewHours}
-                        topic={overviewTopic}
-                        country={selectedCountry}
-                        selectedId={selectedIntelligenceEventId}
-                        onHoursChange={setOverviewHours}
-                        onTopicChange={setOverviewTopic}
-                        onCountryChange={setSelectedCountry}
-                        onSelect={handleOpenIntelligence}
-                        onOpenImagery={handleOpenImagery}
-                        onRefresh={() => setOverviewEventRefresh((value) => value + 1)}
-                      />
-                    </div>
-
-                    <div
-                      ref={dashboardFeedPanelRef}
-                      className={`${dashboardPanelClass} feed-panel xl:col-span-12`}
-                      style={{ animationDelay: "80ms" }}
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--shell-border)] px-3 py-2.5">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            {listMode === "news" ? "Reporting overview" : "Live feed"}
-                          </div>
-                          <div className="text-sm font-semibold">
-                            {listMode === "news" ? "Latest reporting" : "Latest intelligence drops"}
-                          </div>
-                          <div className="text-xs text-[color:var(--shell-muted)]">
-                            {listMode === "news"
-                              ? `${topNewsCountryLabel} ${newsCategoryLabel(topNewsAppliedCategory).toLowerCase()} · ${
-                                isTopNewsScopeLoading ? "refreshing newest stories"
-                                  : topNewsLoadError ? "update failed; showing previous stories"
-                                    : "newest first · publication or first-seen time"
-                              }`
-                              : `${regionLabel} · latest source update ${latestEventLabel}`}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <button
-                            className={`rounded-full border px-3 py-1 transition ${
-                              listMode === "news"
-                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                            onClick={() => setListMode("news")}
-                          >
-                            News
-                          </button>
-                          <button
-                            className={`rounded-full border px-3 py-1 transition ${
-                              listMode === "weather"
-                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                            onClick={() => setListMode("weather")}
-                          >
-                            Weather
-                          </button>
-                          <button
-                            className={`rounded-full border px-3 py-1 transition ${
-                              listMode === "market"
-                                ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
-                                : "border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                            }`}
-                            onClick={() => setListMode("market")}
-                          >
-                            Markets
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setActiveView(
-                                listMode === "news"
-                                  ? "news"
-                                  : listMode === "weather"
-                                    ? "weather"
-                                    : "markets",
-                              )
-                            }
-                            className="inline-flex items-center gap-1 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)] hover:text-[color:var(--shell-ink)]"
-                          >
-                            Open {listMode} workspace
-                            <ArrowUpRight className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {listMode === "news" && (
-                        <NewsCategoryControl
-                          selected={newsCategory}
-                          onSelect={selectNewsCategory}
-                          compact
-                          loading={isTopNewsScopeLoading}
-                          categoryCounts={topNewsCategoryCounts}
-                          allCount={activeTopNewsMetadata?.ranking.category === null && activeTopNewsMetadata.page.total != null
-                            ? topNewsTotal
-                            : undefined}
-                          resultSummary={topNewsResultSummary}
-                        />
-                      )}
-
-                      <div className={listMode === "news" ? "min-h-0 overflow-hidden" : "h-[clamp(20rem,42vh,28rem)] min-h-0 overflow-hidden"}>
-                        {listMode === "news" ? (
-                          <div
-                            ref={feedRef}
-                            className="dashboard-news-stream app-scroll-panel max-h-[clamp(20rem,42vh,28rem)] overflow-y-auto"
-                          >
-                            <PriorityNewsList
-                              items={visibleTopNews}
-                              selectedId={selectedDashboardNewsId}
-                              primaryCountry={selectedCountry}
-                              secondaryCountry={comparisonCountry}
-                              getImageUrl={(item) =>
-                                imageProxy(getNewsImageUrl(item))
-                              }
-                              getSourceLabel={getSourceLabel}
-                              getCountries={getNewsSignalCountries}
-                              getCountryName={(iso) =>
-                                countryMeta.get(iso)?.name ?? iso
-                              }
-                              onToggle={(item, iso) => {
-                                const nextId =
-                                  selectedDashboardNewsId === item.id
-                                    ? null
-                                    : item.id;
-                                setSelectedDashboardNewsId(nextId);
-                                if (nextId && iso) setSelectedCountry(iso);
-                              }}
-                              onRequestTranslation={requestNewsTranslationSummary}
-                              translationPendingIds={newsTranslationPendingIds}
-                              translationErrorIds={newsTranslationErrorIds}
-                              onSelectCountry={setSelectedCountry}
-                              onOpenWorkspace={() => setActiveView("news")}
-                              onOpenEvent={handleOpenIntelligence}
-                              emptyState={
-                                <div className="rounded-xl border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] p-3 text-sm text-[color:var(--shell-muted)] space-y-2">
-                                  <div>
-                                    {isTopNewsScopeLoading
-                                      ? "Loading ranked reporting…"
-                                      : topNewsLoadError
-                                        ? "Top reporting could not be loaded."
-                                        : newsCategory === "all"
-                                          ? "No reporting is currently available."
-                                          : `No ${newsCategoryLabel(newsCategory).toLowerCase()} reporting is currently available.`}
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                                    {topNewsLoadError && (
-                                      <button
-                                        type="button"
-                                        onClick={() => void loadTopNewsData(newsCategory, selectedNewsCountry)}
-                                        className="min-h-11 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                                      >
-                                        Retry top reporting
-                                      </button>
-                                    )}
-                                    {newsCategory !== "all" && !isTopNewsScopeLoading && (
-                                      <button
-                                        type="button"
-                                        onClick={() => selectNewsCategory("all")}
-                                        className="min-h-11 rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-[color:var(--shell-muted)] hover:border-[color:var(--shell-ink)]"
-                                      >
-                                        Show all latest stories
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              }
-                            />
-                          </div>
-                        ) : listMode === "weather" ? (
-                          <div className="app-scroll-panel h-full overflow-y-auto p-4 space-y-4">
-
-                            <div className="flex flex-wrap items-center gap-3 text-sm">
-                              <label className="text-[color:var(--shell-muted)]">
-                                Min temp (°C)
-                              </label>
-                              <input
-                                type="number"
-                                className="w-24 rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-2 py-1"
-                                value={
-                                  typeof minTemp === "number" ? minTemp : ""
-                                }
-                                onChange={(e) =>
-                                  setMinTemp(
-                                    e.currentTarget.value === ""
-                                      ? undefined
-                                      : Number(e.currentTarget.value),
-                                  )
-                                }
-                                placeholder="Any"
-                              />
-                              {isAdmin ? (
-                                <button
-                                  onClick={() => setActiveView("admin")}
-                                  className="ml-auto rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--shell-ink)] hover:bg-[color:var(--signal-sky-soft)]"
-                                >
-                                  Open admin ingest
-                                </button>
-                              ) : (
-                                <div className="ml-auto text-xs text-[color:var(--shell-muted)]">
-                                  Ingestion is admin-only
-                                </div>
-                              )}
-                            </div>
-                            <ul className="list-none divide-y divide-[color:var(--shell-border)]">
-                              {filteredWeather.length === 0 && (
-                                <li className="text-sm text-[color:var(--shell-muted)] py-3">
-                                  No weather rows.
-                                </li>
-                              )}
-                              {filteredWeather.map((w, i) => (
-                                <li
-                                  key={`${w.country}-${i}`}
-                                  className="py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-muted)]">
-                                      {(w.country || "").toUpperCase()}
-                                    </span>
-                                    <span className="text-sm text-[color:var(--shell-ink)]">
-                                      {new Date(w.observed_at).toLocaleString()}
-                                    </span>
-                                  </div>
-                                  <div className="flex flex-wrap items-center gap-4 text-sm text-[color:var(--shell-ink)]">
-                                    <span title="Temperature">
-                                      🌡️ {w.temp_c ?? "—"}°C
-                                    </span>
-                                    <span title="Humidity">
-                                      💧 {w.humidity ?? "—"}%
-                                    </span>
-                                    {w.weather_main && (
-                                      <span className="text-[color:var(--shell-muted)]">
-                                        {w.weather_main}
-                                      </span>
-                                    )}
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        ) : (
-                          <div className="app-scroll-panel h-full overflow-y-auto p-4 space-y-4">
-
-                            <div className="flex flex-wrap items-center gap-3 text-sm">
-                              <div className="text-[color:var(--shell-muted)]">
-                                Country regimes from configured benchmarks, ECB and SEC
-                              </div>
-                              <div className="ml-auto text-xs text-[color:var(--shell-muted)]">
-                                {marketCountryRows.length} countries
-                              </div>
-                            </div>
-                            <ul className="list-none divide-y divide-[color:var(--shell-border)]">
-                              {marketCountryRows.length === 0 && (
-                                <li className="text-sm text-[color:var(--shell-muted)] py-3">
-                                  No country market regimes match this scope.
-                                </li>
-                              )}
-                              {marketCountryRows.map((row) => {
-                                const isPositive =
-                                  typeof row.composite_change_percent === "number" && row.composite_change_percent > 0;
-                                const isNegative =
-                                  typeof row.composite_change_percent === "number" && row.composite_change_percent < 0;
-                                return (
-                                  <li
-                                    key={`dashboard-market-${row.country}`}
-                                    className="cursor-pointer py-3 flex flex-col gap-2"
-                                    onClick={() => setSelectedCountry(row.country)}
-                                  >
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="flex flex-col">
-                                        <div className="flex items-center gap-2">
-                                          <span className="rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2 py-0.5 text-[color:var(--shell-muted)]">
-                                            {row.country}
-                                          </span>
-                                          <span className="text-xs text-[color:var(--shell-muted)]">{row.country_name}</span>
-                                        </div>
-                                        <div className="text-xs text-[color:var(--shell-muted)] mt-1">
-                                          {row.index_name ?? "No national benchmark series"}
-                                        </div>
-                                      </div>
-                                      <div className="text-right">
-                                        <div className="text-base font-semibold text-[color:var(--shell-ink)]">
-                                          {formatSignedMetric(row.composite_change_percent, 2, "%")}
-                                        </div>
-                                        <div
-                                          className={`text-xs ${
-                                            isPositive
-                                              ? "text-[color:var(--viz-positive)]"
-                                              : isNegative
-                                                ? "text-rose-600"
-                                                : "text-[color:var(--shell-muted)]"
-                                          }`}
-                                        >
-                                          {row.index_source ?? "Benchmark"} {formatSignedMetric(row.index_change_percent, 2, "%")} · {row.currency ?? "FX"} {formatSignedMetric(row.fx_change_percent, 2, "%")}
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-3 text-xs text-[color:var(--shell-muted)]">
-                                      <span>{row.index_frequency ?? "Benchmark"} period {row.index_period_end ?? "—"}</span>
-                                      <span>ECB period {row.fx_period_end ?? "—"}</span>
-                                      <span>SEC filings 7d {row.filing_count_7d}</span>
-                                      <span className="ml-auto">
-                                        {row.freshness}
-                                      </span>
-                                    </div>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                  </section>
-                </div>
-
-                {mapExpanded && (
-                  <ModalSurface
-                    label="Expanded map"
-                    onClose={() => setMapExpanded(false)}
-                    className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 sm:p-6"
-                    surfaceClassName="app-card max-h-[95dvh] w-full max-w-6xl overflow-y-auto rounded-[1.6rem]"
-                  >
-                      <div className="flex items-center justify-between border-b border-[color:var(--shell-border)] px-4 py-3">
-                        <div>
-                          <div className="text-[11px] uppercase tracking-[0.3em] text-[color:var(--shell-muted)]">
-                            Expanded map
-                          </div>
-                          <div className="text-sm font-semibold text-[color:var(--shell-ink)]">
-                            {mapMode === "signals"
-                              ? "Cross-source signal relevance"
-                              : mapMode === "news"
-                                ? "News coverage by country"
-                                : "Weather observations by country"}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setMapExpanded(false)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-surface)] text-[color:var(--shell-muted)] hover:text-[color:var(--shell-ink)]"
-                          aria-label="Close expanded map"
-                        >
-                          <X className="h-4 w-4" />
-                        </button>
-                      </div>
-                      <div className="p-4">
-                        <div className="app-map-frame h-[min(74vh,760px)] min-h-[20rem]">
-                          <WorldMapBubbles
-                            variant="default"
-                            data={activeMapData}
-                            onSelect={handleMapSelect}
-                            points={overviewEventPoints}
-                            onSelectPoint={(point) => handleOpenIntelligence(point.id)}
-                            dark={dark}
-                            primaryCountry={selectedCountry}
-                            secondaryCountry={comparisonCountry}
-                            pinnedCountry={pinnedCountry}
-                            featuredCountry={
-                              mapMode === "signals"
-                                ? highestSignalCountry?.country
-                                : mapMode === "news"
-                                  ? highestMapNewsCountry?.country
-                                  : mostExtremeWeatherCountry?.country
-                            }
-                            featuredLabel={
-                              mapMode === "signals"
-                                ? "Highest signal relevance"
-                                : mapMode === "news"
-                                  ? "Highest story concentration"
-                                  : "Most extreme temperature"
-                            }
-                            scale={
-                              mapMode === "news" || mapMode === "signals"
-                                ? "log"
-                                : "linear"
-                            }
-                            fillMode={
-                              mapMode === "weather" ? "temperature" : "relevance"
-                            }
-                            valueDomain={
-                              mapMode === "signals"
-                                ? [0, 100]
-                                : mapMode === "news"
-                                  ? [0, Math.max(1, ...mapBubbleData.map((row) => row.count))]
-                                  : [-30, 45]
-                            }
-                            valueUnit={mapMode === "signals" ? "/100" : mapMode === "weather" ? "°C" : ""}
-                            showBubbles={false}
-                            legendLabel={activeMapLegendLabel}
-                          />
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-3 border-t border-[color:var(--shell-border)] px-4 py-3 text-xs text-[color:var(--shell-muted)]">
-                        <span>
-                          Window: {mapRangeLabel}
-                        </span>
-                        <span>
-                          Countries shown:{" "}
-                          {activeMapData.length}
-                        </span>
-                        <span className="ml-auto">
-                          Search topic: {activeSearchTopicLabel}
-                        </span>
-                      </div>
-                  </ModalSurface>
-                )}
-
-              </div>
+              <SituationDashboard
+                overview={overview} loading={overviewEventsLoading} error={overviewEventsError}
+                hours={overviewHours} topic={overviewTopic} priority={overviewPriority}
+                country={selectedCountry} selectedId={selectedIntelligenceEventId} dark={dark}
+                briefing={dailyBriefing} briefingError={dailyBriefingError}
+                onHoursChange={setOverviewHours} onTopicChange={setOverviewTopic} onPriorityChange={setOverviewPriority}
+                onCountryChange={setSelectedCountry} onSelect={handleOpenIntelligence} onOpenImagery={handleOpenImagery}
+                onRefresh={() => setOverviewEventRefresh((value) => value + 1)} onRefreshBriefing={refreshDailyBriefing}
+              />
             )}
             {activeView === "social" && (
               <SocialSignalsWorkspace initialCountry={selectedCountry} eventId={selectedIntelligenceEventId} onOpenEvent={handleOpenIntelligence} onOpenMap={() => { setMapMode("signals"); setActiveView("dashboard"); }} />
@@ -10056,8 +8128,7 @@ export default function ClaritasDashboard() {
                                 type="button"
                                 onClick={() => {
                                   setMapMode("news");
-                                  setListMode("news");
-                                }}
+                                    }}
                                 className={`rounded-full border px-3 py-1 ${
                                   mapMode === "news"
                                     ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
@@ -10070,8 +8141,7 @@ export default function ClaritasDashboard() {
                                 type="button"
                                 onClick={() => {
                                   setMapMode("weather");
-                                  setListMode("weather");
-                                }}
+                                                            }}
                                 className={`rounded-full border px-3 py-1 ${
                                   mapMode === "weather"
                                     ? "border-[color:var(--shell-strong)] bg-[color:var(--shell-strong)] text-[color:var(--shell-on-strong)]"
@@ -10268,6 +8338,5 @@ export default function ClaritasDashboard() {
           })}
       </nav>
     </div>
-    </CountryDataContext.Provider>
   );
 }

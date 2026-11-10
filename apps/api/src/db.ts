@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import { randomUUID } from "crypto";
 import { runtimeRole } from "./runtime-role";
+import { ReaderWorkQueue } from "./reader-work";
 
 const required = (name: string): string => {
   const v = process.env[name];
@@ -46,6 +47,10 @@ const slowQueryMillis = Math.max(
   100,
   Math.min(parseInt(process.env.DB_SLOW_QUERY_MS || "750", 10) || 750, 60_000),
 );
+const readerWork = runtimeRole === "api" ? new ReaderWorkQueue({
+  concurrency: Math.max(1, poolMax - 1),
+  optionalConcurrency: Math.max(1, Math.min(2, poolMax - 2)),
+}) : null;
 
 export const pool = new Pool({
   host,
@@ -85,6 +90,7 @@ export function getDatabasePoolStats() {
     total: pool.totalCount,
     idle: pool.idleCount,
     waiting: pool.waitingCount,
+    admission: readerWork?.stats(),
   };
 }
 
@@ -101,7 +107,7 @@ export function startDatabasePoolMonitoring(): void {
   );
   poolMonitorTimer = setInterval(() => {
     const stats = getDatabasePoolStats();
-    if (stats.waiting > 0 || stats.total >= stats.max) {
+    if (stats.waiting > 0 || (stats.admission?.waiting ?? 0) > 0 || stats.total >= stats.max) {
       console.warn(
         JSON.stringify({
           event: "database_pool_pressure",
@@ -139,12 +145,14 @@ export function isDatabaseUnavailableError(error: unknown): boolean {
       "08006",
       "08007",
       "08P01",
+      "DATABASE_BUSY",
     ].includes(code)
   ) {
     return true;
   }
   if (
     message.includes("connection terminated") ||
+    message.includes("timeout exceeded when trying to connect") ||
     message.includes("connection timeout") ||
     message.includes("connection refused") ||
     message.includes("the database system is starting up")
@@ -155,6 +163,11 @@ export function isDatabaseUnavailableError(error: unknown): boolean {
 }
 
 export async function query<T = any>(text: string, params?: any[]): Promise<{ rows: T[] }>{
+  if (readerWork) return readerWork.run(() => executeQuery<T>(text, params));
+  return executeQuery<T>(text, params);
+}
+
+async function executeQuery<T>(text: string, params?: any[]): Promise<{ rows: T[] }>{
   const startedAt = Date.now();
   const client = await pool.connect();
   try {

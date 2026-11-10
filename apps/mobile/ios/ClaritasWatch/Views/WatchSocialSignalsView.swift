@@ -36,7 +36,7 @@ struct WatchSocialSignalsView: View {
                                     .font(.system(size: 9))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(3)
-                                Button("Retry") { Task { await model.refresh() } }
+                                Button("Retry") { Task { await model.loadOptionalContext("social") } }
                                     .buttonStyle(.bordered)
                                     .font(.caption2)
                             }

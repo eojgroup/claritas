@@ -242,7 +242,7 @@ struct BriefingOverviewCard: View {
                     .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                     .lineLimit(1)
 
-                if horizontalSizeClass != .compact, let takeaway = briefing?.key_takeaways.first {
+                if let takeaway = briefing?.key_takeaways.first {
                     Text(takeaway)
                         .font(.subheadline)
                         .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))

@@ -72,3 +72,25 @@ test("expired entries are removed when other scopes load", async () => {
   await cache.get("current", async () => "current");
   assert.equal(await cache.get("old", async () => "fresh"), "fresh");
 });
+
+test("stale shared data returns immediately during one refresh and survives refresh errors within its bound", async () => {
+  let now = 0;
+  const cache = new SharedReadCache({ ttlMs: 10, staleWhileRevalidateMs: 30, maxEntries: 2, maxBytes: 1000, now: () => now });
+  await cache.get("overview", async () => "saved");
+  await cache.get("other", async () => "other");
+  now = 10;
+  let resolve!: (value: string) => void;
+  let calls = 0;
+  const refresh = () => { calls++; return new Promise<string>((done) => { resolve = done; }); };
+  assert.deepEqual(await Promise.all(Array.from({ length: 20 }, () => cache.get("overview", refresh))), Array(20).fill("saved"));
+  assert.equal(calls, 1);
+  resolve("updated");
+  await new Promise<void>((done) => setImmediate(done));
+  assert.equal(await cache.get("other", async () => "unexpected"), "other");
+  assert.equal(await cache.get("overview", async () => "unexpected"), "updated");
+  now = 20;
+  assert.equal(await cache.get("overview", async () => { throw new Error("offline"); }), "updated");
+  await new Promise<void>((done) => setImmediate(done));
+  now = 50;
+  await assert.rejects(cache.get("overview", async () => { throw new Error("still offline"); }), /still offline/);
+});

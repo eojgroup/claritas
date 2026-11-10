@@ -9,7 +9,7 @@ export const OVERVIEW_TOPICS = [
   { key: "developments", label: "Other developments", pattern: "" },
 ] as const;
 export type OverviewTopic = typeof OVERVIEW_TOPICS[number]["key"];
-export type OverviewOptions = { hours?: 24 | 72 | 168; country?: string; topic?: OverviewTopic; displayLanguage?: string };
+export type OverviewOptions = { hours?: 24 | 72 | 168; country?: string; topic?: OverviewTopic; priority?: "high" | "all"; displayLanguage?: string };
 export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet" | "unavailable";
 export type OverviewSample = {
   id: string; event_type: string; status: string; severity: string;
@@ -20,18 +20,19 @@ export type OverviewSample = {
   metadata: { origin_domain?: string | null; canonical_evidence_key?: string | null };
   period: "current" | "previous"; displayable?: boolean;
 };
-export const OVERVIEW_SAMPLE_LIMIT = 300;
 export const OVERVIEW_EVENT_LIMIT = 40;
 export const OVERVIEW_TIMELINE_LIMIT = 24;
 
-export function normalizeOverviewOptions(input: { hours?: unknown; country?: unknown; topic?: unknown; displayLanguage?: unknown } = {}): Required<OverviewOptions> {
+export function normalizeOverviewOptions(input: { hours?: unknown; country?: unknown; topic?: unknown; priority?: unknown; displayLanguage?: unknown } = {}): Required<OverviewOptions> {
   const hours = Number(input.hours ?? 24);
   if (![24, 72, 168].includes(hours)) throw new Error("Overview hours must be 24, 72 or 168.");
   const country = typeof input.country === "string" ? input.country.trim().toUpperCase() : "";
   if (country && !/^[A-Z]{2}$/.test(country)) throw new Error("Overview country must be an ISO2 code.");
   const topic = typeof input.topic === "string" ? input.topic.trim().toLowerCase() : "";
   if (topic && !OVERVIEW_TOPICS.some((candidate) => candidate.key === topic)) throw new Error("Unknown overview topic.");
-  return { hours: hours as 24 | 72 | 168, country, topic: topic as OverviewTopic, displayLanguage: normalizeIntelligenceDisplayLanguage(input.displayLanguage ?? "en") };
+  const priority = input.priority ?? "high";
+  if (priority !== "high" && priority !== "all") throw new Error("Overview priority must be high or all.");
+  return { hours: hours as 24 | 72 | 168, country, topic: topic as OverviewTopic, priority, displayLanguage: normalizeIntelligenceDisplayLanguage(input.displayLanguage ?? "en") };
 }
 
 export function overviewTopic(eventType: string) {
@@ -58,6 +59,9 @@ export function overviewPriority(event: OverviewSample, now: Date) {
   return Math.round(Math.min(cap, score) * 100);
 }
 
+export const overviewHighPriority = (event: OverviewSample, now: Date) =>
+  ["high", "critical"].includes(event.severity) || overviewPriority(event, now) >= 70;
+
 export function overviewPriorityReasons(event: OverviewSample) {
   const reasons: string[] = [];
   if (["high", "critical"].includes(event.severity)) reasons.push(`${event.severity === "critical" ? "Critical" : "High"} reported severity`);
@@ -81,30 +85,27 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
   const end = now.getTime();
   const duration = options.hours * 3_600_000;
   const seen = new Set<string>();
-  const rawCurrent = rawRows.filter((row) => row.period === "current");
-  const rawPrevious = rawRows.filter((row) => row.period === "previous");
-  const truncated = rawCurrent.length > OVERVIEW_SAMPLE_LIMIT || rawPrevious.length > OVERVIEW_SAMPLE_LIMIT;
-  const changeForWindow = (current: number, previous: number) => truncated
-    ? { change: current - previous, change_percent: null, direction: "unavailable" as const }
-    : overviewChange(current, previous);
-  const rows = [...rawCurrent.slice(0, OVERVIEW_SAMPLE_LIMIT), ...rawPrevious.slice(0, OVERVIEW_SAMPLE_LIMIT)]
+  // Analytics cover the entire saved projection. Only the presented cards are
+  // bounded; applying that limit here erased the older chart buckets.
+  const rows = rawRows
     .filter((row) => {
       const time = new Date(row.last_activity_time).getTime();
       const belongs = row.period === "current" ? time >= end - duration && time <= end : time >= end - duration * 2 && time < end - duration;
       if (!belongs || row.displayable === false || row.status === "dismissed" || seen.has(row.id)) return false;
       if (options.country && row.primary_country_iso2 !== options.country) return false;
       if (options.topic && overviewTopic(row.event_type).key !== options.topic) return false;
+      if (options.priority === "high" && !overviewHighPriority(row, now)) return false;
       seen.add(row.id);
       return true;
     });
   const current = rows.filter((row) => row.period === "current");
   const previous = rows.filter((row) => row.period === "previous");
-  const highPriority = (row: OverviewSample) => ["high", "critical"].includes(row.severity) || overviewPriority(row, now) >= 70;
+  const highPriority = (row: OverviewSample) => overviewHighPriority(row, now);
   const pulse = (key: string, label: string, members: OverviewSample[]) => {
     const currentMembers = members.filter((row) => row.period === "current");
     const previousMembers = members.filter((row) => row.period === "previous");
     return { key, label, event_count: currentMembers.length, previous_event_count: previousMembers.length,
-      ...changeForWindow(currentMembers.length, previousMembers.length),
+      ...overviewChange(currentMembers.length, previousMembers.length),
       priority_score: currentMembers.length ? Math.max(...currentMembers.map((row) => overviewPriority(row, now))) : 0,
       event_ids: [...currentMembers].sort((a, b) => overviewPriority(b, now) - overviewPriority(a, now)).slice(0, 3).map((row) => row.id) };
   };
@@ -134,14 +135,14 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
       previous_event_count: previous.filter((row) => contains(row, duration)).length,
       high_priority_count: current.filter((row) => contains(row) && highPriority(row)).length };
   });
-  return { generated_at: now.toISOString(), window, filters: { country: options.country || null, topic: options.topic || null },
-    summary: { event_count: current.length, previous_event_count: previous.length, ...changeForWindow(current.length, previous.length),
+  return { generated_at: now.toISOString(), window, filters: { country: options.country || null, topic: options.topic || null, priority: options.priority },
+    summary: { event_count: current.length, previous_event_count: previous.length, ...overviewChange(current.length, previous.length),
       high_priority_count: current.filter(highPriority).length,
       location_count: new Set(current.map((row) => row.primary_location_id || row.primary_country_iso2).filter(Boolean)).size },
     topics, locations, buckets,
-    coverage: { sample_limit: OVERVIEW_SAMPLE_LIMIT, sampled_events: rows.length, truncated, comparison_available: !truncated,
-      notice: `A bounded sample of up to ${OVERVIEW_SAMPLE_LIMIT} latest-updated investigations per window; not a complete count of real-world incidents or articles.${truncated ? " The sample limit was reached; counts are lower bounds." : ""}`,
-      comparison_notice: "Comparison uses each investigation's latest recorded update, not historical activity totals. Later updates can move an investigation between windows. Sampling, source coverage and ingestion delays can change the result; this is a reporting pulse, not proof of escalation.",
+    coverage: { sample_limit: null, sampled_events: rows.length, truncated: false, comparison_available: true,
+      notice: "Counts cover all eligible saved investigations in the selected window. The latest-development cards are limited to 40; chart counts are not limited by the cards. Investigations are not a count of real-world incidents or articles.",
+      comparison_notice: "Comparison uses each investigation's latest recorded update, not historical activity totals. Later updates can move an investigation between windows. Source coverage and ingestion delays can change the result; this is a reporting pulse, not proof of escalation.",
       priority_notice: "Overview priority is a navigation score: 55% recorded relevance, 20% urgency, 15% materiality and 10% recency over 72 hours. Uncorroborated social/podcast leads are capped at 60. High-priority updates have high/critical severity or a score of at least 70. It is not a probability, verified impact or independent assessment." },
     current: [...current].sort((a, b) => new Date(b.last_activity_time).getTime() - new Date(a.last_activity_time).getTime() || a.id.localeCompare(b.id)) };
 }

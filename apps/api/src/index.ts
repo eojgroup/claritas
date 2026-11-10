@@ -97,9 +97,11 @@ import { buildNewsReaderQuery } from "./news-reader-query";
 import { getNewsTranslationAvailability } from "./news-translation";
 import { attachTranslationAvailability, needsTranslationAvailability, type TranslationAvailability } from "./news-translation-presentation";
 import { SharedReadCache } from "./shared-read-cache";
+import { routeReadPriority, withReadPriority } from "./reader-work";
 import { runsBackgroundWorkers, runtimeRole } from "./runtime-role";
 import { DailyBriefingDispatcher } from "./daily-briefing-dispatch";
 import { getIntelligenceOverview, normalizeOverviewOptions } from "./intelligence/overview";
+import { startIntelligenceOverviewWorker } from "./intelligence/overview-snapshot";
 import { normalizeIntelligenceDisplayLanguage } from "./intelligence/display-language";
 import { NewsSearchValidationError } from "./news-search";
 import { buildNewsCountryStatsQuery } from "./news-country-attribution";
@@ -165,8 +167,8 @@ const app = express();
 // execute the session and paid-access middleware for every request. Short TTLs
 // bound ingestion visibility delay; simultaneous clients share one DB read.
 const newsReadCache = new SharedReadCache({ ttlMs: 15_000, maxEntries: 64, maxBytes: 12 * 1024 * 1024 });
-const eventReadCache = new SharedReadCache({ ttlMs: 10_000, maxEntries: 128, maxBytes: 8 * 1024 * 1024 });
-const workspaceReadCache = new SharedReadCache({ ttlMs: 30_000, maxEntries: 128, maxBytes: 8 * 1024 * 1024 });
+const eventReadCache = new SharedReadCache({ ttlMs: 10_000, staleWhileRevalidateMs: 30_000, maxEntries: 128, maxBytes: 8 * 1024 * 1024 });
+const workspaceReadCache = new SharedReadCache({ ttlMs: 60_000, staleWhileRevalidateMs: 300_000, maxEntries: 128, maxBytes: 8 * 1024 * 1024 });
 const sharedReadKey = (namespace: string, scope: unknown) =>
   `${namespace}:${createHash("sha256").update(JSON.stringify(scope, (_key, value) =>
     typeof value === "number" && !Number.isFinite(value) ? String(value) : value)).digest("hex")}`;
@@ -330,6 +332,7 @@ app.post("/internal/news/refresh/:runId/cancel", async (req, res) => {
 });
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+app.use((req, _res, next) => withReadPriority(routeReadPriority(req.path, req.query.include_context === "true"), next));
 app.get("/api/hello", (_req, res) => res.json({ hello: "world" }));
 app.use("/api/auth", authRouter);
 
@@ -2016,6 +2019,7 @@ app.get("/api/intelligence/overview", requireAuthenticated, async (req, res) => 
   let options;
   try {
     options = normalizeOverviewOptions({ hours: req.query.hours, country: req.query.country, topic: req.query.topic,
+      priority: req.query.priority,
       displayLanguage: req.query.display_language });
   } catch (error) {
     return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
@@ -2077,8 +2081,9 @@ app.get("/api/intelligence/events/:id", requireAuthenticated, async (req, res) =
   catch (error) { return res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); }
   try {
     if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Event id must be a UUID." });
-    const result = await eventReadCache.get(sharedReadKey("event", { id: req.params.id, displayLanguage }),
-      () => getIntelligenceEvent(req.params.id, { displayLanguage }));
+    const includeContext = req.query.include_context === "true";
+    const result = await eventReadCache.get(sharedReadKey("event", { id: req.params.id, displayLanguage, includeContext }),
+      () => getIntelligenceEvent(req.params.id, { displayLanguage, includeContext }));
     if (!result) return res.status(404).json({ error: "Intelligence event not found." });
     res.setHeader("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
     return res.json(result);
@@ -2465,7 +2470,7 @@ app.get("/api/news", requireAuthenticated, async (req, res) => {
       includeMetadata,
     });
     const result = await newsReadCache.get(sharedReadKey("news", newsQuery), async () => {
-      const { rows } = await pool.query(newsQuery.sql, newsQuery.params);
+      const { rows } = await query(newsQuery.sql, newsQuery.params);
       return rows[0] ?? {};
     });
     const items: Record<string, unknown>[] = Array.isArray(result.items) ? result.items : [];
@@ -2846,7 +2851,7 @@ app.get("/api/news/country-stats", requireAuthenticated, async (req, res) => {
     // expanding and de-duplicating a full year of JSON geography evidence.
     const days = Math.min(Math.max(parseInt(String(req.query.days || "30"), 10) || 30, 1), 45);
     const result = await workspaceReadCache.get(sharedReadKey("news-country-stats", days), async () => {
-      const result = await pool.query<{
+      const result = await query<{
         stats: Array<{
           country: string;
           count: number;
@@ -3862,6 +3867,7 @@ startDatabasePoolMonitoring();
 if (runsBackgroundWorkers) {
   startIngestionAutomationWorker();
   startNewsAssessmentWorker();
+  startIntelligenceOverviewWorker();
   startNewsImageWorker();
   startNewsTranslationWorker();
   startDailyBriefingSchedulerWorker();
