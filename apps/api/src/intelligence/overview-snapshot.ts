@@ -85,7 +85,8 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
     return { ...bucket, event_count: counts?.event_count ?? 0, previous_event_count: counts?.previous_event_count ?? 0, high_priority_count: counts?.high_priority_count ?? 0 };
   });
   return { ...base, summary: { ...aggregate.summary, ...change(aggregate.summary.event_count, aggregate.summary.previous_event_count) }, topics, locations, buckets,
-    coverage: { ...base.coverage, sampled_events: aggregate.summary.event_count + aggregate.summary.previous_event_count } };
+    coverage: { ...base.coverage, sample_limit: Math.max(aggregate.summary.event_count, aggregate.summary.previous_event_count),
+      sampled_events: aggregate.summary.event_count + aggregate.summary.previous_event_count } };
 }
 const overviewTopicLabel = (key: string) => OVERVIEW_TOPICS.find((topic) => topic.key === key)?.label ?? key;
 
@@ -291,8 +292,11 @@ export async function purgeExpiredOverviewSocialLeads(generation: string, read: 
 }
 
 export async function applyOverviewDirtyBatch(generation: string, read: OverviewQuery = query, limit = BATCH_SIZE, cutoff = new Date()) {
-  const dirty = (await read<{ id: string; queued_at: string | Date }>(`SELECT id,queued_at FROM intelligence_overview_dirty
-    WHERE queued_at<=$2::timestamptz ORDER BY queued_at,id LIMIT $1`, [limit, cutoff])).rows;
+  // pg decodes timestamptz as JS Date, losing sub-millisecond precision. Keep
+  // the exact database value so acknowledgement removes the claimed version
+  // while preserving a row requeued during projection work.
+  const dirty = (await read<{ id: string; queued_at: string }>(`SELECT dirty.id,dirty.queued_at::text AS queued_at FROM intelligence_overview_dirty dirty
+    WHERE dirty.queued_at<=$2::timestamptz ORDER BY dirty.queued_at,dirty.id LIMIT $1`, [limit, cutoff])).rows;
   if (!dirty.length) return 0;
   const ids = dirty.map((row) => row.id);
   const base = buildOverviewProjectionQuery(cutoff, undefined, Math.min(1000, limit));
@@ -305,7 +309,7 @@ export async function applyOverviewDirtyBatch(generation: string, read: Overview
     await saveOverviewProjectionBatch(rows, generation, read);
   }
   await read(`DELETE FROM intelligence_overview_dirty dirty USING jsonb_to_recordset($1::jsonb) AS claimed(id uuid,queued_at timestamptz)
-    WHERE dirty.id=claimed.id AND dirty.queued_at<=claimed.queued_at`, [JSON.stringify(dirty)]);
+    WHERE dirty.id=claimed.id AND dirty.queued_at=claimed.queued_at`, [JSON.stringify(dirty)]);
   return dirty.length;
 }
 

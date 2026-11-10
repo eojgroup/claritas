@@ -11,6 +11,10 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
   const client = await pool.connect();
   await client.query("BEGIN");
   const read: OverviewQuery = async (sql, params) => ({ rows: (await client.query(sql, params)).rows });
+  // PostgreSQL queues have microsecond precision; JS Dates have milliseconds.
+  // An explicit fixture watermark avoids dropping writes made in the same
+  // millisecond when CI executes the next replay immediately.
+  const fixtureWatermark = async () => new Date((await client.query("SELECT clock_timestamp()+interval '1 second' AS watermark")).rows[0].watermark);
   try {
     // Other integration fixtures may have committed ingestion events. Keep
     // this generation's dirty replay isolated inside the rollback-only test.
@@ -44,7 +48,11 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     const moved = records.find((row) => row.age === 47)!;
     await client.query("UPDATE intelligence_event SET last_activity_time=$2 WHERE id=$1", [moved.id, new Date(now.getTime() - 22.5 * 3600_000)]);
     assert.equal((await client.query("SELECT count(*)::int AS count FROM intelligence_overview_dirty WHERE id=ANY($1::uuid[])", [records.map((row) => row.id)])).rows[0].count, records.length);
-    await applyOverviewDirtyBatch(generation, read, 500);
+    await client.query(`UPDATE intelligence_overview_dirty SET queued_at=date_trunc('milliseconds',queued_at)+interval '123 microseconds'
+      WHERE id=ANY($1::uuid[])`, [records.map((row) => row.id)]);
+    await applyOverviewDirtyBatch(generation, read, 500, await fixtureWatermark());
+    assert.equal((await client.query("SELECT count(*)::int AS count FROM intelligence_overview_dirty WHERE id=ANY($1::uuid[])", [records.map((row) => row.id)])).rows[0].count, 0,
+      "acknowledgement must preserve PostgreSQL microseconds rather than leave every processed update pending");
     const state = { generation_id: generation, generated_at: now };
     await publishOverviewSnapshots(state, read, false);
     const statements: string[] = [];
@@ -58,6 +66,9 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.equal(high.buckets.at(-1)?.event_count, 301);
     assert.equal(high.buckets.reduce((sum, bucket) => sum + bucket.event_count, 0), 305);
     assert.equal(high.coverage.truncated, false);
+    assert.equal(high.coverage.full_window, true);
+    assert.equal(typeof high.coverage.sample_limit, "number", "already-installed clients require a numeric coverage limit");
+    assert.ok(high.coverage.sample_limit >= high.summary.event_count);
     await readIntelligenceOverviewSnapshot(normalizeOverviewOptions(), measured);
     assert.equal(statements.length, 2);
     assert.ok(statements.every((sql) => !/intelligence_event(?:\s|_)|\bitem\b/.test(sql)), "Repeated global reads use only saved snapshot tables");
@@ -89,7 +100,7 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.equal(stale.events.length, 40);
     // Quality changes and event deletion enqueue exact indexed source matches.
     await client.query("UPDATE item SET payload=jsonb_build_object('quality_status','rejected') WHERE id=$1", [item]);
-    await applyOverviewDirtyBatch(generation, read, 500);
+    await applyOverviewDirtyBatch(generation, read, 500, await fixtureWatermark());
     await publishOverviewSnapshots(state, read, false);
     assert.equal((await readIntelligenceOverviewSnapshot(normalizeOverviewOptions(), measured)).summary.event_count, 0);
     // Publishing takes time while ingestion continues. New work after the

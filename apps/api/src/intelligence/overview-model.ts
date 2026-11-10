@@ -140,7 +140,9 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
       high_priority_count: current.filter(highPriority).length,
       location_count: new Set(current.map((row) => row.primary_location_id || row.primary_country_iso2).filter(Boolean)).size },
     topics, locations, buckets,
-    coverage: { sample_limit: null, sampled_events: rows.length, truncated: false, comparison_available: true,
+    // Keep the legacy numeric field decodable by already-installed clients.
+    // This is the observed complete-window size, not a sampling cap.
+    coverage: { sample_limit: Math.max(current.length, previous.length), full_window: true, sampled_events: rows.length, truncated: false, comparison_available: true,
       notice: "Counts cover all eligible saved investigations in the selected window. The latest-development cards are limited to 40; chart counts are not limited by the cards. Investigations are not a count of real-world incidents or articles.",
       comparison_notice: "Comparison uses each investigation's latest recorded update, not historical activity totals. Later updates can move an investigation between windows. Source coverage and ingestion delays can change the result; this is a reporting pulse, not proof of escalation.",
       priority_notice: "Overview priority is a navigation score: 55% recorded relevance, 20% urgency, 15% materiality and 10% recency over 72 hours. Uncorroborated social/podcast leads are capped at 60. High-priority updates have high/critical severity or a score of at least 70. It is not a probability, verified impact or independent assessment." },
