@@ -62,3 +62,20 @@ archive/canonical persistence path must still pass. Missing data, parser/SQL
 errors, failed or mismatched runs and unknown failing checks still block release.
 The workflow records the degraded condition as a warning and in its summary,
 rather than describing the source feed as healthy or rolling back working readers.
+
+## Persistence timeout diagnosis
+
+Run `42978545667` correctly blocked and rolled back when its safer diagnostic
+classification identified database statement timeouts in both DOC and GAL
+persistence. Earlier generic timeout diagnostics had obscured this distinction.
+Production plans exposed canonical repair queries sorting text-cast numeric IDs
+and reading payloads before their batch limit. Even an empty pending set could
+scan the complete item/signal history and exceed the 15-second statement budget.
+
+Canonical repair now materializes a bounded, numerically ordered ID batch using
+the existing pending indexes, then fetches only those rows. Completion probes use
+the same bounded index strategy. Read-only production checks on November 11 used
+both pending indexes, executed article/signal selection in 1.8/0.7 ms, and returned
+both completion flags in 5 ms. The PostGIS regression covers numeric ordering,
+IDs beyond JavaScript's exact integer range, cursor continuation, completed-index
+plans and newly pending signals. Persistence errors remain release-blocking.

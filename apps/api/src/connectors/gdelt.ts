@@ -10,6 +10,7 @@ import { hasEarthquakeHeadlineSignal } from "../earthquake-language";
 import { trustedNewsDirectCountrySql } from "../news-country-attribution";
 import { inferNewsCountry, trustedSubjectCountryIso2 } from "./country-inference";
 import { awaitGdeltOperation, readGdeltBody, readGdeltText } from "./gdelt-io";
+import { gdeltCanonicalPendingQuery, gdeltCanonicalRemainingQuery } from "./gdelt-canonical-queries";
 import {
   fetchGdeltGalMetadataMinute, parseGdeltGalMetadata, planGdeltGalMinutes,
   selectGdeltGalMetadataSample, gdeltMinuteDate, gdeltMinuteStamp, GDELT_GAL_METADATA_VERSION,
@@ -1447,14 +1448,7 @@ async function reconcileGdeltCanonicalBatch(
     let signalAfterId = canonicalCursorId(cursor.signal_after_id);
 
     const selectItems = (afterId: string) => client.query<GdeltCanonicalItemRow>(
-      `SELECT id::text,url,external_id
-       FROM item
-       WHERE source_id=$1
-         AND kind='news_article'
-         AND payload->>'canonical_url_algorithm' IS DISTINCT FROM $2
-         AND id>$3::bigint
-       ORDER BY id
-       LIMIT $4`,
+      gdeltCanonicalPendingQuery("item"),
       [sourceId, GDELT_CANONICAL_URL_ALGORITHM, afterId, GDELT_CANONICAL_RECONCILIATION_BATCH_SIZE],
     );
     let legacyItems = await selectItems(itemAfterId);
@@ -1464,13 +1458,7 @@ async function reconcileGdeltCanonicalBatch(
     }
 
     const selectSignals = (afterId: string) => client.query<GdeltCanonicalSignalRow>(
-      `SELECT id::text,url,NULLIF(payload->>'raw_url','') AS raw_url
-       FROM news_signal
-       WHERE source_id=$1
-         AND payload->>'canonical_url_algorithm' IS DISTINCT FROM $2
-         AND id>$3::bigint
-       ORDER BY id
-       LIMIT $4`,
+      gdeltCanonicalPendingQuery("news_signal"),
       [sourceId, GDELT_CANONICAL_URL_ALGORITHM, afterId, GDELT_CANONICAL_RECONCILIATION_BATCH_SIZE],
     );
     let legacySignals: { rows: GdeltCanonicalSignalRow[] } = { rows: [] };
@@ -1536,17 +1524,7 @@ async function reconcileGdeltCanonicalBatch(
     }
 
     const remaining = await client.query<{ items: boolean; signals: boolean }>(
-      `SELECT
-         EXISTS (
-           SELECT 1 FROM item
-           WHERE source_id=$1 AND kind='news_article'
-             AND payload->>'canonical_url_algorithm' IS DISTINCT FROM $2
-         ) AS items,
-         EXISTS (
-           SELECT 1 FROM news_signal
-           WHERE source_id=$1
-             AND payload->>'canonical_url_algorithm' IS DISTINCT FROM $2
-         ) AS signals`,
+      gdeltCanonicalRemainingQuery,
       [sourceId, GDELT_CANONICAL_URL_ALGORITHM],
     );
     const itemComplete = !remaining.rows[0]?.items;

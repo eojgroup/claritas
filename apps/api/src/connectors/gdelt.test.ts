@@ -563,8 +563,9 @@ test("GDELT URL reconciliation repairs complete item and signal history in bound
   assert.match(reconciliation, /pg_advisory_xact_lock/);
   assert.match(reconciliation, /INSERT INTO source_feed/);
   assert.match(reconciliation, /SELECT cursor FROM source_feed[\s\S]*FOR UPDATE/);
-  assert.match(reconciliation, /FROM item[\s\S]*canonical_url_algorithm'[\s\S]*id>\$3::bigint[\s\S]*ORDER BY id[\s\S]*LIMIT \$4/);
-  assert.match(reconciliation, /FROM news_signal[\s\S]*canonical_url_algorithm'[\s\S]*id>\$3::bigint[\s\S]*ORDER BY id[\s\S]*LIMIT \$4/);
+  assert.match(reconciliation, /gdeltCanonicalPendingQuery\("item"\)/);
+  assert.match(reconciliation, /gdeltCanonicalPendingQuery\("news_signal"\)/);
+  assert.match(reconciliation, /gdeltCanonicalRemainingQuery/);
   assert.match(reconciliation, /item_complete: itemComplete/);
   assert.match(reconciliation, /signal_complete: signalComplete/);
   assert.match(reconciliation, /GDELT_SIGNAL_CANONICAL_RECONCILIATION_BATCHES/);
