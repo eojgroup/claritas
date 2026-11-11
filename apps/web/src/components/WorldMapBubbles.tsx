@@ -461,7 +461,7 @@ export default memo(function WorldMapBubbles({
         point.longitude >= -180 &&
         point.longitude <= 180,
       )
-      .slice(0, 120),
+      .slice(0, 200),
     [points],
   );
 

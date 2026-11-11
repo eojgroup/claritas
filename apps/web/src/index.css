@@ -5549,7 +5549,7 @@ body {
 .event-lead-image figcaption { padding: .25rem .4rem; font-size: .55rem; color: var(--shell-muted); }
 @media (max-width: 640px) {
   .situation-workspace { gap: .75rem; }
-  .situation-map-stage { height: 13rem; }
+  .situation-map-stage { height: 17rem; }
   .situation-map > header, .situation-map > footer { padding: .65rem .8rem; }
   .situation-map > header > span { font-size: .65rem; }
   .situation-map > footer { font-size: .65rem; line-height: 1.4; }
@@ -5571,3 +5571,82 @@ body {
 .situation-map, .situation-detail { border-radius: 1rem; }
 .situation-map { top: 5rem; }
 .situation-dashboard .situation-activity > li:not(:has(.situation-event-image)) { grid-template-columns: minmax(0, 1fr); }
+
+/* Complete geographic coverage stays coordinated with the bounded latest list. */
+.situation-geography { min-width: 0; display: grid; gap: 1rem; position: sticky; top: 5rem; }
+.situation-geography .situation-map { position: static; }
+.situation-signal-types { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .35rem; font-size: .65rem; color: var(--shell-muted); text-transform: capitalize; }
+.situation-signal-types span { border: 1px solid var(--shell-border); border-radius: 1rem; padding: .1rem .4rem; }
+.overview-country-profile { border: 1px solid var(--shell-border); border-radius: 1rem; padding: 1rem; background: var(--shell-surface); font-size: .8rem; line-height: 1.6; }
+.overview-country-profile > header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+.overview-country-profile h3 { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; font-size: 1rem; font-weight: 650; }
+.overview-country-profile h3 small { font-size: .7rem; color: var(--shell-muted); }
+.overview-country-profile header button { min-height: 44px; min-width: 44px; display: grid; place-items: center; }
+.overview-country-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .8rem; margin-block: .75rem; }
+.overview-country-metrics dt { color: var(--shell-muted); text-transform: capitalize; font-size: .7rem; }
+.overview-country-metrics dd { font-weight: 600; }
+.overview-visuals { padding: 1rem; }
+.overview-visuals h3 { font-size: .9rem; font-weight: 650; margin-bottom: .75rem; }
+.overview-visuals > div { display: flex; gap: .75rem; overflow-x: auto; scroll-snap-type: x proximity; }
+.overview-visuals button { min-width: 10rem; width: 12rem; flex-shrink: 0; text-align: left; scroll-snap-align: start; }
+.overview-visual-image { width: 100%; height: 7rem; object-fit: cover; border-radius: .5rem; }
+.overview-visuals strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: .5rem; font-size: .75rem; }
+.overview-visuals small { display: block; color: var(--shell-muted); font-size: .6rem; line-height: 1.5; }
+.event-signal-visuals { display: grid; gap: 1rem; margin-block: 1rem; }
+.event-transport-comparison { padding: 1rem; border: 1px solid var(--shell-border); border-radius: .75rem; }
+.event-transport-comparison figcaption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: .5rem; font-size: .8rem; }
+.event-transport-comparison figcaption span, .event-transport-comparison p { font-size: .7rem; color: var(--shell-muted); }
+.event-transport-comparison [role="img"] { display: grid; gap: .6rem; margin-block: .8rem; padding-right: 4rem; }
+.event-transport-comparison [role="img"] > div { position: relative; padding-left: 5rem; min-height: 1.5rem; display: flex; align-items: center; }
+.event-transport-comparison [role="img"] span { position: absolute; left: 0; font-size: .7rem; }
+.event-transport-comparison i { height: .9rem; display: block; border-radius: .25rem; background: var(--signal-emerald, #70b5a7); min-width: 1px; }
+.event-transport-comparison [role="img"] > div:nth-child(2) i { background: var(--shell-muted); opacity: .65; }
+.event-transport-comparison [role="img"] strong { margin-left: .5rem; font-size: .75rem; }
+.event-photo-strip { display: flex; gap: .75rem; overflow-x: auto; }
+.event-photo-strip figure { width: 13rem; flex-shrink: 0; }
+.event-context-photo { width: 100%; height: 8rem; object-fit: cover; border-radius: .5rem; }
+.event-photo-strip figcaption { font-size: .65rem; color: var(--shell-muted); margin-top: .35rem; }
+@media(max-width:900px) { .situation-geography { position: static; } }
+.situation-topic-pulse { display: flex; gap: .5rem; overflow-x: auto; margin-top: .75rem; padding-bottom: .2rem; }
+.situation-topic-pulse button { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; min-height: 2.5rem; padding: .4rem .65rem; border: 1px solid var(--shell-border); border-radius: .6rem; font-size: .7rem; color: var(--shell-muted); }
+.situation-topic-pulse button strong { font-variant-numeric: tabular-nums; color: var(--shell-ink); }
+.situation-topic-pulse button[aria-pressed="true"] { background: var(--signal-sky-soft); border-color: var(--shell-accent); }
+.situation-bar-high { position: absolute; bottom: 0; left: 24%; width: 52%; background: var(--shell-accent); border-radius: 3px 3px 0 0; }
+.situation-timeline-heading i.situation-legend-high { background: var(--shell-accent); opacity: 1; margin-left: .5rem; }
+
+/* Keep the map and selected evidence in one working view. */
+.situation-workspace { grid-template-columns: minmax(0,1.15fr) minmax(22rem,1fr); }
+.situation-stream { min-width: 0; display: grid; gap: 1rem; align-content: start; container-type: inline-size; }
+.situation-stream > .situation-overview { padding: 1rem; border-radius: 1rem; }
+.situation-stream .situation-activity-chart, .situation-stream .situation-timeline { margin-top: 0; padding-top: 0; border-bottom: 0; }
+.situation-stream .situation-activity-heading { margin-top: 0; }
+.situation-map > header > div { display: grid; gap: .2rem; }
+.situation-map .situation-eyebrow { font-size: .58rem; }
+.situation-map-tools { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .55rem .85rem; border-bottom: 1px solid var(--shell-border); }
+.situation-map-tools label { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; color: var(--shell-muted); font-size: .65rem; }
+.situation-map-tools select, .situation-map-tools button { min-height: 2.25rem; border: 1px solid var(--shell-border); border-radius: .5rem; padding: .35rem .6rem; background: var(--shell-bg); color: var(--shell-ink); font-size: .7rem; }
+.situation-map-tools button { display: flex; align-items: center; gap: .4rem; white-space: nowrap; }
+.situation-country-pulse { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: .35rem .8rem; padding: .7rem .9rem; border-top: 1px solid var(--shell-border); }
+.situation-country-pulse button { display: flex; align-items: center; gap: .4rem; min-height: 2rem; min-width: 0; text-align: left; font-size: .72rem; }
+.situation-country-pulse button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.situation-country-pulse button strong { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--shell-accent-2); }
+.situation-stream .event-context-embedded .event-connected-records { grid-template-columns: repeat(auto-fit,minmax(min(100%,15rem),1fr)); }
+.situation-map-overlay { position: fixed; inset: 0; z-index: 90; display: grid; padding: 1rem; background: #06111ed9; backdrop-filter: blur(8px); }
+.situation-expanded-map { min-width: 0; min-height: 0; display: flex; flex-direction: column; border-radius: 1rem; overflow: hidden; }
+.situation-expanded-map > header { display: flex; justify-content: space-between; align-items: center; padding: .8rem 1rem; border-bottom: 1px solid var(--shell-border); }
+.situation-expanded-map > header button { display: flex; align-items: center; gap: .5rem; min-height: 44px; }
+.situation-expanded-map > div { flex: 1; min-height: 0; }
+.situation-expanded-map > div > div { height: 100%; }
+@container (max-width: 640px) {
+  .event-essential-brief, .event-essential-brief.has-image { grid-template-columns: minmax(0,1fr); }
+  .event-lead-image { width: 100%; max-width: 100%; height: 12rem; }
+  .event-lead-image img { height: 10.5rem; }
+}
+@media(max-width:900px) { .situation-workspace { grid-template-columns: minmax(0,1fr); } }
+@media(max-width:640px) {
+  .situation-map-tools { padding: .5rem .65rem; }
+  .situation-map-tools label { font-size: .6rem; }
+  .situation-map-tools select { max-width: 10rem; }
+  .situation-map-stage .map-featured-country { max-width: 11rem; padding: .5rem; }
+  .situation-map-overlay { padding: .4rem; }
+}

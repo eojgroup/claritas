@@ -361,6 +361,8 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
+                transportSignalChart(detail)
+
                 if detail.evidence.contains(where: { !isContextAssessment($0) }) {
                     BrandCard {
                         DisclosureGroup(isExpanded: $showsEvidence) {
@@ -537,6 +539,28 @@ struct IntelligenceWorkspaceView: View {
             }
             Text("A connection describes shared evidence, place, timing, topic or entity. Regional context and model interpretation do not establish confirmation.")
                 .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func transportSignalChart(_ detail: IntelligenceEventDetail) -> some View {
+        if let evidence = detail.evidence.first(where: { $0.domain == "transport" && $0.evidence_type == "rolling_baseline_anomaly" }),
+           let metadata = evidence.metadata?.object,
+           let current = metadata["current"]?.number,
+           let baseline = metadata["baseline"]?.number,
+           current.isFinite, baseline.isFinite, current >= 0, baseline >= 0 {
+            BrandCard(title: "Transport activity", icon: "chart.bar") {
+                Chart {
+                    BarMark(x: .value("Movements", current), y: .value("Period", "Observed"))
+                        .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                        .annotation(position: .trailing) { Text(current.formatted()).font(.caption2) }
+                    BarMark(x: .value("Movements", baseline), y: .value("Period", "Baseline"))
+                        .foregroundStyle(Color.secondary.opacity(0.5))
+                        .annotation(position: .trailing) { Text(baseline.formatted()).font(.caption2) }
+                }.frame(height: 100)
+                Text("Same completed UTC hours. Telemetry coverage; a change alone does not establish disruption.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1866,6 +1890,7 @@ struct IntelligenceOverviewPanel: View {
     private var scope: IntelligenceOverviewScope { model.overviewScope }
     private var countries: [String] {
         Array(Set(model.countryStats.map(\.country)
+            + (model.intelligenceOverview?.countries?.map(\.country_iso2) ?? [])
             + (model.intelligenceOverview?.locations.compactMap(\.country_iso2) ?? [])
             + (model.selectedCountry.map { [$0] } ?? []))).sorted {
                 countryName($0).localizedStandardCompare(countryName($1)) == .orderedAscending
@@ -1887,7 +1912,29 @@ struct IntelligenceOverviewPanel: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     summary(overview)
+                    topics(overview)
                     activityChart(overview)
+                    if let images = overview.visual_events, !images.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 10) {
+                                ForEach(images) { event in
+                                    if let image = event.imagery {
+                                        Button {
+                                            model.selectIntelligenceEvent(event)
+                                        } label: {
+                                            VStack(alignment: .leading, spacing: 5) {
+                                                AuthenticatedEarthImage(path: image.preview_url)
+                                                    .frame(width: 180, height: 110).clipped().cornerRadius(10)
+                                                Text(event.translated_title ?? event.title).font(.caption.weight(.semibold)).lineLimit(2)
+                                                Text(image.source_kind == "publisher" ? "Publisher photo · capture unverified" : "Satellite context")
+                                                    .font(.caption2).foregroundStyle(.secondary)
+                                            }.frame(width: 180, alignment: .leading)
+                                        }.buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }.accessibilityLabel("Images from this period")
+                    }
                     Divider().padding(.vertical, 4)
                     timeline(overview)
                 }

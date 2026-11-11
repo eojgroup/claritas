@@ -9,11 +9,12 @@ test("release waits for all six complete fresh snapshots and rejects incomplete 
     sleep: async (ms: number) => { now += ms; }, log: () => {}, read: async () => {
       calls++;
       return { rows: [calls === 1 ? { snapshots: 5, generated_at: new Date(now).toISOString() }
-        : calls === 2 ? { snapshots: 6, generated_at: "2026-11-09T12:00:00Z" }
-          : calls === 3 ? { snapshots: 6, generated_at: new Date(now).toISOString(), pending_events: 25 }
-          : { snapshots: 6, generated_at: new Date(now).toISOString() }] };
+        : calls === 2 ? { snapshots: 6, coverage_snapshots: 6, generated_at: "2026-11-09T12:00:00Z" }
+          : calls === 3 ? { snapshots: 6, coverage_snapshots: 6, generated_at: new Date(now).toISOString(), pending_events: 25 }
+          : calls === 4 ? { snapshots: 6, coverage_snapshots: 5, generated_at: new Date(now).toISOString() }
+          : { snapshots: 6, coverage_snapshots: 6, generated_at: new Date(now).toISOString() }] };
     } });
-  assert.equal(calls, 4);
+  assert.equal(calls, 5);
   await assert.rejects(waitForOverviewSnapshot({ now: () => now, pollMs: 10, timeoutMs: 20,
     sleep: async (ms: number) => { now += ms; }, log: () => {}, read: async () => ({ rows: [{ snapshots: 0, scanned_events: 1000 }] }) }), /release deadline/);
 });
@@ -24,7 +25,7 @@ test("release retries a temporary unavailable database but fails on missing snap
   await waitForOverviewSnapshot({ now: () => now, timeoutMs: 30, pollMs: 10,
     sleep: async (ms: number) => { now += ms; }, log: () => {}, read: async () => {
       if (++calls === 1) throw new Error("temporary connection timeout");
-      return { rows: [{ snapshots: 6, generated_at: new Date(now).toISOString() }] };
+      return { rows: [{ snapshots: 6, coverage_snapshots: 6, generated_at: new Date(now).toISOString() }] };
     } });
   assert.equal(calls, 2);
   await assert.rejects(waitForOverviewSnapshot({ read: async () => { throw Object.assign(new Error("missing relation"), { code: "42P01" }); } }), /missing relation/);

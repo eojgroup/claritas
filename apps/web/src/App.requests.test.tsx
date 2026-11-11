@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
 import { event, overviewFixture } from "./test/situationFixture";
 
-vi.mock("./components/WorldMapBubbles", () => ({ default: ({ points, onSelectPoint, onSelect }: { points: { id: string; selected?: boolean }[]; onSelectPoint: (point: { id: string }) => void; onSelect: (country: string) => void }) => <div data-testid="overview-map" data-point-count={points.length}><button type="button" aria-pressed={points[0]?.selected} onClick={() => onSelectPoint(points[0])}>Map development</button><button type="button" onClick={() => onSelect("SE")}>Map Sweden</button></div> }));
+vi.mock("./components/WorldMapBubbles", () => ({ default: ({ data, points, onSelectPoint, onSelect }: { data: { count: number }[]; points: { id: string; selected?: boolean }[]; onSelectPoint: (point: { id: string }) => void; onSelect: (country: string) => void }) => <div data-testid="overview-map" data-country-total={data.reduce((sum,item) => sum + item.count,0)} data-point-count={points.length}><button type="button" aria-pressed={points[0]?.selected} onClick={() => onSelectPoint(points[0])}>Map development</button><button type="button" onClick={() => onSelect("SE")}>Map Sweden</button></div> }));
 beforeEach(() => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   window.history.replaceState(null, "", "/");
@@ -28,6 +28,9 @@ it("loads the overview and briefing without an optional-feed request burst and s
     else if (url.pathname === "/api/intelligence/overview") {
       const overview = overviewFixture(url.searchParams.get("priority") as "high" | "all", url.searchParams.get("country"));
       overview.events.push({ ...event, id: "outside-latest-cohort" });
+      overview.map_events = [event, { ...event, id: "older-located-event" }];
+      overview.countries = [{ country_iso2: "SE", event_count: 1000, high_priority_count: 20 }];
+      overview.visual_events = [{ ...event, id: "older-imaged-event", imagery: { preview_url: "/api/news-images/photo/preview", captured_at: null, attribution: "Port authority", source_kind: "publisher" } }];
       data = overview;
     }
     else if (url.pathname === "/api/briefings/daily/latest") data = { briefing: null };
@@ -40,12 +43,25 @@ it("loads the overview and briefing without an optional-feed request burst and s
   expect(await screen.findByRole("button", { name: event.title })).toBeTruthy();
   expect(requests.sort()).toEqual(["/api/auth/me", "/api/auth/providers", "/api/briefings/daily/latest", "/api/intelligence/overview?hours=24&priority=high"].sort());
   expect(peak).toBeLessThanOrEqual(3);
-  expect(screen.getByTestId("overview-map").getAttribute("data-point-count")).toBe("1");
+  expect(screen.getByTestId("overview-map").getAttribute("data-point-count")).toBe("2");
+  expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("1000");
+  expect(screen.getByRole("region", { name: "Images from this period" })).toBeTruthy();
+  fireEvent.change(screen.getByRole("combobox", { name: "Country shading" }), { target: { value: "priority" } });
+  expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("20");
+  fireEvent.change(screen.getByRole("combobox", { name: "Country shading" }), { target: { value: "activity" } });
+  fireEvent.click(screen.getByRole("button", { name: "Expand map" }));
+  expect(screen.getByRole("dialog", { name: "Expanded development map" })).toBeTruthy();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Expanded development map" })).toBeNull();
   expect(screen.getByRole("button", { name: "High priority" }).getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Map development" }));
-  expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
+  // The real lazy detail module is transformed on demand in Vitest. Allow
+  // cold compilation under parallel CI load; request concurrency is asserted
+  // independently above.
+  expect(await screen.findByRole("heading", { name: event.title }, { timeout: 3000 })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Selected development" }).closest(".situation-workspace")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Map development" }).getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getByRole("button", { name: event.title }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "Back to developments" })).toBeTruthy();
   expect(requests.filter((path) => path.includes(`/events/${event.id}`))).toHaveLength(1);
   expect(requests.some((path) => /watchlist|gibs|weather|transport|markets|news/.test(path))).toBe(false);
   fireEvent.click(screen.getByText("Explore surrounding context"));
@@ -57,4 +73,5 @@ it("loads the overview and briefing without an optional-feed request burst and s
   fireEvent.click(screen.getByRole("button", { name: "Map Sweden" }));
   await waitFor(() => expect(requests).toContain("/api/intelligence/overview?hours=24&country=SE&priority=all"));
   expect(await screen.findByRole("button", { name: "Clear SE ×" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Country profile" })).toBeTruthy();
 });

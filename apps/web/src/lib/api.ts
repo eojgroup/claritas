@@ -1213,6 +1213,7 @@ export type AdminIngestionProviderCapabilities = {
 export type IntelligenceSeverity = "low" | "medium" | "high" | "critical";
 
 export type IntelligenceEvent = HeadlineTranslationPresentation & {
+  imagery?: { preview_url: string; captured_at: string | null; attribution: string; source_kind?: string } | null;
   origin_domain?: string;
   signal_domains?: string[];
   priority_score?: number;
@@ -2502,6 +2503,9 @@ export async function fetchIntelligenceEvents(params?: {
 export type OverviewTopic = "security" | "disasters" | "weather" | "transport" | "markets" | "agriculture" | "developments";
 export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet" | "unavailable";
 export type IntelligenceOverview = {
+  countries?: Array<{ country_iso2: string; event_count: number; high_priority_count: number }>;
+  map_events?: IntelligenceEvent[];
+  visual_events?: IntelligenceEvent[];
   generated_at: string;
   window: { hours: number; start: string; end: string; previous_start: string; previous_end: string; bucket_hours: number };
   filters: { country: string | null; topic: OverviewTopic | null; priority?: "high" | "all" };

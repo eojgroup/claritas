@@ -35,7 +35,7 @@ it("explains changes as investigation updates and opens exact evidence and image
   fireEvent.click(screen.getByRole("button", { name: "Port development 0" }));
   expect(props.onSelect).toHaveBeenCalledWith("event-0");
   fireEvent.click(screen.getByRole("button", { name: "Inspect imagery for Port development 0" }));
-  expect(props.onOpenImagery).toHaveBeenCalledWith("event-0");
+  expect(props.onSelect).toHaveBeenCalledWith("event-0");
   fireEvent.click(screen.getAllByText("1 source")[0]);
   expect(screen.getAllByRole("link", { name: "Port authority" })[0].getAttribute("href")).toBe("https://example.test/report");
   fireEvent.click(screen.getByText("Coverage and how to read this"));
@@ -43,7 +43,7 @@ it("explains changes as investigation updates and opens exact evidence and image
 });
 it("shows the full activity history without implying that clicking a bar can load interval developments", () => {
   render(<SituationOverview {...props} />);
-  fireEvent.click(screen.getByText("Activity over time · 8 updates"));
+  expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
   const bar = screen.getByRole("img", { name: /: 4 updates; previous period 2/ });
   fireEvent.click(bar);
   expect(screen.getByRole("button", { name: "Port development 0" })).toBeTruthy();

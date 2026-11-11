@@ -4,7 +4,7 @@ import test, { after } from "node:test";
 import { pool } from "../db";
 import { buildOverviewProjectionQuery } from "./overview";
 import { normalizeOverviewOptions } from "./overview-model";
-import { saveOverviewProjectionBatch, publishOverviewSnapshots, readIntelligenceOverviewSnapshot, applyOverviewDirtyBatch, purgeExpiredOverviewSocialLeads, type OverviewQuery } from "./overview-snapshot";
+import { saveOverviewProjectionBatch, publishOverviewSnapshots, readIntelligenceOverviewSnapshot, applyOverviewDirtyBatch, purgeExpiredOverviewSocialLeads, refreshRetainedOverviewImages, type OverviewQuery } from "./overview-snapshot";
 after(() => pool.end());
 
 test("durable overview counts entire windows, scopes the same cohort, and keeps saved data through a failed refresh", async () => {
@@ -40,6 +40,8 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     await client.query(`INSERT INTO intelligence_event_evidence(event_id,domain,evidence_type,source_record_type,source_record_id,source_id,observed_at,confidence,relationship,provenance)
       SELECT id,'news','publisher_report','item',$2::text,$3,$4,0.7,'reported','{}' FROM unnest($1::uuid[]) id`, [records.map((row) => row.id), item, source, now]);
     const generation = randomUUID();
+    const olderLocated = records.find((row) => row.age === 23)!;
+    await client.query("UPDATE intelligence_event SET geography=ST_SetSRID(ST_MakePoint(18,59),4326) WHERE id=$1", [olderLocated.id]);
     const projection = buildOverviewProjectionQuery(now);
     const rows = (await client.query(projection.sql, projection.params)).rows.filter((row) => records.some((record) => record.id === row.id));
     assert.equal(rows.length, records.length);
@@ -61,6 +63,9 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.equal(high.summary.event_count, 305);
     assert.equal(high.summary.previous_event_count, 1);
     assert.equal(high.events.length, 40);
+    assert.ok(!high.events.some((event) => event.id === olderLocated.id));
+    assert.ok(high.map_events.some((event) => event.id === olderLocated.id), "older located events survive bursts of newer unlocated cards");
+    assert.equal(high.countries.reduce((sum, country) => sum + country.event_count, 0), high.summary.event_count);
     assert.equal(high.timeline.length, 24);
     assert.equal(high.buckets[0].event_count, 2);
     assert.equal(high.buckets.at(-1)?.event_count, 301);
@@ -77,6 +82,20 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.equal(scoped.events.length, 1);
     assert.equal(scoped.events[0].event_type, "aviation_disruption");
     assert.equal(scoped.buckets.reduce((sum, bucket) => sum + bucket.event_count, 0), 1);
+    const imageHash = fixture.replace(/-/g, "").repeat(2);
+    await client.query("INSERT INTO news_image_asset(content_hash,preview,width,height) VALUES($1,$2,320,240)", [imageHash, Buffer.from("fixture")]);
+    const photo = (await client.query(`INSERT INTO news_article_image(item_id,content_hash,image_url,discovery,publisher,article_url)
+      VALUES($1,$2,'https://example.org/photo','publisher_metadata','Fixture publisher','https://example.org/report') RETURNING id`, [item, imageHash])).rows[0].id;
+    await refreshRetainedOverviewImages(generation, read);
+    const scopedImages = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ country: "SE", topic: "transport" }), measured);
+    assert.ok(scopedImages.visual_events.length > 0);
+    assert.equal(scopedImages.timeline[0].imagery?.preview_url, `/api/news-images/${photo}/preview`);
+    assert.equal(scopedImages.timeline[0].imagery?.captured_at, null, "publication is not a photograph capture date");
+    assert.equal(scopedImages.timeline[0].imagery?.source_kind, "publisher");
+    await client.query("UPDATE news_image_asset SET expires_at=now()-interval '1 second' WHERE content_hash=$1", [imageHash]);
+    await refreshRetainedOverviewImages(generation, read);
+    const expiredImages = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ country: "SE", topic: "transport" }), measured);
+    assert.equal(expiredImages.visual_events.length, 0);
     const threeDays = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ hours: 72 }), measured);
     assert.equal(threeDays.summary.event_count, 307);
     assert.equal(threeDays.summary.previous_event_count, 1);

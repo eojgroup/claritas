@@ -14,7 +14,9 @@ type Refresh = { generation_id: string; started_at: string | Date; cursor_time: 
 type ProjectionRow = OverviewSample & HydratedOverviewRow;
 type SavedCard = { sample: OverviewSample; event: HydratedOverviewRow };
 type Aggregate = { summary: { event_count: number; previous_event_count: number; high_priority_count: number; location_count: number };
-  topics: Array<Record<string, any>>; locations: Array<Record<string, any>>; buckets: Array<{ index: number; event_count: number; previous_event_count: number; high_priority_count: number }> };
+  topics: Array<Record<string, any>>; locations: Array<Record<string, any>>;
+  countries: Array<{ country_iso2: string; event_count: number; high_priority_count: number }>;
+  buckets: Array<{ index: number; event_count: number; previous_event_count: number; high_priority_count: number }> };
 const cache = new SharedReadCache({ ttlMs: 30_000, maxEntries: 40, maxBytes: 8 * 1024 * 1024 });
 const BATCH_SIZE = 500;
 const REFRESH_INTERVAL_MS = 120_000;
@@ -50,6 +52,11 @@ export function buildSavedOverviewAggregateQuery(state: State, options: Required
         (array_agg(id ORDER BY priority_score DESC,id) FILTER (WHERE current_period))[1:3] AS event_ids
       FROM eligible WHERE location_key IS NOT NULL GROUP BY location_key
       ORDER BY event_count DESC,priority_score DESC,location_key LIMIT 8
+    ), country_counts AS (
+      SELECT country_iso2,count(*) FILTER(WHERE current_period)::int AS event_count,
+        count(*) FILTER(WHERE current_period AND high_priority)::int AS high_priority_count
+      FROM eligible WHERE country_iso2 IS NOT NULL GROUP BY country_iso2
+      HAVING count(*) FILTER(WHERE current_period)>0
     ), bucket_counts AS (
       SELECT LEAST(($9::numeric/$8::numeric)::int-1,floor((extract(epoch FROM (last_activity_time-$7::timestamptz))
         +CASE WHEN current_period THEN 0 ELSE $9::numeric END)/$8::numeric)::int) AS index,
@@ -62,6 +69,7 @@ export function buildSavedOverviewAggregateQuery(state: State, options: Required
       'location_count',count(DISTINCT location_key) FILTER (WHERE current_period)::int),
       'topics',COALESCE((SELECT jsonb_agg(to_jsonb(topic_counts) ORDER BY event_count DESC,priority_score DESC,key) FROM topic_counts),'[]'::jsonb),
       'locations',COALESCE((SELECT jsonb_agg(to_jsonb(location_counts) ORDER BY event_count DESC,priority_score DESC,key) FROM location_counts),'[]'::jsonb),
+      'countries',COALESCE((SELECT jsonb_agg(to_jsonb(country_counts) ORDER BY event_count DESC,country_iso2) FROM country_counts),'[]'::jsonb),
       'buckets',COALESCE((SELECT jsonb_agg(to_jsonb(bucket_counts)) FROM bucket_counts),'[]'::jsonb)) AS aggregate
       FROM eligible`, params: scopeParams(state, options) };
 }
@@ -72,6 +80,16 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
   const params = scopeParams(state, options);
   const { rows: cards } = await read<SavedCard>(`SELECT sample,event FROM intelligence_overview_projection
     WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz ORDER BY last_activity_time DESC,id LIMIT ${OVERVIEW_EVENT_LIMIT}`, params.slice(0, 7));
+  // Geography must come from the full selected window, not the latest cards:
+  // a burst of unlocated reporting must not erase every known map position.
+  const { rows: mapped } = await read<{ event: HydratedOverviewRow }>(`SELECT event FROM intelligence_overview_projection
+    WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz
+      AND event->>'latitude' IS NOT NULL AND event->>'longitude' IS NOT NULL
+      AND COALESCE(event->>'location_type','')<>'country'
+    ORDER BY last_activity_time DESC,id LIMIT 200`, params.slice(0, 7));
+  const { rows: visual } = await read<{ event: HydratedOverviewRow }>(`SELECT event FROM intelligence_overview_projection
+    WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz AND event->'imagery'<>'null'::jsonb
+    ORDER BY last_activity_time DESC,id LIMIT 8`, params.slice(0, 7));
   const now = new Date(state.generated_at);
   const samples = cards.map(({ sample }) => ({ ...sample, period: "current" as const }));
   const base = assembleIntelligenceOverview(samples, cards.map(({ event }) => event), options, now);
@@ -84,7 +102,9 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
     const counts = aggregate.buckets.find((row) => row.index === index);
     return { ...bucket, event_count: counts?.event_count ?? 0, previous_event_count: counts?.previous_event_count ?? 0, high_priority_count: counts?.high_priority_count ?? 0 };
   });
-  return { ...base, summary: { ...aggregate.summary, ...change(aggregate.summary.event_count, aggregate.summary.previous_event_count) }, topics, locations, buckets,
+  return { ...base, summary: { ...aggregate.summary, ...change(aggregate.summary.event_count, aggregate.summary.previous_event_count) }, topics, locations,
+    countries: aggregate.countries, map_events: mapped.map(({ event: { source_refs: _refs, ...event } }) => event),
+    visual_events: visual.map(({ event: { source_refs: _refs, ...event } }) => event), buckets,
     coverage: { ...base.coverage, sample_limit: Math.max(aggregate.summary.event_count, aggregate.summary.previous_event_count),
       sampled_events: aggregate.summary.event_count + aggregate.summary.previous_event_count } };
 }
@@ -112,7 +132,7 @@ async function readUncached(options: Required<OverviewOptions>, read: OverviewQu
   const state = rows[0];
   if (!state) {
     const { current: _current, ...empty } = buildOverviewAnalytics([], options, new Date());
-    return { ...empty, events: [], timeline: [], snapshot: { status: "warming", generated_at: null, age_seconds: null } };
+    return { ...empty, events: [], timeline: [], map_events: [], visual_events: [], snapshot: { status: "warming", generated_at: null, age_seconds: null } };
   }
   const savedGlobal = !options.country && !options.topic && state.payload;
   const overview = savedGlobal || await buildSavedIntelligenceOverview(state, options, read);
@@ -176,6 +196,7 @@ export async function saveOverviewProjectionBatch(rows: ProjectionRow[], generat
 }
 
 export async function publishOverviewSnapshots(state: State, read: OverviewQuery = query, enrich = true) {
+  if (enrich) await refreshRetainedOverviewImages(state.generation_id, read);
   // The three windows usually share their latest cards. Hydrate and present
   // each selected investigation once across the six coordinated snapshots.
   const enrichedById = new Map<string, HydratedOverviewRow>();
@@ -207,6 +228,36 @@ export async function publishOverviewSnapshots(state: State, read: OverviewQuery
   await read(`INSERT INTO intelligence_overview_state(singleton,generation_id,generated_at,pending_events) VALUES(true,$1,$2,$3)
     ON CONFLICT(singleton) DO UPDATE SET generation_id=EXCLUDED.generation_id,generated_at=EXCLUDED.generated_at,pending_events=EXCLUDED.pending_events`, [state.generation_id, state.generated_at, pending]);
   return pending;
+}
+
+/** Retained assets are small and indexed. Join their linked events once in the
+ * worker so country/topic readers keep imagery without rehydrating history. */
+export async function refreshRetainedOverviewImages(generation: string, read: OverviewQuery = query) {
+  await read(`WITH retained AS MATERIALIZED (
+    SELECT observation.event_id,0 AS preference,observation.captured_at AS sort_time,
+      jsonb_build_object('preview_url','/api/earth-observation/assets/'||asset.id::text||'?v='||left(asset.content_hash,16),
+        'captured_at',observation.captured_at,'attribution',observation.attribution,'source_kind','satellite') AS imagery
+    FROM earth_observation observation JOIN earth_observation_asset asset ON asset.observation_id=observation.id
+    WHERE observation.event_id IS NOT NULL AND observation.status='available' AND observation.product_type='true_color'
+      AND asset.asset_type='preview' AND (asset.expires_at IS NULL OR asset.expires_at>now())
+    UNION ALL
+    SELECT evidence.event_id,1,image.collected_at,
+      jsonb_build_object('preview_url','/api/news-images/'||image.id::text||'/preview','captured_at',NULL,
+        'attribution',image.publisher,'source_kind','publisher')
+    FROM news_article_image image JOIN news_image_asset asset USING(content_hash)
+    JOIN item article ON article.id=image.item_id JOIN source ON source.id=article.source_id
+    JOIN intelligence_event_evidence evidence ON evidence.domain='news' AND evidence.source_record_type='item'
+      AND evidence.source_record_id=image.item_id::text
+    WHERE asset.expires_at>now() AND (lower(source.name)<>'gdelt' OR article.payload->>'quality_status'='accepted')
+  ), chosen AS MATERIALIZED (
+    SELECT DISTINCT ON(event_id) event_id,imagery,preference FROM retained ORDER BY event_id,preference,sort_time DESC
+  ) UPDATE intelligence_overview_projection projection
+    SET event=jsonb_set(projection.event,'{imagery}',COALESCE(chosen.imagery,'null'::jsonb))
+      ||jsonb_build_object('earth_observation_available',COALESCE(chosen.preference=0,false))
+    FROM (SELECT projection.id,chosen.imagery,chosen.preference FROM intelligence_overview_projection projection
+      LEFT JOIN chosen ON chosen.event_id=projection.id WHERE projection.generation_id=$1) chosen
+    WHERE projection.generation_id=$1 AND projection.id=chosen.id
+      AND (projection.event->'imagery' IS DISTINCT FROM COALESCE(chosen.imagery,'null'::jsonb))`, [generation]);
 }
 
 let running = false;

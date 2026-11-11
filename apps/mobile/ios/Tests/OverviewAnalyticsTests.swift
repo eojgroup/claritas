@@ -40,6 +40,24 @@ final class OverviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(overview.summary.momentumLabel, "2 more than the previous window")
     }
 
+    func testFullWindowMapAndCountryCoverageIsIndependentOfLatestCards() throws {
+        var raw = payload()
+        raw["countries"] = [["country_iso2": "SE", "event_count": 1200, "high_priority_count": 50]]
+        var located = try XCTUnwrap((raw["events"] as? [[String: Any]])?.first)
+        located["id"] = "older-located-event"
+        located["latitude"] = 59.3
+        located["longitude"] = 18.1
+        located["imagery"] = ["preview_url": "/api/news-images/photo/preview", "captured_at": NSNull(), "attribution": "Publisher", "source_kind": "publisher"]
+        raw["map_events"] = [located]
+        raw["visual_events"] = [located]
+        let overview = try decode(raw)
+        XCTAssertEqual(overview.countries?.first?.event_count, 1200)
+        XCTAssertEqual(overview.map_events?.first?.id, "older-located-event")
+        XCTAssertFalse(overview.timeline.contains { $0.event_id == "older-located-event" })
+        XCTAssertEqual(overview.visual_events?.first?.imagery?.source_kind, "publisher")
+        XCTAssertNil(overview.visual_events?.first?.imagery?.captured_at)
+    }
+
     func testCappedAndEmptyComparisonsDoNotClaimPercentGrowth() throws {
         var capped = payload()
         capped["coverage"] = ["sample_limit": 300, "sampled_events": 600, "truncated": true,

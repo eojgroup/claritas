@@ -122,6 +122,10 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
     const { label, ...rest } = pulse(key, first.location_name || first.country_name || first.primary_country_iso2 || "Named location", members);
     return { ...rest, name: label, country_iso2: first.primary_country_iso2 };
   }).sort((a, b) => b.event_count - a.event_count || b.priority_score - a.priority_score || a.key.localeCompare(b.key)).slice(0, 8);
+  const countries = [...new Set(current.map((row) => row.primary_country_iso2).filter((value): value is string => Boolean(value)))].map((country_iso2) => {
+    const members = current.filter((row) => row.primary_country_iso2 === country_iso2);
+    return { country_iso2, event_count: members.length, high_priority_count: members.filter(highPriority).length };
+  }).sort((a, b) => b.event_count - a.event_count || a.country_iso2.localeCompare(b.country_iso2));
   const bucketDuration = window.bucket_hours * 3_600_000;
   const buckets = Array.from({ length: options.hours / window.bucket_hours }, (_, index) => {
     const start = end - duration + index * bucketDuration;
@@ -139,7 +143,7 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
     summary: { event_count: current.length, previous_event_count: previous.length, ...overviewChange(current.length, previous.length),
       high_priority_count: current.filter(highPriority).length,
       location_count: new Set(current.map((row) => row.primary_location_id || row.primary_country_iso2).filter(Boolean)).size },
-    topics, locations, buckets,
+    topics, locations, countries, buckets,
     // Keep the legacy numeric field decodable by already-installed clients.
     // This is the observed complete-window size, not a sampling cap.
     coverage: { sample_limit: Math.max(current.length, previous.length), full_window: true, sampled_events: rows.length, truncated: false, comparison_available: true,

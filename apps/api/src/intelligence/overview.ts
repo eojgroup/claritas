@@ -48,7 +48,7 @@ export function buildOverviewSampleQuery(options: Required<OverviewOptions>, now
 }
 
 export type OverviewSourceRef = Partial<HeadlineTranslationPresentation> & { label: string; url: string; domain: string; item_id?: string | null };
-export type OverviewImageryRef = { preview_url: string; captured_at: string; attribution: string };
+export type OverviewImageryRef = { preview_url: string; captured_at: string | null; attribution: string; source_kind?: string };
 export type HydratedOverviewRow = Partial<HeadlineTranslationPresentation> & {
   id: string; event_type: string; title: string; summary: string; status: string; severity: string; confidence: number;
   start_time: string | Date; last_activity_time: string | Date; expires_at: string | Date;
@@ -74,8 +74,10 @@ export function buildOverviewEventQuery(ids: string[]) {
         JOIN earth_observation_asset available_asset ON available_asset.observation_id=available_observation.id
         WHERE available_observation.event_id=event.id AND available_observation.status='available'
           AND (available_asset.expires_at IS NULL OR available_asset.expires_at>now())) AS earth_observation_available,
-      CASE WHEN imagery.preview_url IS NULL THEN NULL ELSE jsonb_build_object('preview_url',imagery.preview_url,
-        'captured_at',imagery.captured_at,'attribution',imagery.attribution) END AS imagery,
+      CASE WHEN COALESCE(imagery.preview_url,publisher_image.preview_url) IS NULL THEN NULL ELSE jsonb_build_object(
+        'preview_url',COALESCE(imagery.preview_url,publisher_image.preview_url),
+        'captured_at',imagery.captured_at,'attribution',COALESCE(imagery.attribution,publisher_image.attribution),
+        'source_kind',CASE WHEN imagery.preview_url IS NOT NULL THEN 'satellite' ELSE 'publisher' END) END AS imagery,
       COALESCE(source_refs.records,'[]'::jsonb) AS source_refs
     FROM intelligence_event event JOIN intelligence_event_feed feed ON feed.id=event.id
     LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
@@ -99,6 +101,15 @@ export function buildOverviewEventQuery(ids: string[]) {
         AND asset.asset_type='preview' AND (asset.expires_at IS NULL OR asset.expires_at>now())
       ORDER BY observation.captured_at DESC,observation.id LIMIT 1
     ) imagery ON true
+    LEFT JOIN LATERAL (
+      SELECT '/api/news-images/'||image.id::text||'/preview' AS preview_url,image.publisher AS attribution
+      FROM intelligence_event_evidence evidence JOIN news_article_image image ON image.item_id=${sourceRecordBigintSql("evidence", "item")}
+      JOIN news_image_asset asset ON asset.content_hash=image.content_hash
+      JOIN item article ON article.id=image.item_id JOIN source evidence_source ON evidence_source.id=article.source_id
+      WHERE evidence.event_id=event.id AND evidence.domain='news' AND asset.expires_at>now()
+        AND ${acceptedEvidenceSql("article", "evidence_source")}
+      ORDER BY image.collected_at DESC,image.id LIMIT 1
+    ) publisher_image ON true
     LEFT JOIN LATERAL (
       SELECT jsonb_agg(jsonb_build_object('label',record.label,'url',record.url,'domain',record.domain,'item_id',record.item_id)
         ORDER BY record.observed_at DESC,record.id) AS records FROM (
@@ -174,7 +185,7 @@ export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRow
   const events = current.slice(0, OVERVIEW_EVENT_LIMIT).flatMap((sample) => {
     const row = byId.get(sample.id);
     if (!row) return [];
-    const { source_refs: _sourceRefs, imagery: _imagery, ...event } = row;
+    const { source_refs: _sourceRefs, ...event } = row;
     return [{ ...event, confidence: Number(row.confidence), start_time: iso(row.start_time), last_activity_time: iso(row.last_activity_time),
       expires_at: iso(row.expires_at), freshness_state: intelligenceEventFreshness({ expiresAt: row.expires_at, status: row.status, now }),
       source_diversity: Number(row.source_diversity), domain_count: Number(row.domain_count), relevance_score: Number(row.relevance_score),
@@ -188,9 +199,11 @@ export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRow
     return { ...headlineTranslationFields(event), event_id: event.id, occurred_at: event.last_activity_time, title: event.title, topic: topic.key, topic_label: topic.label,
       location_name: event.location_name, country_iso2: event.primary_country_iso2, severity: event.severity,
       priority_score: Math.round(event.priority_score * 100), priority_reasons: event.priority_reasons,
-      source_refs: safeSourceRefs(row.source_refs), imagery: row.imagery ? { ...row.imagery, captured_at: iso(row.imagery.captured_at) } : null };
+      source_refs: safeSourceRefs(row.source_refs), imagery: row.imagery ? { ...row.imagery, captured_at: row.imagery.captured_at ? iso(row.imagery.captured_at) : null } : null };
   });
-  return { ...analytics, events, timeline };
+  const map_events: Omit<HydratedOverviewRow, "source_refs">[] = events.filter((event) => event.latitude != null && event.longitude != null && event.location_type !== 'country');
+  const visual_events: Omit<HydratedOverviewRow, "source_refs">[] = events.filter((event) => event.imagery);
+  return { ...analytics, events, timeline, map_events, visual_events };
 }
 
 export type IntelligenceOverview = ReturnType<typeof assembleIntelligenceOverview>;

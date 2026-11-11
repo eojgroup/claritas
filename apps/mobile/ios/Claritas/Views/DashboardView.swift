@@ -4364,7 +4364,7 @@ struct SignalMapPanel: View {
     @State private var resetToken = 0
     private var events: [IntelligenceEvent] {
         guard let overview = model.intelligenceOverview else { return [] }
-        return overviewOnly ? overview.timelineEvents : overview.events
+        return overviewOnly ? (overview.map_events ?? overview.events) : overview.events
     }
     private var eventLoadError: String? { model.intelligenceOverviewError }
     private var eventLoading: Bool { model.isRefreshingIntelligenceOverview }
@@ -4389,6 +4389,14 @@ struct SignalMapPanel: View {
 
     private var points: [CountryBubblePoint] {
         if overviewOnly {
+            if let countries = model.intelligenceOverview?.countries {
+                return countries.compactMap { item in
+                    guard let coordinate = CountryCentroidLookup.coordinate(for: item.country_iso2) else { return nil }
+                    return CountryBubblePoint(id: "overview-\(item.country_iso2)", iso: item.country_iso2,
+                        valueLabel: "\(item.event_count) developments", detail: "Full selected period · \(item.high_priority_count) high priority",
+                        magnitude: Double(item.event_count), colorValue: Double(item.event_count), rank: 0, coordinate: coordinate)
+                }
+            }
             let countries = Set(events.compactMap { $0.primary_country_iso2?.uppercased() })
             return countries.sorted().compactMap { country in
                 guard let coordinate = CountryCentroidLookup.coordinate(for: country) else { return nil }
@@ -4972,7 +4980,6 @@ struct SignalMapPanel: View {
             model.selectedIntelligenceEventID = nil
         }
         model.selectedCountry = normalized
-        if overviewOnly { return }
         profileCountry = normalized
         showsCountryProfileSheet = true
         comparisonCountry = nil
@@ -5341,11 +5348,12 @@ private struct SignalDensityLegend: View {
 
     private var values: [Double] { points.map(\.colorValue) }
     private var lower: Double { mode == .signals ? 0 : (values.min() ?? 0) }
-    private var upper: Double { mode == .signals ? 100 : (values.max() ?? 1) }
+    private var isOverview: Bool { points.first?.id.hasPrefix("overview-") == true }
+    private var upper: Double { mode == .signals && !isOverview ? 100 : (values.max() ?? 1) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(mode.legend.uppercased())
+            Text(isOverview ? "DEVELOPMENTS" : mode.legend.uppercased())
                 .font(.system(size: 7, weight: .bold))
                 .tracking(0.8)
             LinearGradient(
@@ -5863,7 +5871,8 @@ private enum SignalDensityColorScale {
     ) -> UIColor {
         let values = points.map(\.colorValue)
         let minimum = mode == .signals ? 0 : (values.min() ?? 0)
-        let maximum = mode == .signals ? 100 : (values.max() ?? 1)
+        let isOverview = points.first?.id.hasPrefix("overview-") == true
+        let maximum = mode == .signals && !isOverview ? 100 : (values.max() ?? 1)
         let ratio = min(1, max(0, (point.colorValue - minimum) / max(0.0001, maximum - minimum)))
 
         if mode == .weather {

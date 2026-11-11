@@ -71,7 +71,7 @@ struct CountryProfileView: View {
                         columns: [GridItem(.adaptive(minimum: 120), spacing: 10)],
                         spacing: 10
                     ) {
-                        CountryMetric(label: "News", value: "\(countryNews.count)", detail: "Loaded stories")
+                        CountryMetric(label: "Developments", value: model.intelligenceOverview?.countries?.first(where: { $0.country_iso2 == iso }).map { "\($0.event_count)" } ?? "—", detail: model.overviewScope.windowLabel)
                         CountryMetric(
                             label: "Weather",
                             value: latestWeather.map { "\(format($0.temp_c))°C" } ?? "—",
@@ -84,9 +84,15 @@ struct CountryProfileView: View {
                         )
                         CountryMetric(
                             label: "Transport",
-                            value: "\(transportCountry?.active_count ?? 0)",
-                            detail: "Active country links"
+                            value: transportCountry.map { "\($0.active_count)" } ?? "—",
+                            detail: model.transportOverview == nil ? "Context not loaded" : "Active country links"
                         )
+                    }
+
+                    if model.transportOverview == nil {
+                        Button("Load transport context") {
+                            Task { await model.loadOptionalContext("transport") }
+                        }.font(.caption.weight(.semibold)).frame(minHeight: 44)
                     }
 
                     if let marketOverview {
@@ -258,6 +264,12 @@ struct CountryProfileView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+        }
+        .task(id: selectedCountry) {
+            guard selectedCountry != nil else { return }
+            await model.loadOptionalContext("leadership")
+            await model.loadOptionalContext("weather")
+            await model.loadOptionalContext("markets")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

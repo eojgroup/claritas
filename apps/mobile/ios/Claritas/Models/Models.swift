@@ -2881,6 +2881,7 @@ enum IntelligenceSeverity: String, Codable, CaseIterable {
 }
 
 struct IntelligenceEvent: Codable, Identifiable, Hashable {
+    var imagery: IntelligenceOverview.TimelineEntry.Imagery? = nil
     let id: String
     let event_type: String
     let title: String
@@ -3852,7 +3853,7 @@ struct IntelligenceOverview: Codable {
             var translation: IntelligenceHeadlineTranslation? = nil
             var translation_availability: NewsTranslationAvailability? = nil
         }
-        struct Imagery: Codable { let preview_url: String; let captured_at: Date?; let attribution: String }
+        struct Imagery: Codable, Hashable { let preview_url: String; let captured_at: Date?; let attribution: String; var source_kind: String? = nil }
         var id: String { event_id }
         let event_id: String
         let occurred_at: Date
@@ -3902,6 +3903,10 @@ struct IntelligenceOverview: Codable {
     let events: [IntelligenceEvent]
     let timeline: [TimelineEntry]
     let coverage: Coverage
+    struct Country: Codable { let country_iso2: String; let event_count: Int; let high_priority_count: Int }
+    var countries: [Country]? = nil
+    var map_events: [IntelligenceEvent]? = nil
+    var visual_events: [IntelligenceEvent]? = nil
     var snapshot: Snapshot? = nil
     var currentEvents: [IntelligenceEvent] { events.filter { !$0.isArchived } }
     /// Map candidates are the developments available in the timeline, even
