@@ -411,6 +411,9 @@ function safeGdeltError(value: string | null | undefined, product: "DOC" | "GAL"
   if (typeof value !== "string" || !value.trim()) return null;
   const untypedParameter = /\bcould not determine data type of parameter \$([0-9]{1,3})\b/i.exec(value);
   if (untypedParameter) return `GDELT ${product} persistence parameter type error ($${untypedParameter[1]}).`;
+  if (/timeout exceeded when trying to connect|canceling statement|statement timeout|query (?:read )?timeout|lock timeout|deadlock detected|connection terminated|syntax error at|permission denied for|violates .*constraint|duplicate key value/i.test(value)) {
+    return `GDELT ${product} persistence database error.`;
+  }
   const httpStatuses = Array.from(value.matchAll(/\bHTTP\s+([1-5][0-9]{2})\b/gi))
     .map((match) => match[1])
     .filter((status, index, values) => values.indexOf(status) === index)

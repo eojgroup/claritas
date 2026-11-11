@@ -86,6 +86,13 @@ test("release keeps strict news health degraded during a verified external disco
     gdelt_diagnostics: { ...outage.release_run.gdelt_diagnostics, gal: { ...outage.release_run.gdelt_diagnostics.gal,
       error: "GDELT GAL persistence parameter type error ($4)." } } } };
   assert.equal(evaluateNewsReleaseReadiness(persistenceError, 842).ready, false);
+  for (const message of ["timeout exceeded when trying to connect", "canceling statement due to statement timeout", "Query read timeout", "deadlock detected"]) {
+    const internalFailure = evaluateNewsRuntimeHealth({ ...healthy, market_count: 0,
+      release_gdelt_step_status: "failed", release_gdelt_doc_status: "degraded", release_gdelt_doc_error: "GDELT DOC request timed out.",
+      release_gdelt_gal_status: "failed", release_gdelt_gal_error: message }, now);
+    assert.equal(internalFailure.release_run.gdelt_diagnostics.gal.error, "GDELT GAL persistence database error.");
+    assert.equal(evaluateNewsReleaseReadiness(internalFailure, 842).ready, false, message);
+  }
   assert.equal(evaluateNewsReleaseReadiness(evaluateNewsRuntimeHealth({ ...healthy, market_count: 0 }, now), 842).ready, false);
 });
 
