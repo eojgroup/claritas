@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildNewsRuntimeHealthQuery,
   evaluateNewsRuntimeHealth,
+  evaluateNewsReleaseReadiness,
   type NewsRuntimeHealthRow,
 } from "./news-runtime-health";
 
@@ -55,6 +56,37 @@ test("news runtime health proves freshness, markets, assessment and non-GB geogr
   assert.equal(result.current.assessment_ratio, 0.9);
   assert.equal(result.release_run.id, 842);
   assert.ok(Object.values(result.checks).every(Boolean));
+});
+
+test("release keeps strict news health degraded during a verified external discovery outage", () => {
+  const outage = evaluateNewsRuntimeHealth({ ...healthy, market_count: 0, verified_market_count: 0,
+    release_gdelt_step_status: "failed", release_gdelt_doc_status: "degraded", release_gdelt_doc_accepted: 0,
+    release_gdelt_doc_error: "GDELT DOC request timed out.", release_gdelt_gal_status: "failed",
+    release_gdelt_gal_accepted: 0, release_gdelt_gal_error: "GDELT GAL request timed out." }, now);
+  assert.equal(outage.ready, false);
+  assert.equal(outage.state, "stale_or_incomplete");
+  const decision = evaluateNewsReleaseReadiness(outage, 842);
+  assert.equal(decision.ready, true);
+  assert.equal(decision.degraded, true);
+  assert.match(decision.reason, /market coverage may be delayed/);
+  assert.equal(outage.ready, false, "release policy must not relabel stale data as healthy");
+  assert.deepEqual(evaluateNewsReleaseReadiness(evaluateNewsRuntimeHealth(healthy, now), 842),
+    { ready: true, degraded: false, reason: "News runtime is current." });
+
+  for (const key of ["current_volume", "current_timestamp", "assessed", "publisher_verified", "publisher_diversity",
+    "mapped_geography", "non_gb_geography", "exact_release_run", "release_gdelt_source_provenance"]) {
+    assert.equal(evaluateNewsReleaseReadiness({ ...outage, checks: { ...outage.checks, [key]: false } }, 842).ready, false, key);
+  }
+  assert.equal(evaluateNewsReleaseReadiness(outage, 843).ready, false);
+  assert.equal(evaluateNewsReleaseReadiness({ ...outage, checks: { ...outage.checks, unknown_failure: false } }, 842).ready, false);
+  assert.equal(evaluateNewsReleaseReadiness({ ...outage, release_run: { ...outage.release_run, status: "failed" } }, 842).ready, false);
+  assert.equal(evaluateNewsReleaseReadiness({ ...outage, release_run: { ...outage.release_run, gdelt_raw_archive_status: "failed" } }, 842).ready, false);
+  assert.equal(evaluateNewsReleaseReadiness({ ...outage, release_run: { ...outage.release_run, gdelt_gkg_canonical_country_url_probes: 0 } }, 842).ready, false);
+  const persistenceError = { ...outage, release_run: { ...outage.release_run,
+    gdelt_diagnostics: { ...outage.release_run.gdelt_diagnostics, gal: { ...outage.release_run.gdelt_diagnostics.gal,
+      error: "GDELT GAL persistence parameter type error ($4)." } } } };
+  assert.equal(evaluateNewsReleaseReadiness(persistenceError, 842).ready, false);
+  assert.equal(evaluateNewsReleaseReadiness(evaluateNewsRuntimeHealth({ ...healthy, market_count: 0 }, now), 842).ready, false);
 });
 
 test("news runtime health exposes bounded exact-run GDELT diagnostics", () => {

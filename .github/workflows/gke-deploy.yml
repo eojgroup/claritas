@@ -1335,9 +1335,10 @@ jobs:
           printf '%s' "$release_news_run_id" > "$RUNNER_TEMP/claritas-release-news-run-id"
           echo "Verifying exact release-owned news run ${release_news_run_id}."
 
-          # Prove the user-visible data outcome, not merely that the scheduler
-          # process started: fresh assessed reporting, a current markets stream,
-          # publisher diversity, and non-GB subject geography must all exist.
+          # Verify real data and the exact release-owned acquisition path.
+          # A recognized upstream discovery outage remains degraded data health;
+          # it must not roll back a healthy reader when retained assessed data,
+          # publisher/subject diversity and the raw provenance path are proven.
           news_ready=0
           news_body=""
           for attempt in $(seq 1 40); do
@@ -1346,11 +1347,13 @@ jobs:
               timeout --signal=TERM --kill-after=5s 30s \
                 kubectl -n "${NAMESPACE}" exec deployment/claritas-worker -c claritas-worker -- \
                 env RELEASE_NEWS_RUN_ID="$release_news_run_id" node -e '
+                const { evaluateNewsReleaseReadiness } = require("./dist/news-runtime-health.js");
                 const url = new URL("http://127.0.0.1:8080/internal/news/runtime-health");
                 url.searchParams.set("runId", process.env.RELEASE_NEWS_RUN_ID);
                 fetch(url, { signal: AbortSignal.timeout(20_000) })
-                  .then((response) => response.text())
-                  .then((value) => process.stdout.write(value))
+                  .then((response) => response.json())
+                  .then((health) => process.stdout.write(JSON.stringify({ ...health,
+                    release_validation: evaluateNewsReleaseReadiness(health, Number(process.env.RELEASE_NEWS_RUN_ID)) })))
                   .catch(() => process.exit(1));
               ' 2>/dev/null || true
             )"
@@ -1363,7 +1366,7 @@ jobs:
                     const health = JSON.parse(input);
                     const expectedRunId = Number(process.env.EXPECTED_RELEASE_NEWS_RUN_ID);
                     process.stdout.write(String(
-                      health.ready === true && health.release_run?.id === expectedRunId
+                      health.release_validation?.ready === true && health.release_run?.id === expectedRunId
                     ));
                   }
                   catch { process.stdout.write("false"); }
@@ -1378,7 +1381,7 @@ jobs:
             if [ "$attempt" -lt 40 ]; then sleep 15; fi
           done
           if [ "$news_ready" -ne 1 ]; then
-            echo "::error::News runtime did not prove fresh markets, assessed publisher diversity, and non-GB subject geography." >&2
+            echo "::error::News release did not prove assessed reporting, publisher/subject diversity and its exact source acquisition path." >&2
             printf '%s\n' "$news_body"
             kubectl -n "${NAMESPACE}" logs -l app=claritas-worker -c claritas-worker \
               --since=20m --tail=2000 --prefix=true --max-log-requests=10 | \
@@ -1390,12 +1393,19 @@ jobs:
             process.stdin.on("data", (chunk) => { input += chunk; });
             process.stdin.on("end", () => {
               const health = JSON.parse(input);
-              console.log("News runtime verified: " + health.current.count + " current; " + health.current.markets + " markets (" + health.current.publisher_verified_markets + " publisher-timed); " + health.current.publishers + " publishers; " + health.quality_anchor_24h.publisher_verified + " publisher-time anchors in 24h; " + health.geography_24h.countries + " mapped countries; " + health.geography_24h.non_gb_stories + " non-GB stories; " + health.release_run.gdelt_gkg_sampled + " exact-run GKG rows decoded; " + health.release_run.gdelt_gkg_canonical_country_url_probes + " deterministic country/canonical persistence probes; " + health.release_run.gdelt_gkg_matched + " incidental DOC matches (" + health.release_run.gdelt_gkg_matched_country_rows + " accepted with valid country geography).");
-              if (health.release_run.gdelt_diagnostics?.gal?.mode === "primary") {
+              if (health.release_validation.degraded) {
+                console.log("::warning title=Live news discovery degraded::" + health.release_validation.reason);
+                console.log("Live news freshness remains " + health.state + "; failed checks: " + Object.keys(health.checks).filter((key) => !health.checks[key]).join(", "));
+                require("node:fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+                  "\n### Live news coverage is degraded\n" + health.release_validation.reason +
+                  "\nThe strict news health remains unhealthy; application reader, saved overview and provenance checks passed.\n");
+              }
+              console.log((health.release_validation.degraded ? "Retained news data verified: " : "News runtime verified: ") + health.current.count + " current; " + health.current.markets + " markets (" + health.current.publisher_verified_markets + " publisher-timed); " + health.current.publishers + " publishers; " + health.quality_anchor_24h.publisher_verified + " publisher-time anchors in 24h; " + health.geography_24h.countries + " mapped countries; " + health.geography_24h.non_gb_stories + " non-GB stories; " + health.release_run.gdelt_gkg_sampled + " exact-run GKG rows decoded; " + health.release_run.gdelt_gkg_canonical_country_url_probes + " deterministic country/canonical persistence probes; " + health.release_run.gdelt_gkg_matched + " incidental DOC matches (" + health.release_run.gdelt_gkg_matched_country_rows + " accepted with valid country geography).");
+              if (health.release_run.gdelt_diagnostics?.gal?.mode === "primary" && !health.release_validation.degraded) {
                 console.log("Incremental GAL metadata verified: " + health.release_run.gdelt_diagnostics.gal.accepted + " exact-run publisher headlines; bounded multilingual sample. Raw archive counters above describe optional enrichment.");
               }
               if (health.release_run.gdelt_doc_status === "degraded") {
-                console.log("::warning title=GDELT DOC discovery degraded::" + (health.release_run.gdelt_diagnostics?.doc?.error || "GDELT DOC discovery did not complete.") + " The exact release proved source provenance and the independent reporting quality gates.");
+                console.log("::warning title=GDELT DOC discovery degraded::" + (health.release_run.gdelt_diagnostics?.doc?.error || "GDELT DOC discovery did not complete.") + " Archived source provenance and retained reporting are verified.");
               }
             });
           '

@@ -100,6 +100,33 @@ export type NewsRuntimeHealth = {
   checks: Record<string, boolean>;
 };
 
+/** Release safety is separate from the unchanged, stricter live-data health. */
+export function evaluateNewsReleaseReadiness(health: NewsRuntimeHealth, expectedRunId: number): {
+  ready: boolean; degraded: boolean; reason: string;
+} {
+  const blocked = { ready: false, degraded: false, reason: "News release validation did not prove the required data and source path." };
+  if (!Number.isSafeInteger(expectedRunId) || expectedRunId <= 0 || health?.release_run?.id !== expectedRunId
+    || health.release_run.status !== "success" || health.release_run.trigger_mode !== "release_gate") return blocked;
+  const mandatory = ["current_volume", "current_timestamp", "assessed", "publisher_verified", "publisher_diversity",
+    "mapped_geography", "non_gb_geography", "exact_release_run", "release_gdelt_source_provenance"];
+  if (!mandatory.every((key) => health.checks?.[key] === true)) return blocked;
+  if (health.ready === true) return { ready: true, degraded: false, reason: "News runtime is current." };
+  const failures = Object.entries(health.checks).filter(([, passed]) => passed !== true).map(([key]) => key);
+  if (!failures.length || !failures.every((key) => ["markets", "release_gdelt_acquisition"].includes(key))) return blocked;
+  const run = health.release_run;
+  const upstreamUnavailable = (message: string | null | undefined) => typeof message === "string"
+    && /timed out|HTTP (?:429|500|502|503|504)\b/i.test(message);
+  const discoveryUnavailable = run.gdelt_doc_status === "degraded"
+    && ["failed", "degraded"].includes(run.gdelt_diagnostics?.gal?.status ?? "")
+    && upstreamUnavailable(run.gdelt_diagnostics?.doc?.error)
+    && upstreamUnavailable(run.gdelt_diagnostics?.gal?.error);
+  const rawPathVerified = run.gdelt_raw_archive_status === "healthy" && run.gdelt_gkg_archives_scanned >= 1
+    && run.gdelt_gkg_sampled >= 1 && run.gdelt_gkg_canonical_country_url_probes >= 1;
+  if (!discoveryUnavailable || !rawPathVerified) return blocked;
+  return { ready: true, degraded: true,
+    reason: "GDELT live discovery is unavailable. Assessed reporting, publisher diversity and archived source provenance are verified; current market coverage may be delayed." };
+}
+
 export function buildNewsRuntimeHealthQuery(): string {
   const trustedDirect = trustedNewsDirectCountrySql("current_item");
   return `WITH current_news AS MATERIALIZED (
