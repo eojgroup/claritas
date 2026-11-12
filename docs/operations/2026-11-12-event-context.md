@@ -42,3 +42,42 @@ direction are rendered from those records. Reference geography is explicitly
 separated from the event site; the line is labelled as a forecast, not observed
 history. Missing samples return `weather: null`. The initial overview/event
 request budget does not grow, and no generated weather or transport scene is used.
+
+## Release handoff — paused at user request
+
+Application commit: `3e420c49da93b147144fac24580286f7a512f8a6` (includes
+the event-contract/map fix from `630d13f`). The combined release is pushed;
+no further application edits are pending.
+
+- [Apple release 43223394325](https://github.com/eojgroup/claritas/actions/runs/43223394325)
+  succeeded. **1.0 (1000.0.59)** is available to Claritas Test Group. All 57 shared
+  model tests, iPhone/iPad/Watch builds and signed distribution passed.
+- [GKE release 43223394342](https://github.com/eojgroup/claritas/actions/runs/43223394342)
+  is still running at handoff. Validation passed; image publishing/deployment
+  continues independently. Existing release health gates and application rollback
+  remain enabled. Do not treat a running pipeline as a successful deployment.
+- Previous GKE run 43221744819 was intentionally cancelled before rollout when
+  weather visuals were added. Its matching Apple build succeeded but is superseded
+  by build 59.
+
+Local verification: 458 API unit tests, 184 web tests, API/web builds, web lint
+(two existing warnings only), all 34 original PostGIS integration tests on a
+fresh disposable database, and the additional weather/updated authenticated HTTP
+tests passed. The final GKE validation also exercised the complete database suite.
+The temporary PostGIS pod `claritas-event-check-1112` was deleted.
+
+A read-only production probe of the new weather query found a timely Spain
+reference sample for the reported Valencia event, eight forecast points, and a
+31 ms read. This did not deploy the new endpoint. The local Apple toolchain is
+inconsistent; rely on the successful full-Xcode CI checks rather than local Swift
+linking attempts.
+
+On resume, check GKE run 43223394342 first. If successful, inspect its final
+runtime checks and verify the exact reported event with the deployed
+`getIntelligenceEvent`: `regional_reporting` must be `null` on the lightweight
+read, with valid evidence. Check the authenticated weather endpoint and public
+web assets. If failed, inspect the failed step and rollback status before making
+changes. Finish with a release receipt after production verification; no new
+feature scope is required. Logs are in `/tmp/claritas-3e4-apple.log` and the
+`/tmp/claritas-3e4-*-watch.log` files. Local Google authentication was refreshed
+and working during this session; credentials may need renewal after the pause.
