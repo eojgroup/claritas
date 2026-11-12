@@ -8,7 +8,8 @@ on:
     # Runtime deployments own application images, Kubernetes manifests, and
     # Flyway scripts. Pure Terraform/docs changes do not need image builds.
     paths:
-      - 'apps/**'
+      - 'apps/api/**'
+      - 'apps/web/**'
       - 'infra/k8s/**'
       - 'infra/keycloak/**'
       - 'infra/gcp/sql/**'

@@ -5398,6 +5398,7 @@ private struct SignalDensityLegend: View {
 
 struct NaturalEarthCountryBoundary {
     let iso: String
+    let polygons: [MKPolygon]
     let projectedRings: [[(x: Double, y: Double)]]
 }
 
@@ -5416,15 +5417,15 @@ final class NaturalEarthCountryBoundaries {
             guard let properties = feature["properties"] as? [String: Any],
                   let iso = (properties["iso2"] as? String)?.uppercased(), !iso.isEmpty,
                   let geometry = feature["geometry"] as? [String: Any] else { return nil }
-            let rings: [[[Double]]]
+            let polygonRings: [[[[Double]]]]
             if geometry["type"] as? String == "Polygon" {
-                rings = geometry["coordinates"] as? [[[Double]]] ?? []
+                polygonRings = [geometry["coordinates"] as? [[[Double]]] ?? []]
             } else {
-                rings = (geometry["coordinates"] as? [[[[Double]]]] ?? []).flatMap { $0 }
+                polygonRings = geometry["coordinates"] as? [[[[Double]]]] ?? []
             }
             // Keep the resource's exact +180/-180 split instead of normalising
             // longitude through another map engine. Projection is cached once.
-            let projected = rings.compactMap { ring -> [(x: Double, y: Double)]? in
+            let projected = polygonRings.flatMap { $0 }.compactMap { ring -> [(x: Double, y: Double)]? in
                 let values = ring.compactMap { coordinate -> (x: Double, y: Double)? in
                     guard coordinate.count >= 2, coordinate[0].isFinite, coordinate[1].isFinite else { return nil }
                     return SignalMapProjection.raw(latitude: coordinate[1], longitude: coordinate[0])
@@ -5432,7 +5433,17 @@ final class NaturalEarthCountryBoundaries {
                 return values.count >= 3 ? values : nil
             }
             guard !projected.isEmpty else { return nil }
-            return NaturalEarthCountryBoundary(iso: iso, projectedRings: projected)
+            let polygons = polygonRings.compactMap { rings -> MKPolygon? in
+                let parts = rings.compactMap { ring -> MKPolygon? in
+                    var coordinates = ring.filter { $0.count >= 2 }.map { CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) }
+                    guard coordinates.count >= 3 else { return nil }
+                    return MKPolygon(coordinates: &coordinates, count: coordinates.count)
+                }
+                guard let outer = parts.first else { return nil }
+                var coordinates = (0..<outer.pointCount).map { outer.points()[$0].coordinate }
+                return MKPolygon(coordinates: &coordinates, count: coordinates.count, interiorPolygons: Array(parts.dropFirst()))
+            }
+            return NaturalEarthCountryBoundary(iso: iso, polygons: polygons, projectedRings: projected)
         }
     }
 }
@@ -5672,7 +5683,7 @@ private struct InteractiveCountryBubbleMap: View {
                   contains(latitude: latitude, longitude: longitude) else { return nil }
             let pixel = project(CLLocationCoordinate2D(latitude: latitude, longitude: longitude), size: size)
             guard pixel.x >= 0, pixel.x <= size.width, pixel.y >= 0, pixel.y <= size.height else { return nil }
-            return SignalMapPinGroup(id: event.id, eventIDs: [event.id], x: pixel.x, y: pixel.y, hasImagery: event.earth_observation_available)
+            return SignalMapPinGroup(id: event.id, eventIDs: [event.id], x: pixel.x, y: pixel.y, hasImagery: event.earth_observation_available || event.imagery != nil)
         })
     }
 
