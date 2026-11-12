@@ -30,7 +30,7 @@ The deployment waits for all six fresh snapshots to contain `countries`,
 `map_events` and `visual_events`, preventing old cached payloads from satisfying
 the release gate. The previous integer coverage field remains compatible.
 
-Validation includes 457 API unit tests, 180 web tests, and 34 PostGIS integration
+Validation includes 457 API unit tests, 182 web tests, and 34 PostGIS integration
 tests. The database regression explicitly covers older located events outside
 the latest cards, complete country totals, scoped publisher previews and expiry.
 Apple model coverage includes independent map cohorts and unknown photo capture
@@ -67,3 +67,30 @@ High priority remains an explicit filter. Both are prepared snapshots, so this
 does not restore background source fan-out. Apple image highlights use a lazy
 horizontal stack. The legacy API default remains unchanged for compatibility;
 clients send their selected priority explicitly.
+
+Final release receipt, November 12: application commit `fad580b` passed
+[GKE deployment](https://github.com/eojgroup/claritas/actions/runs/43204018690)
+and [Apple distribution](https://github.com/eojgroup/claritas/actions/runs/43204018770).
+TestFlight **1.0 (1000.0.57)** is available to Claritas Test Group. All 54 Apple
+model tests passed, followed by iPhone/iPad/Watch compilation and signed archival.
+
+Production verified all six prepared snapshots before rollout. The 24-hour All
+view contained 11,871 developments, 115 countries, 71 precise map events, eight
+visual highlights and 12 time buckets. The seven-day All view contained 61,783
+developments, 170 countries, 200 bounded map events, eight highlights and 14
+buckets. Chart bucket totals reconciled with the complete selected-window counts;
+retained publisher image bytes were read successfully. The High view remained
+available with 214 developments, without invented pins or images.
+
+The prepared All overview read took **19 ms** while 24 optional queries were
+pending; event essentials took **264 ms**. These are server-side release-probe
+timings, not browser render or end-to-end device latency. The older 100-record
+full-feed read still took **10,504 ms** in this run; the opening overview avoids
+that path and uses saved background projections. The successful release also
+verified current news ingestion (1,681 current stories, 56 mapped countries),
+transport reception, readiness and deployment revisions.
+
+The public application and compiled entry returned HTTP 200. The live entry
+`index-EgRcDuc0.js` matched the locally validated final build. This release ships
+the real application and production data paths; temporary local review fixtures
+are not included in the bundle.
