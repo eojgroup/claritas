@@ -1,6 +1,8 @@
 -- Keep the ranking worker's working set narrow. These indexes do not change
 -- ranking, quality or expiry policy. Concurrent creation keeps ingestion live.
-SET lock_timeout='5s';
+-- Concurrent builds may wait for an existing reader transaction to finish.
+-- Bound the entire operation rather than cancelling that normal wait early.
+SET statement_timeout='5min';
 DROP INDEX CONCURRENTLY IF EXISTS intelligence_event_feed_active_covering_idx;
 CREATE INDEX CONCURRENTLY intelligence_event_feed_active_covering_idx
   ON intelligence_event_feed(last_activity_time DESC,id)
@@ -13,6 +15,7 @@ CREATE INDEX CONCURRENTLY news_item_assessment_feed_covering_idx
 
 -- Defaults wait for hundreds of thousands of dead rows in these large tables.
 -- Their small, frequently changed current cohort needs earlier vacuum/analyze.
+SET lock_timeout='5s';
 ALTER TABLE intelligence_event_evidence SET (
   autovacuum_vacuum_scale_factor=0.005,autovacuum_vacuum_threshold=500,
   autovacuum_vacuum_insert_scale_factor=0.005,autovacuum_vacuum_insert_threshold=500,
@@ -25,3 +28,4 @@ ALTER TABLE news_item_assessment SET (
   autovacuum_vacuum_scale_factor=0.01,autovacuum_vacuum_threshold=500,
   autovacuum_analyze_scale_factor=0.01,autovacuum_analyze_threshold=500);
 RESET lock_timeout;
+RESET statement_timeout;
